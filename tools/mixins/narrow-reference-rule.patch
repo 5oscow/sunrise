@@ -331,7 +331,7 @@ index bca7938..2f2eb44 100644
 +    assert!(e.message.contains("selected site contains `?`"), "{e}");
 +}
 diff --git a/crates/horizon-mixins-cli/tests/integration.rs b/crates/horizon-mixins-cli/tests/integration.rs
-index fcf5a46..2790baf 100644
+index fcf5a46..b594f0e 100644
 --- a/crates/horizon-mixins-cli/tests/integration.rs
 +++ b/crates/horizon-mixins-cli/tests/integration.rs
 @@ -697,14 +697,14 @@ fn cfg_attributes_shared_module_sources_and_shadowing_fail_closed() {
@@ -353,7 +353,7 @@ index fcf5a46..2790baf 100644
              "E_UNSUPPORTED_CONTROL_FLOW",
          ),
          (
-@@ -890,3 +890,809 @@ fn production_test_cfg_modules_are_indexed_and_applied() {
+@@ -890,3 +890,1382 @@ fn production_test_cfg_modules_are_indexed_and_applied() {
      let error = build_plan(&f.root, &f.mods).unwrap_err();
      assert!(format!("{error:?}").contains("E_TARGET_NOT_FOUND"));
  }
@@ -371,6 +371,18 @@ index fcf5a46..2790baf 100644
 +            f.root.join("engine/src/lib.rs"),
 +            format!(
 +                r#"
++    pub static OK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
++    pub fn set_ok(ok: bool) {{ OK.store(ok, std::sync::atomic::Ordering::SeqCst); }}
++    pub fn open_loop() -> Result<EventLoop, &'static str> {{ EventLoop::open(OK.load(std::sync::atomic::Ordering::SeqCst)) }}
++    pub fn res_ok() -> Result<Res, &'static str> {{ res(OK.load(std::sync::atomic::Ordering::SeqCst)) }}
++    pub fn outer_ok() -> Result<Outer, &'static str> {{ outer(OK.load(std::sync::atomic::Ordering::SeqCst)) }}
++    pub fn choose_one() -> Result<Choice<i32>, &'static str> {{ choose(1i32) }}
++    pub struct Holder {{ pub app: App }}
++    pub type AppAlias = App;
++    pub struct Generic<T>(pub T);
++    pub struct Gen<T>(pub T);
++    pub fn gen_of<T>(n: T) -> Gen<T> {{ Gen(n) }}
++    impl<T> Gen<T> {{ pub fn width(self, _n: T) -> usize {{ std::mem::size_of::<T>() }} }}
 +    pub static LOG: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
 +    pub fn mark(what: &'static str) {{ LOG.lock().unwrap().push(what); }}
 +    #[derive(Debug, PartialEq)]
@@ -387,6 +399,7 @@ index fcf5a46..2790baf 100644
 +    impl Res {{
 +        pub fn read(&self) -> i32 {{ mark("read"); self.0 }}
 +        pub fn update(&mut self) -> i32 {{ self.0 += 1; mark("update"); self.0 }}
++        pub fn into_value(self) -> i32 {{ mark("consume"); self.0 }}
 +    }}
 +    pub fn res(ok: bool) -> Result<Res, &'static str> {{ mark("res"); if ok {{ Ok(Res(7)) }} else {{ Err("no res") }} }}
 +    pub struct Trap(pub i32);
@@ -408,18 +421,34 @@ index fcf5a46..2790baf 100644
 +    pub fn choose<T>(x: T) -> Result<Choice<T>, &'static str> {{ Ok(Choice(x)) }}
 +    pub struct EventLoop;
 +    pub struct App(pub i32);
++    pub struct Game<'a> {{ pub count: &'a mut i32 }}
 +    impl EventLoop {{
 +        pub fn new() -> Result<EventLoop, &'static str> {{ mark("new"); Ok(EventLoop) }}
-+        pub fn run_app(self, app: &mut App) -> Result<(), Failure> {{ app.0 += 1; mark("run_app"); Ok(()) }}
++        pub fn open(ok: bool) -> Result<EventLoop, &'static str> {{ mark("open"); if ok {{ Ok(EventLoop) }} else {{ Err("no loop") }} }}
++        pub fn run_app(self, app: &mut App) -> Result<(), Failure> {{ if app.0 == 99 {{ mark("run_app"); return Err(Failure("loop failed".into())); }} app.0 += 1; mark("run_app"); Ok(()) }}
++        pub fn run_ref(self, n: &mut i32) -> i32 {{ *n += 1; mark("run_ref"); *n }}
++        pub fn run_n(self, n: i64) -> i64 {{ mark("run_n"); n }}
++        pub fn scale<T: Into<f64>>(self, t: T) -> f64 {{ t.into() }}
++        pub fn run_game(self, game: &mut Game<'_>) -> Result<(), Failure> {{ *game.count += 1; mark("run_game"); Ok(()) }}
 +    }}
++    pub struct Target;
++    pub struct Lg(pub &'static str);
++    impl std::ops::Deref for Lg {{ type Target = Target; fn deref(&self) -> &Target {{ mark(self.0); &Target }} }}
++    pub struct Refl;
++    impl Refl {{ pub fn reflect(self, _a: &Target, _b: &Target) -> i32 {{ mark("run"); 3 }} }}
++    pub fn recv() -> Refl {{ mark("recv"); Refl }}
++    pub struct Machine(pub i32);
++    impl Machine {{ pub fn go(self) -> i32 {{ self.0 }} }}
++    pub fn boxed_machine() -> Box<Machine> {{ Box::new(Machine(5)) }}
 +    pub fn observe(n: i32) -> i32 {{ mark("observe"); n }}
 +    pub struct Inner;
-+    impl Inner {{ pub fn read(&self) -> i32 {{ 11 }} }}
++    impl Inner {{ pub fn read(&self) -> i32 {{ 11 }} pub fn peek(&self) -> i32 {{ 12 }} }}
 +    pub struct Outer(pub Inner);
 +    impl std::ops::Deref for Outer {{ type Target = Inner; fn deref(&self) -> &Inner {{ &self.0 }} }}
 +    impl Outer {{ pub fn read(&self) -> i32 {{ 22 }} }}
 +    pub fn outer(ok: bool) -> Result<Outer, &'static str> {{ if ok {{ Ok(Outer(Inner)) }} else {{ Err("no outer") }} }}
 +    pub fn scale<T: Into<f64>>(t: T) -> f64 {{ t.into() }}
++    pub fn width<T>(_t: T) -> usize {{ std::mem::size_of::<T>() }}
 +    pub fn default_value<T>(x: T) -> Result<T, &'static str> {{ Ok(x) }}
 +    pub fn fail<T>() -> Result<T, usize> {{ Err(std::mem::size_of::<T>()) }}
 +    pub fn run_param(engine: &Engine, x: i32) -> i32 {{ engine.go(x) }}
@@ -568,6 +597,15 @@ index fcf5a46..2790baf 100644
 +        f
 +    }
 +
++    /// Runs `check` on `f` and returns the build error's message.
++    fn build_error(f: &Fixture) -> String {
++        let output = f.command("check").output().unwrap();
++        assert!(!output.status.success());
++        let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
++        assert_eq!(error["code"], "E_BUILD", "{error}");
++        error["message"].as_str().unwrap().to_string()
++    }
++
 +    /// The plan's refusal of `f`.
 +    fn plan_error(f: &Fixture) -> horizon_mixins_core::Diagnostic {
 +        build_plan(&f.root, &f.mods).unwrap_err()
@@ -650,6 +688,523 @@ index fcf5a46..2790baf 100644
 +        assert!(e.message.contains("computed receiver"), "{e}");
 +    }
 +
++    /// A row on `selector` with an opaque receiver: the wrapper binds the arguments and `$operation`.
++    fn opaque(mode: &str, selector: &str, args: &str, original: &str) -> String {
++        format!(
++            r#"
++    [[injection]]
++    id="wrap"
++    target="fixture_game::run"
++    kind="WRAP_OPERATION"
++    selector="{selector}"
++    require=1
++    ordinal=0
++    opaque_receiver="{mode}"
++    helper="wrap_opaque.rs"
++    bindings=[{args}{{name="original",ty="{original}",value="$operation"}}]
++    "#
++        )
++    }
++    fn opaque_fixture(body: &str, row: &str, helper: &str, driver: &str) -> Fixture {
++        let f = fixture(&format!("set_ok(ok); {body}"), row);
++        fs::write(f.mods.join("alpha/wrap_opaque.rs"), helper).unwrap();
++        fs::write(f.root.join("driver/src/lib.rs"), driver).unwrap();
++        f
++    }
++    const LOOP_ROW_ARGS: &str = r#"{name="app",ty="&mut crate::App",value="$arg0"},"#;
++    const LOOP_ORIGINAL: &str = "impl FnOnce(&mut crate::App) -> Result<(), crate::Failure>";
++    const LOOP_HELPER: &str = "fn wrap_opaque(app: &mut crate::App, original: impl FnOnce(&mut crate::App) -> Result<(), crate::Failure>) -> Result<(), crate::Failure> { crate::mark(\"wrap\"); let mut other = crate::App(10); let result = original(&mut other); app.0 = other.0 + 100; result }";
++
++    #[test]
++    fn an_opaque_owned_receiver_wraps_a_consuming_call_and_the_wrapper_swaps_the_argument() {
++        // `open_loop()?.run_app(&mut app)`: the wrapper never names `EventLoop`; it gets the
++        // argument and `original`, runs the original method once on the receiver the game built.
++        let f = opaque_fixture(
++            "let mut app = App(0); open_loop()?.run_app(&mut app)?; Ok(app.0)",
++            &opaque(
++                "owned",
++                "open_loop()?.run_app",
++                LOOP_ROW_ARGS,
++                LOOP_ORIGINAL,
++            ),
++            LOOP_HELPER,
++            r#"
++    use fixture_game::{run, Failure, LOG};
++    #[test]
++    fn the_wrapper_runs_between_the_loop_and_run_app_and_its_error_exits_first() {
++        // The receiver's `?` fails before anything else: its error converted by `run`, no wrapper.
++        assert_eq!(run(false, false), Err(Failure("converted no loop".into())));
++        assert_eq!(std::mem::take(&mut *LOG.lock().unwrap()), ["open"]);
++        // Otherwise: receiver, wrapper, then `run_app` once, on the swapped handler.
++        assert_eq!(run(true, false), Ok(111));
++        assert_eq!(std::mem::take(&mut *LOG.lock().unwrap()), ["open", "wrap", "run_app"]);
++    }
++    "#,
++        );
++        f.run("check");
++    }
++
++    #[test]
++    fn the_outer_try_on_a_wrapped_call_stays_outside_and_exits_with_the_loops_error() {
++        // `...run_app(&mut app)?;`: the trailing `?` is outside the wrapped call. A pass-through
++        // wrapper, and a handler (99) that `run_app` fails on.
++        let f = opaque_fixture(
++            "let mut app = App(if bad_arg { 99 } else { 0 }); open_loop()?.run_app(&mut app)?; Ok(app.0)",
++            &opaque(
++                "owned",
++                "open_loop()?.run_app",
++                LOOP_ROW_ARGS,
++                LOOP_ORIGINAL,
++            ),
++            "fn wrap_opaque(app: &mut crate::App, original: impl FnOnce(&mut crate::App) -> Result<(), crate::Failure>) -> Result<(), crate::Failure> { crate::mark(\"wrap\"); original(app) }",
++            r#"
++    use fixture_game::{run, Failure, LOG};
++    #[test]
++    fn both_question_marks_exit_the_function() {
++        let log = || std::mem::take(&mut *LOG.lock().unwrap());
++        // The inner `?`: the loop fails to open, nothing after it runs.
++        assert_eq!(run(false, false), Err(Failure("converted no loop".into())));
++        assert_eq!(log(), ["open"]);
++        // The outer `?`: `run_app` fails, its error leaves the function.
++        assert_eq!(run(true, true), Err(Failure("loop failed".into())));
++        assert_eq!(log(), ["open", "wrap", "run_app"]);
++        // Neither: the result flows on.
++        assert_eq!(run(true, false), Ok(1));
++        assert_eq!(log(), ["open", "wrap", "run_app"]);
++    }
++    "#,
++        );
++        f.run("check");
++    }
++
++    #[test]
++    fn an_opaque_receiver_wraps_a_handler_that_borrows_with_its_own_lifetime() {
++        // `game: Game<'_>` borrows a local; the binding spells the lifetime as `'_`, in the
++        // argument and in `$operation` alike.
++        let f = opaque_fixture(
++            "let mut counter = 0; let mut game = Game { count: &mut counter }; let result = open_loop()?.run_game(&mut game); result?; Ok(counter)",
++            &opaque(
++                "owned",
++                "open_loop()?.run_game",
++                r#"{name="game",ty="&mut crate::Game<'_>",value="$arg0"},"#,
++                "impl FnOnce(&mut crate::Game<'_>) -> Result<(), crate::Failure>",
++            ),
++            "fn wrap_opaque(game: &mut crate::Game<'_>, original: impl FnOnce(&mut crate::Game<'_>) -> Result<(), crate::Failure>) -> Result<(), crate::Failure> { crate::mark(\"wrap\"); let mut count = 50; let mut other = crate::Game { count: &mut count }; let result = original(&mut other); *game.count = *other.count + 100; result }",
++            r#"
++    use fixture_game::{run, LOG};
++    #[test]
++    fn the_swapped_handler_runs_and_the_original_sees_its_result() {
++        assert_eq!(run(true, false), Ok(151));
++        assert_eq!(std::mem::take(&mut *LOG.lock().unwrap()), ["open", "wrap", "run_game"]);
++    }
++    "#,
++        );
++        f.run("check");
++    }
++
++    #[test]
++    fn opaque_arguments_coerce_in_their_original_order() {
++        // `&a` coerces through `Deref` (logging `a`) before `&*b` runs its own deref (`b`), as in
++        // the original call; the operand tuple's declared field types keep that order.
++        let target = "&crate::Target";
++        let f = opaque_fixture(
++            "let a = Lg(\"a\"); let b = Lg(\"b\"); Ok(recv().reflect(&a, &b))",
++            &opaque(
++                "owned",
++                "recv().reflect",
++                &format!(
++                    r#"{{name="a",ty="{target}",value="$arg0"}},{{name="b",ty="{target}",value="$arg1"}},"#
++                ),
++                "impl FnOnce(&crate::Target, &crate::Target) -> i32",
++            ),
++            "fn wrap_opaque(a: &crate::Target, b: &crate::Target, original: impl FnOnce(&crate::Target, &crate::Target) -> i32) -> i32 { crate::mark(\"wrap\"); original(a, b) }",
++            r#"
++    use fixture_game::{run, LOG};
++    #[test]
++    fn the_log_is_the_originals_with_the_wrapper_before_the_run() {
++        assert_eq!(run(true, false), Ok(3));
++        assert_eq!(std::mem::take(&mut *LOG.lock().unwrap()), ["recv", "a", "b", "wrap", "run"]);
++    }
++    "#,
++        );
++        f.run("check");
++    }
++
++    #[test]
++    fn a_box_receiver_fails_to_build_naming_the_row() {
++        // `boxed_machine().go()` moves the `Machine` out of the `Box`; the original frees the allocation
++        // at the end of the statement, the continuation would free it earlier.
++        let f = opaque_fixture(
++            "Ok(boxed_machine().go())",
++            &opaque("owned", "boxed_machine().go", "", "impl FnOnce() -> i32"),
++            "fn wrap_opaque(original: impl FnOnce() -> i32) -> i32 { original() }",
++            "",
++        );
++        let message = build_error(&f);
++        assert!(
++            message.contains("HorizonMixinsReceiverOfAlphaWrapMustNotBeABox"),
++            "{message}"
++        );
++    }
++
++    #[test]
++    fn an_opaque_receiver_consumed_by_the_method_keeps_its_drop_order() {
++        // `res_ok()?.into_value()` takes `self`: the receiver is consumed in the method and drops
++        // there, before `observe`, as in the original.
++        let f = opaque_fixture(
++            "Ok(observe(res_ok()?.into_value()))",
++            &opaque("owned", "res_ok()?.into_value", "", "impl FnOnce() -> i32"),
++            "fn wrap_opaque(original: impl FnOnce() -> i32) -> i32 { crate::mark(\"wrap\"); original() }",
++            r#"
++    use fixture_game::{run, LOG};
++    #[test]
++    fn the_receiver_drops_where_it_did() {
++        assert_eq!(run(true, false), Ok(7));
++        assert_eq!(
++            std::mem::take(&mut *LOG.lock().unwrap()),
++            ["res", "wrap", "consume", "drop", "observe"]
++        );
++    }
++    "#,
++        );
++        f.run("check");
++    }
++
++    #[test]
++    fn a_method_that_does_not_consume_the_receivers_own_type_fails_to_build_naming_the_row() {
++        // `&self` and `&mut self` autoref the receiver, and a method reached through an overloaded
++        // `Deref` borrows it: the receiver would drop, or its adjustment would run, in another
++        // place than in the original. The continuation checks that the method takes `self` on the
++        // receiver's own type, in a function named for the row.
++        for (body, selector) in [
++            ("Ok(observe(res_ok()?.read()))", "res_ok()?.read"),
++            ("Ok(res_ok()?.update())", "res_ok()?.update"),
++            ("Ok(outer_ok()?.peek())", "outer_ok()?.peek"),
++            ("Ok(outer_ok()?.read())", "outer_ok()?.read"),
++        ] {
++            let f = opaque_fixture(
++                body,
++                &opaque("owned", selector, "", "impl FnOnce() -> i32"),
++                "fn wrap_opaque(original: impl FnOnce() -> i32) -> i32 { original() }",
++                "",
++            );
++            let message = build_error(&f);
++            assert!(
++                message.contains("receiver_of_alpha_wrap_must_take_self_by_value"),
++                "{selector}: {message}"
++            );
++        }
++    }
++
++    /// An opaque row on `call` whose single argument `a` is declared `ty`, with a pass-through wrapper.
++    fn argument_fixture(body: &str, call: &str, ty: &str, result: &str) -> Fixture {
++        opaque_fixture(
++            body,
++            &opaque(
++                "owned",
++                call,
++                &format!(r#"{{name="a",ty="{ty}",value="$arg0"}},"#),
++                &format!("impl FnOnce({ty}) -> {result}"),
++            ),
++            &format!(
++                "fn wrap_opaque(a: {ty}, original: impl FnOnce({ty}) -> {result}) -> {result} {{ original(a) }}"
++            ),
++            "",
++        )
++    }
++
++    #[test]
++    fn an_opaque_receiver_takes_only_a_local_argument_declared_as_a_reference_to_a_workspace_type()
++    {
++        // Accepted: a local by name, an explicit borrow of a local, and one of a local's field,
++        // each declared as a reference to a struct of the workspace.
++        for (body, call) in [
++            (
++                "let mut app = App(0); let p = &mut app; open_loop()?.run_app(p)?; Ok(app.0)",
++                "open_loop()?.run_app",
++            ),
++            (
++                "let mut h = Holder { app: App(0) }; open_loop()?.run_app(&mut h.app)?; Ok(h.app.0)",
++                "open_loop()?.run_app",
++            ),
++        ] {
++            argument_fixture(body, call, "&mut crate::App", "Result<(), crate::Failure>")
++                .run("check");
++        }
++        // Refused by name: another argument form (a literal, a reborrow, a call, an `if`) ...
++        for (body, call, ty, result) in [
++            (
++                "Ok(open_loop()?.run_n(1i64) as i32)",
++                "open_loop()?.run_n",
++                "i64",
++                "i64",
++            ),
++            (
++                "Ok(open_loop()?.run_n(1) as i32)",
++                "open_loop()?.run_n",
++                "i64",
++                "i64",
++            ),
++            (
++                "let mut app = App(0); let p = &mut app; open_loop()?.run_app(&mut *p)?; Ok(app.0)",
++                "open_loop()?.run_app",
++                "&mut crate::App",
++                "Result<(), crate::Failure>",
++            ),
++            (
++                "let mut a = App(0); let mut b = App(1); open_loop()?.run_app(if ok { &mut a } else { &mut b })?; Ok(a.0)",
++                "open_loop()?.run_app",
++                "&mut crate::App",
++                "Result<(), crate::Failure>",
++            ),
++            (
++                "Ok(open_loop()?.scale(default_value(0.1)?) as i32)",
++                "open_loop()?.scale",
++                "f32",
++                "f64",
++            ),
++        ] {
++            let e = plan_error(&argument_fixture(body, call, ty, result));
++            assert_eq!(e.code, "E_OPERATION_ARGUMENT", "{body}: {e}");
++            assert!(e.message.contains("opaque_receiver"), "{body}: {e}");
++        }
++        // ... and a declared type that is not a reference to a workspace struct or enum, which
++        // could fill an inference variable: a number, a std type, an alias.
++        for (body, ty, call) in [
++            (
++                "let k = 4i64; Ok(open_loop()?.run_n(k) as i32)",
++                "i64",
++                "open_loop()?.run_n",
++            ),
++            (
++                "let mut n = 0; Ok(open_loop()?.run_ref(&mut n))",
++                "&mut i32",
++                "open_loop()?.run_ref",
++            ),
++            (
++                "let mut app = App(0); open_loop()?.run_app(&mut app)?; Ok(app.0)",
++                "&mut crate::AppAlias",
++                "open_loop()?.run_app",
++            ),
++            (
++                "let mut app = App(0); open_loop()?.run_app(&mut app)?; Ok(app.0)",
++                "&mut crate::Generic<i64>",
++                "open_loop()?.run_app",
++            ),
++        ] {
++            let e = plan_error(&argument_fixture(
++                body,
++                call,
++                ty,
++                "Result<(), crate::Failure>",
++            ));
++            assert_eq!(e.code, "E_OPERATION_ARGUMENT", "{ty}: {e}");
++        }
++    }
++
++    #[test]
++    fn an_opaque_receiver_is_built_only_from_functions_calls_fields_and_try() {
++        // `gen_of(1).width(n)` with `n: i64` would turn the receiver's `Gen<i32>` into `Gen<i64>`
++        // (a width of 4 into 8): the literal in the receiver is an open inference variable.
++        // A local anywhere in the receiver is the same, (a closure or a block cannot even be written in a selector).
++        for (body, call) in [
++            (
++                "let n = 1; Ok(gen_of(1).width(n) as i32)",
++                "gen_of(1).width",
++            ),
++            ("Ok(res(ok)?.into_value())", "res(ok)?.into_value"),
++            (
++                "let f = res; Ok(f(true)?.into_value())",
++                "f(true)?.into_value",
++            ),
++        ] {
++            let f = opaque_fixture(
++                body,
++                &opaque("owned", call, "", "impl FnOnce() -> i32"),
++                "fn wrap_opaque(original: impl FnOnce() -> i32) -> i32 { original() }",
++                "",
++            );
++            let e = build_plan(&f.root, &f.mods)
++                .err()
++                .unwrap_or_else(|| panic!("{body} planned"));
++            assert_eq!(e.code, "E_OPERATION_SITE", "{body}: {e}");
++        }
++        // A receiver built only from paths to functions, calls and `?` is accepted.
++        let f = opaque_fixture(
++            "Ok(res_ok()?.into_value())",
++            &opaque("owned", "res_ok()?.into_value", "", "impl FnOnce() -> i32"),
++            "fn wrap_opaque(original: impl FnOnce() -> i32) -> i32 { original() }",
++            "",
++        );
++        f.run("plan");
++    }
++
++    #[test]
++    fn a_non_box_receiver_adds_no_warning_under_denied_warnings() {
++        let f = opaque_fixture(
++            "Ok(res_ok()?.into_value())",
++            &opaque("owned", "res_ok()?.into_value", "", "impl FnOnce() -> i32"),
++            "fn wrap_opaque(original: impl FnOnce() -> i32) -> i32 { original() }",
++            "",
++        );
++        let path = f.root.join("engine/src/lib.rs");
++        let source = fs::read_to_string(&path).unwrap();
++        fs::write(
++            &path,
++            format!("#![deny(non_camel_case_types, dead_code)]\n{source}"),
++        )
++        .unwrap();
++        f.run("check");
++    }
++
++    #[test]
++    fn an_opaque_row_on_a_place_receiver_or_beside_a_tuple_modifier_is_refused() {
++        // A parameter receiver is bound by its reference type, not opaque.
++        let f = fixture(CALL, "");
++        f.append(
++            "mods/alpha/horizon-mixin.toml",
++            r#"
++    [[injection]]
++    id="wrap"
++    target="fixture_game::run_param"
++    kind="WRAP_OPERATION"
++    selector="engine.go"
++    require=1
++    ordinal=0
++    opaque_receiver="owned"
++    helper="wrap_opaque.rs"
++    bindings=[{name="x",ty="i32",value="$arg0"},{name="original",ty="impl FnOnce(i32) -> i32",value="$operation"}]
++    "#,
++        );
++        fs::write(
++            f.mods.join("alpha/wrap_opaque.rs"),
++            "fn wrap_opaque(x: i32, original: impl FnOnce(i32) -> i32) -> i32 { original(x) }",
++        )
++        .unwrap();
++        let e = plan_error(&f);
++        assert_eq!(e.code, "E_OPERATION_SIGNATURE", "{e}");
++        // `borrowed` is not a mode, and a `MODIFY_ARGS` on the same call is refused.
++        let mut row = opaque(
++            "borrowed",
++            "open_loop()?.run_app",
++            LOOP_ROW_ARGS,
++            LOOP_ORIGINAL,
++        );
++        let body = "let mut app = App(0); open_loop()?.run_app(&mut app)?; Ok(app.0)";
++        let f = opaque_fixture(body, &row, LOOP_HELPER, "");
++        assert!(build_plan(&f.root, &f.mods).is_err());
++        let body = "let mut app = App(0); open_loop().unwrap().run_app(&mut app)?; Ok(app.0)";
++        row = opaque(
++            "owned",
++            "open_loop().unwrap().run_app",
++            LOOP_ROW_ARGS,
++            LOOP_ORIGINAL,
++        ) + r#"
++    [[injection]]
++    id="args"
++    target="fixture_game::run"
++    kind="MODIFY_ARGS"
++    selector="open_loop().unwrap().run_app"
++    require=1
++    ordinal=0
++    result="Result<(), crate::Failure>"
++    helper="modify_args.rs"
++    bindings=[{name="args",ty="(&mut crate::App,)",value="$args"}]
++    "#;
++        let f = opaque_fixture(body, &row, LOOP_HELPER, "");
++        fs::write(
++            f.mods.join("alpha/modify_args.rs"),
++            "fn modify_args(args: (&mut crate::App,)) -> (&mut crate::App,) { args }",
++        )
++        .unwrap();
++        let e = plan_error(&f);
++        assert_eq!(e.code, "E_UNSUPPORTED_SITE", "{e}");
++    }
++
++    #[test]
++    fn an_opaque_receiver_leaves_its_type_to_the_games_code() {
++        // `choose_one()?` is a `Choice<i32>` whose own `read` returns 7; the trait's `read` for every
++        // `Choice<T>` returns 8. Nothing in the row names the receiver's type, so the original
++        // method runs.
++        let f = opaque_fixture(
++            "Ok(choose_one()?.read())",
++            &opaque("owned", "choose_one()?.read", "", "impl FnOnce() -> i32"),
++            "fn wrap_opaque(original: impl FnOnce() -> i32) -> i32 { original() }",
++            r#"
++    use fixture_game::run;
++    #[test]
++    fn the_original_method_runs() { assert_eq!(run(true, false), Ok(7)); }
++    "#,
++        );
++        f.run("check");
++    }
++
++    #[test]
++    fn lifetimes_in_operation_inputs_are_spelled_as_in_the_arguments() {
++        // Types are compared as written: `'_` in `$operation` must be the spelling the argument
++        // binding uses (`Game<'_>` is not `Game`).
++        let f = opaque_fixture(
++            "let mut counter = 0; let mut game = Game { count: &mut counter }; open_loop()?.run_game(&mut game)?; Ok(counter)",
++            &opaque(
++                "owned",
++                "open_loop()?.run_game",
++                r#"{name="game",ty="&mut crate::Game<'_>",value="$arg0"},"#,
++                "impl FnOnce(&mut crate::Game) -> Result<(), crate::Failure>",
++            ),
++            "fn wrap_opaque(game: &mut crate::Game<'_>, original: impl FnOnce(&mut crate::Game) -> Result<(), crate::Failure>) -> Result<(), crate::Failure> { original(game) }",
++            "",
++        );
++        let e = build_plan(&f.root, &f.mods).unwrap_err();
++        assert_eq!(e.code, "E_INVALID_BINDING", "{e}");
++    }
++
++    #[test]
++    fn an_opaque_receiver_row_whose_bindings_do_not_match_is_refused() {
++        let ok_helper = "fn wrap_opaque(app: &mut crate::App, original: impl FnOnce(&mut crate::App) -> Result<(), crate::Failure>) -> Result<(), crate::Failure> { original(app) }";
++        let body = "let mut app = App(0); open_loop()?.run_app(&mut app)?; Ok(app.0)";
++        let selector = "open_loop()?.run_app";
++        let with = |mode: &str, args: &str, original: &str| {
++            let f = opaque_fixture(body, &opaque(mode, selector, args, original), ok_helper, "");
++            build_plan(&f.root, &f.mods)
++        };
++        // The right row plans.
++        with("owned", LOOP_ROW_ARGS, LOOP_ORIGINAL).unwrap();
++        // The receiver is bound as well as marked opaque, an argument is missing, and the
++        // operation's declared inputs differ from the call's arguments.
++        for (args, original) in [
++            (
++                r#"{name="event_loop",ty="crate::EventLoop",value="$receiver"},{name="app",ty="&mut crate::App",value="$arg0"},"#,
++                "impl FnOnce(&mut crate::App) -> Result<(), crate::Failure>",
++            ),
++            ("", "impl FnOnce() -> Result<(), crate::Failure>"),
++            (
++                LOOP_ROW_ARGS,
++                "impl FnOnce(crate::EventLoop, &mut crate::App) -> Result<(), crate::Failure>",
++            ),
++        ] {
++            let e = with("owned", args, original).unwrap_err();
++            assert_eq!(e.code, "E_INVALID_BINDING", "{args}: {e}");
++        }
++        // An unknown mode is not a manifest.
++        assert!(with("moved", LOOP_ROW_ARGS, LOOP_ORIGINAL).is_err());
++        // A parameter receiver and a plain function call have nothing to be opaque about.
++        let f = opaque_fixture(
++            "Ok(make(ok)?.go(1))",
++            &opaque(
++                "owned",
++                "make",
++                r#"{name="ok",ty="bool",value="$arg0"},"#,
++                "impl FnOnce(bool) -> Result<crate::Engine, &'static str>",
++            ),
++            "fn wrap_opaque(ok: bool, original: impl FnOnce(bool) -> Result<crate::Engine, &'static str>) -> Result<crate::Engine, &'static str> { original(ok) }",
++            "",
++        );
++        assert_eq!(
++            build_plan(&f.root, &f.mods).unwrap_err().code,
++            "E_INVALID_BINDING"
++        );
++    }
++
 +    #[test]
 +    fn the_hint_names_only_a_bare_method_name_and_only_a_selector_that_matches() {
 +        for selector in ["crate::go", "::go", "go::<u8>"] {
@@ -664,27 +1219,27 @@ index fcf5a46..2790baf 100644
 +        assert!(!e.message.contains("use `"), "{e}");
 +    }
 +
-+    /// A wrap of the function `scale`, whose argument is bound as `ty`.
-+    fn scale_row(ty: &str) -> String {
++    /// A wrap of the function `callee`, whose argument is bound as `ty` and whose result is `out`.
++    fn scale_row(callee: &str, ty: &str, out: &str) -> String {
 +        format!(
 +            r#"
 +    [[injection]]
 +    id="wrap"
 +    target="fixture_game::run"
 +    kind="WRAP_OPERATION"
-+    selector="scale"
++    selector="{callee}"
 +    require=1
 +    ordinal=0
 +    helper="wrap_scale.rs"
-+    bindings=[{{name="x",ty="{ty}",value="$arg0"}},{{name="original",ty="impl FnOnce({ty}) -> f64",value="$operation"}}]
++    bindings=[{{name="x",ty="{ty}",value="$arg0"}},{{name="original",ty="impl FnOnce({ty}) -> {out}",value="$operation"}}]
 +    "#
 +        )
 +    }
-+    fn scale_fixture(body: &str, ty: &str) -> Fixture {
-+        let f = fixture(body, &scale_row(ty));
++    fn scale_fixture(body: &str, callee: &str, ty: &str, out: &str) -> Fixture {
++        let f = fixture(body, &scale_row(callee, ty, out));
 +        fs::write(
 +            f.mods.join("alpha/wrap_scale.rs"),
-+            format!("fn wrap_scale(x: {ty}, original: impl FnOnce({ty}) -> f64) -> f64 {{ original(x) }}"),
++            format!("fn wrap_scale(x: {ty}, original: impl FnOnce({ty}) -> {out}) -> {out} {{ original(x) }}"),
 +        )
 +        .unwrap();
 +        f
@@ -696,17 +1251,35 @@ index fcf5a46..2790baf 100644
 +        // `scale(default_value(0.1)?)` converts `0.1` through `f32` (0.1 becomes
 +        // 0.10000000149011612), and the never-type fallback of `fail()?` in a 2024 diverging
 +        // `if` changes with a declared `i64`. A `?` (or a block) in an argument is refused.
-+        for (body, ty) in [
-+            ("Ok(scale(default_value(0.1)?) as i32)", "f32"),
-+            ("Ok(scale(default_value(0.1)?) as i32)", "f64"),
++        for (body, callee, ty, out) in [
 +            (
-+                "Ok(scale(if ok { return Ok(7) } else { fail()? }) as i32)",
-+                "i64",
++                "Ok(scale(default_value(0.1)?) as i32)",
++                "scale",
++                "f32",
++                "f64",
 +            ),
-+            ("Ok(scale(unsafe { 1i32 }) as i32)", "i32"),
-+            ("Ok(scale(const { 1i32 }) as i32)", "i32"),
++            (
++                "Ok(scale(default_value(0.1)?) as i32)",
++                "scale",
++                "f64",
++                "f64",
++            ),
++            (
++                "Ok(width(if ok { return Ok(7) } else { fail()? }) as i32)",
++                "width",
++                "i64",
++                "usize",
++            ),
++            ("Ok(scale(unsafe { 1i32 }) as i32)", "scale", "i32", "f64"),
++            ("Ok(scale(const { 1i32 }) as i32)", "scale", "i32", "f64"),
++            (
++                "Ok(scale(try { 1i32 }.unwrap()) as i32)",
++                "scale",
++                "i32",
++                "f64",
++            ),
 +        ] {
-+            let f = scale_fixture(body, ty);
++            let f = scale_fixture(body, callee, ty, out);
 +            let e = plan_error(&f);
 +            assert_eq!(e.code, "E_UNSUPPORTED_CONTROL_FLOW", "{body} {ty}: {e}");
 +        }
@@ -715,9 +1288,9 @@ index fcf5a46..2790baf 100644
 +    #[test]
 +    fn arguments_without_a_try_or_a_block_are_still_wrapped() {
 +        // The forms the tool accepted before: any other expression, typed by the declaration.
-+        let f = scale_fixture("Ok(scale(observe(2) as i32) as i32)", "i32");
++        let f = scale_fixture("Ok(scale(observe(2) as i32) as i32)", "scale", "i32", "f64");
 +        f.run("plan");
-+        let f = scale_fixture("Ok(scale(1.5f32) as i32)", "f32");
++        let f = scale_fixture("Ok(scale(1.5f32) as i32)", "scale", "f32", "f64");
 +        f.run("plan");
 +    }
 +
@@ -1164,10 +1737,18 @@ index fcf5a46..2790baf 100644
 +    }
 +}
 diff --git a/crates/horizon-mixins-core/src/helpers.rs b/crates/horizon-mixins-core/src/helpers.rs
-index 55a9372..0daa2d7 100644
+index 55a9372..47a20fb 100644
 --- a/crates/horizon-mixins-core/src/helpers.rs
 +++ b/crates/horizon-mixins-core/src/helpers.rs
-@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
+@@ -1,13 +1,14 @@
+ use crate::{
+     Diagnostic, Result,
+     index::{self, Function, tokens},
+-    manifest::{Binding, Kind},
++    manifest::{Binding, Injection, Kind, OpaqueReceiver},
+ };
+ use quote::quote;
+ use serde::{Deserialize, Serialize};
  use syn::{
      Expr, FnArg, Item, ReturnType, Type,
      visit::{self, Visit},
@@ -1175,7 +1756,18 @@ index 55a9372..0daa2d7 100644
  };
 
  #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-@@ -82,13 +83,98 @@ pub fn return_type(sig: &syn::Signature) -> Type {
+@@ -16,6 +17,10 @@ pub struct Operation {
+     pub inputs: Vec<String>,
+     pub output: String,
+     pub method: bool,
++    /// The receiver is not bound by the wrapper: `inputs[0]` is the placeholder `_`, and the
++    /// receiver is evaluated by the transform from the game's own expression.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub opaque: Option<OpaqueReceiver>,
+ }
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+ #[serde(deny_unknown_fields)]
+@@ -82,13 +87,98 @@ pub fn return_type(sig: &syn::Signature) -> Type {
          ReturnType::Type(_, ty) => *ty.clone(),
      }
  }
@@ -1280,7 +1872,73 @@ index 55a9372..0daa2d7 100644
  }
  fn parse_type(text: &str) -> Result<Type> {
      syn::parse_str(text).map_err(|e| Diagnostic::new("E_INVALID_BINDING", e.to_string()))
-@@ -385,9 +471,14 @@ pub fn validate_helper(
+@@ -152,13 +242,19 @@ pub fn parse_helper(source: &str) -> Result<syn::ItemFn> {
+ }
+ pub fn contract(
+     f: &Function,
+-    kind: Kind,
+-    cancellable: bool,
++    injection: &Injection,
+     helper_source: &str,
+-    bindings: &[Binding],
+     call: Option<&Expr>,
+-    call_result: Option<&str>,
+ ) -> Result<Contract> {
++    let (kind, cancellable) = (injection.kind, injection.cancellable);
++    let (bindings, call_result) = (&injection.bindings[..], injection.result.as_deref());
++    let opaque = injection.opaque_receiver;
++    if opaque.is_some() && kind != Kind::WrapOperation {
++        return Err(Diagnostic::new(
++            "E_INVALID_BINDING",
++            "opaque_receiver is for WRAP_OPERATION",
++        ));
++    }
+     let helper = parse_helper(helper_source)?;
+     let result = return_type(&f.signature);
+     let value = if matches!(
+@@ -201,7 +297,14 @@ pub fn contract(
+             Expr::MethodCall(c) => (true, c.args.len()),
+             _ => return Err(Diagnostic::new("E_PLAN_SITE", "wrapper site is not a call")),
+         };
+-        let input_count = arguments + usize::from(method);
++        if opaque.is_some() && !method {
++            return Err(Diagnostic::new(
++                "E_INVALID_BINDING",
++                "an opaque receiver needs a method call",
++            ));
++        }
++        // An opaque receiver has no binding: the wrapper gets the arguments and `$operation`.
++        let input_count = arguments + usize::from(method && opaque.is_none());
+         if bindings.len() != input_count + 1 {
+             return Err(Diagnostic::new(
+                 "E_INVALID_BINDING",
+@@ -209,11 +312,15 @@ pub fn contract(
+             ));
+         }
+         let mut inputs = Vec::new();
++        if opaque.is_some() {
++            inputs.push("_".to_string());
++        }
++        let bound_receiver = method && opaque.is_none();
+         for (i, binding) in bindings[..input_count].iter().enumerate() {
+-            let expected = if method && i == 0 {
++            let expected = if bound_receiver && i == 0 {
+                 "$receiver".into()
+             } else {
+-                format!("$arg{}", i - usize::from(method))
++                format!("$arg{}", i - usize::from(bound_receiver))
+             };
+             if binding.value != expected {
+                 return Err(Diagnostic::new(
+@@ -247,6 +354,7 @@ pub fn contract(
+             inputs,
+             output: tokens(&output),
+             method,
++            opaque,
+         })
+     } else {
+         None
+@@ -385,9 +493,14 @@ pub fn validate_helper(
          ));
      }
      // OVERWRITE retains the MVP's compiler-validated return compatibility.
@@ -1297,7 +1955,16 @@ index 55a9372..0daa2d7 100644
      {
          let why = if cancellable {
              "cancellable hook helper must return core::ops::ControlFlow<TargetResult>"
-@@ -439,7 +530,15 @@ pub fn validate_helper(
+@@ -431,15 +544,22 @@ pub fn validate_helper(
+             } else if kind == Kind::WrapOperation {
+                 if binding.value == "$operation" {
+                     let op = contract.operation.as_ref().unwrap();
+-                    let inputs: Vec<Type> = op
+-                        .inputs
++                    let inputs: Vec<Type> = op.inputs[usize::from(op.opaque.is_some())..]
+                         .iter()
+                         .map(|s| parse_type(s))
+                         .collect::<Result<_>>()?;
                      let output = parse_type(&op.output)?;
                      let expected: Type =
                          syn::parse2(quote!(impl FnOnce(#(#inputs),*) -> #output)).unwrap();
@@ -1313,7 +1980,7 @@ index 55a9372..0daa2d7 100644
                  } else {
                      binding.value == "$receiver"
                          || binding
-@@ -528,3 +627,78 @@ fn binding_expr(expr: &Expr, parameters: &std::collections::BTreeSet<String>) ->
+@@ -528,3 +648,78 @@ fn binding_expr(expr: &Expr, parameters: &std::collections::BTreeSet<String>) ->
          _ => false,
      }
  }
@@ -1393,7 +2060,7 @@ index 55a9372..0daa2d7 100644
 +    }
 +}
 diff --git a/crates/horizon-mixins-core/src/index.rs b/crates/horizon-mixins-core/src/index.rs
-index 740c0dc..94df671 100644
+index 740c0dc..d743db7 100644
 --- a/crates/horizon-mixins-core/src/index.rs
 +++ b/crates/horizon-mixins-core/src/index.rs
 @@ -1,4 +1,4 @@
@@ -1402,7 +2069,7 @@ index 740c0dc..94df671 100644
  use quote::ToTokens;
  use std::{
      collections::{BTreeMap, BTreeSet},
-@@ -27,6 +27,11 @@ pub struct Index {
+@@ -27,8 +27,15 @@ pub struct Index {
      /// its items are indexed under.
      pub(crate) crate_aliases: BTreeMap<String, BTreeSet<String>>,
      pub(crate) standard_macro_aliases: BTreeMap<String, BTreeSet<String>>,
@@ -1413,8 +2080,12 @@ index 740c0dc..94df671 100644
 +    pub feature_files: BTreeSet<String>,
      pub functions: Vec<Function>,
      pub types: Vec<TypeDefinition>,
++    /// The ids of the structs and enums defined in the workspace, under no inactive or unknown `cfg`.
++    pub adts: BTreeSet<String>,
      pub blocked: BTreeSet<String>,
-@@ -147,6 +152,12 @@ pub fn macro_attributes(attrs: &[Attribute]) -> bool {
+     pub macro_modules: BTreeSet<String>,
+     pub files: BTreeMap<String, syn::File>,
+@@ -147,6 +154,12 @@ pub fn macro_attributes(attrs: &[Attribute]) -> bool {
 
  impl Index {
      pub fn load(root: &Path) -> Result<Self> {
@@ -1427,7 +2098,7 @@ index 740c0dc..94df671 100644
          // Cargo canonicalizes what it reports (`\\?\C:\…` on Windows, a resolved junction on
          // macOS), so the root is compared and stripped in the same form.
          let root = root.canonicalize().map_err(io)?;
-@@ -194,6 +205,9 @@ impl Index {
+@@ -194,10 +207,14 @@ impl Index {
              }
          }
          let mut index = Self {
@@ -1437,7 +2108,12 @@ index 740c0dc..94df671 100644
              crate_aliases: BTreeMap::new(),
              standard_macro_aliases: BTreeMap::new(),
              functions: Vec::new(),
-@@ -223,6 +237,8 @@ impl Index {
+             types: Vec::new(),
++            adts: BTreeSet::new(),
+             blocked: BTreeSet::new(),
+             macro_modules: BTreeSet::new(),
+             files: BTreeMap::new(),
+@@ -223,6 +240,8 @@ impl Index {
                  .ok_or_else(|| Diagnostic::new("E_INVALID_PATH", "non UTF-8 manifest path"))?
                  .replace('\\', "/");
              index.packages.insert(package.name.to_string(), manifest);
@@ -1446,7 +2122,7 @@ index 740c0dc..94df671 100644
              for target in &package.targets {
                  if target.kind.contains(&cargo_metadata::TargetKind::Bin) {
                      index.bins.insert(target.name.clone());
-@@ -289,8 +305,15 @@ impl Index {
+@@ -289,8 +308,15 @@ impl Index {
              .to_str()
              .ok_or_else(|| Diagnostic::new("E_INVALID_PATH", "non UTF-8 module path"))?
              .replace('\\', "/");
@@ -1464,6 +2140,26 @@ index 740c0dc..94df671 100644
          let file_cfg = cfg_status(&tree.attrs);
          if file_cfg == CfgStatus::Inactive {
              active.remove(&path);
+@@ -496,11 +522,19 @@ impl Index {
+                         }
+                     }
+                 }
++                Item::Enum(item) => {
++                    if !inherited_cfg && cfg_status(&item.attrs) == CfgStatus::Active {
++                        self.adts.insert(format!("{prefix}::{}", item.ident));
++                    }
++                }
+                 Item::Struct(item) => {
+                     let status = cfg_status(&item.attrs);
+                     if status == CfgStatus::Inactive {
+                         continue;
+                     }
++                    if !inherited_cfg && status == CfgStatus::Active {
++                        self.adts.insert(format!("{prefix}::{}", item.ident));
++                    }
+                     let attrs: Vec<_> = item
+                         .attrs
+                         .iter()
 diff --git a/crates/horizon-mixins-core/src/lib.rs b/crates/horizon-mixins-core/src/lib.rs
 index 5bac667..f85ac3c 100644
 --- a/crates/horizon-mixins-core/src/lib.rs
@@ -1942,8 +2638,30 @@ index 5bac667..f85ac3c 100644
 
  pub mod modules;
 
+diff --git a/crates/horizon-mixins-core/src/manifest.rs b/crates/horizon-mixins-core/src/manifest.rs
+index c0b5b57..5d77b1c 100644
+--- a/crates/horizon-mixins-core/src/manifest.rs
++++ b/crates/horizon-mixins-core/src/manifest.rs
+@@ -164,6 +164,17 @@ pub struct Injection {
+     pub slice: Option<Slice>,
+     pub variable: Option<Variable>,
+     pub result: Option<String>,
++    #[serde(default)]
++    pub opaque_receiver: Option<OpaqueReceiver>,
++}
++/// A `WRAP_OPERATION` row whose receiver is opaque: the wrapper does not bind it, so no type for
++/// it is declared anywhere in the mod and the game's own code decides it. `owned` is for a method
++/// that takes `self`: the receiver moves into the call, as in the original. The build refuses a
++/// method that does not consume the receiver's own type.
++#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(rename_all = "snake_case")]
++pub enum OpaqueReceiver {
++    Owned,
+ }
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+ #[serde(deny_unknown_fields)]
 diff --git a/crates/horizon-mixins-core/src/plan.rs b/crates/horizon-mixins-core/src/plan.rs
-index 848dcc0..8a80e7c 100644
+index 848dcc0..775e213 100644
 --- a/crates/horizon-mixins-core/src/plan.rs
 +++ b/crates/horizon-mixins-core/src/plan.rs
 @@ -1,5 +1,6 @@
@@ -2029,25 +2747,84 @@ index 848dcc0..8a80e7c 100644
                  }
                  let ordinal = injection.ordinal.unwrap();
                  let site = matches.get(ordinal).ok_or_else(|| {
-@@ -633,6 +669,44 @@ pub fn build_staged(workspace: &Path, mods: &Path) -> Result<(Plan, crate::nativ
+@@ -633,6 +669,103 @@ pub fn build_staged(workspace: &Path, mods: &Path) -> Result<(Plan, crate::nativ
                  {
                      return Err(context(Diagnostic::new("E_UNSUPPORTED_SITE", "the selected site contains a closure, which this hook would move into generated code").file(&f.file)));
                  }
 +                // A declared type is an expected type for the receiver it wraps: on a computed
 +                // receiver it can retype the receiver or change the method the dot call picks.
++                // The opaque form declares none, and takes only arguments that evaluate the same
++                // inside its operand tuple.
 +                if injection.kind == Kind::WrapOperation
++                    && injection.opaque_receiver.is_some()
++                    && let Expr::MethodCall(call) = &site.expr
++                {
++                    if sites::is_place(&call.receiver) {
++                        return Err(context(Diagnostic::new(
++                            "E_OPERATION_SIGNATURE",
++                            "an opaque receiver is for a computed receiver (a call result); a parameter receiver is bound by its reference type",
++                        ).file(&f.file)));
++                    }
++                    let locals = sites::locals(&f.signature, &f.block);
++                    if !sites::opaque_receiver(&call.receiver, &locals) {
++                        return Err(context(Diagnostic::new(
++                            "E_OPERATION_SITE",
++                            format!(
++                                "an opaque receiver is built only from paths to functions and types, calls, method calls, field access and `?`, with no literal, local, closure or block anywhere in it: `{}` is refused (see the book, `opaque_receiver`)",
++                                tokens(&call.receiver)
++                            ),
++                        ).file(&f.file)));
++                    }
++                    if let Some(argument) = call
++                        .args
++                        .iter()
++                        .find(|a| !sites::opaque_argument(a, &locals))
++                    {
++                        return Err(context(Diagnostic::new(
++                            "E_OPERATION_ARGUMENT",
++                            format!(
++                                "an opaque receiver's arguments must each be a local (`x`) or an explicit borrow of a local or of its field (`&x`, `&mut x`, `&mut x.f`): `{}` is refused (see the book, `opaque_receiver`)",
++                                tokens(argument)
++                            ),
++                        ).file(&f.file)));
++                    }
++                    // A declared type fills an inference variable the operands leave open. A
++                    // reference to a struct or enum of the workspace, with at most lifetime
++                    // arguments, has none to fill: it either equals the original's type or the
++                    // build refuses it.
++                    for binding in injection
++                        .bindings
++                        .iter()
++                        .filter(|b| b.value.starts_with("$arg"))
++                    {
++                        if !sites::opaque_argument_type(&binding.ty, &f.module, &index.adts) {
++                            return Err(context(Diagnostic::new(
++                                "E_OPERATION_ARGUMENT",
++                                format!(
++                                    "an opaque receiver's argument `{}` is declared `{}`: it must be a reference to a struct or enum defined in the workspace (named by its path, never an alias), with lifetime arguments only (see the book, `opaque_receiver`)",
++                                    binding.name, binding.ty
++                                ),
++                            ).file(&f.file)));
++                        }
++                    }
++                } else if injection.kind == Kind::WrapOperation
 +                    && let Expr::MethodCall(call) = &site.expr
 +                    && !sites::is_place(&call.receiver)
 +                {
 +                    return Err(context(Diagnostic::new(
 +                        "E_OPERATION_SIGNATURE",
-+                        "a computed receiver (a call result) cannot be wrapped with a declared type: the declaration takes part in inferring the receiver's own type and can change the call the game makes. Wrap a method on a target function's reference parameter instead; binding the receiver to a local in the game's code is not a row",
++                        "a computed receiver (a call result) cannot be wrapped with a declared type: the declaration takes part in inferring the receiver's own type and can change the call the game makes. Mark the receiver opaque (`opaque_receiver`), or wrap a method on a target function's reference parameter; binding the receiver to a local in the game's code is not a row",
 +                    ).file(&f.file)));
 +                }
 +                // The site moves into generated code, where a `?` would leave a closure instead
 +                // of the function. A wrapped call's arguments are typed by the wrapper's
 +                // declaration, so one that carries a `?` (or a block) is refused too.
-+                if sites::contains_exit_or_block(&site.expr) {
++                let moved_exit = if injection.opaque_receiver.is_some() {
++                    sites::opaque_moves_exit_or_block(&site.expr)
++                } else {
++                    sites::contains_exit_or_block(&site.expr)
++                };
++                if moved_exit {
 +                    return Err(context(Diagnostic::new(CLOSURES_ETC.0, "the selected site contains `?`, an `unsafe` or a `const` block, which this hook would move into generated code").file(&f.file)));
 +                }
 +                // The site moves into generated code: a borrow of a call inside it could have
@@ -2074,7 +2851,34 @@ index 848dcc0..8a80e7c 100644
                  if (injection.kind == Kind::BeforeCall
                      || (injection.kind == Kind::AfterCall && injection.cancellable))
                      && !site.whole_expression
-@@ -924,6 +998,11 @@ pub fn build_staged(workspace: &Path, mods: &Path) -> Result<(Plan, crate::nativ
+@@ -661,16 +794,8 @@ pub fn build_staged(workspace: &Path, mods: &Path) -> Result<(Plan, crate::nativ
+             } else {
+                 None
+             };
+-            let contract = helpers::contract(
+-                f,
+-                injection.kind,
+-                injection.cancellable,
+-                helper,
+-                &injection.bindings,
+-                selected.map(|s| &s.expr),
+-                injection.result.as_deref(),
+-            )
+-            .map_err(context)?;
++            let contract = helpers::contract(f, injection, helper, selected.map(|s| &s.expr))
++                .map_err(context)?;
+             validate_helper(
+                 f,
+                 injection.kind,
+@@ -775,6 +900,7 @@ pub fn build_staged(workspace: &Path, mods: &Path) -> Result<(Plan, crate::nativ
+                         inputs,
+                         output: bundle.output.clone(),
+                         method: bundle.receiver.is_some(),
++                        opaque: None,
+                     },
+                 )
+                 .map_err(context)?;
+@@ -924,6 +1050,11 @@ pub fn build_staged(workspace: &Path, mods: &Path) -> Result<(Plan, crate::nativ
          schema: SCHEMA,
          transformer: env!("CARGO_PKG_VERSION").into(),
          rustc: rustc(&root)?,
@@ -2086,7 +2890,7 @@ index 848dcc0..8a80e7c 100644
          inputs,
          injections,
          bridges: planned_bridges,
-@@ -979,6 +1058,9 @@ pub(crate) fn validate_target_with(
+@@ -979,6 +1110,9 @@ pub(crate) fn validate_target_with(
          // are checked in those values only ([`exit_value_error`]). MODIFY_VARIABLE likewise
          // replaces only the value it selects ([`modified_value_error`]).
          rewrites_body: !matches!(kind, Kind::Return | Kind::ModifyVariable),
@@ -2096,7 +2900,7 @@ index 848dcc0..8a80e7c 100644
          // A `?` is an exit RETURN would miss; MODIFY_VARIABLE leaves one outside its value alone.
          try_outside_value: kind == Kind::ModifyVariable,
          body_macros: false,
-@@ -1005,7 +1087,10 @@ pub(crate) fn validate_target_with(
+@@ -1005,7 +1139,10 @@ pub(crate) fn validate_target_with(
      // any exit or expression inside a macro, just like ordinary HEAD.
      safety.body_macros = safety.boundary;
      safety.in_body = true;
@@ -2108,7 +2912,7 @@ index 848dcc0..8a80e7c 100644
      if safety.error.is_none() && kind == Kind::Return {
          safety.error = exit_value_error(&f.block);
      }
-@@ -1173,6 +1258,7 @@ struct Safety {
+@@ -1173,6 +1310,7 @@ struct Safety {
      error: Option<(&'static str, &'static str)>,
      boundary: bool,
      rewrites_body: bool,
@@ -2116,7 +2920,7 @@ index 848dcc0..8a80e7c 100644
      try_outside_value: bool,
      body_macros: bool,
      relaxed: bool,
-@@ -1237,6 +1323,9 @@ impl<'ast> Visit<'ast> for Safety {
+@@ -1237,6 +1375,9 @@ impl<'ast> Visit<'ast> for Safety {
              // RETURN never rewrites inside a closure; what is inside is still checked.
              Expr::Closure(c) if (!self.rewrites_body || self.relaxed) && c.asyncness.is_none() => {}
              Expr::Try(_) if self.try_outside_value => {}
@@ -2126,7 +2930,7 @@ index 848dcc0..8a80e7c 100644
              Expr::Closure(_)
              | Expr::Async(_)
              | Expr::Await(_)
-@@ -1247,7 +1336,10 @@ impl<'ast> Visit<'ast> for Safety {
+@@ -1247,7 +1388,10 @@ impl<'ast> Visit<'ast> for Safety {
              | Expr::Const(_) => self.error = Some(CLOSURES_ETC),
              // Calls under a reference can depend on temporary lifetime extension.
              Expr::Reference(r)
@@ -2138,7 +2942,7 @@ index 848dcc0..8a80e7c 100644
              {
                  self.error = Some(REFERENCED_CALL)
              }
-@@ -1346,6 +1438,23 @@ impl<'ast> Visit<'ast> for Safety {
+@@ -1346,6 +1490,23 @@ impl<'ast> Visit<'ast> for Safety {
          }
      }
  }
@@ -2162,11 +2966,35 @@ index 848dcc0..8a80e7c 100644
  fn contains_call(expr: &Expr) -> bool {
      struct Find(bool);
      impl<'ast> Visit<'ast> for Find {
+@@ -1395,6 +1556,8 @@ fn validate_operation_site(
+                 }
+             }
+         }
++        // An opaque receiver is a call result, checked where the site is selected.
++        Expr::MethodCall(_) if operation.opaque.is_some() => {}
+         Expr::MethodCall(call) => {
+             let Expr::Path(receiver) = &*call.receiver else {
+                 return Err(Diagnostic::new(
+@@ -1523,6 +1686,14 @@ fn validate_composition(entries: &[&PlannedInjection]) -> Result<()> {
+             if let Some(wrapper) = operations.get(&p.call_site.unwrap()) {
+                 let op = wrapper.contract.operation.as_ref().unwrap();
+                 let expected = &op.inputs[usize::from(op.method)..];
++                if op.opaque.is_some() {
++                    return Err(composition_error(
++                        p,
++                        wrapper,
++                        "E_ARGUMENT_SIGNATURE",
++                        "a tuple modifier cannot share a call with an opaque receiver wrapper",
++                    ));
++                }
+                 if expected != bundle.inputs
+                     || op.output != bundle.output
+                     || op.method != bundle.receiver.is_some()
 diff --git a/crates/horizon-mixins-core/src/sites.rs b/crates/horizon-mixins-core/src/sites.rs
-index 47fee7d..7b18f8f 100644
+index 47fee7d..ba9c223 100644
 --- a/crates/horizon-mixins-core/src/sites.rs
 +++ b/crates/horizon-mixins-core/src/sites.rs
-@@ -17,6 +17,35 @@ pub fn contains_closure(expr: &Expr) -> bool {
+@@ -17,6 +17,153 @@ pub fn contains_closure(expr: &Expr) -> bool {
      find.visit_expr(expr);
      find.0
  }
@@ -2189,6 +3017,124 @@ index 47fee7d..7b18f8f 100644
 +    find.visit_expr(expr);
 +    find.0
 +}
++/// What an opaque-receiver `WRAP_OPERATION` cannot carry out of the function: its receiver is
++/// evaluated at the call site, where a `?` still returns from the function, and its arguments are
++/// checked by [`opaque_argument`]. The method's own generic arguments move into the continuation.
++pub fn opaque_moves_exit_or_block(call: &Expr) -> bool {
++    match call {
++        Expr::MethodCall(c) => {
++            contains_block(&c.receiver, false)
++                || c.args.iter().any(contains_exit_or_block)
++                || c.turbofish.as_ref().is_some_and(|t| {
++                    let probe: Expr = syn::parse_quote!(f #t ());
++                    contains_exit_or_block(&probe)
++                })
++        }
++        _ => contains_exit_or_block(call),
++    }
++}
++/// The names a function binds as locals: its parameters (`self` included) and every pattern
++/// identifier in its body, closures' parameters too.
++pub fn locals(
++    signature: &syn::Signature,
++    block: &syn::Block,
++) -> std::collections::BTreeSet<String> {
++    struct Names(std::collections::BTreeSet<String>);
++    impl<'ast> Visit<'ast> for Names {
++        fn visit_pat_ident(&mut self, p: &'ast syn::PatIdent) {
++            self.0.insert(p.ident.to_string());
++            visit::visit_pat_ident(self, p);
++        }
++        fn visit_receiver(&mut self, _: &'ast syn::Receiver) {
++            self.0.insert("self".into());
++        }
++    }
++    let mut names = Names(std::collections::BTreeSet::new());
++    names.visit_signature(signature);
++    names.visit_block(block);
++    names.0
++}
++/// Whether an opaque-receiver wrapper may take this receiver. A declared argument type fills only
++/// an inference variable the operands leave open, which a literal, a local or a closure can carry
++/// in, so the receiver is built only from paths to functions and types, calls, method calls,
++/// field access and `?`, and every nested call argument follows the same rule.
++pub fn opaque_receiver(expr: &Expr, locals: &std::collections::BTreeSet<String>) -> bool {
++    match expr {
++        Expr::Paren(p) => opaque_receiver(&p.expr, locals),
++        Expr::Group(g) => opaque_receiver(&g.expr, locals),
++        Expr::Try(t) => opaque_receiver(&t.expr, locals),
++        Expr::Field(f) => opaque_receiver(&f.base, locals),
++        Expr::Call(c) => {
++            let callee = match &*c.func {
++                Expr::Path(p) => p
++                    .path
++                    .get_ident()
++                    .is_none_or(|i| !locals.contains(&i.to_string())),
++                _ => false,
++            };
++            callee && c.args.iter().all(|a| opaque_receiver(a, locals))
++        }
++        Expr::MethodCall(m) => {
++            opaque_receiver(&m.receiver, locals)
++                && m.args.iter().all(|a| opaque_receiver(a, locals))
++        }
++        _ => false,
++    }
++}
++/// An argument of an opaque-receiver wrapper: an explicit borrow of a local or of a local's field
++/// (`&x`, `&mut x`, `&mut x.f`), or a local by name. Whatever else could carry an open inference
++/// variable, or lose a coercion or an expected type inside the operand tuple.
++pub fn opaque_argument(expr: &Expr, locals: &std::collections::BTreeSet<String>) -> bool {
++    fn local(expr: &Expr, locals: &std::collections::BTreeSet<String>) -> bool {
++        match expr {
++            Expr::Path(p) => {
++                p.qself.is_none()
++                    && p.path
++                        .get_ident()
++                        .is_some_and(|i| locals.contains(&i.to_string()))
++            }
++            Expr::Field(f) => local(&f.base, locals),
++            Expr::Paren(p) => local(&p.expr, locals),
++            Expr::Group(g) => local(&g.expr, locals),
++            _ => false,
++        }
++    }
++    match expr {
++        Expr::Paren(p) => opaque_argument(&p.expr, locals),
++        Expr::Group(g) => opaque_argument(&g.expr, locals),
++        Expr::Path(_) => local(expr, locals),
++        Expr::Reference(r) => local(&r.expr, locals),
++        _ => false,
++    }
++}
++/// Whether `ty` is a reference to a struct or enum in `adts`, spelled as a path from `module`
++/// with lifetime arguments only.
++pub fn opaque_argument_type(
++    ty: &str,
++    module: &str,
++    adts: &std::collections::BTreeSet<String>,
++) -> bool {
++    let Ok(syn::Type::Reference(reference)) = syn::parse_str::<syn::Type>(ty) else {
++        return false;
++    };
++    let syn::Type::Path(mut path) = *reference.elem else {
++        return false;
++    };
++    for segment in &mut path.path.segments {
++        match &segment.arguments {
++            syn::PathArguments::None => {}
++            syn::PathArguments::AngleBracketed(a)
++                if a.args
++                    .iter()
++                    .all(|g| matches!(g, syn::GenericArgument::Lifetime(_))) =>
++            {
++                segment.arguments = syn::PathArguments::None;
++            }
++            _ => return false,
++        }
++    }
++    crate::bridges::type_id(module, &syn::Type::Path(path)).is_ok_and(|id| adts.contains(&id))
++}
 +/// A place expression: a receiver of this shape is borrowed, never moved, by a method call.
 +pub fn is_place(expr: &Expr) -> bool {
 +    match expr {
@@ -2202,7 +3148,7 @@ index 47fee7d..7b18f8f 100644
  pub fn is_call(expr: &Expr) -> bool {
      matches!(expr, Expr::Call(_) | Expr::MethodCall(_))
  }
-@@ -90,6 +119,39 @@ pub fn call_matches(expr: &Expr, selector: &Expr) -> bool {
+@@ -90,6 +237,39 @@ pub fn call_matches(expr: &Expr, selector: &Expr) -> bool {
      let key = call_identity(expr);
      key.is_some() && key == call_identity(selector)
  }
@@ -2242,7 +3188,7 @@ index 47fee7d..7b18f8f 100644
  pub fn parse_call_selector(selector: &str) -> Result<Expr> {
      let parsed = syn::parse_str::<Expr>(&format!("{selector}()"));
      if parsed.as_ref().ok().and_then(call_key).as_deref() != Some(selector) {
-@@ -114,6 +176,9 @@ pub struct Site {
+@@ -114,6 +294,9 @@ pub struct Site {
      pub const_context: bool,
      /// Inside a closure body: the closure may run later, elsewhere or never.
      pub in_closure: bool,
@@ -2252,7 +3198,7 @@ index 47fee7d..7b18f8f 100644
  }
  #[derive(Default)]
  pub struct Sites {
-@@ -124,6 +189,7 @@ pub struct Sites {
+@@ -124,6 +307,7 @@ pub struct Sites {
      next_is_root: bool,
      const_context: bool,
      closures: usize,
@@ -2260,7 +3206,7 @@ index 47fee7d..7b18f8f 100644
  }
  impl Sites {
      pub fn in_block(block: &syn::Block) -> Self {
-@@ -186,6 +252,7 @@ impl<'ast> Visit<'ast> for Sites {
+@@ -186,6 +370,7 @@ impl<'ast> Visit<'ast> for Sites {
              whole_expression: root,
              const_context: self.const_context,
              in_closure: self.closures > 0,
@@ -2268,7 +3214,7 @@ index 47fee7d..7b18f8f 100644
          };
          self.values.push(site(expression));
          if is_call(expr) {
-@@ -198,7 +265,10 @@ impl<'ast> Visit<'ast> for Sites {
+@@ -198,7 +383,10 @@ impl<'ast> Visit<'ast> for Sites {
          if matches!(expr, Expr::Paren(_)) {
              self.next_is_root = root;
          }
@@ -2280,7 +3226,7 @@ index 47fee7d..7b18f8f 100644
  }
 
 diff --git a/crates/horizon-mixins-transform/src/lib.rs b/crates/horizon-mixins-transform/src/lib.rs
-index f4edd3d..d2a70cb 100644
+index f4edd3d..a759f15 100644
 --- a/crates/horizon-mixins-transform/src/lib.rs
 +++ b/crates/horizon-mixins-transform/src/lib.rs
 @@ -1,5 +1,6 @@
@@ -2353,8 +3299,57 @@ index f4edd3d..d2a70cb 100644
          }
          let tree = &trees[&module.file];
          if source::fingerprint(tokens(tree)) != module.fingerprint {
-@@ -523,16 +542,18 @@ fn wrap_operation(call: &Expr, wrappers: &[&PlannedInjection]) -> Result<Expr> {
+@@ -493,11 +512,13 @@ fn after_chain(
+ }
+ fn wrap_operation(call: &Expr, wrappers: &[&PlannedInjection]) -> Result<Expr> {
+     let operation = wrappers[0].contract.operation.as_ref().unwrap();
+-    let names: Vec<_> = (0..operation.inputs.len())
++    // An opaque receiver is not an input of the operation: the wrapper's inputs are the arguments.
++    let opaque = operation.opaque;
++    let first = usize::from(opaque.is_some());
++    let names: Vec<_> = (0..operation.inputs.len() - first)
+         .map(|i| format_ident!("__horizon_mixins_arg{i}"))
+         .collect();
+-    let types: Vec<Type> = operation
+-        .inputs
++    let types: Vec<Type> = operation.inputs[first..]
+         .iter()
+         .map(|s| syn::parse_str(s).map_err(syntax))
+         .collect::<Result<_>>()?;
+@@ -507,7 +528,9 @@ fn wrap_operation(call: &Expr, wrappers: &[&PlannedInjection]) -> Result<Expr> {
+         Expr::MethodCall(c) => c.args.len() + 1,
+         _ => return Err(Diagnostic::new("E_PLAN_SITE", "wrapper site is not a call")),
+     };
+-    if actual_count != inputs.len() || operation.method != matches!(call, Expr::MethodCall(_)) {
++    if actual_count != inputs.len() + first
++        || operation.method != matches!(call, Expr::MethodCall(_))
++    {
+         return Err(Diagnostic::new(
+             "E_PLAN_SITE",
+             "operation input shape differs from its original call",
+@@ -516,23 +539,39 @@ fn wrap_operation(call: &Expr, wrappers: &[&PlannedInjection]) -> Result<Expr> {
+
+     let mut original = call.clone();
+     let mut arguments: Vec<Expr>;
++    let mut receiver_operand: Option<Expr> = None;
++    let mut probe = None;
+     match &mut original {
+         Expr::Call(c) => {
+             arguments = c.args.iter().cloned().collect();
+             c.args = inputs.iter().cloned().collect();
          }
++        Expr::MethodCall(c) if opaque.is_some() => {
++            // The receiver is evaluated first, as the first operand of the call below, with the
++            // arguments after it: all of them in the original statement, so their temporaries and
++            // `?` exits are the original's. The method is resolved on the receiver's own type in
++            // the continuation; no type of it is written here. The receiver moves in, and the
++            // continuation checks that the method takes `self` on the receiver's own type.
++            receiver_operand = Some((*c.receiver).clone());
++            probe = Some((c.method.clone(), c.turbofish.clone()));
++            arguments = c.args.iter().cloned().collect();
++            *c.receiver = syn::parse_quote!(__horizon_mixins_owned);
++            c.args = inputs.iter().cloned().collect();
++        }
          Expr::MethodCall(c) => {
              let receiver = &c.receiver;
 -            let Type::Reference(reference) = &types[0] else {
@@ -2382,3 +3377,97 @@ index f4edd3d..d2a70cb 100644
              };
              arguments = vec![receiver_arg];
              arguments.extend(c.args.iter().cloned());
+@@ -548,10 +587,11 @@ fn wrap_operation(call: &Expr, wrappers: &[&PlannedInjection]) -> Result<Expr> {
+             .iter()
+             .enumerate()
+             .map(|(i, value)| {
+-                let key = if operation.method && i == 0 {
++                let bound_receiver = operation.method && opaque.is_none();
++                let key = if bound_receiver && i == 0 {
+                     "$receiver".into()
+                 } else {
+-                    format!("$arg{}", i - usize::from(operation.method))
++                    format!("$arg{}", i - usize::from(bound_receiver))
+                 };
+                 (key, value.clone())
+             })
+@@ -560,7 +600,78 @@ fn wrap_operation(call: &Expr, wrappers: &[&PlannedInjection]) -> Result<Expr> {
+         let body = invoke(p, &specials)?;
+         continuation = syn::parse2(quote!(|#(#names: #types),*| #body)).map_err(syntax)?;
+     }
+-    syn::parse2(quote!((#continuation)(#(#arguments),*))).map_err(syntax)
++    let Some(receiver) = receiver_operand else {
++        return syn::parse2(quote!((#continuation)(#(#arguments),*))).map_err(syntax);
++    };
++    // The receiver and the arguments are operands of one `Some::<(_, A1, ..)>((..))`, in order, in
++    // the original statement; `map` then runs the chain on them. The tuple's declared field types
++    // make each argument a coercion site in field order, so the coercions (and any `Deref` they
++    // run) happen left to right as in the original call; the receiver's field is `_`. The closure is checked after the operands, so
++    // the receiver's type is known in it without being written, and its method resolves as in the
++    // original. `Some(..).map(..).unwrap()` cannot panic.
++    //
++    // The method must consume the receiver's own type, which keeps the receiver adjustments of
++    // the original dot call to the builtin ones that have no effect and no order (a copy of `&T`,
++    // a `Box` moved out): an `&self` or `&mut self` method autorefs, and a method reached through
++    // an overloaded `Deref` borrows the receiver, so either one leaves a closure that holds the
++    // receiver by reference, which is not `'static`. The probe is dead code: a local of the
++    // receiver's type, and a closure of the dot call with the declared argument types, handed to
++    // a function that wants a `'static` closure. The build refuses it in a function named for the
++    // row. This makes the method need a `'static` receiver. A `Box` receiver is refused as well,
++    // by autoref specialisation on the inferred type: a by-value method on the pointee would move
++    // out of the box, and the original frees the allocation at the end of the statement while the
++    // continuation would free it earlier.
++    let (method, turbofish) = probe.unwrap();
++    let id: String = format!("{}_{}", wrappers[0].mod_id, wrappers[0].injection_id)
++        .chars()
++        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
++        .collect();
++    let name = format_ident!("__horizon_mixins_receiver_of_{id}_must_take_self_by_value");
++    let camel: String = id
++        .split(|c: char| !c.is_ascii_alphanumeric())
++        .filter(|w| !w.is_empty())
++        .map(|w| w[..1].to_ascii_uppercase() + &w[1..])
++        .collect();
++    let boxed = format_ident!("HorizonMixinsReceiverOf{camel}MustNotBeABox");
++    let never = if types.is_empty() {
++        quote!()
++    } else {
++        quote!(
++            fn never<A>() -> A {
++                loop {}
++            }
++        )
++    };
++    syn::parse2(quote!(
++        ::core::option::Option::Some::<(_, #(#types,)*)>((#receiver, #(#arguments,)*))
++            .map(|(__horizon_mixins_receiver, #(#names,)*)| {
++                // Bound mutably, for a method that takes `mut self`.
++                #[allow(unused_mut)]
++                let mut __horizon_mixins_owned = __horizon_mixins_receiver;
++                #[allow(unreachable_code, unused_variables, unused_mut)]
++                if false {
++                    fn #name<F: 'static>(_: F) {}
++                    #never
++                    fn same<T>(_: &T) -> T { loop {} }
++                    #[allow(dead_code)]
++                    struct #boxed;
++                    #[allow(dead_code)]
++                    struct Plain;
++                    #[allow(dead_code)]
++                    trait IsBox { fn kind(&self) -> #boxed { loop {} } }
++                    impl<T: ?Sized> IsBox for &::std::boxed::Box<T> {}
++                    #[allow(dead_code)]
++                    trait NotBox { fn kind(&self) -> Plain { loop {} } }
++                    impl<T: ?Sized> NotBox for &&T {}
++                    let mut probe = same(&__horizon_mixins_owned);
++                    let _: Plain = (&&probe).kind();
++                    #name(|| probe.#method #turbofish(#(never::<#types>()),*));
++                }
++                (#continuation)(#(#names),*)
++            })
++            .unwrap()
++    ))
++    .map_err(syntax)
+ }
+ fn bundle_arguments(
+     call: &Expr,
