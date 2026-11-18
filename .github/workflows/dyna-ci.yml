@@ -136,9 +136,12 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: python3 tools/ci/rust_changes.py --all "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
+      # Best-effort: any failure leaves `reused` unset, and the push runs the whole gate.
       - name: Reuse the merged head's passed gate
         if: github.event_name == 'push'
         id: reuse
+        continue-on-error: true
+        timeout-minutes: 3
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 tools/ci/gate_reuse.py >> "$GITHUB_OUTPUT"
@@ -288,16 +291,20 @@ jobs:
         with:
           # A dispatch with `pr`: that pull request's head; otherwise this event's commit.
           ref: ${{ needs.changes.outputs.pr_sha }}
-      # The tree this gate checks, so a main push of the same tree can take its verdict (tools/ci/gate_reuse.py).
+      # The tree this gate checks, so a main push of the same tree can take its verdict (tools/ci/gate_reuse.py). Only
+      # where the tree's own dyna-ci.yml runs (a push, a pull_request's test merge): a `pr` dispatch runs main's
+      # definition on another tree. Best-effort: a failed record only loses the saving.
       - name: Record the checked tree
         id: tree
-        if: needs.changes.outputs.rust_required != 'false'
+        if: needs.changes.outputs.rust_required != 'false' && github.event_name != 'workflow_dispatch'
+        continue-on-error: true
         run: |
           mkdir -p "$RUNNER_TEMP/gate-tree"
           git rev-parse 'HEAD^{tree}' | tee "$RUNNER_TEMP/gate-tree/tree"
           echo "tree=$(cat "$RUNNER_TEMP/gate-tree/tree")" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         if: steps.tree.outcome == 'success'
+        continue-on-error: true
         with:
           name: gate-tree-${{ steps.tree.outputs.tree }}
           path: ${{ runner.temp }}/gate-tree/tree
