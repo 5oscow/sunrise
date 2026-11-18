@@ -3,11 +3,20 @@ name: cargo-sunrise-mod
 # [package.metadata.binstall] from crates/cargo-sunrise-mod/Cargo.toml and downloads the archive this workflow
 # attaches to the tag `cargo-sunrise-mod-v<version>`, whose version must be the manifest's. The targets come from
 # tools/sunrise_mod_binstall.py, the same file the manifest's template is checked against, so a platform added there
-# is built here and one nobody publishes is caught before it ships. A pull request builds the archives and publishes
-# nothing.
+# is built here and one nobody publishes is caught before it ships. A pull request builds only the x86_64 Linux archive
+# and publishes nothing; the daily run (and a dispatch) builds every archive, publishing nothing either. Every pull
+# request push building two macOS and a Windows archive on GitHub's runners held the organisation's macOS runners
+# while a launcher release's macOS leg waited behind them (2026-11-18).
 on:
   push:
     tags: ['cargo-sunrise-mod-v*']
+  workflow_call:
+    inputs:
+      commit:
+        description: The commit to build
+        type: string
+        required: true
+  workflow_dispatch:
   pull_request:
     paths:
       - 'crates/cargo-sunrise-mod/**'
@@ -16,7 +25,8 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: cargo-sunrise-mod-${{ github.ref }}
+  # A called run takes its caller's ref; its own group keeps it from cancelling or waiting on anything else.
+  group: cargo-sunrise-mod-${{ inputs.commit && format('daily-{0}', github.run_id) || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   plan:
@@ -26,10 +36,13 @@ jobs:
       platforms: ${{ steps.platforms.outputs.platforms }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.commit }}
       - id: platforms
         env:
           EVENT_NAME: ${{ github.event_name }}
-        run: echo "platforms=$(python3 -c 'import json, os, tools.sunrise_mod_binstall as m; print(json.dumps([p for p in m.PLATFORMS if os.environ["EVENT_NAME"] != "pull_request" or p["run"]]))')" >> "$GITHUB_OUTPUT"
+        run: echo "platforms=$(python3 -c 'import json, os, tools.sunrise_mod_binstall as m; print(json.dumps([p for p in m.PLATFORMS if os.environ["EVENT_NAME"] != "pull_request" or p["target"] == "x86_64-unknown-linux-gnu"]))')" >> "$GITHUB_OUTPUT"
   build:
     needs: plan
     # A contributor's pull request (its head in a fork) skips what compiles; a reviewer dispatches it (tools/ci/pr_gate.py).
@@ -43,6 +56,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.commit }}
       - name: The pinned Rust (tools/ci/rust-version)
         id: rust
         shell: bash
@@ -51,7 +67,7 @@ jobs:
         with:
           toolchain: ${{ steps.rust.outputs.version }}
           targets: ${{ matrix.target }}
-      # No compiler cache: a run's cache serves only its own pull request or tag, as main never runs this workflow,
+      # No compiler cache: a run's cache serves only its own pull request, tag or daily run, as main's pushes never run this workflow,
       # and the four a push saved (about 1.2 GB) pushed main's caches out of the repository's 10 GB.
       - name: The aarch64 Linux linker
         if: matrix.target == 'aarch64-unknown-linux-gnu'

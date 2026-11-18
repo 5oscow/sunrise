@@ -188,6 +188,23 @@ class WorkflowTests(unittest.TestCase):
                     body = re.search(rf"^  {name}:\n(.*?)(?=^  [a-z0-9_-]+:\n|\Z)", text, re.M | re.S)[1]
                     self.assertIn(f"if: {SAME_REPO}\n", body)
 
+    def test_a_pull_request_builds_the_mod_tool_for_linux_only(self):
+        import yaml
+
+        workflow = yaml.safe_load((ROOT / ".github/workflows/cargo-sunrise-mod.yml").read_text())
+        # Every other archive is the daily run's (and a tag's): a pull request push holds no macOS or Windows runner.
+        self.assertIn("workflow_call", workflow[True])
+        step = next(step for step in workflow["jobs"]["plan"]["steps"] if step.get("id") == "platforms")
+        def targets(event):
+            import tempfile
+            with tempfile.NamedTemporaryFile("r") as output:
+                subprocess.run(["bash", "-e", "-c", step["run"]], cwd=ROOT, check=True,
+                               env={**os.environ, "EVENT_NAME": event, "GITHUB_OUTPUT": output.name})
+                return [platform["target"] for platform in json.loads(output.read().split("=", 1)[1])]
+        self.assertEqual(targets("pull_request"), ["x86_64-unknown-linux-gnu"])
+        from tools import sunrise_mod_binstall
+        self.assertEqual(targets("workflow_dispatch"), [platform["target"] for platform in sunrise_mod_binstall.PLATFORMS])
+
 
 if __name__ == "__main__":
     unittest.main()
