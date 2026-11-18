@@ -2781,16 +2781,15 @@ impl Game<'_> {
     /// `Block.getDrops` for a block a player breaks: the block's loot table
     /// with the player as `this`, drawing from its server random sequence
     /// (`LootContext.Builder.create`), else the level random. The roll's
-    /// origin is the block's centre and `block_entity` the entity it had.
+    /// origin is the block's centre and `pending` retains its block entity.
     fn block_loot_at(
         &mut self,
         pos: [i32; 3],
         state: BlockStateId,
         held: Option<&ItemStack>,
-        block_entity: Option<sunrise_core::nbt::Tag>,
     ) -> Vec<ItemStack> {
         let dynamic = self.pending.dynamic(pos);
-        let place = self.loot_place_at(pos.map(|v| f64::from(v) + 0.5), block_entity);
+        let place = self.loot_place_at(pos.map(|v| f64::from(v) + 0.5), None);
         let (_, entity) = self.native_clicker();
         let mut drops = sunrise_world::loot::with_native_loot_place(place, || {
             let roll = sunrise_client::items::BlockLootRoll {
@@ -4208,26 +4207,35 @@ impl Game<'_> {
         let held = self.held().cloned();
         let key = (pos[0], pos[1], pos[2]);
         self.unpack_loot(container_loot::LootTarget::Block(key), None);
-        let loot_entity = if self.creative {
-            None
-        } else {
-            self.loot_block_entity(pos, &facts.name)
-        };
-        let live = self.live_block_entity(key, &facts.name, loot_entity.as_ref());
-        if let Some((entity, _)) = &live {
-            let saved = match (&loot_entity, entity) {
-                (Some(tag), BlockEntity::Mod(_)) => tag.clone(),
-                _ => sunrise_client::save::block_entity_encode::encode(
+        let live = (!self.creative)
+            .then(|| self.live_block_entity(key, &facts.name))
+            .flatten();
+        // Mod data is encoded only if the removed block goes on to roll loot.
+        let mod_source = match &live {
+            Some((BlockEntity::Mod(_), _)) => Some((
+                self.world.block_entities.generation(&key),
+                self.world.block_names.get(&key).cloned(),
+                self.world.block_lock(key).cloned(),
+            )),
+            Some((entity, _)) => {
+                let saved = sunrise_client::save::block_entity_encode::encode(
                     key,
                     entity,
                     &facts.name,
                     self.res.items(),
-                ),
-            };
-            self.pending.record_from(&self.world, pos, saved);
-        } else if let Some(tag) = spill::saved_entity(&self.world, pos) {
-            self.pending.record_saved(pos, &tag);
-        }
+                );
+                self.pending.record_from(&self.world, pos, saved);
+                None
+            }
+            None => {
+                if !self.creative
+                    && let Some(tag) = spill::saved_entity(&self.world, pos)
+                {
+                    self.pending.record_saved(pos, &tag);
+                }
+                None
+            }
+        };
         let hive = match self.world.block_entities.get(&key) {
             Some(BlockEntity::Beehive(h)) => self.hive_state(pos).map(|s| ((**h).clone(), s)),
             _ => None,
@@ -4251,7 +4259,18 @@ impl Game<'_> {
                 if let Some(p) = self.player.as_mut() {
                     p.cause_food_exhaustion(0.005);
                 }
-                let stacks = self.block_loot_at(pos, state, held.as_ref(), loot_entity);
+                if let (Some((entity, _)), Some((generation, name, lock))) = (&live, mod_source) {
+                    let saved = self.encode_removed_block_entity(
+                        key,
+                        entity,
+                        generation,
+                        &facts.name,
+                        self.res.items(),
+                    );
+                    self.pending
+                        .record_source(pos, spill::source_snapshot(saved, name, lock.as_ref()));
+                }
+                let stacks = self.block_loot_at(pos, state, held.as_ref());
                 let silk = held
                     .as_ref()
                     .is_some_and(|h| h.enchantment_level("minecraft:silk_touch") > 0);

@@ -151,8 +151,10 @@ Implement `BlockEntityPart::block_entity_save_additional` to serialize live mod 
 captures this type's data. `event.tag` starts with the stored payload. Change that copy to write the
 value that goes into a chunk, a command read, or a copy into an item, loot or a structure. This does
 not update the live entity, change the stored inventory, or affect the separate client update tag.
-The read-only level host cannot write to the world or request another save. During unload the chunk
-may no longer be readable through the host; the event still has its saved payload and entity identity.
+Invalid NBT is refused and the stored payload is used instead. The read-only level host cannot
+write to the world or request another save. During unload or a removed block's loot roll, the entity
+may no longer be readable through the host; the event still carries its payload and identity.
+`block_drops` and `player_destroyed_block` read the stored data, not the loot copy.
 Changing output does not mark a chunk dirty: mark the entity changed when the live state changes.
 
 `block_entity_on_load` is the separate once-per-instance attachment notice. It runs after the entity

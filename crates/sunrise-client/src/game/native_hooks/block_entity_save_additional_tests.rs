@@ -2,13 +2,21 @@
 mod tests {
     use crate::game::native_entity_refs::tests::with_game;
     use mod_api::{BlockEntityPart, BlockEntitySaveAdditionalEvent, Hooks, LevelHost, ModEntry};
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicI32, Ordering};
+    use std::sync::{Arc, Mutex};
     use sunrise_client::{
         chunk::Chunk,
-        containers::{BlockEntity, ModBlockEntity, ModBlockEntityFields},
+        containers::{BlockEntity, ModBlockEntity, ModBlockEntityFields, SHAPES_KEY},
     };
-    use sunrise_core::nbt::{Compound, Tag};
+    use sunrise_core::{
+        nbt::{Compound, Limits, Tag},
+        position::ChunkPos,
+    };
+    use sunrise_mod_runtime::attachments::ATTACHMENTS_KEY;
+    use sunrise_world::{
+        compression::Compression,
+        region::{ChunkRecord, RegionFile},
+    };
 
     struct Counter(Arc<AtomicI32>);
     #[mod_api::sunrise_part]
@@ -20,14 +28,25 @@ mod tests {
             _: &dyn LevelHost,
             event: &mut BlockEntitySaveAdditionalEvent<'_>,
         ) {
-            assert_eq!(event.tag.get(&"count".into()), Some(&Tag::Int(7)));
-            event.tag.insert(
-                "count".into(),
-                Tag::Int(self.0.fetch_add(1, Ordering::Relaxed)),
-            );
+            let serial = self.0.fetch_add(1, Ordering::Relaxed);
+            match event.tag.get(&"count".into()) {
+                Some(Tag::Int(-1)) => {
+                    event.tag.insert("invalid".into(), Tag::End);
+                }
+                Some(Tag::Int(0)) => {
+                    event.tag.remove(&"count".into());
+                }
+                Some(Tag::Int(7)) => {
+                    event.tag.insert("count".into(), Tag::Int(serial));
+                }
+                other => panic!("unexpected payload: {other:?}"),
+            }
+            assert!(!event.tag.contains_key(&ATTACHMENTS_KEY.into()));
             event
                 .tag
                 .insert("id".into(), Tag::String("test:wrong".into()));
+            event.tag.insert(SHAPES_KEY.into(), Tag::Byte(1));
+            event.tag.insert(ATTACHMENTS_KEY.into(), Tag::Byte(1));
         }
     }
     struct Mod(Arc<AtomicI32>);
@@ -64,13 +83,30 @@ mod tests {
                         .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
                     let pos = (1, 64, 1);
                     let silent = (2, 64, 1);
-                    for (pos, kind) in [(pos, "test:counter"), (silent, "test:silent")] {
+                    let invalid = (3, 64, 1);
+                    let erased = (4, 64, 1);
+                    for (pos, kind, saved) in [
+                        (pos, "test:counter", 7),
+                        (silent, "test:silent", 7),
+                        (invalid, "test:counter", -1),
+                        (erased, "test:counter", 0),
+                    ] {
+                        let state = game
+                            .pack
+                            .assets
+                            .registry
+                            .default_state("minecraft:dirt")
+                            .unwrap();
+                        game.world.set(pos.0, pos.1, pos.2, state).unwrap();
                         game.world.block_entities.insert(
                             pos,
                             BlockEntity::Mod(Box::new(ModBlockEntity::new(
                                 kind.into(),
                                 ModBlockEntityFields {
-                                    nbt: Compound::from([("count".into(), Tag::Int(7))]),
+                                    nbt: Compound::from([
+                                        ("count".into(), Tag::Int(saved)),
+                                        (ATTACHMENTS_KEY.into(), Tag::Byte(7)),
+                                    ]),
                                     ..Default::default()
                                 },
                             ))),
@@ -79,6 +115,18 @@ mod tests {
                     let tag = game.block_entity_nbt([1, 64, 1]).unwrap();
                     assert_eq!(tag.get("count"), Some(&Tag::Int(11)));
                     assert_eq!(tag.get("id"), Some(&Tag::String("test:counter".into())));
+                    assert_eq!(tag.get(ATTACHMENTS_KEY), Some(&Tag::Byte(7)));
+                    assert_eq!(tag.get(SHAPES_KEY), None);
+
+                    // Ctrl-pick must not copy the removed field in the base clone item.
+                    let picked = game.picked_stack([4, 64, 1], true).unwrap();
+                    assert!(
+                        picked
+                            .data()
+                            .and_then(|d| d.other("minecraft:block_entity_data"))
+                            .is_none_or(|tag| tag.get("count").is_none())
+                    );
+                    assert_eq!(count.load(Ordering::Relaxed), 13);
 
                     let detached = game.world.chunks.remove(&(0, 0)).unwrap();
                     let capture = game.with_entities([&detached]);
@@ -89,10 +137,8 @@ mod tests {
                         entity.nbt.get(&"count".into()).cloned()
                     };
                     let snapshots = &capture[0].block_entities;
-                    assert_eq!(
-                        fields(&snapshots.iter().find(|(p, _)| *p == pos).unwrap().1),
-                        Some(Tag::Int(12))
-                    );
+                    let edited = fields(&snapshots.iter().find(|(p, _)| *p == pos).unwrap().1);
+                    assert!(matches!(edited, Some(Tag::Int(13..=15))));
                     assert_eq!(
                         fields(&snapshots.iter().find(|(p, _)| *p == silent).unwrap().1),
                         Some(Tag::Int(7))
@@ -101,9 +147,155 @@ mod tests {
                         fields(game.world.block_entities.get(&pos).unwrap()),
                         Some(Tag::Int(7))
                     );
-                    assert_eq!(count.load(Ordering::Relaxed), 13);
+                    assert_eq!(count.load(Ordering::Relaxed), 16);
+
+                    // Refusing one Part's invalid output must still write this chunk, with
+                    // its stored payload and the other entity's valid change in the same record.
+                    let root = sunrise_client::save::encode(
+                        &capture[0],
+                        game.pack.assets.registry,
+                        game.res.biomes(),
+                        game.res.items(),
+                    );
+                    let limits = Limits::saved();
+                    let record =
+                        ChunkRecord::from_nbt(&root, Compression::Zlib, 0, limits).unwrap();
+                    let scratch = tempfile::tempdir().unwrap();
+                    let mut region =
+                        RegionFile::open_writable(scratch.path().join("r.0.0.mca"), true).unwrap();
+                    let chunk = ChunkPos::new(0, 0);
+                    region.write(chunk, &record).unwrap();
+                    let saved = region.read(chunk).unwrap().unwrap().nbt(limits).unwrap();
+                    let Some(Tag::List(entities)) = saved.tag.get("block_entities") else {
+                        panic!("expected saved block entities");
+                    };
+                    let at = |x| {
+                        entities
+                            .iter()
+                            .find(|tag| tag.get("x") == Some(&Tag::Int(x)))
+                            .unwrap()
+                    };
+                    assert_eq!(at(1).get("count"), edited.as_ref());
+                    assert_eq!(at(3).get("count"), Some(&Tag::Int(-1)));
+                    assert_eq!(at(3).get("invalid"), None);
+                    assert_eq!(at(4).get("count"), None);
                 })
             },
         );
+    }
+
+    struct BreakObserver(Arc<Mutex<Vec<(&'static str, Option<Tag>)>>>);
+
+    #[mod_api::__subscriptions]
+    impl Hooks for BreakObserver {
+        fn player_destroyed_block(
+            &self,
+            _: &mut dyn mod_api::ServerHost,
+            event: &mut mod_api::PlayerDestroyedBlockEvent,
+        ) {
+            let stored = event
+                .block_entity
+                .as_ref()
+                .and_then(|tag| tag.get(&"count".into()))
+                .cloned();
+            self.0.lock().unwrap().push(("removed", stored));
+        }
+        fn block_drops(
+            &self,
+            level: &dyn LevelHost,
+            event: &mut mod_api::BlockDropsEvent<'_>,
+        ) -> mod_api::Flow {
+            let stored = event
+                .block_entity
+                .and_then(|entity| level.block_entity_data(entity))
+                .and_then(|mut tag| tag.remove(&"count".into()));
+            self.0.lock().unwrap().push(("drops", stored));
+            mod_api::Flow::Continue
+        }
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn break_only_serializes_admitted_loot_not_removal_notices() {
+        use sunrise_client::{command::args::GameMode, items::ItemStack, motion::PlayerMotion};
+        use sunrise_core::geometry::Vec3;
+
+        for with_observers in [false, true] {
+            let count = Arc::new(AtomicI32::new(11));
+            let seen = Arc::new(Mutex::new(Vec::new()));
+            let mut mods = vec![ModEntry::new("test", Box::new(Mod(count.clone())))];
+            if with_observers {
+                mods.push(ModEntry::new(
+                    "test_observer",
+                    Box::new(BreakObserver(seen.clone())),
+                ));
+            }
+            mod_platform::testing::with_mods(mods.into(), || {
+                with_game(|game| {
+                    mod_api::__private::resolve_block_entity_types(
+                        ["test:counter", "test:silent"],
+                        |_| Some(()),
+                    )
+                    .unwrap();
+                    game.options.dedicated = Some(Vec::new());
+                    game.world
+                        .chunks
+                        .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+                    game.block_ticks
+                        .add_empty_chunk(ChunkPos::new(0, 0))
+                        .unwrap();
+                    game.player =
+                        Some(PlayerMotion::new(game.motion, Vec3::new(4.5, 64.0, 4.5)).unwrap());
+                    game.lan_acting_uuid = Some(123);
+                    game.lan_acting_entity = Some(20);
+                    game.lan_acting_permission = Some(0);
+                    let place = |game: &mut crate::game::Game<'_>, name| {
+                        let pos = (7, 64, 4);
+                        let state = game.pack.assets.registry.default_state(name).unwrap();
+                        game.world.set(pos.0, pos.1, pos.2, state).unwrap();
+                        game.world.block_entities.insert(
+                            pos,
+                            BlockEntity::Mod(Box::new(ModBlockEntity::new(
+                                "test:counter".into(),
+                                ModBlockEntityFields {
+                                    nbt: Compound::from([("count".into(), Tag::Int(7))]),
+                                    ..Default::default()
+                                },
+                            ))),
+                        );
+                    };
+                    for (mode, name, tool, serials) in [
+                        (GameMode::Survival, "minecraft:dirt", None, 12),
+                        (GameMode::Survival, "minecraft:diamond_ore", None, 12),
+                        (
+                            GameMode::Creative,
+                            "minecraft:dirt",
+                            Some(ItemStack::new("minecraft:stick", 1)),
+                            12,
+                        ),
+                    ] {
+                        game.set_mode(mode);
+                        game.inventory[game.selected] = tool;
+                        place(game, name);
+                        assert!(game.break_block_as_player([7, 64, 4]).unwrap());
+                        assert_eq!(count.load(Ordering::Relaxed), serials, "{mode:?}, {name}");
+                    }
+                    let seen = seen.lock().unwrap();
+                    if with_observers {
+                        assert_eq!(
+                            *seen,
+                            [
+                                ("removed", Some(Tag::Int(7))),
+                                ("drops", Some(Tag::Int(7))),
+                                ("removed", Some(Tag::Int(7))),
+                                ("removed", Some(Tag::Int(7))),
+                            ]
+                        );
+                    } else {
+                        assert!(seen.is_empty());
+                    }
+                })
+            });
+        }
     }
 }

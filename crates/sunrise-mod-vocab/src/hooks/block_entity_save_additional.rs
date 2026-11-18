@@ -5,16 +5,20 @@ pub trait Hooks {
     /// (`BlockEntity.saveAdditional`). Edits affect only the output; the entity,
     /// its inventory, identity, position, and engine-managed attachments and
     /// shapes are not changed. Parts of the entity's type run in dispatch order.
+    /// Invalid NBT is refused and the originally stored payload is used.
     ///
     /// Asked on the logical server thread for chunk saves (including unload),
     /// command reads, and copies into items, loot or templates. The read-only
     /// level host cannot write or trigger another save. Use `tag` for stored
-    /// fields even during unload, when the level no longer exposes the chunk.
+    /// fields during unload or a removed block's loot roll, when the level
+    /// may no longer expose the entity.
     /// This is not the one-time attachment notice `block_entity_on_load`, nor
     /// the client sync payload `block_entity_update_tag`.
     #[hook(
         side = "server",
         contract = "listen",
+        non_exhaustive = true,
+        event_per_listener = true,
         scope = "block_entity",
         key = "id",
         target = "sunrise_client::game::native_hooks::block_entity_save_additional::GameLevel<'_>::native_block_entity_save_additional",

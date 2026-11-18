@@ -244,7 +244,13 @@ impl Game<'_> {
             self.world.block_entities.get(&key),
             Some(BlockEntity::CopperGolemStatue(_))
         );
-        if (include_data || banner || pot || statue)
+        // A mod entity contributes only once, to the winning stack in add_block_data.
+        let mod_entity = matches!(
+            self.world.block_entities.get(&key),
+            Some(BlockEntity::Mod(_))
+        );
+        if !mod_entity
+            && (include_data || banner || pot || statue)
             && let Some(saved) = self.saved_block_entity(key, false)
         {
             let mut picked = block_entity_item::pick(&saved);

@@ -153,7 +153,7 @@ mod tests {
         *game.world.random = LegacyRandom::new(7);
         game.rand_sequences = Default::default();
         let flint = (0..ROLLS)
-            .flat_map(|_| game.block_loot_at(POS, gravel, tool, None))
+            .flat_map(|_| game.block_loot_at(POS, gravel, tool))
             .filter(|stack| &*stack.item == "minecraft:flint")
             .count();
         let seed = game.level.seed;
@@ -222,7 +222,7 @@ mod tests {
             host.entity_id = 7;
             game.player = Some(host);
             with_mods(mods(None), || {
-                game.block_loot_at(POS, gravel, None, None);
+                game.block_loot_at(POS, gravel, None);
             });
             game.player = None;
             assert_eq!(reads.lock().unwrap()[0].entity, Some(7));

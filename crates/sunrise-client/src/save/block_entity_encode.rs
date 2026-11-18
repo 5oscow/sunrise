@@ -39,6 +39,8 @@ pub fn encode_with(
         map.insert("id".into(), string(m.id()));
         if m.items.iter().any(Option::is_some) {
             map.insert("Items".into(), encode_items(&m.items));
+        } else if !m.items.is_empty() {
+            map.remove(&"Items".into());
         }
         for (key, v) in [("x", p.0), ("y", p.1), ("z", p.2)] {
             map.insert(key.into(), Tag::Int(v));

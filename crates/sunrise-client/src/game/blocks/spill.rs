@@ -101,7 +101,11 @@ impl Pending {
     pub(super) fn record_saved(&mut self, pos: [i32; 3], tag: &sunrise_core::nbt::Tag) {
         self.record_source(pos, source_snapshot(tag.clone(), None, None));
     }
-    fn record_source(&mut self, pos: [i32; 3], source: sunrise_world::loot::copy::BlockSource) {
+    pub(super) fn record_source(
+        &mut self,
+        pos: [i32; 3],
+        source: sunrise_world::loot::copy::BlockSource,
+    ) {
         let source = std::sync::Arc::new(source);
         self.sources.insert(pos, source.clone());
         let tag = &source.nbt;
