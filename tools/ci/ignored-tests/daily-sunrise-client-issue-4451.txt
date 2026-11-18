@@ -2292,6 +2292,8 @@ sunrise-client game::remote::tests::a_servers_client_takes_its_speed_from_the_at
 sunrise-client game::remote::tests::an_end_crystal_click_on_a_block_ends_there lib daily resources
 sunrise-client game::remote::tests::a_spear_jab_sends_only_its_stab lib daily resources
 sunrise-client game::remote::tests::block_alias_survival_consumption_and_client_prediction lib daily resources
+sunrise-client game::remote::tests::chat_event_tests::mod_chat_needs_a_joined_player_and_what_the_chat_option_allows lib daily resources
+sunrise-client game::remote::tests::chat_event_tests::mods_replace_and_cancel_received_chat lib daily resources
 sunrise-client game::remote::tests::client_camera_entity_returns_to_player_after_removal lib daily resources
 sunrise-client game::remote::tests::client_day_time_reads_overworld_clock_across_packets_and_levels lib daily resources
 sunrise-client game::remote::tests::client_epochs_follow_level_replacement_and_logout lib daily resources
@@ -2310,9 +2312,7 @@ sunrise-client game::remote::tests::forgetting_and_closing_remote_columns_clear_
 sunrise-client game::remote::tests::joining_a_server_empties_the_off_hand_too lib daily resources
 sunrise-client game::remote::tests::menu_title_tests::menu_title_snapshot_follows_packet_and_close_paths lib daily resources
 sunrise-client game::remote::tests::menu_title_tests::menu_title_snapshot_tracks_open_replacement_and_close lib daily resources
-sunrise-client game::remote::tests::mod_chat_needs_a_joined_player_and_what_the_chat_option_allows lib daily resources
 sunrise-client game::remote::tests::mod_open_chat_fills_the_box_only_over_the_world lib daily resources
-sunrise-client game::remote::tests::mods_replace_and_cancel_received_chat lib daily resources
 sunrise-client game::remote::tests::plugin_player_stack_follows_network_moves_and_local_carriers lib daily resources
 sunrise-client game::remote::tests::rejected_menu_packets_retire_the_previous_client_menu lib daily resources
 sunrise-client game::remote::tests::remote_player_use_animation_dispatches_once lib daily resources
