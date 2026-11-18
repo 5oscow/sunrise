@@ -22,20 +22,20 @@ A native mod has no `rust-toolchain.toml`: the pinned Sunrise commit decides the
 There is no input `native/` or `rust/` directory, `sunrise-native.json` or hand-written `horizon-mixin.toml`.
 The launcher writes the tool's manifest and stages the crate itself; those internal paths are not package layouts.
 
-The manifest keeps the [content fields](../content-mods.md#the-manifest), including the exact `api = "0.2"`
-contract and `capabilities = ["registries"]`. A native mod adds:
+The manifest keeps the [content fields](../content-mods.md#the-manifest), except that
+`api` and `capabilities` are written by `cargo sunrise-mod build` into the package, not by you. A native mod adds:
 
 ```toml
 [native]
 game = "26.3"
 sunrise = "<exact 40-character lowercase Sunrise commit>"
-mixins = "<exact 40-character lowercase horizon-mixins commit>"
 ```
 
-Never write the two commits by hand. `cargo sunrise-mod new --template native` fills both in from the SDK of the
-build it pins, and `cargo sunrise-mod update` moves both when you pin a newer build ([Install the mod
+Never write the commit by hand. `cargo sunrise-mod new --template native` fills it in from the SDK of the
+build it pins, and `cargo sunrise-mod update` moves it when you pin a newer build ([Install the mod
 tool](../../start/install-tool.md), [In a mod project](../../reference/sdk/03-in-a-project.md#the-pin)).
-Unknown fields are refused. `icon.png` has no manifest key: when present it must be a valid,
+The horizon-mixins commit is the one the pinned SDK names; a mod with `[[native.mixin]]` rows may pin another
+with `mixins = "<exact 40-character lowercase horizon-mixins commit>"` under `[native]`. Unknown fields are refused. `icon.png` has no manifest key: when present it must be a valid,
 nonzero square PNG, at most 512 × 512 pixels and 256 KiB encoded. It is optional for both content
 and code mods; the scaffold does not create one.
 

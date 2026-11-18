@@ -55,8 +55,7 @@ download Mojang's files. Run `cargo test` for the logic the hooks use. A build s
   are refused.
 - Hook names follow NeoForge 26.3. An event is `&mut`. A write to the world needs a `ServerHost`; a client hook
   gets a `ClientHost`, so the wrong side does not compile.
-- A mod that adds blocks, items, mob effects or entity types needs `capabilities = ["registries"]`, which the
-  template already has.
+- `api`, `capabilities` and the horizon-mixins commit are not in the manifest: `build` writes them. Do not add them.
 - Extra crates.io dependencies are allowed and are pinned by the mod's own `Cargo.lock`; a git or path dependency
   outside the mod is refused. The `sunrise-mod-api` path in `Cargo.toml` points at `.sunrise/sdk/` and stays as
   written.

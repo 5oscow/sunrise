@@ -383,8 +383,9 @@ fn update(
         println!("Pinned to Sunrise {sunrise}");
         return Ok(());
     };
-    // The tool the new build's SDK names, not the one this binary was built with.
-    let mixins = fetch(dir, &sunrise)?.mixins;
+    // The new build's SDK must exist and verify before anything is written; the mixins revision
+    // is the SDK's own unless the manifest pins one.
+    fetch(dir, &sunrise)?;
     let mut doc: toml_edit::DocumentMut = text
         .parse()
         .map_err(|e| format!("{}: {e}", path.display()))?;
@@ -407,12 +408,6 @@ fn update(
     internals::set_string(
         doc["native"]["sunrise"].as_value_mut().expect("native pin"),
         &sunrise,
-    );
-    internals::set_string(
-        doc["native"]["mixins"]
-            .as_value_mut()
-            .expect("native mixins"),
-        &mixins,
     );
     // Every check passes before anything is written: `repin` below parses what lands on disk.
     let text = doc.to_string();
@@ -449,16 +444,15 @@ fn new_code(
         std::io::ErrorKind::AlreadyExists => format!("{} already exists", dir.display()),
         _ => format!("{}: {e}", dir.display()),
     })?;
-    // The tool a native mod pins is the one the build's own SDK names, not this binary's.
-    let sdk = fetch(dir, sunrise).inspect_err(|_| {
+    // The SDK is fetched now, so a failed pin leaves no folder; the mixins revision is its own.
+    fetch(dir, sunrise).inspect_err(|_| {
         let _ = std::fs::remove_dir_all(dir);
     })?;
     let (manifest, metadata) = if native {
         (
             format!(
-                "{}\n[native]\ngame = \"26.3\"\nsunrise = \"{sunrise}\"\nmixins = \"{}\"\n",
+                "{}\n[native]\ngame = \"26.3\"\nsunrise = \"{sunrise}\"\n",
                 include_str!("../template/native/sunrise-mod.toml"),
-                sdk.mixins,
             ),
             String::new(),
         )
@@ -509,11 +503,13 @@ fn build(entry: mod_surface::child::ChildEntry) -> Result<PathBuf, String> {
     let package = Package::read(root)?;
     let code = package.manifest.native.is_some() || package.manifest.wasm.is_some();
     let mut api = None;
+    let mut mixins = None;
     let uses = if code && sdk_fetch::game_tree(root)?.is_none() {
         let sdk = sdk_fetch::ensure_sdk(root)?;
         let surface = uses_table::surface_of(&sdk)?;
         let scanned = uses_table::scan(entry, root, &surface)?;
         api = Some(surface);
+        mixins = Some(sdk.mixins.clone());
         match scanned {
             uses_table::Scanned::Uses(uses) => Some(uses.table(sdk.build).to_json().into_bytes()),
             uses_table::Scanned::Exact(_) => None,
@@ -533,11 +529,38 @@ fn build(entry: mod_surface::child::ChildEntry) -> Result<PathBuf, String> {
         &root.join("target/sunrise-mod"),
         uses.as_deref(),
         api.as_ref(),
+        mixins.as_deref(),
     )
 }
 
 fn build_in(root: &Path) -> Result<PathBuf, String> {
-    pack_into(root, &root.join("target/sunrise-mod"), None, None)
+    pack_into(root, &root.join("target/sunrise-mod"), None, None, None)
+}
+
+/// The manifest text a package carries: the project's, with what the tool derives written in
+/// when the project leaves it out: `api`, `capabilities`, and a native mod's `mixins` (the
+/// revision its pinned SDK names, when one was fetched).
+fn completed_manifest(text: &str, mixins: Option<&str>) -> Result<String, String> {
+    let mut doc: toml_edit::DocumentMut = text.parse().map_err(|e| format!("{MANIFEST}: {e}"))?;
+    let root = doc.as_table_mut();
+    if !root.contains_key("api") {
+        root.insert("api", toml_edit::value(sunrise_mod_package::manifest::API));
+    }
+    if !root.contains_key("capabilities") {
+        let mut names = toml_edit::Array::new();
+        for capability in sunrise_mod_package::Capability::derived() {
+            names.push(capability.to_string());
+        }
+        root.insert("capabilities", toml_edit::value(names));
+    }
+    if let (Some(mixins), Some(native)) = (
+        mixins,
+        doc.get_mut("native").and_then(|n| n.as_table_like_mut()),
+    ) && !native.contains_key("mixins")
+    {
+        native.insert("mixins", toml_edit::value(mixins));
+    }
+    Ok(doc.to_string())
 }
 
 fn pack_into(
@@ -545,12 +568,15 @@ fn pack_into(
     dir: &Path,
     uses: Option<&[u8]>,
     api: Option<&mod_surface::Surface>,
+    mixins: Option<&str>,
 ) -> Result<PathBuf, String> {
     let package = Package::read(root)?;
     if package.manifest.native.is_some() || package.manifest.wasm.is_some() {
         layouts::build(root, api)?;
     }
-    let bytes = Package::pack_directory_with(root, uses)?;
+    let text =
+        std::fs::read_to_string(root.join(MANIFEST)).map_err(|e| format!("{MANIFEST}: {e}"))?;
+    let bytes = Package::pack_directory_with(root, uses, Some(completed_manifest(&text, mixins)?))?;
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let path = dir.join(format!("{}.smod", package.manifest.id));
     // Write then rename, so a running game never reads half a file.
@@ -728,13 +754,8 @@ mod tests {
         let path = dir.path().join("greeter");
         new(&code_args(&path, "native"), &offline).unwrap();
         let before = std::fs::read(path.join(MANIFEST)).unwrap();
-        // An SDK naming a tool that is not a full sha: the new manifest would be invalid.
-        let broken = |project: &Path, build: &str| {
-            offline(project, build).map(|sdk| sdk_fetch::PinnedSdk {
-                mixins: "main".into(),
-                ..sdk
-            })
-        };
+        // A build whose SDK cannot be fetched: nothing is written.
+        let broken = |_: &Path, _: &str| Err("no such build".to_owned());
         let newer = "89abcdef0123456789abcdef0123456789abcdef";
         assert!(update(&path, &broken, Some(newer), &[]).is_err());
         assert_eq!(std::fs::read(path.join(MANIFEST)).unwrap(), before);
@@ -874,10 +895,16 @@ mod tests {
             commit.into(),
         ];
         assert_eq!(new(&args, &offline).unwrap(), Some(path.clone()));
-        // The pin's tool comes from the build's SDK, not from this binary.
-        let written =
-            Manifest::parse(&std::fs::read_to_string(path.join(MANIFEST)).unwrap()).unwrap();
-        assert_eq!(written.native.unwrap().mixins, OLD_MIXINS);
+        // The template writes none of the fields the tool derives.
+        let text = std::fs::read_to_string(path.join(MANIFEST)).unwrap();
+        for key in ["api", "capabilities", "mixins"] {
+            assert!(
+                !text.lines().any(|l| l.starts_with(&format!("{key} "))),
+                "{text}"
+            );
+        }
+        let written = Manifest::parse(&text).unwrap();
+        assert_eq!(written.native.unwrap().mixins, None);
         let api = std::fs::read_to_string(path.join("Cargo.toml")).unwrap();
         // The SDK by path, never git: the build is the manifest's pin.
         assert!(
@@ -892,6 +919,14 @@ mod tests {
         );
         assert_eq!(sdk_fetch::pin(&path).unwrap(), commit);
         let smod = build_in(&path).unwrap();
+        // The package carries what the tool derives, which the project did not write.
+        let packed = Package::entry(&smod, MANIFEST, 1 << 20).unwrap().unwrap();
+        let packed = String::from_utf8(packed).unwrap();
+        assert!(packed.contains("api = \"0.2\""), "{packed}");
+        assert!(
+            packed.contains("capabilities = [\"registries\"]"),
+            "{packed}"
+        );
         let bundle = sunrise_mod_package::index::native::Bundle::read(&smod).unwrap();
         assert_eq!(bundle.manifest.id, "machine_mod");
         let names: Vec<_> = bundle.files.keys().map(String::as_str).collect();
@@ -935,8 +970,8 @@ mod tests {
             Manifest::parse(&std::fs::read_to_string(path.join(MANIFEST)).unwrap()).unwrap();
         let native = manifest.native.unwrap();
         assert_eq!(native.sunrise, newer);
-        // The destination SDK's tool, not the scaffold's.
-        assert_eq!(native.mixins, NEW_MIXINS);
+        // `update` moves the pin only: the SDK names the tool.
+        assert_eq!(native.mixins, None);
         assert_eq!(
             std::fs::read_to_string(path.join("Cargo.toml")).unwrap(),
             api

@@ -113,9 +113,7 @@ license_url = "https://..."  # optional: makes the license a link
 credits = "..."              # optional: thanks, shown under the authors
 homepage = "https://..."     # optional: the Mods screen's Homepage button
 issues = "https://..."       # optional: the Mods screen's Issues button
-api = "0.2"                  # content mods
 side = "both"
-capabilities = ["registries"]
 namespaces = []              # optional: more namespaces the mod's files use (below)
 
 [properties]                 # optional: values other mods read (reference/manifest.md)
@@ -127,8 +125,8 @@ authors, credits and description, as NeoForge's mod list does. A link must be `h
 characters; the others are plain text. The screen has no switch: a mod runs or not by what the launcher and
 `sunrise-mods.txt` say.
 
-Unknown keys are refused, so a typo is an error, not a silently ignored permission. The shared manifest
-uses exactly `api = "0.2"` and `capabilities = ["registries"]`, with `side = "client"` (the default), `"both"` or `"server"`.
+Unknown keys are refused, so a typo is an error that names the nearest valid key. `side` is `"client"` (the default), `"both"` or `"server"`.
+`api` and `capabilities` are not written: `cargo sunrise-mod build` puts `api = "0.2"` and `capabilities = ["registries"]` into the package. A manifest that does write them must write exactly those values, and is refused with both values otherwise.
 Code mods add `[native]` for exact build pins and optional raw injections ([Injections](../concepts/injections.md)); their id and version come only
 from this manifest, not Cargo metadata ([Native mods](native-mods/02-the-package.md)). Both content and code mods support `[dependencies]`: use `base = "^1.2"` for a required dependency or
 `extra = { version = "^2", optional = true }` for an optional one. Missing required dependencies, incompatible installed versions and cycles refuse startup. Content layers load after their dependencies; an absent optional dependency is ignored. Both kinds may include a fixed-name `icon.png` at the top level, with no
@@ -1011,8 +1009,6 @@ Some Java mods ship their files under other names than their mod id (Towns and T
 
 ```toml
 id = "t_and_t"
-api = "0.2"
-capabilities = ["registries"]
 namespaces = ["kaisyn", "towns_and_towers"]
 ```
 
