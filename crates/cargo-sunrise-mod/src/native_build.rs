@@ -158,9 +158,13 @@ fn locked(plan: &contract::LockPlan) -> Result<serde_json::Value, (&'static str,
             found.ok_or_else(|| format!("{} is not a native mod.", plan.mods.display()))
         })
         .and_then(|bundle| {
+            let path = plan.engine.join("Cargo.lock");
+            let game =
+                std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
             sunrise_native_build::registry_generate::generate(
                 || Ok(plan.toolchain.clone()),
                 &bundle,
+                &game,
                 plan.update,
             )
             .map(|()| bundle.dir.join("Cargo.lock"))
@@ -241,6 +245,7 @@ mod tests {
             work: empty.join("work"),
             toolchain,
             mods: empty.clone(),
+            engine: empty.join("engine"),
             update: false,
         })
         .unwrap_err();

@@ -131,9 +131,12 @@ pub fn rewrite_dependencies(
 }
 
 /// The mod's registry pins resolved with the toolchain `rust` gives, once the mod's inputs passed.
+/// Resolution starts from `game`, the game's `Cargo.lock`: a package the game locks keeps the game's
+/// version (and so its dependencies' versions), and only the mod's own packages resolve freely.
 pub fn generate<T: Toolchain>(
     rust: impl FnOnce() -> Result<T, String>,
     bundle: &Bundle,
+    game: &str,
     update: bool,
 ) -> Result<(), String> {
     // Project owns the original API declaration and source-policy boundary.
@@ -146,6 +149,7 @@ pub fn generate<T: Toolchain>(
     }
     let work = tempfile::tempdir_in(super::root()).map_err(|e| e.to_string())?;
     stage(bundle, work.path())?;
+    fs::write(work.path().join("Cargo.lock"), game).map_err(|e| e.to_string())?;
     let rust = rust()?;
     let command = super::cargo(&rust, work.path(), "generate-lockfile");
     super::run(command, "Resolving registry dependency pins", |_| {})?;
@@ -226,7 +230,7 @@ mod tests {
             panic!("no toolchain before the refusal")
         };
         assert!(
-            generate(unreached, &bundle, false)
+            generate(unreached, &bundle, "", false)
                 .unwrap_err()
                 .contains("--update-lock")
         );
@@ -275,5 +279,90 @@ mod tests {
                 .unwrap_err()
                 .contains("outside the mod")
         );
+    }
+
+    /// A mod's own package may need a package the game locks: it gets the game's version of it and of
+    /// what it depends on, not the newest, so the game's package keeps its graph.
+    #[test]
+    #[ignore = "daily"]
+    fn a_package_the_game_locks_keeps_the_games_versions() {
+        use crate::registry_lock::RegistryLock;
+        let input = tempfile::tempdir().unwrap();
+        let vendor = tempfile::tempdir().unwrap();
+        let bundle = fixture(input.path());
+        for (name, version, dependency) in [
+            ("zipish", "1.0.0", "getrandom='0.4'"),
+            ("getrandom", "0.4.3", "libc='0.2'"),
+            ("getrandom", "0.4.4", "libc='0.2'"),
+            ("libc", "0.2.190", ""),
+            ("libc", "0.2.191", ""),
+        ] {
+            let folder = vendor.path().join(format!("{name}-{version}"));
+            fs::create_dir_all(folder.join("src")).unwrap();
+            fs::write(folder.join("src/lib.rs"), "").unwrap();
+            fs::write(
+                folder.join("Cargo.toml"),
+                format!(
+                    "[package]\nname='{name}'\nversion='{version}'\n[dependencies]\n{dependency}\n"
+                ),
+            )
+            .unwrap();
+            fs::write(
+                folder.join(".cargo-checksum.json"),
+                format!(r#"{{"package":"{}","files":{{}}}}"#, "a".repeat(64)),
+            )
+            .unwrap();
+        }
+        fs::write(
+            input.path().join("Cargo.toml"),
+            "[package]\nname='fixture'\nversion='0.1.0'\n[dependencies]\nsunrise-mod-api={ path='.sunrise/sdk/api/crates/sunrise-mod-api' }\nzipish='=1.0.0'\n",
+        )
+        .unwrap();
+        let package = |name: &str, version: &str, dependencies: &str| {
+            format!(
+                "[[package]]\nname = \"{name}\"\nversion = \"{version}\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\nchecksum = \"{}\"\ndependencies = [{dependencies}]\n",
+                "a".repeat(64)
+            )
+        };
+        let game = format!(
+            "version = 4\n{}{}",
+            package("getrandom", "0.4.3", "\"libc\""),
+            package("libc", "0.2.190", "")
+        );
+        let sysroot = std::process::Command::new("rustc")
+            .args(["--print", "sysroot"])
+            .output()
+            .unwrap()
+            .stdout;
+        let toolchain = crate::rust::Unpacked {
+            dir: String::from_utf8(sysroot).unwrap().trim().into(),
+            target: "x86_64-unknown-linux-gnu".into(),
+            cargo_home: input.path().join("cargo-home"),
+            cargo_config: vec![
+                "net.offline=true".into(),
+                "source.crates-io.replace-with='fixture'".into(),
+                format!("source.fixture.directory='{}'", vendor.path().display()),
+            ],
+            c_bin: None,
+        };
+        fs::create_dir_all(crate::root()).unwrap();
+        generate(|| Ok(toolchain), &bundle, &game, false).unwrap();
+        let text = fs::read_to_string(input.path().join("Cargo.lock")).unwrap();
+        let versions = |name: &str| -> Vec<String> {
+            let lock = RegistryLock::parse(&text).unwrap();
+            lock.packages
+                .keys()
+                .filter(|id| id.name == name)
+                .map(|id| id.version.to_string())
+                .collect()
+        };
+        assert_eq!(versions("getrandom"), ["0.4.3"], "{text}");
+        assert_eq!(versions("libc"), ["0.2.190"], "{text}");
+        assert_eq!(versions("zipish"), ["1.0.0"], "{text}");
+        let game = RegistryLock::parse(&game).unwrap();
+        let pins = RegistryLock::parse(&text).unwrap();
+        let mut allowed = game.clone();
+        allowed.extend(&pins).unwrap();
+        allowed.check_partial_resolution(&pins, &game).unwrap();
     }
 }

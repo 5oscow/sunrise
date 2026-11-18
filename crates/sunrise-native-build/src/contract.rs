@@ -64,6 +64,8 @@ pub struct LockPlan {
     pub toolchain: Unpacked,
     /// The mod's folder.
     pub mods: PathBuf,
+    /// The SDK's `engine` slice, unpacked: its `Cargo.lock` is the game's. The mod's pins start from it.
+    pub engine: PathBuf,
     /// Resolve again even when the mod has a lock.
     #[serde(default)]
     pub update: bool,
