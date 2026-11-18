@@ -746,14 +746,14 @@ fn liquid_hosts_read_the_same_comparator_signal_without_unpacking_loot() {
             },
         );
 
-        assert!(
-            game.dispense_filled_bucket(
+        let (remainder, _) = game
+            .dispense_filled_bucket(
                 (2, 65, 1),
                 Direction::South,
-                ItemStack::new("minecraft:water_bucket", 1)
+                ItemStack::new("minecraft:water_bucket", 1),
             )
-            .is_some()
-        );
+            .unwrap();
+        assert_eq!(&*remainder.unwrap().item, "minecraft:bucket");
         assert_eq!(
             game.world
                 .block_entity_extras(loot_pos)
