@@ -1224,7 +1224,7 @@ pub(crate) fn resolve_lang_component(
 ) -> Option<Text> {
     let text = crate::component::render_lang_component(component, origin, language)?;
     (text.rendered.spans.len() <= MAX_TRANSLATION_SPANS
-        && crate::component::rendered_bytes(&text) <= MAX_TRANSLATION_BYTES)
+        && crate::component::rendered_bytes(&text, None) <= MAX_TRANSLATION_BYTES)
         .then_some(text)
 }
 /// The most spans one translation expands to. Vanilla's `TranslatableContents.decompose` keeps
@@ -1302,7 +1302,7 @@ pub(crate) fn format_translation_origin(template: &str, args: &[Text], origin: O
                 };
                 bytes = bytes
                     .saturating_add(literal.len())
-                    .saturating_add(arg.rendered.spans.iter().map(|s| s.text.len()).sum());
+                    .saturating_add(crate::component::rendered_bytes(arg, None));
                 if out
                     .rendered
                     .spans

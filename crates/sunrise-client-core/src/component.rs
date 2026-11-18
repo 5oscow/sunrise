@@ -1,6 +1,6 @@
 //! Text components from commands: `ComponentArgument` reads an SNBT (or JSON)
 //! value, `ComponentSerialization` turns it into styled text.
-use crate::text::{InlineObject, Origin, Style, Text, named_color};
+use crate::text::{ClickEvent, InlineObject, Origin, Style, Text, named_color};
 use serde_json::Value;
 use sunrise_core::nbt::Tag;
 
@@ -333,15 +333,22 @@ impl Sourced {
     /// MutableComponent.append. Don't allocate an oversized concatenation while
     /// resolving pack entries. The remaining allowance is local to this output;
     /// returning the same rendered text through references doesn't charge it again.
-    fn append(self, base: &mut Text, other: Text, remaining: &mut Option<usize>) -> Option<()> {
+    fn append(
+        self,
+        base: &mut Text,
+        other: Text,
+        style: &Style,
+        remaining: &mut Option<usize>,
+    ) -> Option<()> {
         if let Some(bytes) = remaining {
             if base.rendered.spans.len() + other.rendered.spans.len()
                 > crate::text::MAX_TRANSLATION_SPANS
             {
                 return None;
             }
-            *bytes = bytes.checked_sub(rendered_bytes(&other))?;
+            *bytes = bytes.checked_sub(rendered_bytes(&other, Some(style)))?;
         }
+        let other = self.styled(other, style);
         match self.0 {
             true => base.push(other),
             false => {
@@ -385,8 +392,55 @@ impl Sourced {
     }
 }
 
-pub(crate) fn rendered_bytes(text: &Text) -> usize {
-    text.rendered.spans.iter().map(|span| span.text.len()).sum()
+/// The owned bytes copied by rendering or flattening these spans. Count the
+/// payload behind an object marker and text added by style inheritance before
+/// cloning either. Shared hover and NBT payloads are reference-counted.
+pub(crate) fn rendered_bytes(text: &Text, inherited: Option<&Style>) -> usize {
+    text.rendered
+        .spans
+        .iter()
+        .map(|span| {
+            let style = &span.style;
+            let insertion = style
+                .insertion
+                .as_ref()
+                .or(inherited.and_then(|base| base.insertion.as_ref()));
+            let font = style
+                .font
+                .as_ref()
+                .or(inherited.and_then(|base| base.font.as_ref()));
+            let click = match style
+                .click
+                .as_ref()
+                .or(inherited.and_then(|base| base.click.as_ref()))
+            {
+                Some(
+                    ClickEvent::OpenUrl(text)
+                    | ClickEvent::SuggestCommand(text)
+                    | ClickEvent::RunCommand(text)
+                    | ClickEvent::CopyToClipboard(text)
+                    | ClickEvent::OpenFile(text)
+                    | ClickEvent::Profiler(text),
+                ) => text.len(),
+                Some(ClickEvent::Custom { id, .. }) => id.len(),
+                Some(ClickEvent::ChangePage(_) | ClickEvent::ShowDialog(_)) | None => 0,
+            };
+            let object = match &style.inline_object {
+                Some(InlineObject::Player { fallback, .. }) => fallback.len(),
+                Some(InlineObject::Atlas {
+                    atlas,
+                    sprite,
+                    fallback,
+                }) => atlas.len() + sprite.len() + fallback.len(),
+                None => 0,
+            };
+            span.text.len()
+                + object
+                + click
+                + insertion.map_or(0, String::len)
+                + font.map_or(0, String::len)
+        })
+        .fold(0usize, usize::saturating_add)
 }
 
 /// A cached replacement owns its rendering once, even when many keys simply alias it.
@@ -408,7 +462,11 @@ enum Piece {
 
 impl Piece {
     fn new(text: Text, measure: bool) -> Self {
-        let bytes = if measure { rendered_bytes(&text) } else { 0 };
+        let bytes = if measure {
+            rendered_bytes(&text, None)
+        } else {
+            0
+        };
         Self::Owned(text, bytes)
     }
 
@@ -502,11 +560,22 @@ struct Expansion {
     path: usize,
     next_path: usize,
     cuts: usize,
+    visits_left: Option<usize>,
     retained: OutputSize,
 }
 
 impl Expansion {
+    // Count scheduled visits as well as new memo entries. Empty results and
+    // distinct paths through a cycle still cost time and table space.
+    fn charge_visits(&mut self, count: usize) -> Option<()> {
+        if let Some(left) = &mut self.visits_left {
+            *left = left.checked_sub(count)?;
+        }
+        Some(())
+    }
+
     fn remember(&mut self, key: Node, path: Option<usize>, piece: Piece) -> Option<Piece> {
+        self.charge_visits(1)?;
         let piece = match piece {
             Piece::Owned(text, bytes) => {
                 self.retained.add(bytes, text.rendered.spans.len())?;
@@ -543,6 +612,8 @@ fn build(
     let mut pending = vec![Work::Enter(v, false)];
     let mut expansion = Expansion::default();
     if language.is_some() {
+        const MAX_VISITS: usize = 1 << 17;
+        expansion.visits_left = Some(MAX_VISITS - 1); // The root is already scheduled.
         expansion.active.insert(std::ptr::from_ref(v));
     }
     let mut done = ComponentResults {
@@ -561,6 +632,7 @@ fn build(
                             .or_else(|| e.get("contents"))
                             .or_else(|| e.get("text"))
                     {
+                        expansion.charge_visits(1)?;
                         pending.push(Work::Enter(v, true));
                     }
                 }
@@ -571,6 +643,7 @@ fn build(
                         Style::default(),
                         Content::Decode(None),
                     ));
+                    expansion.charge_visits(a.len())?;
                     pending.extend(a.iter().rev().map(|v| Work::Enter(v, hover)));
                 }
                 _ => pending.push(Work::Content(
@@ -610,6 +683,7 @@ fn build(
                     };
                     pending.push(Work::Content(value, hover, style, content));
                     if enter {
+                        expansion.charge_visits(1)?;
                         pending.push(Work::Enter(replacement, false));
                     }
                     continue;
@@ -626,9 +700,11 @@ fn build(
                     if translation.is_some()
                         && let Some(Value::Array(a)) = o.get("with")
                     {
+                        expansion.charge_visits(a.len())?;
                         pending.extend(a.iter().rev().map(|v| Work::Enter(v, hover)));
                     }
                     if let Some(v) = o.get("fallback") {
+                        expansion.charge_visits(1)?;
                         pending.push(Work::Enter(v, hover));
                     }
                 }
@@ -680,12 +756,19 @@ fn build(
                 let piece = if !replacement_needs_style || (!mode.0 && style == Style::default()) {
                     piece
                 } else {
+                    if language.is_some()
+                        && rendered_bytes(piece.text(), Some(&style))
+                            > crate::text::MAX_TRANSLATION_BYTES
+                    {
+                        return None;
+                    }
                     Piece::new(mode.styled(piece.into_text(), &style), language.is_some())
                 };
                 if let Value::Object(o) = value {
                     done.hold(&piece)?;
                     pending.push(Work::Finish(value, hover, style, piece));
                     if let Some(Value::Array(a)) = o.get("extra") {
+                        expansion.charge_visits(a.len())?;
                         pending.extend(a.iter().rev().map(|v| Work::Enter(v, hover)));
                     }
                 } else {
@@ -705,11 +788,12 @@ fn build(
                 {
                     let mut text = piece.into_text();
                     let mut remaining = language.map(|_| {
-                        crate::text::MAX_TRANSLATION_BYTES.saturating_sub(rendered_bytes(&text))
+                        crate::text::MAX_TRANSLATION_BYTES
+                            .saturating_sub(rendered_bytes(&text, None))
                     });
                     for v in a {
                         let extra = done.take_text(v);
-                        mode.append(&mut text, mode.styled(extra, &style), &mut remaining)?;
+                        mode.append(&mut text, extra, &style, &mut remaining)?;
                     }
                     piece = Piece::new(text, language.is_some());
                 }
@@ -750,11 +834,12 @@ fn build_node<'a>(
             let mut base = child(first);
             // The siblings take the first component's own style, even when
             // its text is empty.
-            let mut remaining = (budget_output && !rest.is_empty())
-                .then(|| crate::text::MAX_TRANSLATION_BYTES.saturating_sub(rendered_bytes(&base)));
+            let mut remaining = (budget_output && !rest.is_empty()).then(|| {
+                crate::text::MAX_TRANSLATION_BYTES.saturating_sub(rendered_bytes(&base, None))
+            });
             for sibling in rest {
                 let sibling = child(sibling);
-                sourced.append(&mut base, sourced.styled(sibling, style), &mut remaining)?;
+                sourced.append(&mut base, sibling, style, &mut remaining)?;
             }
             base
         }
@@ -794,6 +879,11 @@ fn build_node<'a>(
             } else {
                 Text::empty()
             };
+            if budget_output
+                && rendered_bytes(&content, Some(style)) > crate::text::MAX_TRANSLATION_BYTES
+            {
+                return None;
+            }
             sourced.styled(content, style)
         }
         Value::Null => Text::empty(),

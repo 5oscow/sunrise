@@ -1168,6 +1168,62 @@ mod tests {
     }
 
     #[test]
+    fn empty_cycle_dependent_expansions_are_work_bounded() {
+        let mut entries = serde_json::Map::new();
+        entries.insert(
+            "test.root".into(),
+            serde_json::json!([{"translate":"test.left.0"},{"translate":"test.right.0"}]),
+        );
+        for n in 0..24 {
+            let children = serde_json::json!([
+                {"translate":format!("test.left.{}", n + 1)},
+                {"translate":format!("test.right.{}", n + 1)}
+            ]);
+            entries.insert(format!("test.left.{n}"), children.clone());
+            entries.insert(format!("test.right.{n}"), children);
+        }
+        entries.insert(
+            "test.left.24".into(),
+            serde_json::json!({"translate":"test.root"}),
+        );
+        entries.insert(
+            "test.right.24".into(),
+            serde_json::json!({"translate":"test.root"}),
+        );
+        let mut language = Language::default();
+        assert!(
+            language.overlay(&serde_json::to_vec(&entries).unwrap(), &|value| Some(
+                value.clone()
+            ))
+        );
+        scoped(language, || {
+            assert_eq!(get_or("test.root", "over budget"), "over budget")
+        });
+    }
+
+    #[test]
+    fn language_budgets_inline_fallbacks_and_inherited_insertion() {
+        let payload = "x".repeat(64 * 1024);
+        let entries = serde_json::json!({
+            "test.object": {"object":"atlas","sprite":"minecraft:test","fallback":{"text":payload}},
+            "test.inline_fanout": vec![serde_json::json!({"translate":"test.object"}); 128],
+            "test.spans": vec![serde_json::json!({"text":"."}); 128],
+            "test.insertion": {"translate":"test.spans","insertion":payload},
+        });
+        let mut language = Language::default();
+        assert!(
+            language.overlay(&serde_json::to_vec(&entries).unwrap(), &|value| Some(
+                value.clone()
+            ))
+        );
+        scoped(language, || {
+            assert_eq!(get("test.object"), payload);
+            assert_eq!(get_or("test.inline_fanout", "over budget"), "over budget");
+            assert_eq!(get_or("test.insertion", "over budget"), "over budget");
+        });
+    }
+
+    #[test]
     fn bundled_sunrise_strings_follow_the_language() {
         // No prepared resources at all: the namespace is compiled in.
         let empty = Mem(HashMap::new());
