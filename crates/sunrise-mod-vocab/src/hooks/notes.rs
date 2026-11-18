@@ -1650,7 +1650,7 @@ one, where vanilla gives the `by` one.
   teleport, a respawn) and when they disconnect, in the level it was watched in. Vanilla watches a chunk when it queues it; Sunrise
   picks a chunk only as it sends it, so the watch comes just before the send. The hub records them only while a mod listens and
   the game tells them after the hub's network step for that level, so a handler sees the state after that step; the order per
-  player and chunk is vanilla's. The far ring's columns past the view distance aren't told, and the server stopping doesn't unwatch.
+  player and chunk is vanilla's. The server stopping doesn't unwatch.
 - A chunk's ticket level changing, on the server: `chunk_ticket_level_updated(chunk, old, new)` (NeoForge's
   `ChunkTicketLevelUpdatedEvent`). The level is the chunk's loading level from its tickets (a player, a forced chunk, a portal
   ticket, the dragon fight's arena), on `ChunkLevel`'s scale: 31 and lower entity ticking, 32 block ticking, 33 loaded without

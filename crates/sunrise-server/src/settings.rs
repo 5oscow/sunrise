@@ -142,7 +142,6 @@ pub fn parse_change(
 fn range(section: &str, field: &str) -> Option<std::ops::RangeInclusive<i64>> {
     match (section, field) {
         ("server", "view_distance" | "simulation_distance") => Some(2..=32),
-        ("server", "max_view_distance") => Some(0..=32),
         ("server", "max_viewed_loaded_chunks" | "max_viewed_ticking_chunks") => Some(0..=65536),
         (
             "server",

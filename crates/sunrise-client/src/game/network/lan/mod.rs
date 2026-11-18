@@ -2779,7 +2779,6 @@ impl Game<'_> {
             for (id, event) in gone {
                 host.hub.entity_event(id, event);
             }
-            host.hub.far_level(&self.save);
             let spawn = self.world_spawn_position();
             let (events, last) = {
                 let clock_rate = self.network_clock_rate();

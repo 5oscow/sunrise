@@ -752,8 +752,6 @@ const LEGACY_PRESET_NAMES: [(&str, sunrise_client::save::WorldPreset); 2] = [
     ),
 ];
 
-/// server.properties' line for `server.toml`'s `max_view_distance` (sunrise-server writes it).
-const FAR_PROPERTY: &str = "sunrise-max-view-distance";
 /// A tick slower than this, in milliseconds, enters the slow ring (five ticks' worth, a stall players feel) unless `SUNRISE_SPIKES` names another.
 pub(super) const SLOW_TICK_MS: f32 = 250.0;
 /// `MinecraftServer.OVERLOADED_WARNING_INTERVAL_NANOS` plus 100 ticks: the
@@ -1375,22 +1373,7 @@ impl Game<'_> {
         self.set_pvp_legacy_rules(load_combat());
         self.read_runtime_level_cap(|key| props.raw.get(key));
         load_entities();
-        // Sunrise's far ring (docs/hosting.md): server.toml's `max_view_distance`.
-        let far = props
-            .raw
-            .get(FAR_PROPERTY)
-            .and_then(|v| v.trim().parse::<i32>().ok())
-            .unwrap_or(0)
-            .clamp(0, 32);
-        let (registry, biomes) = (self.pack.assets.registry, self.res.biomes().clone());
         if let Some(host) = self.lan.as_mut() {
-            if far > host.hub.config.view_distance {
-                host.hub.far = Some(sunrise_client::lan::far::Far::new(far, registry, biomes));
-                log(
-                    "INFO",
-                    &format!("Sending saved chunks up to {far} chunks away (max_view_distance)"),
-                );
-            }
             host.hub.set_anticheat(anticheat);
             host.hub.set_chat_filter(chat_filter);
             // The viewed areas' chunk caps (#3716): server.toml's `max_viewed_*` settings.
@@ -1450,11 +1433,6 @@ impl Game<'_> {
             ),
             perf_epoch: Instant::now(),
             sunrise: sunrise_client::server_perf::sunrise_options(
-                if self.lan.as_ref().is_some_and(|h| h.hub.far.is_some()) {
-                    far as u32
-                } else {
-                    0
-                },
                 sunrise_client::lod_net::distance_property(
                     props.raw.get(sunrise_client::lod_net::PROPERTY),
                 ),
@@ -1487,7 +1465,6 @@ impl Game<'_> {
         self.fns.permission = Some(props.function_permission_level.clamp(0, 4) as u8);
         let watchdog = Watchdog::start(props.max_tick_time);
         let _stop_watchdog = StopWatchdog(watchdog.clone());
-        let mut braked = Instant::now();
         let mut overload_warned: Option<Instant> = None;
         // `/stop`, or a stop signal (the shutdown hook's `halt`): either way the players and levels are
         // saved below, after the wait `[transfer]` may make (transfer.rs).
@@ -1604,15 +1581,6 @@ impl Game<'_> {
                 || self.wire_bytes(),
             );
             self.poll_server_memory_snapshot(&mut state);
-            // The far ring's brake, once a second on the average tick.
-            if braked.elapsed() >= Duration::from_secs(1)
-                && let Some(host) = self.lan.as_mut()
-                && let Some(far) = host.hub.far.as_mut()
-            {
-                braked = Instant::now();
-                let mspt = self.clock.average_nanos() as f64 / 1e6;
-                far.brake(mspt, host.hub.config.view_distance);
-            }
             state.ticked(Instant::now());
             // MinecraftServer.runServer: a server more than a second's ticks
             // behind skips them and says so, at most every 15 seconds.
