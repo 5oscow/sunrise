@@ -521,6 +521,7 @@ fn version_at(
         side: facts.side,
         capabilities: facts.capabilities.into(),
         game: v.game.clone(),
+        dependencies: (!facts.dependencies.is_empty()).then_some(facts.dependencies),
         requires: facts.requires,
         file: File {
             url,

@@ -124,6 +124,48 @@ fn a_changed_file_key_or_manifest_is_refused() {
 }
 
 #[test]
+fn a_content_mod_lists_manifest_dependencies_and_checks_index_claims() {
+    use std::io::Write;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("coords_hud.smod");
+    let mut zip = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
+    zip.start_file(
+        crate::manifest::MANIFEST,
+        zip::write::SimpleFileOptions::default(),
+    )
+    .unwrap();
+    write!(zip, "id='coords_hud'\nname='Coordinates'\nversion='0.1.0'\napi='0.2'\ncapabilities=['registries']\n[dependencies]\njei={{version='^0.5', optional=true, side='client'}}\ncreature='^0.1'\n").unwrap();
+    zip.finish().unwrap();
+    let facts = inspect(&Kind::Mod, &path).unwrap();
+    assert_eq!(
+        serde_json::to_value(&facts.dependencies).unwrap(),
+        serde_json::json!([
+            {"id": "creature", "version": "^0.1"},
+            {"id": "jei", "version": "^0.5", "optional": true, "side": "client"}
+        ])
+    );
+
+    let index = sample();
+    let p = index.project("coords_hud").unwrap();
+    let mut version = p.versions[0].clone();
+    version.side = facts.side;
+    assert!(
+        serde_json::to_value(&version)
+            .unwrap()
+            .get("dependencies")
+            .is_none()
+    );
+    assert!(facts.matches(p, &version).is_ok());
+    version.dependencies = Some(facts.dependencies.clone());
+    assert!(facts.matches(p, &version).is_ok());
+    version.dependencies.as_mut().unwrap().remove(0);
+    let error = facts.matches(p, &version).unwrap_err();
+    for word in ["coords_hud", "0.1.0", "dependencies", "rebuild the index"] {
+        assert!(error.contains(word), "{error}");
+    }
+}
+
+#[test]
 fn revocations_match_by_hash_or_by_id() {
     let index = sample();
     let ones = "1".repeat(64);

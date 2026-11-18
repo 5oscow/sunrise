@@ -209,6 +209,9 @@ pub struct Version {
     pub capabilities: Capabilities,
     /// The Minecraft version it is for.
     pub game: String,
+    /// A mod's dependencies, sorted by id. None means the index did not list the field.
+    #[serde(default, skip_serializing_if = "dependencies_empty")]
+    pub dependencies: Option<Vec<Dependency>>,
     /// A modpack's mods, as its manifest lists them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub requires: Vec<Requirement>,
@@ -303,6 +306,22 @@ impl From<Capabilities> for Vec<String> {
         let known = listed.known.iter().map(Capability::to_string);
         known.chain(listed.unknown).collect()
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Dependency {
+    pub id: String,
+    /// The manifest's semver requirement, rendered as text.
+    pub version: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub optional: bool,
+    /// Absent if it applies to both installations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub side: Option<Side>,
+}
+
+fn dependencies_empty(dependencies: &Option<Vec<Dependency>>) -> bool {
+    dependencies.as_ref().is_none_or(Vec::is_empty)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -791,6 +810,8 @@ pub struct Facts {
     pub capabilities: Vec<Capability>,
     /// The Minecraft version, when the file names one (a modpack does).
     pub game: Option<String>,
+    /// The mod's dependencies, sorted by id.
+    pub dependencies: Vec<Dependency>,
     pub requires: Vec<Requirement>,
     /// A mod that declares `[wasm]`: its `mod.wasm` runs in the game's sandbox.
     pub wasm: bool,
@@ -799,6 +820,16 @@ pub struct Facts {
 impl Facts {
     /// Whether the file is the one `version` of `project` describes.
     pub fn matches(&self, project: &Project, version: &Version) -> Result<(), String> {
+        // Schema 1 predates this field, and a new index omits it when empty. There is no
+        // dependency assertion to compare when it is absent; the file's hash still pins it.
+        if let Some(listed) = &version.dependencies
+            && *listed != self.dependencies
+        {
+            return Err(format!(
+                "{} {}: its sunrise-mod.toml dependencies aren't what the index lists: use the reviewed file and rebuild the index",
+                project.id, version.version
+            ));
+        }
         let (mut caps, mut listed) = (
             self.capabilities.clone(),
             version.capabilities.known().to_vec(),
@@ -859,6 +890,7 @@ pub fn inspect(kind: &Kind, path: &Path) -> Result<Facts, String> {
             crate::Content::read(path, &m)?;
             Ok(Facts {
                 wasm: m.wasm.is_some(),
+                dependencies: manifest_dependencies(&m),
                 capabilities: m.capabilities,
                 id: Some(m.id),
                 version: Some(m.version),
@@ -918,6 +950,22 @@ pub fn inspect(kind: &Kind, path: &Path) -> Result<Facts, String> {
         }),
         Kind::Other(name) => Err(format!("this Sunrise can't read a {name} yet")),
     }
+}
+
+fn manifest_dependencies(manifest: &crate::Manifest) -> Vec<Dependency> {
+    manifest
+        .dependencies
+        .iter()
+        .map(|(id, dependency)| {
+            let details = dependency.details();
+            Dependency {
+                id: id.clone(),
+                version: details.version.to_string(),
+                optional: details.optional,
+                side: (details.side != Side::Both).then_some(details.side),
+            }
+        })
+        .collect()
 }
 
 /// A resource pack: a zip with `pack.mcmeta` at its root holding a `pack`
