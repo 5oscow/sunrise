@@ -4682,6 +4682,7 @@ impl ParticleEngine {
             facing: base,
             partial,
             light_at,
+            surface: self.polytone_gpu.surface(),
         };
         self.polytone_gpu
             .render(&frame, &mut light_cache, out, &mut additive);
