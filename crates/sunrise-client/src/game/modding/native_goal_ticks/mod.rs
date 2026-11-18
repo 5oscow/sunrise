@@ -680,6 +680,11 @@ impl mobs::part_goals::GoalHost for Game<'_> {
         self.credited_elsewhere(attacker, mob.ai.last_hurt_by_uuid)
     }
 
+    fn mob_in_other_level(&self, entity: EntityRef) -> bool {
+        self.native_lifecycle.epoch() == Some(entity.epoch())
+            && Game::mob_in_other_level(self, entity.id()).is_some()
+    }
+
     fn mob_player_credit(&self, mob: &Mob) -> Option<Option<u32>> {
         let credit = *self.last_hurt_by_player.get(&mob.id)?;
         Some(
@@ -902,6 +907,21 @@ impl Game<'_> {
         };
         super::native_hooks::NativeHookHost { host: &context }
             .native_mob_despawn(dimension, entity, kind, pos, result);
+    }
+    /// Run `read` against the goal view of `mob`'s tick, as a mod goal reads.
+    #[cfg(test)]
+    pub(in crate::game) fn in_goal_view<R>(
+        &self,
+        mob: &mut Mob,
+        read: impl FnOnce(&GoalCx<'_, '_>) -> R,
+    ) -> R {
+        let mut world = self.mob_world_base(&[]);
+        world.goal_host = Some(self as &dyn mobs::part_goals::GoalHost);
+        read(&GoalCx {
+            m: mob,
+            w: &world,
+            host: self,
+        })
     }
     /// Dispatch a target change against the mob tick's scoped read view. The
     /// game has lent its mob list to the tick, so using `Game` itself as the

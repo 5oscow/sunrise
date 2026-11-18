@@ -849,10 +849,8 @@ impl Game<'_> {
             Some(target) => self.native_entity_kind_key(target),
             None => {
                 if self.native_lifecycle.epoch() == Some(entity.epoch())
-                    && let Some(dim) = self.mob_in_other_level(entity.id())
+                    && let Some((_, mob)) = self.mob_in_other_level(entity.id())
                 {
-                    let parked = self.levels.parked.get(&dim)?;
-                    let mob = parked.mobs.iter().find(|m| m.id == entity.id())?;
                     return mod_api::__private::resolved_entity_type_key(&mob.kind.id);
                 }
                 mod_api::__private::resolved_entity_type_key(self.native_client_tracked(entity)?.0)
@@ -863,12 +861,25 @@ impl Game<'_> {
     /// one in place, as a kill credit can name one (`getEntityInAnyDimension`):
     /// its identity reads (`entity_kind`, `entity_uuid`, `entity_level`)
     /// answer from there. None on a client or for anything else.
-    pub(super) fn mob_in_other_level(&self, id: u32) -> Option<super::Dim> {
+    pub(super) fn mob_in_other_level(&self, id: u32) -> Option<(super::Dim, &super::Mob)> {
+        use sunrise_client::join_seq::residency::table::EntityLookup;
         if !self.is_logical_server() {
             return None;
         }
-        let dim = self.resident_target_dimension(Target::Mob(id))?;
-        (dim != self.dim).then_some(dim)
+        let EntityLookup::Found {
+            location,
+            value: Target::Mob(_),
+        } = self.server_resident_entity(id)
+        else {
+            return None;
+        };
+        let (dim, parked) = self
+            .levels
+            .parked
+            .iter()
+            .find(|(dim, _)| dim.key() == location.owner.dimension)?;
+        let mob = parked.mobs.get(parked.mobs.locate(location.join)?)?;
+        Some((*dim, mob))
     }
     /// The entity's UUID (`Entity.getUUID`), the one it is saved with; an
     /// entity that has none yet gets it now, as a new vanilla entity does.
@@ -898,10 +909,13 @@ impl Game<'_> {
                 .map(uuid_from_words);
         }
         if self.native_lifecycle.epoch() == Some(entity.epoch())
-            && let Some(dim) = self.mob_in_other_level(entity.id())
+            && self.mob_in_other_level(entity.id()).is_some()
         {
             return self
-                .known_resident_entity_uuid_at(dim.key(), entity.id())
+                .resident_entities
+                .table
+                .borrow_mut()
+                .resident_uuid(entity.id())
                 .map(uuid_from_words);
         }
         let words = match self.native_entity_target(entity)? {
@@ -924,7 +938,7 @@ impl Game<'_> {
             Some(_) => self.native_level_key(),
             None if self.native_lifecycle.epoch() == Some(entity.epoch()) => {
                 match self.mob_in_other_level(entity.id()) {
-                    Some(dim) => dim.key(),
+                    Some((dim, _)) => dim.key(),
                     None => self
                         .native_client_tracked(entity)
                         .map(|_| self.native_level_key())?,

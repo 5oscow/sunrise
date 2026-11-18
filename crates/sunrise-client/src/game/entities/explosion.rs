@@ -1106,6 +1106,11 @@ impl Game<'_> {
         // `VehicleEntity.hurtServer` credits its ENTITY_DAMAGE to
         // `DamageSource.getEntity`, which for a blast is its indirect source.
         let blast_by = self.explosion_kill_credit();
+        // The blast cause's UUID, for the mob victims' kill credit: the hits
+        // land in the enclosing attack, which need not name the cause.
+        let cause_uuid = attacker
+            .as_ref()
+            .and_then(|&(id, _)| self.known_entity_uuid(id));
         let mut destroyed_contents = Vec::new();
         macro_rules! blocked_damage {
             ($id:expr, $kind:expr) => {{
@@ -1232,6 +1237,12 @@ impl Game<'_> {
                             cause,
                             (amount, source),
                         );
+                        if hurt
+                            && let Some(Who::Mob(_)) = source.attacker
+                            && self.mobs[i].ai.last_hurt_by == source.attacker
+                        {
+                            self.mobs[i].ai.last_hurt_by_uuid = cause_uuid;
+                        }
                         if hurt {
                             if source.attacker == Some(Who::Player) {
                                 let guest = self.combat.blast_guest;

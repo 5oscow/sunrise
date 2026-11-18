@@ -56,6 +56,9 @@ pub trait GoalHost {
     /// under that id: in another loaded level, or under the id a dimension
     /// change gave it, by the UUID recorded with the hurt.
     fn mob_attacker_elsewhere(&self, mob: &Mob, attacker: u32) -> Option<mod_api::EntityRef>;
+    /// Whether `entity` is a mob resident in another loaded level, whose
+    /// identity reads the game answers (a credited mob that changed dimension).
+    fn mob_in_other_level(&self, entity: mod_api::EntityRef) -> bool;
     /// Read a lent mob's current target with the game's target validation.
     fn mob_target(
         &self,

@@ -1833,6 +1833,18 @@ mod tests {
                 Some(sunrise_client::lan::playerdata::ints_uuid(uuid))
             );
             assert_eq!(credit.level(game), game.level("minecraft:the_nether"));
+            // The same reads from a mod goal of the pig's own tick.
+            let mut actor = game.mobs.iter().find(|m| m.id == pig).unwrap().clone();
+            let nether = game.level("minecraft:the_nether");
+            game.in_goal_view(&mut actor, |view| {
+                assert_eq!(living.kill_credit(view), Some(credit));
+                assert_eq!(
+                    credit.kind(view),
+                    mod_api::__private::resolved_entity_type_key("minecraft:zombie")
+                );
+                // `uuid` takes a `ServerHost`, which a goal view is not.
+                assert_eq!(credit.level(view), nether);
+            });
         });
     }
 
