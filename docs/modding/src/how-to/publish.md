@@ -30,8 +30,8 @@ list](../reference/registry-index.md#submitting-a-project)), `--tags a,b` and `-
 missing is written as a value that starts with `TODO(publish)`, and the command lists what remains. The registry
 refuses an entry that holds one, so edit `mods/<id>.toml` (or the manifest, then run `publish` again) until the list is empty.
 
-The icon is a square PNG of 64 to 1024 pixels and at most 256 KiB, as `icon.png` beside `sunrise-mod.toml`; `publish`
-says what is wrong with one that does not fit.
+Save `icon.png` beside `sunrise-mod.toml` as a square PNG, 64 to 512 pixels per side and at most 256 KiB, so it fits
+both the package and the registry.
 
 ## 2. Check it as the registry will
 

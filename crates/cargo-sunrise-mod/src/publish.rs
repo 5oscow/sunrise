@@ -1,18 +1,24 @@
-//! `cargo sunrise-mod publish`: the files of a registry submission, written beside the built package
-//! (docs/modding/src/how-to/publish.md). Never uploads, never opens a pull request, never uses the network.
+//! `cargo sunrise-mod publish` prepares a local submission. It uploads nothing, opens no pull request,
+//! and needs no registry access. It runs `build`, which may download the SDK, toolchain and dependencies.
 //!
-//! The output folder is a registry checkout in miniature: `mods/<id>.toml` (the entry, serialised through
-//! the registry's own [`Entry`]), `icons/<id>.png`, `files/<sha256>` (where `registry check --files` and the
-//! registry's `fetch_files.py` keep a file), the package under its release name, and `PULL_REQUEST.md`.
-use std::path::{Path, PathBuf};
+//! The output holds the entry, a new project's icon if supplied, the new package under its release name
+//! and SHA-256, and `PULL_REQUEST.md`. It is not a complete registry checkout.
+use crate::bounded::{self, ReadError};
+use std::{
+    fs,
+    io::{ErrorKind, Read, Write},
+    path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
+};
 use sunrise_mod_package::{
-    Package,
-    icon::MAX_ICON,
+    Manifest,
+    icon::{MAX_DIMENSION, MAX_ICON},
     index::{
-        Kind,
-        page::{self, ICON_SIDE},
-        registry::{ENTRIES, Entry, EntryVersion, TODO},
+        self, Kind,
+        page::{self, ICON_SIDE, Image},
+        registry::{self, ENTRIES, Entry, EntryVersion, TODO},
     },
+    manifest::MANIFEST,
 };
 
 const USAGE: &str = "cargo sunrise-mod publish [--out <dir>] [--registry <checkout>] [--summary <text>] [--owner <login>]… [--categories a,b] [--tags a,b] [--changelog <text>] [--key <public key> --signature <file.minisig>] [--wasm]";
@@ -82,23 +88,66 @@ fn parse(args: &[String]) -> Result<Options, String> {
     Ok(o)
 }
 
-/// The icon at the documented place (`icon.png` beside `sunrise-mod.toml`) against the registry's limits,
-/// as a sentence of what was found, why it is refused and what to do.
-fn icon_problem(len: u64, bytes: Option<&[u8]>) -> Option<String> {
-    if len > MAX_ICON as u64 {
-        return Some(format!(
-            "icon.png is {} KiB, and the registry keeps icons of at most {} KiB: shrink it (fewer colours or a smaller size) and run publish again",
-            len.div_ceil(1024),
-            MAX_ICON >> 10
+/// Binary inputs, including the just-built archive: refuse special files and read at most one
+/// byte past the limit. Nonblocking open also covers a regular file swapped for a FIFO.
+fn read_binary(path: &Path, limit: u64) -> Result<Vec<u8>, ReadError> {
+    let io_error = |e| ReadError::Io(path.to_owned(), e);
+    if !fs::symlink_metadata(path).map_err(io_error)?.is_file() {
+        return Err(ReadError::NotRegular(path.to_owned()));
+    }
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW);
+    }
+    let file = options.open(path).map_err(io_error)?;
+    let metadata = file.metadata().map_err(io_error)?;
+    if !metadata.is_file() {
+        return Err(ReadError::NotRegular(path.to_owned()));
+    }
+    if metadata.len() > limit {
+        return Err(ReadError::TooLarge(path.to_owned(), limit));
+    }
+    let mut bytes = Vec::new();
+    file.take(limit + 1)
+        .read_to_end(&mut bytes)
+        .map_err(io_error)?;
+    if bytes.len() as u64 > limit {
+        return Err(ReadError::TooLarge(path.to_owned(), limit));
+    }
+    Ok(bytes)
+}
+
+/// A submission icon must fit both the package and the registry page.
+const PUBLISH_ICON_SIDE: std::ops::RangeInclusive<u32> = *ICON_SIDE.start()
+    ..=if MAX_DIMENSION < *ICON_SIDE.end() {
+        MAX_DIMENSION
+    } else {
+        *ICON_SIDE.end()
+    };
+
+fn read_icon(path: &Path) -> Result<Option<Vec<u8>>, String> {
+    let bytes = match read_binary(path, MAX_ICON as u64) {
+        Ok(bytes) => bytes,
+        Err(e) if e.is_not_found() => return Ok(None),
+        Err(e) => {
+            return Err(format!(
+                "{e}: replace icon.png with a regular square PNG of at most {} KiB and run publish again",
+                MAX_ICON >> 10
+            ));
+        }
+    };
+    if !matches!(page::image_size(&bytes), Some((Image::Png, w, h)) if w == h && PUBLISH_ICON_SIDE.contains(&w))
+    {
+        return Err(format!(
+            "icon.png does not fit the package and registry limits: save it as a square PNG, {} to {} pixels a side, and run publish again",
+            PUBLISH_ICON_SIDE.start(),
+            PUBLISH_ICON_SIDE.end()
         ));
     }
-    page::check_icon(bytes?).err().map(|e| {
-        format!(
-            "icon.png is refused by the registry ({e}): save it as a square PNG, {} to {} pixels a side, and run publish again",
-            ICON_SIDE.start(),
-            ICON_SIDE.end()
-        )
-    })
+    Ok(Some(bytes))
 }
 
 /// The version row's file name in the release, and the name a maintainer stages it under
@@ -194,41 +243,35 @@ fn draft(
     }
 }
 
-/// `existing` with `version` added at the top; published versions never change, so a version
-/// that is already listed is refused.
-fn add_version(
-    mut existing: Entry,
-    version: EntryVersion,
-    key: Option<&str>,
-) -> Result<Entry, String> {
-    let id = &existing.id;
-    if let Some(repo) = &existing.repo {
-        return Err(format!(
-            "{id} follows the releases of {repo}: publish a release there; the registry takes no file for it"
-        ));
+/// Replace a staged file without following links at the destination or temporary name.
+fn write_output(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(0);
+    let io_error = |e| format!("{}: {e}; choose a writable --out folder", path.display());
+    for _ in 0..16 {
+        let n = NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed);
+        let temporary = path.with_file_name(format!(".publish-{}-{n}.tmp", std::process::id()));
+        let mut file = match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+        {
+            Ok(file) => file,
+            Err(e) if e.kind() == ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(io_error(e)),
+        };
+        let written = file.write_all(bytes);
+        drop(file);
+        return written
+            .and_then(|()| fs::rename(&temporary, path))
+            .map_err(|e| {
+                let _ = fs::remove_file(&temporary);
+                io_error(e)
+            });
     }
-    if existing
-        .versions
-        .iter()
-        .any(|v| v.version == version.version)
-    {
-        return Err(format!(
-            "{id} {} is already listed in the registry, and a published version never changes: raise `version` in sunrise-mod.toml and run publish again",
-            version.version
-        ));
-    }
-    if key.is_some() && key != existing.key.as_deref() {
-        return Err(format!(
-            "{id} is listed with another key: pass the key its entry names, or none if it has none"
-        ));
-    }
-    if existing.key.is_some() && version.signature.is_none() {
-        return Err(format!(
-            "{id} has a key, so every version must be signed: sign the package and pass --key and --signature (docs/modding/src/how-to/publish.md#signing)"
-        ));
-    }
-    existing.versions.insert(0, version);
-    Ok(existing)
+    Err(format!(
+        "{}: no unused temporary name; choose a fresh --out folder",
+        path.display()
+    ))
 }
 
 fn pull_request(entry: &Entry, v: &EntryVersion, size: u64, first: bool) -> (String, String) {
@@ -266,42 +309,167 @@ fn pull_request(entry: &Entry, v: &EntryVersion, size: u64, first: bool) -> (Str
 pub fn run(entry_point: mod_surface::child::ChildEntry, args: &[String]) -> Result<(), String> {
     let o = parse(args)?;
     let root = Path::new(".");
-    let icon_path = root.join("icon.png");
-    let icon = match std::fs::metadata(&icon_path) {
-        Ok(meta) => {
-            let bytes = if meta.len() <= MAX_ICON as u64 {
-                Some(std::fs::read(&icon_path).map_err(|e| format!("icon.png: {e}"))?)
-            } else {
-                None
-            };
-            if let Some(problem) = icon_problem(meta.len(), bytes.as_deref()) {
-                return Err(problem);
-            }
-            bytes
-        }
-        Err(_) => None,
-    };
-    let build_args: Vec<String> = if o.wasm {
-        vec!["--wasm".into()]
+    let manifest = Manifest::parse(&bounded::read(&root.join(MANIFEST), bounded::MAX_MANIFEST)?)?;
+    let id = &manifest.id;
+    if !registry::plain_version(&manifest.version) {
+        return Err(format!(
+            "{MANIFEST}: version {:?} cannot name a registry release: set `version` to at most 64 ASCII letters, digits, '.', '-' or '_', starting with a letter or digit",
+            manifest.version
+        ));
+    }
+    let kind = if manifest.native.is_some() {
+        Kind::NativeMod
     } else {
-        Vec::new()
+        Kind::Mod
     };
-    let package = crate::build_command(entry_point, &build_args)?;
-    let manifest = Package::read(root)?.manifest;
-    let kind = crate::check::kind_of(&package).ok_or("the built package is not a .smod")?;
+    let existing = if let Some(checkout) = &o.registry {
+        let (entries, _) = registry::load_with(checkout, |path| {
+            match bounded::read(path, bounded::MAX_MANIFEST) {
+                Ok(text) => Ok(Some(text)),
+                Err(e) if e.is_not_found() => Ok(None),
+                Err(e) => Err(e.to_string()),
+            }
+        }).map_err(|errors| format!(
+            "--registry {} is not a valid registry checkout: {}. Restore the checked-in entries or use a clean checkout",
+            checkout.display(),
+            errors.join("; ")
+        ))?;
+        // The registry loader has bound every entry's id to its file name; select this project's id.
+        entries.into_iter().find(|e| &e.id == id)
+    } else {
+        None
+    };
+    if let Some(entry) = &existing {
+        if let Some(repo) = &entry.repo {
+            return Err(format!(
+                "{id} follows the releases of {repo}: publish a release there; the registry takes no file for it"
+            ));
+        }
+        if entry.kind != kind {
+            return Err(format!(
+                "{id} is listed as a {}, and a project's kind never changes: build a {} instead",
+                entry.kind.name(),
+                entry.kind.name()
+            ));
+        }
+        if entry.versions.iter().any(|v| v.version == manifest.version) {
+            return Err(format!(
+                "{id} {} is already listed in the registry, and a published version never changes: raise `version` in {MANIFEST} and run publish again",
+                manifest.version
+            ));
+        }
+        if entry.key.is_some() && (o.key.is_none() || o.signature.is_none()) {
+            return Err(format!(
+                "{id} has a key, so every version must be signed: use `cargo sunrise-mod build`, sign the package, then pass --key and --signature to publish"
+            ));
+        }
+        if o.key.as_deref().map(str::trim) != entry.key.as_deref().map(str::trim) {
+            return Err(format!(
+                "{id} cannot change its signing key: pass the --key its entry names, or omit --key and --signature if it has none"
+            ));
+        }
+    }
+    if o.key.is_some() != o.signature.is_some() {
+        return Err(
+            "--key and --signature go together: supply both to publish a signed package".into(),
+        );
+    }
     let signature = o
         .signature
         .as_ref()
-        .map(|p| std::fs::read_to_string(p).map_err(|e| format!("{}: {e}", p.display())))
+        .map(|path| {
+            bounded::read(path, 16 << 10).map_err(|e| {
+                format!("{e}: pass the .minisig produced by minisign -S to --signature")
+            })
+        })
         .transpose()?;
+    let icon = read_icon(&root.join("icon.png"))?;
+    let first = existing.is_none();
+    // Remove trailing slashes and `.` before symlink_metadata; both could hide a symlink.
+    let out: PathBuf = o
+        .out
+        .as_deref()
+        .unwrap_or_else(|| Path::new("target/sunrise-mod/publish"))
+        .components()
+        .collect();
+    if out.as_os_str().is_empty() {
+        return Err("--out is empty: name a folder for the submission".into());
+    }
+    let base = o.registry.clone().unwrap_or_else(|| out.join("base"));
+    let mods = out.join(ENTRIES);
+    let files = out.join("files");
+    let icons = (first && icon.is_some()).then(|| out.join("icons"));
+    let empty_base = o.registry.is_none().then(|| base.join(ENTRIES));
+    // Refuse planted directory links before creating any output; the file replacements below
+    // can safely replace links at the leaf itself.
+    for dir in out.ancestors().filter(|p| !p.as_os_str().is_empty()).chain(
+        [
+            Some(mods.as_path()),
+            Some(files.as_path()),
+            icons.as_deref(),
+            empty_base.as_ref().map(|_| base.as_path()),
+            empty_base.as_deref(),
+        ]
+        .into_iter()
+        .flatten(),
+    ) {
+        match fs::symlink_metadata(dir) {
+            Ok(meta) if meta.is_dir() => {}
+            Ok(_) => {
+                return Err(format!(
+                    "{} is not a real directory: choose a --out folder without symlinks",
+                    dir.display()
+                ));
+            }
+            Err(e) if e.kind() == ErrorKind::NotFound => {}
+            Err(e) => {
+                return Err(format!(
+                    "{}: {e}; choose a writable --out folder",
+                    dir.display()
+                ));
+            }
+        }
+    }
+    if o.registry.is_some()
+        && let Ok(out_path) = dunce::canonicalize(&out)
+        && dunce::canonicalize(&base).is_ok_and(|base_path| base_path == out_path)
+    {
+        return Err("--out is the registry checkout: choose a separate output folder so the original entry stays available for registry check".into());
+    }
+
+    let build_args: Vec<String> = o.wasm.then(|| "--wasm".to_owned()).into_iter().collect();
+    let package = crate::build_command(entry_point, &build_args)?;
+    let package_bytes = read_binary(&package, index::MAX_FILE).map_err(|e| {
+        format!("{e}: build a regular .smod within the registry's size limit with `cargo sunrise-mod build` and sign it again if needed")
+    })?;
     let report = crate::check::check(
         &package,
         kind.clone(),
         o.key.as_deref(),
         signature.as_deref(),
     )
-    .map_err(|e| format!("the package {} fails its check: {e}", package.display()))?;
-    let file = release_name(&manifest.id, &manifest.version, "smod");
+    .map_err(|e| {
+        format!(
+            "the package {} fails its check: {e}; rebuild it and sign the rebuilt file if needed",
+            package.display()
+        )
+    })?;
+    if report.facts.id.as_deref() != Some(id)
+        || report.facts.version.as_deref() != Some(&manifest.version)
+    {
+        return Err(format!(
+            "{} does not contain {id} {} from {MANIFEST}: build that version and sign the resulting package before publishing",
+            package.display(),
+            manifest.version
+        ));
+    }
+    if index::sha256(&package_bytes) != report.sha256 {
+        return Err(format!(
+            "{} changed during the check: finish building and signing before running publish again",
+            package.display()
+        ));
+    }
+    let file = release_name(id, &manifest.version, "smod");
     let version = EntryVersion {
         native_binaries: Vec::new(),
         version: manifest.version.clone(),
@@ -309,70 +477,40 @@ pub fn run(entry_point: mod_surface::child::ChildEntry, args: &[String]) -> Resu
         game: report
             .facts
             .game
-            .clone()
             .unwrap_or_else(|| sunrise_mod_package::sdk::GAME.to_owned()),
         file: file.clone(),
         sha256: report.sha256.clone(),
         signature,
         changelog: o.changelog.clone(),
     };
-    let existing_path = o
-        .registry
-        .as_ref()
-        .map(|r| r.join(ENTRIES).join(format!("{}.toml", manifest.id)))
-        .filter(|p| p.is_file());
-    let existing = existing_path
-        .as_ref()
-        .map(|p| {
-            let text = std::fs::read_to_string(p).map_err(|e| format!("{}: {e}", p.display()))?;
-            toml::from_str::<Entry>(&text).map_err(|e| format!("{}: {e}", p.display()))
-        })
-        .transpose()?;
-    let first = existing.is_none();
     let entry = match existing {
-        Some(entry) if entry.kind != kind => {
-            return Err(format!(
-                "{} is listed as a {}, and a project's kind never changes: this package is a {}",
-                entry.id,
-                entry.kind.name(),
-                kind.name()
-            ));
+        Some(mut entry) => {
+            entry.versions.insert(0, version.clone());
+            entry
         }
-        Some(entry) => add_version(entry, version.clone(), o.key.as_deref())?,
         None => draft(&manifest, kind, &o, icon.is_some(), version.clone()),
     };
-
-    let out = o
-        .out
-        .clone()
-        .unwrap_or_else(|| root.join("target/sunrise-mod/publish"));
-    let write = |path: PathBuf, bytes: &[u8]| -> Result<(), String> {
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-        }
-        std::fs::write(&path, bytes).map_err(|e| format!("{}: {e}", path.display()))
-    };
-    let package_bytes =
-        std::fs::read(&package).map_err(|e| format!("{}: {e}", package.display()))?;
-    write(
-        out.join(ENTRIES).join(format!("{}.toml", entry.id)),
-        entry.to_toml()?.as_bytes(),
-    )?;
-    write(out.join("files").join(&version.sha256), &package_bytes)?;
-    write(out.join(&file), &package_bytes)?;
-    if let (true, Some(bytes)) = (first, &icon) {
-        write(out.join(format!("icons/{}.png", entry.id)), bytes)?;
-    }
-    let base = match &o.registry {
-        Some(r) => r.clone(),
-        None => {
-            std::fs::create_dir_all(out.join("base").join(ENTRIES))
-                .map_err(|e| format!("{}: {e}", out.display()))?;
-            out.join("base")
-        }
-    };
+    let entry_text = entry.to_toml()?;
     let (title, body) = pull_request(&entry, &version, report.size, first);
-    write(out.join("PULL_REQUEST.md"), body.as_bytes())?;
+    for dir in [
+        Some(&mods),
+        Some(&files),
+        icons.as_ref(),
+        empty_base.as_ref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        fs::create_dir_all(dir)
+            .map_err(|e| format!("{}: {e}; choose a writable --out folder", dir.display()))?;
+    }
+    write_output(&mods.join(format!("{id}.toml")), entry_text.as_bytes())?;
+    write_output(&files.join(&version.sha256), &package_bytes)?;
+    write_output(&out.join(&file), &package_bytes)?;
+    if let (Some(dir), Some(bytes)) = (&icons, &icon) {
+        write_output(&dir.join(format!("{id}.png")), bytes)?;
+    }
+    write_output(&out.join("PULL_REQUEST.md"), body.as_bytes())?;
 
     let mut remaining = entry.check_fields();
     remaining.extend(
@@ -466,29 +604,17 @@ mod tests {
         let text = entry.to_toml().unwrap();
         // The registry reads back exactly what was written.
         assert_eq!(toml::from_str::<Entry>(&text).unwrap(), entry);
-        assert!(text.contains("name = \"Glowing Blocks\""), "{text}");
-        assert!(text.contains("source = \"https://github.com/ada/glowing_blocks\""));
-        assert!(text.contains("icon = \"icons/glowing_blocks.png\""));
-        assert!(text.contains(&format!("sha256 = \"{SHA}\"")));
-        assert!(text.contains("file = \"glowing_blocks-0.2.0.smod\""));
-        // Only the summary was missing, and the registry's own check says so.
+        assert_eq!(entry.name, "Glowing Blocks");
+        assert_eq!(entry.source, "https://github.com/ada/glowing_blocks");
+        assert_eq!(entry.icon.as_deref(), Some("icons/glowing_blocks.png"));
+        assert_eq!(entry.versions[0].sha256, SHA);
+        assert_eq!(entry.versions[0].file, "glowing_blocks-0.2.0.smod");
         let left = entry.check_fields();
         assert_eq!(left.len(), 1, "{left:?}");
         assert!(
-            left[0].contains("the summary is still the TODO(publish)"),
+            left[0].contains(TODO) && left[0].contains("summary"),
             "{left:?}"
         );
-    }
-
-    #[test]
-    fn a_version_already_listed_is_refused_by_name() {
-        let o = Options::default();
-        let listed = draft(&manifest(), Kind::Mod, &o, false, row("0.2.0"));
-        let e = add_version(listed.clone(), row("0.2.0"), None).unwrap_err();
-        assert!(e.contains("glowing_blocks 0.2.0 is already listed"), "{e}");
-        let next = add_version(listed, row("0.3.0"), None).unwrap();
-        let versions: Vec<_> = next.versions.iter().map(|v| v.version.as_str()).collect();
-        assert_eq!(versions, ["0.3.0", "0.2.0"]);
     }
 
     #[test]
@@ -501,24 +627,31 @@ mod tests {
     }
 
     #[test]
-    fn an_icon_outside_the_registrys_limits_gets_a_three_part_error() {
+    fn an_icon_must_fit_both_the_package_and_the_registry() {
+        let work = tempfile::tempdir().unwrap();
+        let icon = work.path().join("icon.png");
+        // Only the PNG header is needed for the dimension check; build validates the pixel data.
         let png = |side: u32| {
             let mut b = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
             b.extend(side.to_be_bytes());
             b.extend(side.to_be_bytes());
             b
         };
-        assert_eq!(icon_problem(1000, Some(&png(64))), None);
-        let big = icon_problem(300 << 10, None).unwrap();
-        assert!(
-            big.contains("300 KiB") && big.contains("256 KiB") && big.contains("shrink it"),
-            "{big}"
-        );
-        let small = icon_problem(500, Some(&png(32))).unwrap();
-        assert!(
-            small.contains("64 to 1024") && small.contains("run publish again"),
-            "{small}"
-        );
+        for (side, accepted) in [(63, false), (64, true), (512, true), (513, false)] {
+            fs::write(&icon, png(side)).unwrap();
+            assert_eq!(read_icon(&icon).is_ok(), accepted, "side {side}");
+        }
+        fs::write(&icon, vec![0; MAX_ICON + 1]).unwrap();
+        assert!(matches!(
+            read_binary(&icon, MAX_ICON as u64),
+            Err(ReadError::TooLarge(..))
+        ));
+        fs::remove_file(&icon).unwrap();
+        fs::create_dir(&icon).unwrap();
+        assert!(matches!(
+            read_binary(&icon, MAX_ICON as u64),
+            Err(ReadError::NotRegular(..))
+        ));
     }
 
     #[test]

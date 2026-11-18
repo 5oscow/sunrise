@@ -296,13 +296,25 @@ pub fn tag(id: &str, version: &str) -> String {
 /// Reads `mods/*.toml` and `revoked.toml`: every problem found, not only the
 /// first, so a pull request's check lists them all.
 pub fn load(registry: &Path) -> Result<(Vec<Entry>, Vec<Revoked>), Vec<String>> {
+    load_with(registry, |path| match std::fs::read_to_string(path) {
+        Ok(text) => Ok(Some(text)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e.to_string()),
+    })
+}
+
+/// Reads and binds entry IDs to their filenames as in [`load`], using the caller's file reader.
+/// The reader returns `None` only for a missing file.
+pub fn load_with(
+    registry: &Path,
+    read: impl Fn(&Path) -> Result<Option<String>, String>,
+) -> Result<(Vec<Entry>, Vec<Revoked>), Vec<String>> {
     let mut errors = Vec::new();
     let mut entries = Vec::new();
     let dir = registry.join(ENTRIES);
-    let mut paths: Vec<PathBuf> = match std::fs::read_dir(&dir) {
-        Ok(read) => read.filter_map(|e| e.ok().map(|e| e.path())).collect(),
-        Err(e) => return Err(vec![format!("{}: {e}", dir.display())]),
-    };
+    let mut paths: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .and_then(|entries| entries.map(|e| e.map(|e| e.path())).collect())
+        .map_err(|e| vec![format!("{}: {e}", dir.display())])?;
     paths.sort();
     for path in paths {
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
@@ -310,8 +322,8 @@ pub fn load(registry: &Path) -> Result<(Vec<Entry>, Vec<Revoked>), Vec<String>> 
             errors.push(format!("{ENTRIES}/{name}: only <id>.toml files go here"));
             continue;
         };
-        let parsed = std::fs::read_to_string(&path)
-            .map_err(|e| e.to_string())
+        let parsed = read(&path)
+            .and_then(|text| text.ok_or_else(|| "entry file is missing".to_owned()))
             .and_then(|text| toml::from_str::<Entry>(&text).map_err(|e| e.to_string()));
         match parsed {
             Ok(entry) if entry.id == stem => entries.push(entry),
@@ -322,15 +334,15 @@ pub fn load(registry: &Path) -> Result<(Vec<Entry>, Vec<Revoked>), Vec<String>> 
             Err(e) => errors.push(format!("{ENTRIES}/{name}: {e}")),
         }
     }
-    let revoked = match std::fs::read_to_string(registry.join(REVOKED)) {
-        Ok(text) => match toml::from_str::<RevokedFile>(&text) {
+    let revoked = match read(&registry.join(REVOKED)) {
+        Ok(Some(text)) => match toml::from_str::<RevokedFile>(&text) {
             Ok(file) => file.revoked,
             Err(e) => {
                 errors.push(format!("{REVOKED}: {e}"));
                 Vec::new()
             }
         },
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Ok(None) => Vec::new(),
         Err(e) => {
             errors.push(format!("{REVOKED}: {e}"));
             Vec::new()
@@ -344,7 +356,7 @@ pub fn load(registry: &Path) -> Result<(Vec<Entry>, Vec<Revoked>), Vec<String>> 
 }
 
 /// A version string that is also a plain release tag and file name part.
-fn plain_version(v: &str) -> bool {
+pub fn plain_version(v: &str) -> bool {
     !v.is_empty()
         && v.len() <= 64
         && v.as_bytes()[0].is_ascii_alphanumeric()

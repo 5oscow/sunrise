@@ -1,0 +1,2 @@
+cargo-sunrise-mod bad_version_or_checkout_leaves_destination_and_outside_files_unchanged test:publish daily child-process
+cargo-sunrise-mod output_replaces_file_symlinks_but_refuses_linked_directories test:publish daily child-process
