@@ -189,6 +189,49 @@ fn a_neighbour_s_survival_part_reads_the_prediction_s_blocks() {
     });
 }
 
+#[test]
+#[ignore = "daily"]
+fn a_predicted_break_reconciles_its_neighbour_s_shape_change() {
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+        "neighbour_test",
+        Box::new(NeighbourMod),
+    )]
+    .into();
+    on_a_client(mods, |game| {
+        let registry = game.pack.assets.registry;
+        let dirt = registry.default_state("minecraft:dirt").unwrap();
+        let cobblestone = registry.default_state("minecraft:cobblestone").unwrap();
+        let dandelion = registry.default_state("minecraft:dandelion").unwrap();
+        let air = game.world.air;
+        // The template survives on dirt. Only the Part needs the block east of it.
+        game.world.set(0, 64, 0, dirt).unwrap();
+        game.world.set(0, 65, 0, dandelion).unwrap();
+        game.world.set(1, 65, 0, cobblestone).unwrap();
+
+        game.predict_break([1, 65, 0], cobblestone, 7);
+        game.server_block([1, 65, 0], cobblestone.0 as i32);
+        game.end_predictions(6);
+        assert_eq!(game.world.block(1, 65, 0), air);
+        assert_eq!(game.world.block(0, 65, 0), air, "the Part saw the break");
+
+        game.end_predictions(7);
+        assert_eq!(game.world.block(1, 65, 0), cobblestone);
+        assert_eq!(
+            game.world.block(0, 65, 0),
+            dandelion,
+            "the dependent write rolled back too"
+        );
+
+        game.server_block([1, 65, 0], air.0 as i32);
+        assert_eq!(game.world.block(1, 65, 0), air);
+        assert_eq!(
+            game.world.block(0, 65, 0),
+            dandelion,
+            "server updates skip local shape rules"
+        );
+    });
+}
+
 static GUIDE_ASKS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 struct Counted;
