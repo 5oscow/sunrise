@@ -17,7 +17,7 @@
 //!   other side. Down over a result slot takes one craft or the whole furnace
 //!   output to the inventory; nothing ever goes into a result slot.
 //!
-//! Sorting, which clicks through `tweak_click` too, is in `sorting.rs`.
+//! Sorting, which clicks through `slot_click` too, is in `sorting.rs`.
 use crate::game::{Creative, Game, Screen};
 use sunrise_client::{containers::BlockEntity, items::ItemStack, menu::Input};
 
@@ -26,12 +26,6 @@ pub(in crate::game) struct Tweaks {
     drag: Option<Drag>,
     /// Wheel steps not yet acted on (a trackpad scrolls in fractions).
     wheel: f32,
-}
-impl Tweaks {
-    /// Ends the drag a press that was taken elsewhere didn't reset.
-    pub(in crate::game) fn end_drag(&mut self) {
-        self.drag = None;
-    }
 }
 /// A server's menu the tweaks run in: their clicks are vanilla's in these,
 /// and the menu engine knows which slot takes what. Not the menus whose slots
@@ -127,7 +121,7 @@ impl Game<'_> {
         let Some(held) = drag.held.clone() else {
             return;
         };
-        if self.tweak_takes_one(slot, &held) && self.tweak_put(slot, true) {
+        if self.slot_takes_one(slot, &held) && self.slot_put(slot, true) {
             drag.held = (held.count > 1).then(|| ItemStack {
                 count: held.count - 1,
                 ..held
@@ -162,10 +156,10 @@ impl Game<'_> {
                         self.inv_clicks.skip_release();
                     }
                     if shift {
-                        self.tweak_click(slot, 0, Input::QuickMove);
+                        self.slot_click(slot, 0, Input::QuickMove);
                     } else if held.count + s.count <= self.max_stack(&s)
-                        && self.tweak_click(slot, 0, Input::Pickup)
-                        && self.tweak_click(slot, 0, Input::Pickup)
+                        && self.slot_click(slot, 0, Input::Pickup)
+                        && self.slot_click(slot, 0, Input::Pickup)
                     {
                         // Put the hand's stack in the slot, then take it all.
                         drag.held = Some(ItemStack {
@@ -176,7 +170,7 @@ impl Game<'_> {
                 }
             } else if shift && stack.is_some() {
                 drag.active = true;
-                self.tweak_click(slot, 0, Input::QuickMove);
+                self.slot_click(slot, 0, Input::QuickMove);
             }
         }
         let owned = drag.active || active;
@@ -208,6 +202,34 @@ impl Game<'_> {
         }
         true
     }
+    /// `slot` is a result slot of the open menu.
+    fn tweak_result(&mut self, slot: usize) -> bool {
+        let mut result = false;
+        self.menu_session(|menu, _, to_menu| {
+            result = to_menu(slot).is_some_and(|i| menu.is_result(i));
+            Some(false)
+        });
+        result
+    }
+    /// The slots across from `slot`: a container's or crafting grid's face
+    /// the inventory (hotbar first, from the right), the inventory's face
+    /// them; without one, hotbar and main inventory trade.
+    fn other_side(&self, slot: usize) -> Vec<usize> {
+        let table = self.craft_size == 3;
+        let own: Vec<usize> = self
+            .slots()
+            .into_iter()
+            .filter(|s| (300..500).contains(s) || (table && (100..109).contains(s)))
+            .collect();
+        let player = || (0..9).rev().chain((9..36).rev());
+        match slot {
+            100..109 | 300..500 => player().collect(),
+            0..36 if !own.is_empty() => own,
+            0..9 => (9..36).collect(),
+            9..36 => (0..9).collect(),
+            _ => Vec::new(),
+        }
+    }
     /// Wheel down: one item of `slot` to where a quick move sends it. A
     /// result can't be split or put back: one craft (or the furnace's whole
     /// output) goes, when it all fits.
@@ -215,22 +237,22 @@ impl Game<'_> {
         let Some(stack) = self.slot_view(slot) else {
             return;
         };
-        let landing = self.tweak_landing(slot);
+        let landing = self.slot_landing(slot);
         let Some(&target) = landing.first() else {
             return;
         };
         if self.tweak_result(slot) {
-            if self.tweak_click(slot, 0, Input::Pickup) {
+            if self.slot_click(slot, 0, Input::Pickup) {
                 for target in landing {
-                    self.tweak_put(target, false);
+                    self.slot_put(target, false);
                 }
             }
             return;
         }
-        if self.tweak_click(slot, 0, Input::Pickup) {
-            self.tweak_put(target, true);
+        if self.slot_click(slot, 0, Input::Pickup) {
+            self.slot_put(target, true);
             if stack.count > 1 {
-                self.tweak_put(slot, false);
+                self.slot_put(slot, false);
             }
         }
     }
@@ -240,7 +262,7 @@ impl Game<'_> {
         let Some(stack) = self.slot_view(slot) else {
             return;
         };
-        if !self.tweak_takes_one(slot, &stack) {
+        if !self.slot_takes_one(slot, &stack) {
             return;
         }
         let mut source = None;
@@ -256,10 +278,10 @@ impl Game<'_> {
         let Some((source, count)) = source else {
             return;
         };
-        if self.tweak_click(source, 0, Input::Pickup) {
-            self.tweak_put(slot, true);
+        if self.slot_click(source, 0, Input::Pickup) {
+            self.slot_put(slot, true);
             if count > 1 {
-                self.tweak_put(source, false);
+                self.slot_put(source, false);
             }
         }
     }

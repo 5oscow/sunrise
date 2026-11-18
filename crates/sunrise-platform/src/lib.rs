@@ -100,8 +100,29 @@ pub use sunrise_core::release;
 /// "Container screens"); offered through [`hooks::Hooks::containers`].
 pub mod containers {
     pub use sunrise_hooks::containers::{
-        Click, Container, ContainerHooks, Panel, Role, Slot, SlotId, Stack,
+        Button, Click, Container, ContainerHooks, Panel, Role, Slot, SlotId, Stack,
     };
+
+    // Compiled with the tests: a crate on the platform alone implements every hook.
+    #[cfg(test)]
+    mod consumer {
+        use super::{Button, Click, Container, ContainerHooks, SlotId};
+
+        struct PickOnRelease;
+        impl ContainerHooks for PickOnRelease {
+            fn press(&self, _: &mut dyn Container, _: Option<SlotId>, b: Button) -> bool {
+                b == Button::Middle
+            }
+            fn release(&self, c: &mut dyn Container, slot: Option<SlotId>, _: Button) -> bool {
+                slot.is_some_and(|s| c.click(s, Click::QuickMove))
+            }
+            fn drag(&self, _: &mut dyn Container, _: Option<SlotId>, b: Button) -> bool {
+                matches!(b, Button::Other(_))
+            }
+        }
+
+        const _: &dyn ContainerHooks = &PickOnRelease;
+    }
 }
 
 /// Drawing on the HUD (docs/layers.md, "Platform registries").

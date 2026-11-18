@@ -514,13 +514,18 @@ fn draw(&self, c: &dyn Container, canvas: &mut dyn hud::Canvas);                
   under the tooltips and the carried stack.
 - `true` means the hook took the input: nothing else reads it. The first hook that returns `true` wins; every
   hook hears `release` and draws. A press a hook took makes the button's release the hooks' too, so vanilla
-  never sees half a click; a drag taken from vanilla's own press ends vanilla's quick craft drag.
+  never sees half a click; the latch ends at the physical button-up, whoever cancels the release. A drag or
+  a release a hook takes from vanilla's own press ends vanilla's quick craft drag without a click.
 - `drag` is asked only while a button is physically held. `key` is not asked while a text field has the focus
-  (a search box, an anvil's name), nor for a key's repeats.
+  (a search box, an anvil's name), nor for a key's repeats. No input is offered while another screen covers
+  the menu (a server pack prompt, a dialog).
 - Each `click` is an ordinary slot click: the menu engine's on the player's own world, a `ContainerClick` on a
   server. So an extra built on it works wherever vanilla's clicks do, and anticheats see vanilla's packets.
 - Every menu screen is offered, with its menu type id; the crate decides which menus it acts in, by `menu()`.
-  Creative's tabs are not offered: they have no menu type.
+  Creative's tabs are not offered: they have no menu type. Drawing runs from the shared foreground phase,
+  so every menu screen that draws one (merchants and beacons too) draws the hooks.
+- A slot's role comes from the open menu: a furnace's or station's output, a mod menu's declared results and
+  its crafting result are `Result`. A `SlotId` that isn't the open menu's reads nothing and clicks nothing.
 - A `Stack`'s `kind` is equal for stacks that merge (`StackData`'s `Hash`, which matches its `PartialEq`); its
   `id` is that exact stack, for `takes_one`.
 - The reads that ask the menu's rules take `&mut self`, as the engine's do; drawing gets `&dyn Container`, so

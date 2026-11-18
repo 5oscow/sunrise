@@ -2356,28 +2356,9 @@ impl Game<'_> {
 
     // ---- text fields ----
 
-    /// A text field has keyboard focus: chat, a sign, a book being written,
-    /// a search box, the anvil's name, the title screens' and the options'
-    /// fields, the LAN port, a dialog's input, the command box and the edit
-    /// screens of the jigsaw, structure and test blocks.
-    pub(super) fn pad_typing(&self) -> bool {
-        (self.screen == Screen::Chat && self.title.is_none())
-            || self.sign_edit.is_some()
-            || matches!(self.book, Some(super::books::BookScreen::Edit { .. }))
-            || (self.screen == Screen::Creative && self.creative_screen.tab().search)
-            || self.recipe_search_focused()
-            || self.station_typing()
-            || self.dialog_typing()
-            || self.mod_browser_typing()
-            || matches!(
-                self.screen,
-                Screen::CommandBlock | Screen::BlockEditor | Screen::Social | Screen::DebugOptions
-            )
-    }
-
     /// Whether the screen under the keyboard can still be typed in.
     fn pad_has_typing_screen(&self) -> bool {
-        self.pad_typing()
+        self.text_input_focused()
             || self.title.is_some()
             || matches!(self.screen, Screen::Options | Screen::WorldOptions)
     }

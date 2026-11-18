@@ -55,10 +55,13 @@ struct Point { x: f64, y: f64 }
 struct Batch { scale: f32 }
 enum WindowEvent { Focused(bool) }
 struct Game { drag_button: Option<i32>, physical_buttons: HashSet<i32>, physical_keys: HashSet<i32>,
+    container_buttons: HashSet<i32>,
     cursor: (f32, f32), modifiers: ModifiersState, synthetic: bool, open: bool, cancel: bool, handled: usize, posts: usize,
     calls: RefCell<Vec<(i32, [f32; 2], (f32, f32))>> }
 impl Game {
     fn pad_synthetic_input(&self) -> bool { self.synthetic }
+    // No container hook registered: it takes no drag.
+    fn container_drag(&mut self) -> bool { false }
     fn screen_view_now(&self) -> Option<View> { self.open.then_some(View { mouse: self.cursor }) }
     fn native_screen_mouse_dragged_pre(&self, view: &View, button: i32, delta: [f32; 2], modifiers: u32, canceled: &mut bool) {
         assert_eq!(modifiers, 5);
@@ -79,6 +82,7 @@ impl Game {
 fn lifecycle_and_cancellation() {
     for cancel in [false, true] {
         let mut game = Game { drag_button: None, physical_buttons: HashSet::from([0, 1]),
+            container_buttons: HashSet::new(),
             physical_keys: HashSet::from([10]), cursor: (10.0, 10.0), modifiers: ModifiersState(5), synthetic: false,
             open: true, cancel, handled: 0, posts: 0, calls: RefCell::new(vec![]) };
         game.track_drag_button(0, true);

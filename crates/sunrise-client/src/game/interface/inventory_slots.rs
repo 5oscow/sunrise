@@ -615,7 +615,6 @@ impl Game<'_> {
             None
         };
         let browser_tip = self.draw_mod_browser(batch);
-        self.draw_container_hooks(batch);
         self.draw_screen_phase(batch, sunrise_client::screen_draw::RenderPhase::Foreground);
         if let Some(lines) = book_tip {
             self.draw_tooltip_lines(batch, &lines, self.cursor.0, self.cursor.1);

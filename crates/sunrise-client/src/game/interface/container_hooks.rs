@@ -12,8 +12,7 @@ use std::cell::RefCell;
 use std::hash::{Hash, Hasher};
 use sunrise_client::{
     containers::{BlockEntity, FurnaceKind},
-    extras_hud::argb_color,
-    hud::{HudAtlas, HudBatch},
+    hud::{HudAtlas, HudBatch, rgba},
     items::ItemStack,
     menu::Input,
     stations::hover_name,
@@ -43,6 +42,8 @@ pub(in crate::game) struct Open<'a, 'g> {
     menu: String,
     origin: (f32, f32),
     panel: Panel,
+    /// The open menu's game slots: an id outside them reads and does nothing.
+    slots: Vec<usize>,
     /// Every stack this view handed out, by its `Stack::id`.
     seen: RefCell<Vec<ItemStack>>,
 }
@@ -96,6 +97,12 @@ fn kind_of(stack: &ItemStack) -> u64 {
     hasher.finish()
 }
 
+/// `0xAARRGGBB` as the batch's colour.
+fn color(argb: u32) -> u32 {
+    let [a, r, g, b] = argb.to_be_bytes();
+    rgba(r, g, b, a)
+}
+
 /// A mouse button by the screen events' numbering.
 fn button_of(button: MouseButton) -> Button {
     match glfw_button(button) {
@@ -119,6 +126,11 @@ impl<'g> Open<'_, 'g> {
             Backing::Owned(game) => Some(game),
         }
     }
+    /// `slot` as a game slot of the open menu.
+    fn slot(&self, slot: SlotId) -> Option<usize> {
+        let slot = slot.0 as usize;
+        self.slots.contains(&slot).then_some(slot)
+    }
     fn stack_of(&self, stack: &ItemStack) -> Stack {
         let mut seen = self.seen.borrow_mut();
         seen.push(stack.clone());
@@ -138,16 +150,16 @@ impl Container for Open<'_, '_> {
     }
     fn slots(&self) -> Vec<Slot> {
         let game = self.game();
-        game.slots()
-            .into_iter()
-            .map(|i| {
+        self.slots
+            .iter()
+            .map(|&i| {
                 let (x, y) = game.slot_position(i);
                 Slot::new(SlotId(i as u32), game.container_role(i), x, y)
             })
             .collect()
     }
     fn stack(&self, slot: SlotId) -> Option<Stack> {
-        let stack = self.game().slot_view(slot.0 as usize)?;
+        let stack = self.game().slot_view(self.slot(slot)?)?;
         Some(self.stack_of(&stack))
     }
     fn carried(&self) -> Option<Stack> {
@@ -155,10 +167,13 @@ impl Container for Open<'_, '_> {
     }
     fn name(&self, slot: SlotId) -> Option<String> {
         let game = self.game();
-        let stack = game.slot_view(slot.0 as usize)?;
+        let stack = game.slot_view(self.slot(slot)?)?;
         Some(hover_name(&game.pack.names, &stack))
     }
     fn takes_one(&mut self, slot: SlotId, of: &Stack) -> bool {
+        let Some(slot) = self.slot(slot) else {
+            return false;
+        };
         let Some(stack) = usize::try_from(of.id)
             .ok()
             .and_then(|i| self.seen.borrow().get(i).cloned())
@@ -166,25 +181,30 @@ impl Container for Open<'_, '_> {
             return false;
         };
         self.game_mut()
-            .is_some_and(|g| g.tweak_takes_one(slot.0 as usize, &stack))
+            .is_some_and(|g| g.slot_takes_one(slot, &stack))
     }
     fn landing(&mut self, slot: SlotId) -> Vec<SlotId> {
+        let Some(slot) = self.slot(slot) else {
+            return Vec::new();
+        };
         self.game_mut()
-            .map(|g| g.tweak_landing(slot.0 as usize))
+            .map(|g| g.slot_landing(slot))
             .unwrap_or_default()
             .into_iter()
             .map(|i| SlotId(i as u32))
             .collect()
     }
     fn click(&mut self, slot: SlotId, click: Click) -> bool {
-        let slot = slot.0 as usize;
+        let Some(slot) = self.slot(slot) else {
+            return false;
+        };
         let Some(game) = self.game_mut() else {
             return false;
         };
         match click {
-            Click::Pick { right } => game.tweak_click(slot, i32::from(right), Input::Pickup),
-            Click::QuickMove => game.tweak_click(slot, 0, Input::QuickMove),
-            Click::Put { one } => game.tweak_put(slot, one),
+            Click::Pick { right } => game.slot_click(slot, i32::from(right), Input::Pickup),
+            Click::QuickMove => game.slot_click(slot, 0, Input::QuickMove),
+            Click::Put { one } => game.slot_put(slot, one),
         }
     }
     fn spread(&self) -> usize {
@@ -225,12 +245,12 @@ impl hud::Canvas for Canvas<'_> {
     fn text(&mut self, x: f32, y: f32, text: &str, argb: u32, shadow: bool) {
         let (ox, oy) = self.origin;
         self.batch
-            .text(self.atlas, text, ox + x, oy + y, argb_color(argb), shadow);
+            .text(self.atlas, text, ox + x, oy + y, color(argb), shadow);
     }
     fn fill(&mut self, x: f32, y: f32, w: f32, h: f32, argb: u32) {
         let (ox, oy) = self.origin;
         self.batch
-            .fill(self.atlas, ox + x, oy + y, w, h, argb_color(argb));
+            .fill(self.atlas, ox + x, oy + y, w, h, color(argb));
     }
     fn place(&mut self, _: hud::Corner, _: f32, _: f32) -> Option<(f32, f32)> {
         None
@@ -278,6 +298,7 @@ impl<'g> Game<'g> {
             s if (stations::INPUT..stations::RESULT).contains(&s) => Role::Input,
             s if (mount_menu::CHEST..mount_menu::CHEST + 15).contains(&s) => Role::Storage,
             300..500 => match self.container_kind() {
+                Some(BlockEntity::Mod(_)) => self.mod_menu_role(slot - 300),
                 Some(BlockEntity::Furnace(_)) if slot == 302 => Role::Result,
                 Some(BlockEntity::Crafter(_)) if slot == 309 => Role::Result,
                 Some(
@@ -286,6 +307,21 @@ impl<'g> Game<'g> {
                 _ => Role::Storage,
             },
             _ => Role::Other,
+        }
+    }
+    /// A mod menu's slot `index`, by its declared results and crafting grid.
+    fn mod_menu_role(&self, index: usize) -> Role {
+        let Some(menu) = self
+            .remote_menu_type()
+            .and_then(sunrise_client::containers::mod_menu_type)
+        else {
+            return Role::Storage;
+        };
+        match menu.crafting {
+            Some(c) if c.result == index => Role::Result,
+            Some(c) if c.grid_slots().contains(&index) => Role::Input,
+            _ if menu.results.contains(&index) => Role::Result,
+            _ => Role::Storage,
         }
     }
     /// The panel's corner, which slot positions are from, and its size, as `batch`'s frame lays
@@ -307,9 +343,13 @@ impl<'g> Game<'g> {
         if !api::engine::any() {
             return None;
         }
+        if self.screen_over_playing() {
+            return None;
+        }
         let menu = self.container_menu_id()?;
         #[cfg(test)]
         BUILT.with(|n| n.set(n.get() + 1));
+        let slots = self.slots();
         let (origin, panel) = match self.renderer.as_ref() {
             Some(r) => self.container_frame(&HudBatch::new(
                 [r.config.width, r.config.height],
@@ -325,25 +365,40 @@ impl<'g> Game<'g> {
             menu,
             origin,
             panel,
+            slots,
             seen: RefCell::default(),
         })
     }
     fn container_target(&self) -> Option<SlotId> {
         self.inventory_target().0.map(|s| SlotId(s as u32))
     }
+    /// A mouse button's release clears the latch of a press a hook took: true when the press was
+    /// the hooks', so the release is too. Called for every real button-up, before any hook.
+    pub(in crate::game) fn container_button_up(&mut self, button: MouseButton) -> bool {
+        self.container_buttons.remove(&button)
+    }
     /// A mouse button down or up on a menu screen, once the mods' pre hooks let it through: true
-    /// when a hook took it. A press a hook took makes its release the hooks' alone.
-    pub(in crate::game) fn container_mouse(&mut self, button: MouseButton, pressed: bool) -> bool {
-        let pressed_by_hooks = !pressed && self.container_buttons.remove(&button);
+    /// when a hook took it, or for the release of a press a hook took (`owned`). A release a hook
+    /// takes from vanilla's own press ends vanilla's quick craft drag without a click.
+    pub(in crate::game) fn container_mouse(
+        &mut self,
+        button: MouseButton,
+        pressed: bool,
+        owned: bool,
+    ) -> bool {
         if !api::engine::any() {
-            return pressed_by_hooks;
+            return owned;
         }
         let slot = self.container_target();
         let Some(mut open) = self.open_container() else {
-            return pressed_by_hooks;
+            return owned;
         };
         if !pressed {
-            return api::engine::release(&mut open, slot, button_of(button)) || pressed_by_hooks;
+            let taken = api::engine::release(&mut open, slot, button_of(button));
+            if taken && !owned {
+                self.container_cancel_drag();
+            }
+            return taken || owned;
         }
         let taken = api::engine::press(&mut open, slot, button_of(button));
         if taken {
@@ -351,10 +406,11 @@ impl<'g> Game<'g> {
         }
         taken
     }
-    /// The release of a button whose press a hook took, with no menu screen open any more: it
-    /// stays the hooks'.
-    pub(in crate::game) fn container_release_elsewhere(&mut self, button: MouseButton) -> bool {
-        self.container_buttons.remove(&button)
+    /// Vanilla's quick craft drag ends with nothing clicked: its release, if it comes, does
+    /// nothing.
+    fn container_cancel_drag(&mut self) {
+        self.inv_drag = None;
+        self.inv_clicks.cancel_drag();
     }
     /// The cursor moved with a button held, once the mods' pre hook let it through: true when a
     /// hook took it. A drag taken from vanilla's own press ends its quick craft drag.
@@ -374,9 +430,7 @@ impl<'g> Game<'g> {
         };
         let taken = api::engine::drag(&mut open, slot, button_of(button));
         if taken && !self.container_buttons.contains(&button) {
-            self.inv_drag = None;
-            self.tweaks.end_drag();
-            self.inv_clicks.skip_release();
+            self.container_cancel_drag();
         }
         taken
     }
@@ -395,7 +449,7 @@ impl<'g> Game<'g> {
     /// A key press on a menu screen, once the mods' pre hook let it through, unless a text field
     /// has the focus: true when a hook took it.
     pub(in crate::game) fn container_key(&mut self, key: KeyCode) -> bool {
-        if !api::engine::any() || self.pad_typing() {
+        if !api::engine::any() || self.text_input_focused() {
             return false;
         }
         let Some(name) = sunrise_client::keybinds::key_name(key) else {
@@ -423,6 +477,7 @@ impl<'g> Game<'g> {
             menu,
             origin,
             panel,
+            slots: self.slots(),
             seen: RefCell::default(),
         };
         let mut canvas = Canvas {
@@ -436,7 +491,7 @@ impl<'g> Game<'g> {
 
 impl Game<'_> {
     /// One ordinary click on a game slot. False when nothing took it.
-    pub(in crate::game) fn tweak_click(&mut self, slot: usize, button: i32, input: Input) -> bool {
+    pub(in crate::game) fn slot_click(&mut self, slot: usize, button: i32, input: Input) -> bool {
         if self.remote.is_some() {
             return self.remote_menu_ops(&[(Some(slot), button, input)]);
         }
@@ -452,7 +507,7 @@ impl Game<'_> {
     /// drag (`QUICK_CRAFT`) and not a click: a server that has the hand empty
     /// (the stack it was to come from just burned as fuel) ignores a drag, but
     /// a click would pick up what's in `slot`.
-    pub(in crate::game) fn tweak_put(&mut self, slot: usize, right: bool) -> bool {
+    pub(in crate::game) fn slot_put(&mut self, slot: usize, right: bool) -> bool {
         let kind = i32::from(right) << 2;
         let ops = [
             (None, kind, Input::QuickCraft),
@@ -470,17 +525,8 @@ impl Game<'_> {
         }
         true
     }
-    /// `slot` is a result slot of the open menu.
-    pub(in crate::game) fn tweak_result(&mut self, slot: usize) -> bool {
-        let mut result = false;
-        self.menu_session(|menu, _, to_menu| {
-            result = to_menu(slot).is_some_and(|i| menu.is_result(i));
-            Some(false)
-        });
-        result
-    }
     /// `slot` takes one more of `stack`, by the open menu's rules.
-    pub(in crate::game) fn tweak_takes_one(&mut self, slot: usize, stack: &ItemStack) -> bool {
+    pub(in crate::game) fn slot_takes_one(&mut self, slot: usize, stack: &ItemStack) -> bool {
         let mut takes = false;
         self.menu_session(|menu, env, to_menu| {
             takes = to_menu(slot).is_some_and(|i| menu.takes_one(env, i, stack));
@@ -490,7 +536,7 @@ impl Game<'_> {
     }
     /// Where vanilla's quick move would put `slot`'s items, tried on a copy
     /// of the menu that's dropped (`Some(false)` keeps nothing).
-    pub(in crate::game) fn tweak_landing(&mut self, slot: usize) -> Vec<usize> {
+    pub(in crate::game) fn slot_landing(&mut self, slot: usize) -> Vec<usize> {
         let slots = self.slots();
         let mut landing = Vec::new();
         self.menu_session(|menu, env, to_menu| {
@@ -503,25 +549,6 @@ impl Game<'_> {
             Some(false)
         });
         landing
-    }
-    /// The slots across from `slot`: a container's or crafting grid's face
-    /// the inventory (hotbar first, from the right), the inventory's face
-    /// them; without one, hotbar and main inventory trade.
-    pub(in crate::game) fn other_side(&self, slot: usize) -> Vec<usize> {
-        let table = self.craft_size == 3;
-        let own: Vec<usize> = self
-            .slots()
-            .into_iter()
-            .filter(|s| (300..500).contains(s) || (table && (100..109).contains(s)))
-            .collect();
-        let player = || (0..9).rev().chain((9..36).rev());
-        match slot {
-            100..109 | 300..500 => player().collect(),
-            0..36 if !own.is_empty() => own,
-            0..9 => (9..36).collect(),
-            9..36 => (0..9).collect(),
-            _ => Vec::new(),
-        }
     }
 }
 
@@ -554,6 +581,26 @@ mod tests {
         }
     }
     static PICK_NINE: PickNine = PickNine;
+
+    /// Takes every release.
+    struct TakeRelease;
+    impl ContainerHooks for TakeRelease {
+        fn release(&self, _: &mut dyn Container, _: Option<SlotId>, _: Button) -> bool {
+            true
+        }
+    }
+    static TAKE_RELEASE: TakeRelease = TakeRelease;
+
+    /// Reads slots no menu has, and takes the press only if they read as nothing.
+    struct ReadFar;
+    impl ContainerHooks for ReadFar {
+        fn press(&self, c: &mut dyn Container, _: Option<SlotId>, _: Button) -> bool {
+            let far = [SlotId(36), SlotId(9999)];
+            !far.iter()
+                .all(|&s| c.stack(s).is_none() && c.name(s).is_none())
+        }
+    }
+    static READ_FAR: ReadFar = ReadFar;
 
     /// Takes nothing.
     struct Pass;
@@ -631,7 +678,7 @@ mod tests {
         let stone = ItemStack::new("minecraft:stone", 5);
         game.inventory[9] = Some(stone.clone());
         with_registrants(&[&PICK_NINE], || {
-            assert!(game.container_mouse(MouseButton::Left, true))
+            assert!(game.container_mouse(MouseButton::Left, true, false))
         });
         assert_eq!(game.carried, Some(stone));
         assert!(game.inventory[9].is_none());
@@ -644,20 +691,43 @@ mod tests {
         let mut game = server_game(&mut resources);
         game.screen = Screen::Inventory;
         with_registrants(&[&TAKE], || {
-            assert!(game.container_mouse(MouseButton::Left, true));
-            // Take takes no release: it is kept because the press was taken.
-            assert!(game.container_mouse(MouseButton::Left, false));
-            assert!(!game.container_mouse(MouseButton::Right, false));
+            assert!(game.container_mouse(MouseButton::Left, true, false));
+            // Take takes no release: the button-up says the press was the hooks'.
+            let owned = game.container_button_up(MouseButton::Left);
+            assert!(owned);
+            assert!(game.container_mouse(MouseButton::Left, false, owned));
+            assert!(
+                !game.container_button_up(MouseButton::Left),
+                "the latch is cleared"
+            );
         });
         with_registrants(&[&PASS], || {
-            assert!(!game.container_mouse(MouseButton::Left, true));
-            assert!(!game.container_mouse(MouseButton::Left, false));
+            assert!(!game.container_mouse(MouseButton::Left, true, false));
+            assert!(!game.container_button_up(MouseButton::Left));
         });
-        with_registrants(&[&TAKE], || {
-            assert!(game.container_mouse(MouseButton::Left, true));
-            game.screen = Screen::Playing;
-            assert!(game.container_release_elsewhere(MouseButton::Left));
-            assert!(!game.container_release_elsewhere(MouseButton::Left));
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn a_release_taken_from_vanillas_press_ends_its_drag_unclicked() {
+        let mut resources = None;
+        let mut game = server_game(&mut resources);
+        game.screen = Screen::Inventory;
+        game.inv_drag = Some((0, vec![9]));
+        with_registrants(&[&TAKE_RELEASE], || {
+            assert!(game.container_mouse(MouseButton::Left, false, false))
+        });
+        assert!(game.inv_drag.is_none());
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn a_slot_outside_the_open_menu_reads_nothing() {
+        let mut resources = None;
+        let mut game = server_game(&mut resources);
+        game.screen = Screen::Inventory;
+        with_registrants(&[&READ_FAR], || {
+            assert!(!game.container_mouse(MouseButton::Left, true, false))
         });
     }
 
@@ -685,14 +755,14 @@ mod tests {
         game.screen = Screen::Inventory;
         BUILT.with(|n| n.set(0));
         with_registrants(&[], || {
-            assert!(!game.container_mouse(MouseButton::Left, true))
+            assert!(!game.container_mouse(MouseButton::Left, true, false))
         });
         assert_eq!(BUILT.with(|n| n.get()), 0);
         // No button is held: a pointer move is no drag, however a press went.
         with_registrants(&[&TAKE], || assert!(!game.container_drag()));
         assert_eq!(BUILT.with(|n| n.get()), 0);
         with_registrants(&[&TAKE], || {
-            assert!(game.container_mouse(MouseButton::Left, true))
+            assert!(game.container_mouse(MouseButton::Left, true, false))
         });
         assert_eq!(BUILT.with(|n| n.get()), 1);
     }

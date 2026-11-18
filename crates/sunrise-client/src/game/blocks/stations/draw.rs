@@ -611,7 +611,6 @@ impl Game<'_> {
             tooltip_stack = Some(stack);
         }
         let browser_tip = self.draw_mod_browser(batch);
-        self.draw_container_hooks(batch);
         self.draw_screen_phase(batch, sunrise_client::screen_draw::RenderPhase::Foreground);
         if self.carried.is_some() {
             self.draw_carried(batch);

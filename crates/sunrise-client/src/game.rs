@@ -9405,14 +9405,15 @@ impl Game<'_> {
             // arms below (which hold the container hotkey and the sort and
             // header buttons too) see it. A click the pad or the keyboard's
             // focus made up is not the mouse: it fires nothing.
-            if let WindowEvent::MouseInput { state, button, .. } = &event
-                && !self.pad_synthetic_input()
-                && self.screen_view_now().is_none()
-                && *state == ElementState::Released
-                && self.container_release_elsewhere(*button)
-            {
-                return Ok(());
-            }
+            // A real button-up ends a container hook's press latch before any hook can cancel it.
+            let owned_release = match &event {
+                WindowEvent::MouseInput {
+                    state: ElementState::Released,
+                    button,
+                    ..
+                } if !self.pad_synthetic_input() => self.container_button_up(*button),
+                _ => false,
+            };
             if let WindowEvent::MouseInput { state, button, .. } = &event
                 && !self.pad_synthetic_input()
                 && let Some(screen) = self.screen_view_now()
@@ -9438,13 +9439,16 @@ impl Game<'_> {
                 if canceled {
                     return Ok(());
                 }
-                if self.container_mouse(winit_button, pressed) {
+                if self.container_mouse(winit_button, pressed, owned_release) {
                     return Ok(());
                 }
                 mouse_post = Some(native_hooks::ScreenMousePost::Button {
                     button,
                     pressed: *state == ElementState::Pressed,
                 });
+            }
+            if owned_release {
+                return Ok(());
             }
             self.key_focus_mouse_press(&event);
             match event {
@@ -9616,7 +9620,7 @@ impl Game<'_> {
                         if canceled {
                             return Ok(());
                         }
-                        if self.container_wheel(d) {
+                        if self.container_wheel(scaled(raw_y) as f32) {
                             return Ok(());
                         }
                         mouse_post = Some(native_hooks::ScreenMousePost::Scroll([
