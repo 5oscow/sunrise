@@ -872,7 +872,7 @@ impl Game<'_> {
                         no_push,
                         None
                     ),
-                    &self.motion.health,
+                    &self.health_resources,
                     rules,
                     id,
                     amount,

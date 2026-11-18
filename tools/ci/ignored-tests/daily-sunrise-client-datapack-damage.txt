@@ -1,0 +1,1 @@
+sunrise-client game::commands::world_cmds::datapack_damage_tests::a_datapack_damage_type_hurts_a_mob lib daily resources

@@ -481,13 +481,14 @@ impl Game<'_> {
                 // LivingEntity.hurtServer reached resolvePlayerResponsibleForDamage:
                 // every hit that got past the cooldown, absorbed or blocked too.
                 MotionEvent::Health(HealthEvent::Criterion { source, .. }) => {
-                    let motion = self.motion;
-                    if let Some(d) = motion.health.damage.definition(*source) {
+                    // The world's frozen registry, the one the hit's source id is of.
+                    let damage = &self.health_resources.damage;
+                    if let Some(name) = damage.definition(*source).map(|d| d.name.clone()) {
                         match recorded.take() {
-                            Some((t, id)) if t == d.name => {
+                            Some((t, id)) if t == name => {
                                 self.resolve_player_responsible_for_player(id, None)
                             }
-                            _ => self.commit_pending_hurt_memories(&d.name, None),
+                            _ => self.commit_pending_hurt_memories(&name, None),
                         }
                     }
                     continue;

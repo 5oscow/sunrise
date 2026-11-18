@@ -232,7 +232,7 @@ impl Game<'_> {
         }) {
             return;
         }
-        let Some(id) = self.motion.health.damage.id(kind) else {
+        let Some(id) = self.health_resources.damage.id(kind) else {
             return;
         };
         let attack = sunrise_client::health::Attack {

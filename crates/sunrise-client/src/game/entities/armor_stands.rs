@@ -1393,11 +1393,10 @@ impl Game<'_> {
         let Some(i) = self.armor_stands.iter().position(|a| a.id == id) else {
             return false;
         };
-        let registry = &self.motion.health.damage;
-        let Some(kind) = registry.id(damage_type) else {
+        let Some(kind) = self.health_resources.damage.id(damage_type) else {
             return false;
         };
-        let tagged = |tag: &str| registry.in_tag(kind, tag);
+        let tagged = |game: &Self, tag: &str| game.health_resources.damage.in_tag(kind, tag);
         if !self
             .ui
             .rules
@@ -1406,7 +1405,7 @@ impl Game<'_> {
         {
             return false;
         }
-        if tagged("minecraft:bypasses_invulnerability") {
+        if tagged(self, "minecraft:bypasses_invulnerability") {
             self.kill_target(Target::Stand(id));
             return false;
         }
@@ -1437,16 +1436,16 @@ impl Game<'_> {
             _ => None,
         };
         let (explosion, ignites, burns) = (
-            tagged("minecraft:is_explosion"),
-            tagged("minecraft:ignites_armor_stands"),
-            tagged("minecraft:burns_armor_stands"),
+            tagged(self, "minecraft:is_explosion"),
+            tagged(self, "minecraft:ignites_armor_stands"),
+            tagged(self, "minecraft:burns_armor_stands"),
         );
         let causing_id = causing
             .and_then(|target| self.network_entity_id(target))
             .unwrap_or(0) as u32;
         let (breaks, always_kills) = (
-            tagged("minecraft:can_break_armor_stand"),
-            tagged("minecraft:always_kills_armor_stands"),
+            tagged(self, "minecraft:can_break_armor_stand"),
+            tagged(self, "minecraft:always_kills_armor_stands"),
         );
         if explosion {
             self.break_armor_stand_by_anything(i, damage_type, causing_id);

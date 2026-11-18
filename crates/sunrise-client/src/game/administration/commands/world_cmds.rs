@@ -248,7 +248,7 @@ impl Game<'_> {
     ) -> bool {
         // Resolve the damage registry at the shared command/API boundary before
         // any target-specific path can mutate state or map it to a DamageKind.
-        if self.motion.health.damage.id(ty).is_none() {
+        if self.health_resources.damage.id(ty).is_none() {
             return false;
         }
         let attacker = cause.or(by).and_then(|t| self.network_entity_id(t));
@@ -350,7 +350,7 @@ impl Game<'_> {
                     _ => None,
                 };
                 let damage = Damage {
-                    kind: Self::damage_kind(&self.motion.health.damage, ty),
+                    kind: Self::damage_kind(&self.health_resources.damage, ty),
                     attacker,
                     from,
                     attacker_species,
@@ -384,7 +384,7 @@ impl Game<'_> {
                 id,
                 amount,
                 ty,
-                Self::damage_kind(&self.motion.health.damage, ty),
+                Self::damage_kind(&self.health_resources.damage, ty),
                 (
                     by,
                     cause.or(by),
@@ -394,7 +394,7 @@ impl Game<'_> {
             Target::Crystal(id) => self.command_damage_crystal(
                 id,
                 ty,
-                Self::damage_kind(&self.motion.health.damage, ty),
+                Self::damage_kind(&self.health_resources.damage, ty),
                 by,
                 cause.or(by),
                 from,
@@ -415,7 +415,7 @@ impl Game<'_> {
         causing: Option<Target>,
         position: Option<[f64; 3]>,
     ) -> bool {
-        let registry = &self.motion.health.damage;
+        let registry = &self.health_resources.damage;
         let Some(kind) = registry.id(damage_type) else {
             return false;
         };
@@ -2297,6 +2297,46 @@ mod allay_owner_damage_tests {
                     assert_eq!(game.world.game_time, before);
                 }
             }
+        });
+    }
+}
+
+#[cfg(test)]
+mod datapack_damage_tests {
+    use crate::game::{commands::Target, native_entity_refs::tests::with_game};
+    use sunrise_client::mobs::Mob;
+    use sunrise_core::geometry::Vec3;
+    use sunrise_world::loot::PackOverlay;
+
+    /// #2647: a damage type a world's datapack declares is in the world's frozen
+    /// registry, and `/damage` with it hurts a mob, as `DamageCommand.damage`
+    /// does with the `Holder` it resolved there. Every hurt path reads the
+    /// world's registry, not the startup catalog, which holds no pack.
+    #[test]
+    #[ignore = "daily"]
+    fn a_datapack_damage_type_hurts_a_mob() {
+        with_game(|game| {
+            let root =
+                std::path::PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap());
+            let files = vec![(
+                "damage_type/dmgtest:zap".into(),
+                vec![br#"{"message_id":"zap","scaling":"never","exhaustion":0.1}"#.to_vec()],
+            )];
+            game.health_resources = game
+                .motion
+                .health
+                .with_packs(&root, &PackOverlay::new(&files), false)
+                .unwrap();
+            assert!(game.motion.health.damage.id("dmgtest:zap").is_none());
+            let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+            let mut pig = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
+            pig.no_ai = true;
+            game.mobs.push(pig);
+            assert!(game.hurt_target(Target::Mob(1), 1.0, "dmgtest:zap", None, None, None));
+            assert_eq!(game.mobs[0].health, 9.0);
+            // A type neither registry holds is still refused.
+            assert!(!game.hurt_target(Target::Mob(1), 1.0, "dmgtest:missing", None, None, None));
+            assert_eq!(game.mobs[0].health, 9.0);
         });
     }
 }

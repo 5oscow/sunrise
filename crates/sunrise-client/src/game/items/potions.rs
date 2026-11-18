@@ -1155,7 +1155,7 @@ impl Game<'_> {
             }
             EffectAction::Hurt(source, amount) => {
                 let mut canceled = false;
-                if let Some(id) = self.motion.health.damage.id(source)
+                if let Some(id) = self.health_resources.damage.id(source)
                     && let Ok(o) = p.hurt_blocking(
                         crate::game::entity::damage_level_of!(
                             self,
@@ -1163,7 +1163,7 @@ impl Game<'_> {
                             no_push,
                             None
                         ),
-                        &self.motion.health,
+                        &self.health_resources,
                         rules,
                         id,
                         amount,
@@ -1186,7 +1186,7 @@ impl Game<'_> {
                             no_push,
                             None
                         ),
-                        &self.motion.health,
+                        &self.health_resources,
                         rules,
                         id,
                         1.0,
@@ -1323,7 +1323,7 @@ impl Game<'_> {
                             .iter()
                             .filter_map(|effect| effect.registry_index),
                     );
-                    let registry = &self.motion.health.damage;
+                    let registry = &self.health_resources.damage;
                     actions.extend(changes.into_iter().filter_map(|change| {
                         match change {
                             EffectTickChange::Heal(amount) => Some(EffectAction::Heal(amount)),
@@ -2777,7 +2777,7 @@ impl sunrise_client::mobs::ModEffectTicks for Game<'_> {
                 EffectTickChange::Heal(amount) => mob.heal(&self.loop_context, amount),
                 // An unregistered damage type hurts nothing.
                 EffectTickChange::Hurt(source, amount) => {
-                    let registry = &self.motion.health.damage;
+                    let registry = &self.health_resources.damage;
                     if registry.id(&source).is_some() {
                         let kind = Self::damage_kind(registry, &source);
                         mob.damage(level, amount, Damage::of(kind));
