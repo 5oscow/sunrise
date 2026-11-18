@@ -83,7 +83,7 @@ pub trait ChunkGenerator: Send + Sync + 'static {
         _worker: &mut Self::Worker,
         _x: i32,
         _z: i32,
-    ) -> Option<crate::lod::Surface> {
+    ) -> Option<crate::columns::Surface> {
         None
     }
     /// A previously saved final chunk, bypassing generation.
@@ -196,7 +196,7 @@ pub trait LodSampler: Send {
     /// Reduced far detail (`graphics::FarDetail::Reduced`): `grid` may then
     /// approximate wide cells.
     fn set_approximate(&mut self, _approximate: bool) {}
-    fn sample(&mut self, x: i32, z: i32) -> Option<crate::lod::Surface>;
+    fn sample(&mut self, x: i32, z: i32) -> Option<crate::columns::Surface>;
     fn column(&mut self, x: i32, z: i32) -> crate::lod::Column {
         crate::lod::Column::from_surface(self.sample(x, z))
     }
@@ -239,7 +239,7 @@ struct GeneratorSampler<G: ChunkGenerator> {
     worker: G::Worker,
 }
 impl<G: ChunkGenerator> LodSampler for GeneratorSampler<G> {
-    fn sample(&mut self, x: i32, z: i32) -> Option<crate::lod::Surface> {
+    fn sample(&mut self, x: i32, z: i32) -> Option<crate::columns::Surface> {
         self.generator.lod_surface(&mut self.worker, x, z)
     }
 }
