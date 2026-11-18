@@ -60,7 +60,7 @@ cargo = [
   { package = "sunrise-client", target = "lib", filter = "game::wind::" },
 ]
 harnesses = [
-  "explosion_items", "bed_explosion", "tnt_*", "projectile_hits_tnt", "sulfur_portal_blast", "sulfur_prime_phase",
+  "explosions", "explosion_items", "bed_explosion", "tnt_*", "projectile_hits_tnt", "sulfur_portal_blast", "sulfur_prime_phase",
   "wind_charge_*", "*_wind_charge", "wind_bursts_all_push", "remote_fireball", "dragon_fireball_motion",
 ]
 lan = ["blast", "blast-*", "crystal_blast", "crystals", "fireball", "fishing-tnt", "wind", "wind_burst_player", "wind-*"]
