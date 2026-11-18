@@ -178,10 +178,20 @@ mod tests {
     }
 
     fn with_inert_block(name: &str, test: impl FnOnce(&mut Game<'_>, BlockStateId, &Probe)) {
+        with_inert_block_cases(name, &["dispatch-first"], test);
+    }
+
+    fn with_inert_block_cases(
+        name: &str,
+        cases: &[&str],
+        test: impl FnOnce(&mut Game<'_>, BlockStateId, &Probe),
+    ) {
+        const CHILD: &str = "SUNRISE_INERT_BLOCK_CHILD";
         let name = format!("game::disabled_block_tests::tests::{name}");
-        if fixture::run_fresh_cases(&name, "SUNRISE_INERT_BLOCK_CHILD", &["valid"]) {
+        if fixture::run_fresh_cases(&name, CHILD, cases) {
             return;
         }
+        let packages_first = std::env::var(CHILD).is_ok_and(|case| case == "packages-first");
         let probe = Arc::new(Probe::default());
         let mods: mod_api::Mods = vec![
             mod_api::ModEntry::new("enabled_prefix", Box::new(EnabledPrefix(probe.clone()))),
@@ -189,7 +199,7 @@ mod tests {
             mod_api::ModEntry::new("enabled_observer", Box::new(Observer(probe.clone()))),
         ]
         .into();
-        mod_platform::testing::with_mods(mods.clone(), || {
+        let install_packages = || {
             crate::game::api_values::install_test_platform();
             crate::game::api_values::install_packages(
                 &[sunrise_mod_package::packages::AdjacentManifest {
@@ -204,6 +214,16 @@ mod tests {
                 &[],
             )
             .unwrap();
+        };
+        if packages_first {
+            install_packages();
+        }
+        mod_platform::testing::with_mods(mods.clone(), || {
+            if packages_first {
+                mod_platform::__private::install(mods.clone());
+            } else {
+                install_packages();
+            }
             crate::game::api_values::install_parts(&mods).unwrap();
             mod_api::__private::mark_game_thread();
             let base =
@@ -298,8 +318,9 @@ mod tests {
     #[test]
     #[ignore = "daily"]
     fn disabled_blocks_survive_piston_pushes_without_authorizing_placement() {
-        with_inert_block(
+        with_inert_block_cases(
             "disabled_blocks_survive_piston_pushes_without_authorizing_placement",
+            &["dispatch-first", "packages-first"],
             |game, _, _| {
                 let base = BlockPos::new(3, 70, 5);
                 let registry = &game.pack.assets.registry;
