@@ -39,6 +39,12 @@ fn invalid(message: impl Into<String>) -> io::Error {
 
 /// `NbtIo.readCompressed`: the root compound of a gzip NBT file, if it exists.
 pub fn read_dat(path: &Path) -> io::Result<Option<Tag>> {
+    read_dat_with_quota(path, None)
+}
+
+/// [`read_dat`] under a `NbtAccounter` heap quota, `None` for unlimited.
+/// The byte and depth caps of [`Limits::saved`] are Sunrise's own guards.
+fn read_dat_with_quota(path: &Path, quota: Option<u64>) -> io::Result<Option<Tag>> {
     let bytes = match fs::read(path) {
         Ok(b) => b,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -46,11 +52,16 @@ pub fn read_dat(path: &Path) -> io::Result<Option<Tag>> {
     };
     let limits = Limits::saved();
     let raw = Compression::Gzip.decode(&bytes, limits.max_bytes)?;
-    let (root, _) = nbt::read_named(&raw, limits).map_err(|e| invalid(e.to_string()))?;
+    let (root, _) = match quota {
+        Some(quota) => nbt::read_named_quota(&raw, limits, quota),
+        None => nbt::read_named(&raw, limits),
+    }
+    .map_err(|e| invalid(e.to_string()))?;
     Ok(Some(root.tag))
 }
 
 /// `SavedDataStorage.readTagFromDisk`: a file without the gzip header is plain NBT.
+/// The byte and depth caps of [`Limits::saved`] are Sunrise's guards, not vanilla's.
 pub fn read_saved_dat(path: &Path) -> io::Result<Option<Tag>> {
     let bytes = match fs::read(path) {
         Ok(b) => b,
@@ -67,7 +78,9 @@ pub fn read_saved_dat(path: &Path) -> io::Result<Option<Tag>> {
     Ok(Some(root.tag))
 }
 
-/// `NbtIo.writeCompressed`, creating the parent folders.
+/// `NbtIo.writeCompressed`, creating the parent folders. The byte and depth
+/// caps of [`Limits::saved`] on the written NBT are Sunrise's guards: vanilla
+/// applies no read quota to what it writes.
 pub fn write_dat(path: &Path, tag: &Tag) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -617,7 +630,10 @@ fn fix_world_files_deferred(
     base: &Path,
     progress: &UpgradeProgress,
 ) -> io::Result<(i32, Option<Tag>)> {
-    let root = read_dat(&base.join("level.dat"))?.ok_or_else(|| invalid("missing level.dat"))?;
+    // The file fixer's first read keeps `NbtAccounter.defaultQuota()`, 2 MiB
+    // of estimated heap, unlike the level reads after it.
+    let root = read_dat_with_quota(&base.join("level.dat"), Some(nbt::NETWORK_NBT_QUOTA))?
+        .ok_or_else(|| invalid("missing level.dat"))?;
     let mut data = root
         .get("Data")
         .cloned()
@@ -842,6 +858,7 @@ fn staged_region_of(staging: &Path, mcc: &str) -> Option<PathBuf> {
 /// anew in `staging` and moved over the old one. A file without chunks (most
 /// of a large world's are empty) has nothing to fix and is left as it is.
 fn upgrade_region_file(path: &Path, staging: &Path, fix: &impl Fn(&mut Tag)) -> io::Result<()> {
+    // Its byte and depth caps are Sunrise's guards, on the read and the write.
     let limits = Limits::saved();
     let mut region = RegionFile::open(path)?;
     let positions: Vec<_> = region.chunks().map(|(p, _)| p).collect();
@@ -1603,5 +1620,115 @@ mod upgrade_tests {
         assert_eq!(items.len(), 1_000_001);
         drop(region);
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A list past the old default node cap (1,000,000 tags).
+    fn over_old_cap() -> Tag {
+        Tag::List(vec![Tag::Byte(1); 1_100_000])
+    }
+
+    /// A chunk past the old node cap and 256 sectors (stored uncompressed, so
+    /// it lives in its own `.mcc`) upgrades with its payload: the published
+    /// region reads the upgraded `.mcc`. A failed try leaves the original
+    /// region and its `.mcc` readable.
+    #[test]
+    fn region_upgrade_publishes_an_over_cap_external_chunk() {
+        let dir = std::env::temp_dir().join(format!("sunrise-big-mcc-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let mut tag = old_chunk(0, 0);
+        set(&mut tag, "Items", over_old_cap());
+        let root = NamedTag {
+            name: "".into(),
+            tag,
+        };
+        let pos = sunrise_core::position::ChunkPos::new(0, 0);
+        let record = ChunkRecord::from_nbt(&root, Compression::None, 7, Limits::saved()).unwrap();
+        let mut region = RegionFile::open_writable(dir.join("r.0.0.mca"), true).unwrap();
+        region.write(pos, &record).unwrap();
+        drop(region);
+        assert!(dir.join("c.0.0.mcc").is_file());
+        let read = |dir: &Path| {
+            let mut region = RegionFile::open(dir.join("r.0.0.mca")).unwrap();
+            let chunk = region.read(pos).unwrap().unwrap();
+            let tag = chunk.nbt(Limits::saved()).unwrap().tag;
+            let items = match tag.get("Items") {
+                Some(Tag::List(items)) => items.len(),
+                _ => 0,
+            };
+            (data_version(&tag, -1), items)
+        };
+        let progress = UpgradeProgress::new();
+        let run = Progress {
+            progress: &progress,
+            cancelable: true,
+        };
+        // A folder where the staged `.mcc` goes makes the writer fail.
+        fs::create_dir_all(dir.join(".datafix/c.0.0.mcc")).unwrap();
+        upgrade_regions_with_threads(&dir, &run, fix_overworld_chunk, 1).unwrap_err();
+        assert_eq!(read(&dir), (4000, 1_100_000));
+
+        fs::remove_dir(dir.join(".datafix/c.0.0.mcc")).unwrap();
+        upgrade_regions_with_threads(&dir, &run, fix_overworld_chunk, 1).unwrap();
+        assert!(!dir.join(".datafix").exists());
+        assert_eq!(read(&dir), (CURRENT, 1_100_000));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The file fixer's first level.dat read keeps vanilla's 2 MiB heap
+    /// quota (`NbtAccounter.defaultQuota`): a file whose bytes are well under
+    /// it but whose tags take more is refused, while the other reads take it.
+    #[test]
+    fn early_level_read_keeps_its_heap_quota() {
+        let base = std::env::temp_dir().join(format!("sunrise-early-quota-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let empty = Tag::Compound(Compound::new());
+        let data = Tag::compound([
+            ("DataVersion", Tag::Int(4899)),
+            ("Big", Tag::List(vec![empty; 100_000])),
+        ]);
+        let level = Tag::compound([("Data", data)]);
+        write_dat(&base.join("level.dat"), &level).unwrap();
+        let root = NamedTag {
+            name: JavaString::default(),
+            tag: level,
+        };
+        let raw = nbt::write_named(&root, Limits::saved()).unwrap();
+        assert!((raw.len() as u64) < nbt::NETWORK_NBT_QUOTA);
+
+        let error = fix_world_files_deferred(&base, &UpgradeProgress::new()).unwrap_err();
+        assert!(error.to_string().contains("heap quota"), "{error}");
+        assert!(read_dat(&base.join("level.dat")).unwrap().is_some());
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    /// A gzip player file and a plain (not gzip) saved data file past the old
+    /// node cap upgrade with their payload and the current version.
+    #[test]
+    fn dat_upgrade_round_trips_over_the_old_node_cap() {
+        let base = std::env::temp_dir().join(format!("sunrise-big-dat-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let level = Tag::compound([("Data", Tag::compound([("DataVersion", Tag::Int(4899))]))]);
+        write_dat(&base.join("level.dat"), &level).unwrap();
+        let big = Tag::compound([("DataVersion", Tag::Int(4899)), ("Big", over_old_cap())]);
+        write_dat(&base.join("players/data/a.dat"), &big).unwrap();
+        let storage = base.join("data/minecraft/command_storage.dat");
+        fs::create_dir_all(storage.parent().unwrap()).unwrap();
+        let root = NamedTag {
+            name: JavaString::default(),
+            tag: big,
+        };
+        fs::write(&storage, nbt::write_named(&root, Limits::saved()).unwrap()).unwrap();
+
+        upgrade_world_data(&base).unwrap();
+        for file in [base.join("players/data/a.dat"), storage] {
+            let tag = read_saved_dat(&file).unwrap().unwrap();
+            assert_eq!(data_version(&tag, -1), CURRENT, "{}", file.display());
+            let Some(Tag::List(items)) = tag.get("Big") else {
+                panic!("{} lost its list", file.display());
+            };
+            assert_eq!(items.len(), 1_100_000);
+        }
+        let _ = fs::remove_dir_all(&base);
     }
 }
