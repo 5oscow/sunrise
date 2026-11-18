@@ -39,4 +39,15 @@ Unknown fields are refused. `icon.png` has no manifest key: when present it must
 nonzero square PNG, at most 512 × 512 pixels and 256 KiB encoded. It is optional for both content
 and code mods; the scaffold does not create one.
 
-Injections belong in the same manifest as top-level `[[inject]]` tables. Changing game code itself is `[[native.mixin]]` ([Mixins](../../concepts/native-route/2-mixins.md)). See [Injections](../../concepts/injections.md) for the available forms and fields.
+Injections belong in the same manifest as top-level `[[inject]]` tables. See [Injections](../../concepts/injections.md)
+for the available forms and fields. To change game code itself, add `[[native.mixin]]` to `sunrise-mod.toml` and
+run `cargo sunrise-mod build`. Neither `internals sync` nor `inject update` is a step of a mixin build.
+
+## What a mixin cannot target
+
+For an unsupported macro in the game body or a `RETURN` target with `?`, use `HEAD` or hook a call to that
+function. Select sites outside closures, and use `AFTER_CALL` instead of `WRAP_OPERATION` to observe a call on a
+struct literal. Bind a plain `Self` result using the concrete impl type. If a lower-crate helper needs an import
+from a group, refer to the imported name explicitly or use its accessible full path. See
+[Mixins: what a mixin cannot target](../../concepts/native-route/2-mixins.md#what-a-mixin-cannot-target) for the
+reasons, selector spelling and other alternatives.
