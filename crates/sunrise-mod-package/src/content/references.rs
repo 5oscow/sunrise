@@ -74,6 +74,13 @@ pub fn check_references(content: &Content, manifest: &Manifest) -> Result<Findin
         code: manifest.native.is_some() || manifest.wasm.is_some(),
         jar: !manifest.jar.is_empty() || !manifest.dependencies.is_empty(),
         atlas: content.files.iter().any(atlas),
+        recipe_filters: content.files.iter().any(|name| {
+            name.strip_prefix("data/")
+                .and_then(|data| data.split_once('/'))
+                .is_some_and(|(_, path)| {
+                    path.starts_with("recipe_filter/") && path.ends_with(".json")
+                })
+        }),
         blocks: content.blocks.iter().map(|b| b.id.clone()).collect(),
         items: content
             .items
@@ -140,6 +147,8 @@ struct References<'a> {
     jar: bool,
     /// The mod has atlas sources, which can rename a sprite or take a whole directory.
     atlas: bool,
+    /// A filter file may remove recipes or replace a referenced input or result before decoding.
+    recipe_filters: bool,
     blocks: BTreeSet<String>,
     items: BTreeSet<String>,
     fluids: BTreeSet<String>,
@@ -430,8 +439,18 @@ impl References<'_> {
         };
         let mut ids = Vec::new();
         recipe_ids(&recipe, &mut ids);
+        // Do not try to reproduce the runtime's ordered filters over the merged recipe set.
+        let uncertainty = self
+            .recipe_filters
+            .then_some("a local recipe filter may remove the recipe or replace this reference");
         for (field, id) in ids {
-            self.id_in_registry(name, id, "item", &format!("the recipe item at {field}"));
+            self.id_in_registry(
+                name,
+                id,
+                "item",
+                &format!("the recipe item at {field}"),
+                uncertainty,
+            );
         }
         Ok(())
     }
@@ -443,7 +462,7 @@ impl References<'_> {
         let mut found = Vec::new();
         loot_table_ids(&table, &mut found);
         for (registry, id) in found {
-            self.id_in_registry(name, &id, registry, "the loot entry");
+            self.id_in_registry(name, &id, registry, "the loot entry", None);
         }
         Ok(())
     }
@@ -488,7 +507,13 @@ impl References<'_> {
             if let Some(tag) = id.strip_prefix('#') {
                 self.tag_reference(name, &field, id, tag, registry);
             } else if let Some(registry) = registry {
-                self.id_in_registry(name, id, registry, &format!("the tag value at {field}"));
+                self.id_in_registry(
+                    name,
+                    id,
+                    registry,
+                    &format!("the tag value at {field}"),
+                    None,
+                );
             }
         }
         Ok(())
@@ -532,9 +557,16 @@ impl References<'_> {
     }
 
     /// `id` of a vanilla-shaped registry the mod declares into, when it is in the mod's namespace
-    /// and the mod does not declare it: an error, or a warning when a `[[jar]]` layer could.
-    /// A mod with code is not asked: its code declares ids no file shows.
-    fn id_in_registry(&mut self, name: &str, id: &str, registry: &str, what: &str) {
+    /// and the mod does not declare it: an error unless a jar may declare it or the reference
+    /// may not be used. A mod with code is not asked: its code declares ids no file shows.
+    fn id_in_registry(
+        &mut self,
+        name: &str,
+        id: &str,
+        registry: &str,
+        what: &str,
+        uncertainty: Option<&str>,
+    ) {
         if self.code || self.own(id).is_none() {
             return;
         }
@@ -561,9 +593,12 @@ impl References<'_> {
             .map(|n| format!(" Did you mean {n}?"))
             .unwrap_or_default();
         let listed = self.listed(&known);
-        if self.jar {
+        let reason = uncertainty.or(self
+            .jar
+            .then_some("a [[jar]] layer or a dependency's jar may supply it"));
+        if let Some(reason) = reason {
             self.findings.warnings.push(format!(
-                "{name}: could not find {what} {id} among the {kind}s this mod declares ({listed}); if a [[jar]] layer or a dependency's jar supplies it, ignore this.{near} Otherwise fix the id."
+                "{name}: could not find {what} {id} among the {kind}s this mod declares ({listed}); {reason}.{near} Otherwise fix the id."
             ));
         } else {
             self.findings.errors.push(format!(
@@ -1111,6 +1146,28 @@ mod tests {
                 assert!(e[0].contains("gb:missing is not an item"));
             }
         }
+    }
+
+    #[test]
+    fn local_recipe_filters_make_unused_or_replaced_references_nonfatal() {
+        let file = "data/gb/recipe/slab.json";
+        let recipe = r#"{"type":"minecraft:stonecutting","ingredient":"gb:missing","result":{"id":"gb:slab"}}"#;
+        let filter = "data/gb/recipe_filter/nested/slab.json";
+        for action in [
+            r#""remove":true"#,
+            r#""replace_input":{"from":"gb:missing","to":"gb:shard"}"#,
+        ] {
+            let text = format!(r#"{{"filters":[{{"id":"gb:slab",{action}}}]}}"#);
+            let f = findings(MANIFEST, &[(file, recipe), (filter, &text)]);
+            assert!(f.errors.is_empty(), "{f:?}");
+            assert_eq!(f.warnings.len(), 1, "{f:?}");
+            assert!(f.warnings[0].starts_with(file));
+            assert!(f.warnings[0].contains("recipe filter"));
+        }
+        let e = errors(&[(file, recipe)]);
+        assert_eq!(e.len(), 1, "{e:?}");
+        assert!(e[0].starts_with(file));
+        assert!(e[0].contains("gb:missing is not an item"));
     }
 
     #[test]
