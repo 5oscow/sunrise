@@ -1700,6 +1700,11 @@ pub enum MobEvent {
         conn: Option<u32>,
         event: Box<MobEvent>,
     },
+    /// A finished drink whose item effects still need the world's living Host.
+    DrinkFinished {
+        mob: u32,
+        stack: crate::items::ItemStack,
+    },
     /// Squid.handleEntityEvent(19), resetting the remote tentacle cycle.
     SquidCycle {
         mob: u32,

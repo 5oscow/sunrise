@@ -208,6 +208,79 @@ fn replacing_the_consumed_hand_keeps_the_new_item_and_emits_no_remainder() {
     });
 }
 
+struct ObservePotion(Arc<Mutex<Vec<(String, bool)>>>);
+#[mod_api::__subscriptions]
+impl Hooks for ObservePotion {
+    fn consume_effect(&self, host: &mut dyn ServerHost, event: &mut ConsumeEffectEvent<'_>) {
+        let living = host.living(event.user).unwrap();
+        let breathing = host.effect_key("minecraft:water_breathing").unwrap();
+        let has_effect = living
+            .effects(host)
+            .unwrap()
+            .iter()
+            .any(|effect| effect.id == breathing);
+        assert_eq!(event.stack.count(), 1);
+        self.0
+            .lock()
+            .unwrap()
+            .push((event.kind.to_owned(), has_effect));
+    }
+}
+
+#[test]
+#[ignore = "daily"]
+fn potion_finishes_with_its_patched_effects_after_potion_contents() {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let mods = vec![ModEntry::new(
+        "potion_order",
+        Box::new(ObservePotion(seen.clone())),
+    )]
+    .into();
+    mod_platform::testing::with_mods(mods, || {
+        with_game(|game| {
+            let mut body =
+                sunrise_client::motion::PlayerMotion::new(game.motion, Vec3::new(0.0, 65.0, 0.0))
+                    .unwrap();
+            body.entity_id = 7;
+            game.player = Some(body);
+            game.bind_local_player_residency();
+            game.creative = false;
+            let mut potion =
+                ItemStack::new("minecraft:potion", 1).with_potion("minecraft:water_breathing");
+            potion.data_mut().set_other(
+                "minecraft:consumable",
+                Some(Tag::compound([(
+                    "on_consume_effects",
+                    Tag::List(
+                        [
+                            "potion_order:before_clear",
+                            "minecraft:clear_all_effects",
+                            "potion_order:after_clear",
+                        ]
+                        .map(|id| Tag::compound([("type", Tag::String(id.into()))]))
+                        .into(),
+                    ),
+                )])),
+            );
+            let info = game.items().get(&potion.item).unwrap().clone();
+            let slot = game.selected;
+            game.inventory[slot] = Some(potion.clone());
+            game.complete_using_item(slot, &potion, &info);
+            assert_eq!(
+                *seen.lock().unwrap(),
+                [
+                    ("potion_order:before_clear".into(), true),
+                    ("potion_order:after_clear".into(), false)
+                ]
+            );
+            assert_eq!(
+                game.held(),
+                Some(&ItemStack::new("minecraft:glass_bottle", 1))
+            );
+        });
+    });
+}
+
 struct FoxConsumption(Arc<Mutex<Vec<(mod_api::EntityRef, mod_api::ItemStack)>>>);
 #[mod_api::__subscriptions]
 impl Hooks for FoxConsumption {

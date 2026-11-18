@@ -116,12 +116,7 @@ impl Game<'_> {
         }
         // Consumable.onConsume applies these entries on the logical server only;
         // the client's listener, particles and sounds above still run there.
-        if self.is_logical_server() {
-            let user = self.consuming_player_entity();
-            for effect in &consumable.effects {
-                self.apply_consume_effect(stack, effect, None, user);
-            }
-        }
+        self.apply_consumable_effects(stack, &consumable.effects, None);
         let event = if consumable.animation == UseAnimation::Drink {
             "minecraft:drink"
         } else {
@@ -207,8 +202,6 @@ impl Game<'_> {
             remainder.map(|value| value.to_string()),
         )
         .map(std::sync::Arc::<str>::from);
-        let dim = self.dim;
-        let consumed = std::cell::OnceCell::new();
         let result: Result<bool, ()> = mod_api::run_transaction(self, |game, _| {
             {
                 let mut mobs = game.mobs.lift();
@@ -230,50 +223,11 @@ impl Game<'_> {
                         .restore(mobs, sunrise_client::join_seq::RestoreOrder::SpawnsFirst);
                     return Ok(false);
                 }
-                let mut can_finish = true;
-                for effect in &consumable.effects {
-                    if matches!(
-                        effect,
-                        ConsumeEffect::PlaySound(_) | ConsumeEffect::Native { .. }
-                    ) {
-                        // The level-style sound uses the user's block center and
-                        // category, not Entity.playSound's silent guard or RNG.
-                        // A lost body can make a built-in a no-op, but later custom
-                        // entries still receive this use's original user and stack.
-                        can_finish &= game
-                            .apply_consume_effect(
-                                &decision.stack,
-                                effect,
-                                Some(consumer),
-                                consumer.entity(),
-                            )
-                            .is_some();
-                    } else if let ConsumeEffect::TeleportRandomly(teleport) = effect {
-                        let consumed = consumed.get_or_init(|| consumed_snapshot(&decision.stack));
-                        let mut actor = FoxTeleporter {
-                            game,
-                            consumer,
-                            decision,
-                            dim,
-                            consumed: consumed.as_ref(),
-                        };
-                        can_finish &= teleport.apply(&mut actor, dim).is_ok();
-                    } else if let Some(mob) = game
-                        .mobs
-                        .iter_mut()
-                        .find(|m| m.id == decision.mob && m.alive() && !m.removed)
-                    {
-                        mob.apply_consume_effect(
-                            crate::game::entity::damage_level_of!(
-                                game,
-                                &sunrise_client::health::NO_ATTACK,
-                                no_push,
-                                None
-                            ),
-                            effect,
-                        );
-                    }
-                }
+                let can_finish = game.apply_consumable_effects(
+                    &decision.stack,
+                    &consumable.effects,
+                    Some((consumer, MobConsumption::Fox(decision))),
+                );
                 // A refusal (for example, a listener moved the fox under the
                 // pending teleport) still invalidates the original finish.
                 if !can_finish {
@@ -306,6 +260,113 @@ impl Game<'_> {
             Ok(decision.finish(m, position, remainder))
         });
         result.unwrap_or(false)
+    }
+
+    /// Run the original user's effective effect list, never re-reading its hand.
+    /// If a built-in can no longer act, continue the list but refuse the finish.
+    fn apply_consumable_effects(
+        &mut self,
+        stack: &ItemStack,
+        effects: &[ConsumeEffect],
+        mob_use: Option<(mod_api::LivingRef, MobConsumption<'_>)>,
+    ) -> bool {
+        if !self.is_logical_server() || effects.is_empty() {
+            return true;
+        }
+        let Some((consumer, usage)) = mob_use else {
+            let user = self.consuming_player_entity();
+            for effect in effects {
+                self.apply_consume_effect(stack, effect, None, user);
+            }
+            return true;
+        };
+        let id = consumer.entity().id();
+        let dim = self.dim;
+        let consumed = std::cell::OnceCell::new();
+        let mut can_finish = true;
+        for effect in effects {
+            match effect {
+                ConsumeEffect::PlaySound(_) | ConsumeEffect::Native { .. } => {
+                    can_finish &= self
+                        .apply_consume_effect(stack, effect, Some(consumer), consumer.entity())
+                        .is_some();
+                }
+                ConsumeEffect::TeleportRandomly(teleport) => {
+                    let consumed = consumed.get_or_init(|| consumed_snapshot(stack));
+                    let mut actor = MobTeleporter {
+                        game: self,
+                        consumer,
+                        id,
+                        usage,
+                        dim,
+                        consumed: consumed.as_ref(),
+                    };
+                    can_finish &= teleport.apply(&mut actor, dim).is_ok();
+                }
+                _ => {
+                    if let Some(mob) = self
+                        .mobs
+                        .iter_mut()
+                        .find(|m| m.id == id && m.alive() && !m.removed)
+                    {
+                        mob.apply_consume_effect(
+                            crate::game::entity::damage_level_of!(
+                                self,
+                                &sunrise_client::health::NO_ATTACK,
+                                no_push,
+                                None
+                            ),
+                            effect,
+                        );
+                    }
+                }
+            }
+        }
+        can_finish
+    }
+
+    /// Specialized player drinks have already applied their built-in component listener.
+    pub(super) fn apply_drink_effects(&mut self, stack: &ItemStack) {
+        if let Some(consumable) = self.consumable(stack) {
+            self.apply_consumable_effects(stack, &consumable.effects, None);
+        }
+    }
+
+    /// A witch or trader applied its ordinary drink behavior during AI. The
+    /// owning game now runs the list with the living host, before clearing the hand.
+    pub(super) fn finish_mob_drink(&mut self, id: u32, stack: &ItemStack) {
+        let usage = MobConsumption::Drink(stack);
+        if !self
+            .mobs
+            .iter()
+            .any(|mob| mob.id == id && usage.still_valid(mob, mob.position))
+        {
+            return;
+        }
+        let Some(consumer) = self.entity(id).and_then(|entity| self.living(entity)) else {
+            return;
+        };
+        let consumable = self.consumable(stack);
+        let result: Result<(), ()> = mod_api::run_transaction(self, |game, _| {
+            if let Some(consumable) = &consumable
+                && !game.apply_consumable_effects(
+                    stack,
+                    &consumable.effects,
+                    Some((consumer, usage)),
+                )
+            {
+                return Ok(());
+            }
+            if let Some(mob) = game
+                .mobs
+                .iter_mut()
+                .find(|mob| mob.id == id && usage.still_valid(mob, mob.position))
+            {
+                mob.extra.set_main_hand_stack(None);
+            }
+            Ok(())
+        });
+        let _ = result;
     }
 
     /// `LivingEntity.randomTeleport(x, y, z, true, avoid)`: down to the first
@@ -690,36 +751,56 @@ impl TeleportConsumeWorld for Teleporter<'_, '_> {
     }
 }
 
-/// A paused fox as the same `TeleportRandomlyConsumeEffect` user as a player.
-struct FoxTeleporter<'a, 'g> {
+#[derive(Clone, Copy)]
+enum MobConsumption<'a> {
+    Fox(&'a sunrise_client::mobs::fox::Consumption),
+    Drink(&'a ItemStack),
+}
+impl MobConsumption<'_> {
+    fn still_valid(self, mob: &sunrise_client::mobs::Mob, from: Vec3) -> bool {
+        match self {
+            Self::Fox(decision) => decision.still_valid_at(mob, from),
+            Self::Drink(stack) => {
+                mob.alive()
+                    && !mob.removed
+                    && mob.position == from
+                    && mob.extra.main_hand_stack() == Some(stack)
+            }
+        }
+    }
+}
+
+/// A paused mob as the same `TeleportRandomlyConsumeEffect` user as a player.
+struct MobTeleporter<'a, 'g> {
     game: &'a mut Game<'g>,
     consumer: mod_api::LivingRef,
-    decision: &'a sunrise_client::mobs::fox::Consumption,
+    id: u32,
+    usage: MobConsumption<'a>,
     dim: Dim,
     consumed: Option<&'a mod_api::ItemStack>,
 }
-impl FoxTeleporter<'_, '_> {
+impl MobTeleporter<'_, '_> {
     fn at(&self) -> Result<Vec3, ()> {
         self.game
             .mobs
             .iter()
-            .find(|m| m.id == self.decision.mob && m.alive() && !m.removed)
+            .find(|m| m.id == self.id && m.alive() && !m.removed)
             .map(|m| m.position)
             .ok_or(())
     }
 }
-impl TeleportConsumeWorld for FoxTeleporter<'_, '_> {
+impl TeleportConsumeWorld for MobTeleporter<'_, '_> {
     type Error = ();
     type Level = Dim;
     type Random = u32;
     type Source = LegacyRandom;
     fn position_field(&self) -> Vec3 {
         // get_random immediately refuses an absent actor before any draw or apply.
-        self.at().unwrap_or(self.decision.from)
+        self.at().unwrap_or_default()
     }
     fn get_random(&mut self) -> Result<u32, ()> {
         self.at()?;
-        Ok(self.decision.mob)
+        Ok(self.id)
     }
     fn random_source(&mut self, id: u32) -> &mut LegacyRandom {
         &mut self
@@ -740,12 +821,12 @@ impl TeleportConsumeWorld for FoxTeleporter<'_, '_> {
         self.game
             .mobs
             .iter()
-            .find(|m| m.id == self.decision.mob)
+            .find(|m| m.id == self.id)
             .map(|m| m.extra.passenger)
             .ok_or(())
     }
     fn stop_riding(&mut self) -> Result<(), ()> {
-        self.game.dismount_mob(self.decision.mob);
+        self.game.dismount_mob(self.id);
         Ok(())
     }
     fn position(&mut self) -> Result<Vec3, ()> {
@@ -766,12 +847,12 @@ impl TeleportConsumeWorld for FoxTeleporter<'_, '_> {
         }
         if self.game.dim != self.dim
             || !matches!(self.game.native_living_target(self.consumer),
-                Some(super::commands::Target::Mob(id)) if id == self.decision.mob)
+                Some(super::commands::Target::Mob(id)) if id == self.id)
             || !self
                 .game
                 .mobs
                 .iter()
-                .any(|m| self.decision.still_valid_at(m, from))
+                .any(|m| m.id == self.id && self.usage.still_valid(m, from))
         {
             return Err(());
         }
@@ -794,19 +875,21 @@ impl TeleportConsumeWorld for FoxTeleporter<'_, '_> {
         ))
     }
     fn teleport_event(&mut self, _: Dim, old: Vec3) -> Result<(), ()> {
-        let ctx = self
-            .game
-            .who_context(Some(Who::Mob(self.decision.mob)), None);
+        let ctx = self.game.who_context(Some(Who::Mob(self.id)), None);
         self.game
             .post_game_event("minecraft:teleport", [old.x, old.y, old.z], ctx);
         Ok(())
     }
     fn is_fox(&self) -> bool {
-        true
+        matches!(self.usage, MobConsumption::Fox(_))
     }
-    fn teleport_sound(&mut self, _: Dim, at: Vec3, _: bool) -> Result<(), ()> {
+    fn teleport_sound(&mut self, _: Dim, at: Vec3, fox: bool) -> Result<(), ()> {
         self.game.audio.play(
-            "minecraft:entity.fox.teleport",
+            if fox {
+                "minecraft:entity.fox.teleport"
+            } else {
+                "minecraft:item.chorus_fruit.teleport"
+            },
             Some([at.x, at.y, at.z]),
             1.0,
             1.0,
@@ -826,7 +909,7 @@ impl TeleportConsumeWorld for FoxTeleporter<'_, '_> {
             .game
             .mobs
             .iter_mut()
-            .find(|m| m.id == self.decision.mob)
+            .find(|m| m.id == self.id)
             .ok_or(())?;
         m.fall_distance = 0.0;
         Ok(())
