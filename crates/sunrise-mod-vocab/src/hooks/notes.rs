@@ -2771,9 +2771,8 @@ registration path.
   after the name and before the components, with the same `TooltipAppendContext` as appenders in `event.context`.
   `Hooks::item_tooltip` (NeoForge's `ItemTooltipEvent`) then gets every item's whole tooltip once it is
   complete, with the local player, the stack's `TooltipDisplay` and its `TooltipFlag` (`advanced`, `creative`),
-  and may add, change or remove any line. Version 2 also fires for `ItemResource::tooltip` queries, not just
-  the game's tooltips. A query from within a tooltip callback returns base lines without asking mods again.
-  Sunrise's creative search reads vanilla's exported tooltip text, so search tree builds do not fire it.
+  and may add, change or remove any line. Version 2 also fires for `ItemResource::tooltip` queries;
+  reentrant queries return base lines. Creative search uses exported lines and does not fire it.
 
 - Data component tooltip lines: `Registrar::register_tooltip_appender(component, placement, appender)` (NeoForge's
   `RegisterTooltipAppendersEvent`) gives one component's `TooltipAppender` a `TooltipPlacement`: `BeforeAll`, `AfterAll`,
