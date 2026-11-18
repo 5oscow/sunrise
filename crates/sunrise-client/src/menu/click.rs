@@ -75,17 +75,6 @@ impl Menu {
         button: i32,
         input: Input,
     ) -> Result<(), &'static str> {
-        self.click_step(env, slot_index, button, input)
-            .finish(self, env)
-    }
-
-    pub(super) fn click_step(
-        &mut self,
-        env: &Env,
-        slot_index: i32,
-        button: i32,
-        input: Input,
-    ) -> MenuStep<Result<(), &'static str>> {
         self.touch();
         let size = self.state.slots.len() as i32;
         let in_range = |i: i32| (0..size).contains(&i);
@@ -110,7 +99,7 @@ impl Menu {
                 }
             } else if self.state.quick_status == 1 {
                 if !in_range(slot_index) {
-                    return MenuStep::Done(Err(OUT_OF_BOUNDS));
+                    return Err(OUT_OF_BOUNDS);
                 }
                 let s = slot_index as usize;
                 let carried = self.state.carried.clone().expect("checked");
@@ -129,7 +118,7 @@ impl Menu {
                         let s = self.state.quick_slots[0] as i32;
                         let ty = self.state.quick_type;
                         self.reset_quick_craft();
-                        return self.click_step(env, s, ty, Input::Pickup);
+                        return self.click(env, s, ty, Input::Pickup);
                     }
                     let mut source = self.state.carried.clone().expect("checked");
                     let mut remaining = source.count as i64;
@@ -153,7 +142,7 @@ impl Menu {
                         )
                     {
                         self.reset_quick_craft();
-                        return MenuStep::Done(Ok(()));
+                        return Ok(());
                     }
                     for s in self.state.quick_slots.clone() {
                         let proof = self.equip_placement(env, s, carried);
@@ -196,15 +185,15 @@ impl Menu {
             } else {
                 self.reset_quick_craft();
             }
-            return MenuStep::Done(Ok(()));
+            return Ok(());
         }
         if self.state.quick_status != 0 {
             self.reset_quick_craft();
-            return MenuStep::Done(Ok(()));
+            return Ok(());
         }
         // A slot the mod's screen leaves out takes no click.
         if in_range(slot_index) && self.state.slots[slot_index as usize].role == Role::Hidden {
-            return MenuStep::Done(Ok(()));
+            return Ok(());
         }
         if matches!(input, Input::Pickup | Input::QuickMove) && (button == 0 || button == 1) {
             let primary = button == 0;
@@ -221,56 +210,43 @@ impl Menu {
                 }
             } else if input == Input::QuickMove {
                 if slot_index < 0 {
-                    return MenuStep::Done(Ok(()));
+                    return Ok(());
                 }
                 if !in_range(slot_index) {
-                    return MenuStep::Done(Err(OUT_OF_BOUNDS));
+                    return Err(OUT_OF_BOUNDS);
                 }
                 let s = slot_index as usize;
                 if !self.may_pickup(env, s) {
-                    return MenuStep::Done(Ok(()));
+                    return Ok(());
                 }
-                return MenuStep::repeat(self, env, (), move |menu, env, ()| {
-                    menu.quick_move_step(env, s)
-                        .then(menu, env, move |menu, _, clicked| {
-                            MenuStep::Done(
-                                if clicked.as_ref().is_some_and(|c| {
-                                    menu.slot(s).is_some_and(|now| same_item(now, c))
-                                }) {
-                                    std::ops::ControlFlow::Continue(())
-                                } else {
-                                    std::ops::ControlFlow::Break(Ok(()))
-                                },
-                            )
-                        })
-                });
+                let mut clicked = self.quick_move(env, s);
+                while let Some(c) = &clicked {
+                    if !self.slot(s).is_some_and(|now| same_item(now, c)) {
+                        break;
+                    }
+                    clicked = self.quick_move(env, s);
+                }
             } else {
                 if slot_index < 0 {
-                    return MenuStep::Done(Ok(()));
+                    return Ok(());
                 }
                 if !in_range(slot_index) {
-                    return MenuStep::Done(Err(OUT_OF_BOUNDS));
+                    return Err(OUT_OF_BOUNDS);
                 }
-                return self.pickup_step(env, slot_index as usize, primary).then(
-                    self,
-                    env,
-                    |_, _, ()| MenuStep::Done(Ok(())),
-                );
+                self.pickup(env, slot_index as usize, primary);
             }
         } else if input == Input::Swap && ((0..9).contains(&button) || button == 40) {
             if !in_range(slot_index) {
-                return MenuStep::Done(Err(OUT_OF_BOUNDS));
+                return Err(OUT_OF_BOUNDS);
             }
-            return self
-                .swap_step(env, slot_index as usize, button as usize)
-                .then(self, env, |_, _, ()| MenuStep::Done(Ok(())));
+            self.swap(env, slot_index as usize, button as usize);
         } else if input == Input::Clone
             && self.state.creative
             && self.state.carried.is_none()
             && slot_index >= 0
         {
             if !in_range(slot_index) {
-                return MenuStep::Done(Err(OUT_OF_BOUNDS));
+                return Err(OUT_OF_BOUNDS);
             }
             if let Some(stack) = self.slot(slot_index as usize) {
                 let mut copy = stack.clone();
@@ -283,7 +259,7 @@ impl Menu {
             }
         } else if input == Input::Throw && self.state.carried.is_none() && slot_index >= 0 {
             if !in_range(slot_index) {
-                return MenuStep::Done(Err(OUT_OF_BOUNDS));
+                return Err(OUT_OF_BOUNDS);
             }
             let s = slot_index as usize;
             let amount = if button == 0 {
@@ -291,44 +267,33 @@ impl Menu {
             } else {
                 self.slot(s).map_or(0, |c| c.count)
             };
-            return MenuStep::repeat(self, env, (), move |menu, env, ()| {
-                menu.safe_take_step(env, s, amount, u32::MAX).then(
-                    menu,
-                    env,
-                    move |menu, env, taken| {
-                        if let Some(taken) = &taken {
-                            menu.drop_stack(taken, env.items);
-                        }
-                        MenuStep::Done(
-                            if button == 1
-                                && taken.as_ref().is_some_and(|t| {
-                                    menu.slot(s).is_some_and(|now| same_item(now, t))
-                                })
-                            {
-                                std::ops::ControlFlow::Continue(())
-                            } else {
-                                std::ops::ControlFlow::Break(Ok(()))
-                            },
-                        )
-                    },
-                )
-            });
+            let mut taken = self.safe_take(env, s, amount, u32::MAX);
+            if let Some(t) = &taken {
+                self.drop_stack(t, env.items);
+            }
+            if button == 1 {
+                while let Some(t) = &taken {
+                    if !self.slot(s).is_some_and(|now| same_item(now, t)) {
+                        break;
+                    }
+                    taken = self.safe_take(env, s, amount, u32::MAX);
+                    if let Some(t) = &taken {
+                        self.drop_stack(t, env.items);
+                    }
+                }
+            }
         } else if input == Input::PickupAll && slot_index >= 0 {
             if !in_range(slot_index) {
-                return MenuStep::Done(Err(OUT_OF_BOUNDS));
+                return Err(OUT_OF_BOUNDS);
             }
-            return self.pickup_all_step(env, slot_index as usize, button).then(
-                self,
-                env,
-                |_, _, ()| MenuStep::Done(Ok(())),
-            );
+            self.pickup_all(env, slot_index as usize, button);
         }
-        MenuStep::Done(Ok(()))
+        Ok(())
     }
 
     /// The PICKUP branch of `doClick`: a bundle's override, else the
     /// plain click, ending with `slot.setChanged()`.
-    pub(super) fn pickup_step(&mut self, env: &Env, s: usize, primary: bool) -> MenuStep<()> {
+    pub(super) fn pickup(&mut self, env: &Env, s: usize, primary: bool) {
         self.touch();
         let (mut canceled, mut handled) = (false, false);
         if let Some(outcome) = env.stacked {
@@ -343,40 +308,21 @@ impl Menu {
             }
         }
         let handled = if canceled {
-            MenuStep::Done(handled)
+            handled
         } else {
-            self.bundle_click_step(env, s, primary)
+            self.bundle_click(env, s, primary)
         };
-        handled
-            .then(self, env, move |menu, env, handled| {
-                if handled {
-                    MenuStep::Done(())
-                } else {
-                    menu.pickup_inner_step(env, s, primary)
-                }
-            })
-            .then(self, env, move |menu, env, ()| {
-                menu.slot_changed(env, s);
-                MenuStep::Done(())
-            })
+        if !handled {
+            self.pickup_inner(env, s, primary);
+        }
+        self.slot_changed(env, s);
     }
 
-    pub(super) fn pickup_inner_step(&mut self, env: &Env, s: usize, primary: bool) -> MenuStep<()> {
+    pub(super) fn pickup_inner(&mut self, env: &Env, s: usize, primary: bool) {
         self.touch();
-        self.pickup_equip_carried_step(env, s, primary).then(
-            self,
-            env,
-            move |menu, env, handled| {
-                if handled {
-                    MenuStep::Done(())
-                } else {
-                    menu.pickup_plain_step(env, s, primary)
-                }
-            },
-        )
-    }
-
-    fn pickup_plain_step(&mut self, env: &Env, s: usize, primary: bool) -> MenuStep<()> {
+        if self.pickup_equip_carried(env, s, primary) {
+            return;
+        }
         let clicked = self.slot(s).cloned();
         match clicked {
             None => {
@@ -400,24 +346,18 @@ impl Menu {
                     } else {
                         clicked.count.div_ceil(2)
                     };
-                    if let Some(taken) = self.try_remove(env, s, amount, u32::MAX) {
+                    if let Some(mut taken) = self.try_remove(env, s, amount, u32::MAX) {
                         self.state.carried = Some(taken.clone());
-                        return self.on_take_step(env, s, taken).then(
-                            self,
-                            env,
-                            move |menu, env, mut taken| {
-                                if menu.state.slots[s].role == Role::CartoResult {
-                                    Self::map_crafted(env.maps, &mut taken);
-                                }
-                                if matches!(
-                                    menu.state.slots[s].role,
-                                    Role::CartoResult | Role::CraftResult
-                                ) {
-                                    menu.state.carried = Some(taken);
-                                }
-                                MenuStep::Done(())
-                            },
-                        );
+                        self.on_take(env, s, &mut taken);
+                        if self.state.slots[s].role == Role::CartoResult {
+                            Self::map_crafted(env.maps, &mut taken);
+                        }
+                        if matches!(
+                            self.state.slots[s].role,
+                            Role::CartoResult | Role::CraftResult
+                        ) {
+                            self.state.carried = Some(taken);
+                        }
                     }
                 }
                 Some(mut carried) => {
@@ -442,21 +382,15 @@ impl Menu {
                     } else if clicked.same_item_same_components(&carried) {
                         let room = Self::max_stack(env, &carried).saturating_sub(carried.count);
                         self.state.carried = Some(carried.clone());
-                        if let Some(taken) = self.try_remove(env, s, clicked.count, room) {
+                        if let Some(mut taken) = self.try_remove(env, s, clicked.count, room) {
                             if let Some(c) = self.state.carried.as_mut() {
                                 c.count += taken.count;
                             }
-                            return self.on_take_step(env, s, taken).then(
-                                self,
-                                env,
-                                move |menu, env, mut taken| {
-                                    if menu.state.slots[s].role == Role::CartoResult {
-                                        // onCraftedBy edits the taken stack, not the carried one.
-                                        Self::map_crafted(env.maps, &mut taken);
-                                    }
-                                    MenuStep::Done(())
-                                },
-                            );
+                            self.on_take(env, s, &mut taken);
+                            if self.state.slots[s].role == Role::CartoResult {
+                                // onCraftedBy edits the taken stack, not the carried one.
+                                Self::map_crafted(env.maps, &mut taken);
+                            }
                         }
                     } else {
                         self.state.carried = Some(carried);
@@ -465,56 +399,37 @@ impl Menu {
             },
             Some(_) => {}
         }
-        MenuStep::Done(())
     }
 
     /// The SWAP branch of `doClick`.
-    pub(super) fn swap_step(&mut self, env: &Env, target: usize, button: usize) -> MenuStep<()> {
+    pub(super) fn swap(&mut self, env: &Env, target: usize, button: usize) {
         self.touch();
         let inv_slot = button;
         let target_slot = self.state.slots[target];
         if target_slot.container == PLAYER && target_slot.index == inv_slot {
-            return MenuStep::Done(());
+            return;
         }
-        self.swap_equip_source_step(env, target, inv_slot).then(
-            self,
-            env,
-            move |menu, env, handled| {
-                if handled {
-                    MenuStep::Done(())
-                } else {
-                    menu.swap_plain_step(env, target, inv_slot)
-                }
-            },
-        )
-    }
-
-    fn swap_plain_step(&mut self, env: &Env, target: usize, inv_slot: usize) -> MenuStep<()> {
+        if self.swap_equip_source(env, target, inv_slot) {
+            return;
+        }
         let source = self.state.containers[PLAYER][inv_slot].clone();
         let target_stack = self.slot(target).cloned();
         if source.is_none() && target_stack.is_none() {
-            return MenuStep::Done(());
+            return;
         }
         match (source, target_stack) {
-            (None, Some(taken)) => {
+            (None, Some(mut taken)) => {
                 if self.may_pickup(env, target) {
                     self.state.containers[PLAYER][inv_slot] = Some(taken.clone());
                     self.set_by_player(env, target, None);
-                    return self.on_take_step(env, target, taken).then(
-                        self,
-                        env,
-                        move |menu, env, taken| {
-                            if menu.state.slots[target].role == Role::CraftResult {
-                                menu.state.containers[PLAYER][inv_slot] = Some(taken);
-                            } else if menu.state.slots[target].role == Role::CartoResult
-                                && let Some(stack) =
-                                    menu.state.containers[PLAYER][inv_slot].as_mut()
-                            {
-                                Self::map_crafted(env.maps, stack);
-                            }
-                            MenuStep::Done(())
-                        },
-                    );
+                    self.on_take(env, target, &mut taken);
+                    if self.state.slots[target].role == Role::CraftResult {
+                        self.state.containers[PLAYER][inv_slot] = Some(taken);
+                    } else if self.state.slots[target].role == Role::CartoResult
+                        && let Some(stack) = self.state.containers[PLAYER][inv_slot].as_mut()
+                    {
+                        Self::map_crafted(env.maps, stack);
+                    }
                 }
             }
             (Some(mut source), None) => {
@@ -530,35 +445,26 @@ impl Menu {
                     }
                 }
             }
-            (Some(mut source), Some(taken)) => {
+            (Some(mut source), Some(mut taken)) => {
                 if self.may_pickup(env, target) && self.may_place(env, target, &source) {
                     let max = self.slot_max(env, target, &source);
                     if source.count > max {
                         let part = split(&mut source, max);
                         self.state.containers[PLAYER][inv_slot] = Some(source);
                         self.set_by_player(env, target, Some(part));
-                        return self.on_take_step(env, target, taken).then(
-                            self,
-                            env,
-                            |menu, env, mut taken| {
-                                if !menu.inventory_add(env, &mut taken) {
-                                    menu.drop_stack(&taken, env.items);
-                                }
-                                MenuStep::Done(())
-                            },
-                        );
+                        self.on_take(env, target, &mut taken);
+                        if !self.inventory_add(env, &mut taken) {
+                            self.drop_stack(&taken, env.items);
+                        }
                     } else {
                         self.state.containers[PLAYER][inv_slot] = Some(taken.clone());
                         self.set_by_player(env, target, Some(source));
-                        return self
-                            .on_take_step(env, target, taken)
-                            .then(self, env, |_, _, _| MenuStep::Done(()));
+                        self.on_take(env, target, &mut taken);
                     }
                 }
             }
             (None, None) => {}
         }
-        MenuStep::Done(())
     }
 
     /// The PICKUP_ALL branch (double click).
@@ -680,54 +586,42 @@ impl Menu {
         self.state.slots[s].role != Role::CreativeDisplay
     }
 
-    pub(super) fn pickup_all_step(&mut self, env: &Env, s: usize, button: i32) -> MenuStep<()> {
-        use std::ops::ControlFlow::{Break, Continue};
+    pub(super) fn pickup_all(&mut self, env: &Env, s: usize, button: i32) {
         self.touch();
         let Some(carried) = self.state.carried.clone() else {
-            return MenuStep::Done(());
+            return;
         };
         if self.has_item(s) && self.may_pickup(env, s) {
-            return MenuStep::Done(());
+            return;
         }
         let total = self.state.slots.len() as i32;
         let (start, step) = if button == 0 { (0, 1) } else { (total - 1, -1) };
         let carried_max = Self::max_stack(env, &carried);
-        MenuStep::repeat(self, env, (0, start), move |menu, env, (pass, i)| {
-            if pass == 2 {
-                return MenuStep::Done(Break(()));
-            }
-            if i < 0
-                || i >= total
-                || menu.state.carried.as_ref().map_or(0, |c| c.count) >= carried_max
+        for pass in 0..2 {
+            let mut i = start;
+            while i >= 0
+                && i < total
+                && self.state.carried.as_ref().map_or(0, |c| c.count) < carried_max
             {
-                return MenuStep::Done(Continue((pass + 1, start)));
-            }
-            let t = i as usize;
-            let next = (pass, i + step);
-            let have = menu.state.carried.clone().expect("some");
-            if menu.has_item(t)
-                && menu.quick_replace(t, &have, env)
-                && menu.may_pickup(env, t)
-                && menu.can_take_for_pick_all(t)
-            {
-                let item = menu.slot(t).expect("has item").clone();
-                if pass != 0 || item.count != Self::max_stack(env, &item) {
-                    let room = carried_max - have.count;
-                    return menu.safe_take_step(env, t, item.count, room).then(
-                        menu,
-                        env,
-                        move |menu, _, removed| {
-                            if let Some(removed) = removed
-                                && let Some(c) = menu.state.carried.as_mut()
-                            {
-                                c.count += removed.count;
-                            }
-                            MenuStep::Done(Continue(next))
-                        },
-                    );
+                let t = i as usize;
+                i += step;
+                let have = self.state.carried.clone().expect("some");
+                if self.has_item(t)
+                    && self.quick_replace(t, &have, env)
+                    && self.may_pickup(env, t)
+                    && self.can_take_for_pick_all(t)
+                {
+                    let item = self.slot(t).expect("has item").clone();
+                    if pass != 0 || item.count != Self::max_stack(env, &item) {
+                        let room = carried_max - have.count;
+                        if let Some(removed) = self.safe_take(env, t, item.count, room)
+                            && let Some(c) = self.state.carried.as_mut()
+                        {
+                            c.count += removed.count;
+                        }
+                    }
                 }
             }
-            MenuStep::Done(Continue(next))
-        })
+        }
     }
 }

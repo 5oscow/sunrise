@@ -1,45 +1,6 @@
 //! Result-slot take handling, including pre-take revalidation and remainders.
 use super::*;
 impl Menu {
-    pub(super) fn mod_take_slot(&self, slot: usize) -> bool {
-        matches!(self.kind(), Kind::Mod(_))
-            && matches!(self.state.slots[slot].role, Role::Mod | Role::ModResult)
-    }
-
-    pub(super) fn on_take_step(
-        &mut self,
-        env: &Env,
-        s: usize,
-        taken: ItemStack,
-    ) -> MenuStep<ItemStack> {
-        self.take_step(env, s, taken, 0)
-    }
-
-    pub(super) fn take_step(
-        &mut self,
-        env: &Env,
-        s: usize,
-        mut taken: ItemStack,
-        quick_craft_amount: u32,
-    ) -> MenuStep<ItemStack> {
-        self.on_take(env, s, &mut taken);
-        if self.menu_slot_take_hook
-            && self.mod_take_slot(s)
-            && taken.count > 0
-            && env.loop_context.side() == LoopSide::Server
-        {
-            return MenuStep::Take {
-                event: TakeEvent {
-                    slot: s,
-                    taken: taken.clone(),
-                    quick_craft_amount,
-                },
-                resume: Box::new(move |_, _| MenuStep::Done(taken)),
-            };
-        }
-        MenuStep::Done(taken)
-    }
-
     pub(super) fn crafting_result_is_current(&self, env: &Env, slot: usize) -> bool {
         if !env.recipes.has_mod_crafting() {
             return true;
@@ -232,7 +193,8 @@ impl Menu {
                         Some(crate::crafting::Recipe::Mod(_))
                     ) =>
             {
-                env.recipes.remainders(id, &grid, n, &|s| env.remainder(s))
+                env.recipes
+                    .remainders(env.loop_context, id, &grid, n, &|s| env.remainder(s))
             }
             Some(_) => grid
                 .iter()

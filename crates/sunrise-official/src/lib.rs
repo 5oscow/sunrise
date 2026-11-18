@@ -8,11 +8,11 @@
 //! [`register`] adds them. Nothing here depends on an engine crate.
 #![forbid(unsafe_code)]
 
-use sunrise_platform::hooks::{self, GetTheGame, Hooks};
+use sunrise_platform::hooks::{self, ClientIdentity, GetTheGame, Hooks};
 use sunrise_platform::{pages, settings};
 
 /// Every Sunrise part in the game, in the order its hooks run.
-const PARTS: [&dyn Hooks; 5] = [
+const PARTS: [&dyn Hooks; 6] = [
     // The anonymous "I'm playing" ping.
     &sunrise_heartbeat::HOOKS,
     // Play with Friends: `friend:` addresses join through its tunnel.
@@ -23,6 +23,8 @@ const PARTS: [&dyn Hooks; 5] = [
     &sunrise_discord::HOOKS,
     // Open and Share for saved performance captures.
     &sunrise_perf_share::HOOKS,
+    // The client identity the official Horizon server requires.
+    &HORIZON_IDENTITY,
 ];
 /// The game started by hand without its prepared files: start it from the launcher, downloaded
 /// from Sunrise's website.
@@ -45,6 +47,40 @@ impl Hooks for LauncherPage {
     }
 }
 
+/// The official Horizon server requires the brand `horizon` and a payload offer on
+/// `horizon:payloads` before the client answers its known packs.
+static HORIZON_IDENTITY: HorizonIdentity = HorizonIdentity;
+
+struct HorizonIdentity;
+
+/// The ports a typed address to the server may carry besides none: its SRV target's and the
+/// default one (`ServerAddress.DEFAULT_PORT`).
+const HORIZON_PORTS: [u16; 2] = [24454, 25565];
+
+/// Whether the address as typed names the Horizon server: its host ignoring ASCII case and one
+/// trailing dot, with no port or one of [`HORIZON_PORTS`].
+fn is_horizon_server(address: &str) -> bool {
+    let host = match address.rsplit_once(':') {
+        Some((host, port)) => match port.parse::<u16>() {
+            Ok(port) if HORIZON_PORTS.contains(&port) => host,
+            _ => return false,
+        },
+        None => address,
+    };
+    let host = host.strip_suffix('.').unwrap_or(host);
+    host.eq_ignore_ascii_case(sunrise_addresses::HORIZON_SERVER)
+}
+
+impl Hooks for HorizonIdentity {
+    fn client_identity(&self, server: &str) -> Option<ClientIdentity> {
+        is_horizon_server(server).then(|| ClientIdentity {
+            brand: "horizon".to_owned(),
+            // An offer declaring nothing: revision 1, no records.
+            payloads: vec![("horizon:payloads".to_owned(), vec![1, 1, 0])],
+        })
+    }
+}
+
 /// Their settings, in the player's settings files.
 const STORES: [&dyn settings::Store; 1] = [&sunrise_discord::SETTING];
 /// Their rows and pages in the options screens.
@@ -59,6 +95,43 @@ pub fn register() {
         if let Err(e) = result {
             // The executable registered after starting the game: a bug, not a player's problem.
             log::warn!("Sunrise: an in-game part did not register: {e}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_the_official_horizon_server_gets_its_identity() {
+        let identity = |server: &str| HORIZON_IDENTITY.client_identity(server);
+        let expected = Some(ClientIdentity {
+            brand: "horizon".to_owned(),
+            payloads: vec![("horizon:payloads".to_owned(), vec![1, 1, 0])],
+        });
+        for server in [
+            "play.playhorizon.dev",
+            "PLAY.PlayHorizon.DEV",
+            "play.playhorizon.dev.",
+            "play.playhorizon.dev:24454",
+            "play.playhorizon.dev:25565",
+            "Play.PlayHorizon.dev.:24454",
+        ] {
+            assert_eq!(identity(server), expected, "{server}");
+        }
+        for server in [
+            "play.playhorizon.dev:25566",
+            "play.playhorizon.dev:",
+            "play.playhorizon.dev:abc",
+            "play.playhorizon.dev..",
+            "eu.play.playhorizon.dev",
+            "playhorizon.dev",
+            "example.org:24454",
+            "127.0.0.1",
+            "",
+        ] {
+            assert_eq!(identity(server), None, "{server}");
         }
     }
 }

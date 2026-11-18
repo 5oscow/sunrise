@@ -5,13 +5,13 @@
 use super::*;
 use build_mode::ModKind;
 use instance_mods::ModRow;
+use sunrise_launcher::native_mods::fit::{Change, Misfit};
 use sunrise_launcher::native_mods::{
     self as nm,
     fit::{self, Verdict},
     sdk_cache::Refusal as Sdk,
     Route, Step,
 };
-use sunrise_mod_package::mod_surface::uses::{Change, Misfit};
 
 /// What a preview puts in place of what the launcher reads from disk.
 #[derive(Default)]
@@ -310,6 +310,7 @@ impl Launcher {
                     to,
                     summary,
                     worlds,
+                    blocked: false,
                 });
                 self.mod_preview.state = Some(native_status::State::UpToDate);
             }
@@ -325,14 +326,14 @@ impl Launcher {
                         "hitbox-plus",
                         Verdict::Exact {
                             made_for: MADE_FOR.into(),
-                            why: "native",
+                            why: "native".into(),
                         },
                     ),
                     (
                         "deep-tools",
                         Verdict::Exact {
                             made_for: MADE_FOR.into(),
-                            why: "internals",
+                            why: "internals".into(),
                         },
                     ),
                     (
@@ -403,7 +404,7 @@ impl Launcher {
             }
             ("trust", "registry") => {
                 let (reply, _answer) = std::sync::mpsc::channel();
-                let inventory = nm::RegistryInventory {
+                let inventory = nm::Consent {
                     added_crates: 4,
                     build_scripts: vec!["libz-sys".into()],
                     proc_macros: vec!["serde_derive".into()],

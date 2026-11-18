@@ -60,17 +60,17 @@ The helper file holds exactly one function: private, safe, with no attributes an
 | --- | --- | --- |
 | `HEAD` | at the start of the function | `()`, or `ControlFlow<()>` with `cancellable = true` |
 | `RETURN` | on the value the function returns (`$value`) | the value to return |
-| `OVERWRITE` | instead of the whole body; one mod per function | the function's return type |
+| `OVERWRITE` | instead of the whole body; one mod per function. Needs `fingerprint`, the pin of the function it replaces: a line the game later adds to that function would otherwise vanish silently, so the build refuses a changed function (see `E_FINGERPRINT`) | the function's return type |
 | `BEFORE_CALL`, `AFTER_CALL` | before or after one call in the body | `()` |
 | `AFTER_ASSIGN` | after one statement that stores a call's result (`let x = f();`, `x = f();`) | `()` |
 | `MODIFY_ARG`, `MODIFY_ARGS` | on one argument, or all arguments as a tuple, of one call | the new argument(s) |
 | `MODIFY_CONSTANT` | on one literal in the body | the new value |
 | `MODIFY_VARIABLE` | on one read or write of a local or parameter | the new value |
 | `MODIFY_EXPRESSION_VALUE` | on the value of one call in the body (`$value`) | the new value |
-| `WRAP_OPERATION` | around one call, which you get as `$operation` and may run or not | the call's type |
+| `WRAP_OPERATION` | around one call, which you get as `$operation` and may run or not. The receiver and arguments run at the call site, in order, before the wrapper. The wrapper's declared types are expected types for the game's own expressions, and the tool guards only part of that. Receiver: it must be a reference parameter of the target function (`engine.go`, declared as the parameter's own reference type); a computed receiver, a call result such as `res(ok)?.read` or `choose(1)?.read()`, is refused with `E_OPERATION_SIGNATURE` whatever it is declared as, by value or by reference, since `choose(1)?.read()` declared `Choice<i64>` is another call than the game's. Binding the receiver to a local in the game's code does not make it a row. Arguments: one that carries a `?`, an `unsafe` block, a `const` block or a try block is refused with `E_UNSUPPORTED_CONTROL_FLOW` (`scale(default_value(0.1)?)` declared `f32` converts `0.1` through `f32`); a plain block elsewhere in the call is not refused. Not guarded: an ordinary argument, such as the literal in `width(1)`, takes the type its binding declares, and a named receiver's type is compared by its spelling, so declare exactly the game's types. Wrapping a computed receiver is planned as follow-up work | the call's type; a callee that declares no return type gives `()`, so `impl FnOnce(A)` and `impl FnOnce(A) -> ()` are the same operation |
 
 The other kinds act on one place in the body, which a `selector` names as source text. For a call, write the
-callee without arguments: `autosave_interval` or `self.next_autosave_interval`. For
+callee without arguments: `autosave_interval` or `self.next_autosave_interval`. A bare method name finds no method call: a method's selector writes its receiver as source text, `make()?.method`, and a count of 0 for a bare name called as a method here names that selector when it can be written. For
 `MODIFY_EXPRESSION_VALUE`, write the whole expression: `autosave_interval(rate)`. `MODIFY_VARIABLE` uses
 `variable` instead. `require` is how many matches the body has (inside `slice`, if set), and `ordinal` picks one, from 0.
 
@@ -88,6 +88,7 @@ callee without arguments: `autosave_interval` or `self.next_autosave_interval`. 
 | `variable` | `MODIFY_VARIABLE` | `{ name, ordinal, at = "LOAD" or "STORE", parameter = true for a parameter }`. It replaces `selector`; `require` and `ordinal` then count accesses. |
 | `priority` | no | Orders rows of several mods at one place: **higher** runs first. The default is 100. (Loop slots run the other way.) |
 | `result` | `MODIFY_ARGS`, and `AFTER_CALL` reading the result | The selected call's result type. Refused on other kinds. |
+| `fingerprint` | `OVERWRITE` (required), any other kind (optional) | A hash of the tokens of the target function's staged signature and body for the active build: any change to those tokens changes it, while ordinary comments and layout do not, outer attributes are not part of it, and a `cfg` that differs in the active build can change it. It therefore changes whenever the function changes in a new game build. A row whose target differs is refused with `E_FINGERPRINT`, which names the current value as `got`. On an `OVERWRITE` row, leave the pin out once and copy `got` from the refusal; on any other kind an omitted pin is not checked and nothing prints the hash, so a stale pin's refusal is where you read it. Never compute it from the original source text: the build stages a copy of the function. When the game changes the function, read the new function, check your replacement still suits it, then update the value. |
 | `slice`, `argument` | no | `slice = { from = { selector, ordinal, require } }` narrows the search to a region; `argument` picks an argument. Both are in the tool's docs below. |
 
 | Tool `value` | The helper gets |
@@ -95,7 +96,7 @@ callee without arguments: `autosave_interval` or `self.next_autosave_interval`. 
 | `$value` | The value being changed: the return value, the expression's value, or the argument, constant or variable. |
 | `$arg0`, `$arg1`, … | An argument of the selected call (`WRAP_OPERATION`). |
 | `$args` | All arguments of the selected call, as a tuple (`MODIFY_ARGS`). |
-| `$receiver` | The receiver of a selected method call (`WRAP_OPERATION`); the first binding, and the operation's first parameter. |
+| `$receiver` | The receiver of a selected method call (`WRAP_OPERATION`); the first binding, and the operation's first parameter. It is a reference parameter of the target function, declared as that parameter's own reference type. A computed receiver (a call result) is refused: see `WRAP_OPERATION`. |
 | `$operation` | The selected call, as `impl FnOnce(args) -> result` (`WRAP_OPERATION`); the last binding. |
 | `$local:NAME:N`, `$local_ref:NAME:N`, `$local_mut:NAME:N` | The `N`th local named `NAME` in the body, from 0: by value, `&` or `&mut`. |
 
@@ -128,7 +129,7 @@ These functions are refused:
 - generic over types or consts, or inside an `impl` block that is;
 - taking `impl Trait`, returning `!`, or taking `self` by value;
 - `const`, `async`, `unsafe` or `#[inline(always)]`;
-- existing only under a `cfg`;
+- existing only under a `cfg` the signed build does not compile in (the function is then absent from the build);
 - a body that declares a `static`, thread-local, `macro_rules!` or `impl`;
 - a body that uses a location-dependent macro such as `file!`, `line!`, `module_path!`, `include!` or `env!`;
 - a body that uses a non-exported crate-local macro defined outside its module path. Macros defined
@@ -136,10 +137,12 @@ These functions are refused:
 
 The one generic function you can target is a [published loop's body](3-loops.md#mixins-on-the-loop).
 
+The tool plans against what the patch library compiles. The launcher gives it the build's cfg set (the target's options and the features the prebuilt game was built with), and it drops the items, statements, fields, variants, parameters and match arms under an inactive `cfg` and expands `cfg_attr`. A function with an inner `#[cfg(test)] fn helper()` or a `#[cfg(feature = "x")]` statement takes its mixins like any other. The features are the game crate's: a `feature` predicate is decided only in the game crate's own functions. In a function of a crate below it (`sunrise_world`, say) it stays undecided, since that crate's resolved features are not the game's, and is refused. `unix`, `target_os` and the other options hold for every crate. The tool decides only what the signed build vouches for: `feature` in the game crate (from the game's feature list), `test` (the patch library is not a test build, so it is off), and the target facts that follow from the validated target (`target_os`, `target_family`, `unix`, `windows`, `target_arch`, `target_pointer_width`, `target_endian`, `target_env`, `target_vendor`, `target_abi`), read from the printed set and compared on their full values. Everything that depends on compiler flags (`debug_assertions`, `overflow_checks`, `panic`, `target_feature`, `relocation_model`, `sanitize*`, `doc`, `miri`) or on the original build's build script (any custom name) is undecided in both directions, listed or not. A `cfg` the set cannot decide (`version(..)`, `accessible(..)`, an expression-level attribute, a `feature` outside the game crate, a flag-dependent or custom name) is refused with `E_UNSUPPORTED_CFG`. This reduces the source inside a function the route already lets a row target; a function that carries a `cfg` or `cfg_attr` of its own is still not replaceable, active or not.
+
 ## With other mods
 
 Several mods' rows on one function all apply. An `OVERWRITE` must be the only mixin on its function,
-from any mod including its own. An `[[inject]]` listener may share a function with mixins: head listeners run first, then the
+from any mod including its own, and that includes a `HEAD` or a `WRAP_OPERATION` inside it. The tool plans every mod selected for a native build together, so a conflict between mods is found when they are built together, not when one package is checked, and not when an already built library loads. An `[[inject]]` listener may share a function with mixins: head listeners run first, then the
 mixed-in function, then return listeners.
 
 ## Errors
@@ -158,7 +161,8 @@ A row the build can't apply stops the build, naming the mod, the row and the rea
 | | `<target>: <reason>`, such as ``it is generic over types or takes `impl Trait` …`` | Target a caller or callee that can be copied. |
 | `E_MIXIN_SOURCE` | `<target>: <why>`, such as `<file> differs from this game build's functions.json` | The game's source could not be read, or is not the build's: retry the build. |
 | `E_MIXIN_INDEX` | `<path>: …: the game build's SDK has no function index …`, or `functions.json describes game build <commit>, not <commit>` | The SDK on disk is damaged or another build's: fetch the SDK again. |
-| `E_OVERWRITE_CONFLICT` | from the tool: `OVERWRITE must be exclusive on <function>; competing injections: <mod>/<row>, …` | Keep only one of those mods installed. |
+| `E_OVERWRITE_CONFLICT` | from the tool: `OVERWRITE must be exclusive on <function>; competing injections: <mod>/<row>, …`; it names every row, of any mods, on the function | For competing rows of one mod, remove one of those rows. For rows of different mods, keep only one of those mods installed. |
+| `E_FINGERPRINT` | from the tool: `original function changed; expected <hash>, got <hash>`, or for an `OVERWRITE` with none: ``OVERWRITE requires the `fingerprint` of the function it replaces; expected <none>, got <hash>`` | Check the game's new function still suits your replacement, then set `fingerprint` to the `got` value. |
 | `E_LOOP_ENTRY_REPLACED` | see [Published loops](3-loops.md#errors) | |
 | `E_MIXINS_PATCH` | `tools/mixins/narrow-reference-rule.patch does not apply to horizon-mixins <commit>: <why>` | Not your mod: report it on the game. |
 

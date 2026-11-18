@@ -2,8 +2,7 @@
 
 Capture fixtures substitute winit; the raw-motion fixture uses the real mouse
 accumulator and rotation math. Method bodies come from the client, so assertions
-observe capture and camera outcomes. Native OS routing is checked separately by
-`tools/splitscreen_e2e.py --only native_pointer` on macOS. Vanilla 26.3 reference:
+observe capture and camera outcomes. Vanilla 26.3 reference:
 LevelLoadingScreen.tick/onClose, Gui.setScreen, MouseHandler.grabMouse/releaseMouse.
 """
 from pathlib import Path
@@ -141,7 +140,6 @@ struct Options { offscreen: bool }
 struct ServerPacks { prompt: Option<()> }
 struct Game {
     focused: bool, agent_pointer: bool, window: Option<Window>, mouse: Mouse,
-    keyboard_mouse: bool, split_window: bool, view_at: [u32; 2],
     captured: bool, capture_mode: Option<CursorGrabMode>, regrab_on_refocus: bool, title: Option<()>, screen: Screen,
     remote: Option<Remote>,
     studio: Studio, replay: Replay,
@@ -153,7 +151,6 @@ struct Game {
 impl Default for Game {
     fn default() -> Self {
         Self { focused: true, agent_pointer: false, window: Some(Window::default()),
-            keyboard_mouse: true, split_window: false, view_at: [0, 0],
             mouse: Mouse::default(), captured: false, capture_mode: None, regrab_on_refocus: false, title: None,
             screen: Screen::Playing, remote: None, studio: Studio::default(), replay: Replay::default(),
             mining: false, lan_acting: None,
@@ -168,7 +165,7 @@ impl Game {
     fn stop_mining(&mut self) { self.mining = false; }
     fn studio_up(&self) -> bool { self.replay.playing() || self.studio.flying() }
     fn reset_inventory_clicks(&mut self) {}
-    fn restore_held_keys(&mut self) {}
+    fn restore_held_keys(&mut self) {} // This fixture exercises pointer state, not key mappings.
     fn dialog_open(&self) -> bool { false }
     fn scripted_run(&self) -> bool { self.scripted }
     fn handle_window_event(&mut self, _: &dyn EventLoopCtl, _: WindowId, event: WindowEvent,
@@ -310,52 +307,18 @@ fn main() {
         assert!(!game.captured);
         assert!(!game.studio.rmb_down);
     }
-    // A controller-only player's screens leave the shared native pointer alone.
+    // The native pointer and the GUI cursor are centred in their own units.
     {
         let mut game = Game::default();
-        game.keyboard_mouse = false;
-        game.captured = true;
-        game.mining = true;
-        for capture in [false, true] {
-            game.capture(capture);
-            assert!(!game.captured);
-            assert!(!game.mining);
-            let window = game.window.as_ref().unwrap();
-            assert_eq!(window.grabs.get(), 0);
-            assert_eq!(window.warps.get(), 0);
-            assert!(!window.visible.get()); // No change to native visibility.
-        }
-    }
-    // The owning player's warp includes its view's offset in the shared window;
-    // its menu cursor remains in local GUI coordinates.
-    {
-        let mut game = Game::default();
-        game.view_at = [1200, 400];
         game.renderer = Some(Renderer { config: Config { width: 1000, height: 600 } });
         game.capture(true);
         assert!(game.captured);
-        assert_eq!(game.window.as_ref().unwrap().at.get(), (1700.0, 700.0));
+        assert_eq!(game.window.as_ref().unwrap().at.get(), (500.0, 300.0));
         assert_eq!(game.cursor, (250.0, 150.0));
         game.capture(false);
         assert!(!game.captured);
-        assert_eq!(game.window.as_ref().unwrap().at.get(), (1700.0, 700.0));
+        assert_eq!(game.window.as_ref().unwrap().at.get(), (500.0, 300.0));
         assert_eq!(game.cursor, (250.0, 150.0));
-    }
-    // A composited view still has a visible native window. Its owner must grab,
-    // hide and release the real pointer even though its renderer is offscreen.
-    {
-        let mut game = Game::default();
-        game.options.offscreen = true;
-        game.split_window = true;
-        game.window.as_ref().unwrap().visible.set(true);
-        game.capture(true);
-        assert!(game.captured);
-        let window = game.window.as_ref().unwrap();
-        assert_eq!(window.grabs.get(), 1, "split owner must grab the native pointer");
-        assert!(!window.visible.get());
-        game.capture(false);
-        assert!(!game.captured);
-        assert!(game.window.as_ref().unwrap().visible.get());
     }
     // `--offscreen` shows no window: the grab is the game's own, and the system
     // pointer is never grabbed, warped or hidden.
@@ -545,7 +508,7 @@ fn main() {
 
 
     @unittest.skipUnless(shutil.which("rustc"), "requires Rust")
-    def test_native_split_mouse_turns_only_its_owner(self):
+    def test_native_mouse_turns_only_during_active_gameplay(self):
         source = "".join((ROOT / "crates/sunrise-client/src" / path).read_text(encoding="utf-8")
                           for path in ("game/runtime/window_handler.rs", "game.rs"))
         fixture = r'''
@@ -565,7 +528,7 @@ struct Radial(bool);
 impl Radial { fn is_open(&self) -> bool { self.0 } }
 struct Pad { radial: Radial }
 struct Game {
-    pending_save: Option<()>, captured: bool, focused: bool, keyboard_mouse: bool, split_window: bool,
+    pending_save: Option<()>, captured: bool, focused: bool,
     options: Options, screen: Screen, mouse: MouseLook, last_input: Instant, pad: Pad, scripted: bool,
     unclaimed_window: bool,
 }
@@ -580,23 +543,20 @@ impl Game {
 METHOD
 }
 fn main() {
-    // (offscreen renderer, compositor, keyboard/mouse owner, active, gameplay, saving, the pad's
-    // radial menu open, a scripted run, an agent's window no one has clicked yet).
-    for (offscreen, split, owner, active, playing, saving, radial, scripted, unclaimed, turns) in [
-        (false, false, true, true, true, false, false, false, false, true),
-        (true, true, true, true, true, false, false, false, false, true),
-        (true, true, false, true, true, false, false, false, false, false),
-        (true, false, true, true, true, false, false, false, false, false),
-        (true, true, true, false, true, false, false, false, false, false),
-        (true, true, true, true, false, false, false, false, false, false),
-        (true, true, true, true, true, true, false, false, false, false),
-        (false, false, true, true, true, false, true, false, false, false),
-        (false, false, true, true, true, false, false, true, false, false),
-        (false, false, true, true, true, false, false, false, true, false),
+    // (offscreen, active, gameplay, saving, radial menu, scripted run, unclaimed window, turns).
+    for (offscreen, active, playing, saving, radial, scripted, unclaimed, turns) in [
+        (false, true, true, false, false, false, false, true),
+        (true, true, true, false, false, false, false, false),
+        (false, false, true, false, false, false, false, false),
+        (false, true, false, false, false, false, false, false),
+        (false, true, true, true, false, false, false, false),
+        (false, true, true, false, true, false, false, false),
+        (false, true, true, false, false, true, false, false),
+        (false, true, true, false, false, false, true, false),
     ] {
         let mut game = Game {
             pending_save: saving.then_some(()), captured: true, focused: active,
-            keyboard_mouse: owner, split_window: split, options: Options { offscreen },
+            options: Options { offscreen },
             screen: if playing { Screen::Playing } else { Screen::Paused },
             mouse: MouseLook::default(), last_input: Instant::now(), pad: Pad { radial: Radial(radial) },
             scripted, unclaimed_window: unclaimed,
@@ -609,36 +569,13 @@ fn main() {
         rotation.turn(x, y);
         let want = if turns { (3.0, -1.5) } else { (0.0, 0.0) };
         assert!((rotation.y_rot - want.0).abs() < 0.00001 && (rotation.x_rot - want.1).abs() < 0.00001,
-            "rotation=({}, {}), offscreen={offscreen}, split={split}, owner={owner}, active={active}, playing={playing}, saving={saving}, radial={radial}, scripted={scripted}, unclaimed={unclaimed}", rotation.y_rot, rotation.x_rot);
+            "rotation=({}, {}), offscreen={offscreen}, active={active}, playing={playing}, saving={saving}, radial={radial}, scripted={scripted}, unclaimed={unclaimed}", rotation.y_rot, rotation.x_rot);
     }
 }
 '''
         fixture = fixture.replace("MOUSE_PATH", (ROOT / "crates/sunrise-client-input/src/mouse.rs").as_posix())
         fixture = fixture.replace("METHOD", method(source, "device_event"))
         self.run_fixture(fixture, "native-mouse")
-
-    @unittest.skipUnless(shutil.which("rustc"), "requires Rust")
-    def test_split_layout_keeps_capture_in_the_same_window(self):
-        source = (next(ROOT.glob('crates/sunrise-client/src/game/*/split/windows.rs'))).read_text(encoding="utf-8")
-        body = function(source.replace("pub(super) fn", "pub fn"), "into_window").replace("Game<'_>", "Game")
-        fixture = r'''
-use std::sync::Arc;
-struct Window(usize);
-impl Window { fn id(&self) -> usize { self.0 } }
-struct Game { captured: bool, window: Option<Arc<Window>> }
-impl Game { fn capture(&mut self, captured: bool) { self.captured = captured; } }
-FUNCTION
-fn main() {
-    let first = Arc::new(Window(1));
-    let mut game = Game { captured: true, window: Some(first.clone()) };
-    into_window(&mut game, first.clone());
-    assert!(game.captured, "a player joining or a layout resize must not release P1's existing native window");
-    into_window(&mut game, Arc::new(Window(2)));
-    assert!(!game.captured, "moving to a different native window releases the previous grab");
-    assert_eq!(game.window.as_ref().unwrap().id(), 2);
-}
-'''.replace("FUNCTION", body)
-        self.run_fixture(fixture, "split-window")
 
     def run_fixture(self, fixture, name):
         with tempfile.TemporaryDirectory(prefix="sunrise-input-") as folder:

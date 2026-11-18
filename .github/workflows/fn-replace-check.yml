@@ -21,6 +21,10 @@ on:
         description: The commit to check (the daily run's)
         type: string
         default: ''
+      self_hosted:
+        description: The caller's pool routing (true or false), decided when its run started; empty routes here
+        type: string
+        default: ''
   workflow_dispatch:
 permissions:
   contents: read
@@ -54,7 +58,15 @@ jobs:
           # Only dispatches (the daily run's included) run this workflow, from this repository.
           SAME_REPO: true
           EVENT: ${{ github.event_name }}
-        run: bash tools/ci/dyna_ci_route.sh >> "$GITHUB_OUTPUT"
+          # The daily run routes at its start: this job starts after the SDK's Linux legs, past the hour within which
+          # the run's lease snapshot is judged, so routing here would send the check to GitHub's runners.
+          GIVEN: ${{ inputs.self_hosted }}
+        run: |
+          case "$GIVEN" in
+            true | false) echo "self_hosted=$GIVEN" >> "$GITHUB_OUTPUT" ;;
+            '') bash tools/ci/dyna_ci_route.sh >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::self_hosted is true, false or empty, not '$GIVEN'"; exit 1 ;;
+          esac
   fn-replace-check:
     needs: route
     runs-on: ${{ needs.route.outputs.self_hosted == 'true' && 'dyna-large' || 'ubuntu-latest' }}
@@ -204,7 +216,7 @@ jobs:
       - name: Function replacement check (build and link)
         run: |
           # api_only has no [native] row; beside alpha the mixed set still takes the engine route.
-          FNR_ROUTE=prebuilt FNR_MODS="alpha beta one ten fdshape support registry lower loop loop_second api_only" \
+          FNR_ROUTE=prebuilt FNR_MODS="alpha beta one ten fdshape support registry wasmtime lower loop loop_second api_only" \
             tools/ci/fn_replace_check.sh "$LAUNCHER" "$FNR_SCRATCH/sdk-base" "$FNR_SCRATCH/check" 2>&1 \
             | tee "$FNR_SCRATCH/fnr-check.log"
           grep -E 'Function replacement:|: [0-9]+ ms$|^Mods compiled against the prebuilt game in |^Runner load:' \

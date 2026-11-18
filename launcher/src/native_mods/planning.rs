@@ -18,30 +18,34 @@ pub(super) fn classify(
     // Held while the SDK's index, surface and build data are read and kept.
     _lease: &crate::native_cache::Cache,
 ) -> Result<Routes, Failed> {
-    let found = scan_bundles(folder)?;
+    let found: Vec<Bundle> = scan_bundles(folder)?
+        .into_iter()
+        .filter(|bundle| bundle.manifest.native.is_some())
+        .collect();
     let mut result = Routes::default();
-    let mut projects = Vec::new();
     for bundle in &found {
-        let route = match api::Project::read(bundle) {
-            Ok(project) => {
-                let route = prebuilt::project_refusal(&project).map_or(Route::Prebuilt, |reason| {
-                    Route::Invalid {
-                        reason: reason.plain(),
-                    }
-                });
-                projects.push(project);
-                route
-            }
-            Err(error) => Route::Invalid {
-                reason: error.to_string(),
-            },
-        };
-        result.mods.push((bundle.manifest.id.clone(), route));
+        result
+            .mods
+            .push((bundle.manifest.id.clone(), Route::Prebuilt));
     }
-    if projects.is_empty() {
+    if found.is_empty() {
         return Ok(result);
     }
-    let base = base.ok_or_else(|| tr("Install Sunrise first.").to_string())?;
+    let ids: Vec<&str> = found.iter().map(|b| b.manifest.id.as_str()).collect();
+    let unchecked = |result: &mut Routes, why: &str| {
+        for (id, route) in &mut result.mods {
+            *route = Route::Unchecked {
+                reason: trf(
+                    "Can't check {mod}: its SDK isn't available. {why}",
+                    &[("mod", id), ("why", why)],
+                ),
+            };
+        }
+    };
+    let Some(base) = base else {
+        unchecked(&mut result, tr("Install Sunrise first."));
+        return Ok(result);
+    };
     let built_on = checked_about(base)?;
     let origin = built_on.as_ref().map_or(base, |about| about.base.as_str());
     let revision = build_revision(base, built_on.as_ref())?;
@@ -57,6 +61,7 @@ pub(super) fn classify(
     let sdk = match sdk_cache::index(&sdk_base, &revision, &keys) {
         Ok(sdk) => sdk,
         Err(refusal) => {
+            unchecked(&mut result, &refusal.to_string());
             result.unavailable = Some(refusal);
             return Ok(result);
         }
@@ -72,9 +77,13 @@ pub(super) fn classify(
             *slot = route;
         }
     };
-    match judge_all(&projects, &sdk, &sdk_base) {
-        Ok(verdicts) => {
-            for (id, verdict) in verdicts {
+    match check_all(folder, &ids, &sdk, &sdk_base) {
+        Ok(checks) => {
+            for (id, why) in checks.refusals {
+                let reason = refusal_text(&id, &why);
+                said(id.as_str(), Route::Invalid { reason });
+            }
+            for (id, verdict) in checks.verdicts {
                 let route = match &verdict {
                     fit::Verdict::MadeFor => continue,
                     fit::Verdict::Fits { .. } => Route::Fits {
@@ -89,68 +98,19 @@ pub(super) fn classify(
                 said(id.as_str(), route);
             }
         }
-        // Nothing is guessed: without the build's files, no mod made for another build "fits".
-        Err(refusal) => {
-            for project in &projects {
-                let id = &project.bundle.manifest.id;
-                if project.bundle.native().sunrise != revision {
-                    said(
-                        id.as_str(),
-                        Route::Invalid {
-                            reason: trf(
-                                "Can't check {mod} against {build}. {why}",
-                                &[
-                                    ("mod", id),
-                                    ("build", &shown),
-                                    ("why", &refusal.to_string()),
-                                ],
-                            ),
-                        },
-                    );
-                }
-            }
-        }
+        // Nothing is guessed: without the build's tool and files, no mod is checked.
+        Err(refusal) => unchecked(&mut result, &refusal.to_string()),
     }
     Ok(result)
 }
 
-/// What updating an instance's native mods to a newer release or Nightly would do, told before
-/// anything is downloaded but the build's small SDK files (design-fit §10.1).
-#[derive(Clone, Debug, PartialEq)]
-pub struct UpdateCheck {
-    /// The newer installed release or Nightly the update builds on.
-    pub to: String,
-    /// What the player reads: how many mods fit, and each one switched off and why.
-    pub summary: String,
-    /// The worlds saved with a mod the update would switch off: then backing them up is the
-    /// other choice to staying.
-    pub worlds: Vec<String>,
-}
-
-/// [`UpdateCheck`] for the native mods turned on in game folder `home`, on the installed release
-/// or Nightly `to`. Worker-only: it reads releases.
-pub fn update_check(home: &Path, to: &str) -> Result<UpdateCheck, Failed> {
-    require_consent()?;
-    let _lease = crate::native_cache::Cache::acquire(&backend::build_dir()).map_err(cache_error)?;
-    let found = match stage_installed(home, root().join("installed.routes"))? {
-        Some(folder) => scan_bundles(&folder)?,
-        None => Vec::new(),
-    };
-    let found: Vec<Bundle> = found
-        .into_iter()
-        .filter(|bundle| bundle.manifest.native.is_some())
-        .collect();
-    let projects: Vec<_> = found
-        .iter()
-        .filter_map(|bundle| api::Project::read(bundle).ok())
-        .collect();
-    let revision = build_revision(to, None)?;
-    let sdk_base = sdk_cache::Base::from_env();
-    let keys = sunrise_launcher_release_verify::sdk_keys_for(backend::REPO);
-    let sdk = sdk_cache::index(&sdk_base, &revision, &keys).map_err(|r| r.to_string())?;
-    let verdicts = judge_all(&projects, &sdk, &sdk_base).map_err(|r| r.to_string())?;
-    let shown = sdk.shown();
-    let unfit: Vec<LeftOut> = verdicts
+/// The mods an update leaves out: the unfit, then every mod that needs one of them. A mod the tool refuses can't be built on any build, so it stops the update as it stops a build, by name.
+pub(super) fn update_left_out(found: &[Bundle], checks: &Checks) -> Result<Vec<LeftOut>, String> {
+    if let Some((id, why)) = checks.refusals.first() {
+        return Err(refusal_text(id, why));
+    }
+    let unfit: Vec<LeftOut> = checks
+        .verdicts
         .iter()
         .filter(|(_, verdict)| !verdict.usable())
         .filter_map(|(id, verdict)| {
@@ -166,7 +126,7 @@ pub fn update_check(home: &Path, to: &str) -> Result<UpdateCheck, Failed> {
         .map(|bundle| {
             dependencies::from_manifest(
                 &bundle.manifest.dependencies,
-                sunrise_mod_package::manifest::Side::Both,
+                sunrise_launcher_smod::manifest::Side::Both,
             )
         })
         .collect();
@@ -175,7 +135,59 @@ pub fn update_check(home: &Path, to: &str) -> Result<UpdateCheck, Failed> {
         .zip(&declared)
         .map(|(b, d)| (b, d.as_slice()))
         .collect();
-    let left = isolate::with_dependents(&unfit, &pairs);
+    Ok(isolate::with_dependents(&unfit, &pairs))
+}
+
+/// What updating an instance's native mods to a newer release or Nightly would do, told before
+/// anything is downloaded but the build's small SDK files (design-fit §10.1).
+#[derive(Clone, Debug, PartialEq)]
+pub struct UpdateCheck {
+    /// The newer installed release or Nightly the update builds on.
+    pub to: String,
+    /// What the player reads: how many mods fit, and each one switched off and why.
+    pub summary: String,
+    /// The worlds saved with a mod the update would switch off: then backing them up is the
+    /// other choice to staying.
+    pub worlds: Vec<String>,
+    /// A mod the tool refuses on any build: `summary` names it, and there is no update to take until it is fixed or removed.
+    pub blocked: bool,
+}
+
+/// [`UpdateCheck`] for the native mods turned on in game folder `home`, on the installed release
+/// or Nightly `to`. Worker-only: it reads releases.
+pub fn update_check(home: &Path, to: &str) -> Result<UpdateCheck, Failed> {
+    require_consent()?;
+    let _lease = crate::native_cache::Cache::acquire(&backend::build_dir()).map_err(cache_error)?;
+    let folder = stage_installed(home, root().join("installed.routes"))?;
+    let found = match &folder {
+        Some(folder) => scan_bundles(folder)?,
+        None => Vec::new(),
+    };
+    let found: Vec<Bundle> = found
+        .into_iter()
+        .filter(|bundle| bundle.manifest.native.is_some())
+        .collect();
+    let ids: Vec<&str> = found.iter().map(|b| b.manifest.id.as_str()).collect();
+    let revision = build_revision(to, None)?;
+    let sdk_base = sdk_cache::Base::from_env();
+    let keys = sunrise_launcher_release_verify::sdk_keys_for(backend::REPO);
+    let sdk = sdk_cache::index(&sdk_base, &revision, &keys).map_err(|r| r.to_string())?;
+    let checks = match &folder {
+        Some(folder) => check_all(folder, &ids, &sdk, &sdk_base).map_err(|r| r.to_string())?,
+        None => Checks::default(),
+    };
+    let shown = sdk.shown();
+    let left = match update_left_out(&found, &checks) {
+        Ok(left) => left,
+        Err(refusal) => {
+            return Ok(UpdateCheck {
+                to: to.to_owned(),
+                summary: refusal,
+                worlds: Vec::new(),
+                blocked: true,
+            })
+        }
+    };
     let off: Vec<(String, String)> = left
         .iter()
         .map(|l| {
@@ -200,5 +212,6 @@ pub fn update_check(home: &Path, to: &str) -> Result<UpdateCheck, Failed> {
         to: to.to_owned(),
         summary: fit::update_summary(&shown, found.len(), &off),
         worlds,
+        blocked: false,
     })
 }
