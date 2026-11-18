@@ -31,7 +31,9 @@ class PrFilesTests(unittest.TestCase):
                 contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()):
             listing = Path(directory, "files")
             pr_files.main(str(listing))
-            return out.getvalue(), listed_entries(listing) if listing.exists() else None
+            printed = dict(line.split("=", 1) for line in out.getvalue().splitlines())
+            listed = listed_entries(listing, int(printed["entries"])) if listing.exists() else None
+            return out.getvalue(), listed
 
     def test_the_api_list_matches_gits_diff_without_renames(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -63,7 +65,8 @@ class PrFilesTests(unittest.TestCase):
                  {"status": "renamed", "filename": "docs/new.rs", "previous_filename": "old.rs"},
                  {"status": "added", "filename": "added.md"}, {"status": "copied", "filename": "copy.txt"}]
         out, listed = self.run_main(api(files), len(files))
-        self.assertEqual(out, "listed=true\n")
+        # The rename counts as its deletion and addition.
+        self.assertEqual(out, "listed=true\nentries=6\n")
         self.assertEqual(sorted(listed), sorted(expected))
 
     def test_a_same_count_push_and_revert_cannot_replace_the_event_comparison(self):
@@ -77,12 +80,12 @@ class PrFilesTests(unittest.TestCase):
                 return moved if "/files" in path else {"base": {"sha": BASE}, "head": {"sha": HEAD}}
             return api(event)(path)
 
-        self.assertEqual(self.run_main(get, len(moved)), ("listed=true\n", [("M", "src/lib.rs")]))
+        self.assertEqual(self.run_main(get, len(moved)), ("listed=true\nentries=1\n", [("M", "src/lib.rs")]))
 
     def test_a_comparison_below_the_limit_can_be_used(self):
         files = [{"status": "added", "filename": f"docs/{n}.md"} for n in range(pr_files.API_LIMIT - 1)]
         out, listed = self.run_main(api(files), len(files))
-        self.assertEqual(out, "listed=true\n")
+        self.assertEqual(out, f"listed=true\nentries={pr_files.API_LIMIT - 1}\n")
         self.assertEqual(len(listed), pr_files.API_LIMIT - 1)
 
     def test_empty_and_malformed_api_records_fall_back(self):

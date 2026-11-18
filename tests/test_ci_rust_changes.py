@@ -13,6 +13,8 @@ from tools.ci.rust_changes import (
 )
 
 FULL_SELECTION = dict.fromkeys(("rust_required", "launcher_required", "tooling_required"), "true")
+# What --all prints for it: every check, and no later step may narrow them.
+FULL_CLI = FULL_SELECTION | {"certain": "false"}
 SELECTOR = Path(__file__).resolve().parents[1] / "tools/ci/rust_changes.py"
 
 
@@ -76,11 +78,13 @@ class RustChangesTests(unittest.TestCase):
         self.assertFalse(needs_rust(["docs/hosting.md", "docs/modding/src/introduction.md"]))
 
     def test_launcher_checks_follow_the_crates_it_builds(self):
-        for path in ["crates/sunrise-client/src/game.rs", "launcher/links.json", "launcher/docs/a.md",
-                     "launcher/README.md", "website/src/index.html", "tools/pr_ready.py"]:
+        for path in ["crates/sunrise-client/src/game.rs", "website/src/index.html", "tools/pr_ready.py"]:
             with self.subTest(path=path):
                 self.assertFalse(needs_launcher([path]))
-        for path in ["launcher/src/main.rs", "launcher/Cargo.lock", "crates/sunrise-port-pack/src/net.rs",
+        # Files a launcher release ignores are still its tests' inputs: links.json is embedded and tested, and
+        # tests/ holds gate targets.
+        for path in ["launcher/links.json", "launcher/tests/storage.rs", "launcher/docs/a.md", "launcher/README.md",
+                     "launcher/src/main.rs", "launcher/Cargo.lock", "crates/sunrise-port-pack/src/net.rs",
                      "crates/sunrise-mcp/src/lib.rs", "crates/sunrise-mod-api-gen/src/injection.rs",
                      "crates/sunrise-theme/src/lib.rs", "Cargo.toml", "Cargo.lock",
                      ".github/workflows/ci.yml", ".github/workflows/dyna-ci.yml"]:
@@ -228,7 +232,7 @@ class RustChangesTests(unittest.TestCase):
             )
             self.assertEqual(dict(line.split("=") for line in output.splitlines()), {
                 "rust_required": "false", "launcher_required": "false",
-                "tooling_required": "true",
+                "tooling_required": "true", "certain": "true",
             })
 
     def test_a_deleted_or_moved_cargo_input_requires_rust(self):
@@ -282,17 +286,25 @@ class RustChangesTests(unittest.TestCase):
                                                '("../docs/a\\x20page.md");'}):
             self.assertTrue(selections([("M", "docs/a page.md")])["rust_required"])
 
+    def test_a_path_attribute_split_over_lines_is_an_include(self):
+        # `#[` and `path` on different lines, and the value continued with an escaped newline.
+        source = '#[\n    path = "../docs/gen\\\n        erated.txt"\n]\nmod generated;\n'
+        with fixture_repository({"src/lib.rs": source, "docs/generated.txt": "", "docs/other.md": ""}):
+            self.assertTrue(selections([("M", "docs/generated.txt")])["rust_required"])
+            self.assertEqual(selections([("M", "docs/other.md")])["rust_required"], False)
+
     def test_tokenizer_error_emits_a_complete_full_selection(self):
         with fixture_repository({"src/lib.rs": r'const C: &str = include_str!("\u{110000}");'}) as root:
             # Run the CLI in this fixture, with a valid docs-only listing and an invalid Unicode escape in Rust.
             (root / "listing").write_bytes(b"M\0docs/page.md\0")
             script = ("from pathlib import Path; from tools.ci import rust_changes; "
                       "rust_changes.ROOT = Path.cwd(); rust_changes.main()")
-            result = subprocess.run([sys.executable, "-c", script, "--all", "--files", "listing", "a" * 40, "b" * 40],
+            result = subprocess.run([sys.executable, "-c", script, "--all", "--files", "listing", "--entries", "1",
+                                     "a" * 40, "b" * 40],
                                     cwd=root, env=dict(os.environ, PYTHONPATH=str(SELECTOR.parents[2])),
                                     capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(result.stdout.splitlines(), [f"{key}=true" for key in FULL_SELECTION])
+            self.assertEqual(result.stdout.splitlines(), [f"{key}={value}" for key, value in FULL_CLI.items()])
 
     def test_launcher_helpers_are_relative_to_the_step_even_without_a_launcher_tree(self):
         with fixture_repository({
@@ -358,13 +370,22 @@ class RustChangesTests(unittest.TestCase):
     def test_incomplete_saved_listings_cannot_produce_a_partial_selection(self):
         with tempfile.TemporaryDirectory() as directory:
             listing = Path(directory, "files")
+            def select(data, entries):
+                listing.write_bytes(data)
+                output = subprocess.check_output([sys.executable, str(SELECTOR), "--all", "--files", listing,
+                                                  *(["--entries", str(entries)] if entries is not None else []),
+                                                  "a" * 40, "b" * 40], text=True)
+                return dict(line.split("=") for line in output.splitlines())
+
             for data in (b"", b"M\0docs/setup.md", b"M\0docs/setup.md\0A\0", b"M\0\0",
                          b"U\0docs/setup.md\0", b"M\0../docs/setup.md\0", b"M\0docs/\xff.md\0"):
                 with self.subTest(data=data):
-                    listing.write_bytes(data)
-                    output = subprocess.check_output(
-                        [sys.executable, str(SELECTOR), "--all", "--files", listing, "a" * 40, "b" * 40], text=True)
-                    self.assertEqual(dict(line.split("=") for line in output.splitlines()), FULL_SELECTION)
+                    self.assertEqual(select(data, 1), FULL_CLI)
+            # A listing that lost its whole last record still parses: only the count pr_files.py printed shows it.
+            # A complete listing narrows, and one without its count does not.
+            self.assertEqual(select(b"M\0docs/setup.md\0", 2), FULL_CLI)
+            self.assertEqual(select(b"M\0docs/setup.md\0", None), FULL_CLI)
+            self.assertEqual(select(b"M\0docs/setup.md\0", 1)["rust_required"], "false")
 
     def test_missing_or_invalid_endpoints_and_empty_git_diffs_select_everything(self):
         with fixture_repository({"docs/setup.md": "content\n"}) as root:
@@ -375,13 +396,13 @@ class RustChangesTests(unittest.TestCase):
                 with self.subTest(base=base, head=head):
                     output = subprocess.check_output([sys.executable, str(SELECTOR), "--all", base, head],
                                                      cwd=root, text=True)
-                    self.assertEqual(dict(line.split("=") for line in output.splitlines()), FULL_SELECTION)
+                    self.assertEqual(dict(line.split("=") for line in output.splitlines()), FULL_CLI)
             (root / "files").write_bytes(b"M\0docs/setup.md\0")
             for base, head in (("", sha), (sha, "not-a-sha")):
                 with self.subTest(base=base, head=head, listing=True):
                     output = subprocess.check_output([sys.executable, str(SELECTOR), "--all", "--files", "files",
-                                                      base, head], cwd=root, text=True)
-                    self.assertEqual(dict(line.split("=") for line in output.splitlines()), FULL_SELECTION)
+                                                      "--entries", "1", base, head], cwd=root, text=True)
+                    self.assertEqual(dict(line.split("=") for line in output.splitlines()), FULL_CLI)
 
     def test_a_base_missing_from_the_checkout_means_everything_changed(self):
         with tempfile.TemporaryDirectory() as directory:

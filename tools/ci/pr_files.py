@@ -4,7 +4,8 @@ job can select checks without fetching the history.
 
 usage: pr_files.py OUT    (env: GITHUB_API_URL, GITHUB_REPOSITORY, GH_TOKEN, BASE_SHA, HEAD_SHA, CHANGED_FILES)
 
-Writes OUT as `git diff --name-status --no-renames -z BASE_SHA...HEAD_SHA` would, and prints `listed=true`. The list
+Writes OUT as `git diff --name-status --no-renames -z BASE_SHA...HEAD_SHA` would, and prints `listed=true` and
+`entries=N`, the number of records it wrote, which rust_changes.py --entries checks the listing against. The list
 is GitHub's comparison of those two commits (`compare/BASE_SHA...HEAD_SHA`), the same three-dot diff, so it is tied to
 this run's pair whatever the pull request's branches do meanwhile. A rename is a deletion and an addition, as with
 --no-renames; a copy is an addition. Prints `listed=false` (and the reason on stderr) whenever the list may differ
@@ -92,7 +93,7 @@ def main(out):
         print("listed=false")
         return
     print(f"pr_files: {len(changes)} entries from the API", file=sys.stderr)
-    print("listed=true")
+    print(f"listed=true\nentries={len(changes)}")
 
 
 if __name__ == "__main__":

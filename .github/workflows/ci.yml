@@ -25,15 +25,18 @@ jobs:
   # Which of the jobs below a fork's pull request needs, from the complete diff of its base and head
   # (tools/ci/rust_changes.py, the selection dyna-checks makes): a job whose inputs it didn't change skips at once
   # instead of cloning the history. The trigger itself has no path filter: GitHub matches one against only the
-  # first 300 changed files. A selection that fails or can't diff leaves its outputs empty, and every job runs.
+  # first 300 changed files. A selection that fails, can't diff or leaves any answer out publishes all of them true,
+  # and every job runs; `certain` is true only when the selection rests on a complete diff, so the Rust tests' crate
+  # scope (tools/ci/test_scope.py) narrows only then.
   changes:
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     outputs:
-      rust_required: ${{ steps.selection.outcome == 'success' && steps.selection.outputs.rust_required || '' }}
-      launcher_required: ${{ steps.selection.outcome == 'success' && steps.selection.outputs.launcher_required || '' }}
-      tooling_required: ${{ steps.selection.outcome == 'success' && steps.selection.outputs.tooling_required || '' }}
+      rust_required: ${{ steps.selected.outputs.rust_required }}
+      launcher_required: ${{ steps.selected.outputs.launcher_required }}
+      tooling_required: ${{ steps.selected.outputs.tooling_required }}
+      certain: ${{ steps.selected.outputs.certain }}
     steps:
       - uses: actions/checkout@v7
       - name: Fetch this commit's history for selection
@@ -53,6 +56,27 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: python3 tools/ci/rust_changes.py --all "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
+      # One selection for every job below: the step's four answers when each is true or false, else all checks.
+      - name: Publish one complete selection
+        if: always()
+        id: selected
+        env:
+          OUTCOME: ${{ steps.selection.outcome }}
+          RUST: ${{ steps.selection.outputs.rust_required }}
+          LAUNCHER: ${{ steps.selection.outputs.launcher_required }}
+          TOOLING: ${{ steps.selection.outputs.tooling_required }}
+          CERTAIN: ${{ steps.selection.outputs.certain }}
+        run: |
+          complete=$OUTCOME
+          for answer in "$RUST" "$LAUNCHER" "$TOOLING" "$CERTAIN"; do
+            case $answer in true | false) ;; *) complete=incomplete ;; esac
+          done
+          if [ "$complete" != success ]; then
+            echo "::notice::the selection is $complete: running every check"
+            RUST=true LAUNCHER=true TOOLING=true CERTAIN=false
+          fi
+          printf '%s\n' "rust_required=$RUST" "launcher_required=$LAUNCHER" "tooling_required=$TOOLING" \
+            "certain=$CERTAIN" >> "$GITHUB_OUTPUT"
   # verify runs as three jobs side by side, so a run takes as long as its slowest part (the Rust tests), not the sum:
   # one job doing them in turn took 14-21 minutes on GitHub's runners (main's run 43595807302: 859 s). `verify` waits
   # for the three and passes only when each passed or had nothing to do. It runs even in a cancelled run
@@ -230,7 +254,7 @@ jobs:
       # its files (tools/ci/test_scope.py); a change outside every crate tests the whole workspace. dyna-checks
       # tests the whole workspace on main's pushes, so a missed crate shows on main.
       - name: Which crates must the Rust tests cover?
-        if: github.event_name == 'pull_request' && needs.changes.result == 'success' && needs.changes.outputs.rust_required == 'true'
+        if: github.event_name == 'pull_request' && needs.changes.result == 'success' && needs.changes.outputs.certain == 'true'
         id: scope
         continue-on-error: true
         env:

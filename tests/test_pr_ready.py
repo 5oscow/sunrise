@@ -260,8 +260,8 @@ class PrReadyTests(unittest.TestCase):
         self.assertTrue(pr_ready.launcher_rust("crates/sunrise-theme/src/lib.rs"))
         self.assertTrue(pr_ready.launcher_rust("crates/sunrise-system/src/lib.rs"))
         self.assertTrue(pr_ready.launcher_rust("crates/sunrise-mod-api-gen/src/injection.rs"))
-        self.assertFalse(pr_ready.launcher_rust("launcher/links.json"))
-        self.assertFalse(pr_ready.launcher_rust("launcher/README.md"))
+        # The launcher's tests embed and read links.json: CI's rule runs them for any file under launcher/.
+        self.assertTrue(pr_ready.launcher_rust("launcher/links.json"))
         self.assertFalse(pr_ready.launcher_rust("crates/sunrise-client/src/game.rs"))
 
     def test_crate_checks_do_not_link_unrelated_examples(self):

@@ -370,7 +370,8 @@ class DynaRoutingTests(unittest.TestCase):
                 with self.subTest(files=files):
                     output = Path(directory, "output")
                     output.write_text("")
-                    env = dict(os.environ, BASE_SHA=base, HEAD_SHA=head, FILES=files, GITHUB_OUTPUT=str(output))
+                    env = dict(os.environ, BASE_SHA=base, HEAD_SHA=head, FILES=files, ENTRIES="1",
+                               GITHUB_OUTPUT=str(output))
                     subprocess.run(["bash", "-e", "-c", select["run"].replace("tools/ci/", f"{ROOT}/tools/ci/")],
                                    cwd=directory, env=env, check=True)
                     self.assertIn(f"rust_required={rust}\n", output.read_text())

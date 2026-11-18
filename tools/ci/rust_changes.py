@@ -3,7 +3,8 @@
 
 The default answers Rust selection; --launcher uses the launcher's dependency paths.
 --all emits the shared Rust, launcher and tooling decisions for dyna-checks (the machine sample is a daily leg,
-machine-sample.yml, so dyna-checks selects nothing for it).
+machine-sample.yml, so dyna-checks selects nothing for it), and `certain`: whether they rest on a complete comparison
+and known includes, the only case in which a later step may narrow further.
 server_build: whether verify's clippy of the server build has anything new to check (needs_server_build).
 """
 
@@ -28,8 +29,7 @@ ROOT_RUST = {"Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "rustfmt.toml", 
 # gated on this selection runs are its inputs all the same (gated_by). This script and the module it imports decide
 # whether Rust runs at all, so a change to them runs it.
 RUST_DECIDES = {"tools/ci/rust_changes.py", "tools/ci/pr_files.py", "tools/release_train.py"}
-LAUNCHER_CHECK = RUST_DECIDES | {".github/workflows/ci.yml", ".github/workflows/dyna-ci.yml",
-                                "launcher/docs/launcher-commands.md"}
+LAUNCHER_CHECK = RUST_DECIDES | {".github/workflows/ci.yml", ".github/workflows/dyna-ci.yml"}
 # Cargo's own inputs, wherever they are: a manifest, lock file, build script, toolchain or lint setting, or a Rust
 # source. Deleted or renamed ones count too, so a package under docs/ that loses its manifest still runs Rust.
 CARGO_NAMES = {"Cargo.toml", "Cargo.lock", "build.rs", "rust-toolchain", "rust-toolchain.toml", "rustfmt.toml",
@@ -189,7 +189,8 @@ def rust_includes():
     """(the files Rust includes by name, suffixes of unresolved includes); None if the sources can't be read."""
     scanned = rust_literals()
     # The name and bang can be separated by whitespace, comments or even a newline.
-    listed = git("grep", "-l", "-z", "-E", r"\binclude(_str|_bytes)?\b|#[[:space:]]*\[[[:space:]]*path", "--", "*.rs")
+    # So can an attribute's `#[` and its `path`: list every source with either word, and let the tokenizer decide.
+    listed = git("grep", "-l", "-z", "-E", r"\b(include(_str|_bytes)?|path)\b", "--", "*.rs")
     if scanned is None or listed.returncode not in (0, 1):
         return None
     manifests = scanned[0]
@@ -398,13 +399,10 @@ def needs_server_build(paths):
 
 
 def needs_launcher(paths):
-    # The CLI reference is compared with generated text by the launcher's tests, even though editing it doesn't
-    # warrant a release. Treat deletion as a change too, without requiring launcher/ to exist in the checkout.
-    return any(path in ROOT_RUST or path in LAUNCHER_CHECK or (
-        path.startswith(tuple(release_train.LAUNCHER_PATHS))
-        and not path.startswith(tuple(release_train.LAUNCHER_IGNORED))
-        and not path.endswith(".md")
-    ) for path in paths) or gated_by("launcher", paths)
+    # Every file under the launcher's paths, including the ones a release ignores: its tests read links.json, the CLI
+    # reference and tests/, and they are gate targets. A deleted file counts too, without launcher/ in the checkout.
+    return any(path in ROOT_RUST or path in LAUNCHER_CHECK or path.startswith(tuple(release_train.LAUNCHER_PATHS))
+               for path in paths) or gated_by("launcher", paths)
 
 
 # Stands for "everything changed" when no diff can be computed: a root manifest every check and shard selector
@@ -492,14 +490,20 @@ def needs_tooling(changes):
     ) or bool(python_reads(paths))
 
 
+def include_uncertain(paths):
+    """Whether an unresolved include could read one of the Rust-free-by-name `paths`, or the includes can't be read."""
+    candidates = [path for path in paths if rust_free_by_name(path)]
+    if not candidates:
+        return False
+    included = rust_includes()
+    return included is None or any(path.endswith(included[1]) for path in candidates)
+
+
 def selections(changes):
     paths = [path for _, path in changes]
     # Don't narrow any checks based on the name of a file an unresolved include could read.
-    candidates = [path for path in paths if rust_free_by_name(path)]
-    if candidates:
-        included = rust_includes()
-        if included is None or any(path.endswith(included[1]) for path in candidates):
-            return dict.fromkeys(("rust_required", "launcher_required", "tooling_required"), True)
+    if include_uncertain(paths):
+        return dict.fromkeys(("rust_required", "launcher_required", "tooling_required"), True)
     return {"rust_required": needs_rust(paths),
             "launcher_required": needs_launcher(paths),
             "tooling_required": needs_tooling(changes)}
@@ -516,17 +520,19 @@ def parse_listing(data):
     return pairs if len({path for _, path in pairs}) == len(pairs) else None
 
 
-def listed_entries(path):
-    """Read the comparison saved by tools/ci/pr_files.py instead of asking git."""
-    return parse_listing(Path(path).read_bytes())
+def listed_entries(path, count):
+    """Read the comparison saved by tools/ci/pr_files.py instead of asking git: complete only with the `count` of
+    entries it printed (a rename counts as its deletion and addition), so a listing that lost a whole record fails."""
+    entries = parse_listing(Path(path).read_bytes())
+    return entries if entries and len(entries) == count else None
 
 
-def changed_entries(base, head, listing=None):
+def changed_entries(base, head, listing=None, count=None):
     # In particular, Git substitutes the checkout's HEAD for an empty endpoint, silently allowing an empty diff.
     if commit_ids(base, head):
         try:
             if listing is not None:
-                if entries := listed_entries(listing):
+                if entries := listed_entries(listing, count):
                     return entries
             else:
                 # Disable rename folding: retain both deleted and added paths, including source moved into docs.
@@ -560,15 +566,21 @@ def main():
     mode.add_argument("--all", action="store_true", help="emit centralized dyna-checks selections")
     parser.add_argument("--files", metavar="LIST", help="read base...head's changes from this listing (pr_files.py) "
                         "instead of git")
+    parser.add_argument("--entries", type=int, metavar="N", help="the number of entries pr_files.py wrote to LIST")
     args = parser.parse_args()
-    changes = changed_entries(args.base, args.head, args.files)
+    changes = changed_entries(args.base, args.head, args.files, args.entries)
     try:
         selected = selections(changes)
+        # Whether the selection rests on a complete comparison and known includes: only then may a later step, such
+        # as tools/ci/test_scope.py's crate scope, narrow what it checks.
+        certain = changes != [("?", UNKNOWN_CHANGE)] and not include_uncertain([path for _, path in changes])
     except Exception as error:  # noqa: BLE001 - a parser error must not leave any check ruled out
         print(f"rust_changes: selection failed ({type(error).__name__}: {error}); running all checks", file=sys.stderr)
         changes = [("?", UNKNOWN_CHANGE)]
-        selected = selections(changes)
-    if not args.all:
+        selected, certain = selections(changes), False
+    if args.all:
+        selected["certain"] = certain
+    else:
         paths = [path for _, path in changes]
         selected = {"required": selected["launcher_required" if args.launcher else "rust_required"],
                     "sample": needs_sample(paths), "server_build": needs_server_build(paths)}
