@@ -620,7 +620,7 @@ impl RegionWriter {
 
     /// The `c.X.Z.mcc` files of the oversized chunks written so far, next to
     /// the destination.
-    pub fn externals(&self) -> &[PathBuf] {
+    pub(crate) fn externals(&self) -> &[PathBuf] {
         &self.externals
     }
 

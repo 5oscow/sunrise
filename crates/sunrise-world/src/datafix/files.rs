@@ -762,9 +762,17 @@ fn upgrade_regions_with_threads(
     }
     let staging = folder.join(".datafix");
     fs::create_dir_all(&staging)?;
-    // A try that stopped before moving them out leaves staged `.mcc` files.
-    for stale in files_with_suffix(&staging, ".mcc") {
-        fs::remove_file(stale)?;
+    // A staged `.mcc` with no live copy may be the only one of its chunk (an
+    // older upgrader replaced the region first): put it in place. A region
+    // never reads a `.mcc` its chunk does not flag, so one it does not need
+    // there is harmless; one whose live copy exists is a stopped try's.
+    for staged in files_with_suffix(&staging, ".mcc") {
+        let live = folder.join(staged.file_name().unwrap_or_default());
+        if live.try_exists()? {
+            fs::remove_file(staged)?;
+        } else {
+            fs::rename(staged, live)?;
+        }
     }
     let next = AtomicUsize::new(0);
     let stop = AtomicBool::new(false);
@@ -839,12 +847,13 @@ fn upgrade_region_file(path: &Path, staging: &Path, fix: &impl Fn(&mut Tag)) -> 
     // An oversized chunk's `c.X.Z.mcc` is written next to the staged region.
     let externals = writer.externals().to_vec();
     writer.finish()?;
-    fs::rename(&temporary, path)?;
+    // The `.mcc` files go in before the region: until it is replaced, the old
+    // region reads for each chunk its own inline copy or a whole `.mcc`.
     let folder = path.parent().unwrap_or(Path::new("."));
     for staged in externals {
         fs::rename(&staged, folder.join(staged.file_name().unwrap_or_default()))?;
     }
-    Ok(())
+    fs::rename(&temporary, path)
 }
 
 /// The progress a data upgrade reports to and whether it may stop early: a
@@ -1378,6 +1387,92 @@ mod upgrade_tests {
         upgrade_regions_with_threads(&dir, &run, fix_overworld_chunk, 1).unwrap();
         assert!(!dir.join(".datafix").exists());
         assert_eq!(chunk_versions(&dir), vec![vec![CURRENT]]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The length of the `Big` byte array of chunk 0, 0 in `dir`'s region.
+    fn big_len(dir: &Path) -> Option<usize> {
+        let mut region = RegionFile::open(dir.join("r.0.0.mca")).unwrap();
+        let record = region
+            .read(sunrise_core::position::ChunkPos::new(0, 0))
+            .unwrap()?;
+        match record.nbt(Limits::default()).unwrap().tag.get("Big") {
+            Some(Tag::ByteArray(bytes)) => Some(bytes.len()),
+            _ => None,
+        }
+    }
+
+    /// An inline chunk the upgrade grows past 256 sectors: when its `.mcc`
+    /// cannot be moved in, the old region stays live with the chunk, and the
+    /// retry upgrades it whole.
+    #[test]
+    fn interrupted_inline_to_external_upgrade_keeps_the_chunk() {
+        let dir = std::env::temp_dir().join(format!("sunrise-mcc-grow-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let root = NamedTag {
+            name: "".into(),
+            tag: old_chunk(0, 0),
+        };
+        let record = ChunkRecord::from_nbt(&root, Compression::None, 7, Limits::default()).unwrap();
+        let mut region = RegionFile::open_writable(dir.join("r.0.0.mca"), true).unwrap();
+        region
+            .write(sunrise_core::position::ChunkPos::new(0, 0), &record)
+            .unwrap();
+        drop(region);
+        let grow = |tag: &mut Tag| {
+            fix_overworld_chunk(tag);
+            set(tag, "Big", Tag::ByteArray(vec![0; 1_100_000]));
+        };
+        let progress = UpgradeProgress::new();
+        let run = Progress {
+            progress: &progress,
+            cancelable: true,
+        };
+        // A folder where the `.mcc` goes makes its move fail once.
+        fs::create_dir_all(dir.join("c.0.0.mcc")).unwrap();
+        upgrade_regions_with_threads(&dir, &run, grow, 1).unwrap_err();
+        assert_eq!(chunk_versions(&dir), vec![vec![4000]]);
+
+        fs::remove_dir(dir.join("c.0.0.mcc")).unwrap();
+        upgrade_regions_with_threads(&dir, &run, grow, 1).unwrap();
+        assert!(!dir.join(".datafix").exists());
+        assert_eq!(chunk_versions(&dir), vec![vec![CURRENT]]);
+        assert_eq!(big_len(&dir), Some(1_100_000));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// An earlier upgrader replaced the region before moving its `.mcc` out of
+    /// staging; the staged file is the chunk's only copy and is put in place.
+    #[test]
+    fn region_upgrade_recovers_a_staged_mcc_the_live_region_needs() {
+        let dir = std::env::temp_dir().join(format!("sunrise-mcc-staged-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let mut tag = old_chunk(0, 0);
+        set(&mut tag, "Big", Tag::ByteArray(vec![0; 1_100_000]));
+        let root = NamedTag {
+            name: "".into(),
+            tag,
+        };
+        let record = ChunkRecord::from_nbt(&root, Compression::None, 7, Limits::default()).unwrap();
+        let mut writer = RegionWriter::create(dir.join(".datafix/r.0.0.mca")).unwrap();
+        writer
+            .write(sunrise_core::position::ChunkPos::new(0, 0), &record)
+            .unwrap();
+        writer.finish().unwrap();
+        fs::rename(dir.join(".datafix/r.0.0.mca"), dir.join("r.0.0.mca")).unwrap();
+        assert!(dir.join(".datafix/c.0.0.mcc").exists());
+        assert!(!dir.join("c.0.0.mcc").exists());
+
+        let progress = UpgradeProgress::new();
+        let run = Progress {
+            progress: &progress,
+            cancelable: true,
+        };
+        upgrade_regions_with_threads(&dir, &run, fix_overworld_chunk, 1).unwrap();
+        assert!(!dir.join(".datafix").exists());
+        assert_eq!(chunk_versions(&dir), vec![vec![CURRENT]]);
+        assert_eq!(big_len(&dir), Some(1_100_000));
         let _ = fs::remove_dir_all(&dir);
     }
 }
