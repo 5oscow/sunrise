@@ -1045,6 +1045,12 @@ struct Game<'a> {
     craft_table: Option<[i32; 3]>,
     /// A quick craft drag over inventory slots: (button, game slots so far).
     inv_drag: Option<(i32, Vec<usize>)>,
+    /// The mouse buttons whose press a container hook took: their release is the hooks' too.
+    container_buttons: HashSet<MouseButton>,
+    /// This mouse event's button-up ended a container hook's press latch (`container_button_up`).
+    container_owned_up: bool,
+    /// Physical mouse presses so far: a drag knows whether its press is still the latest.
+    physical_presses: u64,
     /// `AbstractContainerScreen`'s quick craft and skip-release state.
     inv_clicks: sunrise_client::container_screen::Clicks,
     /// The Mouse Tweaks extra's drag and wheel (`tweaks`).
@@ -1587,9 +1593,6 @@ struct Game<'a> {
     /// and mannequins) resolve through the services in the background.
     skin_profiles: RefCell<sunrise_client::skins::Resolver>,
     skin_slots: sunrise_client::skins::SkinSlots,
-    /// 3D skin layers: each player's outer layer as one slab per painted
-    /// texel, built once per (skin, slim) (`mobs::skin_layers`).
-    skin_3d: RefCell<skin_models::SkinModels>,
     /// Runtime trim slots and the last completed preparation for this atlas.
     trim_slots: sunrise_client::trims::TrimSlots,
     cart_models: minecarts::CartModels,
@@ -9144,6 +9147,7 @@ impl Game<'_> {
             self.physical_keys.clear();
             self.physical_buttons.clear();
             self.drag_button = None;
+            self.container_buttons.clear();
         }
         if let WindowEvent::ModifiersChanged(m) = &event {
             self.update_modifiers(m.state());
@@ -9403,7 +9407,10 @@ impl Game<'_> {
                 typed = key_event.text.take().map(|text| text.to_string());
             }
             let canceled = match key_event.physical_key {
-                PhysicalKey::Code(key) => self.screen_key_pressed(key, key_event.repeat),
+                PhysicalKey::Code(key) => {
+                    self.screen_key_pressed(key, key_event.repeat)
+                        || (!key_event.repeat && self.container_key(key))
+                }
                 PhysicalKey::Unidentified(_) => false,
             };
             if self.screen_hooks_open()
@@ -9487,10 +9494,14 @@ impl Game<'_> {
             // arms below (which hold the container hotkey and the sort and
             // header buttons too) see it. A click the pad or the keyboard's
             // focus made up is not the mouse: it fires nothing.
+            // Set by the outer handler at the physical button-up (`container_owned_up`).
+            let owned_release = matches!(&event, WindowEvent::MouseInput { .. })
+                && std::mem::take(&mut self.container_owned_up);
             if let WindowEvent::MouseInput { state, button, .. } = &event
                 && !self.pad_synthetic_input()
                 && let Some(screen) = self.screen_view_now()
             {
+                let (pressed, winit_button) = (*state == ElementState::Pressed, *button);
                 let (button, modifiers) = (glfw_button(*button), glfw_modifiers(self.modifiers));
                 let mut canceled = false;
                 if *state == ElementState::Pressed {
@@ -9511,10 +9522,16 @@ impl Game<'_> {
                 if canceled {
                     return Ok(());
                 }
+                if self.container_mouse(winit_button, pressed, owned_release) {
+                    return Ok(());
+                }
                 mouse_post = Some(native_hooks::ScreenMousePost::Button {
                     button,
                     pressed: *state == ElementState::Pressed,
                 });
+            }
+            if owned_release {
+                return Ok(());
             }
             self.key_focus_mouse_press(&event);
             match event {
@@ -9598,7 +9615,12 @@ impl Game<'_> {
                         }
                         match self.screen_mouse_dragged(delta) {
                             native_hooks::ScreenMousePre::Canceled => return Ok(()),
-                            native_hooks::ScreenMousePre::Passed(post) => mouse_post = Some(post),
+                            native_hooks::ScreenMousePre::Passed(post) => {
+                                if self.container_drag() {
+                                    return Ok(());
+                                }
+                                mouse_post = Some(post);
+                            }
                             native_hooks::ScreenMousePre::NotFired => {}
                         }
                         if self.dialog_open() {
@@ -9681,6 +9703,9 @@ impl Game<'_> {
                             &mut canceled,
                         );
                         if canceled {
+                            return Ok(());
+                        }
+                        if self.container_wheel(scaled(raw_y) as f32) {
                             return Ok(());
                         }
                         mouse_post = Some(native_hooks::ScreenMousePost::Scroll([
@@ -10524,7 +10549,6 @@ impl Game<'_> {
                             self.settings.simulation_distance,
                             self.settings.entity_distance,
                         );
-                        server.set_legacy_rules(self.settings.extras.pvp.combat.rules);
                     }
                     self.clock.end_frame(self.pause);
                     self.poll_screenshot_writes();
@@ -10809,6 +10833,9 @@ impl<'a> Game<'a> {
             craft_size: 2,
             craft_table: None,
             inv_drag: None,
+            container_buttons: HashSet::new(),
+            container_owned_up: false,
+            physical_presses: 0,
             tweaks: Default::default(),
             bundle_mouse: Default::default(),
             inv_clicks: Default::default(),
@@ -11118,7 +11145,6 @@ impl<'a> Game<'a> {
             }),
             skin_profiles: RefCell::new(sunrise_client::skins::Resolver::new()),
             skin_slots: sunrise_client::skins::SkinSlots::new(sunrise_client::hud::SKIN_SLOTS),
-            skin_3d: Default::default(),
             trim_slots: Default::default(),
             cart_models: prepared.cart_models,
             riding: None,

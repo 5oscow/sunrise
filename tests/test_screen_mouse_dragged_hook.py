@@ -76,12 +76,15 @@ struct View { mouse: (f32, f32) }
 type Point = PhysicalPosition<f64>;
 enum WindowEvent { Focused(bool), CursorMoved { position: Point } }
 struct Game { drag_button: Option<i32>, physical_buttons: HashSet<i32>, physical_keys: HashSet<i32>,
+    container_buttons: HashSet<i32>,
     cursor: (f32, f32), window_cursor: Option<PointerSample>, gui_scale: u32, modifiers: ModifiersState,
     framebuffer: [u32; 2], backing_scale: f64,
     synthetic: bool, open: bool, cancel: bool, handled: usize, posts: usize,
     calls: RefCell<Vec<(i32, [f32; 2], (f32, f32))>> }
 impl Game {
     fn pad_synthetic_input(&self) -> bool { self.synthetic }
+    // No container hook registered: it takes no drag.
+    fn container_drag(&mut self) -> bool { false }
     fn screen_view_now(&self) -> Option<View> { self.open.then_some(View { mouse: self.cursor }) }
     fn native_screen_mouse_dragged_pre(&self, view: &View, button: i32, delta: [f32; 2], modifiers: u32, canceled: &mut bool) {
         assert_eq!(modifiers, 5);
@@ -119,6 +122,7 @@ impl Game {
 fn lifecycle_and_cancellation() {
     for cancel in [false, true] {
         let mut game = Game { drag_button: None, physical_buttons: HashSet::from([0, 1]),
+            container_buttons: HashSet::new(),
             physical_keys: HashSet::from([10]), cursor: (10.0, 10.0),
             window_cursor: Some(PointerSpace::new([640, 480], 1.0).physical_sample(Point::new(20.0, 20.0))),
             framebuffer: [640, 480], backing_scale: 1.0, gui_scale: 2, modifiers: ModifiersState(5), synthetic: false,
