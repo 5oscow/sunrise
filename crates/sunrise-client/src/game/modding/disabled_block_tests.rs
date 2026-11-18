@@ -23,6 +23,7 @@ mod tests {
     };
 
     const POS: BlockPos = BlockPos::new(3, 64, 5);
+    const CARPET: &str = "inert_test_extra:carpet";
 
     #[derive(Default)]
     struct ToolProbe {
@@ -127,7 +128,7 @@ mod tests {
         fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
             let block = r.block_key("inert_test:machine");
             r.block_part(block, Machine(self.0.clone()));
-            let carpet = r.block_key("inert_test:carpet");
+            let carpet = r.block_key(CARPET);
             r.block_part(carpet, Survival);
             let sand = r.block_key("inert_test:sand");
             r.block_part(sand, Survival);
@@ -140,7 +141,7 @@ mod tests {
             e.blocks.push(
                 mod_api::Block::new("inert_test:machine", "minecraft:observer").with_item(false),
             );
-            let mut carpet = mod_api::Block::new("inert_test:carpet", "minecraft:white_carpet");
+            let mut carpet = mod_api::Block::new(CARPET, "minecraft:white_carpet");
             carpet.properties.push_reaction = Some(mod_api::PushReaction::PushPull);
             e.blocks.push(carpet);
             e.blocks
@@ -189,6 +190,20 @@ mod tests {
         ]
         .into();
         mod_platform::testing::with_mods(mods.clone(), || {
+            crate::game::api_values::install_test_platform();
+            crate::game::api_values::install_packages(
+                &[sunrise_mod_package::packages::AdjacentManifest {
+                    path: Default::default(),
+                    manifest: sunrise_mod_package::Manifest::parse(
+                        "id='inert_test'\nname='Inert Test'\nversion='1'\napi='0.2'\n\
+                         namespaces=['inert_test_extra']\ncapabilities=['registries']",
+                    )
+                    .unwrap(),
+                    has_icon: false,
+                }],
+                &[],
+            )
+            .unwrap();
             crate::game::api_values::install_parts(&mods).unwrap();
             mod_api::__private::mark_game_thread();
             let base =
@@ -302,7 +317,7 @@ mod tests {
                 let moving = state("minecraft:moving_piston");
                 let redstone = state("minecraft:redstone_block");
                 let cases = [
-                    ("inert_test:carpet", "minecraft:stone", "minecraft:air"),
+                    (CARPET, "minecraft:stone", "minecraft:air"),
                     ("inert_test:plant", "minecraft:dirt", "minecraft:stone"),
                     ("inert_test:plant", "minecraft:dirt", "inert_test:soil"),
                 ]

@@ -69,7 +69,7 @@ pub(crate) struct Installed {
     pub(crate) mods: Mods,
     pub(crate) subscribers: sunrise_mod_runtime::subscribers::Subscribers,
     pub(crate) disabled: Box<[std::sync::atomic::AtomicBool]>,
-    namespace_owners: std::collections::HashMap<Box<str>, usize>,
+    namespace_owners: OnceLock<std::collections::HashMap<Box<str>, usize>>,
     disabled_count: std::sync::atomic::AtomicUsize,
     /// The poison sets of the hooks whose dispatch isolates every listener
     /// (#2414 ruling): a listener that unwound is skipped by that one hook
@@ -109,20 +109,11 @@ impl Installed {
             .iter()
             .map(|_| std::sync::atomic::AtomicBool::new(false))
             .collect();
-        let mut namespace_owners = std::collections::HashMap::new();
-        for (index, entry) in mods.iter().enumerate() {
-            namespace_owners.insert(entry.id.into(), index);
-            if let Some(package) = crate::LoadedMods::new().get(entry.id) {
-                for namespace in package.namespaces() {
-                    namespace_owners.insert(namespace.into(), index);
-                }
-            }
-        }
         Self {
             mods,
             subscribers,
             disabled,
-            namespace_owners,
+            namespace_owners: OnceLock::new(),
             disabled_count: std::sync::atomic::AtomicUsize::new(0),
             poisons: std::sync::Mutex::new(None),
             poison_free: std::sync::atomic::AtomicBool::new(true),
@@ -289,14 +280,42 @@ pub(crate) fn mod_index_on(index: usize) -> bool {
     })
 }
 
-/// Content ownership is resolved at installation, not by scanning mods on a tick.
+/// Publish ownership after package inventory, before registration and Part preparation.
+pub(crate) fn install_namespace_owners(packages: &[PackageInfo]) {
+    let Some(installed) = installed() else { return };
+    let mut owners = std::collections::HashMap::new();
+    for (index, entry) in installed.mods.iter().enumerate() {
+        owners.insert(entry.id.into(), index);
+        if let Some(package) = packages.iter().find(|package| package.id() == entry.id) {
+            for namespace in package.namespaces() {
+                owners.insert(namespace.into(), index);
+            }
+        }
+    }
+    assert!(
+        installed.namespace_owners.set(owners).is_ok(),
+        "namespace owners are published once with package inventory"
+    );
+}
+
+/// Content ownership is resolved at startup, not by scanning mods on a tick.
 pub(crate) fn content_owner_disabled(id: &str) -> bool {
     any_mod_disabled() && content_owner_index(id).is_some_and(|index| !mod_index_on(index))
 }
 
 pub(crate) fn content_owner_index(id: &str) -> Option<usize> {
     let (namespace, _) = id.split_once(':')?;
-    installed()?.namespace_owners.get(namespace).copied()
+    let installed = installed()?;
+    let owners = installed.namespace_owners.get();
+    #[cfg(any(test, feature = "testing"))]
+    if owners.is_none() {
+        // Synthetic dispatch fixtures can omit package installation and use their mod IDs.
+        return installed
+            .mods
+            .iter()
+            .rposition(|entry| entry.id == namespace);
+    }
+    owners?.get(namespace).copied()
 }
 
 /// `mods` in order, each marked as running `hook` until the next one is (or the loop ends), so a

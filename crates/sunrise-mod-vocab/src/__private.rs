@@ -53,6 +53,11 @@ pub fn set_mod_enabled(id: &str, on: bool) -> bool {
     crate::set_mod_enabled(id, on)
 }
 
+/// Index the namespaces of the published packages against the installed dispatch order.
+pub fn install_namespace_owners(packages: &[crate::PackageInfo]) {
+    crate::runtime::install_namespace_owners(packages);
+}
+
 /// Whether the declaring package of this content is switched off.
 pub fn content_owner_disabled(id: &str) -> bool {
     crate::runtime::content_owner_disabled(id)
