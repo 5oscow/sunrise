@@ -34,7 +34,7 @@ pub(super) fn template_none_lines(text: &str, link: &str) -> Vec<(String, Option
         .collect()
 }
 
-fn resample_icon(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u8>> {
+pub(super) fn resample_icon(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u8>> {
     let (w, h) = (width as usize, height as usize);
     if w == 0 || h == 0 || rgba.len() < w * h * 4 {
         return None;

@@ -10,12 +10,12 @@ pub(super) const SETTINGS_LABEL_HEIGHT: f32 = 9.0;
 pub(super) const SETTINGS_LABEL_SPACING: f32 = 4.0;
 pub(super) const SETTINGS_WIDGET_HEIGHT: f32 = 20.0;
 
+/// A plain `labeledElement` cell: (9 + 4 + 20) + padding top and bottom.
 pub(super) const SETTINGS_ROW_HEIGHT: f32 = SETTINGS_LABEL_HEIGHT
     + SETTINGS_LABEL_SPACING
     + SETTINGS_WIDGET_HEIGHT
     + 2.0 * SETTINGS_CELL_PADDING;
 /// The region cell: (label 9 + spacing 4 + line 9 + button 20) + padding.
-
 pub(super) const SETTINGS_REGION_ROW_HEIGHT: f32 = SETTINGS_LABEL_HEIGHT
     + SETTINGS_LABEL_SPACING
     + SETTINGS_LABEL_HEIGHT
