@@ -41,6 +41,8 @@ fn a_soils_answer_comes_before_the_plants_may_place_on() {
         }
         fn before_can_sustain_plant(
             &self,
+            _: &Ticks,
+            _: Option<&PreviewBlocks>,
             state: BlockStateId,
             ground: BlockStateId,
             ground_pos: BlockPos,
@@ -58,6 +60,8 @@ fn a_soils_answer_comes_before_the_plants_may_place_on() {
         }
         fn before_may_place_on(
             &self,
+            _: &Ticks,
+            _: Option<&PreviewBlocks>,
             state: BlockStateId,
             ground: BlockStateId,
             _ground_pos: BlockPos,
