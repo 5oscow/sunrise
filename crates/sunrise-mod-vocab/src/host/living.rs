@@ -123,8 +123,9 @@ pub trait LivingBackend {
     fn living_alive(&self, living: LivingRef) -> Option<bool>;
     /// Side: server.
     /// `LivingEntity.getKillCredit`: the remembered player takes precedence,
-    /// even if the player cannot be resolved; otherwise the last hurting mob.
-    /// Unlike vanilla, a mob that changed dimension cannot be resolved.
+    /// even if the player cannot be resolved; otherwise the last hurting mob,
+    /// in whichever loaded level it is now: one that changed dimension is
+    /// named by the id it arrived with.
     #[access(WorldOnly)]
     fn living_kill_credit(&self, living: LivingRef) -> Option<EntityRef>;
     /// Side: server.

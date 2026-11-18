@@ -1343,6 +1343,11 @@ struct Game<'a> {
     attack_item: Option<Arc<str>>,
     /// Mobs a player hurt (`LivingEntity.lastHurtByPlayer`), by player UUID.
     last_hurt_by_player: HashMap<u32, combat::PlayerCredit>,
+    /// Runtime ids retired by a dimension change, with the UUID the entity left
+    /// with and when: a kill credit naming the old id resolves by that UUID in
+    /// whichever level the entity arrived (`EntityReference`). Kept for the
+    /// hundred-tick credit window (`combat::note_departed_attacker`).
+    departed_attackers: HashMap<u32, ([i32; 4], i64)>,
     /// Leashed mobs a player killed, with the killer's UUID: the lead drops
     /// on the corpse's next tick (`Leashable.tickLeash`), for the mods. With
     /// the corpse's dimension: each level's tick prunes only its own.
@@ -10786,6 +10791,7 @@ impl<'a> Game<'a> {
             attack_ticks: 100,
             attack_item: None,
             last_hurt_by_player: HashMap::new(),
+            departed_attackers: HashMap::new(),
             lead_killers: HashMap::new(),
             love_cause: HashMap::new(),
             died: Default::default(),

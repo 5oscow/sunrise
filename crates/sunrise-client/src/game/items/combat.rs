@@ -269,6 +269,16 @@ impl Game<'_> {
         self.combat.attack = outer;
         result
     }
+    /// `Entity.teleportCrossDimension` gives the copy that arrives a new
+    /// runtime id: a kill credit naming `id` resolves by the UUID it left with
+    /// (`EntityReference`). Entries past the hundred-tick credit window go.
+    pub(in crate::game) fn note_departed_attacker(&mut self, id: u32) {
+        let now = self.world.game_time;
+        let uuid = self.uuid_for(id);
+        self.departed_attackers
+            .retain(|_, (_, at)| now - *at <= 100);
+        self.departed_attackers.insert(id, (uuid, now));
+    }
     /// The attack the hits on the player land in now (a reader of `combat.attack`).
     pub(super) fn current_attack(&self) -> Attack {
         self.combat.attack.clone()

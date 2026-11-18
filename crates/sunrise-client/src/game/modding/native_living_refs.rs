@@ -679,8 +679,8 @@ impl Game<'_> {
     }
 
     /// `LivingEntity.getKillCredit`: the remembered player takes precedence,
-    /// even if the player cannot be resolved; otherwise the last hurting mob.
-    /// Unlike vanilla, a mob that changed dimension cannot be resolved.
+    /// even if the player cannot be resolved; otherwise the last hurting mob,
+    /// in whichever loaded level it is now (`credited_entity`).
     pub(super) fn living_kill_credit(&self, living: LivingRef) -> Option<EntityRef> {
         let credit = match self.native_living_target(living)? {
             Target::Player => self.combat.player_credit(self.world.game_time),
@@ -710,12 +710,12 @@ impl Game<'_> {
             Target::Player => self
                 .combat
                 .kill_credit(self.world.game_time)
-                .and_then(|id| self.entity(id)),
+                .and_then(|id| self.credited_entity(id)),
             Target::Guest(conn) => self
                 .guest_combat
                 .get(&conn)?
                 .kill_credit(self.world.game_time)
-                .and_then(|id| self.entity(id)),
+                .and_then(|id| self.credited_entity(id)),
             Target::Mob(id) => {
                 let m = self.mobs.iter().find(|m| m.id == id && !m.removed)?;
                 let who = m.recent_hurt_by()?;
@@ -748,10 +748,53 @@ impl Game<'_> {
                         }
                     }
                 }?;
-                self.entity(attacker)
+                self.credited_entity(attacker)
             }
             _ => None,
         }
+    }
+
+    /// `EntityReference.getEntity` for a credit held by runtime id, which looks
+    /// through every level (`getEntityInAnyDimension`): the entity `id` in the
+    /// level in place; else, for a mob that changed dimension, the copy that
+    /// arrived, by its UUID (`departed_attackers`), or the vehicle that kept
+    /// its id in another level. None for anything else: an old id is never
+    /// handed to another entity.
+    fn credited_entity(&self, id: u32) -> Option<EntityRef> {
+        use sunrise_client::join_seq::residency::table::EntityLookup;
+        if let Some(entity) = self.entity(id) {
+            return Some(entity);
+        }
+        let epoch = self.native_lifecycle.epoch()?;
+        let elsewhere = |id: u32| match self.server_resident_entity(id) {
+            EntityLookup::Found {
+                location,
+                value: Target::Mob(_),
+            } => (location.owner.dimension != self.dim.key()).then(|| EntityRef::new(epoch, id)),
+            _ => None,
+        };
+        let Some(&(uuid, _)) = self.departed_attackers.get(&id) else {
+            return elsewhere(id);
+        };
+        for dim in std::iter::once(self.dim).chain(self.levels.parked_dims()) {
+            let mut after = None;
+            loop {
+                let next = self
+                    .resident_entities
+                    .table
+                    .borrow_mut()
+                    .level_uuid_candidate(dim.key(), uuid, after);
+                let Some(candidate) = next else { break };
+                let found = self
+                    .entity(candidate.get())
+                    .or_else(|| elsewhere(candidate.get()));
+                if found.is_some() {
+                    return found;
+                }
+                after = Some(candidate);
+            }
+        }
+        None
     }
 
     /// The stack in `slot` (`LivingEntity.getItemBySlot`). Players, guests,
@@ -1716,6 +1759,64 @@ mod tests {
             game.mobs[1].removed = false;
             game.mobs[0].age += 101;
             assert_eq!(living.kill_credit(game), None);
+        });
+    }
+
+    /// `EntityReference.getEntity` looks through every level: the zombie that
+    /// hurt the pig keeps the credit after it crossed into the Nether under a
+    /// new id, and its old id is handed to no other mob.
+    #[test]
+    #[ignore = "daily"]
+    fn kill_credit_follows_a_mob_that_changed_dimension() {
+        use crate::game::{Dim, vehicle_teleport::TeleportMotion};
+        use std::sync::Arc;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.world_root = game.save.root.clone();
+            game.enter_level(Dim::Nether).unwrap();
+            game.world.chunks.insert(
+                (0, 0),
+                Arc::new(sunrise_client::chunk::Chunk::empty(0, 0)),
+            );
+            game.block_ticks
+                .add_empty_chunk(sunrise_core::position::ChunkPos::new(0, 0))
+                .unwrap();
+            assert!(game.run_command("forceload add 0 0"));
+            game.enter_level(Dim::Overworld).unwrap();
+            let mut summon = |kind| match game
+                .summon_with_nbt(kind, [0.5, 70.0, 0.5], "{NoAI:1b}")
+                .unwrap()
+                .unwrap()
+            {
+                Target::Mob(id) => id,
+                other => panic!("{kind} summoned as {other:?}"),
+            };
+            let (pig, zombie, bystander) = (
+                summon("minecraft:pig"),
+                summon("minecraft:zombie"),
+                summon("minecraft:zombie"),
+            );
+            let uuid = game.uuid_for(zombie);
+            let victim = game.mobs.iter_mut().find(|m| m.id == pig).unwrap();
+            victim.ai.hurt_by(Who::Mob(zombie), victim.age as i32);
+            let living = game.living(game.entity(pig).unwrap()).unwrap();
+            assert_eq!(living.kill_credit(game).map(|e| e.id()), Some(zombie));
+
+            assert!(
+                game.teleport_vehicle_across(
+                    Target::Mob(zombie),
+                    Dim::Nether,
+                    [0.5, 70.0, 0.5],
+                    None,
+                    false,
+                    TeleportMotion::Stop,
+                )
+                .unwrap()
+            );
+            assert_eq!(game.dim, Dim::Overworld);
+            let credit = living.kill_credit(game).expect("credit kept").id();
+            assert!(![zombie, bystander, pig].contains(&credit));
+            game.enter_level(Dim::Nether).unwrap();
+            assert_eq!(game.uuid_for(credit), uuid);
         });
     }
 
