@@ -265,7 +265,7 @@ mod tests {
         let exports = r#"(func (export "sunrise_in")) (func (export "sunrise_hook"))"#;
         let imports = format!(
             r#"(import "sunrise" "{}" (func)) (import "env" "memory" (memory 1))"#,
-            mod_surface::call::protocol_name("log", mod_surface::call::SHARED_PROTOCOL).text()
+            mod_call::protocol_name("log", mod_call::SHARED_PROTOCOL).text()
         );
         let imports = imports.as_str();
         let good = module(imports, exports, dylink);

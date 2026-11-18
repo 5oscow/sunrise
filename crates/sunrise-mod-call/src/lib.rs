@@ -9,10 +9,10 @@
 //!
 //! The hash is the first 128 bits of SHA-256 of one canonical text, `call{kind;owner;method;
 //! receiver;extra;[param shapes];return shape;version}`. Each type that crosses enters as its
-//! [`crate::shape`] value (so its fields count, transitively, and its path does not); parameter
+//! `shape` value of the surface crate (so its fields count, transitively, and its path does not); parameter
 //! names are not in it, so a rename refuses nothing. Nothing in it depends on the order of the
 //! API's declarations.
-use crate::shape::digest;
+use std::fmt::Write as _;
 
 /// The import module every name here lives in.
 pub const MODULE: &str = "sunrise";
@@ -186,7 +186,7 @@ pub struct Spec<'a> {
     pub receiver: Option<bool>,
     /// What else the call's meaning rests on: a hook's side, kind and scope.
     pub extra: &'a str,
-    /// The shape of each parameter, as [`crate::shape::Shapes`] writes it.
+    /// The shape of each parameter, as `Shapes` of the surface crate writes it.
     pub params: &'a [String],
     pub ret: &'a str,
     /// A hook's version.
@@ -264,6 +264,17 @@ pub fn protocol_name(word: &str, number: u32) -> Name {
         version: None,
         hash: digest(&format!("protocol{{{word};{number}}}")),
     }
+}
+
+/// The first 128 bits of SHA-256 of `text`, as 32 lowercase hex digits.
+pub fn digest(text: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let hash = Sha256::digest(text.as_bytes());
+    let mut out = String::with_capacity(32);
+    for byte in &hash[..16] {
+        let _ = write!(out, "{byte:02x}");
+    }
+    out
 }
 
 #[cfg(test)]

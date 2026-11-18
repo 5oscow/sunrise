@@ -1068,9 +1068,7 @@ pub(super) fn mark_macro(names: &super::Names) -> String {
 /// The protocol module every guest links.
 pub(super) fn protocol_module() -> String {
     let mut out = String::new();
-    let protocol = |word: &str| {
-        mod_surface::call::protocol_name(word, mod_surface::call::SHARED_PROTOCOL).text()
-    };
+    let protocol = |word: &str| mod_call::protocol_name(word, mod_call::SHARED_PROTOCOL).text();
     write!(
         out,
         r#"/// The imports every guest links, named for the shared protocol's number.
@@ -1111,7 +1109,7 @@ pub(crate) mod protocol {{
         log = protocol("log"),
     )
     .unwrap();
-    out.replace("mod_surface_module", mod_surface::call::MODULE)
+    out.replace("mod_surface_module", mod_call::MODULE)
 }
 
 /// The guest's `hook`: one arm for every export a mod can be called through, reading the

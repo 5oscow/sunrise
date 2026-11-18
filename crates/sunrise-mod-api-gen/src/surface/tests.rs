@@ -1090,7 +1090,7 @@ fn the_recipe_placement_protocol_is_pinned_to_the_shapes_it_carries() {
     layouts.finish(&mut index);
     let mut shapes = Shapes::new(&layouts.table);
     let text: Vec<String> = keys.iter().map(|key| shapes.shape(key).unwrap()).collect();
-    let hash = mod_surface::shape::digest(&text.join(","));
+    let hash = mod_call::digest(&text.join(","));
     assert_eq!(
         hash, PINNED,
         "the placement frames' shapes changed (now {hash}): bump placement_sync PROTOCOL"

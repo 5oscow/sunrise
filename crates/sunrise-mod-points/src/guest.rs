@@ -1,7 +1,7 @@
 //! Guest listeners sharing the ordinary hook export and wire arena.
 use crate::PointId;
 /// The bit that marks a point listener's id.
-const POINT_TAG: u64 = mod_surface::call::POINT_TAG;
+const POINT_TAG: u64 = mod_call::POINT_TAG;
 use mod_api::__private::points::{ApiKind, SlotListener};
 use std::cell::RefCell;
 

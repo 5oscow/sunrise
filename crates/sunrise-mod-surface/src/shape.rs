@@ -35,6 +35,7 @@
 //! A shape is computed once per key and argument list, except for a type in a cycle, which is
 //! described afresh each time it is reached: the result never depends on the order shapes are
 //! asked for.
+use mod_call::digest;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -421,17 +422,6 @@ impl<'a> Shapes<'a> {
         }
         Ok(())
     }
-}
-
-/// The first 128 bits of SHA-256 of `text`, as 32 lowercase hex digits.
-pub fn digest(text: &str) -> String {
-    use sha2::{Digest, Sha256};
-    let hash = Sha256::digest(text.as_bytes());
-    let mut out = String::with_capacity(32);
-    for byte in &hash[..16] {
-        let _ = write!(out, "{byte:02x}");
-    }
-    out
 }
 
 #[cfg(test)]

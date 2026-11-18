@@ -167,7 +167,7 @@ no parameters.
 
 The `<hash>` is the first 128 bits of the SHA-256 of a canonical description of the item: its
 owner, receiver, parameter and answer shapes, and the shape of every type they carry, field by
-field (`mod_surface::call`; the description is in the `sunrise-mod-surface` crate docs). A type's
+field (`mod_call`; the description is in the `sunrise-mod-call` crate docs). A type's
 path never enters it. A hook's `@<version>` is its `hook_version`, which a refusal reports as
 "version 2 → 3".
 

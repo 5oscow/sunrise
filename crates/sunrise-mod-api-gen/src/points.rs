@@ -887,7 +887,7 @@ pub(crate) fn locked_with(lock: &str, name: &str, added: &[&str]) -> Option<Stri
 /// (`point:Points::<place>#<hash>`), and the id the game fires it by, all from the place's name
 /// and its point's signature, so none moves when another point is added. A listener's
 /// registration marks its place through `__point_mark!`.
-fn place_items(places: &[(String, String, mod_surface::call::Name)]) -> proc_macro2::TokenStream {
+fn place_items(places: &[(String, String, mod_call::Name)]) -> proc_macro2::TokenStream {
     let mut ids = std::collections::BTreeMap::new();
     for (variant, _, name) in places {
         assert!(
@@ -968,7 +968,7 @@ fn place_items(places: &[(String, String, mod_surface::call::Name)]) -> proc_mac
 
 /// The id a guest is asked by for the places it listens at: the points' tag and the low 32 bits
 /// set, which no place's digest id is (the generator refuses one that is).
-const SUBSCRIPTIONS: u64 = mod_surface::call::POINT_TAG | 0xFFFF_FFFF;
+const SUBSCRIPTIONS: u64 = mod_call::POINT_TAG | 0xFFFF_FFFF;
 
 /// Platform `mod_points`: canonical engine-record re-exports, listener constructors
 /// and registration place ids. Typed dispatch is owned by `sunrise_engine_slots`.
@@ -1013,7 +1013,7 @@ pub(crate) fn records_selected(
     let mut api_places = proc_macro2::TokenStream::new();
     let mut api_refusals = proc_macro2::TokenStream::new();
     // Each place's name as a mod's import table spells it, and its wire id.
-    let mut places: Vec<(String, String, mod_surface::call::Name)> = Vec::new();
+    let mut places: Vec<(String, String, mod_call::Name)> = Vec::new();
     for point in points {
         if let Some(reason) = &point.api_refusal {
             let target = &point.target;
@@ -1067,11 +1067,11 @@ pub(crate) fn records_selected(
             places.push((
                 variant.to_string(),
                 name.clone(),
-                mod_surface::call::Name {
-                    kind: mod_surface::call::Kind::Point,
+                mod_call::Name {
+                    kind: mod_call::Kind::Point,
                     path: format!("Points::{name}"),
                     version: None,
-                    hash: mod_surface::shape::digest(&format!(
+                    hash: mod_call::digest(&format!(
                         "point{{{};{at_return}}}",
                         point.signature_hash
                     )),

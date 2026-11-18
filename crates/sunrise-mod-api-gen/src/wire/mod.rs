@@ -493,27 +493,27 @@ pub(super) fn fallible_frame_accessor(method: &Method) -> Option<(&str, bool, &T
 /// The name of every method that crosses, by (owner, method): what the guest imports or
 /// exports it as, and what the game's table lists it as.
 pub(super) struct Names {
-    by_method: std::collections::HashMap<(String, String), mod_surface::call::Name>,
+    by_method: std::collections::HashMap<(String, String), mod_call::Name>,
     /// The calls a mod makes on a game object of an exported trait it holds (`held-` imports).
-    held: std::collections::HashMap<(String, String), mod_surface::call::Name>,
+    held: std::collections::HashMap<(String, String), mod_call::Name>,
     /// The three named entries of each prepared hook, by (hook, entry).
-    prepared: std::collections::HashMap<(String, String), mod_surface::call::Name>,
+    prepared: std::collections::HashMap<(String, String), mod_call::Name>,
 }
 
 impl Names {
-    pub(super) fn get(&self, owner: &str, method: &str) -> &mod_surface::call::Name {
+    pub(super) fn get(&self, owner: &str, method: &str) -> &mod_call::Name {
         self.by_method
             .get(&(owner.to_owned(), method.to_owned()))
             .unwrap_or_else(|| panic!("no name for {owner}::{method}"))
     }
 
-    pub(super) fn held(&self, owner: &str, method: &str) -> &mod_surface::call::Name {
+    pub(super) fn held(&self, owner: &str, method: &str) -> &mod_call::Name {
         self.held
             .get(&(owner.to_owned(), method.to_owned()))
             .unwrap_or_else(|| panic!("no held name for {owner}::{method}"))
     }
 
-    pub(super) fn prepared(&self, hook: &str, entry: &str) -> &mod_surface::call::Name {
+    pub(super) fn prepared(&self, hook: &str, entry: &str) -> &mod_call::Name {
         self.prepared
             .get(&(hook.to_owned(), entry.to_owned()))
             .unwrap_or_else(|| panic!("no name for prepared {hook} entry {entry}"))
@@ -521,7 +521,7 @@ impl Names {
 
     /// Every export a mod may implement, with the owner and method it is written as in
     /// `__sunrise_mark!`, sorted: the methods of the exported traits, then the prepared entries.
-    pub(super) fn marked(&self) -> Vec<(&str, &str, &mod_surface::call::Name)> {
+    pub(super) fn marked(&self) -> Vec<(&str, &str, &mod_call::Name)> {
         let mut out: Vec<_> = self
             .by_method
             .iter()
@@ -604,7 +604,7 @@ pub(super) fn call_names(
     prepared: &[(String, String)],
 ) -> Result<Names, String> {
     use crate::surface::calls::Call;
-    use mod_surface::call::Kind;
+    use mod_call::Kind;
     let parse = |text: &String| syn::parse_str::<syn::Type>(text).map_err(|e| e.to_string());
     let mut calls = Vec::new();
     // (table, owner, method) of each call, in order.
@@ -631,7 +631,7 @@ pub(super) fn call_names(
                 .map(|(_, ty)| ty)
                 .chain(std::iter::once(&m.ret))
                 .collect();
-            mod_surface::shape::digest(&descriptors::text(&surface.types, &tys))
+            mod_call::digest(&descriptors::text(&surface.types, &tys))
         };
         let call =
             |kind, owner: String, hook: Option<&crate::catalog::Hook>| -> Result<Call, String> {
@@ -1078,7 +1078,7 @@ mod tests {
                     names.by_method.values().map(|n| n.text()).collect();
                 assert_eq!(texts.len(), surface.methods.len());
                 for text in &texts {
-                    assert!(mod_surface::call::Name::parse(text).is_ok(), "{text}");
+                    assert!(mod_call::Name::parse(text).is_ok(), "{text}");
                 }
                 eprintln!(
                     "{} names, longest {}",
