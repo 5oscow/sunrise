@@ -287,19 +287,39 @@ impl Game<'_> {
             // These synchronized registries are normally decoded only when a peer joins.
             sunrise_client::lan::data::SyncData::stage_registry_conditions(root, &overlay);
         }
+        // Visit independently readable registries before consuming any result.
+        // One rejected winner must not hide the other entries' diagnostics.
+        let loot =
+            sunrise_world::loot::LootData::load(root, &overlay, self.res.core.item_data.defaults());
+        let advancements = Arc::new(sunrise_client::advancements::Tree::load_with(
+            &root.join("data"),
+            &overlay,
+        ));
+        let datapack_candidate = self.datapack_candidate(stack, &conditions);
         // The recipe tables, the stations and the recipe book read one folder:
         // hold its files so it is read once.
         let _recipe_files = sunrise_client::json_folder::read(&root.join("data/minecraft/recipe"));
         let sources = if reload {
-            lan::sync::prepare_server_sources(root, &self.res.core.item_data, &overlay)?
+            lan::sync::prepare_server_sources(root, &self.res.core.item_data, &overlay)
         } else {
             lan::sync::load_sources(
                 root,
                 &self.res.core.item_data,
                 self.options.execution_role.data_load_origin(),
                 &overlay,
-            )?
+            )
         };
+        if let Err(errors) = conditions.check_errors() {
+            // Recipe source discovery aggregates its condition errors with its
+            // JSON errors instead of adding them to the overlay diagnostics.
+            return Err(match sources {
+                Ok(_) => errors,
+                Err(recipe_error) => format!("{errors}; {recipe_error}"),
+            }
+            .into());
+        }
+        let sources = sources?;
+        let mut loot = loot?;
         let recipes = Recipes::from_resolved(root, &items, &overlay, &sources)?;
         let mut stations = sunrise_client::stations::StationData::from_sources(
             root,
@@ -314,7 +334,7 @@ impl Game<'_> {
         // the registries they list.
         // Resolve membership against the very generation that will be published.
         // In particular, generation exhaustion refuses preparation before any state changes.
-        let mut datapack_candidate = self.datapack_candidate(stack, &conditions)?;
+        let mut datapack_candidate = datapack_candidate?;
         if let Some(candidate) = &mut datapack_candidate {
             native_registry_entries::bind_datapack_tags(root, &tag_files, candidate)?;
         }
@@ -430,18 +450,6 @@ impl Game<'_> {
                     .registry_order(),
             ));
         drop(registries);
-        // Prepare one private loot generation with the same winning inputs and
-        // final condition lookup as this world's items. Nothing is published here.
-        let mut loot = sunrise_world::loot::LootData::load(
-            root,
-            &overlay,
-            self.res.core.item_data.defaults(),
-        )?;
-        let advancements = Arc::new(sunrise_client::advancements::Tree::load_with(
-            &root.join("data"),
-            &overlay,
-        ));
-        conditions.check_errors()?;
         // The API's key order is live state as well: do not change it for a
         // candidate refused by the condition readers.
         api_values::resolve_enchantment_registry(&items)?;

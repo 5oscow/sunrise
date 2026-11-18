@@ -266,7 +266,7 @@ fn load_conditions_recipe_reload_counts_and_failed_candidates_keep_old_recipes()
                     if bad == 2 || bad == 3 {
                         assert!(error.contains("testmod:flag"), "{error}");
                     }
-                    if bad == 1 || bad == 3 {
+                    if bad == 3 {
                         assert!(error.contains("mod testmod"), "{error}");
                     }
                     assert_eq!(

@@ -137,6 +137,16 @@ fn datapack_game_open_reload_and_exhaustion_are_atomic() {
                     &winning,
                     r#"{"power":8,"neoforge:conditions":[{"type":"neoforge:or","values":[{"type":"neoforge:always"},{"type":"absent:spell_enabled"}]}]}"#,
                 );
+                let bad_entries = ["predicate", "advancement", "recipe"].map(|kind| {
+                    let path = format!("data/registry_test/{kind}/bad.json");
+                    let file = root.join("datapacks/override").join(&path);
+                    let id = format!("absent:{kind}");
+                    write(
+                        &file,
+                        &serde_json::json!({"neoforge:conditions":[{"type":id}]}).to_string(),
+                    );
+                    (path, id, file)
+                });
                 let features = game.level.enabled_features.clone();
                 let error = game
                     .reload_datapacks(true, &features)
@@ -148,6 +158,10 @@ fn datapack_game_open_reload_and_exhaustion_are_atomic() {
                     "{error}"
                 );
                 assert!(error.contains("absent:spell_enabled"), "{error}");
+                for (path, id, file) in bad_entries {
+                    assert!(error.contains(&path) && error.contains(&id), "{error}");
+                    std::fs::remove_file(file).unwrap();
+                }
                 assert!(std::sync::Arc::ptr_eq(
                     game.mods.datapack_registries.as_ref().unwrap(),
                     &old
