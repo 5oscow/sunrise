@@ -42,6 +42,9 @@ mod content {
         ) -> Option<&'static str> {
             Some("test:counter")
         }
+        pub(in crate::tests) fn entity_type_name(_: u32) -> Option<&'static str> {
+            Some("test:entity")
+        }
         pub(in crate::tests) fn item_id(key: super::super::ItemKey<'_>) -> Option<&str> {
             Some(key.0)
         }
