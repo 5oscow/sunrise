@@ -126,8 +126,9 @@ python3 tools/perf_bench.py --compare target-base/release target/release --budge
 
 The server tick figures are vanilla's `/tick query` after each flight: the integrated server's last 100 ticks, in 0.1 ms
 steps. They count only when all 100 fall inside the flight (`--seconds` 5 or more at 20 TPS); otherwise they're missing.
-A joined server's ticks aren't read, so `--compare` runs single player. At 0.1 ms steps a tick time under about 1.7 ms
-can't pass within 3%.
+A joined server's ticks aren't read, so `--compare` runs single player. When rounding alone (half a 0.1 ms step) is more
+than the budget allows, a before tick time under about 1.7 ms at 3%, the row says "below resolution: not gated": it is
+shown, but neither passes nor fails, and the scene's frame figures are gated as usual. A missing tick figure still fails.
 
 Set-up options for Sunrise: `--graphics KEY:VALUE` (a line of `sunrise-graphics.txt`, repeatable), `--resource-pack PATH`
 (turned on in `options.txt`, repeatable) and `--shader-pack PATH` (picked through `SUNRISE_SHADER_PACK`, a folder or a

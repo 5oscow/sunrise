@@ -452,14 +452,29 @@ class CompareTests(unittest.TestCase):
                  for v in pick(0.24951, 0.25749)]
         row = {r["figure"]: r for r in judge(frame, 3, ["village"])}["p50_ms"]
         self.assertFalse(row["passed"], "3.2% slower, though 0.250 and 0.257 round to under 3%")
-        tick = [{"village": {"p50_ms": 1.0, "p99_ms": 1.0, "server_tick_p50_ms": v, "server_tick_p99_ms": 9.0}}
-                for v in pick(1.0, 1.0)]
+        tick = [{"village": {"p50_ms": 1.0, "p99_ms": 1.0, "server_tick_p50_ms": v, "server_tick_p99_ms": 2.0}}
+                for v in pick(2.0, 2.06)]
         row = {r["figure"]: r for r in judge(tick, 3, ["village"])}["server_tick_p50_ms"]
-        self.assertFalse(row["passed"], "1.0 and 1.0 in 0.1 ms steps can hide 8% more")
+        self.assertFalse(row["passed"], "+0.06 ms on 2.0, plus half a 0.1 ms step, is over 3%")
         tick = [{"village": {"p50_ms": 1.0, "p99_ms": 1.0, "server_tick_p50_ms": v, "server_tick_p99_ms": 9.0}}
                 for v in pick(5.0, 5.0)]
         row = {r["figure"]: r for r in judge(tick, 3, ["village"])}["server_tick_p50_ms"]
         self.assertTrue(row["passed"], "at 5 ms, half a step is within 3%")
+
+    def test_a_tick_time_below_resolution_is_shown_but_not_gated(self):
+        from tools.perf_bench import ARMS, judge
+        pick = lambda before, after: [before if ARMS[i % 4] == "A" else after for i in range(12)]
+        fast = [{"village": {"p50_ms": f, "p99_ms": 1.0, "server_tick_p50_ms": t, "server_tick_p99_ms": 1.2}}
+                for f, t in zip(pick(0.25, 0.30), pick(1.0, 1.4))]
+        rows = {r["figure"]: r for r in judge(fast, 3, ["village"])}
+        tick = rows["server_tick_p50_ms"]
+        self.assertEqual((tick["below_resolution"], tick["gated"], tick["passed"], tick["diff"]), (True, False, None, 0.4),
+                         "1.0 ms is below what 0.1 ms steps can judge at 3%: shown, neither pass nor fail")
+        self.assertEqual((rows["p50_ms"]["gated"], rows["p50_ms"]["passed"]), (True, False),
+                         "the client frame figures are still gated")
+        lacking = [{"village": {"p50_ms": 0.25, "p99_ms": 1.0}} for _ in range(12)]
+        missing = {r["figure"]: r for r in judge(lacking, 3, ["village"])}["server_tick_p50_ms"]
+        self.assertEqual((missing["verdict"], missing["passed"]), ("missing", False), "a missing tick figure still fails")
         lacking = [{"village": {"p50_ms": 1.0, "p99_ms": 1.0}} for _ in range(12)]
         rows = {r["figure"]: r for r in judge(lacking, 3, ["village", "menu_hold"])}
         self.assertEqual((rows["server_tick_p50_ms"]["verdict"], rows["server_tick_p50_ms"]["passed"]), ("missing", False))
