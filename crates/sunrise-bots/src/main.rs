@@ -75,13 +75,13 @@ sunrise-bots: load-test bots for a Minecraft Java Edition 26.3 server (offline m
   --flood N              packets a tick for the flood behaviours; default 100
   --attack NAME          attack the player NAME twice a second, from wherever the bot is (a reach test),
                          swinging after each attack as vanilla's client does. NAME,NAME...: each of them
-                         in the same tick (a multi-target kill aura, for the anticheat's tests);
+                         in the same tick (a multi-target kill aura, to test an anticheat);
                          the report gives each bot's last health. A UUID instead of a NAME: the
                          entity with that UUID (a boat summoned with it, say)
   --attack-after S       start attacking S seconds after joining; default 5
   --attack-rounds N      stop after N rounds of attacks (each hits every target seen so far once);
                          default no limit
-  --no-swing             attack without swinging (a kill aura hiding its swing, for the anticheat's tests)
+  --no-swing             attack without swinging (a kill aura hiding its swing, to test an anticheat)
   --no-loaded            never say the level is loaded (ServerboundPlayerLoadedPacket): a vanilla server
                          ignores the player's moves and actions for its first 3 seconds
   --no-read              stop reading from the server once spawned (a client that lets the

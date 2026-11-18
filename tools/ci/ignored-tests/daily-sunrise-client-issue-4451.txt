@@ -2169,7 +2169,6 @@ sunrise-client game::play_ping_tests::dead_guest_play_ping_is_transport_not_an_a
 sunrise-client game::play_ping_tests::handover_guest_play_ping_survives_the_acknowledgement_filter lib daily resources
 sunrise-client game::play_ping_tests::held_guest_play_ping_survives_the_acknowledgement_filter lib daily resources
 sunrise-client game::play_ping_tests::registered_play_ping_echoes_exact_long_to_only_its_connection lib daily resources
-sunrise-client game::play_ping_tests::server_ping_client_pong_keeps_the_existing_prediction_route lib daily resources
 sunrise-client game::player_destroy_tests::a_block_part_decides_whether_a_player_breaking_a_block_destroyed_it lib daily resources
 sunrise-client game::player_destroy_tests::a_part_keeping_the_block_replaces_player_will_destroy_in_creative lib daily resources
 sunrise-client game::player_destroy_tests::a_pots_harvest_listener_runs_once_and_sees_it_cracked lib daily resources
@@ -2205,9 +2204,6 @@ sunrise-client game::potions::tests::residency_cloud_load_expiry_bottling_and_la
 sunrise-client game::potions::tests::taken_breath_tick_keeps_both_spawns_before_survivors lib daily resources
 sunrise-client game::potions::tests::taken_potion_tick_keeps_both_spawns_before_survivors lib daily resources
 sunrise-client game::potions::xp_bottle_tests::bottle_orbs_start_away_from_what_it_hit lib daily resources
-sunrise-client game::prediction_tests::guest_replay_synchronizes_worn_boots lib daily resources
-sunrise-client game::prediction_tests::honest_powder_snow_prediction lib daily resources
-sunrise-client game::prediction_tests::lying_powder_snow_prediction lib daily resources
 sunrise-client game::projectile_spawned_tests::owner_launch_applies_the_supplied_stacks_effects lib daily resources
 sunrise-client game::projectile_spawned_tests::requirements_draw_the_level_random_before_each_effect lib daily resources
 sunrise-client game::projectile_spawned_tests::stack_then_weapon_in_component_order lib daily resources

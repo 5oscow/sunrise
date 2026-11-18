@@ -89,21 +89,6 @@ webhook = ""                 # the channel's webhook URL (a secret: anyone with 
 events = ["chat", "join", "leave", "death"]   # what is posted; "kick" too if you like
 enabled = true               # false pauses it and keeps the webhook
 
-# Sunrise's anticheat (docs/anticheat.md) is on: `combat` drops attacks no vanilla client sends and
-# `ground` the false ground claims of a no-fall or a walk on water; both kick, and ban at the second kick.
-# timer and prediction only write logs/anticheat.log until they're trusted. To change it:
-# [anticheat]
-# enabled = true             # false: the server checks only what vanilla's checks
-# alerts = true              # tell online operators (alert_level = 2) in their chat; the console always is
-# log = "logs/anticheat.log" # every flag, one line each
-# [anticheat.timer]          # a sped-up game: more client ticks than the server's clock allows
-# enabled = true             # false turns this check off
-# setback = 2                # the violation level from which the player is sent back; 0: never
-# alert = 5
-# kick = 20
-# decay = 0.02               # violation level lost each second
-# ban_after = 0              # the kick (counting this check's earlier ones) that bans instead; 0: never
-
 # The chat filter (docs/chat-filter.md) is on: a message, sign, anvil name or book title with a hate slur reaches
 # nobody, the sender is told, and logs/chat-filter.log keeps it for operators. To change it:
 # [chat_filter]
@@ -201,9 +186,6 @@ pub struct Config {
     /// Chat and players posted to a Discord channel (discord.rs).
     #[serde(default)]
     pub discord: Discord,
-    /// The game reads this section itself (docs/anticheat.md); written only when it isn't the default.
-    #[serde(default, skip_serializing_if = "anticheat_default")]
-    pub anticheat: sunrise_anticheat::Config,
     /// The game reads this section itself (docs/chat-filter.md); written only when it isn't the default.
     #[serde(default, skip_serializing_if = "chat_filter_default")]
     pub chat_filter: sunrise_chat_filter::Config,
@@ -270,10 +252,6 @@ impl Entities {
 /// The game reads this section itself too (docs/chat-filter.md).
 fn chat_filter_default(c: &sunrise_chat_filter::Config) -> bool {
     *c == sunrise_chat_filter::Config::default()
-}
-
-fn anticheat_default(c: &sunrise_anticheat::Config) -> bool {
-    *c == sunrise_anticheat::Config::default()
 }
 
 const EVENTS: [&str; 6] = ["chat", "join", "leave", "death", "kick", "announce"];
@@ -664,9 +642,19 @@ fn text_or_number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::E
     })
 }
 
+/// What `parse` answers for a `server.toml` that still has an `[anticheat]` section.
+const ANTICHEAT_REMOVED: &str =
+    "anticheat was removed from Sunrise; delete the [anticheat] section from server.toml";
+
 impl Config {
     pub fn parse(text: &str) -> Result<Self, String> {
-        let config: Self = toml::from_str(text).map_err(|e| e.to_string())?;
+        let config: Self = toml::from_str(text).map_err(|e| {
+            // The anticheat is gone: an old file's section gets what to do, not "unknown field".
+            match toml::from_str::<toml::Table>(text) {
+                Ok(table) if table.contains_key("anticheat") => ANTICHEAT_REMOVED.to_owned(),
+                _ => e.to_string(),
+            }
+        })?;
         config.check()?;
         Ok(config)
     }
@@ -715,7 +703,6 @@ impl Config {
             return Err("entities.villager_lobotomize_check_interval must be above zero".into());
         }
         self.discord.check()?;
-        self.anticheat.check()?;
         self.chat_filter.check()?;
         self.prune_chunks.check()?;
         self.entities.check()?;
@@ -858,13 +845,7 @@ pub fn render(config: &Config) -> String {
         set(&mut doc, section, field, &table[section][field]);
     }
     let mut text = doc.to_string();
-    for section in [
-        "anticheat",
-        "chat_filter",
-        "prune_chunks",
-        "biome_regions",
-        "entities",
-    ] {
+    for section in ["chat_filter", "prune_chunks", "biome_regions", "entities"] {
         if let Some(settings) = table.get(section) {
             let mut only = toml::Table::new();
             only.insert(section.into(), settings.clone());
@@ -1119,25 +1100,12 @@ mod tests {
     }
 
     #[test]
-    fn anticheat_is_on_unless_its_section_turns_it_off() {
-        assert!(Config::default().anticheat.enabled);
-        assert!(!TEMPLATE.lines().any(|l| l.trim() == "[anticheat]"));
-        let text =
-            format!("{TEMPLATE}\n[anticheat]\nenabled = true\n[anticheat.timer]\nkick = 20\n");
-        let c = Config::parse(&text).unwrap();
-        assert!(c.anticheat.enabled);
-        assert_eq!(c.anticheat.timer.kick, 20.0);
-        let off = Config::parse(&format!("{TEMPLATE}\n[anticheat]\nenabled = false\n")).unwrap();
-        assert!(!off.anticheat.enabled);
-        assert_eq!(Config::parse(&render(&off)).unwrap(), off);
-        // The game reads the same section from the same file.
-        assert_eq!(
-            sunrise_anticheat::Config::from_server_toml(&text).unwrap(),
-            c.anticheat
-        );
-        assert_eq!(Config::parse(&render(&c)).unwrap(), c);
-        assert!(Config::parse("[anticheat]\nenable = true\n").is_err());
-        assert!(Config::parse("[anticheat.timer]\nalert = -1\n").is_err());
+    fn a_leftover_anticheat_section_says_what_to_do() {
+        let old = format!("{TEMPLATE}\n[anticheat]\nenabled = true\n");
+        assert_eq!(Config::parse(&old), Err(ANTICHEAT_REMOVED.to_owned()));
+        // Other unknown keys keep serde's own message.
+        let other = Config::parse("[nonsense]\nenabled = true\n").unwrap_err();
+        assert_ne!(other, ANTICHEAT_REMOVED);
     }
 
     #[test]

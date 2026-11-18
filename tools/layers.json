@@ -43,7 +43,6 @@
     "sunrise-guest-stack": "engine",
     "sunrise-world": "engine",
     "cargo-sunrise-mod": "tool",
-    "sunrise-anticheat": "platform",
     "sunrise-chat-filter": "platform",
     "sunrise-dualsense": "platform",
     "sunrise-hdr": "platform",
@@ -144,7 +143,6 @@
     }
   ],
   "allowed": [
-    "sunrise-client -> sunrise-anticheat",
     "sunrise-client -> sunrise-chat-filter",
     "sunrise-client -> sunrise-dualsense",
     "sunrise-client -> sunrise-friends",
@@ -153,7 +151,6 @@
     "sunrise-client -> sunrise-shader-api",
     "sunrise-client -> sunrise-shaders",
     "sunrise-client -> sunrise-theme",
-    "sunrise-client-lib -> sunrise-anticheat",
     "sunrise-client-lib -> sunrise-dualsense",
     "sunrise-client-lib -> sunrise-hdr",
     "sunrise-client-lib -> sunrise-mcp",

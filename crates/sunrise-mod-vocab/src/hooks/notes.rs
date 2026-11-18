@@ -1160,9 +1160,8 @@ it moves only what the player sees, not where they are or aim.
 `crates/sunrise-client/src/game/modding/native_motion.rs`: a push on a client.
 
 - `native_push_player([x, y, z])` (client) adds a push to the player's own velocity, in blocks a tick, as an
-  explosion's knockback does: the player's own game moves them. The server didn't send it, so on a LAN or dedicated
-  server the anticheat's movement check sees a move it can't explain (logged only unless the server sets it to send
-  players back); for a push the server should stand behind, have the server send it. Each component is
+  explosion's knockback does: the player's own game moves them. The server didn't send it, so a server's movement checks
+  may see a move they can't explain; for a push the server should stand behind, have the server send it. Each component is
   cut to 4 either way; an upward push lifts the player off the ground. A spectator, no player, or a value that isn't
   a number is left alone. A server mod that wants a client pushed sends its client half a message.
 

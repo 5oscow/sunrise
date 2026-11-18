@@ -2071,7 +2071,6 @@ impl Game<'_> {
                 event @ (HostEvent::Chat { .. } | HostEvent::Warn(_) | HostEvent::Error(_)) => {
                     self.lan_log_event(event);
                 }
-                HostEvent::Ban { uuid, name, reason } => self.anticheat_ban(uuid, &name, &reason),
                 HostEvent::ChatFiltered {
                     sender,
                     name,
@@ -2915,9 +2914,6 @@ impl Game<'_> {
         self.lan_update_waypoints();
         self.lan_sync_scoreboard();
         self.lan_sync_border();
-        if let Some(host) = self.lan.as_mut() {
-            host.hub.anticheat_ping();
-        }
         drop(holding);
         self.flush_attachment_sync();
         self.flush_far_terrain();

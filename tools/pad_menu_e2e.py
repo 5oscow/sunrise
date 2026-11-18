@@ -3156,8 +3156,22 @@ def craft_lan_guest(args, name):
     return check.failures
 
 
+# A flat creative test server with nobody's account checked.
+PROPERTIES = {
+    'online-mode': 'false',
+    'white-list': 'false',
+    'level-type': 'minecraft\\:flat',
+    'generate-structures': 'false',
+    'gamemode': 'creative',
+    'force-gamemode': 'true',
+    'spawn-protection': '0',
+    'view-distance': '4',
+    'simulation-distance': '4',
+    'max-players': '100',
+}
+
+
 def craft_dedicated(args, name):
-    from anticheat_e2e import PROPERTIES
     from server_bench import DONE, Server
     check = Check()
     folder = Path(tempfile.mkdtemp(prefix=f'pad-menu-{name}-server-'))
