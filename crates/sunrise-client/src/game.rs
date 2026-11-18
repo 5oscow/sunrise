@@ -1096,7 +1096,7 @@ struct Game<'a> {
     /// wanting it takes it again (`MouseHandler.grabMouse`, whose grab
     /// outlives the window's focus).
     regrab_on_refocus: bool,
-    /// Controller connection and movement notices.
+    /// Controller connection notices.
     controller_notice: sunrise_client::controller_notice::NoticeSlot,
     focused: bool,
     /// The visible window of a game an agent started, until a person clicks into it: its

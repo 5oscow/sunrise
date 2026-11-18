@@ -68,7 +68,7 @@ Vanilla Minecraft: Java Edition 26.3, and nothing else.
 - **Also the render pipeline's own capabilities that vanilla's path doesn't use**, when a higher layer could only
   get them by rebuilding the pipeline. The one today is the **compositor**: drawing a view into an offscreen target
   and composing several targets into a window's views. The ordinary client does not use the compositor;
-  the renderer's scene replay example still exercises it.
+  the renderer's `examples/compositor.rs` still exercises it.
 - **Examples:** `sunrise-world` (`worldgen/`, `level/redstone.rs`), `sunrise-protocol` (`packets/`),
   `sunrise-items`, `sunrise-command`, `sunrise-core`, `game/creatures.rs`, `game/integrated.rs`, `gfx.rs`,
   `mesher.rs`, `streaming.rs`, `lan/`.
