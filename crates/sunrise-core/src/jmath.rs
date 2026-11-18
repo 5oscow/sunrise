@@ -13,7 +13,8 @@
 //!   100,000 arguments near 1 and 2 in 10 million over its usual range;
 //!   `log10`: about 10 in 100,000 near 1 and none of 10 million over its
 //!   usual range), so `log` and `log10` are [`exact`]'s, which glibc's miss
-//!   by far more.
+//!   by far more. `exp` is the stub's own algorithm
+//!   ([`hotspot_exp`]), whose results are not always correctly rounded.
 //!   The others use the platform libm, which rounds like the stubs for nearly
 //!   every argument; Windows' libm (Microsoft's) rounds `sin` and `cos`
 //!   differently for about 3% of arguments, so there they are correctly
@@ -27,6 +28,7 @@
 //! Linux and on an Apple silicon Mac alike.
 
 pub mod fdlibm;
+pub mod hotspot_exp;
 
 /// `Math.sin` and `Math.cos` as HotSpot computes them on AArch64: fdlibm's
 /// algorithm with fused multiply-adds, on every platform.
@@ -97,7 +99,7 @@ pub fn tan(x: f64) -> f64 {
 pub fn exp(x: f64) -> f64 {
     match PLATFORM {
         Platform::Aarch64 => libm::exp(x),
-        Platform::Windows | Platform::Libm => x.exp(),
+        Platform::Windows | Platform::Libm => hotspot_exp::exp(x),
     }
 }
 
