@@ -403,6 +403,7 @@ impl<'g> Game<'g> {
             return taken || owned;
         }
         let taken = api::engine::press(&mut open, slot, button_of(button));
+        self.container_heard_press = Some(self.physical_presses);
         if taken {
             self.container_buttons.insert(button);
         }
@@ -423,6 +424,7 @@ impl<'g> Game<'g> {
         let Some(button) = self
             .drag_button
             .filter(|b| self.physical_buttons.contains(b))
+            .filter(|_| self.container_heard_press == Some(self.physical_presses))
         else {
             return false;
         };
@@ -804,5 +806,77 @@ mod tests {
             assert!(game.container_mouse(MouseButton::Left, true, false))
         });
         assert_eq!(BUILT.with(|n| n.get()), 1);
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn a_drag_belongs_to_the_last_press_the_hooks_heard() {
+        let mut resources = None;
+        let mut game = server_game(&mut resources);
+        game.screen = Screen::Inventory;
+        game.physical_buttons.insert(MouseButton::Left);
+        game.drag_button = Some(MouseButton::Left);
+        game.physical_presses = 1;
+        with_registrants(&[&TAKE], || {
+            assert!(game.container_mouse(MouseButton::Left, true, false));
+            assert!(game.container_drag());
+            // A newer press the hooks never heard (a mod's pre hook cancelled it).
+            game.physical_presses = 2;
+            assert!(!game.container_drag());
+        });
+    }
+
+    /// Sunrise's inventory extras (`sunrise-inventory`) through this hook on the real menus.
+    fn inventory_extras() -> &'static dyn ContainerHooks {
+        use sunrise_hooks::Hooks;
+        sunrise_inventory::HOOKS.containers().unwrap()
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn the_sort_key_sorts_the_inventory_in_creative_order_merging_stacks() {
+        use sunrise_hooks::settings::Store;
+        let mut resources = None;
+        let mut game = server_game(&mut resources);
+        game.screen = Screen::Inventory;
+        game.creative_screen.publish_order();
+        game.inventory[9] = Some(ItemStack::new("minecraft:dirt", 10));
+        game.inventory[10] = Some(ItemStack::new("minecraft:stone", 64));
+        game.inventory[12] = Some(ItemStack::new("minecraft:dirt", 20));
+        sunrise_inventory::SETTING.load("sort", "true");
+        sunrise_inventory::SETTING.load("sortKey", "key.keyboard.r");
+        with_registrants(&[inventory_extras()], || {
+            assert!(game.container_key(KeyCode::KeyR))
+        });
+        sunrise_inventory::SETTING.load("sort", "false");
+        let at = |i: usize| game.inventory[i].as_ref().map(|s| (&*s.item, s.count));
+        // Stone comes before dirt in the creative tabs; the two dirt stacks merge.
+        assert_eq!(at(9), Some(("minecraft:stone", 64)));
+        assert_eq!(at(10), Some(("minecraft:dirt", 30)));
+        assert_eq!((at(11), at(12)), (None, None));
+        assert!(game.carried.is_none());
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn the_wheel_down_moves_one_item_across() {
+        use sunrise_hooks::settings::Store;
+        let mut resources = None;
+        let mut game = server_game(&mut resources);
+        game.screen = Screen::Inventory;
+        game.inventory[0] = Some(ItemStack::new("minecraft:stone", 5));
+        sunrise_inventory::SETTING.load("mouseTweaks", "true");
+        with_registrants(&[inventory_extras()], || {
+            let mut open = game.open_container().unwrap();
+            assert!(api::engine::wheel(&mut open, Some(SlotId(0)), -1.0));
+        });
+        sunrise_inventory::SETTING.load("mouseTweaks", "false");
+        assert_eq!(game.inventory[0].as_ref().map(|s| s.count), Some(4));
+        let moved: u32 = (9..36)
+            .filter_map(|i| game.inventory[i].as_ref())
+            .map(|s| s.count)
+            .sum();
+        assert_eq!(moved, 1, "one stone went to the main inventory");
+        assert!(game.carried.is_none());
     }
 }
