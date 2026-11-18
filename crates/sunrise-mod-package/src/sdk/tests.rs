@@ -349,6 +349,7 @@ fn asset_names_state_kind_target_and_side() {
             "surface.json",
             Some((Kind::Surface, Codec::None, None, None)),
         ),
+        ("game.lock", Some((Kind::GameLock, Codec::None, None, None))),
         (
             "build-data.tar.xz",
             Some((Kind::BuildData, Codec::Xz, None, None)),
@@ -384,6 +385,8 @@ fn asset_names_state_kind_target_and_side() {
         ("build-data-x.tar.xz", None),
         ("sdk/engine-x.tar.xz", None),
         ("surface.json.xz", None),
+        ("game.lock.xz", None),
+        ("Cargo.lock", None),
         ("engine-a/../../evil.tar.xz", None),
         ("engine-a\\..\\evil.tar.xz", None),
         ("engine-x86.64.tar.xz", None),

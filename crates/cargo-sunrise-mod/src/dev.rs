@@ -262,7 +262,7 @@ pub(crate) fn build(project: &Path, update_lock: bool) -> Result<Built, String> 
             println!("Pinning them in Cargo.lock");
             sunrise_native_build::registry_generate::generate(
                 || Ok(rust.clone()),
-                sunrise_native_build::registry_generate::game_lock,
+                |revision| sdk_fetch::game_lock(&project, revision),
                 &bundle,
                 update_lock,
             )

@@ -8,6 +8,14 @@ const MIXINS: &str = "fedcba9876543210fedcba9876543210fedcba98";
 /// A release folder `sdk-<BUILD>` under a base folder, signed with a fresh key: the base and the
 /// key.
 fn release(nightly: Option<&str>) -> (tempfile::TempDir, PublicKey) {
+    release_with(nightly, None)
+}
+
+/// A game lock that reads as one.
+const LOCK: &str = "version = 4\n[[package]]\nname = \"naga\"\nversion = \"30.0.1\"\n";
+
+/// [`release`], with the SDK listing `lock` as its `game.lock` when given.
+fn release_with(nightly: Option<&str>, lock: Option<&str>) -> (tempfile::TempDir, PublicKey) {
     let base = tempfile::tempdir().unwrap();
     let folder = base.path().join(format!("sdk-{BUILD}"));
     fs::create_dir_all(&folder).unwrap();
@@ -20,6 +28,9 @@ fn release(nightly: Option<&str>) -> (tempfile::TempDir, PublicKey) {
         )
         .unwrap();
     }
+    if let Some(lock) = lock {
+        fs::write(folder.join(GAME_LOCK), lock).unwrap();
+    }
     let build = sdk::Build {
         commit: BUILD.into(),
         game: sdk::GAME.into(),
@@ -31,7 +42,11 @@ fn release(nightly: Option<&str>) -> (tempfile::TempDir, PublicKey) {
     fs::write(folder.join(sdk::INDEX), index.to_json()).unwrap();
     let digest = |name: &str| format!("{:x}", Sha256::digest(fs::read(folder.join(name)).unwrap()));
     let sums = sunrise_release_sign::sums_file(
-        &[sdk::INDEX, SURFACE, API_SOURCE].map(|name| (name.to_owned(), digest(name))),
+        &[sdk::INDEX, SURFACE, API_SOURCE]
+            .into_iter()
+            .chain(lock.map(|_| GAME_LOCK))
+            .map(|name| (name.to_owned(), digest(name)))
+            .collect::<Vec<_>>(),
     );
     fs::write(folder.join(sunrise_release_sign::SUMS), &sums).unwrap();
     let pkcs8 = Ed25519KeyPair::generate_pkcs8(&ring::rand::SystemRandom::new()).unwrap();
@@ -273,4 +288,58 @@ fn a_project_inside_a_game_checkout_builds_against_it_and_a_pinned_one_does_not(
         &dependency("../game/crates/sunrise-mod-api"),
     );
     assert_eq!(game_tree(&outside).unwrap(), None);
+}
+
+#[test]
+fn the_games_lock_is_fetched_verified_and_read_from_the_project_with_no_download() {
+    let (base, key) = release_with(None, Some(LOCK));
+    let folder = base.path().join(format!("sdk-{BUILD}"));
+    let base = Base::Folder(base.path().to_owned());
+    let project = tempfile::tempdir().unwrap();
+    let dir = project.path().join(DIR);
+    fetch(&base, &[key], BUILD, &dir, true).unwrap();
+    assert_eq!(fs::read_to_string(dir.join(GAME_LOCK)).unwrap(), LOCK);
+    // The seed is the project's file: the default host has no network, so a download would fail.
+    assert_eq!(game_lock(project.path(), BUILD).unwrap(), LOCK);
+    // The file edited after the fetch is not the one the index lists.
+    fs::write(dir.join(GAME_LOCK), LOCK.replace("30.0.1", "30.0.2")).unwrap();
+    let error = game_lock(project.path(), BUILD).unwrap_err();
+    assert!(error.contains("cargo sunrise-mod check"), "{error}");
+    // A folder an older tool fetched, with no lock, is completed on the next fetch.
+    fs::remove_file(dir.join(GAME_LOCK)).unwrap();
+    fetch(&base, &[key], BUILD, &dir, true).unwrap();
+    assert_eq!(game_lock(project.path(), BUILD).unwrap(), LOCK);
+    // A lock that differs from the index's hash is refused at the fetch, leaving no SDK folder stamp.
+    fs::write(folder.join(GAME_LOCK), LOCK.replace("30.0.1", "30.0.2")).unwrap();
+    let other = project.path().join("other");
+    let error = fetch(&base, &[key], BUILD, &other, true).unwrap_err();
+    assert!(error.starts_with(&format!("sdk-{BUILD}: ")), "{error}");
+    assert!(!other.join(STAMP).exists());
+}
+
+#[test]
+fn a_game_lock_the_sdk_lists_but_that_is_not_a_lock_is_refused() {
+    let (base, key) = release_with(None, Some("[[package]]\nname = \"cut"));
+    let base = Base::Folder(base.path().to_owned());
+    let project = tempfile::tempdir().unwrap();
+    fetch(&base, &[key], BUILD, &project.path().join(DIR), true).unwrap();
+    let error = game_lock(project.path(), BUILD).unwrap_err();
+    assert!(error.contains("is not the game's Cargo.lock"), "{error}");
+}
+
+#[test]
+fn an_sdk_without_the_asset_takes_the_download_and_one_not_fetched_names_its_command() {
+    let (base, key) = release(None);
+    let base = Base::Folder(base.path().to_owned());
+    let project = tempfile::tempdir().unwrap();
+    let dir = project.path().join(DIR);
+    // Not fetched: refused before anything else, naming the command.
+    let error = game_lock(project.path(), BUILD).unwrap_err();
+    assert!(error.contains("`cargo sunrise-mod check`"), "{error}");
+    // Fetched, with no game.lock listed: nothing is placed, and the lock is looked for where it always was
+    // (the default host has no network, so the download says so).
+    fetch(&base, &[key], BUILD, &dir, true).unwrap();
+    assert!(!dir.join(GAME_LOCK).exists());
+    let error = game_lock(project.path(), BUILD).unwrap_err();
+    assert!(error.contains("could not be downloaded"), "{error}");
 }

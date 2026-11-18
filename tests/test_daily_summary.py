@@ -949,7 +949,7 @@ class DailyWorkflowTests(unittest.TestCase):
         names = {f"{kind}-{entry['target']}{'-server' if entry.get('server') == 'true' else ''}.tar.xz"
                  for entry in legs for kind in ("runtime", "api", "engine")}
         names |= {f"tool-{entry['target']}.tar.xz" for entry in legs if entry.get("server") != "true"}
-        self.assertEqual(names | {"api-source.tar.xz", "build-data.tar.xz", "surface.json"}, set(nightly.SDK_ARCHIVES))
+        self.assertEqual(names | {"api-source.tar.xz", "build-data.tar.xz", "surface.json", "game.lock"}, set(nightly.SDK_ARCHIVES))
         self.assertEqual(len(nightly.SDK_ARCHIVES), len(set(nightly.SDK_ARCHIVES)))
         steps = {step.get("name") or step.get("uses"): step for step in build["steps"]}
         self.assertEqual(steps["Pack the SDK's assets"]["run"],
@@ -964,7 +964,7 @@ class DailyWorkflowTests(unittest.TestCase):
         sdk = (ROOT / "crates/sunrise-mod-package/src/sdk.rs").read_text()
         self.assertIn('format!("{}-{target}{suffix}.tar.xz", kind.name())', sdk)
         self.assertIn('let suffix = if kind.per_side() && side == Side::Server {', sdk)
-        for kind in ("runtime", "api", "engine", "build-data", "api-source", "tool"):
+        for kind in ("runtime", "api", "engine", "build-data", "game-lock", "api-source", "tool"):
             self.assertIn(f'=> "{kind}",', sdk)
         self.assertIn('pub const INDEX: &str = "sdk.json";', sdk)
         self.assertIn('pub const BESIDE_ASSETS: [&str; 3] = [INDEX, "SHA256SUMS", "SHA256SUMS.sig"];', sdk)

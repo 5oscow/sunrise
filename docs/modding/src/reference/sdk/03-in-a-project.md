@@ -49,7 +49,9 @@ that has one.
 
 In a code mod, `new`, `build`, `build --wasm`, `check`, `hooks`, `fits` and `update` fetch the pinned build's SDK
 into `.sunrise/sdk/` when the folder is missing or holds another build, after the [checks](01-release.md#how-a-download-is-checked).
-It holds `sdk.json`, `surface.json`, the unpacked API source under `api/`, and `build`, a file naming the build. That
+It holds `sdk.json`, `surface.json`, `game.lock` (the game's `Cargo.lock`, which `native-lock` and `build` start a native
+mod's own lock from; a build published before the SDK carried it has none, and its lock is downloaded as before), the
+unpacked API source under `api/`, and `build`, a file naming the build. That
 file is written last, so a fetch that stopped partway is fetched again by the next command.
 
 `fits` and `update` fetch no SDK for a mod made for exactly one build: its manifest says so before one is needed. Any of these commands makes a fresh clone of a mod work, `check` included, since it fetches before Cargo

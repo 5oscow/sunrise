@@ -81,7 +81,8 @@ pub const MIXINS_TOOL_RELEASES: &str = "https://github.com/sunrise-org/sunrise/r
 pub const SDK_RELEASES: &str = "https://github.com/sunrise-org/sunrise/releases/download";
 
 /// A file of the game's source at one commit; the commit and the file's path follow. `native-lock`
-/// reads the pinned build's `Cargo.lock` from it.
+/// reads the pinned build's `Cargo.lock` from it only for an SDK that has no `game.lock` asset
+/// (`registry_generate::download_game_lock`, deleted with it).
 pub const GAME_SOURCE_FILES: &str = "https://raw.githubusercontent.com/sunrise-org/sunrise";
 
 /// The fork's newest releases, which `cargo sunrise-mod` reads to find the one SDK a short sha names.

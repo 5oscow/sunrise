@@ -45,6 +45,9 @@ const fn number(text: &str) -> u32 {
 }
 /// The game version every build of this source implements.
 pub const GAME: &str = sunrise_core::version::VERSION_ID;
+/// The asset holding the game's `Cargo.lock` at the build: a plain file, named by what it is as `surface.json` is.
+/// A build published before it existed does not list it.
+pub const GAME_LOCK: &str = "game.lock";
 /// Files a release folder holds besides its assets: the index and its signed sums.
 pub const BESIDE_ASSETS: [&str; 3] = [INDEX, "SHA256SUMS", "SHA256SUMS.sig"];
 
@@ -156,6 +159,8 @@ pub enum Kind {
     Surface,
     /// `build-data.tar.xz`: `points.json`, `internals.json`, `loops.json`, `functions.json`.
     BuildData,
+    /// `game.lock`: the game's `Cargo.lock` at this build, the file a native mod's own lock starts from.
+    GameLock,
     /// The API crates with their generated code written out.
     ApiSource,
     /// The game's libraries, the API route's prebuilt executable and its stub mods library, and
@@ -172,9 +177,10 @@ pub enum Kind {
 }
 
 impl Kind {
-    const ALL: [Kind; 7] = [
+    const ALL: [Kind; 8] = [
         Kind::Surface,
         Kind::BuildData,
+        Kind::GameLock,
         Kind::ApiSource,
         Kind::Runtime,
         Kind::Api,
@@ -187,6 +193,7 @@ impl Kind {
         match self {
             Kind::Surface => "surface",
             Kind::BuildData => "build-data",
+            Kind::GameLock => "game-lock",
             Kind::ApiSource => "api-source",
             Kind::Runtime => "runtime",
             Kind::Api => "api",
@@ -226,12 +233,15 @@ pub enum Side {
 
 impl Asset {
     /// The kind, codec, target and side an asset's file name states:
-    /// `surface.json`, `build-data.tar.xz`, `api-source.tar.xz`, `tool-<target>.tar.xz` and
+    /// `surface.json`, `game.lock`, `build-data.tar.xz`, `api-source.tar.xz`, `tool-<target>.tar.xz` and
     /// `<runtime|api|engine>-<target>[-server].tar.xz`, where a target is made of `a-z`, `0-9`,
     /// `_` and `-` only. `None` for any other name, so a name this accepts is a plain file name.
     pub fn parts_of(name: &str) -> Option<(Kind, Codec, Option<String>, Option<Side>)> {
         if name == "surface.json" {
             return Some((Kind::Surface, Codec::None, None, None));
+        }
+        if name == GAME_LOCK {
+            return Some((Kind::GameLock, Codec::None, None, None));
         }
         let stem = name.strip_suffix(".tar.xz")?;
         let kind = Kind::ALL.into_iter().find(|kind| {

@@ -101,6 +101,8 @@ BUILD_DATA_SCHEMA = 1
 BUILD_DATA_ARCHIVE = "build-data.tar.xz"
 # The surface export (`sunrise-stage surface`), an SDK asset of its own.
 SURFACE = "surface.json"
+# The game's `Cargo.lock` at the commit, an SDK asset of its own: what `native-lock` starts a mod's lock from.
+GAME_LOCK = "game.lock"
 # xz's default preset: the dictionary covers the large metadata files; the publish legs' time is measured by PR 5.
 XZ_PRESET = 6
 # The SDK's `tool` asset: `cargo sunrise-mod native-build` compiles native mods as the launcher does.
@@ -930,7 +932,7 @@ def members(archive: Path, names: tuple[str, ...]) -> dict[str, str]:
 
 def gather(legs: Path, dist: Path) -> None:
     """The release folder DIST from the packing legs' folders under LEGS (one per OS and side, each `pack`'s DIST):
-    every slice archive once, and one `build-data.tar.xz` and `surface.json`, after checking that every copy of the
+    every slice archive once, one `build-data.tar.xz` and `surface.json`, and the commit's `game.lock`, after checking that every copy of the
     build data is the same: each leg's `build-data.tar.xz`, and the copy inside each leg's `api` slice. A leg whose
     surface or build data differs, or two legs with the same archive, stop it before anything is signed."""
     folders = sorted(path for path in legs.iterdir() if path.is_dir())
@@ -966,6 +968,8 @@ def gather(legs: Path, dist: Path) -> None:
             if (dist / archive.name).exists():
                 sys.exit(f"{archive.name} comes from two legs")
             shutil.copy2(archive, dist / archive.name)
+    # The commit's own lock, as GitHub serves it (the bytes the tool downloaded before the SDK carried them).
+    (dist / GAME_LOCK).write_bytes(dict(tracked_blobs(ROOT, head(), ("Cargo.lock",)))["Cargo.lock"])
     print(f"gather: {len(folders)} legs, one build data ({', '.join(f'{name} {digest[:12]}' for name, digest in sorted(reference[2].items()))})")
 
 

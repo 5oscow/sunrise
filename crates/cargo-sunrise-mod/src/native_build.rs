@@ -160,7 +160,7 @@ fn locked(plan: &contract::LockPlan) -> Result<serde_json::Value, (&'static str,
         .and_then(|bundle| {
             sunrise_native_build::registry_generate::generate(
                 || Ok(plan.toolchain.clone()),
-                sunrise_native_build::registry_generate::game_lock,
+                |revision| crate::sdk_fetch::game_lock(&plan.mods, revision),
                 &bundle,
                 plan.update,
             )

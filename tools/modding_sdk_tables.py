@@ -26,6 +26,8 @@ INPUTS = ROOT / "crates/sunrise-mod-package/src/sdk/inputs.json"
 KINDS = {
     "surface": "The stable surface: everything an API-only mod can name, each item with its fingerprint "
                "([`surface.json`](02-surface.md)).",
+    "game-lock": "The game's `Cargo.lock` at this build: the lock a native mod's own `Cargo.lock` starts from, so "
+                 "`native-lock` downloads nothing.",
     "build-data": "`points.json`, `internals.json`, `loops.json` and `functions.json`: data pinned to this build, "
                   "with no compatibility promise.",
     "api-source": "The mod API's crates with their generated code written out: what a mod project's "
@@ -99,6 +101,8 @@ def kind_of(name):
         return BESIDE[name], None, None
     if name == "surface.json":
         return "surface", None, None
+    if name == "game.lock":
+        return "game-lock", None, None
     stem = name.removesuffix(".tar.xz")
     if stem in ("build-data", "api-source"):
         return stem, None, None

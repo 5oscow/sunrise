@@ -39,8 +39,8 @@ twice: the features and dependency versions of the mod's copy are the mod's own.
 is that every registry package it compiles is pinned, by version and checksum, in the game's lock or
 in the mod's.
 
-`native-lock` starts from the game's `Cargo.lock`, which it downloads once from the pinned game
-commit. A package the game also locks takes the game's version where the mod's requirements allow
+`native-lock` starts from the game's `Cargo.lock`, which the pinned SDK carries (`.sunrise/sdk/game.lock`; for a build
+published before that, it downloads it once from the pinned game commit). A package the game also locks takes the game's version where the mod's requirements allow
 it, so mods made for one game build agree on those packages; the mod's other packages take the newest
 version that fits. A requirement the game's version can't meet (`libc = "0.2.999"`) gives the mod
 its own version of that package.

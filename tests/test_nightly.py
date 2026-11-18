@@ -283,6 +283,7 @@ class SdkPairTests(unittest.TestCase):
         # Written out, not taken from the module: the release a Nightly needs, signed index and sums included.
         assets = [{"name": name} for name in (
             "sdk.json", "SHA256SUMS", "SHA256SUMS.sig", "api-source.tar.xz", "build-data.tar.xz", "surface.json",
+            "game.lock",
             *(f"{kind}-{leg}.tar.xz" for kind in ("runtime", "api", "engine") for leg in (
                 "x86_64-unknown-linux-gnu", "x86_64-unknown-linux-gnu-server", "x86_64-pc-windows-gnu",
                 "aarch64-apple-darwin")),
@@ -412,7 +413,7 @@ class SdkPairTests(unittest.TestCase):
         for why, document in (
                 ("for build", {**good, "build": {"commit": "b" * 40}}),
                 ("package format", {**good, "package_format": 0}),
-                ("does not list surface.json", {**good, "assets": {name: {} for name in nightly.SDK_ARCHIVES[:-1]}}),
+                ("does not list surface.json", {**good, "assets": {name: {} for name in nightly.SDK_ARCHIVES if name != "surface.json"}}),
                 ("not an SDK index", {"build": {}})):
             with self.subTest(why), self.assertRaisesRegex(SystemExit, why):
                 nightly.checked_index(sha, json.dumps(document).encode())
@@ -421,6 +422,22 @@ class SdkPairTests(unittest.TestCase):
         self.assertFalse(nightly.listed("sdk.json", b"other", sums))
         self.assertFalse(nightly.listed("surface.json", b"index", sums))
         self.assertFalse(nightly.listed("SHA256SUMS", b"index", sums))
+
+    def test_the_games_lock_is_an_sdk_asset_the_release_must_hold_and_sign(self):
+        # Listed in what a release holds, and so in what sign_release.sh hashes into the signed SHA256SUMS
+        # (it signs every file of dist) and in what sdk.json must list.
+        self.assertIn("game.lock", nightly.SDK_ARCHIVES)
+        self.assertIn("game.lock", nightly.SDK_ASSETS)
+        import hashlib
+        sha = "a" * 40
+        good = {"build": {"commit": sha}, "package_format": nightly.package_format(),
+                "assets": {name: {} for name in nightly.SDK_ARCHIVES}}
+        without = {**good, "assets": {name: {} for name in nightly.SDK_ARCHIVES if name != "game.lock"}}
+        with self.assertRaisesRegex(SystemExit, "does not list game.lock"):
+            nightly.checked_index(sha, json.dumps(without).encode())
+        sums = f"{hashlib.sha256(b'lock').hexdigest()}  game.lock\n"
+        self.assertTrue(nightly.listed("game.lock", b"lock", sums))
+        self.assertFalse(nightly.listed("game.lock", b"another lock", sums))
 
     def test_an_sdk_asset_is_trusted_only_under_the_forks_signature_for_its_own_tag(self):
         command = nightly.signature_check("a" * 40, Path("/tmp/x"), ["sdk.json"])

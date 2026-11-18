@@ -104,9 +104,14 @@ source and caches), `toolchain` (as for `native-build`) and `mods` (the mod's fo
 | `native-discover` | `catalog`, optional: a folder that doesn't exist yet | without `catalog`, `{"internals": […]}`: the game internals the mod names, each as the pinned game's catalog lists it (`cargo sunrise-mod internals sync` writes them into `sunrise-mod.toml`). With it, `{"catalog": folder}`: the pinned game's `internals.json` and `points.json` with only this mod's `[[native.module]]` rows applied, copied there | `source` (the pinned game's source isn't cached and couldn't be downloaded), `discover` |
 | `native-lock` | `update`, optional: resolve again when the mod has a lock | `{"lock": path}`: the mod's registry dependencies pinned in its `Cargo.lock`, starting from the versions the pinned game locks | `lock` |
 
-`native-lock` reads the pinned game's `Cargo.lock`, kept as `game-lock/<commit>.lock` in `work` and downloaded from
-that commit of the game's repository the first time; with no network, put the file there. It creates `work` when it
-is missing.
+`native-lock` reads the pinned game's `Cargo.lock` from the SDK's `game.lock` asset, which `cargo sunrise-mod` fetches
+into the mod's `.sunrise/sdk/` with the rest of the SDK ([in a project](03-in-a-project.md#sunrisesdk)): it is checked
+against `sdk.json` (so against the signed sums) and downloads nothing. A mod whose `.sunrise/sdk/` is not fetched
+for its pinned build is refused with the command that fetches it, `cargo sunrise-mod check` in the mod's folder. A
+build published before `game.lock` existed has no such asset: for it `native-lock` keeps the file as
+`game-lock/<commit>.lock` in `work`, downloaded from that commit of the game's repository the first time; with no
+network, put the file there. Either way a file that is cut off, too large or not a lock is refused. `native-lock`
+creates `work` when it is missing.
 
 `native-discover` checks the mod against the pinned game's source with the deprecation lint forced on the mod alone;
 it runs the tool itself as Cargo's rustc wrapper for that.

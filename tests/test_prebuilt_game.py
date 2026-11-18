@@ -377,8 +377,12 @@ class SdkAssetTests(unittest.TestCase):
             # The client leg alone packs the target's tool: it serves both sides.
             self.assertEqual(sorted(path.name for path in (root / "dist").iterdir()), sorted(
                 [f"{kind}-x86_64-unknown-linux-gnu{suffix}.tar.xz" for kind in ("api", "engine", "runtime")
-                 for suffix in ("", "-server")] + ["build-data.tar.xz", "surface.json",
+                 for suffix in ("", "-server")] + ["build-data.tar.xz", "surface.json", "game.lock",
                                                    "tool-x86_64-unknown-linux-gnu.tar.xz"]))
+            # The lock is the commit's Cargo.lock, byte for byte.
+            committed = subprocess.run(["git", "show", f"{prebuilt_game.head()}:Cargo.lock"], cwd=prebuilt_game.ROOT,
+                                       capture_output=True, check=True).stdout
+            self.assertEqual((root / "dist" / "game.lock").read_bytes(), committed)
             with tarfile.open(root / "dist" / "tool-x86_64-unknown-linux-gnu.tar.xz") as tar:
                 self.assertEqual(tar.getnames(), [".", "./" + prebuilt_game.TOOL_PROGRAM])
 

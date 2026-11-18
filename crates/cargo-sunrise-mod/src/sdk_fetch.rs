@@ -32,7 +32,9 @@ const BASE: &str = sunrise_addresses::SDK_RELEASES;
 const STAMP: &str = "build";
 const SURFACE: &str = "surface.json";
 const API_SOURCE: &str = "api-source.tar.xz";
-/// The most a small file (`sdk.json`, the sums, the signature, `surface.json`) may be.
+/// The file in a project's SDK folder holding the game's `Cargo.lock`, when the build lists it.
+const GAME_LOCK: &str = sdk::GAME_LOCK;
+/// The most a small file (`sdk.json`, the sums, the signature, `surface.json`, `game.lock`) may be.
 const SMALL: u64 = 16 << 20;
 /// The most the API source may unpack to.
 const API_LIMIT: u64 = 512 << 20;
@@ -336,6 +338,10 @@ pub(crate) fn fetch(
     if stamped {
         let bytes = fs::read(dir.join(sdk::INDEX)).map_err(|e| format!("{DIR}: {e}"))?;
         let index = Index::read(&bytes, build).map_err(|e| format!("{tag}: {e}"))?;
+        // A folder an older tool fetched lacks the lock a newer build lists: it is added, verified.
+        if api && index.asset(GAME_LOCK).is_ok() && !dir.join(GAME_LOCK).exists() {
+            fetch_game_lock(base, &index, dir)?;
+        }
         return Ok(pinned(&index, dir));
     }
     if let Err(e) = fs::remove_dir_all(dir)
@@ -373,10 +379,54 @@ pub(crate) fn fetch(
     write(SURFACE, &surface)?;
     if api {
         unpack(base, &index, API_SOURCE, dir, "api", API_LIMIT)?;
+        if index.asset(GAME_LOCK).is_ok() {
+            fetch_game_lock(base, &index, dir)?;
+        }
     }
     write(sdk::INDEX, &bytes)?;
     write(STAMP, build.as_bytes())?;
     Ok(pinned(&index, dir))
+}
+
+/// The listed `game.lock` of `index`'s build, checked against the index and placed in `dir`.
+fn fetch_game_lock(base: &Base, index: &Index, dir: &Path) -> Result<(), String> {
+    let tag = format!("sdk-{}", index.build.commit);
+    let lock = base.read(&tag, GAME_LOCK, SMALL)?;
+    index
+        .verify(GAME_LOCK, lock.as_slice())
+        .map_err(|e| format!("{tag}: {e}"))?;
+    fs::write(dir.join(GAME_LOCK), lock)
+        .map_err(|e| format!("{}: {e}", dir.join(GAME_LOCK).display()))
+}
+
+/// The game's `Cargo.lock` a native mod's own lock starts from, for the build `revision` the mod at
+/// `project` pins: the SDK's `game.lock` in the project's `.sunrise/sdk/`, which `native-lock` reads
+/// with no download. The file is checked against the SDK's index again here, then parsed.
+///
+/// An SDK that does not list `game.lock` (published before the asset) takes the one other way,
+/// [`sunrise_native_build::registry_generate::download_game_lock`], which names the condition for its removal. An SDK that
+/// is not fetched in the project is refused, naming the command that fetches it.
+pub(crate) fn game_lock(project: &Path, revision: &str) -> Result<String, String> {
+    let dir = project.join(DIR);
+    let fetched_here = fs::read_to_string(dir.join(STAMP)).is_ok_and(|stamp| stamp == revision);
+    if !fetched_here {
+        return Err(format!(
+            "{}: the mod's lock starts from the game's Cargo.lock, which the SDK of game build {revision} carries, and that SDK is not in {DIR}/. Run `cargo sunrise-mod check` in the mod's folder to fetch it, then lock again",
+            project.display()
+        ));
+    }
+    let read = |name: &str| fs::read(dir.join(name)).map_err(|e| format!("{DIR}/{name}: {e}"));
+    let index = Index::read(&read(sdk::INDEX)?, revision)
+        .map_err(|e| format!("{DIR}/{}: {e}", sdk::INDEX))?;
+    if index.asset(GAME_LOCK).is_err() {
+        return sunrise_native_build::registry_generate::download_game_lock(revision);
+    }
+    let bytes = read(GAME_LOCK)?;
+    index
+        .verify(GAME_LOCK, bytes.as_slice())
+        .map_err(|e| format!("{DIR}/{GAME_LOCK}: {e}. Delete {DIR}/ and run `cargo sunrise-mod check` to fetch it again"))?;
+    sunrise_native_build::registry_generate::read_game_lock(bytes.as_slice())
+        .map_err(|e| format!("{DIR}/{GAME_LOCK} is not the game's Cargo.lock: {e}"))
 }
 
 /// The compiled slices (`runtime`, `api`, `engine`) of the build `index` describes, for `target`,

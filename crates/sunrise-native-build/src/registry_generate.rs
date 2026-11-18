@@ -131,15 +131,36 @@ pub fn rewrite_dependencies(
     Ok(())
 }
 
-/// The `Cargo.lock` of the game build `revision`, which a mod's lock starts from: kept in the
-/// build's folder, and downloaded from that commit once. A kept file that no longer reads as a
-/// lock is downloaded again.
-pub fn game_lock(revision: &str) -> Result<String, String> {
+/// The game's `Cargo.lock` read from `source`: refused when it is larger than any game lock, is cut off
+/// or does not parse as a lock. Every lock a mod's own starts from passes here, whether the SDK carried
+/// it (`game.lock`) or [`download_game_lock`] fetched it.
+pub fn read_game_lock(source: impl Read) -> Result<String, String> {
+    let mut text = String::new();
+    // One byte past the limit shows a file that is too large, where a cut one could still parse.
+    source
+        .take(GAME_LOCK_LIMIT + 1)
+        .read_to_string(&mut text)
+        .map_err(|e| e.to_string())?;
+    if text.len() as u64 > GAME_LOCK_LIMIT {
+        return Err("it is too large to be a lock".into());
+    }
+    super::registry_lock::RegistryLock::parse(&text)?;
+    Ok(text)
+}
+
+/// The `Cargo.lock` of the game build `revision`, downloaded from that commit once and kept in the
+/// build's folder; a kept file that no longer reads as a lock is downloaded again.
+///
+/// This is the way for a build whose SDK was published before the SDK carried the lock as its
+/// `game.lock` asset. Delete this function, its kept folder, `GAME_SOURCE_FILES` and the
+/// `host::get` it needs once no SDK the launcher or the tool offers lacks `game.lock`: every
+/// build then reads the lock from its signed SDK.
+pub fn download_game_lock(revision: &str) -> Result<String, String> {
     let kept = super::root()
         .join("game-lock")
         .join(format!("{revision}.lock"));
-    if let Ok(text) = fs::read_to_string(&kept)
-        && super::registry_lock::RegistryLock::parse(&text).is_ok()
+    if let Ok(file) = fs::File::open(&kept)
+        && let Ok(text) = read_game_lock(file)
     {
         crate::host::mark_used(&kept)?;
         return Ok(text);
@@ -158,17 +179,7 @@ pub fn game_lock(revision: &str) -> Result<String, String> {
             ],
         )
     };
-    let mut text = String::new();
-    // One byte past the limit shows an answer that is too large, where a cut one could still parse.
-    crate::host::get(&url)
-        .map_err(unavailable)?
-        .take(GAME_LOCK_LIMIT + 1)
-        .read_to_string(&mut text)
-        .map_err(|e| unavailable(e.to_string()))?;
-    if text.len() as u64 > GAME_LOCK_LIMIT {
-        return Err(unavailable("the answer is too large to be a lock".into()));
-    }
-    super::registry_lock::RegistryLock::parse(&text).map_err(unavailable)?;
+    let text = read_game_lock(crate::host::get(&url).map_err(unavailable)?).map_err(unavailable)?;
     let folder = kept.parent().expect("a file in the build's folder");
     fs::create_dir_all(folder).map_err(|e| e.to_string())?;
     let mut pending = tempfile::NamedTempFile::new_in(folder).map_err(|e| e.to_string())?;
@@ -378,6 +389,23 @@ mod tests {
             stage(&bundle, output.path())
                 .unwrap_err()
                 .contains("outside the mod")
+        );
+    }
+
+    #[test]
+    fn a_game_lock_that_is_cut_off_oversized_or_not_a_lock_is_refused() {
+        let lock = "version = 4\n[[package]]\nname = \"naga\"\nversion = \"30.0.1\"\n";
+        assert_eq!(read_game_lock(lock.as_bytes()).unwrap(), lock);
+        // Cut inside a string: not TOML. Cut after a field: a package with no version.
+        assert!(read_game_lock(&lock.as_bytes()[..lock.len() - 12]).is_err());
+        assert!(read_game_lock(&lock.as_bytes()[..45]).is_err());
+        assert!(read_game_lock("not a lock".as_bytes()).is_err());
+        // A comment pads a valid lock past the limit; the size is refused, not the content.
+        let padding = format!("{lock}#{}", "x".repeat(GAME_LOCK_LIMIT as usize));
+        assert!(
+            read_game_lock(padding.as_bytes())
+                .unwrap_err()
+                .contains("too large")
         );
     }
 
