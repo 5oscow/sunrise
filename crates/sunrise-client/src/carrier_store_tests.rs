@@ -196,7 +196,7 @@ fn only_cube_symmetry_rotations_pass() {
 
 #[test]
 fn crc32_matches_the_ieee_vector() {
-    assert_eq!(crc32fast::hash(b"123456789"), 0xcbf4_3926);
+    assert_eq!(crc_fast::crc32_iso_hdlc(b"123456789"), 0xcbf4_3926);
 }
 
 #[test]
@@ -390,7 +390,7 @@ fn a_valid_newer_schema_slot_refuses() {
     let mut crc_input = Vec::with_capacity(14 + body_len);
     crc_input.extend_from_slice(&newer[4..18]);
     crc_input.extend_from_slice(&newer[22..22 + body_len]);
-    newer[18..22].copy_from_slice(&crc32fast::hash(&crc_input).to_le_bytes());
+    newer[18..22].copy_from_slice(&crc_fast::crc32_iso_hdlc(&crc_input).to_le_bytes());
     fs::write(world.slot_path(0), &newer).unwrap();
     assert_eq!(
         Store::open(&world.root).unwrap_err(),
@@ -421,7 +421,7 @@ fn hostile_slots_refuse_without_reading_their_bodies() {
     let mut crc_input = Vec::with_capacity(14 + body_len);
     crc_input.extend_from_slice(&over[4..18]);
     crc_input.extend_from_slice(&over[22..22 + body_len]);
-    over[18..22].copy_from_slice(&crc32fast::hash(&crc_input).to_le_bytes());
+    over[18..22].copy_from_slice(&crc_fast::crc32_iso_hdlc(&crc_input).to_le_bytes());
     fs::write(world.slot_path(1), &over).unwrap();
     fs::remove_file(world.slot_path(0)).unwrap();
     assert_eq!(Store::open(&world.root).unwrap_err(), Refusal::NoValidSlot);

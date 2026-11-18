@@ -508,7 +508,7 @@ fn package_stream(
     // Zip64, so a recording past 4 GiB still finishes.
     zip.start_file("recording.tmcpr", options.large_file(true))?;
     let mut input = BufReader::new(File::open(stream)?).take(bytes);
-    let mut checksum = crc32fast::Hasher::new();
+    let mut checksum = crc_fast::Digest::new(crc_fast::CrcAlgorithm::Crc32IsoHdlc);
     let mut copied = 0u64;
     let mut buffer = [0; 64 * 1024];
     loop {
@@ -749,7 +749,7 @@ impl McprReader {
         }
         let mut stream = TemporaryStream::create()?;
         let mut stream_size = 0u64;
-        let mut stream_crc = crc32fast::Hasher::new();
+        let mut stream_crc = crc_fast::Digest::new(crc_fast::CrcAlgorithm::Crc32IsoHdlc);
         let mut buffer = [0; 64 * 1024];
         loop {
             let count = stream_entry.read(&mut buffer)?;

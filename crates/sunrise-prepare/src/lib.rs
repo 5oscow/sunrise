@@ -1408,7 +1408,7 @@ fn extract_member(client: &mut Jar, name: &str, target: &Path) -> Result<(), Str
     drop(member);
     if target.is_file() && fs::metadata(target).map_err(|e| e.to_string())?.len() == size {
         let mut file = fs::File::open(target).map_err(|e| e.to_string())?;
-        let mut hash = crc32fast::Hasher::new();
+        let mut hash = crc_fast::Digest::new(crc_fast::CrcAlgorithm::Crc32IsoHdlc);
         let mut buffer = [0; 16 * 1024];
         loop {
             let n = file.read(&mut buffer).map_err(|e| e.to_string())?;
@@ -1417,7 +1417,7 @@ fn extract_member(client: &mut Jar, name: &str, target: &Path) -> Result<(), Str
             }
             hash.update(&buffer[..n]);
         }
-        if hash.finalize() == crc {
+        if hash.finalize() == u64::from(crc) {
             return Ok(());
         }
     }
