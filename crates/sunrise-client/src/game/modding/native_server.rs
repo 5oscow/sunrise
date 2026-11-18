@@ -1626,9 +1626,9 @@ impl Game<'_> {
         Some(self.lan.as_ref()?.hub.hidden.get(&player.uuid()).copied())
     }
     /// The name `player_set_nickname` set, `Some(None)` when there is none. None for a stale
-    /// or offline player, or without a server list (also an unpublished single-player world's).
+    /// or offline player, or without a server list. An unpublished single-player world has one:
+    /// `player_set_nickname` works there, so its nickname reads back.
     pub(super) fn player_nickname(&self, player: PlayerRef) -> Option<Option<String>> {
-        self.open_to_others().then_some(())?;
         let uuid = self.message_player_uuid(player)?;
         let hub = &self.lan.as_ref()?.hub;
         hub.online_players().any(|g| g.uuid == uuid).then_some(())?;

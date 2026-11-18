@@ -271,17 +271,18 @@ fn hide_level_and_nickname_read_back() {
 }
 
 /// An unpublished single-player world runs a hub for its owner, but nobody else can join it:
-/// the owner's handle reads no hide level and no nickname until the world is published.
+/// the owner's handle reads no hide level until the world is published. A nickname is set and
+/// read back there either way.
 #[test]
 #[ignore = "daily"]
-fn an_unpublished_single_player_world_reads_no_hide_level_or_nickname() {
+fn an_unpublished_single_player_world_reads_no_hide_level() {
     with_guests(|game| {
         let owner = game.player(12).unwrap();
         assert!(owner.hide(game, Some(2)));
         assert!(owner.set_nickname(game, Some("Cap")));
         game.serving = Some(super::integrated::Serving::fixture(0));
         assert_eq!(owner.hidden(game), None);
-        assert_eq!(owner.nickname(game), None);
+        assert_eq!(owner.nickname(game), Some(Some("Cap".to_owned())));
         game.serving = Some(super::integrated::Serving::fixture(25565));
         assert_eq!(owner.hidden(game), Some(Some(2)));
         assert_eq!(owner.nickname(game), Some(Some("Cap".to_owned())));
