@@ -41,6 +41,7 @@ use {
 /// GameEvent types (ClientboundGameEventPacket).
 pub mod advancements;
 mod block_changes;
+mod carried_check;
 pub mod chat;
 pub mod chat_filter;
 mod fake_kicks;
@@ -2075,13 +2076,13 @@ impl Hub {
             self.guests
                 .update(i, |guest| guest.above_ground_ticks = value);
         }
-        self.teleport_relative(i, position, 0);
+        self.teleport_relative(i, position, 0, [0.0; 3]);
     }
 
     /// `ServerGamePacketListenerImpl.teleport` alone (a refused or too fast
     /// move, a teleport sent again): the flying ticks go on.
     pub(super) fn resend_teleport(&mut self, i: usize, position: Option<[f64; 3]>) {
-        self.teleport_relative(i, position, 0);
+        self.teleport_relative(i, position, 0, [0.0; 3]);
     }
 
     /// A teleport to `position` that keeps the player's motion and look
@@ -2094,7 +2095,7 @@ impl Hub {
         }
         use play::relative::{DELTA_X, DELTA_Y, DELTA_Z, ROTATE_DELTA, X_ROT, Y_ROT};
         let relatives = Y_ROT | X_ROT | DELTA_X | DELTA_Y | DELTA_Z | ROTATE_DELTA;
-        self.teleport_relative(i, Some(position), relatives);
+        self.teleport_relative(i, Some(position), relatives, [0.0; 3]);
     }
 
     /// A command's teleport to `position` (`ServerGamePacketListenerImpl.teleport`
@@ -2118,7 +2119,7 @@ impl Hub {
             self.guests
                 .update(i, |guest| guest.above_ground_ticks = value);
         }
-        self.teleport_relative(i, Some(position), relatives);
+        self.teleport_relative(i, Some(position), relatives, [0.0; 3]);
     }
 
     /// A rider's own teleport when its vehicle is teleported
@@ -2133,17 +2134,81 @@ impl Hub {
                 .update(i, |guest| guest.above_ground_ticks = value);
         }
         use play::relative::{DELTA_X, DELTA_Y, DELTA_Z};
-        self.teleport_relative(i, Some(position), DELTA_X | DELTA_Y | DELTA_Z);
+        self.teleport_relative(i, Some(position), DELTA_X | DELTA_Y | DELTA_Z, [0.0; 3]);
     }
 
+    /// A displacement of the player by `by` to `target`, made on its server copy by the caller
+    /// (its body is at `target`; `Guest::position` is set here), told to its client as a
+    /// relative teleport: the client adds `by` to where it is now (`Relative.X/Y/Z`), keeps its motion and look
+    /// (`DELTA_*`, `ROTATE_DELTA`, `Y_ROT`, `X_ROT`), and nothing snaps back by what it
+    /// walked while the packet was on its way. Its confirmation puts the server copy where it
+    /// has been since, the awaited target, and its reports until then are dropped as for any
+    /// teleport.
+    ///
+    /// A player a moving collider carries stays carried when the target is still on the
+    /// collider as the server places it now, with the place on the collider re-derived from the
+    /// target; otherwise it lets go, and its next report that fits attaches it again. Either
+    /// way no report is counted against it. Nothing happens for a player the hub has no more.
+    pub fn displace(&mut self, conn: u32, target: [f64; 3], by: [f64; 3]) {
+        let Some(i) = self.guests.connection_index(conn) else {
+            return;
+        };
+        let carried = self.guests[i].on_collider;
+        self.guests.update(i, |g| g.above_ground_ticks = 0);
+        use play::relative::{DELTA_X, DELTA_Y, DELTA_Z, ROTATE_DELTA, X, X_ROT, Y, Y_ROT, Z};
+        let relatives = X | Y | Z | Y_ROT | X_ROT | DELTA_X | DELTA_Y | DELTA_Z | ROTATE_DELTA;
+        self.teleport_relative(i, Some(target), relatives, by);
+        self.keep_carried_at(i, carried, target);
+        self.note_displaced(i);
+    }
+
+    /// A development build's warning for a player displaced on 20 ticks in a row: each
+    /// pending confirmation drops that player's own movement reports, so a mod that moves a
+    /// player every tick holds it still. Once per streak, and nothing is built unless it fires.
+    #[cfg(debug_assertions)]
+    fn note_displaced(&mut self, i: usize) {
+        const STREAK: u32 = 20;
+        let ticks = self.ticks;
+        let streak = self.guests.update(i, |g| {
+            let (last, run) = g.displaced_streak;
+            let run = match ticks.checked_sub(last) {
+                Some(0) => run,
+                Some(1) => run + 1,
+                _ => 1,
+            };
+            g.displaced_streak = (ticks, run);
+            run
+        });
+        if streak == STREAK {
+            log::warn!(
+                "{} was moved by a mod on {STREAK} ticks in a row: each pending confirmation drops \
+                 the player's own movement reports, so it cannot walk; use a velocity push \
+                 (`entity_push`) or a client-side write for motion every tick",
+                self.guests[i].name
+            );
+        }
+    }
+
+    #[cfg(not(debug_assertions))]
+    fn note_displaced(&mut self, _: usize) {}
+
     /// ServerGamePacketListenerImpl.teleport with `relatives`: the rotation
-    /// and motion they name are sent as zero changes.
-    fn teleport_relative(&mut self, i: usize, position: Option<[f64; 3]>, relatives: i32) {
+    /// and motion they name are sent as zero changes, and a position axis it names
+    /// as `shift` (no change when `shift` is zero).
+    fn teleport_relative(
+        &mut self,
+        i: usize,
+        position: Option<[f64; 3]>,
+        relatives: i32,
+        shift: [f64; 3],
+    ) {
         let ticks = self.ticks;
         self.guests.update(i, |g| {
             g.teleport_tick = ticks;
             g.held_ticket_chunk = Some(g.ticket_chunk()); // teleport has no move
             g.pending_move = None;
+            g.on_collider = None;
+            g.carry_hint = None;
             if let Some(p) = position {
                 g.position = p;
                 g.previous_position = p;
@@ -2155,8 +2220,10 @@ impl Hub {
             use play::relative::{DELTA_X, DELTA_Y, DELTA_Z};
             g.awaiting_keeps_motion = relatives & (DELTA_X | DELTA_Y | DELTA_Z) != 0;
             let turn = relatives & (play::relative::Y_ROT | play::relative::X_ROT) != 0;
-            // A relative axis (X, Y, Z: bits 0 to 2) goes as no change (`follow_passage`).
-            let at = std::array::from_fn(|k| [g.position[k], 0.0][(relatives >> k & 1) as usize]);
+            // A relative axis (X, Y, Z: bits 0 to 2) goes as its shift: none for a rotation or
+            // motion alone (`follow_passage`), the displacement for a move.
+            let at =
+                std::array::from_fn(|k| [g.position[k], shift[k]][(relatives >> k & 1) as usize]);
             g.send(&C::PlayerPosition(play::PlayerPosition {
                 teleport: id,
                 position: at,
@@ -3580,6 +3647,10 @@ impl Hub {
                         if let Some(add) = first.recipe_book_add {
                             g.send(&raw(ids::RECIPE_BOOK_ADD, add));
                         }
+                        // The game's own TICK trigger may have awarded these in the guest's
+                        // turn before this first tick: announced here, flush_advancements
+                        // must not send them again (vanilla awards them once).
+                        g.recipes_unlocked.retain(|id| !first.recipes.contains(id));
                         g.send(&raw(ids::UPDATE_ADVANCEMENTS, first.update_advancements));
                         g.advancements_visible = sync.advancements.visibility(&g.advancements);
                         g.advancements_changed.clear();
@@ -4131,8 +4202,11 @@ impl Hub {
                                 g.record.get_or_insert_default().teleported(at, kept);
                             }
                         });
-                        let rot = (p.yaw, p.pitch);
-                        self.position_change(i, at, rot, 0, Hearing::Confirmation, ctx, events);
+                        // The confirmation is then an ordinary report of where the client
+                        // is: its own position goes through the speed test, the collided
+                        // replay and the moved-wrongly test, from the target just snapped to.
+                        let (to, rot) = ([p.x, p.y, p.z], (p.yaw, p.pitch));
+                        self.position_change(i, to, rot, 0, Hearing::Confirmation, ctx, events);
                     }
                 }
                 // handlePlayerAbilities: the client flies only if it may.
@@ -4158,6 +4232,13 @@ impl Hub {
                 }
                 S::MovePlayerStatus(p) => {
                     self.move_player(i, None, None, p.flags, ctx, events);
+                }
+                S::CustomPayload(p) if p.channel == sunrise_protocol::carry_age::CHANNEL => {
+                    // A payload that does not decode is no hint: it is only where a search starts.
+                    if let Ok(hint) = sunrise_protocol::carry_age::decode(&p.data) {
+                        self.guests
+                            .update(i, |g| g.carry_hint = Some((hint.collider, hint.ticks)));
+                    }
                 }
                 S::CustomPayload(p)
                     if p.channel == sunrise_protocol::passage_sync::CROSS_CHANNEL =>
@@ -4466,6 +4547,13 @@ impl Hub {
             if self.ticks - g.teleport_tick > 20 {
                 self.resend_teleport(i, Some(at));
             }
+            // The awaiting check applies the report's rotation and drops its position, its
+            // ground flag and its collision flag. Nothing is counted against the player.
+            if let Some((yaw, pitch)) = rot {
+                self.guests.update(i, |g| {
+                    (g.yaw, g.pitch) = (wrap_degrees(yaw), wrap_degrees(pitch))
+                });
+            }
             return;
         }
         let to = pos.unwrap_or(g.position);
@@ -4491,6 +4579,11 @@ impl Hub {
             to[2].clamp(-3.0E7, 3.0E7),
         ];
         let (yaw, pitch) = (wrap_degrees(yaw), wrap_degrees(pitch));
+        // A carried player's report is measured in the collider's frame, and judged in it.
+        let plan = (hearing != Hearing::Confirmation)
+            .then(|| self.carry_plan(i, to))
+            .flatten();
+        let reference = self.carry_speed_delta(i, to, plan.as_ref());
         let begin = self.guests.update(i, |g| {
             let owner = self.singleplayer_owner == Some(g.uuid);
             // A passenger only turns: its vehicle carries it (absSnapTo where it is).
@@ -4499,7 +4592,7 @@ impl Hub {
                 g.release_tickets();
                 return std::ops::ControlFlow::Break(false);
             }
-            let d = [0, 1, 2].map(|k| to[k] - g.first_good[k]);
+            let d = reference.unwrap_or_else(|| [0, 1, 2].map(|k| to[k] - g.first_good[k]));
             let moved = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
             if g.sleeping {
                 if moved > 1.0 {
@@ -4544,21 +4637,46 @@ impl Hub {
             std::ops::ControlFlow::Continue(start) => start,
             std::ops::ControlFlow::Break(resend) => {
                 if resend {
-                    self.resend_teleport(i, None);
+                    // A carried player's refusal puts it back where the server has it on its
+                    // collider, and is counted like any other.
+                    let carried = self.guests[i].on_collider;
+                    if carried.is_some() && reference.is_some() {
+                        self.carry_rejected(i);
+                    }
+                    let back = self.guests[i].carry_correction;
+                    self.guests.update(i, |g| g.carry_correction = None);
+                    self.resend_teleport(i, back);
+                    self.keep_carried(i, carried, back);
                 }
                 return;
             }
         };
-        let (wrongly, refused, stands) = self.collide(i, to, ctx);
+        // The confirmation of a teleport (a carried player's correction included) is committed in
+        // place against the world as it stands.
+        let (wrongly, refused, stands) = if hearing == Hearing::Confirmation {
+            self.collide(i, to, ctx)
+        } else {
+            self.collide_carried(i, to, ctx, plan)
+        };
         if wrongly {
             let line = format!("{} moved wrongly!", self.guests[i].name);
             events.push(HostEvent::Warn(line));
         }
         if refused {
             self.guests.update(i, |g| (g.yaw, g.pitch) = (yaw, pitch));
-            self.resend_teleport(i, Some(start));
+            // A carried player goes back to where the server has it on its collider now.
+            let back = self.guests[i].carry_correction.unwrap_or(start);
+            self.guests.update(i, |g| g.carry_correction = None);
+            let carried = self.guests[i].on_collider;
+            self.resend_teleport(i, Some(back));
+            self.keep_carried(i, carried, Some(back));
             return;
         }
+        // A carried player is where the server puts it: its local position under the
+        // collider's transform now, not the position in the frame the client held.
+        let committed = self.guests[i].carry_commit;
+        self.guests.update(i, |g| g.carry_commit = None);
+        let to = committed.unwrap_or(to);
         // The anticheat's `ground`: a claim of the ground with nothing to
         // stand on is dropped (no-fall, walking on water).
         let (mut flags, mut corrected) = (flags, false);
@@ -4623,7 +4741,16 @@ impl Hub {
             at[1] + f64::from(d.height) + 0.0625,
             at[2] + half,
         ];
+        // A moving collider's box under the feet holds the player up as a block does: it is not
+        // floating on one, and the colliders are where they stand now, as the player is committed.
         no_blocks_in(world, lo, hi, &self.encoder)
+            && !sunrise_client_render::moving_colliders::overlaps(
+                sunrise_world::entity_obstruction::EntityIdentity(self.guests[i].entity_id as u64),
+                sunrise_core::geometry::Aabb::new(
+                    sunrise_core::geometry::Vec3::new(lo[0], lo[1], lo[2]),
+                    sunrise_core::geometry::Vec3::new(hi[0], hi[1], hi[2]),
+                ),
+            )
     }
 
     /// `ServerGamePacketListenerImpl.forceSendPlayerSupportBlocks`: the blocks just under the
@@ -5235,11 +5362,15 @@ fn equipment_source(g: &Guest, index: usize) -> Option<&ItemStack> {
 
 #[cfg(test)]
 mod tests {
+    mod carried_check_tests;
     mod cave_air_tests;
     mod collision_exclusion_tests;
+    mod collision_part_tests;
+    mod displace_tests;
     mod effect_meta_tests;
     #[path = "../far_tests.rs"]
     mod far_tests;
+    mod first_tick_recipe_tests;
     mod live_player_limit_tests;
     mod ordered_inbox_tests;
     mod pending_move_bound_tests;
@@ -5272,7 +5403,8 @@ mod tests {
                 .clone(),
         );
         let states = ["minecraft:air", "test:machine"].map(|n| (Arc::<str>::from(n), false, None));
-        hub.encoder = ChunkEncoder::with_types(states, &builtin, &[], &[], Some(&types));
+        hub.encoder =
+            ChunkEncoder::with_types(states, &builtin, &[], &[], Some(&types), Default::default());
         hub.encoder.mod_update_tag = Some(|_, entity| {
             BUILT.fetch_add(1, Ordering::Relaxed);
             Some(entity.nbt.clone())
@@ -5782,6 +5914,7 @@ mod tests {
             &sunrise_protocol::registry::Builtin::default(),
             &[],
             &[],
+            Default::default(),
         );
         let hub_config = HubConfig {
             default_game_mode: 0,

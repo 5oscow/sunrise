@@ -49,7 +49,7 @@ entry leaves out.
 | `screenshots` | Optional, up to 8 HTTPS PNG or JPEG URLs in the generated index, from files kept in the registry under `screenshots/<id>/`. |
 | `key` | The author's [minisign](https://jedisct1.github.io/minisign/) public key. When set, every version must be signed with it; an update signed with another key is refused. Absent: the project is unsigned and the launcher says so. |
 | `versions` | Newest first, at least one. |
-| `downloads` | How many times its files were downloaded, every version together: GitHub's count of each release asset, summed across release assets. Absent when no file has been downloaded. Read-only: never in an entry. |
+| `downloads` | How many times its files were downloaded, every version together: GitHub's count of each release asset, summed across release assets. Absent when no file has been downloaded. Read-only: never in an entry. The registry's publish workflow reads the counts from GitHub and hands them to `cargo sunrise-mod registry build --counts <file>` (`{"downloads": {"<file address>": n}, "stars": {"<owner>/<repo>": n}}`), so both refresh each time the index is republished. |
 | `stars` | GitHub stars of the project's source repository, refreshed by the registry. Absent when zero or the source is not on GitHub. Read-only: never in an entry. The launcher shows the count and a button that opens the repository. |
 | `updated` | Its newest version's `published` (the latest of `versions[].published`), set by the registry, so a reader can sort by it beside `downloads` without walking every version. Absent when no version has a date. Read-only: never in an entry. |
 | `api` | A mod's API line (its manifest's `api`); a native mod's pinned revisions (`native-1/<sunrise>/<mixins>`); a modpack's manifest format (`1`). |
@@ -115,7 +115,8 @@ on = true                   # optional, default true: turned on in the profile's
 Unknown keys are refused. `overrides/` may hold only `options.txt`, `sunrise-graphics.txt`, `sunrise-extras.txt`,
 `resourcepacks/<name>.zip` and `sunrise-mods/.sunrise-mod-data/<a listed mod>/...` (a mod's own saved settings,
 a native mod's saved settings), each at most 64 MiB and 256 MiB in all; anything else refuses the pack. The launcher copies
-them into the profile's game folder.
+them into the profile's game folder, which may itself be a link; a destination under it that is a link, or
+sits in a linked folder, refuses the import before anything is written.
 
 ## Submitting a project
 

@@ -401,8 +401,6 @@ pub(super) fn start_game<'a>(
     }
     // The atlases the initial load stitched, the models it baked, then FMLClientSetupEvent: once
     // per process, here in `run`, after the initial load applied.
-    // A dedicated server has no client and returned above; a splitscreen guest's `run` is
-    // another local player of the same process.
     game.publish_initial_client_models()?;
     // Finish Setup -> Config -> World before any screen, connection, input or tick hooks.
     game.native_configs_client_start();

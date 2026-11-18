@@ -16,8 +16,9 @@
 //! - `wasm-std <out.wasm>`: the standard library member the game ships for wasm mods.
 //! - `run [--game <sunrise-client>] [-- <game args>]`: build, then play with
 //!   the mod.
-//! - `check [--uses]` in a mod folder: `cargo check` for the host and wasm32, the package
-//!   rules, and what the mod uses of its pinned build (`sdk_cmds.rs`).
+//! - `check [--uses]` in a mod folder: the package rules, its render pipeline shaders composed
+//!   and validated as the game does, `cargo check` for the host and wasm32, and what the mod
+//!   uses of its pinned build (`sdk_cmds.rs`).
 //! - `check <file> [--json]`: what the registry checks of a submission
 //!   (`.smod`, `.spack`, resource pack `.zip`, `.sshader`).
 //! - `hooks <text> [--all]`: search the pinned build's hooks (or every item) offline.
@@ -26,6 +27,11 @@
 //!   do, 1 when one does not, 2 when it cannot be told.
 //! - `registry build|review|check|list`: the registry repository's CI.
 //! - `use-jar <path>`: list an exact original Java jar as a passive asset/data source.
+//! - `native-build < plan.json`: compile native mods against an unpacked SDK, as the launcher does
+//!   (docs/modding/src/reference/sdk/08-native-build.md).
+//! - `native-check < plan.json`: how native mods stand against one build before anything compiles (the same page).
+//! - `native-discover < plan.json`, `native-lock < plan.json`: a native mod's internals or its pinned game's build data, and its registry lock (the same page).
+//! - `native-layout < plan.json`: a local prebuilt game checked and laid out as an SDK's slices (the same page).
 use sunrise_mod_package::{Content, Manifest, Package, manifest::MANIFEST};
 mod bounded;
 mod check;
@@ -34,6 +40,7 @@ mod inject_sync;
 mod internals;
 mod jar;
 mod layouts;
+mod native_build;
 mod registry;
 mod sdk_cmds;
 mod sdk_fetch;
@@ -50,6 +57,12 @@ fn is_compiler_wrapper(name: &str) -> bool {
 }
 
 fn main() -> ExitCode {
+    // A native build's registry route, and internals discovery, run this program as Cargo's rustc wrapper.
+    if let Some(code) = sunrise_native_build::registry_rustc::wrapper()
+        .or_else(sunrise_native_build::discover::rustc_wrapper)
+    {
+        return ExitCode::from(u8::try_from(code).unwrap_or(1));
+    }
     // The uses scan parses a mod's source in a child, this program started again: run its part
     // and exit.
     let entry = mod_surface::child::child_entry();
@@ -88,7 +101,8 @@ fn main() -> ExitCode {
             None => Ok(()),
         }),
         Some("build") if args.get(1).is_some_and(|a| a == "--wasm") => fetched(Path::new("."))
-            .and_then(|()| wasm::build(Path::new("."), flag(&args[2..], "--catalog").map(Path::new), &args[2..].windows(2).filter(|a| a[0] == "--with").map(|a| PathBuf::from(&a[1])).collect::<Vec<_>>()))
+            .and_then(|()| pinned_surface(Path::new(".")))
+            .and_then(|api| wasm::build(Path::new("."), flag(&args[2..], "--catalog").map(Path::new), &args[2..].windows(2).filter(|a| a[0] == "--with").map(|a| PathBuf::from(&a[1])).collect::<Vec<_>>(), api.as_ref()))
             .and_then(|()| build(entry))
             .map(|p| println!("Built {}", p.display())),
         Some("wasm-std") => wasm::wasm_std(&args[1..]),
@@ -111,6 +125,11 @@ fn main() -> ExitCode {
         Some("fits") => return sdk_cmds::fits(entry, &args[1..]),
         Some("registry") => registry::main(&args[1..]),
         Some("use-jar") => jar::run(&args[1..]),
+        Some("native-build") => return native_build::run(&args[1..]),
+        Some("native-check") => return native_build::check(&args[1..]),
+        Some("native-discover") => return native_build::discover(&args[1..]),
+        Some("native-lock") => return native_build::lock(&args[1..]),
+        Some("native-layout") => return native_build::layout(&args[1..]),
         Some("internals") => internals::run(&args[1..]),
         Some("inject") => inject::run(&args[1..]),
         Some("update") => {
@@ -128,7 +147,7 @@ fn main() -> ExitCode {
                 })
                 .map(|()| println!("Run `cargo sunrise-mod check`."))
         }
-        _ => Err("usage: cargo sunrise-mod new <path> [--name \"Name\"] [--template content|native|wasm [--sunrise <build>]] | update [--sunrise <build>] | inject update [--accept <id>]… | inject sync --repo <game checkout> | inject add <at> --kind <kind> [--call <canonical callee>] [--nth N] [--with <fn>] | internals sync [--repo <path>] | internals add <path>… [--kind <kind>] | build [--wasm] | wasm-std <out.wasm> | run [--game <sunrise-client>] [-- <game args>] | check [--uses] | check <file> [--kind <kind>] [--key <public key> --signature <file.minisig>] [--json] | hooks <text> [--all] | sdk diff <build> <build> | fits [<file.smod>] [--build <name>]… | registry build|review|check|list | use-jar <path>".into()),
+        _ => Err("usage: cargo sunrise-mod new <path> [--name \"Name\"] [--template content|native|wasm [--sunrise <build>]] | update [--sunrise <build>] | inject update [--accept <id>]… | inject sync --repo <game checkout> | inject add <at> --kind <kind> [--call <canonical callee>] [--nth N] [--with <fn>] | internals sync [--repo <path>] | internals add <path>… [--kind <kind>] | build [--wasm] | wasm-std <out.wasm> | run [--game <sunrise-client>] [-- <game args>] | check [--uses] | check <file> [--kind <kind>] [--key <public key> --signature <file.minisig>] [--json] | hooks <text> [--all] | sdk diff <build> <build> | fits [<file.smod>] [--build <name>]… | registry build|review|check|list | use-jar <path> | native-build < plan.json | native-check < plan.json | native-discover < plan.json | native-lock < plan.json | native-layout < plan.json".into()),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -159,6 +178,15 @@ fn fetched(dir: &Path) -> Result<(), String> {
         sdk.dir.display()
     );
     Ok(())
+}
+
+/// The surface of the SDK the project pins, read once for everything that packs a library's
+/// wire identities; none for a project built against the game checkout, which exports its own.
+fn pinned_surface(dir: &Path) -> Result<Option<mod_surface::Surface>, String> {
+    if sdk_fetch::game_tree(dir)?.is_some() {
+        return Ok(None);
+    }
+    uses_table::surface_of(&sdk_fetch::ensure_sdk(dir)?).map(Some)
 }
 
 /// The value after `flag` in `args`.
@@ -312,8 +340,7 @@ fn update(dir: &Path, sunrise: Option<&str>, accept: &[&str]) -> Result<(), Stri
         doc["native"]["sunrise"].as_value_mut().expect("native pin"),
         &sunrise,
     );
-    let candidate = doc.to_string();
-    std::fs::write(&path, candidate).map_err(|e| format!("{}: {e}", path.display()))?;
+    internals::atomic_write_manifest(&path, doc.to_string())?;
     // The old pin's SDK goes; the next command fetches this one.
     sdk_fetch::repin(dir, &sunrise)?;
     println!("Pinned to Sunrise {sunrise}");
@@ -393,9 +420,13 @@ fn build(entry: mod_surface::child::ChildEntry) -> Result<PathBuf, String> {
     let root = Path::new(".");
     let package = Package::read(root)?;
     let code = package.manifest.native.is_some() || package.manifest.wasm.is_some();
+    let mut api = None;
     let uses = if code && sdk_fetch::game_tree(root)?.is_none() {
         let sdk = sdk_fetch::ensure_sdk(root)?;
-        match uses_table::scan(entry, root, &uses_table::surface_of(&sdk)?)? {
+        let surface = uses_table::surface_of(&sdk)?;
+        let scanned = uses_table::scan(entry, root, &surface)?;
+        api = Some(surface);
+        match scanned {
             uses_table::Scanned::Uses(uses) => Some(uses.table(sdk.build).to_json().into_bytes()),
             uses_table::Scanned::Exact(_) => None,
             uses_table::Scanned::Unread(why) => {
@@ -409,17 +440,27 @@ fn build(entry: mod_surface::child::ChildEntry) -> Result<PathBuf, String> {
     } else {
         None
     };
-    pack_into(root, &root.join("target/sunrise-mod"), uses.as_deref())
+    pack_into(
+        root,
+        &root.join("target/sunrise-mod"),
+        uses.as_deref(),
+        api.as_ref(),
+    )
 }
 
 fn build_in(root: &Path) -> Result<PathBuf, String> {
-    pack_into(root, &root.join("target/sunrise-mod"), None)
+    pack_into(root, &root.join("target/sunrise-mod"), None, None)
 }
 
-fn pack_into(root: &Path, dir: &Path, uses: Option<&[u8]>) -> Result<PathBuf, String> {
+fn pack_into(
+    root: &Path,
+    dir: &Path,
+    uses: Option<&[u8]>,
+    api: Option<&mod_surface::Surface>,
+) -> Result<PathBuf, String> {
     let package = Package::read(root)?;
     if package.manifest.native.is_some() || package.manifest.wasm.is_some() {
-        layouts::build(root)?;
+        layouts::build(root, api)?;
     }
     let bytes = Package::pack_directory_with(root, uses)?;
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;

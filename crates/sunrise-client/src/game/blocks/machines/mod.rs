@@ -528,8 +528,18 @@ impl Containers<'_> {
         }
         let held = self.get(view, slot);
         let is_bucket = |s: &ItemStack| &*s.item == "minecraft:bucket";
+        if let Some(container) = &view.container {
+            return sunrise_client::containers::mod_container_insert_allowed(
+                container
+                    .insert_rules
+                    .get(slot)
+                    .copied()
+                    .unwrap_or_default(),
+                held,
+                stack,
+            );
+        }
         match view.kind {
-            _ if view.container.is_some() => true,
             Kind::Jukebox | Kind::Bookshelf => held.is_none(),
             Kind::Brewing => slot >= 3 || held.is_none(),
             Kind::Furnace => slot != 1 || !is_bucket(stack) || !held.is_some_and(is_bucket),
@@ -757,14 +767,7 @@ pub(super) fn cat_sitting_above(mobs: &[Mob], key: Pos) -> bool {
 /// `ChestBlock.getContainer(.., false)`, whose blocked check sees the level's
 /// cats (`isCatSittingOnChest`).
 pub(super) fn container_signal(level: &mut super::GameLevel<'_>, pos: BlockPos) -> i32 {
-    let c = Containers {
-        world: &*level.world,
-        behaviours: level.behaviours,
-        items: level.items,
-        registry: level.registry,
-        brewing: None,
-        mobs: level.entities().mobs,
-    };
+    let c = level.containers();
     let view = c
         .view((pos.x, pos.y, pos.z), true)
         .filter(|v| !matches!(v.kind, Kind::Composter(_)))
@@ -774,14 +777,7 @@ pub(super) fn container_signal(level: &mut super::GameLevel<'_>, pos: BlockPos) 
             level.unpack_loot(super::container_loot::LootTarget::Block(key), None);
         }
     }
-    let c = Containers {
-        world: &*level.world,
-        behaviours: level.behaviours,
-        items: level.items,
-        registry: level.registry,
-        brewing: None,
-        mobs: level.entities().mobs,
-    };
+    let c = level.containers();
     view.map_or(0, |v| c.signal(&v))
 }
 
@@ -824,6 +820,19 @@ pub(super) fn shelf_signal(
             .map(|(slot, item)| i32::from(item.is_some()) << slot)
             .sum(),
     )
+}
+
+impl super::GameLevel<'_> {
+    pub(in crate::game) fn containers(&self) -> Containers<'_> {
+        Containers {
+            world: self.world,
+            behaviours: self.behaviours,
+            items: self.items,
+            registry: self.registry,
+            brewing: None,
+            mobs: self.entities().mobs,
+        }
+    }
 }
 
 impl Game<'_> {
@@ -1008,7 +1017,7 @@ impl Game<'_> {
             let pos = view.parts[0].0;
             if let Tag::Compound(map) = &mut tag {
                 if let Some(item) = item {
-                    map.insert("item".into(), save::item_to_nbt(&item));
+                    map.insert("item".into(), save::item_to_nbt(&item, self.res.items()));
                 } else {
                     map.remove(&"item".into());
                 }
@@ -1108,7 +1117,7 @@ impl Game<'_> {
         if let Tag::Compound(map) = tag {
             match item {
                 Some(item) => {
-                    map.insert("item".into(), save::item_to_nbt(&item));
+                    map.insert("item".into(), save::item_to_nbt(&item, self.res.items()));
                 }
                 None => {
                     map.remove(&"item".into());
@@ -2531,6 +2540,7 @@ mod mod_container_tests {
                 inputs: vec![0, 1],
                 outputs: vec![2],
                 menu: None,
+                insert_rules: Vec::new(),
             })),
         };
         assert_eq!(

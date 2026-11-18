@@ -115,7 +115,13 @@ impl RayWorld for VisualRays<'_, '_> {
             return Ok(VoxelShape::block());
         }
         if name == "minecraft:snow" || name.ends_with("_fence") {
-            return ray_shape_from_boxes(&facts.outline);
+            let shape = ray_shape_from_boxes(&facts.outline)?;
+            let offset = if facts.outline_offset {
+                facts.offset_at(p.x, p.z)
+            } else {
+                [0.0; 3]
+            };
+            return Ok(shape.moved(Vec3::new(offset[0], offset[1], offset[2])));
         }
         self.inner.block_shape(state, p, RayBlockMode::Collider)
     }
@@ -407,7 +413,7 @@ impl Game<'_> {
         super::camera_rotation(CameraType::FirstPerson, yaw, pitch)
     }
     /// The player as `Camera.alignWithEntity` sees it.
-    fn player_camera_entity(&mut self) -> Option<CameraEntity> {
+    pub(super) fn player_camera_entity(&mut self) -> Option<CameraEntity> {
         let (scale, distance) = {
             let p = self.player.as_mut()?;
             (
@@ -1112,7 +1118,7 @@ impl Game<'_> {
             return;
         };
         let assets = &self.armor_stand_assets;
-        let Some((texture, _)) = assets
+        let Some(layer) = assets
             .equipment
             .get(&asset)
             .and_then(|k| k.get("wings"))
@@ -1127,7 +1133,7 @@ impl Game<'_> {
             assets
                 .player
                 .get(if baby { "elytra_baby" } else { "elytra" }),
-            rect.or_else(|| sprites.get(texture)),
+            rect.or_else(|| sprites.get(&layer.texture)),
         ) else {
             return;
         };
@@ -1164,7 +1170,7 @@ impl Game<'_> {
                     .read()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
                 emissive
-                    .overlay(texture)
+                    .overlay(&layer.texture)
                     .and_then(|e| sprites.get(e))
                     .copied()
             })

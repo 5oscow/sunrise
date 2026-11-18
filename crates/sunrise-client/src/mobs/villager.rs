@@ -928,11 +928,22 @@ fn golem_attempt<L: super::spawn_rules::SpawnLevel>(
 }
 /// `IronGolem.checkSpawnObstruction`: a floor with a full top face, its feet
 /// free whatever fluid is there, and the two blocks above free.
-fn golem_fits<L: super::spawn_rules::SpawnLevel>(l: &L, [x, y, z]: [i32; 3]) -> bool {
-    use super::spawn_rules::is_valid_empty_spawn;
-    // entityCanStandOn: Block.isFaceFull(collision shape, UP).
-    let floor = l.mob_data().state(l.state(x, y - 1, z));
-    let stands = floor.flags & super::data::STURDY_TOP != 0 && floor.top >= 1.0;
+fn golem_fits(l: &MobWorld, [x, y, z]: [i32; 3]) -> bool {
+    use super::spawn_rules::{SpawnLevel, is_valid_empty_spawn};
+    // entityCanStandOn: Block.isFaceFull(collision shape, UP). A state that takes its
+    // shapes from its block entity reads the published shape (#1710).
+    let below = l.state(x, y - 1, z);
+    let stands = if l.collision.publishes_shapes(below) {
+        l.bound_collision_shape(below, [x, y - 1, z])
+            .is_some_and(|shape| {
+                sunrise_world::block_support::SupportType::Full
+                    .is_supporting(&shape, sunrise_core::geometry::Direction::Up)
+                    .unwrap_or(false)
+            })
+    } else {
+        let floor = l.mob_data().state(below);
+        floor.flags & super::data::STURDY_TOP != 0 && floor.top >= 1.0
+    };
     // isValidEmptySpawnBlock with Fluids.EMPTY: open water is free too.
     let feet = is_valid_empty_spawn(Species::IronGolem, l, x, y, z)
         || &*l.facts().get(l.state(x, y, z)).name == "minecraft:water";
@@ -946,8 +957,8 @@ fn golem_fits<L: super::spawn_rules::SpawnLevel>(l: &L, [x, y, z]: [i32; 3]) -> 
 /// `create` makes the golem (`EntityType.create`: the yaw drawn here, then its
 /// `finalizeSpawn` draws, see [`finalize_summoned_golem`]); it is kept only
 /// when `IronGolem.checkSpawnObstruction` passes, and discarded otherwise.
-pub fn summon_golem<L: super::spawn_rules::SpawnLevel, R: RandomSource, T>(
-    l: &L,
+pub fn summon_golem<R: RandomSource, T>(
+    l: &MobWorld,
     start: [i32; 3],
     random: &mut R,
     mut create: impl FnMut(&mut R, sunrise_core::geometry::Vec3, f32) -> T,
@@ -998,7 +1009,7 @@ pub fn eat_and_digest_in(m: &mut Mob, w: &MobWorld) {
 
 /// The saved fields (`FoodLevel`, `Gossips`, `LastGossipDecay`, `Inventory`,
 /// `LivingEntity`'s `sleeping_pos` and the sleep and golem memories).
-pub fn write_nbt(m: &Mob, map: &mut sunrise_core::nbt::Compound) {
+pub fn write_nbt(m: &Mob, map: &mut sunrise_core::nbt::Compound, items: &crate::items::Items) {
     use sunrise_core::nbt::Tag;
     if let Some(p) = sleeping_pos(m) {
         map.insert("sleeping_pos".into(), Tag::IntArray(p.to_vec()));
@@ -1015,7 +1026,12 @@ pub fn write_nbt(m: &Mob, map: &mut sunrise_core::nbt::Compound) {
     map.insert("LastGossipDecay".into(), Tag::Long(e.last_gossip_decay));
     map.insert(
         "Inventory".into(),
-        Tag::List(e.inventory.iter().map(crate::save::item_to_nbt).collect()),
+        Tag::List(
+            e.inventory
+                .iter()
+                .map(|stack| crate::save::item_to_nbt(stack, items))
+                .collect(),
+        ),
     );
 }
 /// The memories of `Brain.memories` the villager keeps besides positions.
@@ -1595,14 +1611,14 @@ mod tests {
         m.extra.ints[1] = bed_facing_code(Some("north"));
         ext_mut(&mut m).sleeping_pos = Some([3, 64, -7]);
         let mut map = sunrise_core::nbt::Compound::new();
-        write_nbt(&m, &mut map);
+        write_nbt(&m, &mut map, &Default::default());
         let mut loaded = villager();
         read_nbt(&mut loaded, &sunrise_core::nbt::Tag::Compound(map));
         assert!(sleeping(&loaded));
         assert_eq!(sleeping_pos(&loaded), Some([3, 64, -7]));
         let mut awake = villager();
         let mut map = sunrise_core::nbt::Compound::new();
-        write_nbt(&awake, &mut map);
+        write_nbt(&awake, &mut map, &Default::default());
         assert!(!map.contains_key(&"sleeping_pos".into()));
         read_nbt(&mut awake, &sunrise_core::nbt::Tag::Compound(map));
         assert!(!sleeping(&awake));
@@ -1623,11 +1639,18 @@ mod tests {
                 if stale {
                     map.insert("sleeping_pos".into(), Tag::IntArray(vec![9, 90, 9]));
                 }
-                write_nbt(&m, &mut map);
+                write_nbt(&m, &mut map, &Default::default());
                 assert_eq!(map.get(&"sleeping_pos".into()), expected.as_ref());
                 assert_eq!(map.get(&"h232_control".into()), Some(&Tag::Int(42)));
             }
-            let saved = crate::entity_nbt::mob_to_nbt(&m, [0; 4], None, None, |_| None);
+            let saved = crate::entity_nbt::mob_to_nbt(
+                &m,
+                [0; 4],
+                None,
+                None,
+                |_| None,
+                &Default::default(),
+            );
             assert_eq!(saved.get("sleeping_pos"), expected.as_ref());
         }
     }

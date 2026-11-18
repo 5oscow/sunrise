@@ -255,13 +255,57 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             None => (-1, VoxelShape::empty_ref()),
         }
     }
-    /// `FlowingFluid.canPassThroughWall`.
-    fn can_pass_through_wall(
-        &self,
+    /// `!merged_face_occludes` for two shapes of which one is published, remembered by the
+    /// shapes' identity: the union it builds allocates, and a spread asks again and again.
+    fn published_passage(
+        &mut self,
+        source: VoxelShape,
+        target: VoxelShape,
         direction: Direction,
+    ) -> bool {
+        const LIMIT: usize = 64;
+        let cache = &mut self.ticks.published_passages;
+        if let Some(entry) = cache.iter().find(|(s, t, d, _)| {
+            *d == direction as u8 && s.same_identity(&source) && t.same_identity(&target)
+        }) {
+            return entry.3;
+        }
+        let result = !merged_face_occludes(&source, &target, direction);
+        if cache.len() >= LIMIT {
+            cache.clear();
+        }
+        cache.push((source, target, direction as u8, result));
+        result
+    }
+    /// `FlowingFluid.canPassThroughWall` from the cell at `source_pos` toward `direction`: each
+    /// cell's collision shape at its position. Published and displaced shapes take priority
+    /// over the state cache; a translated shape does not enter either passage cache.
+    fn can_pass_through_wall(
+        &mut self,
+        direction: Direction,
+        source_pos: BlockPos,
         source: BlockStateId,
         target: BlockStateId,
     ) -> bool {
+        let target_pos = rel(source_pos, direction);
+        let signals = self.signals();
+        let source_positioned = signals.positioned_collision(source_pos, source);
+        let target_positioned = signals.positioned_collision(target_pos, target);
+        if source_positioned.is_some() || target_positioned.is_some() {
+            let source_shape =
+                source_positioned.unwrap_or_else(|| self.collision_or_empty(source).1.clone());
+            let target_shape =
+                target_positioned.unwrap_or_else(|| self.collision_or_empty(target).1.clone());
+            if target_shape.is_block() || source_shape.is_block() {
+                return false;
+            }
+            if self.b.facts(source).collision_offset.is_some()
+                || self.b.facts(target).collision_offset.is_some()
+            {
+                return !merged_face_occludes(&source_shape, &target_shape, direction);
+            }
+            return self.published_passage(source_shape, target_shape, direction);
+        }
         // The shapes are compared by identity and borrowed, never cloned: a
         // clone of the shared block or empty shape is atomic reference counts
         // every thread contends on, and this runs for every step of a spread.
@@ -484,7 +528,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         fluid.kind().same_family(kind) && fluid.is_source()
     }
     /// `FlowingFluid.getNewLiquid`.
-    fn new_liquid(&self, kind: FluidKind, pos: BlockPos, state: BlockStateId) -> FluidState {
+    fn new_liquid(&mut self, kind: FluidKind, pos: BlockPos, state: BlockStateId) -> FluidState {
         let b = self.b;
         let mut highest = 0;
         let mut sources = 0;
@@ -493,7 +537,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             let neighbour = self.rel_state(pos, direction);
             let fluid = b.fluid(neighbour);
             if fluid.kind().same_family(kind)
-                && self.can_pass_through_wall(direction, state, neighbour)
+                && self.can_pass_through_wall(direction, pos, state, neighbour)
             {
                 // Mods are asked for each neighbouring source, the fluid's rule
                 // as the default (`CreateFluidSourceEvent`).
@@ -517,7 +561,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         let above_fluid = b.fluid(above_state);
         if above_fluid.kind() != FluidKind::Empty
             && above_fluid.kind().same_family(kind)
-            && self.can_pass_through_wall(Direction::Up, state, above_state)
+            && self.can_pass_through_wall(Direction::Up, pos, state, above_state)
         {
             return FluidState::new(flowing_of(kind), 8, true);
         }
@@ -528,8 +572,14 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             FluidState::new(flowing_of(kind), amount as u8, false)
         }
     }
-    fn is_water_hole(&self, kind: FluidKind, top: BlockStateId, bottom: BlockStateId) -> bool {
-        if !self.can_pass_through_wall(Direction::Down, top, bottom) {
+    fn is_water_hole(
+        &mut self,
+        kind: FluidKind,
+        top_pos: BlockPos,
+        top: BlockStateId,
+        bottom: BlockStateId,
+    ) -> bool {
+        if !self.can_pass_through_wall(Direction::Down, top_pos, top, bottom) {
             return false;
         }
         if self.b.fluid(bottom).kind().same_family(kind) {
@@ -539,8 +589,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         }
     }
     fn can_maybe_pass_through(
-        &self,
+        &mut self,
         kind: FluidKind,
+        source_pos: BlockPos,
         source: BlockStateId,
         direction: Direction,
         test: BlockStateId,
@@ -548,17 +599,18 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     ) -> bool {
         !self.is_source_of(kind, test_fluid)
             && self.can_hold_any_fluid(test)
-            && self.can_pass_through_wall(direction, source, test)
+            && self.can_pass_through_wall(direction, source_pos, source, test)
     }
     fn can_pass_through(
-        &self,
+        &mut self,
         kind: FluidKind,
+        source_pos: BlockPos,
         source: BlockStateId,
         direction: Direction,
         test: BlockStateId,
         test_fluid: FluidState,
     ) -> bool {
-        self.can_maybe_pass_through(kind, source, direction, test, test_fluid)
+        self.can_maybe_pass_through(kind, source_pos, source, direction, test, test_fluid)
             && self.can_hold_specific_fluid(test, flowing_of(kind))
     }
     fn context_state(&self, context: &mut SpreadContext, pos: BlockPos) -> BlockStateId {
@@ -572,21 +624,26 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         context.states[i] = Some(state);
         state
     }
-    fn context_is_hole(&self, kind: FluidKind, context: &mut SpreadContext, pos: BlockPos) -> bool {
+    fn context_is_hole(
+        &mut self,
+        kind: FluidKind,
+        context: &mut SpreadContext,
+        pos: BlockPos,
+    ) -> bool {
         let index = context.index(pos);
         if let Some(hole) = index.and_then(|i| context.holes[i]) {
             return hole;
         }
         let state = self.context_state(context, pos);
         let below_state = self.below_state(pos);
-        let hole = self.is_water_hole(kind, state, below_state);
+        let hole = self.is_water_hole(kind, pos, state, below_state);
         if let Some(i) = index {
             context.holes[i] = Some(hole);
         }
         hole
     }
     fn slope_distance(
-        &self,
+        &mut self,
         kind: FluidKind,
         pos: BlockPos,
         pass: i32,
@@ -602,7 +659,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             let test_pos = rel(pos, direction);
             let test_state = self.context_state(context, test_pos);
             let test_fluid = self.b.fluid(test_state);
-            if self.can_pass_through(kind, state, direction, test_state, test_fluid) {
+            if self.can_pass_through(kind, pos, state, direction, test_state, test_fluid) {
                 if self.context_is_hole(kind, context, test_pos) {
                     return pass;
                 }
@@ -623,7 +680,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     }
     /// `FlowingFluid.getSpread` (EnumMap: iteration in Direction order).
     fn spread_targets(
-        &self,
+        &mut self,
         kind: FluidKind,
         pos: BlockPos,
         state: BlockStateId,
@@ -635,7 +692,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             let test_pos = rel(pos, direction);
             let test_state = self.state(test_pos);
             let test_fluid = self.b.fluid(test_state);
-            if !self.can_maybe_pass_through(kind, state, direction, test_state, test_fluid) {
+            if !self.can_maybe_pass_through(kind, pos, state, direction, test_state, test_fluid) {
                 continue;
             }
             let new_fluid = self.new_liquid(kind, test_pos, test_state);
@@ -735,7 +792,8 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         let below_pos = below(pos);
         let below_state = self.state(below_pos);
         let below_fluid = self.b.fluid(below_state);
-        if self.can_maybe_pass_through(kind, state, Direction::Down, below_state, below_fluid) {
+        if self.can_maybe_pass_through(kind, pos, state, Direction::Down, below_state, below_fluid)
+        {
             let new_below = self.new_liquid(kind, below_pos, below_state);
             if self.can_be_replaced_with(below_fluid, below_pos, new_below.kind(), Direction::Down)
                 && self.can_hold_specific_fluid(below_state, new_below.kind())
@@ -747,7 +805,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 return;
             }
         }
-        if fluid.is_source() || !self.is_water_hole(kind, state, below_state) {
+        if fluid.is_source() || !self.is_water_hole(kind, pos, state, below_state) {
             self.spread_to_sides(kind, pos, fluid, state);
         }
     }
@@ -990,6 +1048,38 @@ pub(crate) fn merged_face_occludes(
 mod tests {
     use super::*;
     use crate::fluid::{ModFluidType, register_mod_fluid};
+
+    #[test]
+    #[ignore = "daily"]
+    fn displaced_collision_faces_and_fluid_walls_follow_the_column() {
+        let root = std::path::PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap());
+        let registry = super::super::data::load_registry(&root).unwrap();
+        let mut behaviours = Behaviours::load(&registry, &root).unwrap();
+        let stone = registry.default_state("minecraft:stone").unwrap();
+        let air = behaviours.air();
+        // Both columns use the same state. The vertical seed nibble is 3 at (1,2)
+        // (stone's top drops below the cell face), and 15 at (0,1) (no displacement).
+        behaviours.facts[stone.0 as usize].collision_offset = Some((0.0, 0.2));
+        let mut level = super::super::tests::TestLevel::new(&behaviours);
+        let mut ticks = super::super::Ticks::new(0);
+        for (x, z, closed) in [(1, 2, false), (0, 1, true), (1, 2, false)] {
+            let pos = BlockPos::new(x, 64, z);
+            level.set_raw(pos, stone);
+            let mut sim = behaviours.sim(&mut level, &mut ticks);
+            assert_eq!(sim.collision_face_full_at(pos, Direction::Up), closed);
+            assert_eq!(sim.multiface_can_attach_at(pos, Direction::Down), closed);
+            let top = 1 << Direction::Up as u8;
+            assert_eq!(sim.shape_info_at(stone, pos).full_faces & top != 0, closed);
+            assert_eq!(
+                sim.can_pass_through_wall(Direction::Up, pos, stone, air),
+                !closed
+            );
+            assert_eq!(
+                sim.can_pass_through_wall(Direction::Down, above(pos), air, stone),
+                !closed
+            );
+        }
+    }
 
     fn mod_fluid(id: &str, tick_delay: i32) -> FluidKind {
         FluidKind::Mod(

@@ -123,6 +123,7 @@ struct Declare {
 #[mod_api::__subscriptions]
 impl Hooks for Declare {
     fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
+        r.register_attachment_type("mymod:counter", false).unwrap();
         for (path, save) in [("robot", true), ("ghost", false)] {
             r.declare_general_entity(
                 path,
@@ -1007,6 +1008,8 @@ struct Observe {
 #[mod_api::__subscriptions]
 impl Hooks for Observe {
     fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
+        r.register_attachment_type("mymod:native_counter", false)
+            .unwrap();
         r.entity_part(
             "wasm_fixture:robot",
             Observer {

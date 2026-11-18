@@ -26,10 +26,11 @@
 //! damage, death or attribute operations.
 //! An entity added inside one goes at an abort, one removed is only marked until the root
 //! commit, and mods hear of joins and leaves at the root commit (`transactions/entities.rs`).
-use super::{BlockEntity, BlockStateId, Game, machines::HopperState};
+use super::{BlockEntity, BlockStateId, Game, machines::HopperState, maps::MapData};
 use mod_api::{Transaction, TransactionLifecycle, TransactionSeal};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use sunrise_client::{items::ItemStack, world::BlockEntityExtras};
+use sunrise_core::position::BlockPos;
 use sunrise_mod_runtime::attachments::{Attachments, Holder};
 
 #[path = "transactions/decision.rs"]
@@ -130,6 +131,8 @@ pub(super) struct Level {
     biomes: HashMap<Pos, u16>,
     /// Each player's inventory before this transaction first wrote it, by UUID.
     players: HashMap<u128, KeptPlayer>,
+    /// Ender storage has one journal shared by player and menu writes.
+    ender_items: HashMap<u128, Vec<Option<ItemStack>>>,
     /// Synced player health and its unpublished update events before set_health.
     player_health: HashMap<u128, KeptPlayerHealth>,
     /// Mob health and synchronization dirtiness before set_health.
@@ -159,6 +162,8 @@ pub(super) struct Level {
     /// attachment map in it: an abort puts them back, so a chunk only a tentative write marked
     /// is clean again.
     chunk_marks: HashMap<(i32, i32), sunrise_client::world::ChunkMark>,
+    /// New map data and its reserved IDs. Neither enters the saved map table until root commit.
+    pub(super) new_maps: BTreeMap<i32, MapData>,
     /// What the root commit does, in order.
     after: Vec<After>,
     /// Internal decide/fire/apply state. No menu route uses this yet.
@@ -247,7 +252,6 @@ struct KeptMobHealth {
 
 #[derive(Clone)]
 struct KeptPlayer {
-    ender_items: Vec<Option<ItemStack>>,
     player_extra: Option<sunrise_core::nbt::Tag>,
     inventory: Vec<Option<ItemStack>>,
     armor: [Option<ItemStack>; 4],
@@ -266,7 +270,6 @@ enum KeptEquipment {
 
 #[derive(Clone)]
 struct KeptMenus {
-    ender_items: Vec<Option<ItemStack>>,
     craft_grid: [Option<ItemStack>; 4],
     native_menu: Vec<Option<ItemStack>>,
 }
@@ -550,6 +553,9 @@ impl Game<'_> {
                 for (id, len) in level.mob_lengths {
                     outer.mob_lengths.entry(id).or_insert(len);
                 }
+                for (uuid, kept) in level.ender_items {
+                    outer.ender_items.entry(uuid).or_insert(kept);
+                }
                 for (conn, kept) in level.menus {
                     outer.menus.entry(conn).or_insert(kept);
                 }
@@ -569,6 +575,7 @@ impl Game<'_> {
                 for (chunk, mark) in level.chunk_marks {
                     outer.chunk_marks.entry(chunk).or_insert(mark);
                 }
+                outer.new_maps.append(&mut level.new_maps);
                 outer.after.extend(level.after);
                 // The nearest enclosing transaction of this level takes its entities back; a
                 // parent in another level can't, and with none in this level they are told now.
@@ -815,8 +822,11 @@ impl Game<'_> {
         let Some(level) = self.transactions.last_mut() else {
             return;
         };
+        level
+            .ender_items
+            .entry(uuid)
+            .or_insert_with(|| self.ender_items.clone());
         level.players.entry(uuid).or_insert_with(|| KeptPlayer {
-            ender_items: self.ender_items.clone(),
             player_extra: self.level.player_extra.clone(),
             inventory: self.inventory.clone(),
             armor: self.armor.clone(),
@@ -877,21 +887,30 @@ impl Game<'_> {
         let Some(level) = self.transactions.last() else {
             return;
         };
-        let Some(super::native_server::PlayerRead::Guest(g)) = self.player_handle_read(player)
-        else {
+        let Some(g) = self.native_menu_player(player) else {
             return;
         };
         let conn = g.conn;
         if level.menus.contains_key(&conn) {
             return;
         }
+        let uuid = player.uuid();
+        let ender = (!level.ender_items.contains_key(&uuid)).then(|| {
+            if self.lan_acting == Some(conn) {
+                self.ender_items.clone()
+            } else {
+                g.ender_items.clone()
+            }
+        });
         let kept = KeptMenus {
-            ender_items: g.ender_items.clone(),
             craft_grid: g.craft_grid.clone(),
             native_menu: g.native_menu.clone(),
         };
         if let Some(level) = self.transactions.last_mut() {
             level.menus.insert(conn, kept);
+            if let Some(ender) = ender {
+                level.ender_items.insert(uuid, ender);
+            }
         }
     }
     /// Keeps entity `id`'s inventory as it is, if a transaction is open and hasn't yet.
@@ -1071,6 +1090,10 @@ impl Game<'_> {
         }
     }
     fn root_commit(&mut self, level: Level) {
+        // A deferred listener may read a new map or create one of its own.
+        for (id, data) in level.new_maps {
+            self.publish_map(id, data);
+        }
         let mut told = std::collections::HashSet::new();
         let mut biome_columns = std::collections::HashSet::new();
         for after in level.after {
@@ -1164,9 +1187,22 @@ impl Game<'_> {
             }
         }
 
+        // Block entities whose published shapes the abort changed back.
+        let mut reshaped = Vec::new();
         for (pos, kept) in level.block_entities {
             match (&kept.entity, self.world.block_entities.get_mut(&pos)) {
                 (Some(entity), Some(now)) => {
+                    fn shapes(
+                        entity: &BlockEntity,
+                    ) -> Option<&sunrise_client::containers::PublishedShapes> {
+                        match entity {
+                            BlockEntity::Mod(entity) => entity.shapes(),
+                            _ => None,
+                        }
+                    }
+                    if shapes(now) != shapes(entity) {
+                        reshaped.push(pos);
+                    }
                     *now = entity.clone();
                     self.world
                         .block_entities
@@ -1236,6 +1272,16 @@ impl Game<'_> {
         for (pos, state) in level.blocks {
             self.world.set_stored(pos.0, pos.1, pos.2, state);
         }
+        // The shapes are back: the neighbours that read them (a fluid beside it) are told, as
+        // the publish told them.
+        for pos in reshaped {
+            let at = BlockPos::new(pos.0, pos.1, pos.2);
+            let state = self.world.block(pos.0, pos.1, pos.2);
+            self.with_level(|b, level, ticks| {
+                let block = b.block(state);
+                b.update_neighbors_at(level, ticks, at, block);
+            });
+        }
         for (chunk, randoms) in level.composter_randoms {
             self.transactions
                 .composter_randoms
@@ -1263,7 +1309,6 @@ impl Game<'_> {
         if let Some(host) = self.lan.as_mut() {
             host.hub.guests.update_all(|g| {
                 if let Some(kept) = level.menus.get(&g.conn).filter(|_| g.placed) {
-                    g.ender_items.clone_from(&kept.ender_items);
                     g.craft_grid.clone_from(&kept.craft_grid);
                     g.native_menu.clone_from(&kept.native_menu);
                 }
@@ -1340,9 +1385,21 @@ impl Game<'_> {
             self.score.board.restore(saved);
             self.sync_score_registries();
         }
+        for (uuid, kept) in level.ender_items {
+            if self.native_acting_id() == uuid {
+                self.ender_items = kept;
+            } else if let Some(host) = self.lan.as_mut()
+                && let Some(index) = host
+                    .hub
+                    .guests
+                    .iter()
+                    .position(|g| g.placed && g.uuid == uuid)
+            {
+                host.hub.guests.update(index, |g| g.ender_items = kept);
+            }
+        }
         for (uuid, kept) in level.players {
             self.native_as_player(uuid, |g| {
-                g.ender_items = kept.ender_items;
                 g.level.player_extra = kept.player_extra;
                 g.inventory = kept.inventory;
                 g.armor = kept.armor;

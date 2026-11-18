@@ -139,10 +139,12 @@ fn datapack_game_open_reload_and_exhaustion_are_atomic() {
                     game.mods.datapack_registries.as_ref().unwrap().generation(),
                     6
                 );
+                // `reload_datapacks(false)` is the world-open path: it installs the world's tables
+                // and starts a new registry session (61ce0afada1), so the generation starts again.
                 game.reload_datapacks(false, &features).unwrap();
                 assert_eq!(
                     game.mods.datapack_registries.as_ref().unwrap().generation(),
-                    6
+                    1
                 );
                 std::sync::Arc::make_mut(game.mods.datapack_registries.as_mut().unwrap())
                     .exhaust_generation_for_testing();
@@ -160,7 +162,7 @@ fn datapack_game_open_reload_and_exhaustion_are_atomic() {
                 assert_eq!(game.mods.datapack_registries, old_set);
                 assert_eq!(
                     sunrise_client::datapack_net::served().unwrap().generation(),
-                    6
+                    1
                 );
                 assert_eq!(
                     game.world_tables
