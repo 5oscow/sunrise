@@ -329,7 +329,7 @@ index bca7938..2f2eb44 100644
 +    assert!(e.message.contains("selected site contains `?`"), "{e}");
 +}
 diff --git a/crates/horizon-mixins-cli/tests/integration.rs b/crates/horizon-mixins-cli/tests/integration.rs
-index fcf5a46..7c66d8e 100644
+index fcf5a46..c5fadd1 100644
 --- a/crates/horizon-mixins-cli/tests/integration.rs
 +++ b/crates/horizon-mixins-cli/tests/integration.rs
 @@ -697,14 +697,14 @@ fn cfg_attributes_shared_module_sources_and_shadowing_fail_closed() {
@@ -351,7 +351,7 @@ index fcf5a46..7c66d8e 100644
              "E_UNSUPPORTED_CONTROL_FLOW",
          ),
          (
-@@ -890,3 +890,709 @@ fn production_test_cfg_modules_are_indexed_and_applied() {
+@@ -890,3 +890,794 @@ fn production_test_cfg_modules_are_indexed_and_applied() {
      let error = build_plan(&f.root, &f.mods).unwrap_err();
      assert!(format!("{error:?}").contains("E_TARGET_NOT_FOUND"));
  }
@@ -393,6 +393,7 @@ index fcf5a46..7c66d8e 100644
 +    impl Reads for Trap {{ fn read(&self) -> i32 {{ mark("read"); self.0 }} }}
 +    pub fn trap(ok: bool) -> Result<Trap, &'static str> {{ mark("trap"); if ok {{ Ok(Trap(7)) }} else {{ Err("no trap") }} }}
 +    pub trait Marker {{}}
++    pub type Erased = Box<dyn Marker>;
 +    pub struct Item;
 +    impl Marker for Item {{}}
 +    impl Item {{ pub fn read(&self) -> i32 {{ mark("item"); 1 }} }}
@@ -603,7 +604,13 @@ index fcf5a46..7c66d8e 100644
 +    fn an_owned_binding_that_could_unsize_the_receiver_is_refused() {
 +        // The source calls `Item::read(&self)` on a `Box<Item>`; bound as `Box<dyn Marker>`, the
 +        // receiver would be unsized at the call and the dot call could pick another method.
-+        for ty in ["Box<dyn crate::Marker>", "Box<[i32]>", "Box<str>"] {
++        // Also through a type alias, which the tool cannot see through.
++        for ty in [
++            "Box<dyn crate::Marker>",
++            "Box<[i32]>",
++            "Box<str>",
++            "crate::Erased",
++        ] {
 +            let f = res_fixture("Ok(boxed(ok)?.read())", ty, "boxed(ok)?.read");
 +            let output = f.command("apply").output().unwrap();
 +            assert!(!output.status.success(), "{ty}");
@@ -869,7 +876,10 @@ index fcf5a46..7c66d8e 100644
 +        let plan = ::horizon_mixins_core::build_plan_with(
 +            &f.root,
 +            &f.mods,
-+            Some(&::horizon_mixins_core::cfg::CfgSet::parse(&["unix".into()], Some("fixture-game")).unwrap()),
++            Some(
++                &::horizon_mixins_core::cfg::CfgSet::parse(&["unix".into()], Some("fixture-game"))
++                    .unwrap(),
++            ),
 +        )
 +        .unwrap();
 +        let planned = plan.cfg.unwrap();
@@ -941,18 +951,93 @@ index fcf5a46..7c66d8e 100644
 +            "#[cfg(test)] mark(\"test only\"); #[cfg(unix)] mark(\"feature on\"); mark(\"body\"); 7",
 +        );
 +        let output = with_features_of(&f, "apply", &["unix"], "fixture-driver");
-+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
++        assert!(
++            output.status.success(),
++            "{}",
++            String::from_utf8_lossy(&output.stderr)
++        );
 +        let staged = fs::read_to_string(f.out.join("engine/src/lib.rs")).unwrap();
-+        assert!(!staged.contains("test only") && !staged.contains("cfg"), "{staged}");
++        assert!(
++            !staged.contains("test only") && !staged.contains("cfg"),
++            "{staged}"
++        );
 +        // The same feature cfg in the game crate is decided.
 +        let f = cfg_fixture(TEST_ONLY_BODY);
 +        let output = with_cfg(&f, "apply", &["unix", "feature=\"x\""]);
-+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
++        assert!(
++            output.status.success(),
++            "{}",
++            String::from_utf8_lossy(&output.stderr)
++        );
 +        // A feature option with no package to belong to is malformed.
 +        let mut command = f.command("apply");
 +        let output = command.arg("--cfg").arg("feature=\"x\"").output().unwrap();
 +        let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
 +        assert_eq!(error["code"], "E_CFG", "{error}");
++    }
++
++    #[test]
++    fn a_cfg_name_the_set_cannot_vouch_for_is_refused_not_deleted() {
++        // `engine_special` may be a cfg of the original build's build script: absent from the
++        // printed set is not off. rustc's own names (`test`) stay decided.
++        let f = cfg_fixture(
++            "#[cfg(test)] mark(\"test only\"); #[cfg(engine_special)] mark(\"special\"); mark(\"feature on\"); mark(\"body\"); 7",
++        );
++        let output = with_cfg(&f, "apply", &["unix"]);
++        assert!(!output.status.success());
++        let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
++        assert_eq!(error["code"], "E_UNSUPPORTED_CFG", "{error}");
++        // Named in the set, it is decided either way.
++        let output = with_cfg(&f, "apply", &["unix", "engine_special"]);
++        assert!(
++            output.status.success(),
++            "{}",
++            String::from_utf8_lossy(&output.stderr)
++        );
++    }
++
++    #[test]
++    fn a_raw_identifier_cfg_is_the_plain_name() {
++        let body =
++            "#[cfg(r#feature = \"x\")] mark(\"feature on\"); mark(\"head\"); mark(\"body\"); 7";
++        let f = cfg_fixture(body);
++        let output = with_cfg(&f, "apply", &["feature=\"x\""]);
++        assert!(
++            output.status.success(),
++            "{}",
++            String::from_utf8_lossy(&output.stderr)
++        );
++        let staged = fs::read_to_string(f.out.join("engine/src/lib.rs")).unwrap();
++        assert!(
++            staged.contains("feature on") && !staged.contains("cfg"),
++            "{staged}"
++        );
++        // In another package it is undecided, not deleted.
++        let output = with_features_of(&f, "apply", &["feature=\"x\""], "fixture-driver");
++        let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
++        assert_eq!(error["code"], "E_UNSUPPORTED_CFG", "{error}");
++    }
++
++    #[test]
++    fn a_cfg_value_with_escapes_survives_the_plan() {
++        let f = cfg_fixture(TEST_ONLY_BODY);
++        let value = r#"label="a\"b\\c""#;
++        let mut f = f;
++        let stage = f.out.clone();
++        f.out = f._temp.path().join("plan.json");
++        let plan = with_cfg(&f, "plan", &["feature=\"x\"", value]);
++        assert!(
++            plan.status.success(),
++            "{}",
++            String::from_utf8_lossy(&plan.stderr)
++        );
++        f.out = stage;
++        let applied = with_cfg(&f, "apply", &["feature=\"x\"", value]);
++        assert!(
++            applied.status.success(),
++            "{}",
++            String::from_utf8_lossy(&applied.stderr)
++        );
 +    }
 +
 +    #[test]
@@ -1361,10 +1446,10 @@ index 740c0dc..94df671 100644
          if file_cfg == CfgStatus::Inactive {
              active.remove(&path);
 diff --git a/crates/horizon-mixins-core/src/lib.rs b/crates/horizon-mixins-core/src/lib.rs
-index 5bac667..1a48889 100644
+index 5bac667..ce8b959 100644
 --- a/crates/horizon-mixins-core/src/lib.rs
 +++ b/crates/horizon-mixins-core/src/lib.rs
-@@ -1,4 +1,410 @@
+@@ -1,4 +1,450 @@
  pub mod bridges;
 +pub mod cfg {
 +    //! The `cfg` set of the build a workspace is compiled in, and the pass that applies it.
@@ -1379,6 +1464,7 @@ index 5bac667..1a48889 100644
 +
 +    use crate::{Diagnostic, Result};
 +    use std::collections::BTreeSet;
++    use syn::ext::IdentExt;
 +    use syn::{
 +        Attribute, Expr, Lit, Meta, Token,
 +        punctuated::Punctuated,
@@ -1390,6 +1476,8 @@ index 5bac667..1a48889 100644
 +    #[derive(Debug, Clone, Default, PartialEq, Eq)]
 +    pub struct CfgSet {
 +        options: BTreeSet<String>,
++        /// The names the options carry, with any value.
++        names: BTreeSet<String>,
 +        features_of: Option<String>,
 +    }
 +
@@ -1428,6 +1516,10 @@ index 5bac667..1a48889 100644
 +                ));
 +            }
 +            Ok(Self {
++                names: set
++                    .iter()
++                    .map(|key| key.split('=').next().unwrap().to_owned())
++                    .collect(),
 +                options: set,
 +                features_of: features_of.map(str::to_owned),
 +            })
@@ -1447,10 +1539,20 @@ index 5bac667..1a48889 100644
 +            match meta {
 +                Meta::Path(path) if path.is_ident("true") => Truth::Yes,
 +                Meta::Path(path) if path.is_ident("false") => Truth::No,
-+                Meta::NameValue(nv) if !features && nv.path.is_ident("feature") => Truth::Unknown,
 +                Meta::Path(_) | Meta::NameValue(_) => match option_key(meta) {
++                    Some(key) if key.starts_with("feature=") && !features => Truth::Unknown,
 +                    Some(key) if self.options.contains(&key) => Truth::Yes,
-+                    Some(_) => Truth::No,
++                    // Absent: off only for a name the set can vouch for. Another name may be a
++                    // cfg the build script of the original build turned on.
++                    Some(key) => {
++                        let name = key.split('=').next().unwrap();
++                        let known = if name == "feature" {
++                            features
++                        } else {
++                            self.names.contains(name) || rustc_name(name)
++                        };
++                        if known { Truth::No } else { Truth::Unknown }
++                    }
 +                    None => Truth::Unknown,
 +                },
 +                Meta::List(list) => {
@@ -1569,14 +1671,37 @@ index 5bac667..1a48889 100644
 +    }
 +
 +    /// `name` or `name="value"` as the one string the set holds; `None` for any other shape.
++    /// The names rustc itself answers for, whatever the flags: an absent one is off.
++    fn rustc_name(name: &str) -> bool {
++        name.starts_with("target_")
++            || name.starts_with("sanitize")
++            || matches!(
++                name,
++                "unix"
++                    | "windows"
++                    | "panic"
++                    | "debug_assertions"
++                    | "overflow_checks"
++                    | "ub_checks"
++                    | "contract_checks"
++                    | "test"
++                    | "doc"
++                    | "doctest"
++                    | "miri"
++                    | "proc_macro"
++                    | "relocation_model"
++                    | "fmt_debug"
++            )
++    }
++
 +    fn option_key(meta: &Meta) -> Option<String> {
 +        match meta {
-+            Meta::Path(path) => path.get_ident().map(|i| i.to_string()),
++            Meta::Path(path) => path.get_ident().map(|i| i.unraw().to_string()),
 +            Meta::NameValue(nv) => {
-+                let name = nv.path.get_ident()?;
++                let name = nv.path.get_ident()?.unraw();
 +                match &nv.value {
 +                    Expr::Lit(lit) => match &lit.lit {
-+                        Lit::Str(value) => Some(format!("{name}=\"{}\"", value.value())),
++                        Lit::Str(value) => Some(format!("{name}={:?}", value.value())),
 +                        _ => None,
 +                    },
 +                    _ => None,
@@ -1775,7 +1900,7 @@ index 5bac667..1a48889 100644
  pub mod diagnostic;
  pub mod helpers;
  pub mod index;
-@@ -10,7 +416,9 @@ pub mod sites;
+@@ -10,7 +456,9 @@ pub mod sites;
  pub mod slices;
  pub mod source;
  pub use diagnostic::{Diagnostic, Result};
@@ -1787,7 +1912,7 @@ index 5bac667..1a48889 100644
  pub mod modules;
  
 diff --git a/crates/horizon-mixins-core/src/plan.rs b/crates/horizon-mixins-core/src/plan.rs
-index 848dcc0..c8020cc 100644
+index 848dcc0..083cc54 100644
 --- a/crates/horizon-mixins-core/src/plan.rs
 +++ b/crates/horizon-mixins-core/src/plan.rs
 @@ -1,5 +1,6 @@
@@ -1913,7 +2038,25 @@ index 848dcc0..c8020cc 100644
                  if (injection.kind == Kind::BeforeCall
                      || (injection.kind == Kind::AfterCall && injection.cancellable))
                      && !site.whole_expression
-@@ -924,6 +993,11 @@ pub fn build_staged(workspace: &Path, mods: &Path) -> Result<(Plan, crate::nativ
+@@ -769,6 +838,7 @@ pub fn build_staged(workspace: &Path, mods: &Path) -> Result<(Plan, crate::nativ
+                     inputs.insert(0, receiver.clone());
+                 }
+                 validate_operation_site(
++                    &index,
+                     f,
+                     &selected.unwrap().expr,
+                     &helpers::Operation {
+@@ -780,7 +850,8 @@ pub fn build_staged(workspace: &Path, mods: &Path) -> Result<(Plan, crate::nativ
+                 .map_err(context)?;
+             }
+             if let Some(operation) = &contract.operation {
+-                validate_operation_site(f, &selected.unwrap().expr, operation).map_err(context)?;
++                validate_operation_site(&index, f, &selected.unwrap().expr, operation)
++                    .map_err(context)?;
+             }
+             let call_site = selected
+                 .filter(|_| injection.kind.selects_call())
+@@ -924,6 +995,11 @@ pub fn build_staged(workspace: &Path, mods: &Path) -> Result<(Plan, crate::nativ
          schema: SCHEMA,
          transformer: env!("CARGO_PKG_VERSION").into(),
          rustc: rustc(&root)?,
@@ -1925,7 +2068,7 @@ index 848dcc0..c8020cc 100644
          inputs,
          injections,
          bridges: planned_bridges,
-@@ -979,6 +1053,9 @@ pub(crate) fn validate_target_with(
+@@ -979,6 +1055,9 @@ pub(crate) fn validate_target_with(
          // are checked in those values only ([`exit_value_error`]). MODIFY_VARIABLE likewise
          // replaces only the value it selects ([`modified_value_error`]).
          rewrites_body: !matches!(kind, Kind::Return | Kind::ModifyVariable),
@@ -1935,7 +2078,7 @@ index 848dcc0..c8020cc 100644
          // A `?` is an exit RETURN would miss; MODIFY_VARIABLE leaves one outside its value alone.
          try_outside_value: kind == Kind::ModifyVariable,
          body_macros: false,
-@@ -1005,7 +1082,10 @@ pub(crate) fn validate_target_with(
+@@ -1005,7 +1084,10 @@ pub(crate) fn validate_target_with(
      // any exit or expression inside a macro, just like ordinary HEAD.
      safety.body_macros = safety.boundary;
      safety.in_body = true;
@@ -1947,7 +2090,7 @@ index 848dcc0..c8020cc 100644
      if safety.error.is_none() && kind == Kind::Return {
          safety.error = exit_value_error(&f.block);
      }
-@@ -1173,6 +1253,7 @@ struct Safety {
+@@ -1173,6 +1255,7 @@ struct Safety {
      error: Option<(&'static str, &'static str)>,
      boundary: bool,
      rewrites_body: bool,
@@ -1955,7 +2098,7 @@ index 848dcc0..c8020cc 100644
      try_outside_value: bool,
      body_macros: bool,
      relaxed: bool,
-@@ -1237,6 +1318,9 @@ impl<'ast> Visit<'ast> for Safety {
+@@ -1237,6 +1320,9 @@ impl<'ast> Visit<'ast> for Safety {
              // RETURN never rewrites inside a closure; what is inside is still checked.
              Expr::Closure(c) if (!self.rewrites_body || self.relaxed) && c.asyncness.is_none() => {}
              Expr::Try(_) if self.try_outside_value => {}
@@ -1965,7 +2108,7 @@ index 848dcc0..c8020cc 100644
              Expr::Closure(_)
              | Expr::Async(_)
              | Expr::Await(_)
-@@ -1247,7 +1331,10 @@ impl<'ast> Visit<'ast> for Safety {
+@@ -1247,7 +1333,10 @@ impl<'ast> Visit<'ast> for Safety {
              | Expr::Const(_) => self.error = Some(CLOSURES_ETC),
              // Calls under a reference can depend on temporary lifetime extension.
              Expr::Reference(r)
@@ -1977,7 +2120,7 @@ index 848dcc0..c8020cc 100644
              {
                  self.error = Some(REFERENCED_CALL)
              }
-@@ -1346,6 +1433,23 @@ impl<'ast> Visit<'ast> for Safety {
+@@ -1346,6 +1435,23 @@ impl<'ast> Visit<'ast> for Safety {
          }
      }
  }
@@ -2001,13 +2144,63 @@ index 848dcc0..c8020cc 100644
  fn contains_call(expr: &Expr) -> bool {
      struct Find(bool);
      impl<'ast> Visit<'ast> for Find {
-@@ -1395,11 +1499,14 @@ fn validate_operation_site(
+@@ -1363,7 +1469,37 @@ fn contains_call(expr: &Expr) -> bool {
+ pub use crate::helpers::{parse_helper, validate_helper};
+ pub use crate::sites::{call_key, is_call};
+ 
++/// Whether the declared receiver type of an owned computed receiver might hide an unsized type
++/// behind a name the tool cannot see through: a type alias of the workspace, an associated type,
++/// or a qualified path. The receiver would be coerced to it on the way in.
++fn may_hide_alias(index: &Index, ty: &syn::Type) -> bool {
++    struct Aliases(BTreeSet<String>);
++    impl<'ast> Visit<'ast> for Aliases {
++        fn visit_item_type(&mut self, item: &'ast syn::ItemType) {
++            self.0.insert(item.ident.to_string());
++        }
++    }
++    struct Paths<'a>(&'a BTreeSet<String>, bool);
++    impl<'ast> Visit<'ast> for Paths<'_> {
++        fn visit_type_path(&mut self, path: &'ast syn::TypePath) {
++            self.1 |= path.qself.is_some()
++                || path.path.segments.iter().enumerate().any(|(i, seg)| {
++                    self.0.contains(&seg.ident.to_string()) || (i == 0 && seg.ident == "Self")
++                });
++            visit::visit_type_path(self, path);
++        }
++    }
++    let mut aliases = Aliases(BTreeSet::new());
++    for file in index.files.values() {
++        aliases.visit_file(file);
++    }
++    let mut paths = Paths(&aliases.0, false);
++    paths.visit_type(ty);
++    paths.1
++}
++
+ fn validate_operation_site(
++    index: &Index,
+     f: &Function,
+     expr: &Expr,
+     operation: &helpers::Operation,
+@@ -1395,11 +1531,26 @@ fn validate_operation_site(
                  }
              }
          }
 +        // A receiver that is a value (a call, with or without `?`) is evaluated at the call site
 +        // and moves into the operation as the binding's declared type.
-+        Expr::MethodCall(call) if !sites::is_place(&call.receiver) => {}
++        Expr::MethodCall(call) if !sites::is_place(&call.receiver) => {
++            let declared: syn::Type = syn::parse_str(&operation.inputs[0])
++                .map_err(|e| Diagnostic::new("E_OPERATION_SIGNATURE", e.to_string()))?;
++            if !matches!(declared, syn::Type::Reference(_)) && may_hide_alias(index, &declared) {
++                return Err(Diagnostic::new(
++                    "E_OPERATION_SIGNATURE",
++                    format!(
++                        "a computed receiver bound by value must be declared as its own type, written out: `{}` names a type alias or an associated type the tool cannot see through, and the receiver could be unsized to it on the way in",
++                        tokens(&declared).replace(' ', "")
++                    ),
++                ));
++            }
++        }
          Expr::MethodCall(call) => {
              let Expr::Path(receiver) = &*call.receiver else {
                  return Err(Diagnostic::new(
