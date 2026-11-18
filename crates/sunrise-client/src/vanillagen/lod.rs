@@ -964,38 +964,58 @@ mod tests {
                 }
             }
         }
+        let end_stone = "minecraft:end_stone";
         for &(cx, cz) in &centers {
+            let base = worker.generate_proto(sunrise_core::position::ChunkPos::new(cx, cz))?;
             let Some(chunk) = decorated_region(&mut worker, (cx, cz), &stop)? else {
                 continue;
             };
             let min = chunk.terrain.min_y();
             let max = min + chunk.terrain.height();
+            // The end stone decoration added: the island, not the terrain under it.
+            let mut added = Vec::new();
             let mut raw = 0;
             for y in min..max {
                 for z in 0..16 {
                     for x in 0..16 {
-                        raw += usize::from(chunk.block_name(x, y, z) == "minecraft:end_stone");
+                        if chunk.block_name(x, y, z) == end_stone {
+                            raw += 1;
+                            if base.block_name(x, y, z) != end_stone {
+                                added.push((x, y, z));
+                            }
+                        }
                     }
                 }
             }
-            if raw == 0 {
+            if added.is_empty() {
                 continue;
             }
-            let kept: usize = columns(&chunk, &terrain.biome_map, "minecraft:the_end")
+            let far = columns(&chunk, &terrain.biome_map, "minecraft:the_end");
+            let is_stone = |state| assets.registry.state(state).unwrap().name == end_stone;
+            let kept: usize = far
                 .iter()
                 .flat_map(|column| &column.spans)
-                .filter(|span| {
-                    assets.registry.state(span.state).unwrap().name == "minecraft:end_stone"
-                })
+                .filter(|span| is_stone(span.state))
                 .map(|span| (span.max - span.min) as usize)
                 .sum();
             assert_eq!(
                 raw, kept,
                 "far columns keep the real small island in {cx} {cz}"
             );
+            for &(x, y, z) in &added {
+                assert!(
+                    far[(z * 16 + x) as usize].spans.iter().any(|span| {
+                        is_stone(span.state) && i32::from(span.min) <= y && y < i32::from(span.max)
+                    }),
+                    "decorated end stone at {x} {y} {z} in {cx} {cz} is in its far column"
+                );
+            }
             return Ok(());
         }
-        panic!("no small end island among {} candidates", centers.len());
+        panic!(
+            "no decorated small end island among {} candidates",
+            centers.len()
+        );
     }
     /// Vanilla decoration places chorus plants in the End; the far columns must
     /// keep them even though they are not motion-blocking blocks.
