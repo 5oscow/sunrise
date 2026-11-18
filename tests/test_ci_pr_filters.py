@@ -1,5 +1,6 @@
 """checks starts on every pull request and skips a job only when the complete diff leaves its inputs untouched."""
 from pathlib import Path
+import re
 import sys
 import unittest
 
@@ -12,8 +13,20 @@ GATED = {"verify-tree": ("tooling_required", "rust_required"), "verify-lint": ("
          "verify-test": ("rust_required",), "launcher": ("launcher_required",)}
 
 
-def workflow():
-    return yaml.load((ROOT / ".github/workflows/ci.yml").read_text(), Loader=yaml.BaseLoader)
+def workflow(name="ci"):
+    return yaml.load((ROOT / f".github/workflows/{name}.yml").read_text(), Loader=yaml.BaseLoader)
+
+
+def evaluate(expression, context):
+    """Evaluate the selection predicates from the workflow for a synthetic Actions context."""
+    expression = " ".join(expression.split()).removeprefix("${{").removesuffix("}}").strip()
+    expression = re.sub(r"[a-zA-Z_][\w-]*(?:\.[\w*-]+)+", lambda m: repr(context.get(m[0], "")), expression)
+    expression = expression.replace("&&", " and ").replace("||", " or ")
+    expression = re.sub(r"!(?!=)", " not ", expression).strip()
+    return eval(expression, {"__builtins__": {}}, {
+        "always": lambda: True, "cancelled": lambda: False,
+        "startsWith": str.startswith, "contains": lambda values, item: item in values,
+    })
 
 
 class PullRequestSelectionTests(unittest.TestCase):
@@ -41,6 +54,30 @@ class PullRequestSelectionTests(unittest.TestCase):
                 for output in outputs:
                     self.assertIn(f"needs.changes.outputs.{output} != 'false'", condition)
                 self.assertNotIn("== 'true'", condition)
+
+    def test_failed_or_missing_selection_does_not_skip_or_rerun_fork_checks(self):
+        jobs = workflow()["jobs"]
+        event = {"github.event_name": "pull_request", "github.repository": "org/game",
+                 "github.event.pull_request.head.repo.full_name": "fork/game"}
+        output_keys = {name for outputs in GATED.values() for name in outputs}
+        for result, outcome, value, expected in (
+            ("success", "success", "false", False), ("success", "success", "true", True),
+            ("success", "success", "", True), ("success", "failure", "false", True),
+            ("failure", "success", "false", True),
+        ):
+            context = dict(event, **{"needs.changes.result": result})
+            producer = {"steps.selection.outcome": outcome,
+                        **{f"steps.selection.outputs.{key}": value for key in output_keys}}
+            context.update({f"needs.changes.outputs.{key}": evaluate(jobs["changes"]["outputs"][key], producer)
+                            for key in output_keys})
+            for name in GATED:
+                with self.subTest(name=name, result=result, outcome=outcome, value=value):
+                    self.assertEqual(evaluate(jobs[name]["if"], context), expected)
+                    self.assertFalse(any("rust_changes.py" in step.get("run", "") for step in jobs[name]["steps"]))
+        for name, command in (("verify-lint", "fmt --all"), ("verify-test", "test --locked"),
+                              ("launcher", "test --locked")):
+            with self.subTest(name=name):
+                self.assertTrue(any(command in step.get("run", "") and "if" not in step for step in jobs[name]["steps"]))
 
 
 if __name__ == "__main__":

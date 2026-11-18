@@ -31,20 +31,24 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     outputs:
-      rust_required: ${{ steps.selection.outputs.rust_required }}
-      launcher_required: ${{ steps.selection.outputs.launcher_required }}
-      tooling_required: ${{ steps.selection.outputs.tooling_required }}
+      rust_required: ${{ steps.selection.outcome == 'success' && steps.selection.outputs.rust_required || '' }}
+      launcher_required: ${{ steps.selection.outcome == 'success' && steps.selection.outputs.launcher_required || '' }}
+      tooling_required: ${{ steps.selection.outcome == 'success' && steps.selection.outputs.tooling_required || '' }}
     steps:
       - uses: actions/checkout@v7
       - name: Fetch this commit's history for selection
+        id: history
         timeout-minutes: 11
+        continue-on-error: true
         env:
           FETCH_STEP: Fetch this commit's history for selection
           # The diff reads commits and two trees, which Git fetches when it first reads them (tools/ci/history_fetch.sh).
           HISTORY_FILTER: tree:0
         run: bash tools/ci/history_fetch.sh
       - name: Select the jobs this pull request needs
+        if: steps.history.outcome == 'success'
         id: selection
+        continue-on-error: true
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -68,7 +72,7 @@ jobs:
     if: >-
       !cancelled() && (github.event_name == 'schedule' || github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name != github.repository &&
-      (needs.changes.outputs.tooling_required != 'false' || needs.changes.outputs.rust_required != 'false'))
+      (needs.changes.result != 'success' || needs.changes.outputs.tooling_required != 'false' || needs.changes.outputs.rust_required != 'false'))
     runs-on: >-
       ${{ vars.SELF_HOSTED_CI != 'off' && vars.SELF_HOSTED_CI != 'light' && (vars.SELF_HOSTED_CI == 'all' ||
       github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository &&
@@ -130,7 +134,7 @@ jobs:
     if: >-
       !cancelled() && (github.event_name == 'schedule' || github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name != github.repository &&
-      needs.changes.outputs.rust_required != 'false')
+      (needs.changes.result != 'success' || needs.changes.outputs.rust_required != 'false'))
     runs-on: >-
       ${{ vars.SELF_HOSTED_CI != 'off' && vars.SELF_HOSTED_CI != 'light' && (vars.SELF_HOSTED_CI == 'all' ||
       github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository &&
@@ -142,13 +146,6 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - name: Does this pull request need Rust checks?
-        if: github.event_name == 'pull_request'
-        id: rust
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: python3 tools/ci/rust_changes.py "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
       # As in verify-tree: a default toolchain and no GPU, so a part doesn't depend on which pool took it.
       - name: Our runners as GitHub's (a default Rust toolchain, no GPU)
         if: runner.environment != 'github-hosted'
@@ -157,7 +154,6 @@ jobs:
           rustup default stable
           echo "WGPU_BACKEND=dx12" >> "$GITHUB_ENV"
       - name: Install Rust toolchain and the ALSA and udev headers the client links against
-        if: steps.rust.outputs.required != 'false'
         env:
           HOSTED: ${{ runner.environment == 'github-hosted' }}
         run: |
@@ -167,12 +163,11 @@ jobs:
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy
       # Dependencies checked by clippy, saved from main's runs (pull requests read main's cache).
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        if: steps.rust.outputs.required != 'false' && runner.environment == 'github-hosted'
+        if: runner.environment == 'github-hosted'
         with:
           shared-key: verify-lint
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Check formatting and lint
-        if: steps.rust.outputs.required != 'false'
         run: |
           cargo +stable fmt --all -- --check
           find crates/sunrise-mod-api/src crates/sunrise-mod-vocab/src -name '*.rs' -print0 | xargs -0 rustup run stable rustfmt --edition 2024 --check --config skip_children=true
@@ -183,7 +178,6 @@ jobs:
           # The server build (released as sunrise-engine): the game without sound or controllers.
           cargo +stable clippy -p sunrise-client -p sunrise-game -p sunrise-mod-host --all-targets --locked --no-default-features -- -D warnings
       - name: Check generated mod API signatures
-        if: steps.rust.outputs.required != 'false'
         run: python3 tools/ci/check_api_boundary.py
   verify-test:
     name: verify (Rust tests)
@@ -193,7 +187,7 @@ jobs:
     if: >-
       !cancelled() && (github.event_name == 'schedule' || github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name != github.repository &&
-      needs.changes.outputs.rust_required != 'false')
+      (needs.changes.result != 'success' || needs.changes.outputs.rust_required != 'false'))
     runs-on: >-
       ${{ vars.SELF_HOSTED_CI != 'off' && vars.SELF_HOSTED_CI != 'light' && (vars.SELF_HOSTED_CI == 'all' ||
       github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository &&
@@ -205,13 +199,6 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - name: Does this pull request need Rust checks?
-        if: github.event_name == 'pull_request'
-        id: rust
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: python3 tools/ci/rust_changes.py "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
       # As in verify-tree: a default toolchain and no GPU, so a part doesn't depend on which pool took it.
       - name: Our runners as GitHub's (a default Rust toolchain, no GPU)
         if: runner.environment != 'github-hosted'
@@ -220,7 +207,6 @@ jobs:
           rustup default stable
           echo "WGPU_BACKEND=dx12" >> "$GITHUB_ENV"
       - name: Install Rust toolchain and the ALSA and udev headers the client links against
-        if: steps.rust.outputs.required != 'false'
         env:
           HOSTED: ${{ runner.environment == 'github-hosted' }}
         run: |
@@ -230,7 +216,7 @@ jobs:
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy
       # Dependencies and the workspace's own build, saved from main's runs (pull requests read main's cache).
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        if: steps.rust.outputs.required != 'false' && runner.environment == 'github-hosted'
+        if: runner.environment == 'github-hosted'
         with:
           shared-key: verify
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -239,22 +225,21 @@ jobs:
       # cargo test --locked, not nextest: nextest's process per test reloads each binary's shared tables for every test, and on
       # these 4-core runners it was no faster (#4978).
       - name: Build the runtime holder test actor
-        if: steps.rust.outputs.required != 'false'
         run: cargo +stable build -p sunrise-mod-package --features runtime-process --example holder_actor
       # A pull request tests the crates it changes, the crates that depend on them, and the crates whose tests read
       # its files (tools/ci/test_scope.py); a change outside every crate tests the whole workspace. dyna-checks
       # tests the whole workspace on main's pushes, so a missed crate shows on main.
       - name: Which crates must the Rust tests cover?
-        if: github.event_name == 'pull_request' && steps.rust.outputs.required != 'false'
+        if: github.event_name == 'pull_request' && needs.changes.result == 'success' && needs.changes.outputs.rust_required == 'true'
         id: scope
+        continue-on-error: true
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: python3 tools/ci/test_scope.py "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
       - name: Test Rust core and voxel kernel correctness
-        if: steps.rust.outputs.required != 'false'
         env:
-          PACKAGES: ${{ steps.scope.outputs.packages }}
+          PACKAGES: ${{ steps.scope.outcome == 'success' && steps.scope.outputs.packages || '' }}
         run: |
           cargo +stable test --locked ${PACKAGES:---workspace} --lib --bins --tests
           # The full content-root tests (#[ignore]d: minutes each on a laptop). The same build as above; they need the
@@ -289,7 +274,7 @@ jobs:
     if: >-
       !cancelled() && (github.event_name == 'schedule' || github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name != github.repository &&
-      needs.changes.outputs.launcher_required != 'false')
+      (needs.changes.result != 'success' || needs.changes.outputs.launcher_required != 'false'))
     runs-on: >-
       ${{ vars.SELF_HOSTED_CI != 'off' && vars.SELF_HOSTED_CI != 'light' && (vars.SELF_HOSTED_CI == 'all' ||
       github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository &&
@@ -301,15 +286,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - name: Does this pull request change the launcher or a crate it builds?
-        if: github.event_name == 'pull_request'
-        id: launcher
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: python3 tools/ci/rust_changes.py --launcher "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
       - name: Install Rust and the headers GPUI links against
-        if: steps.launcher.outputs.required != 'false'
         env:
           HOSTED: ${{ runner.environment == 'github-hosted' }}
         run: |
@@ -321,7 +298,6 @@ jobs:
       # No compiler cache: its 1.5 GB pushed the release caches (the SDK's and the launcher's) out of the
       # repository's 10 GB, and those come first.
       - name: Check the launcher's formatting, lint and tests
-        if: steps.launcher.outputs.required != 'false'
         working-directory: launcher
         run: |
           cargo +stable fmt --check

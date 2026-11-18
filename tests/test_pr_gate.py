@@ -89,16 +89,16 @@ class WorkflowTests(unittest.TestCase):
     def test_heavy_jobs_wait_for_the_gate_and_fail_closed(self):
         for name in ("lint", "verify"):
             with self.subTest(job=name):
-                self.assertIn("(needs.changes.result != 'success' || needs.changes.outputs.heavy == 'true')",
+                self.assertIn("(needs.changes.result != 'success' || needs.changes.outputs.heavy != 'false')",
                               self.job(name))
-        self.assertIn("needs.changes.outputs.heavy == 'true'", self.job("launcher"))
+        self.assertIn("needs.changes.outputs.heavy != 'false'", self.job("launcher"))
         for name in ("vanilla-parity",):
             self.assertIn("!inputs.pr", self.job(name), name)
 
     def test_cheap_jobs_run_without_the_heavy_gate(self):
         # verify-static runs outside the gate too: only where it runs depends on the gate.
         self.assertNotIn("outputs.heavy", self.job("verify-static").split("\n", 2)[1])
-        self.assertIn("needs.changes.outputs.heavy != 'true'", self.job("format"))
+        self.assertIn("needs.changes.outputs.heavy == 'false'", self.job("format"))
         self.assertNotRegex(self.job("format"), r"cargo (clippy|build|test|check)")
 
     def test_a_dispatched_head_is_checked_out_with_a_read_only_token_and_reported_apart(self):
@@ -171,16 +171,68 @@ class WorkflowTests(unittest.TestCase):
         # format and verify-static are all a pull request outside the gate gets: nothing gates on them, so they leave
         # Dyna's counted runners to the gates, and a paid pool's balance must not fail them.
         self.assertIn("runs-on: ubuntu-latest\n", self.job("format"))
-        self.assertIn("self_hosted: ${{ steps.gate.outputs.heavy == 'true' && ", self.job("changes"))
+        self.assertIn("self_hosted: ${{ (steps.gate.outcome != 'success' || steps.gate.outputs.heavy != 'false') && ",
+                      self.job("changes"))
         # Outside the gate, the first term decides (Actions' || and && short-circuit): no switch, paid pool or boat
         # label reached through the later terms can move verify-static, and boat's watcher never starts.
         static = self.job("verify-static")
-        self.assertIn("runs-on: ${{ needs.changes.outputs.heavy != 'true' && 'ubuntu-latest' || ", static)
-        self.assertIn("RUNNER_KIND: ${{ needs.changes.outputs.heavy != 'true' && 'github' || ", static)
-        self.assertIn("if: needs.changes.outputs.heavy == 'true' && ", self.job("boat-watch"))
+        self.assertIn("runs-on: ${{ needs.changes.outputs.heavy == 'false' && 'ubuntu-latest' || ", static)
+        self.assertIn("RUNNER_KIND: ${{ needs.changes.outputs.heavy == 'false' && 'github' || ", static)
+        self.assertIn("if: needs.changes.outputs.heavy != 'false' && ", self.job("boat-watch"))
         # A contributor's dispatched pull request is heavy but untrusted: GitHub's runner too.
         self.assertIn("needs.changes.outputs.trusted != 'true' && 'ubuntu-latest' ||", static)
         self.assertIn("|| needs.changes.outputs.trusted != 'true' && 'github' ||", static)
+
+    def test_unknown_heavy_outputs_run_the_full_gate(self):
+        from test_ci_pr_filters import evaluate, workflow
+
+        jobs = workflow("dyna-ci")["jobs"]
+        changes = jobs["changes"]
+        for outcome, raw_heavy, heavy in (("success", "false", False), ("success", "true", True),
+                                          ("success", "", True), ("success", "bad", True),
+                                          ("failure", "false", True)):
+            with self.subTest(raw_heavy=raw_heavy, outcome=outcome):
+                context = {"github.event_name": "pull_request", "steps.gate.outcome": outcome,
+                           "steps.gate.outputs.heavy": raw_heavy, "steps.selection-history.outcome": "success",
+                           "needs.changes.result": "success"}
+                context["needs.changes.outputs.heavy"] = evaluate(changes["outputs"]["heavy"], context)
+                for key in ("lint", "verify", "launcher"):
+                    self.assertEqual(evaluate(jobs[key]["if"], context), heavy, key)
+                self.assertTrue(evaluate(jobs["verify-static"]["if"], context))
+                self.assertEqual(evaluate(jobs["format"]["if"], context), not heavy)
+                for step in changes["steps"]:
+                    if step.get("id") in {"files", "selection-history", "selection"}:
+                        self.assertEqual(evaluate(step["if"], context), not heavy, step["id"])
+
+    def test_docs_only_unlabelled_sync_gets_integration_routing_and_full_gate(self):
+        from test_ci_pr_filters import evaluate, workflow
+
+        branch = "sync/upstream-f24ee1accf"
+        jobs = workflow("dyna-ci")["jobs"]
+        changes = jobs["changes"]
+        # These are the exact outputs ordinary selection would have produced for a non-input documentation edit.
+        docs_selection = dict.fromkeys(("rust_required", "launcher_required", "tooling_required"), "false")
+        for same_repository in (True, False):
+            with self.subTest(same_repository=same_repository):
+                raw = pr_gate.outputs("pull_request", same_repository, "", never_read, head_ref=branch)
+                self.assertEqual(raw["heavy"], "true" if same_repository else "false")
+                context = {"github.event_name": "pull_request", "github.head_ref": branch,
+                           "github.repository": "sunrise-org/sunrise", "vars.DYNA_CI_SELF_HOSTED": "true",
+                           "github.event.pull_request.head.repo.full_name": "sunrise-org/sunrise" if same_repository else "a/fork",
+                           "steps.gate.outcome": "success", "steps.gate.outputs.heavy": raw["heavy"],
+                           "steps.selection-history.outcome": "success", "needs.changes.result": "success"}
+                self.assertEqual(evaluate(changes["runs-on"], context), "dyna-small" if same_repository else "ubuntu-latest")
+                select = next(step for step in changes["steps"] if step.get("id") == "selection")
+                selected = evaluate(select["if"], context)
+                self.assertEqual(selected, not same_repository)
+                if selected:
+                    context.update({f"steps.selection.outputs.{key}": value for key, value in docs_selection.items()})
+                    context["steps.selection.outcome"] = "success"
+                for key in (*docs_selection, "heavy"):
+                    context[f"needs.changes.outputs.{key}"] = evaluate(changes["outputs"][key], context)
+                    self.assertEqual(context[f"needs.changes.outputs.{key}"], "true" if same_repository else "false", key)
+                for key in ("lint", "verify", "launcher"):
+                    self.assertEqual(evaluate(jobs[key]["if"], context), same_repository, key)
 
     def test_windows_jobs_run_daily_and_by_dispatch_only(self):
         import yaml

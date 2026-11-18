@@ -86,7 +86,7 @@ jobs:
       ${{ vars.DYNA_CI_SELF_HOSTED == 'true' && !inputs.github-fallback && (github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository && (
       startsWith(github.head_ref, 'sunrise-review-rollup-') || startsWith(github.head_ref, 'fork-review-rollup-') ||
-      startsWith(github.head_ref, 'rollup-') || startsWith(github.head_ref, 'sync-') ||
+      startsWith(github.head_ref, 'rollup-') || startsWith(github.head_ref, 'sync-') || startsWith(github.head_ref, 'sync/upstream-') ||
       contains(github.event.pull_request.labels.*.name, 'rollup') || contains(github.event.pull_request.labels.*.name, 'sync'))) &&
       'dyna-small' || 'ubuntu-latest' }}
     # Selection normally finishes in seconds; allow the file list and two bounded history fetches.
@@ -97,15 +97,15 @@ jobs:
       pull-requests: read
     outputs:
       # Whether the heavy jobs run (tools/ci/pr_gate.py); a dispatch with `pr` runs them on that head.
-      heavy: ${{ steps.gate.outputs.heavy }}
+      heavy: ${{ steps.gate.outcome == 'success' && steps.gate.outputs.heavy == 'false' && 'false' || 'true' }}
       pr_sha: ${{ steps.gate.outputs.pr_sha }}
       # Whether this run's code may use our own runners: never a fork's pull request, dispatched or not.
       trusted: ${{ steps.gate.outputs.trusted || ((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'true' || 'false') }}
-      rust_required: ${{ steps.selection.outputs.rust_required || 'true' }}
-      launcher_required: ${{ steps.selection.outputs.launcher_required || 'true' }}
-      tooling_required: ${{ steps.selection.outputs.tooling_required || 'true' }}
+      rust_required: ${{ steps.selection.outcome == 'success' && steps.selection.outputs.rust_required || 'true' }}
+      launcher_required: ${{ steps.selection.outcome == 'success' && steps.selection.outputs.launcher_required || 'true' }}
+      tooling_required: ${{ steps.selection.outcome == 'success' && steps.selection.outputs.tooling_required || 'true' }}
       # Only a gate (heavy) uses Dyna's runners; a pull request outside it runs where a pool-down run would.
-      self_hosted: ${{ steps.gate.outputs.heavy == 'true' && !inputs.github-fallback && steps.hosted.outputs.forced_github != 'true' && steps.runner.outputs.self_hosted || 'false' }}
+      self_hosted: ${{ (steps.gate.outcome != 'success' || steps.gate.outputs.heavy != 'false') && !inputs.github-fallback && steps.hosted.outputs.forced_github != 'true' && steps.runner.outputs.self_hosted || 'false' }}
       # Where lint and verify run when they don't go to Dyna's pool: boat-large for listed outside contributors
       # while vars.BOAT_CI is on (boat refuses a public repository's run unless both its author and the user who
       # started it are on boat's own list, so the same list lives in vars.BOAT_CI_USERS), else GitHub's runner.
@@ -118,6 +118,8 @@ jobs:
         run: bash tools/ci/ensure_gh.sh
       - name: Heavy checks for this event
         id: gate
+        # A PR can run the full gate with no classification. A dispatch must not lose its requested checkout ref.
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT: ${{ github.event_name }}
@@ -131,7 +133,7 @@ jobs:
       # The pull request's files from the API for this run's base and head, exactly as the history's diff lists them,
       # or listed=false whenever they might differ (tools/ci/pr_files.py); then the history is fetched as before.
       - name: List this pull request's files
-        if: github.event_name == 'pull_request' && steps.gate.outputs.heavy != 'true'
+        if: github.event_name == 'pull_request' && steps.gate.outcome == 'success' && steps.gate.outputs.heavy == 'false'
         id: files
         timeout-minutes: 2
         # A list that can't be read in time is only a fallback to the history, never a failure.
@@ -143,8 +145,10 @@ jobs:
           CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
         run: python3 tools/ci/pr_files.py "$RUNNER_TEMP/pr-files" >> "$GITHUB_OUTPUT"
       - name: Fetch this commit's history for selection
-        if: github.event_name == 'pull_request' && steps.gate.outputs.heavy != 'true' && steps.files.outputs.listed != 'true'
+        if: github.event_name == 'pull_request' && steps.gate.outcome == 'success' && steps.gate.outputs.heavy == 'false' && (steps.files.outcome != 'success' || steps.files.outputs.listed != 'true')
+        id: selection-history
         timeout-minutes: 11
+        continue-on-error: true
         env:
           FETCH_STEP: Fetch this commit's history for selection
           # Selection diffs the base against the head (their merge base and two trees), so it takes the commits
@@ -153,17 +157,23 @@ jobs:
           HISTORY_FILTER: tree:0
         run: bash tools/ci/history_fetch.sh
       - name: Select checks once for this pull request
-        if: github.event_name == 'pull_request' && steps.gate.outputs.heavy != 'true'
+        if: >-
+          github.event_name == 'pull_request' && steps.gate.outcome == 'success' && steps.gate.outputs.heavy == 'false' &&
+          (steps.files.outcome == 'success' && steps.files.outputs.listed == 'true' || steps.selection-history.outcome == 'success')
         id: selection
+        continue-on-error: true
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          FILES: ${{ steps.files.outputs.listed == 'true' && format('{0}/pr-files', runner.temp) || '' }}
+          FILES: ${{ steps.files.outcome == 'success' && steps.files.outputs.listed == 'true' && format('{0}/pr-files', runner.temp) || '' }}
         run: python3 tools/ci/rust_changes.py --all ${FILES:+--files "$FILES"} "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
       # workflow_run omits pull_requests for fork runs. Record only immutable IDs;
       # the trusted controller reads this as bounded data, never as executable code.
       - name: Record the original PR base for boat recovery
-        if: github.event_name == 'pull_request' && github.run_attempt == 1
+        if: >-
+          github.event_name == 'pull_request' && github.run_attempt == 1 &&
+          github.event.pull_request.base.sha != '' && github.event.pull_request.head.sha != ''
+        id: boat-base
         run: |
           python3 -I - <<'PY'
           import json, os
@@ -176,7 +186,7 @@ jobs:
           }))
           PY
       - uses: actions/upload-artifact@v4
-        if: github.event_name == 'pull_request' && github.run_attempt == 1
+        if: steps.boat-base.outcome == 'success'
         with:
           name: boat-base-1
           path: boat-base.json
@@ -193,7 +203,7 @@ jobs:
           SAME_REPO: ${{ steps.gate.outputs.trusted || (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
         run: bash tools/ci/dyna_ci_route.sh >> "$GITHUB_OUTPUT"
       - id: hosted
-        if: steps.selection.outputs.rust_required != 'false'
+        if: steps.selection.outcome != 'success' || steps.selection.outputs.rust_required != 'false'
         env:
           GH_TOKEN: ${{ github.token }}
           # Empty on a fork's pull request: boat_health.py then reads what boat-recovery published.
@@ -209,7 +219,7 @@ jobs:
   # Same-run fallback jobs would leave the original queued checks pending, not green.
   boat-watch:
     needs: changes
-    if: needs.changes.outputs.heavy == 'true' && needs.changes.outputs.hosted_label == 'boat-large' && needs.changes.outputs.self_hosted != 'true' && needs.changes.outputs.trusted == 'true'
+    if: needs.changes.outputs.heavy != 'false' && needs.changes.outputs.hosted_label == 'boat-large' && needs.changes.outputs.self_hosted != 'true' && needs.changes.outputs.trusted == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -279,7 +289,7 @@ jobs:
     # build folder persists, so clippy re-checks only what changed. A fork's pull request, or a run while the
     # pool is down, stays on GitHub's runners with the snapshot cache below.
     needs: changes
-    if: ${{ always() && !cancelled() && needs.changes.result != 'skipped' && (needs.changes.result != 'success' || needs.changes.outputs.heavy == 'true') && !inputs.parity }}
+    if: ${{ always() && !cancelled() && needs.changes.result != 'skipped' && (needs.changes.result != 'success' || needs.changes.outputs.heavy != 'false') && !inputs.parity }}
     runs-on: ${{ needs.changes.outputs.rust_required == 'false' && (needs.changes.outputs.self_hosted == 'true' && needs.changes.outputs.trusted == 'true' && 'dyna-small' || 'ubuntu-latest') || needs.changes.outputs.self_hosted == 'true' && needs.changes.outputs.trusted == 'true' && 'dyna-large' || needs.changes.outputs.hosted_label || 'ubuntu-latest' }}
     # Recent green lint peaked at 53.5 minutes on a cold runner (including the wasm check).
     # Cold GitHub/boat lint was not represented in that sample; retain its previous allowance.
@@ -450,7 +460,7 @@ jobs:
 
   verify:
     needs: changes
-    if: ${{ always() && !cancelled() && needs.changes.result != 'skipped' && (needs.changes.result != 'success' || needs.changes.outputs.heavy == 'true') && !inputs.parity }}
+    if: ${{ always() && !cancelled() && needs.changes.result != 'skipped' && (needs.changes.result != 'success' || needs.changes.outputs.heavy != 'false') && !inputs.parity }}
     runs-on: ${{ needs.changes.outputs.rust_required == 'false' && (needs.changes.outputs.self_hosted == 'true' && needs.changes.outputs.trusted == 'true' && 'dyna-small' || 'ubuntu-latest') || needs.changes.outputs.self_hosted == 'true' && 'dyna-large' || !inputs.github-fallback && needs.changes.outputs.forced_github != 'true' && vars.SELF_HOSTED_CI == 'all' && needs.changes.outputs.trusted == 'true' && fromJSON('["self-hosted", "linux", "playsunrise-ci"]') || needs.changes.outputs.hosted_label || 'ubuntu-latest' }}
     timeout-minutes: ${{ needs.changes.outputs.self_hosted == 'true' && 50 || 45 }}
     # Dyna's runner image now carries lavapipe, Mesa's software Vulkan driver, for ignored-tests' `gpu` tests.
@@ -700,7 +710,7 @@ jobs:
   # compiles. Formatting alone never blocks a merge (room rule); lint repeats it on the heavy runs.
   format:
     needs: changes
-    if: needs.changes.result == 'success' && needs.changes.outputs.heavy != 'true' && !inputs.parity
+    if: needs.changes.result == 'success' && needs.changes.outputs.heavy == 'false' && !inputs.parity
     # Only pull requests outside the gate run it, so it is never a gate job: GitHub's runner, leaving Dyna's to gates.
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -739,7 +749,7 @@ jobs:
     # A pull request outside the gate: GitHub's runner, never a paid pool or our own (it gates nothing).
     # On our pool, dyna-medium: the work is serial Python, git and small fixture compiles, which GitHub's 4-CPU runner
     # finishes in 8 to 11 minutes, so eight CPUs only took a large slot from the gate's compiling jobs.
-    runs-on: ${{ needs.changes.outputs.heavy != 'true' && 'ubuntu-latest' || needs.changes.outputs.rust_required == 'false' && (needs.changes.outputs.self_hosted == 'true' && needs.changes.outputs.trusted == 'true' && 'dyna-small' || 'ubuntu-latest') || needs.changes.outputs.trusted != 'true' && 'ubuntu-latest' || needs.changes.outputs.self_hosted == 'true' && 'dyna-medium' || !inputs.github-fallback && needs.changes.outputs.forced_github != 'true' && vars.SELF_HOSTED_CI == 'all' && needs.changes.outputs.trusted == 'true' && fromJSON('["self-hosted", "linux", "playsunrise-ci"]') || needs.changes.outputs.hosted_label || 'ubuntu-latest' }}
+    runs-on: ${{ needs.changes.outputs.heavy == 'false' && 'ubuntu-latest' || needs.changes.outputs.rust_required == 'false' && (needs.changes.outputs.self_hosted == 'true' && needs.changes.outputs.trusted == 'true' && 'dyna-small' || 'ubuntu-latest') || needs.changes.outputs.trusted != 'true' && 'ubuntu-latest' || needs.changes.outputs.self_hosted == 'true' && 'dyna-medium' || !inputs.github-fallback && needs.changes.outputs.forced_github != 'true' && vars.SELF_HOSTED_CI == 'all' && needs.changes.outputs.trusted == 'true' && fromJSON('["self-hosted", "linux", "playsunrise-ci"]') || needs.changes.outputs.hosted_label || 'ubuntu-latest' }}
     timeout-minutes: ${{ needs.changes.outputs.self_hosted == 'true' && needs.changes.outputs.trusted == 'true' && 20 || 45 }}
     # Dyna's runner image now carries lavapipe, Mesa's software Vulkan driver, for ignored-tests' `gpu` tests.
     # verify's tests were written to skip GPU work when no adapter exists, and one of them
@@ -751,7 +761,7 @@ jobs:
       # With Vulkan hidden, a runner with Mesa's GL software adapter (boat's image) would still run the GPU tests,
       # on GL, and fail (#2841); Vulkan only leaves every runner with no adapter, so GPU tests skip here everywhere.
       WGPU_BACKEND: vulkan
-      RUNNER_KIND: ${{ needs.changes.outputs.heavy != 'true' && 'github' || needs.changes.outputs.trusted != 'true' && 'github' || needs.changes.outputs.self_hosted == 'true' && 'dyna' || !inputs.github-fallback && needs.changes.outputs.forced_github != 'true' && vars.SELF_HOSTED_CI == 'all' && needs.changes.outputs.trusted == 'true' && 'other' || startsWith(needs.changes.outputs.hosted_label, 'boat') && 'boat' || 'github' }}
+      RUNNER_KIND: ${{ needs.changes.outputs.heavy == 'false' && 'github' || needs.changes.outputs.trusted != 'true' && 'github' || needs.changes.outputs.self_hosted == 'true' && 'dyna' || !inputs.github-fallback && needs.changes.outputs.forced_github != 'true' && vars.SELF_HOSTED_CI == 'all' && needs.changes.outputs.trusted == 'true' && 'other' || startsWith(needs.changes.outputs.hosted_label, 'boat') && 'boat' || 'github' }}
     steps:
       - name: Require successful check selection
         if: needs.changes.result != 'success'
@@ -932,7 +942,7 @@ jobs:
   # alone and break it together (#2059 and the registry ratings did, 2026-10-26).
   launcher:
     needs: changes
-    if: needs.changes.outputs.launcher_required != 'false' && needs.changes.outputs.heavy == 'true' && !inputs.parity
+    if: needs.changes.outputs.launcher_required != 'false' && needs.changes.outputs.heavy != 'false' && !inputs.parity
     runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna-medium' || !inputs.github-fallback && needs.changes.outputs.forced_github != 'true' && vars.SELF_HOSTED_CI == 'all' && needs.changes.outputs.trusted == 'true' && fromJSON('["self-hosted", "linux", "playsunrise-ci"]') || 'ubuntu-latest' }}
     timeout-minutes: 45
     steps:

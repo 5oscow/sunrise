@@ -28,7 +28,7 @@ def outputs(event: str, same_repository: bool, pr: str, read_pr, *, labels: tupl
     # ci.yml's full checks run only for a fork's pull request (and scheduled runs on main): this repository's other
     # pull requests get dyna-checks' cheap checks, and these integration pull requests the heavy gate.
     integration = bool({"rollup", "sync"}.intersection(labels)) or head_ref.startswith(
-        ("fork-review-rollup-", "sunrise-review-rollup-", "rollup-", "sync-"))
+        ("fork-review-rollup-", "sunrise-review-rollup-", "rollup-", "sync-", "sync/upstream-"))
     heavy = event != "pull_request" or (same_repository and integration)
     return {"heavy": "true" if heavy else "false", "pr_sha": "", "trusted": ""}
 

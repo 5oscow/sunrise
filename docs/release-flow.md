@@ -122,11 +122,9 @@ run there (parity has none). It is also a parity host (`playsunrise` in `tools/p
 
 ## Merging
 
-Pull requests go through the merge queue, which squashes each one into a single commit titled with the pull
-request's title and number (`kind(area): what changes (#123)`); never `gh pr merge --auto`. Branch protection on main
-requires `verify` for everyone, and a council member's review (team `council`) for the files `.github/CODEOWNERS` lists (what builds, signs
-and ships releases). Branches don't have to be up to date with main: main's own `dyna-checks` run catches the rare
-semantic conflict.
+Rollup pull requests run the full `dyna-checks` gate before merging. Rollups preserve each contributor's commits,
+so GitHub records their pull requests as merged. The workflows do not listen for GitHub's `merge_group` event;
+the rollup pull request is what starts the integration checks.
 
 **Who merges.** The Sunrise Team (GitHub team `sunrise-team`: kacpherek, levzzz5154, rdbtCVS, Online5277, dezer-x) and
 Ludovic. The orchestrator's agents prove only the risky pull requests (below), so a contributor's ordinary pull
@@ -275,7 +273,7 @@ A [snapshot](#snapshot) (`release.yml -f kind=snapshot`) needs only dyna-checks'
 ```mermaid
 flowchart LR
     pr(["pull request"]) --> checks{"verify<br/>parity"}
-    checks -- green --> merge["merge queue<br/>(squash)"]
+    checks -- green --> merge["rollup pull request<br/>(full gate before merge)"]
     merge --> main(["main"])
     main --> mainchecks{"checks and<br/>parity-main"}
     mainchecks -- green --> decide{"decide<br/>tools/release_train.py"}
