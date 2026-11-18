@@ -663,9 +663,10 @@ fn exhausted_ids_refuse_every_mod_spawn() {
             game.drop_at([1, 70, 1], ItemStack::new("minecraft:stone", 1));
             game.dropped.len() > before
         }),
-        ("level_spawn_mob", |game, f| {
+        ("level_spawn_entity", |game, f| {
             let reason = mod_api::SpawnReason::Command;
-            (game.level_spawn_mob(f.level, "minecraft:cow", [1.5, 70.0, 1.5], reason)).is_some()
+            let spawn = mod_api::EntitySpawn::new(mod_api::SpawnBody::Living { reason });
+            (game.level_spawn_entity(f.level, "minecraft:cow", [1.5, 70.0, 1.5], &spawn)).is_some()
         }),
         ("level_block_drops", |game, f| {
             game.level_block_drops(f.level, [1, 70, 1], None, None)

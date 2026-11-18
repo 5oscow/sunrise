@@ -1,4 +1,4 @@
-//! The `level_spawning` area: natural spawning limits and flags, and spawning a mob. Host method declarations; access defaults and game forwarders are generated.
+//! The `level_spawning` area: natural spawning limits and flags, and spawning an entity. Host method declarations; access defaults and game forwarders are generated.
 #![allow(unused_variables)]
 use crate::*;
 /// The handles' reads of the `level_spawning` area, implemented by the game and reached through [`Backend`].
@@ -33,27 +33,54 @@ pub trait LevelSpawningBackend {
 #[sunrise_mod_api_macros::host_area]
 pub trait LevelSpawningBackendMut {
     /// Side: server.
-    /// Spawns a mob of `kind` (`minecraft:zombie`) at `pos` in the level as
-    /// `EntityType.spawn` does with `reason`: the entity type creates it (its
-    /// Parts and attachments with it, and `entity_constructing`), with a random
-    /// yaw from the level random, then `finalize_spawn` and `finalizeSpawn`
-    /// with that reason (equipment, variants, jockeys), and it joins the level
-    /// (`entity_join_level`), not persistent, as a natural spawn joins. The
-    /// level's spawn limits, flags and spawn rules don't apply, as they don't
-    /// to `/summon`. The new mob as a handle. None, with nothing spawned, for a
-    /// kind that isn't a mob, a position that isn't finite or is outside the
-    /// spawnable bounds (`Level.isInSpawnableBounds`), an unloaded chunk, a
-    /// stale handle, a level not in place, a client, a `finalize_spawn` that
-    /// cancelled the spawn or a mob a mod kept out.
-    /// Inside a transaction its join waits for the root commit, so a mod keeping the mob out is not
-    /// known at the call: the handle is returned and reads stale from the commit on.
+    /// Spawns an entity of `kind` at `pos` in the level, as `spawn` describes
+    /// ([`EntitySpawn`]): a thrown item projectile (`minecraft:snowball` or a
+    /// content thrown type), a mob (`minecraft:zombie` or a content living
+    /// type) or a code-declared general type, whichever `spawn.body` says.
+    /// Each goes the way the game's own spawns of that family go:
+    ///
+    /// - [`SpawnBody::Thrown`]: `Projectile.spawnProjectile`, the route a
+    ///   thrown snowball takes. The owner is set before it joins, as
+    ///   `Projectile.setOwner` (hit credit, `Owner`, and the shot keeps clear
+    ///   of its owner until it leaves the owner's box); `projectile_launch`
+    ///   fires. It carries `item` (`ThrowableItemProjectile.setItem`), checked
+    ///   as `ServerHost::spawn_projectile_from_rotation` checks its stack.
+    /// - [`SpawnBody::Living`]: `EntityType.spawn` with `reason`, the route
+    ///   `/summon` takes: the entity type creates it (its Parts and
+    ///   attachments with it, and `entity_constructing`), with a random yaw
+    ///   from the level random unless `spawn.rotation` names one, then
+    ///   `finalize_spawn` and `finalizeSpawn` with that reason (equipment,
+    ///   variants, jockeys), and it joins the level (`entity_join_level`), not
+    ///   persistent. A mob takes no owner.
+    /// - [`SpawnBody::General`]: a new row of the general type, with a fresh
+    ///   UUID and the type's declared payload version, through the insertion
+    ///   `/summon` and chunk loading share. The owner is kept on the row and
+    ///   saved (`Owner`); [`EntityRef::owner`] reads it back, for the type's
+    ///   own tick to skip its shooter and credit its damage. The row's state is
+    ///   its attachments: write them on the returned handle in the same
+    ///   transaction, and the join and the first tracking snapshot see them.
+    ///
+    /// Velocity is set before the entity joins (`Entity.setDeltaMovement`).
+    /// The level's spawn limits, flags and spawn rules don't apply, as they
+    /// don't to `/summon`; nor does a general type's `summonable`, which is
+    /// `/summon`'s alone (`EntityType.canSummon`). The new entity as a handle.
+    /// None, with nothing spawned and no random drawn, for a kind that isn't
+    /// of `spawn.body`'s family, a position, velocity or rotation that isn't
+    /// finite, a position outside the spawnable bounds
+    /// (`Level.isInSpawnableBounds`), an unloaded chunk, an owner that is
+    /// stale, in another level or given for a mob, an invalid thrown item, a
+    /// stale handle, a level not in place, a client, or exhausted entity ids;
+    /// and, with nothing left in the level, a `finalize_spawn` that cancelled
+    /// the spawn or an entity a mod kept out. Inside a transaction its join
+    /// waits for the root commit, so a mod keeping the entity out is not known
+    /// at the call: the handle is returned and reads stale from the commit on.
     #[access(WorldOnly)]
-    fn level_spawn_mob(
+    fn level_spawn_entity(
         &mut self,
         level: LevelRef,
         kind: &str,
         pos: [f64; 3],
-        reason: SpawnReason,
+        spawn: &EntitySpawn,
     ) -> Option<EntityRef>;
     /// Side: server.
     /// Sets the level's natural spawning limits ([`SpawnLimits`]), from the next

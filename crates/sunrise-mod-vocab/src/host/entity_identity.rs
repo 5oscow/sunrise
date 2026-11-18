@@ -41,6 +41,15 @@ pub trait EntityIdentityBackend {
     /// client's level. API 373.
     #[access(WorldOnly)]
     fn entity_level(&self, entity: EntityRef) -> Option<LevelRef>;
+    /// Side: server.
+    /// The entity that fired it (`TraceableEntity.getOwner`), as a resolved
+    /// entity: a projectile's owner (`Projectile.getOwner`; a trident a player
+    /// threw belongs to that player) or a general row's, as
+    /// [`LevelRef::spawn_entity`] set it. None for an entity with no owner or
+    /// of a kind that has none, an owner that is gone or in another level, a
+    /// client, or a stale handle.
+    #[access(WorldOnly)]
+    fn entity_owner(&self, entity: EntityRef) -> Option<EntityRef>;
     /// Side: both.
     /// Whether the entity is made of parts that are entities of their own
     /// (`Entity.isMultipartEntity`): the ender dragon. Its parts are not the

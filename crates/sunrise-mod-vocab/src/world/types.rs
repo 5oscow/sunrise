@@ -845,6 +845,62 @@ pub enum SpawnReason {
     DimensionTravel,
 }
 
+/// What [`LevelRef::spawn_entity`] spawns besides its kind and position: the
+/// velocity, rotation and owner it starts with, and the body its family takes.
+/// Built with [`EntitySpawn::new`], then its fields set.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+#[derive(sunrise_mod_api_macros::Wire)]
+pub struct EntitySpawn {
+    /// The velocity it starts with, in blocks per tick (`Entity.setDeltaMovement`).
+    pub velocity: [f64; 3],
+    /// Its yaw and pitch in degrees. None: a thrown projectile faces along its
+    /// velocity (`Projectile.shoot`), a mob takes `EntityType.spawn`'s yaw, and
+    /// a general row faces south, level.
+    pub rotation: Option<[f32; 2]>,
+    /// The entity that fired it (`Projectile.setOwner`, `TraceableEntity`): for
+    /// damage credit, and so its shooter is not hit by its own shot. None for
+    /// a mob.
+    pub owner: Option<EntityRef>,
+    /// The family's own part of the spawn, which must match the kind's family.
+    pub body: SpawnBody,
+}
+
+impl EntitySpawn {
+    /// A spawn of `body` at rest, unturned and with no owner.
+    pub fn new(body: SpawnBody) -> Self {
+        Self {
+            velocity: [0.0; 3],
+            rotation: None,
+            owner: None,
+            body,
+        }
+    }
+}
+
+/// The family of entity [`LevelRef::spawn_entity`] spawns, with what that
+/// family's spawn takes.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+#[derive(sunrise_mod_api_macros::Wire)]
+pub enum SpawnBody {
+    /// A thrown item projectile (vanilla's snowball, egg, ender pearl,
+    /// experience bottle, wind charge, splash or lingering potion, or a content
+    /// thrown type), carrying and drawn as `item` (`ThrowableItemProjectile.setItem`).
+    Thrown {
+        /// The item it carries; one of it is kept.
+        item: ItemStack,
+    },
+    /// A mob (vanilla's or a content living type), finalized with `reason`
+    /// (`Mob.finalizeSpawn`).
+    Living {
+        /// Why it spawns, as `finalize_spawn` and `finalizeSpawn` read it.
+        reason: SpawnReason,
+    },
+    /// A row of a code-declared general type (`declare_general_entity`).
+    General,
+}
+
 /// The local difficulty at a spawn (`DifficultyInstance`): what `finalize_spawn` reads and
 /// may change before the mob is finalized.
 #[derive(Clone, Copy, Debug, PartialEq)]

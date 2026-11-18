@@ -847,7 +847,7 @@ fn level_world_controls_take_a_server_host(server: &mut dyn ServerHost, level: L
     let _ = server.set_tick_rate(40.0);
 }
 
-/// Compile-only: mob spawning and the spawn policy as a mod calls them, the reads on any host
+/// Compile-only: entity spawning and the spawn policy as a mod calls them, the reads on any host
 /// and the writes, which change what the level spawns, on a server host.
 #[allow(dead_code)]
 fn spawn_policy_writes_take_a_server_host(
@@ -860,12 +860,16 @@ fn spawn_policy_writes_take_a_server_host(
     let _: Option<bool> = level.can_spawn_entities_in_chunk(read, [0, 0]);
     let _: bool = level.set_spawn_limits(server, SpawnLimits::VANILLA);
     let _: bool = level.set_spawn_flags(server, SpawnFlags::default());
-    let _: Option<EntityRef> = level.spawn_mob(
-        server,
-        "minecraft:zombie",
-        [0.5, 64.0, 0.5],
-        SpawnReason::Command,
-    );
+    let mut spawn = EntitySpawn::new(SpawnBody::Living {
+        reason: SpawnReason::Command,
+    });
+    spawn.velocity = [0.0, 0.5, 0.0];
+    let _: Option<EntityRef> =
+        level.spawn_entity(server, "minecraft:zombie", [0.5, 64.0, 0.5], &spawn);
+    let mut missile = EntitySpawn::new(SpawnBody::General);
+    missile.owner = None;
+    let shot = level.spawn_entity(server, "mymod:missile", [0.5, 65.0, 0.5], &missile);
+    let _: Option<EntityRef> = shot.and_then(|shot| shot.owner(read));
 }
 
 /// Compile-only: a passage is registered and removed through its level on a server host.

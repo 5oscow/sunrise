@@ -72,10 +72,19 @@ impl Game<'_> {
         self.entity(id)
     }
 
-    /// `Projectile.getOwner`: the owner as a resolved entity. None for no
-    /// owner, one that is gone or in another level, or a stale handle.
-    pub(super) fn projectile_owner(&self, projectile: ProjectileRef) -> Option<EntityRef> {
-        let target = match self.native_projectile_backing(projectile)? {
+    /// `TraceableEntity.getOwner`: a projectile's owner (`Projectile.getOwner`)
+    /// or a general row's, as a resolved entity. None for no owner or a kind
+    /// with none, one that is gone or in another level, or a stale handle.
+    pub(super) fn entity_owner(&self, entity: EntityRef) -> Option<EntityRef> {
+        let Some(backing) = self.native_projectile_backing(ProjectileRef::new(entity)) else {
+            let Target::General(id) = self.native_entity_target(entity)? else {
+                return None;
+            };
+            let rows = &self.resident_entities.general.rows;
+            let owner = rows.iter().find(|row| row.id == id)?.owner?;
+            return self.native_owner_entity(self.target_by_uuid(ints_uuid(owner))?);
+        };
+        let target = match backing {
             Backing::List(i) => {
                 let uuid = self.creatures.projectiles[i].owner_uuid?;
                 self.target_by_uuid(ints_uuid(uuid))?
@@ -423,7 +432,7 @@ mod tests {
             let entity = game.entity(id).unwrap();
             let projectile = game.projectile(entity).unwrap();
             assert!(game.projectile_set_owner(projectile, Some(boat)));
-            assert_eq!(game.projectile_owner(projectile), Some(boat));
+            assert_eq!(game.entity_owner(projectile.entity()), Some(boat));
             let scene = Air(game.vehicle_targets());
             let mut p = game.creatures.projectiles[0].clone();
             assert!(!p.left_owner);
@@ -520,12 +529,12 @@ mod tests {
             let handle = game.projectile(entity).unwrap();
             assert_eq!(handle.entity(), entity);
 
-            assert_eq!(handle.owner(game), Some(mob));
+            assert_eq!(handle.entity().owner(game), Some(mob));
             assert!(handle.set_owner(game, None));
-            assert_eq!(handle.owner(game), None);
+            assert_eq!(handle.entity().owner(game), None);
             assert_eq!(game.creatures.projectiles[0].owner, None);
             assert!(handle.set_owner(game, Some(mob)));
-            assert_eq!(handle.owner(game), Some(mob));
+            assert_eq!(handle.entity().owner(game), Some(mob));
             assert_eq!(game.creatures.projectiles[0].owner, Some(Who::Mob(99)));
             // A non-living owner has collision identity but no living hit credit.
             let boat_id = game.take_entity_id();
@@ -537,7 +546,7 @@ mod tests {
             ));
             let boat = game.entity(boat_id).unwrap();
             assert!(handle.set_owner(game, Some(boat)));
-            assert_eq!(handle.owner(game), Some(boat));
+            assert_eq!(handle.entity().owner(game), Some(boat));
             assert_eq!(game.creatures.projectiles[0].owner, None);
             assert_eq!(game.creatures.projectiles[0].owner_vehicle, Some(boat_id));
             let saved = game.uuid_for(boat_id);
@@ -646,7 +655,7 @@ mod tests {
                 stale.set_pierce_level(game, 1),
                 Err(PierceLevelError::Stale)
             );
-            assert_eq!(stale.owner(game), None);
+            assert_eq!(stale.entity().owner(game), None);
             assert!(!stale.set_pickup(game, ArrowPickup::Allowed));
             assert!(!stale.deflect(game, Deflection::Reverse, None, None, false, [1.0; 3]));
             let taken = game.creatures.projectiles.lift();
@@ -732,9 +741,9 @@ mod tests {
             assert_eq!(game.tridents[0].velocity, velocity);
 
             // A rocket: owner, then REVERSE, then an owner of none.
-            assert_eq!(rocket.owner(game), None);
+            assert_eq!(rocket.entity().owner(game), None);
             assert!(rocket.set_owner(game, Some(mob)));
-            assert_eq!(rocket.owner(game), Some(mob));
+            assert_eq!(rocket.entity().owner(game), Some(mob));
             assert_eq!(game.rockets[0].owner, Some(Who::Mob(99)));
             let _ = rocket_random.next_float();
             assert!(rocket.deflect(game, Deflection::Reverse, None, None, false, [0.5; 3]));
@@ -743,7 +752,7 @@ mod tests {
                 game.rockets[0].random.clone().next_float(),
                 rocket_random.next_float()
             );
-            assert_eq!(rocket.owner(game), None);
+            assert_eq!(rocket.entity().owner(game), None);
 
             // A rocket keeps an owner that is neither player nor mob, across a
             // save too, but a player's trident still refuses one.
@@ -757,7 +766,7 @@ mod tests {
             let boat = game.entity(boat_id).unwrap();
             assert!(!trident.set_owner(game, Some(boat)));
             assert!(rocket.set_owner(game, Some(boat)));
-            assert_eq!(rocket.owner(game), Some(boat));
+            assert_eq!(rocket.entity().owner(game), Some(boat));
             assert_eq!(game.rockets[0].owner, None);
             let saved = game.uuid_for(boat_id);
             let tag = game.rockets[0].to_nbt([9; 4], None, None, game.res.items());

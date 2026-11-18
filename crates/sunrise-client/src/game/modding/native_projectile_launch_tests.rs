@@ -40,7 +40,7 @@ fn owner_launch_sets_owner_before_insertion_and_uses_projectile_random() {
         let shot = game
             .spawn_projectile_from_rotation(owner, &entity_type, &stack, 0.0, 1.5, 1.0)
             .unwrap();
-        assert_eq!(game.projectile_owner(shot), Some(source));
+        assert_eq!(game.entity_owner(shot.entity()), Some(source));
         let projectile = game
             .creatures
             .projectiles
@@ -136,7 +136,7 @@ fn owner_launch_reports_explicit_guest_to_launch_listeners() {
             event: &mut ProjectileLaunchEvent<'_>,
         ) {
             let projectile = host.projectile(host.entity(event.entity).unwrap()).unwrap();
-            let owner = projectile.owner(host).unwrap();
+            let owner = projectile.entity().owner(host).unwrap();
             let uuid = owner.uuid(host);
             self.0
                 .lock()
@@ -159,7 +159,7 @@ fn owner_launch_reports_explicit_guest_to_launch_listeners() {
             let shot = game
                 .spawn_projectile_from_rotation(owner, &kind, &stack, 0.0, 1.5, 1.0)
                 .unwrap();
-            assert_eq!(game.projectile_owner(shot), Some(source));
+            assert_eq!(game.entity_owner(shot.entity()), Some(source));
             assert_eq!(game.lan_acting, previous_actor);
             assert_eq!(
                 *observed.lock().unwrap(),

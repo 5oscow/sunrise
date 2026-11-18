@@ -588,6 +588,26 @@ impl Game<'_> {
         // entity_join_level).
         self.spawn_mob(kind, at, false, site)
     }
+    /// [`spawn_mob_spawned`](Self::spawn_mob_spawned) for a mob that starts
+    /// moving or turned: `velocity` (`Entity.setDeltaMovement`) and, when
+    /// given, `[yaw, pitch]` in place of the level random's yaw, set before
+    /// it joins. Not the ender dragon, which has a creation of its own.
+    pub(in crate::game) fn spawn_mob_spawned_moving(
+        &mut self,
+        kind: &str,
+        at: [f64; 3],
+        site: SpawnSite,
+        velocity: Vec3,
+        rotation: Option<[f32; 2]>,
+    ) -> Option<u32> {
+        // Not persistent, as `spawn_mob_spawned`'s mob.
+        let mut mob = self.create_mob_reason(kind, at, false, site, rotation.map(|r| r[0]))?;
+        mob.velocity = velocity;
+        if let Some([_, pitch]) = rotation {
+            (mob.head_pitch, mob.previous_head_pitch) = (pitch, pitch);
+        }
+        self.insert_spawned_mob(mob)
+    }
     fn create_mob_reason(
         &mut self,
         kind: &str,

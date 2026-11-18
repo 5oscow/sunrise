@@ -771,7 +771,8 @@ chunk, `/summon <id>:<name>` makes one, and it has its template's row in `entity
 it. A world opened without the
 mod keeps the saved ones as they are, frozen in place. A dispenser does not throw it.
 
-A code mod can launch a thrown type with
+A code mod can spawn a thrown type at a position with a velocity of its own through
+`LevelRef::spawn_entity` with `SpawnBody::Thrown` ([spawning from a level](world/spawning.md#spawning-from-a-level)), or launch one with
 `host.spawn_projectile_from_rotation(owner, &entity_type, &stack, offset, power, inaccuracy)`.
 This is the owner-based `Projectile.spawnProjectileFromRotation` operation, not a summon:
 ownership is set before shooting and the existing launch hook runs after insertion.

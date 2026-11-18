@@ -247,6 +247,7 @@ fn record_at(type_key: &str, uuid: [i32; 4], at: [f64; 3], riders: Vec<Tag>) -> 
         position: at,
         velocity: [0.0; 3],
         rotation: [0.0, 90.0],
+        owner: None,
         uuid,
         envelope: GeneralTypeEnvelope {
             type_key: type_key.to_owned(),
@@ -931,6 +932,90 @@ fn summon_answers_a_target_with_a_network_id() {
             game.target_position(crate::game::commands::Target::General(id)),
             Some([0.5, 64.0, 0.5])
         );
+    });
+}
+
+/// `LevelRef::spawn_entity` of a general type: one row, through the insertion
+/// `/summon` reaches, with a fresh UUID, the spawn's velocity and rotation, the
+/// type's declared payload version and its owner, which reads back and saves as
+/// `Owner`. No projectile is made. A body of another family, and a general
+/// body for a type that isn't general, refuse with nothing spawned.
+#[test]
+#[ignore = "daily"]
+fn spawn_entity_inserts_a_general_row_with_its_owner() {
+    use mod_api::{EntitySpawn, SpawnBody};
+    with_counter(|game, _| {
+        game.world.chunks.insert(
+            (0, 0),
+            std::sync::Arc::new(sunrise_client::chunk::Chunk::empty(0, 0)),
+        );
+        let level = game.level(game.dim.id()).unwrap();
+        let reason = mod_api::SpawnReason::Command;
+        let living = EntitySpawn::new(SpawnBody::Living { reason });
+        let turret = game
+            .level_spawn_entity(level, "minecraft:cow", [2.5, 64.0, 2.5], &living)
+            .unwrap();
+        let mut spawn = EntitySpawn::new(SpawnBody::General);
+        spawn.velocity = [0.5, 0.125, -0.25];
+        spawn.rotation = Some([90.0, -15.0]);
+        spawn.owner = Some(turret);
+        let projectiles = game.creatures.projectiles.len();
+        let missile = game
+            .level_spawn_entity(level, "mymod:robot", [2.5, 65.5, 2.5], &spawn)
+            .unwrap();
+        assert_eq!(game.creatures.projectiles.len(), projectiles);
+        let owner_uuid =
+            sunrise_client::lan::playerdata::uuid_ints(game.entity_uuid(turret).unwrap());
+        let rows = &game.resident_entities.general.rows;
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+        assert_eq!(row.id, missile.id());
+        assert_eq!(row.position, Vec3::new(2.5, 65.5, 2.5));
+        assert_eq!(row.velocity, Vec3::new(0.5, 0.125, -0.25));
+        assert_eq!(row.rotation, [90.0, -15.0]);
+        assert_eq!(row.payload_version, 1);
+        assert!(row.payload_bytes.is_empty());
+        assert_eq!(row.owner, Some(owner_uuid));
+        assert_eq!(game.entity_owner(missile), Some(turret));
+        // The save keeps the owner, and a load reads it back.
+        let record = game
+            .general_row_record(missile.id(), &mut std::collections::HashSet::new())
+            .unwrap();
+        let tag = record.to_tag();
+        assert_eq!(tag.get("Owner"), Some(&Tag::IntArray(owner_uuid.to_vec())));
+        assert_eq!(record_from_compound(&tag).unwrap().owner, Some(owner_uuid));
+        // A row with no owner answers none, and saves no `Owner`.
+        let alone = game
+            .level_spawn_entity(
+                level,
+                "mymod:robot",
+                [3.5, 65.5, 2.5],
+                &EntitySpawn::new(SpawnBody::General),
+            )
+            .unwrap();
+        assert_eq!(game.entity_owner(alone), None);
+        let record = game
+            .general_row_record(alone.id(), &mut std::collections::HashSet::new())
+            .unwrap();
+        assert_eq!(record.to_tag().get("Owner"), None);
+        // Bodies of another family, and a general body for a mob, refuse.
+        let rows = game.resident_entities.general.rows.len();
+        let mobs = game.mobs.len();
+        let general = EntitySpawn::new(SpawnBody::General);
+        assert_eq!(
+            game.level_spawn_entity(level, "minecraft:cow", [4.5, 64.0, 2.5], &general),
+            None
+        );
+        assert_eq!(
+            game.level_spawn_entity(level, "mymod:robot", [4.5, 64.0, 2.5], &living),
+            None
+        );
+        assert_eq!(
+            game.level_spawn_entity(level, "mymod:missing", [4.5, 64.0, 2.5], &general),
+            None
+        );
+        assert_eq!(game.resident_entities.general.rows.len(), rows);
+        assert_eq!(game.mobs.len(), mobs);
     });
 }
 
