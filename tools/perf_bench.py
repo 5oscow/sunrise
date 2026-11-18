@@ -620,38 +620,43 @@ def game_folder_extras(args, game_dir):
             out.write(lines)
     if args.shader_pack:
         pack = Path(args.shader_pack).resolve()
-        (shutil.copytree if pack.is_dir() else shutil.copy2)(pack, (game_dir / "shaderpacks").joinpath(pack.name))
+        (game_dir / "shaderpacks").mkdir(exist_ok=True)
+        (shutil.copytree if pack.is_dir() else shutil.copy2)(pack, game_dir / "shaderpacks" / pack.name)
         env["SUNRISE_SHADER_PACK"] = pack.name
     return lines, env
 
 
-TICK_PERCENTILES = re.compile(r"P50: ([\d.]+) ?ms P95: ([\d.]+) ?ms P99: ([\d.]+) ?ms")
+TICK_PERCENTILES = re.compile(r"P50: ([\d.]+) ?ms P95: ([\d.]+) ?ms P99: ([\d.]+) ?ms\. Sample: (\d+)")
+# `/tick query` keeps vanilla's last 100 tick times (MinecraftServer.tickTimesNanos), shown in 0.1 ms steps.
+TICK_WINDOW, TICK_STEP_MS = 100, 0.1
 
 
 def parse_tick_query(lines):
-    """`/tick query`'s percentiles line as {p50_ms, p95_ms, p99_ms}; None without one."""
+    """`/tick query`'s percentiles line as {p50_ms, p95_ms, p99_ms, samples}; None without one."""
     for line in lines:
         if m := TICK_PERCENTILES.search(line):
-            return dict(zip(("p50_ms", "p95_ms", "p99_ms"), map(float, m.groups())))
+            return dict(zip(("p50_ms", "p95_ms", "p99_ms"), map(float, m.groups()[:3])), samples=int(m[4]))
     return None
 
 
-def server_ticks(control):
-    """The server thread's tick times over its last 100 ticks, in vanilla's 0.1 ms steps (`/tick query`)."""
+def server_ticks(control, ticked):
+    """The server's tick times over the flight, or None unless `/tick query`'s full window lies inside its `ticked` ticks."""
     try:
-        return parse_tick_query(control("command tick query").get("chat") or [])
+        query = parse_tick_query(control("command tick query").get("chat") or [])
     except (OSError, ValueError, RuntimeError):
         return None
+    return query if query and query["samples"] >= TICK_WINDOW and ticked >= TICK_WINDOW else None
 
 
 def menu_hold(control, seconds):
     """The menu-hold scene: Options open while Tab steps the keyboard focus; the frames' summary, as `fly` gives."""
     control("options")
     control("stats reset")
-    end = time.time() + seconds
-    while time.time() < end:
+    start = time.monotonic()
+    for step in range(int(seconds / MENU_STEP_S)):
+        time.sleep(max(0.0, start + step * MENU_STEP_S - time.monotonic()))
         control("key tab tap")
-        time.sleep(MENU_STEP_S)
+    time.sleep(max(0.0, start + seconds - time.monotonic()))
     summary = control("stats raw")
     for _ in range(5):
         if control("status").get("screen") == "playing":
@@ -753,7 +758,7 @@ def run_sunrise(args, distance):
             scene["entities"] = {"mobs": status.get("mobs"), "block_entities": status.get("block_entities")}
             # The integrated server's ticks while flying; a joined server's aren't ours to read.
             if not args.server and name != MENU_HOLD[0]:
-                scene["server_tick"] = server_ticks(control)
+                scene["server_tick"] = server_ticks(control, ticks)
             if name in stress_scenes.NAMES:
                 for line in stress_scenes.cleanup(name):
                     control("command " + line)
@@ -1174,7 +1179,11 @@ def report(args, distance, runs, app):
 # Gated by --budget: frame time and the server thread's tick time. Reported: where a cost sits.
 GATED = ("p50_ms", "p99_ms", "server_tick_p50_ms", "server_tick_p99_ms")
 REPORTED = ("cpu_p50_ms", "gpu_p50_ms")
-# Game i runs build ARMS[i % 4]: pair k is games 2k and 2k+1, adjacent in time, so linear drift cancels.
+# Options may pause the integrated server, so menu_hold gates frame time only.
+GATED_BY_SCENE = {MENU_HOLD[0]: ("p50_ms", "p99_ms")}
+# How far a figure can be off from its true value before pairing: /tick query's display step.
+RESOLUTION_MS = {"server_tick_p50_ms": TICK_STEP_MS, "server_tick_p99_ms": TICK_STEP_MS}
+# Game i runs build ARMS[i % 4]: B A A B counterbalances the order within each block of four games.
 ARMS = "BAAB"
 
 
@@ -1205,8 +1214,8 @@ def wilcoxon_interval(n, walsh):
     return ([walsh[k - 1], walsh[m - k]], 1 - 2 * best) if k >= 1 else None
 
 
-def paired(pairs):
-    """sunrise_bench::compare::paired over (a, b) per pair: Hodges-Lehmann diff of b - a, its interval, the verdict."""
+def paired_raw(pairs):
+    """sunrise_bench::compare::paired over (a, b) per pair, unrounded: (a, b, diff, interval or None, verdict)."""
     n = len(pairs)
     a, b = median([x for x, _ in pairs]), median([y for _, y in pairs])
     d = [y - x for x, y in pairs]
@@ -1221,40 +1230,58 @@ def paired(pairs):
         verdict = "negligible"
     else:
         verdict = "slower" if iv[0][0] > 0 else "faster"
-    return {"pairs": n, "a": rnd(a) + 0.0, "b": rnd(b) + 0.0, "diff": rnd(diff) + 0.0,
+    return a, b, diff, iv, verdict
+
+
+def paired(pairs):
+    """paired_raw rounded as sunrise_bench reports it."""
+    a, b, diff, iv, verdict = paired_raw(pairs)
+    return {"pairs": len(pairs), "a": rnd(a) + 0.0, "b": rnd(b) + 0.0, "diff": rnd(diff) + 0.0,
             "diff_pct": rnd(100 * diff / a) + 0.0 if a else None,
             "ci95": [rnd(iv[0][0]) + 0.0, rnd(iv[0][1]) + 0.0] if iv else None,
             "confidence": round4(iv[1]) if iv else None, "verdict": verdict}
 
 
+def percentile(values, p):
+    """frames()' nearest-rank percentile, unrounded; None for no values."""
+    v = sorted(t for t in values if math.isfinite(t))
+    return v[min(len(v), max(1, math.ceil(len(v) * p))) - 1] if v else None
+
+
 def game_figures(result):
-    """{scene: {figure: value}} of one game, from run_sunrise's result."""
+    """{scene: {figure: unrounded value}} of one game, from run_sunrise's result; a figure it lacks is left out."""
     out = {}
     for name, scene in result["scenes"].items():
-        f = frames(name, 0, scene["frame_ms"], scene.get("cpu_ms", ()), scene.get("gpu_ms", ())) or {}
-        figures = {k: f[k] for k in ("p50_ms", "p99_ms") + REPORTED if k in f}
+        figures = {"p50_ms": percentile(scene["frame_ms"], 0.5), "p99_ms": percentile(scene["frame_ms"], 0.99),
+                   "cpu_p50_ms": percentile(scene.get("cpu_ms") or (), 0.5),
+                   "gpu_p50_ms": percentile(scene.get("gpu_ms") or (), 0.5)}
         tick = scene.get("server_tick") or {}
-        figures.update({f"server_tick_{k}": tick[k] for k in ("p50_ms", "p99_ms") if k in tick})
-        out[name] = figures
+        figures.update({f"server_tick_{k}": tick.get(k) for k in ("p50_ms", "p99_ms")})
+        out[name] = {k: v for k, v in figures.items() if v is not None}
     return out
 
 
-def judge(games, budget_pct):
-    """Each scene's figures over games in ARMS order; a gated one passes when its ci95 reaches at most budget_pct of BEFORE's."""
+def judge(games, budget_pct, scenes):
+    """Gate each scene's figures: the unrounded ci95 plus resolution within budget_pct of BEFORE, a missing one failing."""
     pairs = len(games) // 2
-    scenes = [s for s in games[0] if all(s in g for g in games)] if games else []
     rows = []
     for scene in scenes:
+        gated = GATED_BY_SCENE.get(scene, GATED)
         for figure in GATED + REPORTED:
-            values = [g[scene].get(figure) for g in games[:2 * pairs]]
+            values = [g.get(scene, {}).get(figure) for g in games[:2 * pairs]]
             if not values or any(v is None for v in values):
+                if figure in gated:
+                    rows.append({"scene": scene, "figure": figure, "gated": True, "passed": False, "pairs": pairs,
+                                 "a": None, "b": None, "diff": None, "diff_pct": None, "ci95": None,
+                                 "confidence": None, "verdict": "missing"})
                 continue
             by_arm = [(values[i], values[i + 1]) if ARMS[i % 4] == "A" else (values[i + 1], values[i])
                       for i in range(0, 2 * pairs, 2)]
-            stat = paired(by_arm)
-            gated = figure in GATED
-            passed = stat["ci95"] is not None and stat["ci95"][1] <= budget_pct / 100 * stat["a"]
-            rows.append({"scene": scene, "figure": figure, "gated": gated, "passed": passed if gated else None, **stat})
+            a, _, _, iv, _ = paired_raw(by_arm)
+            reach = iv and iv[0][1] + RESOLUTION_MS.get(figure, 0.0)
+            passed = bool(iv) and reach <= budget_pct / 100 * a
+            rows.append({"scene": scene, "figure": figure, "gated": figure in gated,
+                         "passed": passed if figure in gated else None, **paired(by_arm)})
     return rows
 
 
@@ -1262,6 +1289,9 @@ def print_judgement(rows, budget_pct):
     print(f"| scene | figure | before | after | diff | ci95 | verdict | within {budget_pct:g}% |")
     print("| --- | --- | --- | --- | --- | --- | --- | --- |")
     for r in rows:
+        if r["verdict"] == "missing":
+            print(f"| {r['scene']} | {r['figure']} | – | – | – | – | missing | FAIL |")
+            continue
         pct = f" ({r['diff_pct']:+.1f}%)" if r["diff_pct"] is not None else ""
         ci = "–" if r["ci95"] is None else f"{r['ci95'][0]:+.3f} to {r['ci95'][1]:+.3f}"
         gate = "reported" if not r["gated"] else "pass" if r["passed"] else "FAIL"
@@ -1271,25 +1301,30 @@ def print_judgement(rows, budget_pct):
 def compare(args):
     """--compare BEFORE AFTER: games of the two builds alternating, judged per render distance and window size."""
     before, after = (str(Path(b).resolve()) for b in args.compare)
+    scenes = [s[0] for s in scene_list(args)]
+    workload = {"scenes": scenes, "seconds": args.seconds, "settle_s": args.settle, "offscreen": bool(args.offscreen),
+                "graphics": args.graphics or [], "resource_packs": [Path(p).name for p in args.resource_pack or ()],
+                "shader_pack": args.shader_pack and Path(args.shader_pack).name}
     label, failed = args.label, False
     for args.width, args.height in parse_sizes(args.sizes):
         args.label = size_label(label, args.width, args.height)
         for d in [int(x) for x in args.distances.split(",")]:
-            games, arms = [], []
+            games, played = [], []
             for i in range(2 * args.repeats):
-                arm = ARMS[i % 4]
-                args.build = before if arm == "A" else after
-                print(f"rd {d} game {i + 1} of {2 * args.repeats}: {'before' if arm == 'A' else 'after'}", flush=True)
+                build = "before" if ARMS[i % 4] == "A" else "after"
+                args.build = before if build == "before" else after
+                print(f"rd {d} game {i + 1} of {2 * args.repeats}: {build}", flush=True)
+                started = time.time()
                 games.append(game_figures(run_sunrise(args, d)))
-                arms.append("before" if arm == "A" else "after")
-            rows = judge(games, args.budget)
+                played.append({"build": build, "started": started, "ended": time.time(), "scenes": games[-1]})
+            rows = judge(games, args.budget, scenes)
             print_judgement(rows, args.budget)
             failed |= any(r["gated"] and not r["passed"] for r in rows)
             out = ROOT / "benchmarks/perf" / f"{args.label}-compare-rd{d}.json"
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_text(json.dumps({"before": before, "after": after, "budget_pct": args.budget,
                                        "render_distance": d, "window": [args.width, args.height],
-                                       "hardware": hardware(), "games": [{"build": a, "scenes": g} for a, g in zip(arms, games)],
+                                       "workload": workload, "hardware": hardware(), "games": played,
                                        "results": rows}, indent=1) + "\n")
             print(out)
     return 1 if failed else 0
@@ -1418,8 +1453,10 @@ def main():
     if args.compare:
         if args.server:
             p.error("--compare runs single player: drop --server")
-        if args.repeats < 6:
-            p.error("--compare needs --repeats 6 or more: the interval needs 6 pairs")
+        if args.repeats < 6 or args.repeats % 2:
+            p.error("--compare needs an even --repeats of 6 or more: 6 pairs for the interval, whole B A A B blocks")
+        if not scene_list(args):
+            p.error(f"--scenes {args.scenes!r} names no scene")
         args.label = args.label or f"compare-{platform.node().split('.')[0]}"
         WORK.mkdir(parents=True, exist_ok=True)
         sys.exit(compare(args))

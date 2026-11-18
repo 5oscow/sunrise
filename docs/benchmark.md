@@ -100,27 +100,38 @@ Besides the FPS table, `--table` then gives each scene's median frame CPU time (
 
 ### Comparing two builds
 
-`--compare BEFORE AFTER` runs games of two build folders alternately, in the order B A A B B A A B..., so pair *k* is
-games 2*k* and 2*k*+1, adjacent in time, and linear drift cancels. `--repeats` is the number of pairs per render
-distance and window size, at least 6. Each figure of each scene goes through `sunrise_bench::compare`'s statistic
-([benchmark-report.md](benchmark-report.md)): the Hodges-Lehmann estimate of after minus before, its exact 95% interval
-and the verdict. The gated figures are frame time p50 and p99 and the server thread's tick time p50 and p99. A gated
-figure passes when the upper end of its interval is at most `--budget` percent (default 3, #2510's pooled gate) of
-the before figure, so `within_noise` with a wide interval still fails. CPU and GPU frame p50 are reported, not gated.
-The table goes to the terminal, the games' figures and the results to `benchmarks/perf/<label>-compare-rd<N>.json`,
-and the exit status is 1 when a gated figure misses:
+`--compare BEFORE AFTER` runs games of two build folders alternately, in the order B A A B B A A B..., which
+counterbalances the order within each block of four games; pair *k* is games 2*k* and 2*k*+1. `--repeats` is the number
+of pairs per render distance and window size: even, so the blocks are whole, and at least 6, which the interval needs.
+Each figure of each scene goes through `sunrise_bench::compare`'s statistic ([benchmark-report.md](benchmark-report.md)):
+the Hodges-Lehmann estimate of after minus before, its exact signed-rank 95% interval (nominal, for independent and
+symmetric pair differences) and the verdict.
+
+- **Gated:** frame time p50 and p99, and the server thread's tick time p50 and p99; `menu_hold` gates frame time only,
+  because Options may pause the integrated server.
+- **The rule:** a gated figure passes when the upper end of its interval, computed from unrounded values and widened by
+  the figure's resolution (0.1 ms for tick times), is at most `--budget` percent (default 3, #2510's pooled gate) of the
+  before figure. A `within_noise` with a wide interval still fails, and so does a gated figure any game lacks (`missing`).
+- **Reported, not gated:** CPU and GPU frame p50.
+- **Output:** the table on the terminal; the workload (scenes, seconds, `--graphics`, packs), each game's build, start
+  and end times and figures, and the results in `benchmarks/perf/<label>-compare-rd<N>.json`. The exit status is 1 when a
+  gated figure fails.
 
 ```sh
 python3 tools/perf_bench.py --compare target-base/release target/release --budget 3 --repeats 6 --distances 16 --offscreen
 ```
 
 The server tick figures are vanilla's `/tick query` after each flight: the integrated server's last 100 ticks, in 0.1 ms
-steps. A joined server's ticks aren't read, so `--compare` runs single player.
+steps. They count only when all 100 fall inside the flight (`--seconds` 5 or more at 20 TPS); otherwise they're missing.
+A joined server's ticks aren't read, so `--compare` runs single player. At 0.1 ms steps a tick time under about 3.3 ms
+can't be shown within 3%.
 
 Set-up options for Sunrise: `--graphics KEY:VALUE` (a line of `sunrise-graphics.txt`, repeatable), `--resource-pack PATH`
-(turned on in `options.txt`, repeatable) and `--shader-pack PATH` (picked through `SUNRISE_SHADER_PACK`); a report
-records them under `conditions`. `--scenes menu_hold` holds the Options screen open for `--seconds` at the village
-flight's start while Tab steps the keyboard focus every 250 ms (#2498's menu path).
+(turned on in `options.txt`, repeatable) and `--shader-pack PATH` (picked through `SUNRISE_SHADER_PACK`, a folder or a
+zip); a report records them under `conditions`. `--scenes menu_hold` holds the Options screen open for `--seconds` at the
+village flight's start while Tab steps the focus every 250 ms (#2498's menu path), on fixed deadlines. The taps go through
+the control socket's `key`, which reaches the Options screen's own key handling but not the window's keyboard-focus
+driver (`key_focus_key`); no control command older builds have reaches that driver.
 
 On Windows, run `python tools\perf_bench.py ...` the same way. Sunrise's control endpoint there is a localhost TCP port, which the game writes to a `.json` file in the temporary folder. `--build` can point at an installed release (`%APPDATA%\sunrise-launcher\versions\vX.Y.Z`, with `--resources` its `.local\sunrise-client\26.3`), and the report then gives that release's version.
 
