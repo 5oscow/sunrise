@@ -186,10 +186,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     } else {
                         data.gate_close[super::data::GateSoundSite::Use as usize].clone()
                     };
-                    let pitch = self.random().next_float() * 0.1 + 0.9;
-                    if let Some(sound) = sound {
-                        self.sound(pos, &sound, 1.0, pitch);
-                    }
+                    self.fence_gate_sound(pos, sound);
                     self.game_event(
                         pos,
                         if opens {
@@ -838,10 +835,7 @@ impl Behaviours {
         };
         let mut sim = self.sim(level, ticks);
         sim.set_block_and_update(pos, self.table.set_bool(state, self.props.open, !open));
-        let pitch = sim.random().next_float() * 0.1 + 0.9;
-        if let Some(sound) = sound {
-            sim.sound(pos, &sound, 1.0, pitch);
-        }
+        sim.fence_gate_sound(pos, sound);
         sim.game_event_state(
             pos,
             if open {

@@ -953,10 +953,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 } else {
                     data.gate_close[super::data::GateSoundSite::Redstone as usize].clone()
                 };
-                let pitch = self.random().next_float() * 0.1 + 0.9;
-                if let Some(sound) = sound {
-                    self.sound(pos, &sound, 1.0, pitch);
-                }
+                self.fence_gate_sound(pos, sound);
                 self.game_event(
                     pos,
                     if power {

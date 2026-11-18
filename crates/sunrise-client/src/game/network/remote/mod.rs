@@ -8078,7 +8078,11 @@ impl Game<'_> {
         self.predict_blocks(changes, seq);
         // `level.playSound(player, ...)`: the clicker hears it from its own use; the
         // server sends it to the others only.
-        for (pos, sound, volume, pitch) in sounds {
+        self.play_predicted_sounds(sounds);
+    }
+
+    fn play_predicted_sounds(&mut self, sounds: &[DrySound]) {
+        for (pos, sound, source, volume, pitch) in sounds {
             let at = [
                 f64::from(pos.x) + 0.5,
                 f64::from(pos.y) + 0.5,
@@ -8090,7 +8094,7 @@ impl Game<'_> {
                 format!("minecraft:{sound}")
             };
             self.play_client_local_sound(
-                LevelSound::new(&name, at, *volume, *pitch).in_source(mod_api::SoundSource::Blocks),
+                LevelSound::new(&name, at, *volume, *pitch).in_source(*source),
             );
         }
     }
@@ -9657,6 +9661,7 @@ use dry_level::DryLevel;
 type DrySound = (
     sunrise_core::position::BlockPos,
     std::sync::Arc<str>,
+    mod_api::SoundSource,
     f32,
     f32,
 );
@@ -13335,6 +13340,7 @@ pub(crate) mod tests {
             lan::{Out, PlayerSender},
             mod_content::{ContentMod, resource_root},
         };
+        use sunrise_core::position::BlockPos;
         use sunrise_mod_package::{
             content::{Block, Content, GateSound},
             enabled::EnabledMods,
@@ -13348,13 +13354,18 @@ pub(crate) mod tests {
         let mut content = Content::declared("gates");
         let use_sound = "gates:use.open";
         let blast_sound = "gates:blast.close";
+        let wire_sound = "minecraft:entity.zombie.ambient";
         content
             .declare(
                 &[Block {
                     id: "gates:sites".into(),
                     template: "minecraft:oak_fence_gate".into(),
                     item: false,
-                    open_sound: Some(GateSound::All(use_sound.into())),
+                    open_sound: Some(GateSound::Sites {
+                        on_use: Some(use_sound.into()),
+                        on_explosion: None,
+                        on_redstone: Some(wire_sound.into()),
+                    }),
                     close_sound: Some(GateSound::Sites {
                         on_use: None,
                         on_explosion: Some(blast_sound.into()),
@@ -13400,20 +13411,6 @@ pub(crate) mod tests {
                 let b = game.res.behaviours();
                 b.table.bool(game.world.block(x, y, z), b.props.open)
             };
-            game.world.set(x, y, z, gate).unwrap();
-            game.audio.capture = Some(Vec::new());
-            let (answer, dry) = game.remote_block_reacts(&hit, None);
-            assert!(answer.consumes_action());
-            game.predict_use(&dry, 1);
-            assert!(
-                open(game),
-                "the declared gate opens without a server round trip"
-            );
-            let predicted = game.audio.capture.as_mut().unwrap().pop().unwrap();
-            assert_eq!(predicted.event, use_sound);
-            assert_eq!(predicted.source, mod_api::SoundSource::Blocks.index());
-            assert!(game.audio.capture.as_ref().unwrap().is_empty());
-
             let [actor, other] = [12, 13].map(|conn| {
                 let (tx, rx) = std::sync::mpsc::channel();
                 game.lan
@@ -13426,16 +13423,8 @@ pub(crate) mod tests {
                     .unwrap();
                 rx
             });
-            game.options.dedicated = Some(Vec::new());
-            game.world.set(x, y, z, gate).unwrap();
-            game.world.block_log = Some(Vec::new());
-            assert!(
-                game.guest_use_item_on(12, game.guest_index(12).unwrap(), hit, super::Hand::Main)
-                    .unwrap()
-            );
-            assert!(open(game));
-            game.lan_broadcast_effects();
-            let sounds = |rx: std::sync::mpsc::Receiver<Out>| {
+            let sounds = |game: &crate::game::Game<'_>, rx: &std::sync::mpsc::Receiver<Out>| {
+                let sync = game.lan.as_ref().unwrap().hub.sync_data();
                 rx.try_iter()
                     .flat_map(|out| match out {
                         Out::Packet(body) => vec![body],
@@ -13446,23 +13435,90 @@ pub(crate) mod tests {
                         let mut reader = Reader::new(&body);
                         let id = reader.varint().unwrap();
                         match Clientbound::decode(id, reader.rest()).unwrap() {
-                            Clientbound::Sound(packet) => packet.sound.1.map(|(id, _)| id),
+                            Clientbound::Sound(packet) => {
+                                let name = packet.sound.1.map(|(id, _)| id).unwrap_or_else(|| {
+                                    sync.builtin
+                                        .get("minecraft:sound_event")
+                                        .unwrap()
+                                        .name(packet.sound.0)
+                                        .unwrap()
+                                        .to_owned()
+                                });
+                                Some((name, packet.source, packet.volume))
+                            }
                             _ => None,
                         }
                     })
                     .collect::<Vec<_>>()
             };
-            assert!(!sounds(actor).iter().any(|name| name == use_sound));
-            assert_eq!(
-                sounds(other)
-                    .iter()
-                    .filter(|name| *name == use_sound)
-                    .count(),
-                1
-            );
+            let blocks = mod_api::SoundSource::Blocks.index();
+            let vanilla_gate = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:oak_fence_gate")
+                .unwrap();
+            game.options.dedicated = Some(Vec::new());
+            for (state, name) in [
+                (vanilla_gate, "minecraft:block.fence_gate.open"),
+                (gate, use_sound),
+            ] {
+                game.world.set(x, y, z, state).unwrap();
+                game.audio.capture = Some(Vec::new());
+                let (answer, dry) = game.remote_block_reacts(&hit, None);
+                assert!(answer.consumes_action());
+                game.predict_use(&dry, 1);
+                assert!(open(game), "the gate opens without a server round trip");
+                let capture = game.audio.capture.as_mut().unwrap();
+                assert_eq!(capture.len(), 1);
+                let predicted = capture.pop().unwrap();
+                assert_eq!((predicted.event.as_str(), predicted.source), (name, blocks));
+
+                game.world.set(x, y, z, state).unwrap();
+                game.world.block_log = Some(Vec::new());
+                assert!(
+                    game.guest_use_item_on(
+                        12,
+                        game.guest_index(12).unwrap(),
+                        hit,
+                        super::Hand::Main
+                    )
+                    .unwrap()
+                );
+                assert!(open(game));
+                game.lan_broadcast_effects();
+                assert!(sounds(game, &actor).is_empty(), "no echo to the clicker");
+                assert_eq!(sounds(game, &other), [(name.into(), blocks as i32, 1.0)]);
+            }
 
             game.explosion_trigger_blocks(&mut [pos]).unwrap();
             assert!(!open(game));
+            game.lan_broadcast_effects();
+            for listener in [&actor, &other] {
+                assert_eq!(
+                    sounds(game, listener),
+                    [(blast_sound.into(), blocks as i32, 1.0)]
+                );
+            }
+
+            let power = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:redstone_block")
+                .unwrap();
+            assert!(game.with_level(|b, level, ticks| {
+                b.set_block(level, ticks, BlockPos::new(x + 1, y, z), power, 3)
+            }));
+            game.process_level_events().unwrap();
+            assert!(open(game));
+            game.lan_broadcast_effects();
+            for listener in [&actor, &other] {
+                assert_eq!(
+                    sounds(game, listener),
+                    [(wire_sound.into(), blocks as i32, 1.0)]
+                );
+            }
             assert_eq!(game.audio.heard.get(blast_sound), Some(&1));
             let powered = game
                 .with_props(gate, &[("open", "true"), ("powered", "true")])
