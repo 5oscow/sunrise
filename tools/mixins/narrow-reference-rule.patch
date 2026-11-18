@@ -271,7 +271,7 @@ index bca7938..2f2eb44 100644
 +    assert!(e.message.contains("selected site contains `?`"), "{e}");
 +}
 diff --git a/crates/horizon-mixins-cli/tests/integration.rs b/crates/horizon-mixins-cli/tests/integration.rs
-index fcf5a46..b3a6efd 100644
+index fcf5a46..d31e7f6 100644
 --- a/crates/horizon-mixins-cli/tests/integration.rs
 +++ b/crates/horizon-mixins-cli/tests/integration.rs
 @@ -697,14 +697,14 @@ fn cfg_attributes_shared_module_sources_and_shadowing_fail_closed() {
@@ -293,7 +293,7 @@ index fcf5a46..b3a6efd 100644
              "E_UNSUPPORTED_CONTROL_FLOW",
          ),
          (
-@@ -890,3 +890,278 @@ fn production_test_cfg_modules_are_indexed_and_applied() {
+@@ -890,3 +890,369 @@ fn production_test_cfg_modules_are_indexed_and_applied() {
      let error = build_plan(&f.root, &f.mods).unwrap_err();
      assert!(format!("{error:?}").contains("E_TARGET_NOT_FOUND"));
  }
@@ -328,6 +328,18 @@ index fcf5a46..b3a6efd 100644
 +        pub fn update(&mut self) -> i32 {{ self.0 += 1; mark("update"); self.0 }}
 +    }}
 +    pub fn res(ok: bool) -> Result<Res, &'static str> {{ mark("res"); if ok {{ Ok(Res(7)) }} else {{ Err("no res") }} }}
++    pub struct Trap(pub i32);
++    impl Drop for Trap {{ fn drop(&mut self) {{ mark("drop"); }} }}
++    impl Trap {{ pub fn read(_: Trap) -> i32 {{ 0 }} }}
++    pub trait Reads {{ fn read(&self) -> i32; }}
++    impl Reads for Trap {{ fn read(&self) -> i32 {{ mark("read"); self.0 }} }}
++    pub fn trap(ok: bool) -> Result<Trap, &'static str> {{ mark("trap"); if ok {{ Ok(Trap(7)) }} else {{ Err("no trap") }} }}
++    pub struct EventLoop;
++    pub struct App(pub i32);
++    impl EventLoop {{
++        pub fn new() -> Result<EventLoop, &'static str> {{ mark("new"); Ok(EventLoop) }}
++        pub fn run_app(self, app: &mut App) -> Result<(), Failure> {{ app.0 += 1; mark("run_app"); Ok(()) }}
++    }}
 +    pub fn observe(n: i32) -> i32 {{ mark("observe"); n }}
 +    pub fn run(ok: bool, bad_arg: bool) -> Result<i32, Failure> {{ {body} }}
 +    "#
@@ -505,6 +517,85 @@ index fcf5a46..b3a6efd 100644
 +                "{message}"
 +            );
 +        }
++    }
++
++    #[test]
++    fn an_owned_binding_is_refused_when_the_dot_call_selects_a_namesake_that_borrows() {
++        // `Trap::read` names an associated function that takes `Trap`, but `trap(ok)?.read()`
++        // calls the trait's `read(&self)`: the temporary would drop before `observe`. The check
++        // follows the dot call, so the namesake cannot satisfy it.
++        let f = res_fixture(
++            "Ok(observe(trap(ok)?.read()))",
++            "crate::Trap",
++            "trap(ok)?.read",
++        );
++        let message = build_error(&f);
++        assert!(
++            message.contains("receiver_of_alpha_wrap_must_take_self_by_value"),
++            "{message}"
++        );
++    }
++
++    #[test]
++    fn an_owned_receiver_keeps_the_temporaries_of_the_arguments_until_the_statement_ends() {
++        // `res(ok)?.read()` borrows its `Res` for the whole statement: it drops after `observe`,
++        // also when the call around it is wrapped with an owned receiver.
++        let f = fixture(
++            "let n = observe(make(ok)?.go(res(ok)?.read())); Ok(n)",
++            &wrap("make(ok)?.go", 1),
++        );
++        fs::write(
++            f.root.join("driver/src/lib.rs"),
++            r#"
++    use fixture_game::{run, LOG};
++    #[test]
++    fn argument_temporaries_drop_after_the_statement() {
++        assert_eq!(run(true, false), Ok(108));
++        assert_eq!(
++            std::mem::take(&mut *LOG.lock().unwrap()),
++            ["make", "res", "read", "wrap", "go", "observe", "drop"]
++        );
++    }
++    "#,
++        )
++        .unwrap();
++        f.run("check");
++    }
++
++    #[test]
++    fn an_owned_event_loop_is_wrapped_around_run_app_with_a_borrowed_argument() {
++        let f = fixture(
++            "let mut app = App(0); EventLoop::new()?.run_app(&mut app)?; Ok(app.0)",
++            r#"
++    [[injection]]
++    id="wrap"
++    target="fixture_game::run"
++    kind="WRAP_OPERATION"
++    selector="EventLoop::new()?.run_app"
++    require=1
++    ordinal=0
++    helper="wrap_loop.rs"
++    bindings=[{name="event_loop",ty="crate::EventLoop",value="$receiver"},{name="app",ty="&mut crate::App",value="$arg0"},{name="original",ty="impl FnOnce(crate::EventLoop, &mut crate::App) -> Result<(), crate::Failure>",value="$operation"}]
++    "#,
++        );
++        fs::write(
++            f.mods.join("alpha/wrap_loop.rs"),
++            "fn wrap_loop(event_loop: crate::EventLoop, app: &mut crate::App, original: impl FnOnce(crate::EventLoop, &mut crate::App) -> Result<(), crate::Failure>) -> Result<(), crate::Failure> { crate::mark(\"wrap\"); original(event_loop, app) }",
++        )
++        .unwrap();
++        fs::write(
++            f.root.join("driver/src/lib.rs"),
++            r#"
++    use fixture_game::{run, LOG};
++    #[test]
++    fn the_wrapper_runs_between_the_event_loop_and_run_app() {
++        assert_eq!(run(true, false), Ok(1));
++        assert_eq!(std::mem::take(&mut *LOG.lock().unwrap()), ["new", "wrap", "run_app"]);
++    }
++    "#,
++        )
++        .unwrap();
++        f.run("check");
 +    }
 +
 +    #[test]
@@ -1061,7 +1152,7 @@ index 47fee7d..1d3220c 100644
  }
  
 diff --git a/crates/horizon-mixins-transform/src/lib.rs b/crates/horizon-mixins-transform/src/lib.rs
-index f4edd3d..fafdaef 100644
+index f4edd3d..e27c335 100644
 --- a/crates/horizon-mixins-transform/src/lib.rs
 +++ b/crates/horizon-mixins-transform/src/lib.rs
 @@ -516,6 +516,7 @@ fn wrap_operation(call: &Expr, wrappers: &[&PlannedInjection]) -> Result<Expr> {
@@ -1090,7 +1181,7 @@ index f4edd3d..fafdaef 100644
 +            // (a call, with or without `?`) is evaluated here, first: declared `&T` or `&mut T`
 +            // it is borrowed in place, a temporary that lives as long as the original receiver
 +            // did, and the method autorefs as Rust would (a reference a call returns coerces);
-+            // declared `T` it moves into the operation, and a guard below checks that the method
++            // declared `T` it moves into the operation, and the continuation checks that the method
 +            // takes `self`, since a method that borrows would drop the temporary early.
 +            let place = sites::is_place(receiver);
 +            let receiver_arg = match &types[0] {
@@ -1122,15 +1213,17 @@ index f4edd3d..fafdaef 100644
              };
              arguments = vec![receiver_arg];
              arguments.extend(c.args.iter().cloned());
-@@ -541,6 +565,33 @@ fn wrap_operation(call: &Expr, wrappers: &[&PlannedInjection]) -> Result<Expr> {
+@@ -541,6 +565,36 @@ fn wrap_operation(call: &Expr, wrappers: &[&PlannedInjection]) -> Result<Expr> {
          }
          _ => return Err(Diagnostic::new("E_PLAN_SITE", "wrapper site is not a call")),
      }
 +    // An owned computed receiver is lowered by value, which drops it where the continuation ends
-+    // instead of at the end of the statement: only right if the method consumes it. The guard
-+    // coerces `<T>::method` to a function taking `T` first, so a method that takes `&self` or
-+    // `&mut self` fails to compile, in a function named for the row.
-+    let mut guard: Option<Expr> = None;
++    // instead of at the end of the statement: only right if the method consumes it. The
++    // continuation holds a dead copy of the original dot call, on a local of the declared type
++    // inside a closure that must be `'static`: a closure that merely borrows the local is not,
++    // so a method that takes `&self` or `&mut self` (the one the dot call selects, not a
++    // namesake) fails to compile, in a function named for the row. The check sits in the
++    // continuation, so the operands stay outside it and keep their temporaries' scopes.
 +    if let Some((method, turbofish)) = owned_receiver {
 +        let id: String = format!("{}_{}", wrappers[0].mod_id, wrappers[0].injection_id)
 +            .chars()
@@ -1138,16 +1231,17 @@ index f4edd3d..fafdaef 100644
 +            .collect();
 +        let name = format_ident!("__horizon_mixins_receiver_of_{id}_must_take_self_by_value");
 +        let ty = &types[0];
-+        let rest: Vec<Type> = types[1..].iter().map(|_| syn::parse_quote!(_)).collect();
-+        let params: Vec<syn::Ident> = (1..types.len()).map(|i| format_ident!("A{i}")).collect();
-+        let receiver_type = format_ident!("A0");
-+        guard = Some(syn::parse2(quote!({
-+            fn #name<#receiver_type, F, #(#params,)* R>(_: F) where F: FnOnce(#receiver_type, #(#params),*) -> R {}
-+            #name::<#ty, _, #(#rest,)* _>(<#ty>::#method #turbofish);
-+        })).map_err(syntax)?);
-+        // Bound mutably, for a method that takes `mut self`.
++        let rest = &types[1..];
 +        let receiver = &names[0];
 +        original = syn::parse_quote!({
++            #[allow(unreachable_code, unused_variables, unused_mut)]
++            if false {
++                fn #name<F: 'static>(_: F) {}
++                fn never<A>() -> A { loop {} }
++                let mut probe: #ty = never();
++                #name(|| probe.#method #turbofish(#(never::<#rest>()),*));
++            }
++            // Bound mutably, for a method that takes `mut self`.
 +            #[allow(unused_mut)]
 +            let mut #receiver = #receiver;
 +            #original
@@ -1156,19 +1250,3 @@ index f4edd3d..fafdaef 100644
      let mut continuation: Expr =
          syn::parse2(quote!(|#(#names: #types),*| #original)).map_err(syntax)?;
      for p in wrappers.iter().rev() {
-@@ -560,7 +611,14 @@ fn wrap_operation(call: &Expr, wrappers: &[&PlannedInjection]) -> Result<Expr> {
-         let body = invoke(p, &specials)?;
-         continuation = syn::parse2(quote!(|#(#names: #types),*| #body)).map_err(syntax)?;
-     }
--    syn::parse2(quote!((#continuation)(#(#arguments),*))).map_err(syntax)
-+    match guard {
-+        Some(guard) => syn::parse2(quote!({
-+            #guard;
-+            (#continuation)(#(#arguments),*)
-+        }))
-+        .map_err(syntax),
-+        None => syn::parse2(quote!((#continuation)(#(#arguments),*))).map_err(syntax),
-+    }
- }
- fn bundle_arguments(
-     call: &Expr,
