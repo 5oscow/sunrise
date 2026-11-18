@@ -110,6 +110,9 @@ impl Game<'_> {
                 let _ = catch_unwind(AssertUnwindSafe(|| {
                     self.native_lifecycle_close_failed(&message);
                 }));
+                // The callback can panic inside a new player's turn, and the save below writes
+                // every player the exclusion does not name.
+                self.exclude_interrupted_players(crashed, |m| log::warn!("{m}"));
                 // A config/player callback may unwind before the stop path
                 // reaches its final save. Complete that same tail, not just
                 // the writes already queued, while retaining the first error.
@@ -211,6 +214,9 @@ impl Game<'_> {
             Ok(result) => result,
             Err(payload) => Err(shutdown_panic(payload.as_ref()).into()),
         };
+        // The cleanup can unwind inside a new player's turn too (entering a level fires a load
+        // callback), before the save writes the players the exclusion does not name.
+        self.exclude_interrupted_players(crashed, |m| log::warn!("{m}"));
         let saved = match catch_unwind(AssertUnwindSafe(|| {
             if self.world_adopted && self.session_lock.is_some() {
                 self.save_game()
@@ -222,6 +228,9 @@ impl Game<'_> {
             Err(payload) => Err(shutdown_panic(payload.as_ref()).into()),
         };
         result = result.and(saved);
+        // The save can unwind inside a new player's turn, and `lan_close` writes every player the
+        // exclusion does not name.
+        self.exclude_interrupted_players(crashed, |m| log::warn!("{m}"));
         if let Err(payload) = catch_unwind(AssertUnwindSafe(|| self.lan_close(false))) {
             let message = shutdown_panic(payload.as_ref());
             if result.is_ok() {

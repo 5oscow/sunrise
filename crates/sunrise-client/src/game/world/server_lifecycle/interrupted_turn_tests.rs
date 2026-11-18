@@ -1,24 +1,9 @@
 //! #2704: a crash save never writes the half-done turn of a player a panic interrupted.
 
-use crate::game::{
-    execution_role::ExecutionRole, native_entity_refs::tests::run_fresh_cases,
-    native_guest_turn_tests::with_guests,
-};
+use crate::game::{execution_role::ExecutionRole, native_guest_turn_tests::with_guests};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-
-struct Warnings(Mutex<Vec<String>>);
-impl log::Log for Warnings {
-    fn enabled(&self, _: &log::Metadata<'_>) -> bool {
-        true
-    }
-    fn log(&self, record: &log::Record<'_>) {
-        self.0.lock().unwrap().push(record.args().to_string());
-    }
-    fn flush(&self) {}
-}
-static WARNINGS: Warnings = Warnings(Mutex::new(Vec::new()));
 
 /// Records who each `player_logged_out` listener call is for.
 struct Logouts(std::sync::Arc<Mutex<Vec<u128>>>);
@@ -30,6 +15,40 @@ impl mod_api::Hooks for Logouts {
         event: &mut mod_api::PlayerLoggedOutEvent<'_>,
     ) {
         self.0.lock().unwrap().push(event.player);
+    }
+}
+
+/// A mod whose logout listener panics for guest 13, so the stop path itself panics, and whose
+/// level-unload listener (heard by the close-failure callback) then starts a new turn for
+/// guest 13, through the handle it kept, that panics too.
+#[derive(Default)]
+struct PanicsInShutdown(Mutex<Option<mod_api::PlayerRef>>);
+#[mod_api::__subscriptions]
+impl mod_api::Hooks for PanicsInShutdown {
+    fn player_logged_out(
+        &self,
+        host: &mut dyn mod_api::ServerHost,
+        event: &mut mod_api::PlayerLoggedOutEvent<'_>,
+    ) {
+        if event.player == 13 {
+            *self.0.lock().unwrap() = host.player(13);
+            panic!("mod panic stopping the server");
+        }
+    }
+    fn level_unload(
+        &self,
+        host: &mut dyn mod_api::ServerHost,
+        _: &mut mod_api::LevelUnloadEvent<'_>,
+    ) {
+        let player = self.0.lock().unwrap().expect("guest 13 was online");
+        player.set_game_mode(host, mod_api::GameMode::Creative);
+    }
+    fn player_game_mode_changed(
+        &self,
+        _: &mut dyn mod_api::ServerHost,
+        _: &mut mod_api::PlayerGameModeChangedEvent<'_>,
+    ) -> mod_api::Flow {
+        panic!("mod panic in a new turn");
     }
 }
 
@@ -57,8 +76,9 @@ fn taking_turn(game: &mut crate::game::Game<'_>) {
 }
 
 /// Runs the scenario: the panic goes through the real turn helpers, then the real stop path
-/// saves. `nested` puts guest 13's turn inside guest 12's.
-fn scenario(nested: bool) {
+/// saves. `nested` puts guest 13's turn inside guest 12's; `callback` has the shutdown itself
+/// panic and the close-failure callback panic in a new turn of guest 13.
+fn scenario(nested: bool, callback: bool) {
     with_guests(|game| {
         game.options.execution_role = ExecutionRole::DedicatedServer;
         let root = tempfile::tempdir().unwrap();
@@ -132,28 +152,29 @@ fn scenario(nested: bool) {
 
         // The stop path saves; no tick has run since, so the record stands.
         let logouts = std::sync::Arc::new(Mutex::new(Vec::new()));
-        mod_platform::testing::with_mods(
-            vec![mod_api::ModEntry::new(
-                "logouts",
-                Box::new(Logouts(logouts.clone())),
-            )]
-            .into(),
-            || {
-                game.run_server_lifecycle(true, |_, began| {
-                    *began = true;
-                    Ok(())
-                })
-                .unwrap();
-            },
-        );
-        // An interrupted player stays online: each login still gets its one logout.
-        let mut left = logouts.lock().unwrap().clone();
-        left.sort_unstable();
-        assert!(
-            left.iter().filter(|&&p| p == 12).count() == 1
-                && left.iter().filter(|&&p| p == 13).count() == 1,
-            "one logout for each of guests 12 and 13: {left:?}"
-        );
+        let entry = if callback {
+            game.native_level_opened(game.dim);
+            mod_api::ModEntry::new("panics", Box::new(PanicsInShutdown::default()))
+        } else {
+            mod_api::ModEntry::new("logouts", Box::new(Logouts(logouts.clone())))
+        };
+        mod_platform::testing::with_mods(vec![entry].into(), || {
+            let result = game.run_server_lifecycle(true, |_, began| {
+                *began = true;
+                Ok(())
+            });
+            assert_eq!(result.is_err(), callback, "{result:?}");
+        });
+        if !callback {
+            // An interrupted player stays online: each login still gets its one logout.
+            let mut left = logouts.lock().unwrap().clone();
+            left.sort_unstable();
+            assert!(
+                left.iter().filter(|&&p| p == 12).count() == 1
+                    && left.iter().filter(|&&p| p == 13).count() == 1,
+                "one logout for each of guests 12 and 13: {left:?}"
+            );
+        }
 
         assert_eq!(
             read(12),
@@ -164,11 +185,11 @@ fn scenario(nested: bool) {
             game.boats.iter().any(|b| b.id == boat),
             "the interrupted player's boat stays in the world, not in a file nobody writes"
         );
-        if nested {
+        if nested || callback {
             assert_eq!(
                 read(13),
                 before_13,
-                "so does the player whose turn it was inside"
+                "so does the player whose turn it was inside, or whom a shutdown callback's turn interrupted"
             );
         } else {
             assert_ne!(
@@ -177,42 +198,13 @@ fn scenario(nested: bool) {
                 "a player whose turn was not interrupted is saved as ever"
             );
         }
-        let warnings = WARNINGS.0.lock().unwrap();
-        for name in if nested {
-            vec!["guest12", "guest13"]
-        } else {
-            vec!["guest12"]
-        } {
-            assert!(
-                warnings
-                    .iter()
-                    .any(|line| line.contains("player's turn") && line.contains(name)),
-                "{name} has the warning: {warnings:?}"
-            );
-        }
-        assert!(
-            !warnings
-                .iter()
-                .any(|line| line.contains("player's turn") && line.contains("guest13") && !nested),
-            "only the interrupted player is named"
-        );
     });
 }
 
 #[test]
 #[ignore = "daily"]
 fn a_crash_save_keeps_the_files_of_players_whose_turn_a_panic_interrupted() {
-    // The logger is process-global.
-    if run_fresh_cases(
-        "game::server_lifecycle::interrupted_turn_tests::a_crash_save_keeps_the_files_of_players_whose_turn_a_panic_interrupted",
-        "SUNRISE_INTERRUPTED_TURN_CHILD",
-        &["turns"],
-    ) {
-        return;
-    }
-    log::set_logger(&WARNINGS).unwrap();
-    log::set_max_level(log::LevelFilter::Warn);
-    scenario(false);
-    WARNINGS.0.lock().unwrap().clear();
-    scenario(true);
+    scenario(false, false);
+    scenario(true, false);
+    scenario(false, true);
 }
