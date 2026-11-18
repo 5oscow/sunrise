@@ -92,8 +92,6 @@ class WorkflowTests(unittest.TestCase):
                 self.assertIn("(needs.changes.result != 'success' || needs.changes.outputs.heavy != 'false')",
                               self.job(name))
         self.assertIn("needs.changes.outputs.heavy != 'false'", self.job("launcher"))
-        for name in ("vanilla-parity",):
-            self.assertIn("!inputs.pr", self.job(name), name)
 
     def test_cheap_jobs_run_without_the_heavy_gate(self):
         # verify-static runs outside the gate too: only where it runs depends on the gate.

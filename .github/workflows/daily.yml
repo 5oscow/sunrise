@@ -66,11 +66,24 @@ jobs:
       commit: ${{ steps.commit.outputs.commit }}
       skip: ${{ steps.commit.outputs.skip }}
       dry_run: ${{ steps.commit.outputs.dry_run }}
+      parity_required: ${{ steps.commit.outputs.parity_required }}
+      self_hosted: ${{ steps.route.outputs.self_hosted }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: false
+      # The pool's routing for a leg that starts late (fn-replace-check waits for the SDK's Linux legs), decided now:
+      # the run's lease snapshot is judged only within an hour of the run's creation (tools/ci/dyna_ci_route.sh), and
+      # a route of its own an hour or more later sent fn-replace-check to GitHub's runners (daily 44065326913, 44145360054).
+      - id: route
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VARS_ENABLED: ${{ vars.DYNA_CI_SELF_HOSTED }}
+          VARS_LEASE: ${{ vars.DYNA_CI_POOL_UNTIL }}
+          SAME_REPO: true
+          EVENT: ${{ github.event_name }}
+        run: bash tools/ci/dyna_ci_route.sh >> "$GITHUB_OUTPUT"
       - id: commit
         env:
           GH_TOKEN: ${{ github.token }}
@@ -96,7 +109,14 @@ jobs:
               echo "### $sha already has a completed daily run: $done" >> "$GITHUB_STEP_SUMMARY"
             fi
           fi
-          { echo "commit=$sha"; echo "skip=$skip"; echo "dry_run=$DRY_RUN"; } >> "$GITHUB_OUTPUT"
+          # Every writing run, whichever commit of main it takes, runs parity: a writing run can move daily-green and
+          # start the Nightly, so none may skip it. Only a dry run, which writes nothing, has no parity leg.
+          parity_required=false
+          if [ "$GITHUB_REF" = refs/heads/main ] && [ "$DRY_RUN" = false ]; then
+            parity_required=true
+          fi
+          printf 'commit=%s\nskip=%s\ndry_run=%s\nparity_required=%s\n' \
+            "$sha" "$skip" "$DRY_RUN" "$parity_required" >> "$GITHUB_OUTPUT"
 
   shards:
     needs: resolve
@@ -126,6 +146,7 @@ jobs:
     uses: ./.github/workflows/fn-replace-check.yml
     with:
       commit: ${{ needs.resolve.outputs.commit }}
+      self_hosted: ${{ needs.resolve.outputs.self_hosted }}
   linkage:
     needs: resolve
     if: needs.resolve.outputs.skip == 'false'
@@ -174,12 +195,25 @@ jobs:
       commit: ${{ needs.resolve.outputs.commit }}
       legs: windows-macos
 
+  # Every automatic vanilla parity harness on this writing run's commit of main. Never on a rollup or a pull
+  # request (owner, 2026-11-17). After the test shards, so its large runner is never one of three
+  # beside them while gates wait. The summary requires this leg for the nightly and files its failures.
+  parity:
+    needs: [resolve, shards]
+    if: >-
+      !cancelled() && needs.resolve.result == 'success' && needs.resolve.outputs.skip == 'false' &&
+      needs.resolve.outputs.parity_required == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/parity.yml
+    with:
+      commit: ${{ needs.resolve.outputs.commit }}
   # Reads every leg's result and verdict file (never a log) and moves `daily-green` or files the issues.
   summary:
     # The resolved commit names the job: what a scheduled run's lookup (daily_summary.py --seen) matches.
     name: summary ${{ needs.resolve.outputs.commit }}${{ needs.resolve.outputs.dry_run == 'true' && ' (dry run)' || '' }}
     needs: [resolve, shards, wasm-mods, fn-replace-check, linkage, windows-runtime-leases, machine-sample, sdk,
-            sdk-windows-macos]
+            sdk-windows-macos, parity]
     # Not on a cancelled run: its legs did not fail, they were stopped, and a stopped leg says nothing about the commit.
     if: ${{ !cancelled() && needs.resolve.result == 'success' && needs.resolve.outputs.skip == 'false' }}
     runs-on: ubuntu-latest

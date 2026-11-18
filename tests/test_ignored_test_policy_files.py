@@ -4,12 +4,15 @@ import io
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from tools.ci import ignored_tests
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class PolicyFiles(unittest.TestCase):
@@ -118,6 +121,61 @@ class PolicyFiles(unittest.TestCase):
                 ["cargo", "test", "-p", "sunrise-world", "--lib", "--", "--ignored", "--exact", "f::shard"],
             ])
         self.assertEqual([row.test for row in ignored_tests.daily_rows()], ["c::slow"])
+
+    def test_a_windows_row_is_listed_for_the_windows_job_and_for_no_linux_leg(self):
+        self.write("daily-pkg.txt", "pkg a::slow lib daily slow\n"
+                                    "pkg z::windows_only test:hidden daily windows # #![cfg(windows)]\n"
+                                    "pkg b::windows_too test:hidden daily windows\n")
+        self.assertEqual([row.test for row in ignored_tests.daily_rows()], ["a::slow"])
+        self.assertEqual(ignored_tests.daily_rows_groups(ignored_tests.daily_rows()), {("pkg", "lib"): ["a::slow"]})
+        self.assertEqual([(row.package, row.reference, row.test) for row in ignored_tests.windows_rows()],
+                         [("pkg", "test:hidden", "b::windows_too"), ("pkg", "test:hidden", "z::windows_only")])
+
+    def test_windows_rows_on_the_command_line_prints_the_rows_and_runs_no_shard(self):
+        done = subprocess.run([sys.executable, str(ROOT / "tools/ci/ignored_tests.py"), "--windows-rows"],
+                              capture_output=True, text=True, cwd=ROOT)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        # The committed rows: the subprocess reads the real folder, not this test's scratch one.
+        with patch.object(ignored_tests, "POLICY", ROOT / "tools/ci/ignored-tests"):
+            expected = "".join(f"{row.package} {row.reference} {row.test}\n" for row in ignored_tests.windows_rows())
+        self.assertEqual(done.stdout, expected)
+
+    def test_windows_rows_report_pass_missing_panic_and_nonzero_exit(self):
+        self.write("daily-pkg.txt", "pkg a::one test:exports daily windows\n"
+                                    "pkg b::missing test:exports daily windows\n"
+                                    "pkg c::panics test:exports daily windows\n"
+                                    "pkg d::crash test:exports daily windows\n"
+                                    "pkg e::linux lib daily slow\n")
+        source = "crates/pkg/tests/exports.rs"
+        outcomes = [
+            (0, "test a::one ... ok\ntest result: ok. 1 passed; 0 failed; 0 ignored;\n"),
+            (0, "test result: ok. 0 passed; 0 failed; 0 ignored;\n"),
+            (101, "test c::panics ... FAILED\n"
+                  "thread 'c::panics' (42) panicked at crates\\pkg\\tests\\exports.rs:2:3:\n"
+                  "a payload that must not be published\n"
+                  "test result: FAILED. 0 passed; 1 failed; 0 ignored;\n"),
+            (101, "test d::crash ... ok\ntest result: ok. 1 passed; 0 failed; 0 ignored;\n"),
+        ]
+        with patch.object(ignored_tests.subprocess, "Popen") as popen, \
+                patch.object(ignored_tests, "tracked_rust_paths", return_value={source}), \
+                patch.object(ignored_tests, "source_lines", return_value=("fn test() {", "assert!(false);", "}")), \
+                patch.object(ignored_tests.os, "sep", "\\"), contextlib.redirect_stdout(io.StringIO()) as log:
+            popen.side_effect = [unittest.mock.Mock(stdout=io.StringIO(output), wait=lambda code=code: code)
+                                 for code, output in outcomes]
+            report = Path(self.folder.parent) / "report.json"
+            self.assertEqual(ignored_tests.run_windows_rows(report), 1)
+        self.assertEqual([call.args[0] for call in popen.call_args_list], [
+            ["cargo", "test", "--no-fail-fast", "--release", "--locked", "-p", "pkg", "--test", "exports",
+             "--", "--ignored", "--exact", test] for test in ("a::one", "b::missing", "c::panics", "d::crash")
+        ])
+        verdict = json.loads(report.read_text())
+        self.assertEqual(verdict["passed"], [{"package": "pkg", "test": "a::one"}])
+        self.assertEqual([(item["test"], item["kind"], item["panic"]) for item in verdict["problems"]],
+                         [("b::missing", "no-longer-runs", None), ("c::panics", "failed", f"{source}:2:3")])
+        self.assertEqual(verdict["incomplete"], [{"shard": "pkg", "reason": "failed without a failed test",
+                                                  "cargo_exit": 101}])
+        for output in (report.read_text(), log.getvalue()):
+            self.assertNotIn("a payload that must not be published", output)
 
     def test_an_unset_variable_runs_nothing(self):
         self.write("wasm-fixture.txt", "pkg a::one VAR needs\n")

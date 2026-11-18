@@ -225,47 +225,6 @@ fn load_chat_filter() -> Option<Box<dyn sunrise_server_files::chat_guard::ChatGu
     loaded.guard
 }
 
-/// `server.toml`'s `[combat]` (docs/pvp.md): `legacy = true` resolves melee hits by 1.8.9's rules. Off without
-/// the file or the section, and (with an error logged) when the section is wrong.
-fn load_combat() -> bool {
-    #[derive(serde::Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct Combat {
-        #[serde(default)]
-        legacy: bool,
-    }
-    let Ok(text) = std::fs::read_to_string("server.toml") else {
-        return false;
-    };
-    let section = toml::from_str::<toml::Table>(&text)
-        .map_err(|e| e.to_string())
-        .and_then(|mut t| match t.remove("combat") {
-            Some(section) => section
-                .try_into::<Combat>()
-                .map(|c| c.legacy)
-                .map_err(|e| format!("[combat]: {e}")),
-            None => Ok(false),
-        });
-    match section {
-        Ok(legacy) => {
-            if legacy {
-                log(
-                    "INFO",
-                    "1.8 combat rules on (server.toml [combat]; legacy = false turns them off)",
-                );
-            }
-            legacy
-        }
-        Err(e) => {
-            log(
-                "ERROR",
-                &format!("server.toml: {e}; fights keep 26.3's rules"),
-            );
-            false
-        }
-    }
-}
-
 /// `server.toml`'s `[entities]` (docs/server.md): `villager_lobotomize` and its check interval. Off without
 /// the file or the section, and (with an error logged) when the section is wrong.
 fn load_entities() {
@@ -1372,7 +1331,6 @@ impl Game<'_> {
         let anticheat = load_anticheat();
         let anticheat_on = anticheat.enabled;
         let chat_filter = load_chat_filter();
-        self.set_pvp_legacy_rules(load_combat());
         self.read_runtime_level_cap(|key| props.raw.get(key));
         load_entities();
         // Sunrise's far ring (docs/hosting.md): server.toml's `max_view_distance`.
@@ -2101,17 +2059,6 @@ impl Game<'_> {
                     }
                 }
             }
-            // Sunrise's temporary ban (game/administration/tempban.rs), as an operator's `/tempban`.
-            command if super::tempban::TEMPBAN_COMMANDS.contains(&command) => {
-                if let Some(mut host) = self.lan.take() {
-                    let words: Vec<&str> = [command].into_iter().chain(rest).collect();
-                    let replies = self.tempban_command(&mut host, &words, "Server");
-                    self.lan = Some(host);
-                    for reply in replies {
-                        self.console_reply(reply.text());
-                    }
-                }
-            }
             "ban" if !rest.is_empty() => {
                 let Some(user) = self.resolve(rest[0]) else {
                     return;
@@ -2591,6 +2538,8 @@ impl Game<'_> {
     }
 
     pub(super) fn stop_dedicated(&mut self, crashed: bool) -> Result<()> {
+        self.streaming.abort_generation();
+        self.levels.abort_parked_generation();
         // The close request starts before player and world saves.
         self.native_lifecycle.begin_close();
         self.native_configs_server_stop();
@@ -3078,7 +3027,7 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// A temporary ban (`/tempban`, the chat filter's) keeps the player out and says when it ends;
+    /// A temporary ban (the chat filter's) keeps the player out and says when it ends;
     /// once it has ended, or after `/pardon`, they come in.
     #[test]
     fn a_temporarily_banned_player_is_refused_with_the_end_until_it_has_passed() {

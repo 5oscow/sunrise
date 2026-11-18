@@ -39,9 +39,9 @@ pub use sunrise_client_render::{
     poi_sections, polytone_creative_tabs, polytone_post, post_chain, potent_sulfur, preedit,
     providers, pvp, pvp_hud, random_source, resource_source, screen_draw, screen_effects, sculk,
     section_mask, server_terrain, settings, shader_options, shader_pack_list, signs, skins, social,
-    sound_engine, sound_events, sound_preview, spans, split_layout, split_map, split_profiles,
-    sprites, streaming, structure_block, tab_list, terrain_model, test_block, test_instance_block,
-    testgen, title_edition, trims, ui, vault, weather, widgets, world, worldborder, zip,
+    sound_engine, sound_events, sound_preview, spans, sprites, streaming, structure_block,
+    tab_list, terrain_model, test_block, test_instance_block, testgen, trims, ui, vault, weather,
+    widgets, world, worldborder, zip,
 };
 pub mod attack_strength;
 pub mod attribute_updates;
@@ -59,6 +59,7 @@ pub mod chunk_io;
 pub mod client_perf;
 pub mod clock;
 pub mod colliders;
+pub mod collision_parts;
 pub mod command_storage;
 pub mod confirm_screen;
 pub mod container_screen;
@@ -113,7 +114,6 @@ mod test_game_dir;
 pub use sunrise_core::json_nbt;
 pub mod lan;
 pub mod landing;
-pub mod legacy_combat;
 pub mod living_attributes;
 pub mod locator_bar;
 pub mod lod_net;
