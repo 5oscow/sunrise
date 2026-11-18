@@ -354,8 +354,10 @@ impl ThrownTrident {
         } else {
             (m.x, m.z)
         };
-        self.yaw = x.atan2(z).to_degrees() as f32;
-        self.pitch = m.y.atan2(m.x.hypot(m.z)).to_degrees() as f32;
+        // Projectile.updateRotation's targets: Mth.atan2 times the folded 180F / (float)PI, the pitch over
+        // Vec3.horizontalDistance.
+        self.yaw = sunrise_core::geometry::trig::atan2_degrees(x, z);
+        self.pitch = sunrise_core::geometry::trig::atan2_degrees(m.y, m.horizontal_distance());
         let to = self.position.add_vector(m);
         if !self.no_physics
             && let Some((at, _, _)) = w.clip(self.position, to)
