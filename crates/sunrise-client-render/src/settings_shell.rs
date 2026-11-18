@@ -538,8 +538,8 @@ pub(crate) fn row(batch: &mut HudBatch, atlas: &HudAtlas, cols: &Columns, y: f32
             (None, Some(position)) => {
                 let value = Text::literal(value);
                 if active {
-                    let focus = live && focused;
-                    style::slider(batch, atlas, control, &value, position, (lit, live, focus));
+                    let states = (hover, focused, held, live);
+                    style::slider(batch, atlas, control, &value, position, states);
                 } else {
                     batch.text_styled(atlas, &value, start, ty, soft, true);
                 }
@@ -726,7 +726,13 @@ fn pad_row(batch: &mut HudBatch, atlas: &HudAtlas, cols: &Columns, y: f32, view:
         (None, Some(_)) => Text::literal(text).with_color(crate::text::YELLOW),
         (None, None) => Text::literal(text),
     };
-    style::button(batch, atlas, chip, &face, (live && hover, live, false));
+    style::button(
+        batch,
+        atlas,
+        chip,
+        &face,
+        (live && (hover || focused), live, false),
+    );
     let ty = y + ((style::ROW - 8.0) / 2.0).floor();
     let middle = chip[0] + chip[2] / 2.0;
     if let Some(g) = art {
@@ -766,7 +772,8 @@ fn pad_row(batch: &mut HudBatch, atlas: &HudAtlas, cols: &Columns, y: f32, view:
         crate::widgets::target(reset);
     }
     let shown = Text::literal(reset_label);
-    style::button(batch, atlas, reset, &shown, (reset_hover, resets, false));
+    let reset_lit = resets && (reset_hover || reset_focused);
+    style::button(batch, atlas, reset, &shown, (reset_lit, resets, false));
     if reset_focused {
         style::ring(batch, atlas, reset, style::WHITE);
     }
