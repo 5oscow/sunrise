@@ -2063,8 +2063,10 @@ fn write_region_records(
         let Some(region) = cached_region(cache, (rx, rz), &path, create)? else {
             continue;
         };
-        let mut region = region.lock().map_err(|_| "region file poisoned")?;
+        // Keep far readers on the exact locked read path while writes and their
+        // flush are in progress, so they cannot use a stale kept header.
         let _writing = far_regions::writing(cache, (rx, rz));
+        let mut region = region.lock().map_err(|_| "region file poisoned")?;
         let mut changed = false;
         for (pos, record) in &list {
             match record {
@@ -2076,7 +2078,9 @@ fn write_region_records(
             }
         }
         if changed {
-            region.sync()?;
+            let handle = region.sync_handle()?;
+            drop(region);
+            handle.sync_data()?;
         }
     }
     Ok(())
