@@ -256,14 +256,24 @@ refused open closes nothing.
 
 The menu the player had open closes on the server first, as a close does: its `removed`, one
 `player_container_close`, and the cursor stack and crafting grids back to the inventory. Then
-the new menu is built, its screen opened and its contents sent, and the next tick's
-`player_container_open` tells of it. `replace` is the Java `MenuProvider`'s choice
+the new menu is built, its screen opened and its contents sent, and `player_container_open`
+tells of it synchronously. Version 2 names the type string `menu_type` (also on
+`player_container_close`) and supplies `menu: Option<MenuRef>`, valid during the open callback,
+as `PlayerRef::container_menu` does. It is `None` for crafting tables, merchants, workstations,
+lecterns, mount inventories and hidden-slot menus. `replace` is the Java `MenuProvider`'s choice
 (`shouldTriggerClientSideContainerClosingOnOpen`), as for
 [`open_menu`](../../concepts/capabilities/menu-slots.md#a-mods-chest-menu):
 `MenuReplace::CloseFirst`, vanilla's default, first sends the client a close for the old
 window, which centres the mouse again; `MenuReplace::InPlace` sends none, so the client keeps
 its screen and its mouse where they are until the new screen replaces it, as when one
 screen of a machine leads to the next.
+
+## Laying a screen's slots out again
+
+A screen whose slots move while it is open (Tinkers' tinker station, which lays its input slots out for the
+tool being built) calls `host.set_screen_slot(block, slot, Some([x, y]))` on the client, or `None` to hide a
+slot ([moving or hiding a mod screen's slots](../client/screens.md#moving-or-hiding-a-mod-screens-slots)). Only
+the screen changes: the server's menu keeps every slot.
 
 ## Receiving synchronized data
 

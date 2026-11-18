@@ -13,9 +13,13 @@ A `BlockState` is an API-owned value pairing a `BlockKey` with a block-local can
 | `friction(state) -> Option<f32>` | `BlockBehaviour.getFriction()` of the block: 0.6 usually, 0.98 ice, 0.8 slime |
 | `is_solid_render(state) -> Option<bool>` | `BlockState.isSolidRender()`: a full, occluding cube (stone yes; glass, leaves, slabs no) |
 | `map_color(state) -> Option<u8>` | `BlockState.getMapColor`: the `MapColor.id` a map item colours a column by, 0 for none |
+| `map_color_rgba(packed) -> Option<[u8; 4]>` | `MapColor.getColorFromPackedId`: decode a map pixel to `[red, green, blue, alpha]`; ID 0 and undefined IDs decode to transparent RGBA; `None` means no game backend |
 | `states_of(block) -> Option<BlockStateRange>` | `StateDefinition.getPossibleStates`, as owned values in canonical local-ordinal order |
 | `definition(block)` | Property names and legal serialized values |
 | `matches(state, block, constraints)` | Partial property match with typed invalid-property and invalid-value errors |
+
+`map_color` returns an unshaded palette ID. Pass a packed map pixel to `map_color_rgba`, or pack an ID with
+`id * 4 + shade` (0–3). The shade scales each RGB channel by 180, 220, 255 or 135 out of 255, rounding down.
 
 Use `StateConstraint` for each partial constraint; `StateMatchError` identifies an invalid property or value by index. `StateProperty` describes a property's legal values. These types are shared by state-definition services.
 

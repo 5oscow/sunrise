@@ -517,6 +517,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "sunrise-addresses",
+ "sunrise-mod-api-gen",
  "sunrise-mod-package",
  "sunrise-mod-point-emit",
  "sunrise-mod-source",
@@ -525,13 +526,14 @@ dependencies = [
  "sunrise-native-build",
  "sunrise-port-pack",
  "sunrise-release-sign",
+ "sunrise-shader-api",
+ "sunrise-wasmtime",
  "tempfile",
  "toml",
  "toml_edit",
  "ureq",
  "wasm-encoder 0.261.0",
  "wasmparser 0.261.0",
- "wasmtime",
  "zip",
 ]
 
@@ -4470,9 +4472,6 @@ dependencies = [
  "log",
  "miniz_oxide 0.8.9",
  "naga",
- "objc2 0.6.5",
- "objc2-app-kit 0.3.2",
- "objc2-foundation 0.3.2",
  "png",
  "pollster",
  "rustix 1.1.5",
@@ -4485,6 +4484,7 @@ dependencies = [
  "sunrise-bench",
  "sunrise-chat-filter",
  "sunrise-client-core",
+ "sunrise-client-gameplay",
  "sunrise-client-input",
  "sunrise-client-lib",
  "sunrise-client-render",
@@ -4494,6 +4494,7 @@ dependencies = [
  "sunrise-engine-slots",
  "sunrise-friends",
  "sunrise-game-discovery",
+ "sunrise-gameplay",
  "sunrise-guest-stack",
  "sunrise-hdr",
  "sunrise-hooks",
@@ -4541,6 +4542,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "sunrise-client-gameplay"
+version = "0.1.0"
+dependencies = [
+ "sunrise-client-lib",
+]
+
+[[package]]
 name = "sunrise-client-input"
 version = "0.1.0"
 dependencies = [
@@ -4572,9 +4580,6 @@ dependencies = [
  "miniz_oxide 0.8.9",
  "mio",
  "naga",
- "objc2 0.6.5",
- "objc2-app-kit 0.3.2",
- "objc2-foundation 0.3.2",
  "open",
  "png",
  "pollster",
@@ -4781,6 +4786,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "sunrise-gameplay"
+version = "0.1.0"
+dependencies = [
+ "sunrise-client-lib",
+]
+
+[[package]]
 name = "sunrise-guest-stack"
 version = "0.1.0"
 dependencies = [
@@ -4879,6 +4891,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "sunrise-game-discovery",
+ "sunrise-mod-call",
  "sunrise-mod-point-shape",
  "sunrise-mod-source",
  "sunrise-mod-surface",
@@ -4909,6 +4922,13 @@ dependencies = [
  "quote",
  "sunrise-mod-point-shape",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "sunrise-mod-call"
+version = "0.1.0"
+dependencies = [
+ "sha2",
 ]
 
 [[package]]
@@ -4981,6 +5001,7 @@ dependencies = [
  "sunrise-core",
  "sunrise-mod-api",
  "sunrise-mod-api-macros",
+ "sunrise-mod-call",
  "sunrise-mod-point-shape",
  "sunrise-mod-surface",
  "sunrise-mod-vocab",
@@ -5024,6 +5045,7 @@ dependencies = [
  "sunrise-mod-api",
  "sunrise-mod-api-gen",
  "sunrise-mod-api-macros",
+ "sunrise-mod-call",
  "sunrise-mod-point-shape",
  "syn 2.0.119",
 ]
@@ -5070,6 +5092,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "sunrise-mod-call",
  "syn 2.0.119",
 ]
 
@@ -5108,16 +5131,17 @@ dependencies = [
  "sunrise-mod-api",
  "sunrise-mod-api-gen",
  "sunrise-mod-api-macros",
+ "sunrise-mod-call",
  "sunrise-mod-package",
  "sunrise-mod-point-emit",
  "sunrise-mod-points",
  "sunrise-mod-runtime",
  "sunrise-threads",
+ "sunrise-wasmtime",
  "sunrise-world",
  "syn 2.0.119",
  "tempfile",
  "wasmparser 0.261.0",
- "wasmtime",
  "wat",
 ]
 
@@ -5465,6 +5489,13 @@ dependencies = [
  "rustc-demangle",
  "sunrise-guest-stack",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "sunrise-wasmtime"
+version = "0.1.0"
+dependencies = [
+ "wasmtime",
 ]
 
 [[package]]

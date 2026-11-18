@@ -105,6 +105,26 @@ impl mod_api::Goal for GoalSpec {
 }
 struct GoalPart(Arc<Probe>);
 #[mod_api::sunrise_part]
+impl mod_api::MobEffectPart for GoalPart {
+    fn should_apply_effect_tick_this_tick(
+        &self,
+        _: &dyn mod_api::Host,
+        event: &mut mod_api::ShouldApplyEffectTickThisTickEvent,
+    ) {
+        event.apply = self.0.family == Family::Knockback;
+    }
+    fn apply_effect_tick(
+        &self,
+        _: &dyn mod_api::Host,
+        event: &mut mod_api::ApplyEffectTickEvent<'_>,
+    ) {
+        if self.0.family == Family::Knockback && event.entity == Some(72) {
+            eprintln!("BORROWED_REAL_EFFECT_HURT");
+            event.hurt("minecraft:mob_attack", 1.0);
+        }
+    }
+}
+#[mod_api::sunrise_part]
 impl mod_api::BlockPart for GoalPart {
     fn fall_on(
         &self,
@@ -174,24 +194,10 @@ impl mod_api::Hooks for Hooks {
             let stone = r.block_key("minecraft:stone");
             r.block_part(stone, GoalPart(self.0.clone()));
         }
-    }
-    fn should_apply_effect_tick_this_tick(
-        &self,
-        _: &dyn mod_api::Host,
-        event: &mut mod_api::ShouldApplyEffectTickThisTickEvent,
-    ) {
         if self.0.family == Family::Knockback {
-            event.apply = true;
-        }
-    }
-    fn apply_effect_tick(
-        &self,
-        _: &dyn mod_api::Host,
-        event: &mut mod_api::ApplyEffectTickEvent<'_>,
-    ) {
-        if self.0.family == Family::Knockback && event.entity == Some(72) {
-            eprintln!("BORROWED_REAL_EFFECT_HURT");
-            event.hurt("minecraft:mob_attack", 1.0);
+            let effect = r.effect_key("borrowed-panic:hit");
+            r.mob_effect_part(&effect, GoalPart(self.0.clone()))
+                .unwrap();
         }
     }
     fn living_knockback(

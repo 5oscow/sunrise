@@ -69,40 +69,77 @@ screen-side replacement point, not a second item-tooltip hook. NeoForge's
 tooltip events do not carry a slot index; the index here is a Sunrise convenience
 over the screen override. Native and wasm use the same hook and menu indices.
 
-## Moving a mod screen's slots
+## Moving or hiding a mod screen's slots
 
 A mod screen declares where each slot sits in `Screen::slots`. A screen whose layout changes while it is
-open (tabs, a collapsing panel, a scrolling slot grid) moves a slot afterwards with
-`ClientHost::set_screen_slot_position`:
+open (tabs, a collapsing panel, a scrolling slot grid, Tinkers' station laying its inputs out for the tool
+being built) moves or hides a slot afterwards with `ClientHost::set_screen_slot`, as a Java screen sets
+`Slot.x`/`Slot.y` or deactivates a slot:
 
 ```rust,ignore
+const BLOCK: &str = "mymod:station";
 // A scrolling grid: slot 3 now sits one row up, 18 pixels from the screen's top-left corner.
-if !host.set_screen_slot_position(3, 62.0, 18.0) {
-    // no mod screen is open, the screen does not show slot 3, or the position is not finite
-}
+host.set_screen_slot(BLOCK, 3, Some([62.0, 18.0]))?;
+// This layout doesn't use slot 4.
+host.set_screen_slot(BLOCK, 4, None)?;
+// Where slot 3 is from the next frame.
+assert_eq!(host.screen_slot(BLOCK, 3), Some([62.0, 18.0]));
 ```
 
-`slot` is the index into `Screen::slots`. `x` and `y` are GUI pixels from the screen's top-left corner and
-name the item's top-left corner, as in `Screen::slots`. The call takes `&self`, so a screen hook such as
-`screen_render_post` can move slots every frame; a call that repeats a slot's position changes nothing and costs
-no layout work. The position lasts until the screen closes, and the next screen opens with its declared layout.
+`block` is the block whose screen is open, so a call made for another screen refuses. `slot` is the index into
+`Screen::slots`. A position is GUI pixels from the screen's top-left corner and names the item's top-left
+corner, as in `Screen::slots`; `None` hides the slot. The call takes `&self`, so a screen hook such as
+`screen_render_post` can move slots every frame; a call that repeats a slot's current place changes nothing and
+costs no layout work. The change lasts until the screen closes, and the next screen opens with its declared
+layout. `ClientHost::screen_slot(block, slot)` reads where a slot will be from the next frame, `None` when it is
+hidden.
 
-From the next frame the moved slot is a vanilla slot at that position, which is what the screen reads live:
+From the next frame a moved slot is a vanilla slot at that position, which is what the screen reads live:
 
-- the hovered slot is the first shown slot in index order whose 18 by 18 box (one pixel up and left of the item
-  square, one beyond it) holds the pointer, so slots that overlap resolve to the lower index;
+- the hovered slot is the first shown slot in menu order whose 18 by 18 box (one pixel up and left of the item
+  square, one beyond it) holds the pointer, so a container slot over the player's inventory or hotbar wins;
 - the 24 by 24 highlight is drawn 4 pixels up and left of it;
 - its item, count and decorations, and its empty-slot icon, are drawn there;
 - the recipe book's ghost items are drawn there.
 
-The recipe book and `screen_room` still move the whole image, and every slot with it; a slot's own position
-never changes for them. A position outside the image is allowed and is not clamped. The call is client-side
-only: nothing is sent, and the server's menu never learns a position.
+A hidden slot is none of these: it is not hovered, drawn or listed until the mod puts it somewhere again. A move
+or a hide never touches the recipe book: a bound book keeps its catalogue and its placement. The recipe book and
+`screen_room` still move the whole image, and every slot with it; a slot's own position never changes for them. A
+position outside the image is allowed and is not clamped, and a slot there takes the click instead of making it a
+click outside the screen.
 
-It refuses, returning `false` and changing nothing, with no mod screen open, for an index past the end of
-`Screen::slots` or hidden there with `None`, and for an `x` or `y` that is NaN or infinite. It never panics.
+The call is client-side only: nothing is sent, and the server's menu never learns a position. It keeps every slot,
+so a hidden slot keeps its item and a shift-click may still fill it, as a deactivated Java slot does. A slot the
+screen hid in `Screen::slots` when it opened is not in the server's menu, so it can't be shown: declare the most
+slots any layout shows, and hide the ones a layout doesn't use.
+
+Each refusal changes nothing and is named by `ScreenSlotRefusal`:
+
+| Refusal | When |
+|---|---|
+| `NoScreen` | No mod screen is open, or the open one is another block's |
+| `NoSuchSlot` | `slot` is past the end of `Screen::slots` |
+| `HiddenAtOpen` | A position for a slot `Screen::slots` hid when the screen opened |
+| `BadPosition` | An `x` or `y` that is NaN or infinite |
+| `Unavailable` | No game backend: screens are the client's |
+
 It moves only the slots a mod screen declares; the player's inventory stays under `inventory_x` and
-`inventory_y`, and showing or hiding a slot stays with `Screen::slots`.
+`inventory_y`.
+
+## Mod container title and inventory labels
+
+`Screen::title_label` and `Screen::inventory_label` optionally place those two labels,
+independently of slot positions. `Some([x, y])` is relative to the screen image's
+top-left corner, in GUI pixels. `None` uses vanilla's defaults: title `[8, 6]` and
+inventory `[8, height - 94]`. Moving `inventory_x` or `inventory_y` moves slots,
+not labels. `own_labels: true` suppresses both engine labels even when positions
+are supplied; draw them yourself from `screen_draw` instead.
+
+The default inventory label is at y 72 for a standard 166-high screen and y 39
+for a 133-high hopper layout. Chest layouts use `height - 94`; a shulker box's
+167-high image places it at y 73. Native and wasm use the same declaration.
+When building a complete `Screen` literal, include `title_label: None` and
+`inventory_label: None`, or use `..Default::default()`.
 
 ## Labels: wrapped text without a widget
 

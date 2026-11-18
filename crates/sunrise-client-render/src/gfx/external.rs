@@ -20,7 +20,7 @@ use super::{Cull, EffectiveOutput, Frame, Frustum, Sides, facing_runs, frustum};
 
 /// What a world frame gives an external pipeline at its points: the frame's own values, and
 /// the display's from the renderer's one output snapshot (`EffectiveOutput`: whether HDR is on,
-/// paper white, peak), never worked out again, so each split-screen window keeps its own.
+/// paper white, peak), preserved with the frame.
 pub struct FrameState<'a> {
     pub frame: &'a Frame<'a>,
     pub output: &'a EffectiveOutput,

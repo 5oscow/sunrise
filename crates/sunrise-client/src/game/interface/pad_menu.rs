@@ -841,26 +841,6 @@ impl Game<'_> {
         if self.pad_binding() && !matches!(button, Button::East | Button::Start) {
             return Ok(());
         }
-        // Splitscreen Setup: A picks up the focused player's tile, then left/right (or LB/RB)
-        // cycle where it goes, A drops it, B puts it back (`split_ui`).
-        if !prompt && self.screen == Screen::Options && self.ui.options.page() == Page::SplitSetup {
-            let setup = &mut self.ui.options.split_setup;
-            if setup.pad_button(button) {
-                // Dropped or put back: the focus follows the player to its tile.
-                if let Some(rect) = setup.take_refocus() {
-                    let kind = Kind::Button;
-                    self.pad_focus_on(event_loop, Target { rect, kind });
-                }
-                return Ok(());
-            }
-            if button == Button::South
-                && self.pad_focusing()
-                && let Some(focus) = self.pad.menu.focus
-                && self.ui.options.split_setup.pad_pick_up(focus.center())
-            {
-                return Ok(());
-            }
-        }
         // The screen under the keyboard went away (dying with chat open): so does the keyboard.
         if self.pad.menu.osk.is_some() && !self.pad_has_typing_screen() {
             self.pad.menu.osk = None;
@@ -1048,15 +1028,6 @@ impl Game<'_> {
         }
         // A slider's step is a click, which a waiting key row would bind.
         if self.pad_binding() {
-            return;
-        }
-        // Splitscreen Setup with a player held: the stick cycles it as the D-pad does.
-        if !self.prompt_open()
-            && self.screen == Screen::Options
-            && self.ui.options.page() == Page::SplitSetup
-            && self.ui.options.split_setup.holding()
-        {
-            self.ui.options.split_setup.pad_button(button);
             return;
         }
         if self.pad_focus_mode() {
@@ -1994,10 +1965,6 @@ impl Game<'_> {
             return;
         }
         self.pad.menu.os_hidden = !show;
-        // Controller menus leave the native pointer to its owning player.
-        if !self.keyboard_mouse {
-            return;
-        }
         if let Some(window) = &self.window {
             window.set_cursor_visible(show && !self.captured);
         }

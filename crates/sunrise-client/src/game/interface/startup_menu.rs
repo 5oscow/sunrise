@@ -418,7 +418,7 @@ pub(super) fn spawn_loader(
                     });
             let result = root
                 .and_then(|root| {
-                    load_resources(
+                    load_resources_for_mods(
                         root,
                         super::pack_finders::data_packs(&mod_sources),
                         world.as_deref(),
@@ -431,6 +431,7 @@ pub(super) fn spawn_loader(
                         &mut |gui, root| {
                             let _ = sender.send(LoaderMsg::Ui(gui, root.to_path_buf()));
                         },
+                        &mod_sources,
                     )
                 })
                 .map(|mut loaded| {

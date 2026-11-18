@@ -24,7 +24,6 @@ Cases:
 - optimize_world: B doesn't stop Optimize World, which declares nothing.
 - pointer_screens: Statistics', Advancements' and the packs' Done show a glyph and B presses them.
 - settings_pages: nothing labelled Done, Back or Cancel is undeclared on any options page, Graphics included.
-- split_setup: Splitscreen Setup's Done is declared, and off while a player is held.
 - actions_follow_screen: right after a press opens a screen, the screen before it can't be pressed.
 - glyphs_title: the title's X and B on their buttons, A once the focus is on the exit, gone at the mouse.
 - glyph_on_field: A on a focused text field and B on Cancel; A opens one keyboard, which hides them; B closes it.
@@ -556,31 +555,6 @@ def settings_pages(args, name):
         game.pad('east')
         game.wait_targets()
         check(game.rects() != before, 'B did not press Done on Graphics')
-    finally:
-        game.quit()
-    return check.failures
-
-
-def split_setup(args, name):
-    game = Game(args, name)
-    check = Check()
-    try:
-        game.wait_targets()
-        game.title_buttons()
-        game.pad('west')
-        game.ctl('options', 'sunrise')
-        time.sleep(SETTLE)
-        game.wait_targets()
-        click_widget(game, widget(game, 'split'))
-        game.wait_targets()
-        game.pad('down')
-        check(declared(game).get('Done') is True, f'Setup declares {declared(game)}')
-        check(game.menu()['undeclared'] == [], f"undeclared: {game.menu()['undeclared']}")
-        # A held player needs a second one, which one virtual pad can't be: `split_ui`'s
-        # done_is_declared_off_while_a_player_is_held has that.
-        game.pad('east')
-        game.wait_targets()
-        check(any('split' in w['id'] for w in game.widgets()), f'B did not press Done: {labels(game)}')
     finally:
         game.quit()
     return check.failures
@@ -4652,7 +4626,7 @@ CASES = {'idle_a': idle_a, 'idle_b': idle_b, 'idle_x': idle_x, 'release': releas
          'pad_release': pad_release, 'pause_y': pause_y, 'settings': settings, 'create_world': create_world,
          'world_options': world_options, 'key_row_b': key_row_b, 'lock_question': lock_question,
          'optimize_world': optimize_world, 'pointer_screens': pointer_screens, 'settings_pages': settings_pages,
-         'split_setup': split_setup, 'actions_follow_screen': actions_follow_screen, 'glyphs_title': glyphs_title,
+         'actions_follow_screen': actions_follow_screen, 'glyphs_title': glyphs_title,
          'glyph_on_field': glyph_on_field, 'settings_apply': settings_apply, 'long_label': long_label,
          'tabs_create_world': tabs_create_world,
          'tab_release': tab_release,
