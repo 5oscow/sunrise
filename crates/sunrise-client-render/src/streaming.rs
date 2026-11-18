@@ -577,6 +577,10 @@ pub struct Streaming {
     saves_beside_final: bool,
     lighting: FxHashMap<(i32, i32), u64>,
     meshing: FxHashMap<(i32, i32, i32), u64>,
+    /// Mesh jobs actually in flight. `meshing` can hide more than one job for a
+    /// section when an edit replaces its entry before the old job lands, so the
+    /// room is counted from this, not from the map's length.
+    mesh_jobs: usize,
     /// The sequence each section's latest accepted mesh was dispatched at
     /// (`CompiledSectionMesh.compileTaskStartTimeNs`).
     compile_started: FxHashMap<(i32, i32, i32), u64>,
@@ -601,6 +605,9 @@ pub struct Streaming {
     mesh_columns_scratch: Vec<((i32, i32), SectionMask)>,
     sequence: u64,
     pub center: (i32, i32),
+    /// The centre's height: a column admitted part-way spends its slots on the
+    /// sections nearest the camera, not on the lowest.
+    pub center_y: i32,
     /// The view distance around `center`; below 0, no area there (a dedicated
     /// server nobody is on).
     pub radius: i32,
@@ -1206,6 +1213,7 @@ impl Streaming {
             saves_beside_final: generator.decorates_beside_final(),
             lighting: Default::default(),
             meshing: Default::default(),
+            mesh_jobs: 0,
             compile_started: Default::default(),
             lit: Default::default(),
             meshed: Default::default(),
@@ -1220,6 +1228,7 @@ impl Streaming {
             mesh_columns_scratch: Vec::new(),
             sequence: 0,
             center: (0, 0),
+            center_y: 0,
             radius: 8,
             forced: HashSet::new(),
             commanded: HashSet::new(),
@@ -1270,6 +1279,7 @@ impl Streaming {
     /// rebuild every loaded, lit section.
     pub fn reload_sections(&mut self, world: &mut World) {
         self.meshing.clear();
+        self.mesh_jobs = 0;
         self.compile_started.clear();
         Self::mark_loaded_sections_dirty(world, &self.lit);
     }
@@ -1368,6 +1378,7 @@ impl Streaming {
         // pass over them all (80,000 at render distance 32) took 1.7 ms of the frame.
         if world.chunks.is_empty() {
             self.meshing.clear();
+            self.mesh_jobs = 0;
             self.compile_started.clear();
             self.waiting.clear();
         } else {
@@ -1773,6 +1784,15 @@ impl Streaming {
                 paused: true,
             });
         }
+        // A section dirtied while its mesh was in flight must not upload that
+        // mesh: drop its entry so the result is stale, and leave the section
+        // dirty for the next job. The alternative is drawing the pre-edit
+        // border face the edit was meant to hide.
+        for ((x, z), sections) in world.dirty_sections.columns() {
+            for sy in sections.iter() {
+                self.meshing.remove(&(x, sy as i32, z));
+            }
+        }
         ExtraCover::refresh(&mut self.cover, &self.extra);
         ForcedCover::refresh(&mut self.forced_cover, &self.forced);
         self.cover_current = true;
@@ -1846,6 +1866,7 @@ impl Streaming {
                     self.apply_lit(world, x, z, sections, snapshot);
                 }
                 Done::Meshed(x, sy, z, mesh, seq) => {
+                    self.mesh_jobs = self.mesh_jobs.saturating_sub(1);
                     if self.meshing.get(&(x, sy, z)) != Some(&seq) {
                         resume.stale.push(((x, sy, z), mesh));
                         continue;
@@ -2305,7 +2326,8 @@ impl Streaming {
                 continue;
             };
             let mut sections = world.dirty_sections.take_column(x, z);
-            let taken = sections.take_up_to(&mut budget);
+            let center = (self.center_y - world.layout().min_y()).div_euclid(16);
+            let taken = sections.take_near(&mut budget, center);
             if !sections.is_empty() {
                 world.dirty_sections.insert_column_mask((x, z), sections);
             }
@@ -2332,6 +2354,7 @@ impl Streaming {
                     continue;
                 }
                 self.meshing.insert((x, sy, z), self.sequence);
+                self.mesh_jobs += 1;
                 self.submit(
                     Some((x, z)),
                     if first { 2 } else { 0 },
@@ -2527,6 +2550,7 @@ impl Streaming {
         self.viewing.clear();
         self.waiting.clear();
         self.meshing.clear();
+        self.mesh_jobs = 0;
         self.lighting.clear();
         self.jobs.notify_all();
     }
