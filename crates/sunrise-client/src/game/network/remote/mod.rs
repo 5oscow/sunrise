@@ -6276,30 +6276,34 @@ impl Game<'_> {
         .then(|| self.local_player())
         .flatten();
         let player_from = entity_section_steps::player_before(self);
+        // The entities that tick before the player pushed it before its tick began, so
+        // before Pre.
+        self.apply_remote_push(pushed);
         if let Some(player) = player {
             self.native_player_tick_pre(mod_api::__private::PlayerTickPreCall { player });
         }
         self.native_local_player_fit_sizes();
-        let result = self.tick_local_player(entity_collisions, pushed, sprint_window);
-        self.push_after_player();
+        let result = self.tick_local_player(entity_collisions, sprint_window);
         entity_section_steps::player_after(self, player_from);
         // `EntityEvent.Size` for the pose the tick set.
         self.native_local_player_size();
         if let Some(player) = player {
             self.native_player_tick_post(mod_api::__private::PlayerTickPostCall { player });
         }
+        // The entities added after the player tick after it, so after Post: `Entity.push`
+        // adds each to the player's deltaMovement during their tick, from where they and
+        // the player ended it. A velocity or teleport the server sends before the next
+        // tick replaces that deltaMovement, push included
+        // (`ClientPacketListener.handleSetEntityMotion`, `handleMovePlayer`), so the push
+        // lands on the velocity now, not on the next move.
+        let after = self.remote_pushes(false);
+        self.apply_remote_push(after);
         result
     }
 
-    /// The pushes of the entities added after the player, which tick after
-    /// it: `Entity.push` adds each to the player's deltaMovement during their
-    /// tick, from where they and the player ended it. A velocity or teleport
-    /// the server sends before the next tick replaces that deltaMovement, push
-    /// included (`ClientPacketListener.handleSetEntityMotion`,
-    /// `handleMovePlayer`), so the push lands on the velocity now, not on the
-    /// next move.
-    fn push_after_player(&mut self) {
-        let pushed = self.remote_pushes(false);
+    /// `Entity.push`'s share of the other entities' ticks: added to the local
+    /// player's deltaMovement, unless it lies dead, sleeps or rides.
+    fn apply_remote_push(&mut self, pushed: Vec3) {
         let still = self.screen == Screen::Dead || self.sleeping.is_some() || self.riding.is_some();
         if let Some(player) = self.player.as_mut()
             && !still
@@ -6313,7 +6317,6 @@ impl Game<'_> {
     fn tick_local_player(
         &mut self,
         entity_collisions: Vec<sunrise_core::geometry::Aabb>,
-        pushed: Vec3,
         sprint_window: i32,
     ) -> Result<()> {
         // Player.tick's ItemCooldowns.tick, after Pre and after
@@ -6433,7 +6436,6 @@ impl Game<'_> {
             player.pitch = 0.0;
         } else if !dead && !riding {
             player.client_side = true;
-            player.velocity = player.velocity.add_vector(pushed);
             // LivingEntity.checkAutoSpinAttack: a Riptide spin that touches a
             // mob ends and bounces back; the server deals the hit.
             player.spin_targets.clear();
