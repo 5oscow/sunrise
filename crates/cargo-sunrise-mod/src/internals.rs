@@ -180,6 +180,15 @@ fn sync(dir: &Path) -> Result<(), String> {
         .native
         .as_ref()
         .ok_or("internals sync needs a [native] mod")?;
+    // A mod names game internals only through the `sunrise-internals` crate: without it
+    // discovery has nothing to find, and checking the game's source would take minutes.
+    let cargo = fs::read_to_string(dir.join("Cargo.toml")).unwrap_or_default();
+    if manifest.internals.is_empty() && !cargo.contains("sunrise-internals") {
+        println!(
+            "Nothing to sync: Cargo.toml does not depend on sunrise-internals and {MANIFEST} declares no internals, so this mod names no game internals. Add that dependency to use them."
+        );
+        return Ok(());
+    }
     let launcher =
         std::env::var_os("SUNRISE_LAUNCHER").unwrap_or_else(|| "sunrise-launcher".into());
     let output = std::process::Command::new(launcher)
@@ -553,6 +562,25 @@ mod tests {
         assert_eq!(fs::read_to_string(&path).unwrap(), "written");
         assert_eq!(fs::read_to_string(&referent).unwrap(), "keep");
         assert!(!dangling.exists());
+    }
+
+    #[test]
+    fn sync_stops_before_discovery_when_the_mod_names_no_internals() {
+        let project = Scratch::new("sync-nothing");
+        let text = format!(
+            "id = 'example'\nname = 'Example'\nversion = '0.1.0'\napi = '0.2'\ncapabilities = ['registries']\n[native]\ngame = '26.3'\nsunrise = '{}'\nmixins = '{}'\n",
+            "a".repeat(40),
+            "b".repeat(40)
+        );
+        fs::write(project.join(MANIFEST), &text).unwrap();
+        fs::write(
+            project.join("Cargo.toml"),
+            "[package]\nname = 'example'\nversion = '0.1.0'\n[dependencies]\nsunrise-mod-api = { path = 'x' }\n",
+        )
+        .unwrap();
+        // No launcher is run and nothing is written: a launcher call would fail in a test box.
+        sync(&project).unwrap();
+        assert_eq!(fs::read_to_string(project.join(MANIFEST)).unwrap(), text);
     }
 
     #[cfg(unix)]

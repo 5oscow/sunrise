@@ -44,16 +44,17 @@ folders are unsupported.
 
 ## `sunrise-mod.toml`
 
-The shared [manifest fields](../how-to/content-mods.md#the-manifest) include `id`, `name`, `version`, `api = "0.2"`
-and `capabilities = ["registries"]`. The content API is checked for exact equality. Unknown fields
-refuse the manifest. Native mods may declare top-level `internals`, an array of tables with
+The shared [manifest fields](../how-to/content-mods.md#the-manifest) include `id`, `name`, `version`, and the two the tool writes, `api` and `capabilities`:
+`cargo sunrise-mod build` puts `api = "0.2"` and `capabilities = ["registries"]` into the package, and a manifest that
+writes either must write that value (any other is refused, naming both). Unknown fields refuse the manifest,
+naming the nearest valid key when one is close. Native mods may declare top-level `internals`, an array of tables with
 `path`, optional `hash`, and `kind` when a path names several member kinds. Without `hash`, the build uses the fingerprint from the pinned game’s catalog. An explicitly empty `hash` is refused. Native code adds `[native]`:
 
 | Field | Type | Rule |
 | --- | --- | --- |
 | `game` | string | not empty, the Minecraft version (`"26.3"`) |
 | `sunrise` | string | the exact Sunrise commit, 40 lowercase hex characters |
-| `mixins` | string | the exact horizon-mixins commit, 40 lowercase hex characters |
+| `mixins` | string, optional | the exact horizon-mixins commit, 40 lowercase hex characters; absent, the one the pinned SDK names (`sdk.json`'s `mixins`), which `build` writes into the package |
 | `module` | array of tables | optional support modules, written as `[[native.module]]` |
 
 API points use top-level declarations.

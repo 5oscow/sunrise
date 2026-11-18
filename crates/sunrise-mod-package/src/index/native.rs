@@ -65,7 +65,12 @@ impl Bundle {
         Facts {
             id: Some(self.manifest.id.clone()),
             version: Some(self.manifest.version.clone()),
-            api: format!("native-1/{}/{}", native.sunrise, native.mixins),
+            // No SDK is at hand here: a package `cargo sunrise-mod build` made carries the
+            // revision its SDK named, and one without it lists the pin as written.
+            api: match &native.mixins {
+                Some(mixins) => format!("native-1/{}/{mixins}", native.sunrise),
+                None => format!("native-1/{}", native.sunrise),
+            },
             game: Some(native.game.clone()),
             ..Facts::default()
         }

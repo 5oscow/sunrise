@@ -16,6 +16,12 @@ pub(super) fn run(dir: &Path, args: &[String]) -> Result<(), String> {
         .native
         .as_ref()
         .ok_or("inject update needs a [native] mod")?;
+    if manifest.inject.is_empty() {
+        println!(
+            "Nothing to update: {MANIFEST} has no [[inject]] rows. `cargo sunrise-mod inject add <at> --kind <kind>` writes one."
+        );
+        return Ok(());
+    }
     let internals = crate::internals::load(dir, &native.sunrise)?;
     let points = crate::sdk_fetch::build_data(dir, &native.sunrise)?.join("points.json");
     let (_, catalog): (_, Catalog) = sunrise_mod_package::build_data::read(

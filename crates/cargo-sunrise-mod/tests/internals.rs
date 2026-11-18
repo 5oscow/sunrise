@@ -247,8 +247,8 @@ fn update_diffs_signatures_refreshes_present_hashes_and_keeps_missing_declaratio
     let manifest = project.manifest();
     let native = manifest.native.unwrap();
     assert_eq!(native.sunrise, NEW);
-    // The destination SDK's tool replaces the manifest's.
-    assert_eq!(native.mixins, NEW_MIXINS);
+    // An explicit pin of the tool is the mod's own choice: `update` leaves it.
+    assert_eq!(native.mixins.as_deref(), Some(MANIFEST_MIXINS));
     assert_eq!(
         manifest
             .internals
@@ -298,7 +298,10 @@ fn table_declarations_keep_their_format_when_adding_and_refreshing() {
     let report = success(&project.run(&["update", "--sunrise", NEW]));
     assert!(report.contains("unchanged: sunrise_client::game::Game"));
     assert_eq!(project.manifest().internals.len(), 2);
-    assert_eq!(project.manifest().native.unwrap().mixins, NEW_MIXINS);
+    assert_eq!(
+        project.manifest().native.unwrap().mixins.as_deref(),
+        Some(MANIFEST_MIXINS)
+    );
     assert!(project.text().contains("# fingerprint"));
 }
 

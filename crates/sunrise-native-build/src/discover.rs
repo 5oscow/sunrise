@@ -64,7 +64,7 @@ fn catalog_for_mod(
         cache_root,
         crate::source,
         |bundle, prepared, input, fresh| {
-            let tool = crate::tool(rust, &bundle.native().mixins, &|| {})?;
+            let tool = crate::tool(rust, bundle.native().mixins_or(crate::MIXINS_REV), &|| {})?;
             crate::run(
                 crate::apply(rust, &tool, prepared, input, fresh),
                 "horizon-mixins",

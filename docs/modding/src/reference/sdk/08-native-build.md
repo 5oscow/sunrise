@@ -86,7 +86,7 @@ mods, `null` when none is. Each of `mods` has:
 |---|---|
 | `id` | The mod's id. |
 | `refusal` | Why no build takes it, as the build log says it; then `verdict` is `null`. |
-| `verdict` | `{"kind": …, "made_for": build}`: `made-for` (no `made_for`), `fits`, `exact` (`why`: the table that changes game code, or `internals`), `no-list` (its package doesn't say what it uses), `does-not-fit` (`misfits`: each `{id, change}`, the surface id and how it changed), `points` (`why`: an `[[inject]]` point that isn't the same). `made-for` and `fits` are usable. |
+| `verdict` | `{"kind": …, "made_for": build}`: `made-for` (no `made_for`), `fits`, `exact` (`why`: the table that changes game code, or `internals`), `no-list` (its package carries no list of what it uses, or one made for another build than its pin), `does-not-fit` (`misfits`: each `{id, change}`, the surface id and how it changed), `points` (`why`: an `[[inject]]` point that isn't the same). `made-for` and `fits` are usable. |
 | `needs` | `surface` or `build-data` when the plan didn't give the file its verdict needs; then `verdict` is `null`. The caller fetches it and asks again. |
 
 A `change` is `"removed"`, `"changed"`, `{"lost-impl": trait}`, `{"fields": {gained, at}}`, `{"version": {named, now}}`,
