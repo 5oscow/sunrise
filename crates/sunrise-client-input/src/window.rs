@@ -4,7 +4,7 @@
 //! request/state pair.
 
 use winit::{
-    dpi::PhysicalPosition,
+    dpi::{LogicalPosition, PhysicalPosition},
     raw_window_handle::{HasDisplayHandle, RawDisplayHandle},
     window::Window,
 };
@@ -59,6 +59,7 @@ impl GuiSize {
 pub struct PointerSpace {
     screen: [i32; 2],
     backing_scale: f64,
+    wayland: bool,
 }
 
 impl PointerSpace {
@@ -67,6 +68,7 @@ impl PointerSpace {
             screen: physical
                 .map(|extent| ((f64::from(extent) / backing_scale).round() as i32).max(1)),
             backing_scale,
+            wayland: false,
         }
     }
 
@@ -74,13 +76,28 @@ impl PointerSpace {
         // Cocoa and Wayland use points/surface units. On Win32 and X11 the
         // pointer and extent are already in client pixels; their UI scale
         // does not enter the pointer conversion.
-        let logical = cfg!(target_os = "macos")
-            || matches!(
-                window.display_handle().map(|h| h.as_raw()),
-                Ok(RawDisplayHandle::Wayland(_))
-            );
+        let wayland = matches!(
+            window.display_handle().map(|h| h.as_raw()),
+            Ok(RawDisplayHandle::Wayland(_))
+        );
+        let logical = cfg!(target_os = "macos") || wayland;
         let backing_scale = if logical { window.scale_factor() } else { 1.0 };
-        Self::new(window.inner_size().into(), backing_scale)
+        Self {
+            wayland,
+            ..Self::new(window.inner_size().into(), backing_scale)
+        }
+    }
+
+    /// Recover the surface position from an OS-delivered `CursorMoved` event.
+    pub fn os_sample(self, position: PhysicalPosition<f64>) -> PointerSample {
+        if self.wayland {
+            // Winit multiplied a wl_fixed (1/256 surface unit) by the backing
+            // scale. Dividing can land just below the original pixel edge.
+            let snap = |raw: f64| (raw / self.backing_scale * 256.0).round() / 256.0;
+            PointerSample::Wayland(LogicalPosition::new(snap(position.x), snap(position.y)))
+        } else {
+            position.into()
+        }
     }
 
     /// `MouseHandler.grabMouse` / `releaseMouse` center in window units.
@@ -102,6 +119,36 @@ impl PointerSpace {
     }
 }
 
+/// A cursor sample retained for projection after a redraw or resize.
+#[derive(Clone, Copy, Debug)]
+pub enum PointerSample {
+    Physical(PhysicalPosition<f64>),
+    Wayland(LogicalPosition<f64>),
+}
+
+impl PointerSample {
+    fn screen_position(self, backing_scale: f64) -> LogicalPosition<f64> {
+        match self {
+            Self::Physical(position) => {
+                LogicalPosition::new(position.x / backing_scale, position.y / backing_scale)
+            }
+            Self::Wayland(position) => position,
+        }
+    }
+}
+
+impl From<PhysicalPosition<f64>> for PointerSample {
+    fn from(position: PhysicalPosition<f64>) -> Self {
+        Self::Physical(position)
+    }
+}
+
+impl Default for PointerSample {
+    fn default() -> Self {
+        Self::Physical(PhysicalPosition::new(0.0, 0.0))
+    }
+}
+
 /// The GUI uses framebuffer-derived dimensions, but the pointer denominator
 /// is the window's screen-coordinate extent, not the rounded drawable size.
 #[derive(Clone, Copy, Debug)]
@@ -111,16 +158,13 @@ pub struct PointerProjection {
 }
 
 impl PointerProjection {
-    fn project_axis(self, physical: f64, axis: usize) -> f64 {
-        scaled_pos(
-            physical / self.window.backing_scale,
-            self.gui.size[axis] as i32,
-            self.window.screen[axis],
-        )
+    fn project_axis(self, screen: f64, axis: usize) -> f64 {
+        scaled_pos(screen, self.gui.size[axis] as i32, self.window.screen[axis])
     }
 
     /// `MouseHandler` projects window coordinates before dispatching mouse input.
-    pub fn project_pointer(self, position: PhysicalPosition<f64>) -> GuiPointer {
+    pub fn project_pointer(self, sample: impl Into<PointerSample>) -> GuiPointer {
+        let position = sample.into().screen_position(self.window.backing_scale);
         GuiPointer(
             self.project_axis(position.x, 0),
             self.project_axis(position.y, 1),
@@ -129,14 +173,23 @@ impl PointerProjection {
 
     /// Measure motion in the current GUI units, even if the scale changed
     /// since the last sample. Narrow only the final delta for the hook ABI.
-    pub fn drag_delta(
-        self,
-        previous: PhysicalPosition<f64>,
-        current: PhysicalPosition<f64>,
-    ) -> [f32; 2] {
+    pub fn drag_delta(self, previous: PointerSample, current: PointerSample) -> [f32; 2] {
+        let scale = self.window.backing_scale;
+        let (dx, dy) = match (previous, current) {
+            // Retain the original subtract-then-scale order for raw samples.
+            (PointerSample::Physical(previous), PointerSample::Physical(current)) => (
+                (current.x - previous.x) / scale,
+                (current.y - previous.y) / scale,
+            ),
+            _ => {
+                let previous = previous.screen_position(scale);
+                let current = current.screen_position(scale);
+                (current.x - previous.x, current.y - previous.y)
+            }
+        };
         [
-            self.project_axis(current.x - previous.x, 0) as f32,
-            self.project_axis(current.y - previous.y, 1) as f32,
+            self.project_axis(dx, 0) as f32,
+            self.project_axis(dy, 1) as f32,
         ]
     }
 
@@ -153,12 +206,13 @@ impl PointerProjection {
             // A negative integer instead keeps the render pixel (truncation
             // is toward zero), even when it lies outside the window.
             let target = f64::from(pos);
+            let project = |raw| self.project_axis(raw / self.window.backing_scale, axis);
             if pos < 0.0 && pos.fract() == 0.0 {
-                while self.project_axis(raw, axis) > target {
+                while project(raw) > target {
                     raw = raw.next_down();
                 }
             } else {
-                while self.project_axis(raw, axis) < target {
+                while project(raw) < target {
                     raw = raw.next_up();
                 }
             }
@@ -954,6 +1008,50 @@ mod tests {
             scaled.window.center(),
             PhysicalPosition::new(320.625, 240.625)
         );
+    }
+
+    #[test]
+    fn wayland_os_samples_round_trip_through_the_surface_grid() {
+        for scale in [130, 140, 160] {
+            let backing_scale = f64::from(scale) / 120.0;
+            let extent = (468.0 * backing_scale).round() as u32;
+            let framebuffer = [extent; 2];
+            let projection = PointerProjection {
+                gui: GuiSize::new(framebuffer, 1, false),
+                window: PointerSpace {
+                    wayland: true,
+                    ..PointerSpace::new(framebuffer, backing_scale)
+                },
+            };
+            let os_pointer = |x: f64, y: f64| {
+                projection
+                    .window
+                    .os_sample(PhysicalPosition::new(x * backing_scale, y * backing_scale))
+            };
+            if scale == 140 {
+                assert_eq!(
+                    projection.project_pointer(os_pointer(30.0, 30.0)).pixel(),
+                    (35.0, 35.0)
+                );
+            }
+            for pixel in 0..468 {
+                for offset in [-1.0 / 256.0, 0.0, 1.0 / 256.0] {
+                    let x = f64::from(pixel) + offset;
+                    let expected = (x * f64::from(extent) / 468.0) as i32 as f32;
+                    assert_eq!(
+                        projection.project_pointer(os_pointer(x, -x)).pixel(),
+                        (expected, -expected),
+                        "scale {scale}, surface x={x}"
+                    );
+                }
+            }
+            // Agent and pad events take the inverse path. Snapping this
+            // non-grid position at 140/120 would move it onto pixel 35.
+            let synthetic = (35.0_f32.next_down(), 67.25);
+            let projected = projection.project_pointer(projection.window_pointer(synthetic));
+            assert_eq!(projected.subpixel(), synthetic);
+            assert_eq!(projected.pixel(), (34.0, 67.0));
+        }
     }
 
     #[test]

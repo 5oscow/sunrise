@@ -3,17 +3,19 @@
 //! (`sunrise_client::no_resources`) and quits when it is closed. No loader, no
 //! crash report: nothing went wrong in the game.
 use super::*;
-use sunrise_client::no_resources::{Action, NoResources};
-use winit::{dpi::PhysicalPosition, event::MouseButton};
+use sunrise_client::{
+    no_resources::{Action, NoResources},
+    window::{GuiSize, PointerProjection, PointerSample, PointerSpace},
+};
+use winit::event::MouseButton;
 
 struct Missing {
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     gui: UiResources,
     screen: NoResources,
-    /// The pointer in physical pixels.
-    pointer: PhysicalPosition<f64>,
-    window_pointer_space: std::cell::OnceCell<sunrise_client::window::PointerSpace>,
+    pointer: PointerSample,
+    window_pointer_space: std::cell::OnceCell<PointerSpace>,
     api: sunrise_client::graphics::GraphicsApi,
     settings: Settings,
     error: Option<Box<dyn std::error::Error>>,
@@ -37,7 +39,7 @@ pub(super) fn show(looked_in: &std::path::Path, settings: &Settings) -> Result<(
             splashes: Arc::from(""),
         },
         screen: NoResources::new(looked_in, sunrise_hooks::engine::get_the_game()),
-        pointer: PhysicalPosition::new(0.0, 0.0),
+        pointer: PointerSample::default(),
         window_pointer_space: std::cell::OnceCell::new(),
         api: settings.sunrise.api,
         settings: settings.clone(),
@@ -56,7 +58,6 @@ impl Missing {
     }
 
     fn projected_pointer(&self) -> sunrise_client::window::GuiPointer {
-        use sunrise_client::window::{GuiSize, PointerProjection, PointerSpace};
         let inputs = self.settings.gui_scale_inputs();
         let size = self.size();
         let window = self.window.as_deref().map_or_else(
@@ -176,7 +177,10 @@ impl ApplicationHandler for Missing {
             }
             WindowEvent::RedrawRequested => self.draw(),
             WindowEvent::CursorMoved { position, .. } => {
-                self.pointer = position;
+                self.pointer = self
+                    .window_pointer_space
+                    .get_or_init(|| PointerSpace::from_window(&window))
+                    .os_sample(position);
                 window.request_redraw();
             }
             WindowEvent::MouseInput {

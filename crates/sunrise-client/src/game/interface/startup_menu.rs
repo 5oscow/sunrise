@@ -7,8 +7,9 @@ use sunrise_client::{
     clipboard::{self, AppendSelection, SystemClipboard},
     options_ui::{Event, OptionsUi, Page},
     widgets::{Kind, Target},
+    window::{GuiSize, PointerProjection, PointerSample, PointerSpace},
 };
-use winit::{dpi::PhysicalPosition, event::KeyEvent, keyboard::ModifiersState};
+use winit::{event::KeyEvent, keyboard::ModifiersState};
 
 #[derive(Default)]
 pub(super) struct StartupMenu {
@@ -19,8 +20,8 @@ pub(super) struct StartupMenu {
     win: Option<(sunrise_client::win_screen::WinScreen, Instant)>,
     root: PathBuf,
     cursor: (f32, f32),
-    pointer: (f64, f64),
-    window_pointer_space: std::cell::OnceCell<sunrise_client::window::PointerSpace>,
+    pointer: PointerSample,
+    window_pointer_space: std::cell::OnceCell<PointerSpace>,
     modifiers: ModifiersState,
     physical_keys: HashSet<KeyCode>,
     dragging: bool,
@@ -153,7 +154,7 @@ impl StartupMenu {
         game.mod_jobs = std::mem::take(&mut self.mod_jobs);
         game.cursor = self.cursor;
         if self.key_focus.is_none() {
-            game.window_cursor = Some(PhysicalPosition::new(self.pointer.0, self.pointer.1));
+            game.window_cursor = Some(self.pointer);
         }
         game.modifiers = self.modifiers;
         game.physical_keys = std::mem::take(&mut self.physical_keys);
@@ -526,8 +527,7 @@ impl Loading {
         self.update_menu_cursor();
     }
 
-    fn projected_menu_pointer(&self) -> sunrise_client::window::GuiPointer {
-        use sunrise_client::window::{GuiSize, PointerProjection, PointerSpace};
+    fn menu_pointer_projection(&self) -> PointerProjection {
         let inputs = self.settings.gui_scale_inputs();
         let size = self.menu_size();
         let window = self.window.as_deref().map_or_else(
@@ -539,14 +539,15 @@ impl Loading {
                     .get_or_init(|| PointerSpace::from_window(window))
             },
         );
-        let projection = PointerProjection {
+        PointerProjection {
             gui: GuiSize::new(size, inputs.requested, inputs.unicode),
             window,
-        };
-        projection.project_pointer(PhysicalPosition::new(
-            self.menu.pointer.0,
-            self.menu.pointer.1,
-        ))
+        }
+    }
+
+    fn projected_menu_pointer(&self) -> sunrise_client::window::GuiPointer {
+        self.menu_pointer_projection()
+            .project_pointer(self.menu.pointer)
     }
 
     fn update_menu_cursor(&mut self) {
@@ -1221,8 +1222,9 @@ impl Loading {
             WindowEvent::MouseInput { .. } | WindowEvent::MouseWheel { .. }
                 if self.menu.win.is_some() => {}
             WindowEvent::CursorMoved { position, .. } => {
-                self.menu.pointer = (position.x, position.y);
-                self.update_menu_cursor();
+                let projection = self.menu_pointer_projection();
+                self.menu.pointer = projection.window.os_sample(position);
+                self.menu.cursor = projection.project_pointer(self.menu.pointer).subpixel();
                 if self.menu.options_open && self.menu.dragging {
                     self.menu_options_click(true, false);
                 } else if let Some(title) = &mut self.menu.title {
@@ -1660,7 +1662,7 @@ mod tests {
             assert_eq!(view(&second), (4.0, 240.0, 180.0));
         });
         first.settings.force_unicode = true;
-        first.menu.pointer = (400.0, 200.0);
+        first.menu.pointer = winit::dpi::PhysicalPosition::new(400.0, 200.0).into();
         first.apply_menu_settings();
         assert_eq!(view(&first), (4.0, 240.0, 180.0));
         assert_eq!(first.menu.cursor, (100.0, 50.0));
@@ -1756,6 +1758,7 @@ mod tests {
             game.handle_window_event_inner(
                 &Loop,
                 WindowEvent::DroppedFile(source.join("Game pack")),
+                input_trace::InputOrigin::User,
             );
             assert!(game.ui.options.pack_screen.as_ref().unwrap().confirming());
             assert!(!packs::packs_dir().join("Game pack").exists());

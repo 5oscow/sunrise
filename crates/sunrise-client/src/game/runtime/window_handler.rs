@@ -222,7 +222,7 @@ impl Game<'_> {
             self.mod_mappings_button(*button, *state == ElementState::Pressed);
         }
         let resized = matches!(event, WindowEvent::Resized(_));
-        self.handle_window_event_inner(event_loop, event);
+        self.handle_window_event_inner(event_loop, event, origin);
         if resized {
             self.notify_window_resize();
         }

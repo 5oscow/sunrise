@@ -1081,8 +1081,8 @@ struct Game<'a> {
     left: bool,
     right: bool,
     cursor: (f32, f32),
-    /// The raw window pointer; frames and input project it at the current GUI size.
-    window_cursor: Option<winit::dpi::PhysicalPosition<f64>>,
+    /// The window pointer sample; frames and input project it at the current GUI size.
+    window_cursor: Option<sunrise_client::window::PointerSample>,
     window_pointer_space: std::cell::OnceCell<sunrise_client::window::PointerSpace>,
     /// The cursor icon the window shows (`widgets::take_cursor` each frame).
     cursor_icon: sunrise_client::widgets::Cursor,
@@ -9108,11 +9108,12 @@ impl Game<'_> {
 
     fn set_window_cursor(
         &mut self,
-        position: winit::dpi::PhysicalPosition<f64>,
+        sample: impl Into<sunrise_client::window::PointerSample>,
         projection: sunrise_client::window::PointerProjection,
     ) {
-        self.window_cursor = Some(position);
-        self.cursor = projection.project_pointer(position).subpixel();
+        let sample = sample.into();
+        self.window_cursor = Some(sample);
+        self.cursor = projection.project_pointer(sample).subpixel();
     }
 
     fn refresh_window_cursor(&mut self) {
@@ -9130,7 +9131,19 @@ impl Game<'_> {
     /// shortcut, a special case) never reaches a controller. If a player could want it on one, give
     /// it a handler both can call and a `gamepad::Route` (screenshot and fullscreen do this). A
     /// screen's own raw keys, text and mods' key hooks stay raw on purpose.
-    fn handle_window_event_inner(&mut self, event_loop: &dyn EventLoopCtl, mut event: WindowEvent) {
+    fn handle_window_event_inner(
+        &mut self,
+        event_loop: &dyn EventLoopCtl,
+        mut event: WindowEvent,
+        origin: input_trace::InputOrigin,
+    ) {
+        let cursor_sample = |projection: sunrise_client::window::PointerProjection, position| {
+            if origin == input_trace::InputOrigin::User {
+                projection.window.os_sample(position)
+            } else {
+                position.into()
+            }
+        };
         if matches!(
             event,
             WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. }
@@ -9291,7 +9304,7 @@ impl Game<'_> {
             match &event {
                 WindowEvent::CursorMoved { position, .. } => {
                     if let Some(projection) = self.renderer_pointer_projection() {
-                        self.set_window_cursor(*position, projection);
+                        self.set_window_cursor(cursor_sample(projection, *position), projection);
                     }
                 }
                 WindowEvent::MouseInput {
@@ -9594,10 +9607,11 @@ impl Game<'_> {
                     if let Some(r) = &self.renderer {
                         let size = [r.config.width, r.config.height];
                         let projection = self.pointer_projection(size);
-                        let delta = self.window_cursor.map_or([0.0; 2], |previous| {
-                            projection.drag_delta(previous, position)
-                        });
-                        self.set_window_cursor(position, projection);
+                        let sample = cursor_sample(projection, position);
+                        let delta = self
+                            .window_cursor
+                            .map_or([0.0; 2], |previous| projection.drag_delta(previous, sample));
+                        self.set_window_cursor(sample, projection);
                         let [w, h] = projection.gui.size.map(|v| v as f32);
                         if self.studio_mouse_dragged(w) {
                             return Ok(());
