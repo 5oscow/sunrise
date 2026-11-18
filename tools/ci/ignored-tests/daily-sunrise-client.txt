@@ -114,7 +114,6 @@ sunrise-client game::native_hooks::player_bed_leave::player_bed_leave_tests::gue
 sunrise-client game::native_hooks::player_bed_leave::player_bed_leave_tests::guest_wake_counters_match_the_same_reasons_without_listeners lib daily game-boot
 sunrise-client game::native_hooks::runtime_environment::server_data_version_tests::host_data_version_matches_a_freshly_saved_chunk lib daily resources
 sunrise-client game::native_menu_places::tests::a_backing_names_why_it_refuses lib daily resources
-sunrise-client game::native_menu_places::tests::a_code_opened_menus_shift_click_skips_the_slots_its_screen_hides lib daily child-process
 sunrise-client game::native_menu_places::tests::a_shift_click_into_a_held_backpack_writes_through_its_handler lib daily resources
 sunrise-client game::native_menu_places::tests::a_write_into_the_box_is_mirrored_at_its_notice lib daily resources
 sunrise-client game::native_menu_places::tests::another_hotbar_slot_selected_closes_the_menu lib daily resources
