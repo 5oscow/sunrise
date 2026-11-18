@@ -52,6 +52,9 @@ fn data_reads_a_hoppers_live_transfer_cooldown() {
     };
     assert_eq!(chest.iter().flatten().map(|s| s.count).sum::<u32>(), 1);
     assert_eq!(cooldown_shown(game), Some(8));
+    // The saved tag is an Int, as `putInt` writes it.
+    let moved = game.data_of(&DataRef::Block([4, 200, 4])).unwrap();
+    assert_eq!(moved.get("TransferCooldown"), Some(&Tag::Int(8)));
     game.world.game_time += 1;
     game.tick_hopper((4, 200, 4));
     assert_eq!(cooldown_shown(game), Some(7));
