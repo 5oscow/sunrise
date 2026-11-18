@@ -1990,7 +1990,7 @@ impl Streaming {
         commit: StreamingCommit,
     ) -> (Vec<((i32, i32, i32), SectionMesh)>, Vec<Arc<Chunk>>) {
         let StreamingCommit {
-            uploads,
+            mut uploads,
             removed,
             paused,
         } = commit;
@@ -2280,16 +2280,57 @@ impl Streaming {
         // Meshes waiting for upload count too: when uploads fall behind (a
         // low frame rate at a wide distance), meshing on held gigabytes of
         // them until the system swapped.
+        // `room` counts sections, but a fresh column brings every one of its
+        // sections dirty at once: choosing `room` columns could submit 24
+        // times the room. Columns are chosen nearest first, then the budget
+        // is spent section by section, lowest first; a column it runs out in
+        // keeps the rest of its sections dirty.
         let room = (self.workers * 32).saturating_sub(self.meshing.len() + self.upload_backlog);
         nearest_first(&mut candidates, room);
-        for (_, x, z, sections) in candidates.drain(..) {
+        let mut budget = room;
+        // An all-air section meshes to nothing (`Mesher::mesh_reusing`) unless
+        // a mod adds section geometry, and most of a tall column is air: the
+        // first mesh of one goes straight to the uploads rather than through
+        // a worker. Registration is set once, so with none now the workers'
+        // tables have none either. Only a first mesh: a section that has one
+        // (`compile_started`) may have had it accepted in this very update,
+        // and two meshes of one section in `uploads` can be uploaded in
+        // either order once the game sorts its upload queue.
+        let air_meshes_empty = !crate::mesher::has_section_geometry();
+        for (_, x, z, _) in candidates.drain(..) {
+            if budget == 0 {
+                break;
+            }
             let Some(region) = Self::region(world, x, z) else {
                 continue;
             };
-            world.dirty_sections.take_column(x, z);
-            for sy in sections.iter().map(|sy| sy as i32) {
+            let mut sections = world.dirty_sections.take_column(x, z);
+            let taken = sections.take_up_to(&mut budget);
+            if !sections.is_empty() {
+                world.dirty_sections.insert_column_mask((x, z), sections);
+            }
+            let centre = region[1][1].as_ref().expect("centre chunk");
+            for sy in taken.iter().map(|sy| sy as i32) {
                 let first = self.meshed.insert((x, z));
                 self.sequence += 1;
+                let air = air_meshes_empty
+                    && !self.compile_started.contains_key(&(x, sy, z))
+                    && centre
+                        .sections
+                        .get(sy as usize)
+                        .is_some_and(|section| section.is_uniform(0));
+                if air {
+                    // What `Done::Meshed` does for an accepted mesh; dropping
+                    // `meshing`'s entry turns an older job still out for this
+                    // section stale, as a newer submission would.
+                    self.meshing.remove(&(x, sy, z));
+                    self.compile_started.insert((x, sy, z), self.sequence);
+                    self.meshed_total += 1;
+                    let mut mesh = SectionMesh::default();
+                    mesh.sort_solid();
+                    uploads.push(((x, sy, z), mesh));
+                    continue;
+                }
                 self.meshing.insert((x, sy, z), self.sequence);
                 self.submit(
                     Some((x, z)),
