@@ -2307,8 +2307,8 @@ sunrise-client game::remote::tests::every_free_route_returns_the_columns_it_free
 sunrise-client game::remote::tests::flint_and_steel_use_on_ends_the_click lib daily resources
 sunrise-client game::remote::tests::forgetting_and_closing_remote_columns_clear_their_data lib daily resources
 sunrise-client game::remote::tests::joining_a_server_empties_the_off_hand_too lib daily resources
-sunrise-client game::remote::tests::menu_title_snapshot_follows_packet_and_close_paths lib daily resources
-sunrise-client game::remote::tests::menu_title_snapshot_tracks_open_replacement_and_close lib daily resources
+sunrise-client game::remote::tests::menu_title_tests::menu_title_snapshot_follows_packet_and_close_paths lib daily resources
+sunrise-client game::remote::tests::menu_title_tests::menu_title_snapshot_tracks_open_replacement_and_close lib daily resources
 sunrise-client game::remote::tests::mod_chat_needs_a_joined_player_and_what_the_chat_option_allows lib daily resources
 sunrise-client game::remote::tests::mod_open_chat_fills_the_box_only_over_the_world lib daily resources
 sunrise-client game::remote::tests::mods_replace_and_cancel_received_chat lib daily resources
