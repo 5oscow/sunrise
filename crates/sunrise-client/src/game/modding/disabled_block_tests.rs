@@ -131,7 +131,7 @@ mod tests {
     impl BlockPart for Survival {
         fn can_survive(
             &self,
-            _: &dyn mod_api::LevelHost,
+            _: mod_api::LevelSide<'_>,
             _: &mut mod_api::CanSurviveEvent,
         ) -> Option<bool> {
             Some(true)
@@ -143,7 +143,7 @@ mod tests {
     impl BlockPart for Plant {
         fn may_place_on(
             &self,
-            _: &dyn mod_api::LevelHost,
+            _: mod_api::LevelSide<'_>,
             _: &mut mod_api::MayPlaceOnEvent,
         ) -> Option<bool> {
             Some(true)
@@ -155,7 +155,7 @@ mod tests {
     impl BlockPart for Soil {
         fn can_sustain_plant(
             &self,
-            _: &dyn mod_api::LevelHost,
+            _: mod_api::LevelSide<'_>,
             _: &mut mod_api::CanSustainPlantEvent,
         ) -> Option<bool> {
             Some(true)
@@ -416,9 +416,6 @@ mod tests {
                     wet,
                     "the earlier enabled Part can answer"
                 );
-                assert!(mod_api::__private::set_mod_enabled("enabled_prefix", false));
-                assert_eq!(tick(game, dry, water), dry);
-
                 {
                     let _owner = mod_platform::content::crash::enter_native_mod(
                         mod_api::content::crash::ModCall {
@@ -431,12 +428,19 @@ mod tests {
                         .add_water_ticket(game, at, [POS.x + 1, POS.y + 1, POS.z + 1])
                         .unwrap();
                     assert_eq!(
+                        tick(game, three, lava),
+                        wet,
+                        "the ticket wets held farmland even when the earlier Part does not accept the fluid"
+                    );
+                    assert!(mod_api::__private::set_mod_enabled("enabled_prefix", false));
+                    assert_eq!(
                         tick(game, three, air),
                         wet,
-                        "an enabled mod's ticket waters it"
+                        "an enabled mod's ticket waters it even without fluid"
                     );
                     assert!(ticket.remove(game));
                 }
+                assert_eq!(tick(game, dry, water), dry);
 
                 game.install_live_features();
                 let plains = game.res.biomes().id("minecraft:plains");

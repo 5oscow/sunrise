@@ -158,7 +158,7 @@ pub(super) struct GameplayTables {
 /// parsed models), the face visibility, the collisions, the biomes and the
 /// environment need no block facts and load beside them. The outer error
 /// fails the load; the inner one is the packs' (the registry or the block
-/// models), which `load_resources` rolls back from.
+/// models), which [`load_resources_for_mods`] rolls back from.
 pub(super) fn load_core(
     resources: &sunrise_assets::resource_source::ResourceRoot,
     additional_data: &[Arc<sunrise_client::datapack::DataPack>],

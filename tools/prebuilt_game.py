@@ -875,10 +875,12 @@ def archives(out: Path, sliced: dict[str, list[str]]) -> dict[str, list[str]]:
                                 if parent != Path("."))} | set(names)) for kind, names in chosen.items()}
 
 
-def pack(out: Path, dist: Path, stage_tool: Path | None = None) -> None:
+def pack(out: Path, dist: Path, stage_tool: Path | None = None, with_tool: bool = False) -> None:
     """The SDK release's assets from a checked folder OUT, into DIST: the package as its `runtime`, `api` and `engine`
     archives for its target and side ([`archives`]), the build data, the surface export of this source and, for the
-    client side, the target's `tool` ([`tool`]): one per target, as it serves both sides."""
+    client side, the target's `tool` ([`tool`]): one per target, as it serves both sides. `with_tool` packs it on a server
+    leg too, for a server-only SDK that no client leg completes (the fn-replace fixtures): the launcher needs the tool
+    even to export a server."""
     check(out)
     identity = json.loads((out / IDENTITY).read_text())
     if identity.get("package_format") != package_format(ROOT) or identity.get("commit") != head():
@@ -888,7 +890,7 @@ def pack(out: Path, dist: Path, stage_tool: Path | None = None) -> None:
     jobs = {dist / f"{kind}-{identity['target']}{suffix}.tar.xz": (out, names)
             for kind, names in archives(out, identity["slices"]).items()}
     jobs[dist / BUILD_DATA_ARCHIVE] = (out, [".", *BUILD_DATA])
-    if identity["side"] == "client":
+    if identity["side"] == "client" or with_tool:
         jobs[dist / f"tool-{identity['target']}.tar.xz"] = (tool(identity["target"]), [".", TOOL_PROGRAM])
     # Each archive keeps its single xz stream; only independent archives run concurrently.
     with ProcessPoolExecutor(max_workers=len(jobs)) as pool:
@@ -1042,6 +1044,8 @@ def main() -> None:
     # `build` compiles sunrise-stage from the commit's own source before staging it (target/prebuilt/tools); the
     # surface export reuses that binary instead of compiling it again in another target folder.
     pack_parser.add_argument("--stage-tool", type=Path, help="the sunrise-stage binary to export the surface with")
+    pack_parser.add_argument("--with-tool", action="store_true",
+                             help="also pack the target's tool on a server leg (a server-only SDK no client leg completes)")
     gather_parser = commands.add_parser("gather")
     gather_parser.add_argument("legs", type=Path)
     gather_parser.add_argument("dist", type=Path)
@@ -1066,7 +1070,7 @@ def main() -> None:
     elif args.command == "start":
         start(args.out.resolve())
     elif args.command == "pack":
-        pack(args.out.resolve(), args.dist.resolve(), args.stage_tool)
+        pack(args.out.resolve(), args.dist.resolve(), args.stage_tool, args.with_tool)
     elif args.command == "gather":
         gather(args.legs.resolve(), args.dist.resolve())
     elif args.command == "index":
