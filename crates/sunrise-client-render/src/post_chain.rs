@@ -1133,6 +1133,8 @@ impl PostEffects {
         decoder.ignore_checksums(true);
         decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
         let mut reader = decoder.read_info().map_err(|e| e.to_string())?;
+        crate::hud::check_pack_size(reader.info().width, reader.info().height)
+            .map_err(|e| e.to_string())?;
         let mut data = vec![0; reader.output_buffer_size().ok_or("a huge image")?];
         let info = reader.next_frame(&mut data).map_err(|e| e.to_string())?;
         let rgba: Vec<u8> = match info.color_type {

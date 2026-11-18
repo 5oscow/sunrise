@@ -200,6 +200,7 @@ fn colormap(root: &ResourceSource, name: &str) -> Result<Vec<u32>> {
     decoder.ignore_checksums(true);
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
     let mut reader = decoder.read_info()?;
+    crate::hud::check_pack_size(reader.info().width, reader.info().height)?;
     let mut bytes = vec![0; reader.output_buffer_size().ok_or("colormap too large")?];
     let info = reader.next_frame(&mut bytes)?;
     let channels = info.color_type.samples();
@@ -1024,6 +1025,37 @@ mod source_tests {
         )]));
         assert_eq!(colormap(&source, "grass").unwrap(), [0x0c2238]);
         assert!(colormap(&source, "missing").is_err());
+    }
+
+    /// A colormap is refused by the side its PNG header claims when no atlas
+    /// would take it, before the reader sizes a buffer from that header.
+    #[test]
+    fn a_colormap_claiming_a_side_no_atlas_takes_is_refused() {
+        use sunrise_assets::resource_source::Resource;
+        let colormap_of_width = |width: u32| {
+            let mut png = Vec::new();
+            let mut encoder = png::Encoder::new(&mut png, width, 1);
+            encoder.set_color(png::ColorType::Rgb);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().unwrap();
+            writer
+                .write_image_data(&vec![0; width as usize * 3])
+                .unwrap();
+            writer.finish().unwrap();
+            let source = ResourceSource::indexed(std::collections::BTreeMap::from([(
+                "assets/minecraft/textures/colormap/grass.png".into(),
+                Resource::bytes(png),
+            )]));
+            colormap(&source, "grass").map(|map| map.len())
+        };
+        assert_eq!(colormap_of_width(32_768).unwrap(), 32_768);
+        let refused = colormap_of_width(40_000);
+        assert!(
+            refused
+                .as_ref()
+                .is_err_and(|e| e.to_string().contains("40000x1")),
+            "{refused:?}"
+        );
     }
 }
 

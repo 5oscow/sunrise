@@ -210,6 +210,10 @@ pub fn decode_png(bytes: &[u8]) -> Option<Texture> {
     decoder.ignore_checksums(true);
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
     let mut reader = decoder.read_info().ok()?;
+    // The header alone sizes the buffer: hold it to the raw textures' limit first.
+    if reader.info().width.max(reader.info().height) > MAX_SIZE {
+        return None;
+    }
     let mut buf = vec![0; reader.output_buffer_size()?];
     let info = reader.next_frame(&mut buf).ok()?;
     let pixels = &buf[..info.buffer_size()];
@@ -433,6 +437,27 @@ mod tests {
         let ihdr = encoded.windows(4).position(|w| w == b"IHDR").unwrap();
         encoded[ihdr + 4 + 13] ^= 0xFF;
         assert!(decode_png(&encoded).is_some());
+    }
+
+    /// A PNG is held to the raw textures' side limit by the size its header
+    /// claims, before the reader sizes a buffer from that header.
+    #[test]
+    fn png_sizes_are_bounded() {
+        let png = |width: u32| {
+            let mut bytes = Vec::new();
+            let mut encoder = png::Encoder::new(&mut bytes, width, 1);
+            encoder.set_color(png::ColorType::Grayscale);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().unwrap();
+            writer.write_image_data(&vec![0; width as usize]).unwrap();
+            writer.finish().unwrap();
+            bytes
+        };
+        assert_eq!(
+            decode_png(&png(16_384)).map(|t| t.size),
+            Some([16_384, 1, 1])
+        );
+        assert_eq!(decode_png(&png(40_000)).map(|t| t.size), None);
     }
 
     #[test]

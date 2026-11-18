@@ -210,6 +210,26 @@ fn check_fetched_size(width: u64, height: u64) -> Result<()> {
     Ok(())
 }
 
+/// A pack image may claim no side an atlas would refuse, nor more pixels than
+/// the largest atlas holds: the PNG reader alone would trust the header and
+/// allocate it, as its own limit covers one row.
+pub(crate) fn check_pack_size(width: u32, height: u32) -> Result<()> {
+    use crate::atlas_sources::MAX_SPRITE_SIDE;
+    if i64::from(width.max(height)) > MAX_SPRITE_SIDE {
+        return Err(format!(
+            "a {width}x{height} image exceeds the {MAX_SPRITE_SIDE}-pixel sprite side"
+        )
+        .into());
+    }
+    if u64::from(width) * u64::from(height) > u64::from(MAX_ATLAS_SIZE).pow(2) {
+        return Err(format!(
+            "a {width}x{height} image has more pixels than a {MAX_ATLAS_SIZE}x{MAX_ATLAS_SIZE} atlas"
+        )
+        .into());
+    }
+    Ok(())
+}
+
 /// A WebP image as RGBA8. Still frames and animations both decode; an
 /// animation gives its first frame, as an animated PNG would.
 fn decode_webp(data: &[u8]) -> Result<(u32, u32, Vec<u8>)> {
@@ -292,6 +312,7 @@ pub fn decode_bytes(data: &[u8]) -> Result<(u32, u32, Vec<u8>)> {
     decoder.ignore_checksums(true);
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
     let mut reader = decoder.read_info()?;
+    check_pack_size(reader.info().width, reader.info().height)?;
     let mut bytes = vec![0; reader.output_buffer_size().ok_or("image too large")?];
     let info = reader.next_frame(&mut bytes)?;
     let channels = info.color_type.samples();
@@ -3256,6 +3277,53 @@ mod tests {
         assert!(
             refused.to_string().contains("too large to decode"),
             "{refused}"
+        );
+    }
+
+    /// A pack PNG is refused by the side its header claims when no atlas would
+    /// take it: the reader sizes the whole pixel buffer from that header, and
+    /// its own limit covers one row.
+    #[test]
+    fn a_pack_png_claiming_a_side_no_atlas_takes_is_refused() {
+        let png = |width: u32| {
+            let mut bytes = Vec::new();
+            let mut encoder = png::Encoder::new(&mut bytes, width, 1);
+            encoder.set_color(png::ColorType::Grayscale);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().unwrap();
+            writer.write_image_data(&vec![0; width as usize]).unwrap();
+            writer.finish().unwrap();
+            bytes
+        };
+        assert_eq!(decode_bytes(&png(32_768)).unwrap().0, 32_768);
+        let refused = decode_bytes(&png(40_000)).map(|(width, height, _)| (width, height));
+        assert!(
+            refused
+                .as_ref()
+                .is_err_and(|e| e.to_string().contains("40000x1")),
+            "{refused:?}"
+        );
+    }
+
+    /// A header within the side limit can still claim gigabytes: 32768 x 32768
+    /// is refused by its pixel count before the reader sizes a buffer from it.
+    #[test]
+    fn a_pack_png_claiming_more_pixels_than_an_atlas_is_refused() {
+        let mut header = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut header, 32_768, 32_768);
+            encoder.set_color(png::ColorType::Grayscale);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().unwrap();
+            // No pixels, only an empty IDAT: `read_info` reads up to the image data.
+            writer.write_chunk(png::chunk::IDAT, &[]).unwrap();
+        }
+        let refused = decode_bytes(&header).map(|(width, height, _)| (width, height));
+        assert!(
+            refused
+                .as_ref()
+                .is_err_and(|e| e.to_string().contains("32768x32768")),
+            "{refused:?}"
         );
     }
 

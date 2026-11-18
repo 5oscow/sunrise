@@ -825,6 +825,7 @@ pub(crate) fn decode_rgba(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>)> {
     decoder.ignore_checksums(true);
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
     let mut reader = decoder.read_info()?;
+    crate::hud::check_pack_size(reader.info().width, reader.info().height)?;
     let mut bytes = vec![
         0;
         reader
@@ -952,6 +953,29 @@ pub(crate) fn sprite_mipmap_limit(requested: u32, size: u32, minimum: u32, avail
 mod tests {
     use super::*;
     use std::fs::{self, File};
+    /// A sprite is refused by the side its PNG header claims when no atlas
+    /// would take it, before the reader sizes a buffer from that header.
+    #[test]
+    fn a_sprite_png_claiming_a_side_no_atlas_takes_is_refused() {
+        let png = |width: u32| {
+            let mut bytes = Vec::new();
+            let mut encoder = png::Encoder::new(&mut bytes, width, 1);
+            encoder.set_color(png::ColorType::Grayscale);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().unwrap();
+            writer.write_image_data(&vec![0; width as usize]).unwrap();
+            writer.finish().unwrap();
+            bytes
+        };
+        assert_eq!(decode_rgba(&png(32_768)).unwrap().0, 32_768);
+        let refused = decode_rgba(&png(40_000)).map(|(width, height, _)| (width, height));
+        assert!(
+            refused
+                .as_ref()
+                .is_err_and(|e| e.to_string().contains("40000x1")),
+            "{refused:?}"
+        );
+    }
     #[test]
     fn archive_sprites_keep_deferred_reads_and_cache_on_their_reload_snapshot() -> Result<()> {
         use std::io::Write;
