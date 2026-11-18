@@ -1,8 +1,22 @@
 use super::*;
 use std::sync::{Arc, Mutex};
+use winit::dpi::PhysicalPosition;
 
-/// What each `screen_draw` was told: the block whose menu it is and its position.
-type Seen = Arc<Mutex<Vec<(Option<String>, Option<[i32; 3]>)>>>;
+#[derive(Debug, PartialEq)]
+struct Frame {
+    pointer: [i32; 2],
+    size: [i32; 2],
+    origin: [f32; 2],
+}
+
+#[derive(Default)]
+struct ScreenEvents {
+    /// The block whose menu it is and the position heard by `screen_draw`.
+    draw: Vec<(Option<String>, Option<[i32; 3]>)>,
+    frames: Vec<Frame>,
+    tooltip_at: Vec<[f32; 2]>,
+}
+type Seen = Arc<Mutex<ScreenEvents>>;
 /// A mod menu type no block opens here.
 const PACK: &str = "test:pack";
 
@@ -30,8 +44,26 @@ impl mod_api::MenuPart for Position {
         })
     }
     fn screen_draw(&self, _: &dyn mod_api::ClientHost, event: &mut mod_api::ScreenDrawEvent<'_>) {
-        let block = event.block.map(str::to_owned);
-        self.0.lock().unwrap().push((block, event.pos));
+        let mut seen = self.0.lock().unwrap();
+        seen.draw.push((event.block.map(str::to_owned), event.pos));
+        seen.frames.push(Frame {
+            pointer: event.pointer,
+            size: event.gui_size,
+            origin: event.origin,
+        });
+    }
+
+    fn screen_tooltip(
+        &self,
+        _: &dyn mod_api::ClientHost,
+        event: &mut mod_api::ScreenTooltipEvent<'_>,
+    ) {
+        let mut seen = self.0.lock().unwrap();
+        let draw = seen.frames.last().unwrap();
+        assert_eq!(event.pointer, draw.pointer);
+        assert_eq!(event.gui_size, draw.size);
+        assert_eq!(event.origin, draw.origin);
+        seen.tooltip_at.push(event.at);
     }
 }
 struct Listener(Seen);
@@ -124,10 +156,60 @@ fn a_mod_blocks_menu_of_a_vanilla_type_gets_the_types_screen_on_both_sides() {
                 assert_eq!(open.screen.height, 166.0);
                 game.screen = Screen::Inventory;
                 game.container = Some(pos);
-                let mut batch = HudBatch::scratch([128, 128]);
-                assert!(game.draw_native_screen(&mut batch, 0.0, 0.0));
-                let block = Some("test:crate".to_owned());
-                assert_eq!(*seen.lock().unwrap(), [(block, Some([17, 63, -9]))]);
+                game.title = None;
+                game.ui.hide_gui = true;
+                game.settings.gui_scale = 2;
+                game.level.recipe_book.open = [false; 4];
+                game.world
+                    .block_entities
+                    .insert(pos, BlockEntity::Chest(vec![None; 27]));
+                let screen = &mut game.mod_screen.as_mut().unwrap().screen;
+                screen.width = 176.0;
+                screen.inventory_x = 8.0;
+                screen.inventory_y = 84.0;
+                // No new motion: the odd-sized resize allows GUI scale 2.
+                let small = [638, 478];
+                let projection = game.pointer_projection(small);
+                let sample = projection
+                    .window
+                    .physical_sample(PhysicalPosition::new(321.75, 231.75));
+                game.set_window_cursor(sample, projection);
+                game.hud(small);
+                game.hud([641, 481]);
+
+                // A cursor supplied in GUI pixels directly still truncates toward zero.
+                game.window_cursor = None;
+                game.cursor = (-3.75, 129.75);
+                game.hud([641, 481]);
+                {
+                    let seen = seen.lock().unwrap();
+                    let block = Some("test:crate".to_owned());
+                    assert_eq!(seen.draw, vec![(block, Some([17, 63, -9])); 3]);
+                    assert_eq!(
+                        seen.frames,
+                        [
+                            Frame {
+                                pointer: [321, 231],
+                                size: [638, 478],
+                                origin: [231.0, 156.0],
+                            },
+                            Frame {
+                                pointer: [161, 116],
+                                size: [321, 241],
+                                origin: [72.0, 37.0],
+                            },
+                            Frame {
+                                pointer: [-3, 129],
+                                size: [321, 241],
+                                origin: [72.0, 37.0],
+                            },
+                        ]
+                    );
+                    assert_eq!(
+                        seen.tooltip_at,
+                        [[90.0, 75.0], [89.0, 79.0], [-75.75, 92.75]]
+                    );
+                }
                 // The server's menu for the block: asked with the block, so slot 4 is not in it.
                 assert_eq!(
                     game.native_hidden_slots("minecraft:generic_9x3", Some(pos), 27),
@@ -154,7 +236,7 @@ fn a_mod_menu_opened_without_a_block_gets_its_types_screen() {
                 game.container = Some(key);
                 let mut batch = HudBatch::scratch([128, 128]);
                 assert!(game.draw_native_screen(&mut batch, 0.0, 0.0));
-                assert_eq!(*seen.lock().unwrap(), [(None, None)]);
+                assert_eq!(seen.lock().unwrap().draw, [(None, None)]);
                 game.open_native_screen(key, None, 2, "minecraft:generic_9x3", None);
                 assert!(
                     game.mod_screen.is_none(),
@@ -294,13 +376,33 @@ fn two_mods_sharing_a_vanilla_menu_type_keep_their_screens_apart() {
                     assert_eq!(game.native_screen_slots(), Some(ids));
                     let block = Some(block.as_str());
                     let mut batch = HudBatch::scratch([8, 8]);
-                    game.native_screen_draw(&menu, block, None, &[], &mut batch, [0.0; 2]);
+                    let mut draw = crate::game::host::draw::GameDrawContext::new(game, &mut batch);
+                    game.native_screen_draw(mod_api::__private::ScreenDrawCall {
+                        menu: &menu,
+                        block,
+                        pos: None,
+                        data: &[],
+                        draw: &mut draw,
+                        origin: [0.0; 2],
+                        pointer: [0; 2],
+                        gui_size: [8; 2],
+                    });
                     let mut button = None;
                     game.native_screen_click(&menu, block, &[], [0.0; 2], false, &mut button);
                     assert_eq!(button, Some(hidden as i32));
                     let mut lines = Vec::new();
-                    game.native_screen_tooltip(&menu, block, &[], [0.0; 2], None, &mut lines);
-                    assert_eq!(lines, [(sunrise_client::text::Text::literal(owner), 0)]);
+                    game.native_screen_tooltip(mod_api::__private::ScreenTooltipCall {
+                        menu: &menu,
+                        block,
+                        data: &[],
+                        at: [0.0; 2],
+                        slot: None,
+                        origin: [0.0; 2],
+                        pointer: [0; 2],
+                        gui_size: [8; 2],
+                        lines: &mut lines,
+                    });
+                    assert_eq!(lines, [(mod_api::Text::literal(owner), 0)]);
                     let hooks = ["screen", "draw", "click", "tooltip"];
                     let only_owner: Vec<_> = hooks.iter().map(|&hook| (owner, hook)).collect();
                     assert_eq!(*heard.lock().unwrap(), only_owner);

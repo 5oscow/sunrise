@@ -483,6 +483,100 @@ impl Drop for NestedRoll {
     }
 }
 
+/// The block tags the mob code asks about by name, as a bit per block state:
+/// built once from [`Items::block_tags`], so a mob tick or a pathfinder step
+/// tests a bit instead of hashing the tag and the block name.
+#[derive(Clone, Debug, Default)]
+pub struct BlockTagFlags {
+    /// Every block state's flags, indexed by `BlockStateId.0`.
+    bits: Vec<u16>,
+    /// The states' names by id, in the registry the table was built for:
+    /// what a rebuild tests `block_tags` against. The map is replaced by a
+    /// load, a `/reload`, a pack's classes and a server's tags.
+    names: Arc<[Arc<str>]>,
+}
+impl BlockTagFlags {
+    /// `minecraft:climbable` (`BlockTags.CLIMBABLE`).
+    pub const CLIMBABLE: u16 = 1 << 0;
+    /// `minecraft:fire` (`BlockTags.FIRE`).
+    pub const FIRE: u16 = 1 << 1;
+    /// `minecraft:cauldrons` (`BlockTags.CAULDRONS`).
+    pub const CAULDRONS: u16 = 1 << 2;
+    /// `minecraft:can_glide_through` (`BlockTags.CAN_GLIDE_THROUGH`).
+    pub const CAN_GLIDE_THROUGH: u16 = 1 << 3;
+    /// `minecraft:cats_can_lie_on`.
+    pub const CATS_CAN_LIE_ON: u16 = 1 << 4;
+    /// `minecraft:cats_can_sit_on`.
+    pub const CATS_CAN_SIT_ON: u16 = 1 << 5;
+    /// `minecraft:entities_can_teleport_to`.
+    pub const ENTITIES_CAN_TELEPORT_TO: u16 = 1 << 6;
+    /// `minecraft:dangerous_for_teleportation`.
+    pub const DANGEROUS_FOR_TELEPORTATION: u16 = 1 << 7;
+    /// Every flag with the tag it stands for: the table's whole contract.
+    pub const ALL: [(u16, &'static str); 8] = [
+        (Self::CLIMBABLE, "minecraft:climbable"),
+        (Self::FIRE, "minecraft:fire"),
+        (Self::CAULDRONS, "minecraft:cauldrons"),
+        (Self::CAN_GLIDE_THROUGH, "minecraft:can_glide_through"),
+        (Self::CATS_CAN_LIE_ON, "minecraft:cats_can_lie_on"),
+        (Self::CATS_CAN_SIT_ON, "minecraft:cats_can_sit_on"),
+        (
+            Self::ENTITIES_CAN_TELEPORT_TO,
+            "minecraft:entities_can_teleport_to",
+        ),
+        (
+            Self::DANGEROUS_FOR_TELEPORTATION,
+            "minecraft:dangerous_for_teleportation",
+        ),
+    ];
+
+    /// `tags` as one flag set per state of `names` (in `BlockStateId` order).
+    /// A member of several flags is marked with all of them, as testing each
+    /// tag's set does.
+    pub fn build(tags: &HashMap<String, HashSet<String>>, names: Arc<[Arc<str>]>) -> Self {
+        let mut by_name: HashMap<&str, u16> = HashMap::new();
+        for (flag, tag) in Self::ALL {
+            if let Some(members) = tags.get(tag) {
+                for member in members {
+                    *by_name.entry(member.as_str()).or_default() |= flag;
+                }
+            }
+        }
+        let bits = names
+            .iter()
+            .map(|name| by_name.get(&**name).copied().unwrap_or(0))
+            .collect();
+        Self { bits, names }
+    }
+    /// The state's flags: 0 for an id the table has no name for.
+    #[inline]
+    pub fn flags(&self, id: BlockStateId) -> u16 {
+        self.bits.get(id.0 as usize).copied().unwrap_or(0)
+    }
+    /// Whether the state carries `flag`.
+    #[inline]
+    pub fn has(&self, id: BlockStateId, flag: u16) -> bool {
+        self.flags(id) & flag != 0
+    }
+    /// The flags by state id, for a view that keeps them directly.
+    pub fn bits(&self) -> &[u16] {
+        &self.bits
+    }
+    /// The states' names by id.
+    pub fn state_names(&self) -> &[Arc<str>] {
+        &self.names
+    }
+}
+/// The states' names of `facts`, by `BlockStateId`: what a [`BlockTagFlags`]
+/// is built against.
+pub fn block_tag_state_names(facts: &BlockFacts) -> Arc<[Arc<str>]> {
+    facts
+        .states
+        .iter()
+        .map(|state| Arc::clone(&state.name))
+        .collect()
+}
+
 /// An empty catalog is useful for synthetic worlds without registered items;
 /// normal worlds load their catalog from the resource snapshot.
 #[derive(Clone, Default)]
@@ -503,6 +597,10 @@ pub struct Items {
     pub registry_order: Vec<Arc<str>>,
     /// Block tag name (without '#') -> member block names.
     pub block_tags: HashMap<String, HashSet<String>>,
+    /// The tags of `block_tags` the mob code asks about, as a bit per block
+    /// state ([`BlockTagFlags`]): a tick or a pathfinder step tests one bit
+    /// instead of hashing the tag and the block name.
+    pub block_tag_flags: Arc<BlockTagFlags>,
     pub item_tags: HashMap<String, HashSet<String>>,
     /// Fluid tag name -> member fluid names (`minecraft:water` holds `minecraft:water` and
     /// `minecraft:flowing_water`).
@@ -546,6 +644,8 @@ impl Items {
                 .into_iter()
                 .map(|(name, members)| (name, members.into_iter().collect()))
                 .collect();
+            let names = items.block_state_names();
+            items.rebuild_block_tag_flags(names);
         }
         if let Some(tags) = item_tags {
             items.item_tags = tags
@@ -555,6 +655,16 @@ impl Items {
             items.item_tag_order = tags;
         }
         items
+    }
+    /// The states' names [`Self::block_tag_flags`] was built against.
+    pub fn block_state_names(&self) -> Arc<[Arc<str>]> {
+        Arc::clone(&self.block_tag_flags.names)
+    }
+    /// Rebuild [`Self::block_tag_flags`] from `block_tags` against the states'
+    /// `names`: every path that replaces the map (a load, a `/reload`, a
+    /// pack's class tags, a server's tags) rebuilds the table with it.
+    pub fn rebuild_block_tag_flags(&mut self, names: Arc<[Arc<str>]>) {
+        self.block_tag_flags = Arc::new(BlockTagFlags::build(&self.block_tags, names));
     }
 }
 /// A `JukeboxSong`.
@@ -869,6 +979,8 @@ impl Items {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => return Err(format!("{}: {e}", path.display()).into()),
         }
+        // The mob code's tags as a bit per state, against this registry.
+        items.rebuild_block_tag_flags(block_tag_state_names(facts));
         Ok(items)
     }
     /// Every item's defaults, tags and block-to-item identities, without
@@ -1161,6 +1273,7 @@ impl Items {
             order,
             registry_order,
             block_tags: load_tags(root, "block", overlay)?,
+            block_tag_flags: Default::default(),
             item_tags: load_tags(root, "item", overlay)?,
             fluid_tags: load_tags(root, "fluid", overlay)?,
             item_tag_order: load_tag_lists(root, "item", overlay)?,
@@ -1255,6 +1368,10 @@ impl Items {
             .map(|(tag, members)| (tag.clone(), members.iter().cloned().collect()))
             .collect();
         *order = tags;
+        if registry == TagRegistry::Block {
+            let names = self.block_state_names();
+            self.rebuild_block_tag_flags(names);
+        }
     }
     /// Whether `block` is in the block tag `tag` (`minecraft:fire`, no `#`).
     pub fn block_in_tag(&self, tag: &str, block: &str) -> bool {
@@ -3264,6 +3381,102 @@ mod consume_effect_tests {
 }
 
 #[cfg(test)]
+mod block_tag_flag_tests {
+    use super::*;
+
+    /// The table's own rule: a state carries each flag whose tag lists its
+    /// name, a block in two tags carries both, and an id the table has no
+    /// name for carries none.
+    #[test]
+    fn build_marks_the_states_of_every_tags_members() {
+        let tags = HashMap::from([
+            (
+                "minecraft:climbable".to_owned(),
+                HashSet::from(["minecraft:ladder".to_owned(), "minecraft:vine".to_owned()]),
+            ),
+            (
+                // A fire block cats may also lie on.
+                "minecraft:fire".to_owned(),
+                HashSet::from(["minecraft:fire".to_owned()]),
+            ),
+            (
+                "minecraft:cats_can_lie_on".to_owned(),
+                HashSet::from(["minecraft:fire".to_owned()]),
+            ),
+            ("minecraft:cauldrons".to_owned(), HashSet::new()),
+        ]);
+        let names: Arc<[Arc<str>]> = [
+            "minecraft:ladder",
+            "minecraft:fire",
+            "minecraft:vine",
+            "minecraft:stone",
+        ]
+        .iter()
+        .map(|name| Arc::<str>::from(*name))
+        .collect();
+        let flags = BlockTagFlags::build(&tags, names);
+        assert_eq!(flags.flags(BlockStateId(0)), BlockTagFlags::CLIMBABLE);
+        assert_eq!(
+            flags.flags(BlockStateId(1)),
+            BlockTagFlags::FIRE | BlockTagFlags::CATS_CAN_LIE_ON
+        );
+        assert_eq!(flags.flags(BlockStateId(2)), BlockTagFlags::CLIMBABLE);
+        assert_eq!(flags.flags(BlockStateId(3)), 0);
+        assert!(flags.has(BlockStateId(0), BlockTagFlags::CLIMBABLE));
+        assert!(!flags.has(BlockStateId(3), BlockTagFlags::CLIMBABLE));
+        // No name for this id: no flags, and no panic.
+        assert_eq!(flags.flags(BlockStateId(4)), 0);
+        assert!(!flags.has(BlockStateId(u32::MAX), BlockTagFlags::FIRE));
+        assert_eq!(flags.bits(), &[1u16, 18, 1, 0][..]);
+        assert_eq!(&*flags.state_names()[2], "minecraft:vine");
+    }
+
+    /// Every state's flags are exactly what the tag map answers for its name:
+    /// `has(id, flag)` equals `block_tags[tag].contains(name)` for every state
+    /// and every flag. This is the equivalence the mob code relies on when it
+    /// tests a bit where it used to hash the tag and the block name.
+    ///
+    /// Needs the prepared resources; skipped without them like the crate's
+    /// other resource tests (`prepared_items`).
+    #[test]
+    fn every_states_flags_match_the_tag_map() {
+        let Some(items) = prepared_items() else {
+            return;
+        };
+        let names = items.block_state_names();
+        assert!(!names.is_empty(), "a loaded catalog names its states");
+        let mut seen = 0u16;
+        for (id, name) in names.iter().enumerate() {
+            let state = BlockStateId(id as u32);
+            for (flag, tag) in BlockTagFlags::ALL {
+                let expected = items
+                    .block_tags
+                    .get(tag)
+                    .is_some_and(|members| members.contains(&**name));
+                assert_eq!(
+                    items.block_tag_flags.has(state, flag),
+                    expected,
+                    "{name} / {tag}"
+                );
+                if expected {
+                    seen |= flag;
+                }
+            }
+        }
+        // A tag with members must reach at least one state: an empty table
+        // fails here instead of answering false everywhere in silence.
+        for (flag, tag) in BlockTagFlags::ALL {
+            if items.block_tags.get(tag).is_some_and(|m| !m.is_empty()) {
+                assert!(
+                    seen & flag != 0,
+                    "{tag} has members but no state carries it"
+                );
+            }
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     mod enchant_select_tests {
         include!("enchant_select_tests.rs");
@@ -3549,7 +3762,7 @@ mod tests {
             (
                 "tags/visuals:block/absent".to_owned(),
                 vec![bytes(json!({
-                    "neoforge:conditions":[{"type":"neoforge:not","value":{"type":"neoforge:true"}}],
+                    "neoforge:conditions":[{"type":"neoforge:not","value":{"type":"neoforge:always"}}],
                     "replace":true,"values":["minecraft:iron_block"]
                 }))],
             ),
@@ -3592,7 +3805,7 @@ mod tests {
                     bytes(json!({"values": ["minecraft:stone", "minecraft:dirt", "#test:other"]})),
                     bytes(json!({"values": [], "remove": ["minecraft:dirt", "#test:other"]})),
                     bytes(json!({"neoforge:conditions": [{"type": "neoforge:not",
-                    "value": {"type": "neoforge:true"}}], "values": [], "remove": ["minecraft:stone"]})),
+                    "value": {"type": "neoforge:always"}}], "values": [], "remove": ["minecraft:stone"]})),
                 ],
             ),
             (

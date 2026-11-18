@@ -20,6 +20,7 @@ class MouseButtonEventsTests(unittest.TestCase):
         fixture = r"""
 use std::collections::HashSet;
 #[derive(Clone, Copy, PartialEq)] enum ElementState { Pressed, Released }
+struct PointerSample;
 enum WindowEvent { MouseInput { state: ElementState, button: i32 }, Resized(()), Other }
 fn glfw_button(button: i32) -> i32 { button }
 fn glfw_modifiers(modifiers: u32) -> u32 { modifiers }
@@ -49,13 +50,15 @@ impl Game {
     }
     fn settle_title_mode(&mut self) {}
     fn notify_window_resize(&mut self) {}
-    fn handle_window_event_inner(&mut self, _: (), _: WindowEvent) {
+    fn handle_window_event_inner(&mut self, _: (), _: WindowEvent, cursor_sample: Option<PointerSample>) {
+        assert!(cursor_sample.is_none());
         self.calls.push("handle");
         if self.early { return; }
         self.calls.push("finish");
     }
     fn dispatch(&mut self, event: WindowEvent) {
         let event_loop = ();
+        let cursor_sample = None;
 DISPATCH
 }
 #[test]

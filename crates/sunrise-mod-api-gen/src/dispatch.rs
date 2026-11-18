@@ -385,10 +385,13 @@ pub(super) fn emit<'a>(
                     .find(|(arg, _)| arg == key)
                     .ok_or_else(|| format!("key {key} is not an argument of {name}"))?;
                 let key_type = ty.to_token_stream().to_string().replace("mod_api :: ", "");
-                if hook.inert.is_some() && key_type != "BlockState" {
-                    return Err(format!("inert hook {name} requires a BlockState key"));
+                if hook.inert.is_some() && (observer_routed || key_type != "BlockState") {
+                    return Err(format!(
+                        "inert hook {name} requires a block scope routed by a BlockState key"
+                    ));
                 }
                 let lookup = match key_type.as_str() {
+                    "BlockState" if hook.inert.is_some() => format!("block_entry({key})"),
                     "BlockState" if table == "block" && observer_routed => {
                         let host = &host
                             .as_ref()
@@ -415,6 +418,12 @@ pub(super) fn emit<'a>(
                     ),
                     "& str" if screen_routed => format!("menu_screen({key}, block)"),
                     "& str" => format!("{table}(|| Some({key}))"),
+                    "EntityRef" if table == "entity" => {
+                        let host = &host.as_ref().ok_or("entity handle needs a Host")?.0;
+                        format!(
+                            "entity(|| {key}.kind({host}).and_then(super::content::registry_keys::entity_type_name))"
+                        )
+                    }
                     "BlockEntityRef" if table == "block_entity" => {
                         let host = &host.as_ref().ok_or("block entity handle needs a Host")?.0;
                         format!(
@@ -695,7 +704,12 @@ pub(super) fn emit<'a>(
             signature.ident = syn::Ident::new(&format!("fire_{name}"), signature.ident.span());
             let target_path: syn::Path = syn::parse_str(target)
                 .map_err(|error| format!("invalid target for {name}: {error}"))?;
-            let receiver = &target_path.segments[target_path.segments.len() - 2].ident;
+            let receiver = &target_path.segments[target_path.segments.len() - 2];
+            let receiver_impl = if receiver.arguments.is_empty() {
+                format!("{}<'_>", receiver.ident)
+            } else {
+                receiver.to_token_stream().to_string()
+            };
             let guarded_carrier = !declared.is_empty()
                 && (hook.stack_count.is_some()
                     || carried.iter().any(|(_, ty)| {
@@ -832,7 +846,7 @@ pub(super) fn emit<'a>(
                 format!("mod_api::{call}({passed});")
             };
             fire.push_str(&format!(
-                "impl {receiver}<'_> {{ #[inline] pub(super) {signature} {{ {body} }} }}\n",
+                "impl {receiver_impl} {{ #[inline] pub(super) {signature} {{ {body} }} }}\n",
                 signature = signature.to_token_stream()
             ));
             if fill {
@@ -1065,14 +1079,27 @@ pub(super) fn emit<'a>(
             Some((_, lookup)) => (
                 // The parts are looked up first: the key may be moved into the event. A worldgen
                 // Part method runs on the worker threads too: it reads the server's published table.
-                format!(
-                    "\nif !super::has_part_hook(HookId::{hook_id}) {{ return; }} let {part_table} = {}; let {part_list} = {part_table}.for_hook(HookId::{hook_id}).map_or(&[][..], |table| table.{lookup}); if {part_list}.is_empty() {{ return; }}",
-                    if hook.context == Some(PhaseContext::Worldgen) {
+                {
+                    let table = if hook.context == Some(PhaseContext::Worldgen) {
                         "super::worldgen_parts()".to_owned()
                     } else {
                         format!("super::parts(HookId::{hook_id}, \"{name}\")")
+                    };
+                    let routing = format!(
+                        "\nif !super::has_part_hook(HookId::{hook_id}) {{ return; }} let {part_table} = {table};"
+                    );
+                    let table = format!("{part_table}.for_hook(HookId::{hook_id})");
+                    if hook.inert.is_some() {
+                        let entry = fresh_name("part_entry", &mut used);
+                        format!(
+                            "{routing} let Some({entry}) = {table}.and_then(|table| table.{lookup}) else {{ return; }}; let {part_list} = {entry}.parts(); let {inert_owner} = if super::any_mod_disabled() {{ {entry}.disabled_owner_slot() }} else {{ None }};"
+                        )
+                    } else {
+                        format!(
+                            "{routing} let {part_list} = {table}.map_or(&[][..], |table| table.{lookup}); if {part_list}.is_empty() {{ return; }}"
+                        )
                     }
-                ),
+                },
                 if let Some(inert) = &hook.inert {
                     let inert = if inert_signal {
                         "*inert = true;"
@@ -1092,14 +1119,6 @@ pub(super) fn emit<'a>(
                     )
                 },
             ),
-        };
-        let lookup = if hook.inert.is_some() {
-            let key = &hook.scope.as_ref().expect("inert has a block scope").key;
-            format!(
-                "{lookup}\nlet {inert_owner} = if super::any_mod_disabled() {{ super::disabled_owner_part({part_list}, super::content::registry_keys::block_id({key}.block())) }} else {{ None }};"
-            )
-        } else {
-            lookup
         };
         let write_back = if name == "block_entity_tick" {
             format!(
@@ -2398,11 +2417,11 @@ fn main() {{ game::run(std::env::args_os().nth(1).unwrap().into()); }}
             &[],
         )
         .unwrap();
-        assert!(declared.dispatch.contains("disabled_owner_part"));
+        assert!(declared.dispatch.contains("disabled_owner_slot"));
         assert!(declared.dispatch.contains("*handled = true;"));
         hook.inert = None;
         let undeclared = emit(&root, std::iter::once(&hook), &[method], &[]).unwrap();
-        assert!(!undeclared.dispatch.contains("disabled_owner_part"));
+        assert!(!undeclared.dispatch.contains("disabled_owner_slot"));
     }
 
     #[test]

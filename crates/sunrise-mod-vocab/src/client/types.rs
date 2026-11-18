@@ -840,25 +840,6 @@ impl ColoredLight {
     }
 }
 
-/// The minimap a native mod shows (`minimap`), drawn by Sunrise's
-/// minimap: its corner, its side in GUI pixels, blocks per map pixel,
-/// turning with the player or north up, round or square.
-#[derive(Clone, Copy, Debug, PartialEq)]
-// exhaustive: the game builds it with a literal; mods only read it
-#[derive(sunrise_mod_api_macros::Wire)]
-pub struct Minimap {
-    /// The screen corner the map sits in.
-    pub corner: Corner,
-    /// The map's side length in GUI pixels.
-    pub size: f32,
-    /// How many blocks one pixel covers; larger zooms out.
-    pub blocks_per_pixel: f32,
-    /// Turn the map with the player's facing instead of keeping north up.
-    pub rotate: bool,
-    /// Draw the map as a circle instead of a square.
-    pub round: bool,
-}
-
 /// A menu type's screen, a mod's (`screen`): its size, where
 /// each of the container's slots is (`Slot.x`, `Slot.y`; none hides the
 /// slot, and so do slots past the list; for a block's menu the server's menu

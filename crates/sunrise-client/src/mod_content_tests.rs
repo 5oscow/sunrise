@@ -10,6 +10,8 @@ mod block_entity_tests;
 mod farmland_tests;
 #[path = "mod_content_jar_tests.rs"]
 mod jar_tests;
+#[path = "mod_content_waterlogged_tests.rs"]
+mod waterlogged_tests;
 /// A Java jar's assets are a pack layer under the mod's own files, in mod
 /// order under the later mods. Passive assets stay in the jar, and the files
 /// every pack stacks (atlases here) merge across vanilla, the jars and the
@@ -716,6 +718,7 @@ fn block_aliases_keep_the_original_item_in_placement_context() {
         fn before_state_for_placement(
             &self,
             _: &sunrise_world::level::Ticks,
+            _: Option<&sunrise_world::level::PreviewBlocks>,
             _: BlockStateId,
             c: &PlacementContext,
             _: sunrise_world::fluid::FluidState,
@@ -5597,6 +5600,82 @@ fn configured_features_load_from_the_26_3_path() {
     fs::remove_dir_all(scratch).unwrap();
 }
 
+/// A content mod's own biomes join the biome set after vanilla's, by namespace
+/// then path; a `minecraft` biome file never joins it (the content fence refuses the file). Its tag keeps them, a
+/// modifier on that tag reaches them, and the biome suggestions list them.
+#[test]
+fn a_mods_own_biomes_join_the_biome_set() {
+    let base = biome_base("mod-biomes");
+    let scratch = base.parent().unwrap().to_owned();
+    fs::write(
+        base.join("command-registries.json"),
+        r#"{"blocks":{},"items":[],"by_registry":{"minecraft:worldgen/biome":{"ids":["minecraft:desert","minecraft:plains"]}}}"#,
+    )
+    .unwrap();
+    let foo = r#"{"temperature":1.5,"downfall":0.0,"features":[[]]}"#;
+    let m = folder_mod(
+        &scratch.join("zinc"),
+        &[
+            ("sunrise-mod.toml", &manifest("zinc", "")),
+            ("data/zinc/worldgen/biome/foo.json", foo),
+            ("data/zinc/worldgen/biome/bar/a.json", foo),
+            (
+                "data/zinc/worldgen/feature/ore_zinc.json",
+                r#"{"type":"minecraft:ore","config":{}}"#,
+            ),
+            (
+                "data/zinc/worldgen/placed_feature/ore_zinc.json",
+                r#"{"feature":"zinc:ore_zinc","placement":[]}"#,
+            ),
+            (
+                "data/zinc/tags/worldgen/biome/hot.json",
+                r#"{"values":["zinc:foo","zinc:missing"]}"#,
+            ),
+            (
+                "data/zinc/neoforge/biome_modifier/hot_ore.json",
+                r##"{"type":"neoforge:add_features","biomes":"#zinc:hot",
+                    "features":"zinc:ore_zinc","step":"underground_ores"}"##,
+            ),
+        ],
+    );
+    let out = scratch.join("out");
+    build_fixture(&base, Path::new(""), &[m], &out).unwrap();
+    let text = |root: &Path| fs::read_to_string(root.join("worldgen/biomes.json")).unwrap();
+    let bundle: BTreeMap<String, String> = serde_json::from_str(&text(&out)).unwrap();
+    let vanilla: BTreeMap<String, String> = serde_json::from_str(&text(&base)).unwrap();
+    for (id, biome) in &vanilla {
+        assert_eq!(&bundle[id], biome, "{id}");
+    }
+    assert_eq!(bundle.len(), vanilla.len() + 2);
+    let features = biome_features(&out);
+    assert_eq!(
+        features["zinc:foo"],
+        serde_json::json!([[], [], [], [], [], [], ["zinc:ore_zinc"]])
+    );
+    assert_eq!(features["zinc:bar/a"], serde_json::json!([[]]));
+    // After vanilla's, then by path.
+    let at = |id: &str| text(&out).find(&format!("\"{id}\":")).unwrap();
+    assert!(at("minecraft:plains") < at("zinc:bar/a") && at("zinc:bar/a") < at("zinc:foo"));
+    let tag: BTreeMap<String, String> =
+        serde_json::from_slice(&fs::read(out.join("worldgen/biome_tags.json")).unwrap()).unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&tag["zinc:hot"]).unwrap()["values"],
+        serde_json::json!(["zinc:foo"])
+    );
+    let commands: serde_json::Value =
+        serde_json::from_slice(&fs::read(out.join("command-registries.json")).unwrap()).unwrap();
+    assert_eq!(
+        commands["by_registry"]["minecraft:worldgen/biome"]["ids"],
+        serde_json::json!([
+            "minecraft:desert",
+            "minecraft:plains",
+            "zinc:bar/a",
+            "zinc:foo"
+        ])
+    );
+    let _ = fs::remove_dir_all(&scratch);
+}
+
 /// A world's data pack that replaces a vanilla biome (Terralith's plains)
 /// keeps the mods' modifier features, and a pack's own biome its tag puts
 /// under the modifier's selector gets them: modifiers apply after
@@ -6304,8 +6383,8 @@ fn signs_take_their_form_wood_and_wall_block_from_their_declaration() {
 
 /// A fence gate of a mod is a vanilla `FenceGateBlock` through its template, with
 /// its wood's sounds unless the file names its own: `open_sound` and
-/// `close_sound` replace `WoodType.fenceGateOpen` and `fenceGateClose`, the one
-/// value a use, a redstone change and an explosion all read.
+/// `close_sound` override every site or just the named sites, retaining the
+/// template wood for each missing site.
 #[test]
 #[ignore = "daily"]
 fn a_content_fence_gate_plays_its_own_sounds_or_its_woods() {
@@ -6332,6 +6411,10 @@ fn a_content_fence_gate_plays_its_own_sounds_or_its_woods() {
                 "data/gates/sunrise/block/half.json",
                 r#"{"template": "minecraft:birch_fence_gate", "open_sound": "gates:half.open"}"#,
             ),
+            (
+                "data/gates/sunrise/block/sites.json",
+                r#"{"template":"minecraft:oak_fence_gate","open_sound":{"use":"gates:use.open","redstone":"gates:wire.open"},"close_sound":{"explosion":"gates:blast.close"}}"#,
+            ),
         ],
     );
     let root = resource_root_fixture(
@@ -6347,12 +6430,15 @@ fn a_content_fence_gate_plays_its_own_sounds_or_its_woods() {
         let state = registry.default_state(name).unwrap();
         let data = behaviours.data(state);
         (
-            data.gate_open.as_deref().map(str::to_owned),
-            data.gate_close.as_deref().map(str::to_owned),
+            std::array::from_fn::<_, 3, _>(|i| data.gate_open[i].as_deref().map(str::to_owned)),
+            std::array::from_fn::<_, 3, _>(|i| data.gate_close[i].as_deref().map(str::to_owned)),
         )
     };
     let gate = |open: Option<&str>, close: Option<&str>| {
-        (open.map(str::to_owned), close.map(str::to_owned))
+        (
+            std::array::from_fn::<_, 3, _>(|_| open.map(str::to_owned)),
+            std::array::from_fn::<_, 3, _>(|_| close.map(str::to_owned)),
+        )
     };
     assert_eq!(
         sounds("gates:oak"),
@@ -6370,6 +6456,23 @@ fn a_content_fence_gate_plays_its_own_sounds_or_its_woods() {
         gate(
             Some("gates:half.open"),
             Some("minecraft:block.fence_gate.close")
+        )
+    );
+    assert_eq!(
+        sounds("gates:sites"),
+        (
+            [
+                "gates:use.open",
+                "minecraft:block.fence_gate.open",
+                "gates:wire.open"
+            ]
+            .map(|s| Some(s.to_owned())),
+            [
+                "minecraft:block.fence_gate.close",
+                "gates:blast.close",
+                "minecraft:block.fence_gate.close"
+            ]
+            .map(|s| Some(s.to_owned())),
         )
     );
     assert_eq!(

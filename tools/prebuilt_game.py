@@ -33,6 +33,7 @@ import tarfile
 import tempfile
 import tomllib
 import time
+import urllib.request
 from pathlib import Path
 
 
@@ -105,6 +106,26 @@ XZ_PRESET = 6
 # The SDK's `tool` asset: `cargo sunrise-mod native-build` compiles native mods as the launcher does.
 TOOL = "cargo-sunrise-mod"
 TOOL_PROGRAM = TOOL + (".exe" if sys.platform == "win32" else "")
+
+
+LAUNCHER_FILES = ("src/game_app.rs", "assets/icons/sunrise.icns")  # game_app.rs include_bytes!es the icon
+
+
+def launcher_pin() -> str:
+    pin = (ROOT / "tools/ci/launcher-pin").read_text().strip()
+    if not re.fullmatch(r"[0-9a-f]{40}", pin):
+        sys.exit("tools/ci/launcher-pin must be a full 40-character lowercase commit SHA")
+    return pin
+
+
+def fetch_launcher_files(destination: Path, pin: str, fetch=lambda url: urllib.request.urlopen(url, timeout=60).read()) -> Path:
+    """The files of the bundle preparation at the sunrise-launcher commit `pin`, in their own layout under `destination`
+    (game_app.rs reads the icon by the relative path ../assets/icons/)."""
+    for name in LAUNCHER_FILES:
+        target = destination / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(fetch(f"https://raw.githubusercontent.com/sunrise-org/sunrise-launcher/{pin}/{name}"))
+    return destination
 
 
 def run(command: list[str], **kwargs) -> str:
@@ -652,7 +673,7 @@ def smoke(out: Path) -> None:
     if installed.exists():
         shutil.rmtree(installed)
     installed.mkdir()
-    # The game's libraries load from beside the executable (launcher/src/native_mods/prebuilt.rs `compile`).
+    # The game's libraries load from beside the executable (sunrise-launcher's src/native_mods/prebuilt.rs `compile`).
     origin = {"linux": ["-Wl,-rpath,$ORIGIN"], "darwin": ["-Wl,-rpath,@executable_path"]}.get(sys.platform, [])
     identity = json.loads((out / IDENTITY).read_text())
     release = next(line.removeprefix("release: ") for line in identity["rustc"].splitlines() if line.startswith("release: "))
@@ -739,7 +760,7 @@ def install_package(folder: Path, mod: str, source: str, dependencies: str) -> N
 
 
 def runtime_libraries(out: Path) -> list[Path]:
-    """What the launcher installs beside the executable (launcher/src/native_mods/prebuilt.rs `runtime_libraries`),
+    """What the launcher installs beside the executable (sunrise-launcher's src/native_mods/prebuilt.rs `runtime_libraries`),
     by the same rule: every shared library the identity's `runtime` slice records under `deps/`, std, and on Windows
     the MinGW runtime the GNU DLLs import. So `start` fails when the record misses a library the game loads."""
     runtime = json.loads((out / IDENTITY).read_text())["slices"]["runtime"]
@@ -787,9 +808,12 @@ def start(out: Path) -> None:
             (game / "eula.txt").write_text("eula=true\n")
             executable = installed / EXECUTABLE
             if sys.platform == "darwin":
-                # Use the launcher's actual bundle preparation, not a second list of libraries.
+                # Use the launcher's actual bundle preparation, not a second list of libraries: its source from the
+                # sunrise-launcher commit pinned in tools/ci/launcher-pin.
                 bundle_source = scratch / "bundle.rs"
-                module = json.dumps(str(ROOT / "launcher/src/game_app.rs"))
+                pin = launcher_pin()
+                game_app = fetch_launcher_files(scratch / "launcher", pin) / "src/game_app.rs"
+                module = json.dumps(str(game_app))
                 bundle_source.write_text(
                     'mod i18n { pub fn tr(s: &str) -> &str { s } }\n'
                     'mod shortcut { pub fn xml(s: &str) -> String { s.to_owned() } }\n'
@@ -851,10 +875,12 @@ def archives(out: Path, sliced: dict[str, list[str]]) -> dict[str, list[str]]:
                                 if parent != Path("."))} | set(names)) for kind, names in chosen.items()}
 
 
-def pack(out: Path, dist: Path, stage_tool: Path | None = None) -> None:
+def pack(out: Path, dist: Path, stage_tool: Path | None = None, with_tool: bool = False) -> None:
     """The SDK release's assets from a checked folder OUT, into DIST: the package as its `runtime`, `api` and `engine`
     archives for its target and side ([`archives`]), the build data, the surface export of this source and, for the
-    client side, the target's `tool` ([`tool`]): one per target, as it serves both sides."""
+    client side, the target's `tool` ([`tool`]): one per target, as it serves both sides. `with_tool` packs it on a server
+    leg too, for a server-only SDK that no client leg completes (the fn-replace fixtures): the launcher needs the tool
+    even to export a server."""
     check(out)
     identity = json.loads((out / IDENTITY).read_text())
     if identity.get("package_format") != package_format(ROOT) or identity.get("commit") != head():
@@ -864,7 +890,7 @@ def pack(out: Path, dist: Path, stage_tool: Path | None = None) -> None:
     jobs = {dist / f"{kind}-{identity['target']}{suffix}.tar.xz": (out, names)
             for kind, names in archives(out, identity["slices"]).items()}
     jobs[dist / BUILD_DATA_ARCHIVE] = (out, [".", *BUILD_DATA])
-    if identity["side"] == "client":
+    if identity["side"] == "client" or with_tool:
         jobs[dist / f"tool-{identity['target']}.tar.xz"] = (tool(identity["target"]), [".", TOOL_PROGRAM])
     # Each archive keeps its single xz stream; only independent archives run concurrently.
     with ProcessPoolExecutor(max_workers=len(jobs)) as pool:
@@ -1018,6 +1044,8 @@ def main() -> None:
     # `build` compiles sunrise-stage from the commit's own source before staging it (target/prebuilt/tools); the
     # surface export reuses that binary instead of compiling it again in another target folder.
     pack_parser.add_argument("--stage-tool", type=Path, help="the sunrise-stage binary to export the surface with")
+    pack_parser.add_argument("--with-tool", action="store_true",
+                             help="also pack the target's tool on a server leg (a server-only SDK no client leg completes)")
     gather_parser = commands.add_parser("gather")
     gather_parser.add_argument("legs", type=Path)
     gather_parser.add_argument("dist", type=Path)
@@ -1042,7 +1070,7 @@ def main() -> None:
     elif args.command == "start":
         start(args.out.resolve())
     elif args.command == "pack":
-        pack(args.out.resolve(), args.dist.resolve(), args.stage_tool)
+        pack(args.out.resolve(), args.dist.resolve(), args.stage_tool, args.with_tool)
     elif args.command == "gather":
         gather(args.legs.resolve(), args.dist.resolve())
     elif args.command == "index":

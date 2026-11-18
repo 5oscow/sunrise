@@ -125,6 +125,8 @@ All three hooks also fire in singleplayer, where the window is a client of its o
 The server-side world still reports its edits through `block_changed`. A level a server opens for
 viewing (below) is not told. A section update tells each of its blocks, so keep the listener cheap:
 mark the chunk and redraw it later.
+sunrise-org/sunrise-minimap is such a mod: it redraws a marked chunk into its map's dynamic texture and draws
+the map in `render_gui_post`.
 
 ## Viewed levels
 

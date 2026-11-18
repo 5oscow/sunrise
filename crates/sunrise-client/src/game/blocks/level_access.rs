@@ -619,22 +619,62 @@ impl LevelAccess for GameLevel<'_> {
     fn before_state_for_placement(
         &self,
         ticks: &Ticks,
+        preview: Option<&sunrise_world::level::PreviewBlocks>,
         state: BlockStateId,
         context: &PlacementContext,
         fluid: FluidState,
         answer: &mut Option<Option<BlockStateId>>,
     ) {
-        if self.native_authoritative
-            && let Some(fluid) = native_world_read::api_fluid_state(fluid)
-        {
-            self.view(ticks).native_state_for_placement(
-                self.dimension,
-                state,
-                context,
-                fluid,
-                answer,
-            );
+        // Asked on both sides: a client's placement prediction asks it too.
+        if let Some(fluid) = native_world_read::api_fluid_state(fluid) {
+            self.view(ticks)
+                .previewing(preview)
+                .native_state_for_placement(self.dimension, state, context, fluid, answer);
         }
+    }
+    fn placement_context(
+        &self,
+        item: &str,
+        context: &PlacementContext,
+    ) -> Option<Option<PlacementContext>> {
+        let mut answer = None;
+        self.native_placement_context(item, context, &mut answer);
+        answer.map(|answer| {
+            answer.and_then(|snapshot| {
+                if !snapshot.hit.iter().all(|n| n.is_finite())
+                    || !snapshot.yaw.is_finite()
+                    || !snapshot.pitch.is_finite()
+                {
+                    log::warn!("placement_context: refused {item}: nonfinite hit or rotation");
+                    return None;
+                }
+                if snapshot.item.and_then(mod_api::__private::item_key_id) != Some(item) {
+                    log::warn!("placement_context: refused {item}: replacement changed the item");
+                    return None;
+                }
+                Some(PlacementContext {
+                    pos: snapshot.pos,
+                    hit_pos: snapshot.hit_pos,
+                    face: snapshot.face,
+                    hit: sunrise_core::geometry::Vec3::new(
+                        snapshot.hit[0],
+                        snapshot.hit[1],
+                        snapshot.hit[2],
+                    ),
+                    inside: snapshot.inside,
+                    yaw: snapshot.yaw,
+                    pitch: snapshot.pitch,
+                    sneaking: snapshot.sneaking,
+                    item: context.item.clone(),
+                    replace_clicked: snapshot.replace_clicked,
+                })
+            })
+        })
+    }
+    fn must_survive(&self, item: &str) -> Option<bool> {
+        let mut answer = None;
+        self.native_must_survive(item, &mut answer);
+        answer
     }
     fn fence_gate_in_wall(&self, state: BlockStateId) -> Option<bool> {
         let mut answer = None;
@@ -644,27 +684,34 @@ impl LevelAccess for GameLevel<'_> {
     fn before_can_survive(
         &self,
         ticks: &Ticks,
+        preview: Option<&sunrise_world::level::PreviewBlocks>,
         pos: BlockPos,
         state: BlockStateId,
         survives: &mut Option<bool>,
     ) -> bool {
         let mut inert = false;
-        if self.native_authoritative {
-            self.view(ticks)
-                .native_can_survive(self.dimension, pos, state, survives, &mut inert);
-        }
+        self.view(ticks).previewing(preview).native_can_survive(
+            self.dimension,
+            pos,
+            state,
+            survives,
+            &mut inert,
+        );
         inert
     }
     fn before_can_sustain_plant(
         &self,
+        ticks: &Ticks,
+        preview: Option<&sunrise_world::level::PreviewBlocks>,
         state: BlockStateId,
         ground: BlockStateId,
         ground_pos: BlockPos,
         sustains: &mut Option<bool>,
     ) -> bool {
         let mut inert = false;
-        if self.native_authoritative {
-            self.native_can_sustain_plant(
+        self.view(ticks)
+            .previewing(preview)
+            .native_can_sustain_plant(
                 self.dimension,
                 state,
                 ground,
@@ -672,7 +719,6 @@ impl LevelAccess for GameLevel<'_> {
                 sustains,
                 &mut inert,
             );
-        }
         inert
     }
     fn asks_is_fertile(&self) -> bool {
@@ -708,15 +754,22 @@ impl LevelAccess for GameLevel<'_> {
     }
     fn before_may_place_on(
         &self,
+        ticks: &Ticks,
+        preview: Option<&sunrise_world::level::PreviewBlocks>,
         state: BlockStateId,
         ground: BlockStateId,
         ground_pos: BlockPos,
         may: &mut Option<bool>,
     ) -> bool {
         let mut inert = false;
-        if self.native_authoritative {
-            self.native_may_place_on(self.dimension, state, ground, ground_pos, may, &mut inert);
-        }
+        self.view(ticks).previewing(preview).native_may_place_on(
+            self.dimension,
+            state,
+            ground,
+            ground_pos,
+            may,
+            &mut inert,
+        );
         inert
     }
     fn is_client_side(&self) -> bool {
