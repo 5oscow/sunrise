@@ -1,7 +1,6 @@
 use super::*;
 use sunrise_core::{geometry::Direction, position::BlockPos};
 use sunrise_world::level::LevelAccess;
-#[cfg(test)]
 use sunrise_world::level::Ticks;
 
 use crate::game::mod_api_host::{FireOddsLevel, PredictedLevel};
@@ -60,6 +59,26 @@ impl<'w> DryLevel<'w> {
             reads: None,
             asks_mods: true,
         }
+    }
+}
+
+impl crate::game::Game<'_> {
+    /// Preview state-level placement effects before a code placement can write any fenced cell.
+    pub(in crate::game) fn preview_set_placed_by(
+        &mut self,
+        pos: BlockPos,
+        state: BlockStateId,
+    ) -> sunrise_world::level::PreviewBlocks {
+        self.with_level(|behaviours, level, _| {
+            let random = level.random().clone();
+            let mut dry = DryLevel::new(level);
+            dry.random = random;
+            dry.asks_mods = false;
+            // Standalone and convenience callers both preview with the chosen state at the origin.
+            dry.changed.insert(pos, state);
+            behaviours.set_placed_by_state(&mut dry, &mut Ticks::default(), pos, state);
+            dry.changed
+        })
     }
 }
 

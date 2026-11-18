@@ -150,13 +150,14 @@ pub trait PlayerInteractionBackendMut {
     /// the player's turn (a bed places its head, a door its upper half). Nothing else of vanilla's `BlockItem.place`
     /// or `useOn` runs: no check that the block may be placed there (survival, entity
     /// obstruction, build permission, spawn protection), no `placed_block` advancement trigger or
-    /// statistic, item placement sound, placement game event, or item use or consumption.
+    /// statistic, generic item placement sound or game event, or item use or consumption.
+    /// The block callback may produce its own effects.
     /// `setPlacedBy` is not given the player as placer. The player is only whose turn `setPlacedBy` runs in, so it is
     /// not "as player" in the sense of a use-on. The state is written as given. Refuses, writing
     /// nothing, with `PlayerWorldRefusal`: `Client`, `Stale`, `Dead`, `StaleLevel`, `OtherLevel`
-    /// (not the level in place, where the player is), `UnknownState`, `OutOfWorld`, `NotLoaded`
-    /// `Fenced` (the origin or companion is held by a carrier transfer), `InTransaction`
-    /// (a wither skull in an open Host transaction), and `Unchanged` (that state already stands
+    /// (not the level in place, where the player is), `UnknownState`, `OutOfWorld`, `NotLoaded`,
+    /// `Fenced` (a cell the placement writes is held by a carrier transfer), `InTransaction`
+    /// (a completed wither pattern in an open Host transaction), and `Unchanged` (that state already stands
     /// there, or the write was refused as
     /// `level_set_block` returns false).
     #[access(WorldOnly)]

@@ -1,1 +1,2 @@
+sunrise-client game::native_level_placement_tests::a_tripwire_placement_cannot_rewrite_a_fenced_hook_or_wire lib daily resources
 sunrise-client game::native_level_placement_tests::placement_does_not_write_a_fenced_companion lib daily resources

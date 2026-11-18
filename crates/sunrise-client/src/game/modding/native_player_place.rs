@@ -93,6 +93,7 @@ impl Game<'_> {
         update_neighbour_shapes: bool,
     ) -> Result<bool, LevelWriteError> {
         if !self.native_level_write_position(level, pos)?
+            || self.world.block(pos[0], pos[1], pos[2]) == state
             || !self.placement_callback_allowed(pos, state)?
         {
             return Ok(false);
@@ -128,21 +129,22 @@ impl Game<'_> {
         pos: [i32; 3],
         state: BlockStateId,
     ) -> Result<bool, LevelWriteError> {
-        if !self.transactions.is_empty() && self.is_wither_skull_state(state) {
-            // The raw pattern clear is not part of the entity transaction journal.
-            // Refuse before either the block or the pattern can change.
+        if self.world.carrier_fences.has_locked_cells() {
+            let at = BlockPos::new(pos[0], pos[1], pos[2]);
+            if self.world.carrier_fences.locks_cell(&pos)
+                || self
+                    .preview_set_placed_by(at, state)
+                    .keys()
+                    .any(|p| self.world.carrier_fences.locks_cell(&[p.x, p.y, p.z]))
+            {
+                return Ok(false);
+            }
+        }
+        if !self.transactions.is_empty() && self.wither_spawn_pattern(pos, state).is_some() {
+            // The pattern's flag-2 writes, destroy events and neighbour pass are not journalled.
             return Err(LevelWriteError::InTransaction);
         }
-        if !self.world.carrier_fences.has_locked_cells() {
-            return Ok(true);
-        }
-        if self.world.carrier_fences.locks_cell(&pos) {
-            return Ok(false);
-        }
-        let at = BlockPos::new(pos[0], pos[1], pos[2]);
-        let companion =
-            self.with_level(|b, level, ticks| b.set_placed_by_companion(level, ticks, at, state));
-        Ok(!companion.is_some_and(|at| self.world.carrier_fences.locks_cell(&[at.x, at.y, at.z])))
+        Ok(true)
     }
 
     /// Chosen-state mod placements did not run the simulation's block-item placement.
@@ -155,15 +157,9 @@ impl Game<'_> {
     ) {
         let [x, y, z] = pos;
         let placed = self.world.block(x, y, z);
-        if placed != expected {
-            let b = self.res.behaviours();
-            if b.block(placed) != b.block(expected)
-                || !self
-                    .placement_callback_allowed(pos, placed)
-                    .unwrap_or(false)
-            {
-                return;
-            }
+        let behaviours = self.res.behaviours();
+        if behaviours.block(placed) != behaviours.block(expected) {
+            return;
         }
         self.with_level(|b, level, ticks| {
             b.set_placed_by_state(level, ticks, BlockPos::new(x, y, z), placed);
@@ -197,9 +193,9 @@ impl Game<'_> {
                 // The sign editor is a ServerPlayer side effect, not a block-state or NBT write.
                 Some(BlockEntity::Sign(sign))
                     if placer.is_some()
-                        && !self.lan_acting_fake
                         && !sign.waxed
-                        && sign.front.has_editable_text() =>
+                        && sign.front.has_editable_text()
+                        && !self.fake_blocks(mod_api::FakeEffect::Menu) =>
                 {
                     self.open_text_edit(key, true);
                 }

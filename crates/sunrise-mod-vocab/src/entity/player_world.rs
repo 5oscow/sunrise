@@ -46,7 +46,7 @@ pub enum PlayerWorldRefusal {
     Unchanged,
     /// The origin or its companion cell is fenced by a carrier transfer.
     Fenced,
-    /// This placement can summon a wither and cannot run inside a Host transaction.
+    /// This placement completes a wither pattern and cannot run inside a Host transaction.
     InTransaction,
 }
 

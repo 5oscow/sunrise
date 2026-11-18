@@ -1822,21 +1822,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
 }
 
 impl Behaviours {
-    /// The extra cell a placement may write directly, for a caller enforcing a write fence.
-    pub fn set_placed_by_companion<L: LevelAccess + ?Sized>(
-        &self,
-        level: &mut L,
-        ticks: &mut Ticks,
-        pos: BlockPos,
-        state: BlockStateId,
-    ) -> Option<BlockPos> {
-        self.sim(level, ticks)
-            .placed_companion(pos, state)
-            .map(|(at, _)| at)
-            .or_else(|| self.data(state).is(Class::MossyCarpet).then(|| above(pos)))
-    }
-
-    /// `Block.setPlacedBy` for the state standing at `pos` (a bed's head, a door's upper half).
+    /// The simulation's `Block.setPlacedBy` effects for the state standing at `pos`.
     /// The caller has already written the block itself (`Level.setBlock`).
     pub fn set_placed_by_state<L: LevelAccess + ?Sized>(
         &self,

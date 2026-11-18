@@ -10,14 +10,14 @@ These are all server operations on the level in place.
   no placer. First write the state and load the block-entity data. The callback can write companion
   cells and produce block-specific effects; it does not place the initial block or copy the stack's
   data into it. `stack` is read only (`None` supplies an empty stack); it need not fit an inventory
-  slot. A carrier transfer fence at the origin or companion refuses the operation. A wither skull
-  refuses with `LevelWriteError::InTransaction` inside an open Host transaction.
+  slot. A carrier transfer fence on any cell the callback would write refuses the operation. If the placement
+  would summon a wither, it returns `LevelWriteError::InTransaction` inside a Host transaction.
 - `level.place_block(host, pos, state, update_neighbour_shapes)` writes `state` with a placement's
   flags (neighbours and clients told, and unless `update_neighbour_shapes` is false their shapes
   updated) and then runs `Block.setPlacedBy`, so a bed gets its head, a door its upper half and a
   tall plant its top. It returns `Ok(true)` when the block was written and `Ok(false)` for an
   unchanged state, an unloaded or out-of-height position, or a fenced origin or companion. It
-  has the same wither skull transaction refusal.
+  has the same refusal when it would summon a wither.
 
 ```rust,ignore
 let fitted = level.update_from_neighbour_shapes(host, pos, door)?;

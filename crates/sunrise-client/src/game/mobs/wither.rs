@@ -8,6 +8,7 @@ use sunrise_client::{
     projectiles::{Projectile, ProjectileKind},
 };
 use sunrise_core::{geometry::Direction, position::BlockPos};
+use sunrise_world::registry::BlockStateId;
 
 impl Game<'_> {
     /// `LivingEntity.createWitherRose`: a mob a wither killed leaves a wither
@@ -68,64 +69,77 @@ impl Game<'_> {
         }
         self.spawn_item_own(ItemStack::new("minecraft:wither_rose", 1), position, 0);
     }
-    fn is_wither_skull(&self, p: [i32; 3]) -> bool {
-        self.is_wither_skull_state(self.world.block(p[0], p[1], p[2]))
-    }
-    pub(super) fn is_wither_skull_state(
-        &self,
-        state: sunrise_world::registry::BlockStateId,
-    ) -> bool {
+    fn is_wither_skull_state(&self, state: BlockStateId) -> bool {
         matches!(
             &*self.res.facts().get(state).name,
             "minecraft:wither_skeleton_skull" | "minecraft:wither_skeleton_wall_skull"
         )
     }
-    /// `#minecraft:wither_summon_base_blocks` (soul sand and soul soil).
-    pub(super) fn is_soul_base(&self, p: [i32; 3]) -> bool {
-        let name = &*self
-            .res
-            .facts()
-            .get(self.world.block(p[0], p[1], p[2]))
-            .name;
-        self.res
-            .items()
-            .block_tags
-            .get("minecraft:wither_summon_base_blocks")
-            .is_some_and(|t| t.contains(name))
-    }
+
     /// `pattern.find(level, pos)` for the wither patterns: '^' a wither
-    /// skeleton skull, '#' a summon base block, '~' air.
+    /// skeleton skull, '#' a summon base block, '~' air. `at_origin` can
+    /// substitute a proposed state without putting it in the world.
     pub(super) fn find_wither_pattern(
         &self,
         pattern: BlockPattern,
         pos: [i32; 3],
+        at_origin: BlockStateId,
     ) -> Option<PatternMatch> {
-        pattern.find(pos, |key, p| match key {
-            '^' => self.is_wither_skull(p),
-            '#' => self.is_soul_base(p),
-            _ => self.res.facts().is_air(self.world.block(p[0], p[1], p[2])),
+        pattern.find(pos, |key, p| {
+            let state = if p == pos {
+                at_origin
+            } else {
+                self.world.block(p[0], p[1], p[2])
+            };
+            match key {
+                '^' => self.is_wither_skull_state(state),
+                '#' => self
+                    .res
+                    .items()
+                    .block_tags
+                    .get("minecraft:wither_summon_base_blocks")
+                    .is_some_and(|tag| tag.contains(&*self.res.facts().get(state).name)),
+                _ => self.res.facts().is_air(state),
+            }
         })
     }
-    /// `WitherSkullBlock.checkSpawn`, after a wither skeleton skull is
-    /// placed: the T of three skulls on four soul sand or soul soil, built in
-    /// any orientation, becomes a wither.
-    pub(super) fn check_wither_spawn(&mut self, placed: [i32; 3]) -> sunrise_client::Result<()> {
-        // Nothing is built in Peaceful (`level.getDifficulty() != PEACEFUL`).
-        if self.ui.difficulty == 0 || !self.is_wither_skull(placed) {
-            return Ok(());
+
+    /// The same spawn eligibility for an actual or proposed skull placement.
+    pub(super) fn wither_spawn_pattern(
+        &self,
+        placed: [i32; 3],
+        state: BlockStateId,
+    ) -> Option<(PatternMatch, Vec<[i32; 3]>)> {
+        if self.ui.difficulty == 0 || !self.is_wither_skull_state(state) {
+            return None;
         }
-        let Some(found) = self.find_wither_pattern(WITHER_FULL, placed) else {
-            return Ok(());
-        };
-        // Clear the pattern, the wither appears on the middle of the bottom
-        // row facing along the pattern's forwards axis, then neighbours update.
+        let found = self.find_wither_pattern(WITHER_FULL, placed, state)?;
         let cells = found.front_cells();
         if cells
             .iter()
             .any(|pos| self.world.carrier_fences.locks_cell(pos))
         {
+            return None;
+        }
+        Some((found, cells))
+    }
+
+    /// `WitherSkullBlock.checkSpawn`: the T of three skulls on four soul sand
+    /// or soul soil, built in any orientation, becomes a wither.
+    pub(super) fn check_wither_spawn(&mut self, placed: [i32; 3]) -> sunrise_client::Result<()> {
+        // The transaction journals ordinary state and entity changes, not this
+        // pattern's flag-2 writes, destroy events and subsequent neighbour pass.
+        // The mod placement preflight refuses a completing formation before it writes.
+        // Do not clear a formation created reentrantly by the write's neighbours either.
+        if !self.transactions.is_empty() {
             return Ok(());
         }
+        let state = self.world.block(placed[0], placed[1], placed[2]);
+        let Some((found, cells)) = self.wither_spawn_pattern(placed, state) else {
+            return Ok(());
+        };
+        // Clear the pattern, the wither appears on the middle of the bottom
+        // row facing along the pattern's forwards axis, then neighbours update.
         self.clear_pattern_blocks(&cells)?;
         let base = found.block(1, 2, 0);
         let at = [

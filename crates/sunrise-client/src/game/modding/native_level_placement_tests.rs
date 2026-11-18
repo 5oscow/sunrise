@@ -78,6 +78,18 @@ fn a_post_write_placement_reads_the_stack_without_loading_its_data() {
             level.set_placed_by(game, [128, 70, 2], Some(&stack)),
             Ok(false)
         );
+        // An invalid component on an otherwise valid item refuses before the jukebox changes.
+        let mut invalid = stack.clone();
+        let mut patch = invalid.components().unwrap().as_nbt().clone();
+        patch.insert("minecraft:consumable".into(), mod_api::Tag::Int(1));
+        invalid.set_components(patch).unwrap();
+        assert_eq!(
+            level.set_placed_by(game, pos, Some(&invalid)),
+            Err(mod_api::LevelWriteError::InvalidStack(
+                mod_api::StackWriteError::InvalidEffectPayload
+            ))
+        );
+        assert_eq!(game.world.block(pos[0], pos[1], pos[2]), jukebox);
         assert_eq!(level.set_placed_by(game, pos, Some(&stack)), Ok(true));
         let placed = game
             .pack
@@ -94,6 +106,49 @@ fn a_post_write_placement_reads_the_stack_without_loading_its_data() {
                 .unwrap()
                 .get("RecordItem")
                 .is_none()
+        );
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn a_command_block_placement_callback_saves_updated_entity_data() {
+    use sunrise_client::containers::BlockEntity;
+
+    with_game(|game| {
+        let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+        loaded(game);
+        let level = game.level(game.dim.id()).unwrap();
+        let pos = [2, 70, 2];
+        let command = state(game, "minecraft:command_block");
+        assert_eq!(
+            game.level_set_block(level, pos, command, BlockUpdateFlags::NONE),
+            Ok(true)
+        );
+        let key = (pos[0], pos[1], pos[2]);
+        let Some(BlockEntity::CommandBlock(entity)) = game.world.block_entities.get_mut(&key)
+        else {
+            panic!("placement must create a command block entity");
+        };
+        let feedback = game
+            .ui
+            .rules
+            .bool_at(sunrise_client::gamerules::vanilla::SEND_COMMAND_FEEDBACK);
+        entity.track_output = !feedback;
+        game.world.modified.clear();
+        assert_eq!(level.set_placed_by(game, pos, None), Ok(true));
+        let Some(BlockEntity::CommandBlock(entity)) = game.world.block_entities.get(&key) else {
+            panic!("the command block entity must remain");
+        };
+        assert_eq!(entity.track_output, feedback);
+        assert!(
+            game.world.modified.remove(&(0, 0)),
+            "the block entity change must be saved"
+        );
+        assert_eq!(level.set_placed_by(game, pos, None), Ok(true));
+        assert!(
+            !game.world.modified.remove(&(0, 0)),
+            "no change needs no save"
         );
     });
 }
@@ -128,14 +183,84 @@ fn placement_does_not_write_a_fenced_companion() {
 
 #[test]
 #[ignore = "daily"]
-fn a_wither_placement_refused_in_a_transaction_keeps_the_pattern() {
-    use mod_api::{HostTransaction, LevelWriteError, ServerHost};
-
+fn a_tripwire_placement_cannot_rewrite_a_fenced_hook_or_wire() {
     with_game(|game| {
+        let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+        loaded(game);
+        let level = game.level(game.dim.id()).unwrap();
+        let hook = state(game, "minecraft:tripwire_hook");
+        let east = game.with_props(hook, &[("facing", "east")]).unwrap();
+        let west = game.with_props(hook, &[("facing", "west")]).unwrap();
+        let wire = state(game, "minecraft:tripwire");
+        let stone = state(game, "minecraft:stone");
+        let (origin, between, opposite) = ([2, 70, 2], [3, 70, 2], [4, 70, 2]);
+        for (pos, block) in [
+            ([1, 70, 2], stone),
+            ([5, 70, 2], stone),
+            (between, wire),
+            (opposite, west),
+        ] {
+            assert_eq!(
+                game.level_set_block(level, pos, block, BlockUpdateFlags::NONE),
+                Ok(true)
+            );
+        }
+        for fenced in [opposite, between] {
+            game.world.carrier_fences.lock_cell(fenced);
+            assert_eq!(
+                game.level_place_block(level, origin, east, false),
+                Ok(false)
+            );
+            assert_eq!(
+                game.world.block(origin[0], origin[1], origin[2]),
+                game.world.air
+            );
+            game.world.carrier_fences.unlock_cell(fenced);
+        }
+        assert_eq!(
+            game.level_set_block(level, origin, east, BlockUpdateFlags::NONE),
+            Ok(true)
+        );
+        let saved = [origin, opposite, between].map(|[x, y, z]| game.world.block(x, y, z));
+        for fenced in [opposite, between] {
+            game.world.carrier_fences.lock_cell(fenced);
+            assert_eq!(level.set_placed_by(game, origin, None), Ok(false));
+            assert_eq!(
+                [origin, opposite, between].map(|[x, y, z]| game.world.block(x, y, z)),
+                saved
+            );
+            game.world.carrier_fences.unlock_cell(fenced);
+        }
+        assert_eq!(level.set_placed_by(game, origin, None), Ok(true));
+        for [x, y, z] in [origin, opposite, between] {
+            assert_eq!(
+                game.pack
+                    .assets
+                    .registry
+                    .state(game.world.block(x, y, z))
+                    .unwrap()
+                    .properties
+                    .get("attached")
+                    .map(String::as_str),
+                Some("true")
+            );
+        }
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn a_transaction_refuses_only_a_completing_wither_placement() {
+    use super::native_guest_turn_tests::with_guests;
+    use crate::game::api_values::TryIntoApi;
+    use mod_api::{HostTransaction, LevelWriteError, PlayerWorldRefusal, ServerHost};
+
+    with_guests(|game| {
         let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
         loaded(game);
         game.ui.difficulty = 2;
         let level = game.level(game.dim.id()).unwrap();
+        let player = game.player(13).unwrap();
         let skull = state(game, "minecraft:wither_skeleton_skull");
         let soul = state(game, "minecraft:soul_sand");
         let air = game.world.air;
@@ -150,18 +275,54 @@ fn a_wither_placement_refused_in_a_transaction_keeps_the_pattern() {
             ([5, 70, 4], soul),
             ([6, 70, 4], air),
         ];
-        for (pos, state) in cells.into_iter().filter(|(_, state)| *state != air) {
+        let at = [5, 72, 4];
+        let alone = [1, 72, 1];
+        let before = game.mobs.len();
+        (game as &mut dyn ServerHost)
+            .transaction(|host, _| -> Result<(), ()> {
+                assert_eq!(
+                    level.place_block(host, alone, skull.try_into_api().unwrap(), false),
+                    Ok(true)
+                );
+                assert_eq!(level.set_placed_by(host, alone, None), Ok(true));
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(game.world.block(alone[0], alone[1], alone[2]), skull);
+        for (pos, state) in cells
+            .into_iter()
+            .filter(|(pos, state)| *pos != at && *state != air)
+        {
             assert_eq!(
                 game.level_set_block(level, pos, state, BlockUpdateFlags::NONE),
                 Ok(true)
             );
         }
-        let at = [5, 72, 4];
-        let before = game.mobs.len();
+        let projected: Result<(), ()> = (game as &mut dyn ServerHost).transaction(|host, _| {
+            assert_eq!(
+                level.place_block(host, at, skull.try_into_api().unwrap(), false),
+                Err(LevelWriteError::InTransaction)
+            );
+            assert_eq!(
+                player.place_block(host, level, at, skull.try_into_api().unwrap(), false),
+                Err(PlayerWorldRefusal::InTransaction)
+            );
+            Err(())
+        });
+        assert_eq!(projected, Err(()));
+        assert_eq!(game.world.block(at[0], at[1], at[2]), air);
+        assert_eq!(
+            game.level_set_block(level, at, skull, BlockUpdateFlags::NONE),
+            Ok(true)
+        );
         let aborted: Result<(), ()> = (game as &mut dyn ServerHost).transaction(|host, _| {
             assert_eq!(
                 level.set_placed_by(host, at, None),
                 Err(LevelWriteError::InTransaction)
+            );
+            assert_eq!(
+                level.place_block(host, at, skull.try_into_api().unwrap(), false),
+                Ok(false)
             );
             Err(())
         });

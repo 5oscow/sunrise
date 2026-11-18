@@ -1768,6 +1768,7 @@ impl Game<'_> {
         self.find_wither_pattern(
             sunrise_client::block_pattern::WITHER_BASE,
             [head.0, head.1, head.2],
+            self.world.block(head.0, head.1, head.2),
         )
         .is_some()
     }

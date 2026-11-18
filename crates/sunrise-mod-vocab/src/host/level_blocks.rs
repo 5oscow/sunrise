@@ -94,8 +94,8 @@ pub trait LevelBlocksBackendMut {
     /// `update_neighbour_shapes` is false; without it the neighbours' shapes update, so fences
     /// and walls connect). `setPlacedBy` gets no placer and no item. Nothing else of
     /// `BlockItem.place` runs: no survival or obstruction check, item placement sound, placement
-    /// game event or advancement. Also returns `Ok(false)` if the companion is fenced,
-    /// and `LevelWriteError::InTransaction` for a wither skull in an open Host transaction.
+    /// game event or advancement. Also returns `Ok(false)` if a callback write is fenced,
+    /// and `LevelWriteError::InTransaction` for a completed wither pattern in an open Host transaction.
     #[access(WorldOnly)]
     fn level_place_block(
         &mut self,
@@ -109,9 +109,9 @@ pub trait LevelBlocksBackendMut {
     /// a detached item value (`None` is the empty stack); the block may inspect its components.
     /// Write the initial state and load any block entity data before calling. The callback can
     /// write companion cells and produce block-specific effects, but will not load stack NBT.
-    /// `Ok(false)` at an unloaded, out-of-height or fenced origin, or a fenced companion.
+    /// `Ok(false)` at an unloaded or out-of-height origin, or for a fenced callback write.
     /// Stale or unavailable levels and invalid stacks return typed errors before any effects.
-    /// Wither skull placements are refused while a Host transaction is open.
+    /// A placement that would summon a wither is refused while a Host transaction is open.
     #[access(WorldOnly)]
     #[read_stack]
     fn level_set_placed_by(
