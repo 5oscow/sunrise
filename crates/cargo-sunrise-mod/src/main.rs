@@ -56,6 +56,16 @@ fn is_compiler_wrapper(name: &str) -> bool {
     name.strip_suffix(".exe").unwrap_or(name).ends_with("rustc")
 }
 
+/// What `--version` prints: the commit this tool was built from, which tells a user whether it is as new as the
+/// rolling release (`tool.json`'s `commit` in the `mod-tool` release), and the `native-*` contract number it speaks.
+fn version_line() -> String {
+    format!(
+        "cargo-sunrise-mod commit {} native-contract {}",
+        env!("SUNRISE_TOOL_BUILT_FROM"),
+        sunrise_native_build::contract::CONTRACT
+    )
+}
+
 fn main() -> ExitCode {
     // A native build's registry route, and internals discovery, run this program as Cargo's rustc wrapper.
     if let Some(code) = sunrise_native_build::registry_rustc::wrapper()
@@ -94,6 +104,10 @@ fn main() -> ExitCode {
     }
     if args.first().is_some_and(|a| a == "sunrise-mod") {
         args.remove(0);
+    }
+    if args.first().is_some_and(|a| a == "--version" || a == "-V") {
+        println!("{}", version_line());
+        return ExitCode::SUCCESS;
     }
     let result = match args.first().map(String::as_str) {
         Some("new") => new(&args[1..]).and_then(|code| match code {

@@ -445,14 +445,14 @@ impl fmt::Display for Refusal {
             Self::Malformed(why) => write!(f, "{INDEX} is not a valid SDK index: {why}"),
             Self::Schema(schema) => write!(
                 f,
-                "{INDEX} has schema {schema}; this program reads schema {SCHEMA}. Update it to use this SDK"
+                "{INDEX} has schema {schema}; this program reads schema {SCHEMA}, so it is older than this SDK. Update it (`cargo sunrise-mod`: run the install block of the book's \"Install the mod tool\" page), or use the tool in this SDK's own release"
             ),
             Self::Build { expected, found } => {
                 write!(f, "{INDEX} is for build {found}, not {expected}")
             }
             Self::PackageFormat(format) => write!(
                 f,
-                "{INDEX} has package format {format}; this program reads format {PACKAGE_FORMAT}. Update it to use this SDK"
+                "{INDEX} has package format {format}; this program reads format {PACKAGE_FORMAT}, so it is older than this SDK. Update it (`cargo sunrise-mod`: run the install block of the book's \"Install the mod tool\" page), or use the tool in this SDK's own release"
             ),
             Self::Kind { asset, kind } => write!(f, "{asset}: unknown asset kind {kind:?}"),
             Self::Codec { asset, codec } => write!(f, "{asset}: unknown codec {codec:?}"),
