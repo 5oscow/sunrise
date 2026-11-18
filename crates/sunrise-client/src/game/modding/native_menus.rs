@@ -336,9 +336,9 @@ impl Game<'_> {
         self.player_menu_changed(conn, menu, true);
     }
 
-    /// `conn`'s menu closes with the guest in the level in place
-    /// (`ServerPlayer.doCloseContainer`): the mods hear it, if they heard it
-    /// open.
+    /// `conn`'s tracked menu closes with the guest's state in place
+    /// (`ServerPlayer.doCloseContainer`). Close listeners are checked independently
+    /// of open listeners.
     pub(super) fn player_menu_closing(&mut self, conn: u32) {
         let heard = self
             .lan
