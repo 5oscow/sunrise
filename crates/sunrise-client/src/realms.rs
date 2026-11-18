@@ -260,11 +260,6 @@ fn extend_link(server: &RealmServer, profile: u128, expired: bool) -> String {
     }
 }
 
-/// `RealmsSettingsTab`'s column: its `GridLayout` gives every cell `padding(8)`
-/// (`defaultCellSetting().padding(8)`), and each `CommonLayouts.labeledElement` is a
-/// 9-tall label, 4 of spacing, then its 20-tall widget. The region cell's widget is the
-/// 9-tall preference line over the 20-tall button; the toggle cell is the button alone.
-
 /// `RealmsSettingsTab.isRealmNameValid`: a name that trims to something and has no
 /// leading or trailing whitespace.
 fn realm_name_valid(name: &str) -> bool {
