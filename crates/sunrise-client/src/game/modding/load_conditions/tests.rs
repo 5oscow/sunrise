@@ -71,7 +71,7 @@ impl Hooks for Registrant {
             ),
             (
                 "nested",
-                json!({"type":"neoforge:and","values":[{"type":"neoforge:true"},{"type":"neoforge:or","values":[{"type":"testmod:flag","value":true}]}]}),
+                json!({"type":"neoforge:and","values":[{"type":"neoforge:always"},{"type":"neoforge:or","values":[{"type":"testmod:flag","value":true}]}]}),
             ),
         ] {
             let mut recipe = json!({
@@ -394,21 +394,20 @@ fn load_conditions_registration_refuses_duplicate_ids_even_if_ignored() {
 
 #[test]
 fn load_conditions_refuse_a_builtin_id_at_startup_even_if_ignored() {
-    mod_platform::testing::with_mods(
-        vec![ModEntry::new(
-            "compat",
-            Box::new(NamedCondition("neoforge:mod_loaded")),
-        )]
-        .into(),
-        || {
-            let sources = crate::game::mods::ModsState::default();
-            let inventory = sunrise_mod_package::enabled::EnabledMods::default();
-            let error = super::conditions_for_mods(&sources, &inventory).unwrap_err();
-            assert!(error.contains("mod compat"), "{error}");
-            assert!(error.contains("neoforge:mod_loaded"), "{error}");
-            assert!(error.contains("built in"), "{error}");
-        },
-    );
+    for name in ["neoforge:always", "neoforge:never", "neoforge:mod_loaded"] {
+        mod_platform::testing::with_mods(
+            vec![ModEntry::new("compat", Box::new(NamedCondition(name)))].into(),
+            || {
+                let sources = crate::game::mods::ModsState::default();
+                let inventory = sunrise_mod_package::enabled::EnabledMods::default();
+                let error = super::conditions_for_mods(&sources, &inventory).unwrap_err();
+                assert_eq!(
+                    error,
+                    format!("mod compat cannot register condition {name}: that ID is built in")
+                );
+            },
+        );
+    }
 }
 
 #[test]
@@ -517,7 +516,7 @@ fn registered_reads_the_candidate_packs_not_the_last_load() {
     // An entry its own conditions turn off is not in the registry.
     files.push((
         "worldgen/biome/test:off".into(),
-        vec![br#"{"neoforge:conditions":[{"type":"neoforge:false"}]}"#.to_vec()],
+        vec![br#"{"neoforge:conditions":[{"type":"neoforge:never"}]}"#.to_vec()],
     ));
     let first = super::candidate_registries(root.path(), &files, &admission);
     let first = sunrise_world::conditions::LoadConditions::new([]).with_registries(

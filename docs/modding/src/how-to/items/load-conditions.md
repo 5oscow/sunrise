@@ -6,9 +6,10 @@ register it from
 `event.conditions.register(Identifier::parse("testmod:flag").unwrap(), Flag)`.
 Registration happens once per mod load, with one handler per id and a read-only
 `RegistrationContext`. Any mod may register an unused ID in any namespace:
-mod B can register `a:x` while mod A registers `a:y`. A built-in ID (such as
-`neoforge:mod_loaded`) cannot be replaced, and a duplicate ID names both mods
-in the error. A registration error refuses admission even if you ignore it.
+mod B can register `a:x` while mod A registers `a:y`. Built-in IDs such as
+`neoforge:always`, `neoforge:never` and `neoforge:mod_loaded` cannot be replaced.
+A duplicate ID names both mods in the error. A registration error refuses
+admission even if you ignore it.
 
 ```rust,ignore
 struct Flag;
@@ -57,10 +58,10 @@ naming the file, condition and owning mod. This applies at every depth inside
 `not`, `and` and `or`, even beside an already false or true branch.
 
 An unknown name in any other namespace also makes its file absent, wherever it
-appears inside `not`, `and` or `or`. Evaluation visits every branch, so
-`or(true, othermod:unknown)` leaves the file out. An ERROR-level diagnostic
-names the file and distinct unknown IDs. Recipe loading also refuses the load
-for those unknown IDs.
+appears inside `not`, `and` or `or`. Evaluation visits every branch, so an `or`
+containing `neoforge:always` and an unknown condition still leaves the file out.
+An ERROR-level diagnostic names the file and distinct unknown IDs. Recipe loading
+also refuses the load for those unknown IDs.
 
 The public [NeoForge data load condition documentation](https://docs.neoforged.net/docs/resources/server/conditions/)
 describes `ICondition` and the top-level `neoforge:conditions` array.

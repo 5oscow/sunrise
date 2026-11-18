@@ -24,7 +24,7 @@ fn unregistered_serializer_refuses_whole_load_after_false_conditions() {
     );
     std::fs::write(
         folder.join("unknown.json"),
-        r#"{"type":"absent:serializer","neoforge:conditions":[{"type":"neoforge:not","value":{"type":"neoforge:true"}}]}"#,
+        r#"{"type":"absent:serializer","neoforge:conditions":[{"type":"neoforge:not","value":{"type":"neoforge:always"}}]}"#,
     )
     .unwrap();
     // With the serializer skipped by its false condition, the malformed sibling still

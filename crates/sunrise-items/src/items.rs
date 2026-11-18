@@ -3332,7 +3332,7 @@ mod tests {
             (
                 "tags/visuals:block/absent".to_owned(),
                 vec![bytes(json!({
-                    "neoforge:conditions":[{"type":"neoforge:not","value":{"type":"neoforge:true"}}],
+                    "neoforge:conditions":[{"type":"neoforge:not","value":{"type":"neoforge:always"}}],
                     "replace":true,"values":["minecraft:iron_block"]
                 }))],
             ),
@@ -3375,7 +3375,7 @@ mod tests {
                     bytes(json!({"values": ["minecraft:stone", "minecraft:dirt", "#test:other"]})),
                     bytes(json!({"values": [], "remove": ["minecraft:dirt", "#test:other"]})),
                     bytes(json!({"neoforge:conditions": [{"type": "neoforge:not",
-                    "value": {"type": "neoforge:true"}}], "values": [], "remove": ["minecraft:stone"]})),
+                    "value": {"type": "neoforge:always"}}], "values": [], "remove": ["minecraft:stone"]})),
                 ],
             ),
             (

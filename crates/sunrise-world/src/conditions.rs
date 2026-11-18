@@ -556,8 +556,8 @@ pub fn is_builtin_condition(id: &sunrise_core::identifier::Identifier) -> bool {
 #[derive(Clone, Copy)]
 enum BuiltinCondition {
     ModLoaded,
-    True,
-    False,
+    Always,
+    Never,
     FeatureFlags,
     Registered,
     TagEmpty,
@@ -573,8 +573,8 @@ impl BuiltinCondition {
         }
         Some(match path {
             "mod_loaded" => Self::ModLoaded,
-            "true" => Self::True,
-            "false" => Self::False,
+            "always" => Self::Always,
+            "never" => Self::Never,
             "feature_flags_enabled" => Self::FeatureFlags,
             "registered" => Self::Registered,
             "tag_empty" => Self::TagEmpty,
@@ -613,8 +613,8 @@ fn evaluate(
         use BuiltinCondition::*;
         Ok(match builtin {
             Some(ModLoaded) => Some(c["modid"].as_str().is_some_and(loaded)),
-            Some(True) => Some(true),
-            Some(False) => Some(false),
+            Some(Always) => Some(true),
+            Some(Never) => Some(false),
             Some(FeatureFlags) => match &context.features {
                 Some(enabled) => {
                     let Some(flags) = c["flags"].as_array() else {
@@ -786,14 +786,14 @@ mod tests {
             {"type": "neoforge:mod_loaded", "modid": "create"},
             {"type": "neoforge:or", "values": [
                 {"type": "neoforge:mod_loaded", "modid": "ic2"},
-                {"type": "neoforge:true"}
+                {"type": "neoforge:always"}
             ]}
         ]);
         c.insert("neoforge:conditions".to_owned(), both);
         assert!(conditions_hold(&Value::Object(c), &loaded));
         // One failing condition in the list fails the file.
         let failing = json!([
-            {"type": "neoforge:true"},
+            {"type": "neoforge:always"},
             {"type": "neoforge:mod_loaded", "modid": "ic2"}
         ]);
         let mut f = serde_json::Map::new();
@@ -812,12 +812,12 @@ mod tests {
             ]
         });
         assert!(!conditions_hold(&nested_not, &loaded));
-        // `or` with a `true` beside a `not` of an unknown: one child is
+        // `or` with `always` beside a `not` of an unknown: one child is
         // known-true, but the other's subtree holds an unknown.
         let nested_or = json!({
             "neoforge:conditions": [
                 {"type": "neoforge:or", "values": [
-                    {"type": "neoforge:true"},
+                    {"type": "neoforge:always"},
                     {"type": "neoforge:not", "value":
                         {"type": "example:unknown"}}
                 ]}
@@ -831,15 +831,18 @@ mod tests {
     }
 
     #[test]
-    fn false_omits_the_file_and_not_false_loads_it() {
-        let conditions = LoadConditions::vanilla();
-        assert!(!conditions.allows(&file(json!({"type": "neoforge:false"}))));
+    fn always_and_never_evaluate_without_a_registered_handler() {
+        let conditions = LoadConditions::new([]).with_lookup(BTreeMap::new(), |name, _| {
+            panic!("built-in condition {name} fell through to the mod lookup")
+        });
+        assert!(conditions.allows(&file(json!({"type": "neoforge:always"}))));
+        assert!(!conditions.allows(&file(json!({"type": "neoforge:never"}))));
         assert!(conditions.allows(&file(
-            json!({"type": "neoforge:not", "value": {"type": "neoforge:false"}})
+            json!({"type": "neoforge:not", "value": {"type": "neoforge:never"}})
         )));
         assert!(
             conditions.allows(&file(json!({"type": "neoforge:or", "values": [
-                {"type": "neoforge:false"}, {"type": "neoforge:true"}
+                {"type": "neoforge:never"}, {"type": "neoforge:always"}
             ]})))
         );
     }
