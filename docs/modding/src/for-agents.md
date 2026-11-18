@@ -18,8 +18,9 @@ commands and the rules that decide whether the code compiles. The same material,
 
 Take the page [Install the mod tool](start/install-tool.md) and run the block for the user's computer. It reads the
 current Nightly's build, downloads that SDK release's tool, checks Sunrise's signature and the tool's hash, and puts `cargo-sunrise-mod` on the
-`PATH`. For a fix to the tool that merged after the Nightly, change the block's `RELEASE` line to `mod-tool`, the
-newest tool from main; that page says when to take which. On NixOS the prebuilt binary needs `steam-run` or `nix-ld`; the fallback is
+`PATH`. Then run `cargo sunrise-mod --version`: if it prints the usage instead of a commit, the Nightly's tool is
+older than this page and cannot build or run a native mod on its own, so run the block again with its `RELEASE` line
+changed to `mod-tool`, the newest tool from main. That page says when to take which. On NixOS the prebuilt binary needs `steam-run` or `nix-ld`; the fallback is
 `cargo install --locked --git https://github.com/sunrise-org/sunrise cargo-sunrise-mod`.
 
 ## 2. Make and check a native mod
@@ -38,8 +39,8 @@ reports before going on. Use another mod id by changing the folder name: `new` t
 To compile it against the prebuilt game, run `cargo sunrise-mod build`: it fetches the pinned SDK's compiled slices
 into a per-user cache and installs the Rust the SDK names with rustup, so it needs the network the first time. To
 play it, run `cargo sunrise-mod run --resources <folder> -- <game args>`; the user has to make those prepared
-resources from their own Minecraft (`sunrise-prepare --prepare --output <folder>`), so ask for the folder and never
-download Mojang's files. Run `cargo test` for the logic the hooks use. A build server uses the plan contract in
+resources from their own Minecraft ([Prepared resources](start/first-mod.md#prepared-resources)), so ask for the
+folder and never download Mojang's files. Run `cargo test` for the logic the hooks use. A build server uses the plan contract in
 [Your first native mod](start/first-mod.md#without-the-tools-commands).
 
 ## Rules that matter
