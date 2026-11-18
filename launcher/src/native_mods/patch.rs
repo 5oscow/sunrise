@@ -615,8 +615,9 @@ fn game_cfg(cmd: &mut std::process::Command, sdk: &Identity) {
 }
 
 /// The cfg options of the build the patch library is compiled into, in rustc's `--cfg` spelling:
-/// what `rustc --print cfg` printed, which carries the game's features and the profile's options
-/// (`debug_assertions` and `overflow_checks` follow the release profile the library compiles under).
+/// what `rustc --print cfg` printed, which carries the game's features and the target's facts.
+/// The tool decides only the features and the target facts from it; flag-dependent options such as
+/// `debug_assertions` stay undecided there.
 fn build_cfg(printed: &str) -> Vec<String> {
     printed
         .lines()

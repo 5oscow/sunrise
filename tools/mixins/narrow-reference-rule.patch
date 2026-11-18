@@ -1,5 +1,5 @@
 diff --git a/crates/horizon-mixins-cli/src/main.rs b/crates/horizon-mixins-cli/src/main.rs
-index ac813ca..8018725 100644
+index ac813ca..a446846 100644
 --- a/crates/horizon-mixins-cli/src/main.rs
 +++ b/crates/horizon-mixins-cli/src/main.rs
 @@ -1,7 +1,9 @@
@@ -13,14 +13,16 @@ index ac813ca..8018725 100644
  use serde_json::json;
  use std::{
      path::{Path, PathBuf},
-@@ -45,6 +47,24 @@ struct Common {
+@@ -45,6 +47,26 @@ struct Common {
      mods: PathBuf,
      #[arg(long)]
      out: PathBuf,
 +    /// A cfg option of the build the workspace is compiled in, as rustc's `--cfg` spells it
 +    /// (`unix`, `feature="x"`); repeat for each. Given any, the tool plans against what that
-+    /// build compiles: items and statements under an inactive cfg are dropped, and a name
-+    /// not listed is off. Without it only `cfg(test)` items are dropped.
++    /// build compiles: items and statements under an inactive cfg are dropped. Only what the
++    /// build vouches for is decided: `feature` (in the `--features-of` package), `test` (off)
++    /// and the target facts (`target_os`, `unix`, ...); any other name is refused as
++    /// undecided, listed or not. Without it only `cfg(test)` items are dropped.
 +    #[arg(long = "cfg")]
 +    cfg: Vec<String>,
 +    /// The workspace package the `feature="x"` options belong to (the game crate's features).
@@ -38,7 +40,7 @@ index ac813ca..8018725 100644
  }
  fn main() -> ExitCode {
      let cli = Cli::parse();
-@@ -68,7 +88,7 @@ fn run(cli: Cli) -> Result<serde_json::Value> {
+@@ -68,7 +90,7 @@ fn run(cli: Cli) -> Result<serde_json::Value> {
              protect(&root, &out)?;
              let mods = common.mods.canonicalize().map_err(io)?;
              protect(&mods, &out)?;
@@ -47,7 +49,7 @@ index ac813ca..8018725 100644
              let mut bytes = serde_json::to_vec_pretty(&plan)
                  .map_err(|e| Diagnostic::new("E_JSON", e.to_string()))?;
              bytes.push(b'\n');
-@@ -117,7 +137,7 @@ fn run(cli: Cli) -> Result<serde_json::Value> {
+@@ -117,7 +139,7 @@ fn run(cli: Cli) -> Result<serde_json::Value> {
          protect(&out, target)?;
      }
      let _stage_lock = staging::lock(&out, "stage")?;
@@ -329,7 +331,7 @@ index bca7938..2f2eb44 100644
 +    assert!(e.message.contains("selected site contains `?`"), "{e}");
 +}
 diff --git a/crates/horizon-mixins-cli/tests/integration.rs b/crates/horizon-mixins-cli/tests/integration.rs
-index fcf5a46..dd234c2 100644
+index fcf5a46..89c297b 100644
 --- a/crates/horizon-mixins-cli/tests/integration.rs
 +++ b/crates/horizon-mixins-cli/tests/integration.rs
 @@ -697,14 +697,14 @@ fn cfg_attributes_shared_module_sources_and_shadowing_fail_closed() {
@@ -351,7 +353,7 @@ index fcf5a46..dd234c2 100644
              "E_UNSUPPORTED_CONTROL_FLOW",
          ),
          (
-@@ -890,3 +890,813 @@ fn production_test_cfg_modules_are_indexed_and_applied() {
+@@ -890,3 +890,819 @@ fn production_test_cfg_modules_are_indexed_and_applied() {
      let error = build_plan(&f.root, &f.mods).unwrap_err();
      assert!(format!("{error:?}").contains("E_TARGET_NOT_FOUND"));
  }
@@ -996,23 +998,29 @@ index fcf5a46..dd234c2 100644
 +    }
 +
 +    #[test]
-+    fn a_cfg_name_the_set_cannot_vouch_for_is_refused_not_deleted() {
-+        // `engine_special` may be a cfg of the original build's build script: absent from the
-+        // printed set is not off. rustc's own names (`test`) stay decided.
-+        let f = cfg_fixture(
-+            "#[cfg(test)] mark(\"test only\"); #[cfg(engine_special)] mark(\"special\"); mark(\"feature on\"); mark(\"body\"); 7",
-+        );
-+        let output = with_cfg(&f, "apply", &["unix"]);
-+        assert!(!output.status.success());
-+        let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
-+        assert_eq!(error["code"], "E_UNSUPPORTED_CFG", "{error}");
-+        // Named in the set, it is decided either way.
-+        let output = with_cfg(&f, "apply", &["unix", "engine_special"]);
-+        assert!(
-+            output.status.success(),
-+            "{}",
-+            String::from_utf8_lossy(&output.stderr)
-+        );
++    fn a_flag_dependent_or_custom_cfg_is_refused_whether_the_set_lists_it_or_not() {
++        // `debug_assertions` follows the profile the original build used, and `engine_special` may
++        // be a cfg of its build script: the set cannot vouch for either, in either direction.
++        // `test` and the target facts stay decided.
++        for name in [
++            "debug_assertions",
++            "overflow_checks",
++            "panic = \"abort\"",
++            "engine_special",
++        ] {
++            let f = cfg_fixture(&format!(
++                "#[cfg(test)] mark(\"test only\"); #[cfg({name})] mark(\"gated\"); mark(\"feature on\"); mark(\"body\"); 7"
++            ));
++            for set in [vec!["unix"], vec!["unix", name]] {
++                let output = with_cfg(&f, "apply", &set);
++                assert!(!output.status.success(), "{name} {set:?}");
++                let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
++                assert_eq!(
++                    error["code"], "E_UNSUPPORTED_CFG",
++                    "{name} {set:?}: {error}"
++                );
++            }
++        }
 +    }
 +
 +    #[test]
@@ -1166,7 +1174,7 @@ index fcf5a46..dd234c2 100644
 +    }
 +}
 diff --git a/crates/horizon-mixins-core/src/helpers.rs b/crates/horizon-mixins-core/src/helpers.rs
-index 55a9372..45c0638 100644
+index 55a9372..0daa2d7 100644
 --- a/crates/horizon-mixins-core/src/helpers.rs
 +++ b/crates/horizon-mixins-core/src/helpers.rs
 @@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
@@ -1299,21 +1307,23 @@ index 55a9372..45c0638 100644
      {
          let why = if cancellable {
              "cancellable hook helper must return core::ops::ControlFlow<TargetResult>"
-@@ -439,7 +530,13 @@ pub fn validate_helper(
+@@ -439,7 +530,15 @@ pub fn validate_helper(
                      let output = parse_type(&op.output)?;
                      let expected: Type =
                          syn::parse2(quote!(impl FnOnce(#(#inputs),*) -> #output)).unwrap();
 +                    // A call whose callee declares no return type returns `()`: the operation
 +                    // may be written `impl FnOnce(A)` as well as `impl FnOnce(A) -> ()`.
 +                    let unit: Type = syn::parse_quote!(());
-+                    let shorthand: Option<Type> = (normalize_type(&output) == normalize_type(&unit))
-+                        .then(|| syn::parse2(quote!(impl FnOnce(#(#inputs),*))).unwrap());
++                    let shorthand: Option<Type> = (normalize_type(&output)
++                        == normalize_type(&unit))
++                    .then(|| syn::parse2(quote!(impl FnOnce(#(#inputs),*))).unwrap());
                      normalize_type(&ty) == normalize_type(&expected)
-+                        || shorthand.is_some_and(|short| normalize_type(&ty) == normalize_type(&short))
++                        || shorthand
++                            .is_some_and(|short| normalize_type(&ty) == normalize_type(&short))
                  } else {
                      binding.value == "$receiver"
                          || binding
-@@ -528,3 +625,78 @@ fn binding_expr(expr: &Expr, parameters: &std::collections::BTreeSet<String>) ->
+@@ -528,3 +627,78 @@ fn binding_expr(expr: &Expr, parameters: &std::collections::BTreeSet<String>) ->
          _ => false,
      }
  }
@@ -1465,10 +1475,10 @@ index 740c0dc..94df671 100644
          if file_cfg == CfgStatus::Inactive {
              active.remove(&path);
 diff --git a/crates/horizon-mixins-core/src/lib.rs b/crates/horizon-mixins-core/src/lib.rs
-index 5bac667..ce8b959 100644
+index 5bac667..f85ac3c 100644
 --- a/crates/horizon-mixins-core/src/lib.rs
 +++ b/crates/horizon-mixins-core/src/lib.rs
-@@ -1,4 +1,450 @@
+@@ -1,4 +1,462 @@
  pub mod bridges;
 +pub mod cfg {
 +    //! The `cfg` set of the build a workspace is compiled in, and the pass that applies it.
@@ -1490,8 +1500,11 @@ index 5bac667..ce8b959 100644
 +        visit_mut::{self, VisitMut},
 +    };
 +
-+    /// The cfg options of one build: names (`unix`) and name/value pairs (`feature="x"`). A name
-+    /// that is not in the set is off, as for rustc.
++    /// The cfg options of one build: names (`unix`) and name/value pairs (`feature="x"`). The set
++    /// decides only what the signed build vouches for: `feature` in the `--features-of` package,
++    /// `test` (the patch library is not a test build) and the target facts, which follow from the
++    /// target (see [`TARGET_FACTS`]). Anything else is `Unknown` whether the set lists it or not,
++    /// since it depends on compiler flags or on the original build's build script.
 +    #[derive(Debug, Clone, Default, PartialEq, Eq)]
 +    pub struct CfgSet {
 +        options: BTreeSet<String>,
@@ -1560,17 +1573,34 @@ index 5bac667..ce8b959 100644
 +                Meta::Path(path) if path.is_ident("false") => Truth::No,
 +                Meta::Path(_) | Meta::NameValue(_) => match option_key(meta) {
 +                    Some(key) if key.starts_with("feature=") && !features => Truth::Unknown,
-+                    Some(key) if self.options.contains(&key) => Truth::Yes,
-+                    // Absent: off only for a name the set can vouch for. Another name may be a
-+                    // cfg the build script of the original build turned on.
 +                    Some(key) => {
 +                        let name = key.split('=').next().unwrap();
-+                        let known = if name == "feature" {
-+                            features
-+                        } else {
-+                            self.names.contains(name) || rustc_name(name)
++                        let present = self.options.contains(&key);
++                        let decided = match name {
++                            "feature" => true,
++                            "test" => {
++                                return if key == "test" {
++                                    Truth::No
++                                } else {
++                                    Truth::Unknown
++                                };
++                            }
++                            // The printed target set is complete for these names: absent is off.
++                            _ if TARGET_FACTS.contains(&name) => {
++                                present
++                                    || self.names.contains(name)
++                                    || (matches!(name, "unix" | "windows")
++                                        && ["unix", "windows", "target_family"]
++                                            .iter()
++                                            .any(|n| self.names.contains(*n)))
++                            }
++                            _ => false,
 +                        };
-+                        if known { Truth::No } else { Truth::Unknown }
++                        match (decided, present) {
++                            (false, _) => Truth::Unknown,
++                            (true, true) => Truth::Yes,
++                            (true, false) => Truth::No,
++                        }
 +                    }
 +                    None => Truth::Unknown,
 +                },
@@ -1689,30 +1719,22 @@ index 5bac667..ce8b959 100644
 +        }
 +    }
 +
-+    /// `name` or `name="value"` as the one string the set holds; `None` for any other shape.
-+    /// The names rustc itself answers for, whatever the flags: an absent one is off.
-+    fn rustc_name(name: &str) -> bool {
-+        name.starts_with("target_")
-+            || name.starts_with("sanitize")
-+            || matches!(
-+                name,
-+                "unix"
-+                    | "windows"
-+                    | "panic"
-+                    | "debug_assertions"
-+                    | "overflow_checks"
-+                    | "ub_checks"
-+                    | "contract_checks"
-+                    | "test"
-+                    | "doc"
-+                    | "doctest"
-+                    | "miri"
-+                    | "proc_macro"
-+                    | "relocation_model"
-+                    | "fmt_debug"
-+            )
-+    }
++    /// The cfg names that follow from the validated target, taken from the printed set and
++    /// compared on their full values.
++    const TARGET_FACTS: [&str; 10] = [
++        "target_os",
++        "target_family",
++        "unix",
++        "windows",
++        "target_arch",
++        "target_pointer_width",
++        "target_endian",
++        "target_env",
++        "target_vendor",
++        "target_abi",
++    ];
 +
++    /// `name` or `name="value"` as the one string the set holds; `None` for any other shape.
 +    fn option_key(meta: &Meta) -> Option<String> {
 +        match meta {
 +            Meta::Path(path) => path.get_ident().map(|i| i.unraw().to_string()),
@@ -1919,7 +1941,7 @@ index 5bac667..ce8b959 100644
  pub mod diagnostic;
  pub mod helpers;
  pub mod index;
-@@ -10,7 +456,9 @@ pub mod sites;
+@@ -10,7 +468,9 @@ pub mod sites;
  pub mod slices;
  pub mod source;
  pub use diagnostic::{Diagnostic, Result};
