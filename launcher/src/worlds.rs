@@ -75,14 +75,14 @@ pub fn saved_with<'a>(worlds: &'a [World], ids: &[String]) -> Vec<(&'a World, Ve
 
 /// The worlds in a game folder's `saves/`, the last played first.
 pub fn list(home: &Path) -> Vec<World> {
-    let mut worlds: Vec<World> = fs::read_dir(home.join("saves"))
+    let mut worlds: Vec<(Duration, World)> = fs::read_dir(home.join("saves"))
         .into_iter()
         .flatten()
         .flatten()
         .filter_map(|e| read(&e.path()))
         .collect();
-    worlds.sort_by_key(|w| std::cmp::Reverse(w.last_played));
-    worlds
+    worlds.sort_by_key(|(played, _)| std::cmp::Reverse(*played));
+    worlds.into_iter().map(|(_, world)| world).collect()
 }
 
 /// level.dat: gzip, as vanilla writes it, or plain.
@@ -99,7 +99,9 @@ fn level_dat(path: &Path) -> Option<Tag> {
     Some(nbt::read_named(&raw, Limits::default()).ok()?.0.tag)
 }
 
-fn read(path: &Path) -> Option<World> {
+/// A world, with the time it was last played as saved: the order of [`list`], which a clamped
+/// `last_played` would lose.
+fn read(path: &Path) -> Option<(Duration, World)> {
     let dat = path.join("level.dat");
     let changed = fs::metadata(&dat).and_then(|m| m.modified()).ok()?;
     let folder = path.file_name()?.to_string_lossy().into_owned();
@@ -126,11 +128,15 @@ fn read(path: &Path) -> Option<World> {
         (_, 3) => "Spectator",
         _ => "Survival",
     };
-    let last_played = match number(field("LastPlayed")) {
-        millis if millis > 0 => {
-            UNIX_EPOCH + Duration::from_millis((millis as u64).min(MAX_LAST_PLAYED_MILLIS))
-        }
-        _ => changed,
+    let (played, last_played) = match number(field("LastPlayed")) {
+        millis if millis > 0 => (
+            Duration::from_millis(millis as u64),
+            UNIX_EPOCH + Duration::from_millis((millis as u64).min(MAX_LAST_PLAYED_MILLIS)),
+        ),
+        _ => (
+            changed.duration_since(UNIX_EPOCH).unwrap_or_default(),
+            changed,
+        ),
     };
     let icon = path.join("icon.png");
     // `[{ModId, ModVersion}]` lists, as `save::level_mods` writes them; anything else reads as none.
@@ -154,19 +160,22 @@ fn read(path: &Path) -> Option<World> {
             .and_then(|r| r.get("sunrise"))
             .and_then(|sunrise| sunrise.get("ContentModList")),
     ));
-    Some(World {
-        name: text(field("LevelName"))
-            .filter(|n| !n.trim().is_empty())
-            .unwrap_or_else(|| folder.clone()),
-        folder,
-        path: path.to_path_buf(),
-        mode,
-        last_played,
-        version: text(field("Version").and_then(|v| v.get("Name"))),
-        size: size(path),
-        icon: icon.is_file().then_some(icon),
-        mods,
-    })
+    Some((
+        played,
+        World {
+            name: text(field("LevelName"))
+                .filter(|n| !n.trim().is_empty())
+                .unwrap_or_else(|| folder.clone()),
+            folder,
+            path: path.to_path_buf(),
+            mode,
+            last_played,
+            version: text(field("Version").and_then(|v| v.get("Name"))),
+            size: size(path),
+            icon: icon.is_file().then_some(icon),
+            mods,
+        },
+    ))
 }
 
 fn size(dir: &Path) -> u64 {
@@ -278,7 +287,9 @@ pub fn copy(world: &World) -> Result<World, String> {
         let _ = fs::remove_dir_all(&to);
         return Err(format!("Could not copy {}: {e}", world.name));
     }
-    read(&to).ok_or_else(|| format!("{} has no level.dat", to.display()))
+    read(&to)
+        .map(|(_, world)| world)
+        .ok_or_else(|| format!("{} has no level.dat", to.display()))
 }
 
 fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {

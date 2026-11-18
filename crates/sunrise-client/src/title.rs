@@ -583,7 +583,12 @@ fn last_played(millis: u64) -> std::time::SystemTime {
 }
 
 pub fn list_worlds(saves: &Path) -> Vec<WorldEntry> {
-    let mut worlds: Vec<WorldEntry> = std::fs::read_dir(saves)
+    let since_epoch = |time: std::time::SystemTime| {
+        time.duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+    };
+    // Sorted by the time as saved: the clamped time shown would make far-off ones tie.
+    let mut worlds: Vec<(std::time::Duration, WorldEntry)> = std::fs::read_dir(saves)
         .into_iter()
         .flatten()
         .flatten()
@@ -600,14 +605,16 @@ pub fn list_worlds(saves: &Path) -> Vec<WorldEntry> {
             let level = Level::read_summary(&path);
             let root = crate::save::read_dat(&path.join("level.dat"));
             let (Some(level), Some(root)) = (level, root) else {
-                return Some(WorldEntry::corrupted(folder, modified));
+                return Some((since_epoch(modified), WorldEntry::corrupted(folder, modified)));
             };
             let data = root.get("Data")?;
-            let modified = match data.get("LastPlayed") {
-                Some(sunrise_core::nbt::Tag::Long(millis)) if *millis >= 0 => last_played(*millis as u64),
-                _ => modified,
+            let (played, modified) = match data.get("LastPlayed") {
+                Some(sunrise_core::nbt::Tag::Long(millis)) if *millis >= 0 => {
+                    (std::time::Duration::from_millis(*millis as u64), last_played(*millis as u64))
+                }
+                _ => (since_epoch(modified), modified),
             };
-            Some(WorldEntry {
+            Some((played, WorldEntry {
                 folder,
                 name: level.name,
                 game_mode: level.game_mode,
@@ -623,11 +630,11 @@ pub fn list_worlds(saves: &Path) -> Vec<WorldEntry> {
                 file_fixing: crate::save::needs_file_fixes(&path),
                 downgrade: crate::save::downgraded_from(&path).is_some(),
                 experimental: experimental_features(data),
-            })
+            }))
         })
         .collect();
-    worlds.sort_by_key(|w| std::cmp::Reverse(w.modified));
-    worlds
+    worlds.sort_by_key(|(played, _)| std::cmp::Reverse(*played));
+    worlds.into_iter().map(|(_, world)| world).collect()
 }
 /// `FeatureFlags.isExperimental` of `LevelStorageSource.parseFeatureFlagsFromSummary`:
 /// level.dat's `enabled_features` name a known flag other than `minecraft:vanilla`
@@ -4175,6 +4182,7 @@ mod classic_tests {
 mod last_played_tests {
     use super::*;
     use std::time::{Duration, UNIX_EPOCH};
+    use sunrise_core::nbt::Tag;
 
     /// A `LastPlayed` too far ahead for a Windows `SystemTime` is clamped to the end of year 9999
     /// instead of panicking the Singleplayer list; an ordinary one is kept as it is.
@@ -4188,5 +4196,29 @@ mod last_played_tests {
             last_played(1_700_000_000_000),
             UNIX_EPOCH + Duration::from_millis(1_700_000_000_000)
         );
+    }
+
+    #[test]
+    fn worlds_played_past_the_clamp_keep_the_newest_first() {
+        let saves =
+            std::env::temp_dir().join(format!("sunrise-last-played-order-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&saves);
+        // Both later than the clamp, the older one first in the folder.
+        for (folder, millis) in [("A", i64::MAX - 1), ("B", i64::MAX)] {
+            crate::save::write_dat(
+                &saves.join(folder).join("level.dat"),
+                Tag::compound([(
+                    "Data",
+                    Tag::compound([
+                        ("LevelName", Tag::String("Twin".into())),
+                        ("LastPlayed", Tag::Long(millis)),
+                    ]),
+                )]),
+            )
+            .unwrap();
+        }
+        let folders: Vec<String> = list_worlds(&saves).into_iter().map(|w| w.folder).collect();
+        assert_eq!(folders, ["B", "A"]);
+        std::fs::remove_dir_all(&saves).unwrap();
     }
 }
