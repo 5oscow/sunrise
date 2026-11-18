@@ -2,12 +2,10 @@
 //! (`sunrise-org/sunrise-mods`, docs/modding/src/reference/registry-index.md). Network-free: the
 //! workflow downloads the files and publishes what this writes.
 use std::path::Path;
-use sunrise_mod_package::index::{
-    FILE_HOST,
-    registry::{self, Sources},
-};
+use sunrise_mod_package::index::registry::{self, Sources};
 
-/// Where the registry's site is published (its icons).
+/// Where this registry publishes its release assets and its site (icons and screenshots).
+const RELEASE: &str = "https://github.com/sunrise-org/sunrise-mods/releases/download/";
 const SITE: &str = "https://sunrise-org.github.io/sunrise-mods/";
 
 const USAGE: &str = "usage: cargo sunrise-mod registry build <checkout> --files <dir> --out <index.json> [--release <url>] [--site <url>] [--generated <time>] [--counts <counts.json>]
@@ -60,7 +58,7 @@ pub fn main(args: &[String]) -> Result<(), String> {
             let mut index = registry::build(&Sources {
                 registry: Path::new(checkout),
                 files: Path::new(files),
-                release: flag(rest, "--release").unwrap_or(FILE_HOST),
+                release: flag(rest, "--release").unwrap_or(RELEASE),
                 site: flag(rest, "--site").unwrap_or(SITE),
                 generated,
             })

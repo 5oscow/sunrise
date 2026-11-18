@@ -224,11 +224,11 @@ const TEMPORARY_ATTEMPTS: u64 = 16;
 ///
 /// The temporary file is created with `create_new`, so a file or symlink planted at its name
 /// makes that name be skipped instead of followed. The rename replaces `path` itself, even
-/// when `path` is a symlink, and the existing file's permissions carry over.
-pub(crate) fn atomic_write(path: &Path, contents: String) -> Result<(), String> {
+/// when `path` is a symlink. Only a regular destination file's permissions carry over.
+pub(crate) fn atomic_write(path: &Path, contents: impl AsRef<[u8]>) -> Result<(), String> {
     static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(0);
-    let permissions = match fs::metadata(path) {
-        Ok(metadata) => Some(metadata.permissions()),
+    let permissions = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata.is_file().then(|| metadata.permissions()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
         Err(e) => return Err(format!("{}: {e}", path.display())),
     };
@@ -236,7 +236,7 @@ pub(crate) fn atomic_write(path: &Path, contents: String) -> Result<(), String> 
     let (temporary, mut file) =
         create_temporary(path, first).map_err(|e| format!("{}: {e}", path.display()))?;
     let written = file
-        .write_all(contents.as_bytes())
+        .write_all(contents.as_ref())
         .and_then(|()| match permissions {
             Some(permissions) => file.set_permissions(permissions),
             None => Ok(()),
@@ -483,8 +483,8 @@ mod tests {
     fn atomic_write_replaces_contents_and_leaves_no_temporary_file() {
         let dir = Scratch::new("replace");
         let path = dir.join("sunrise-mod.toml");
-        atomic_write(&path, "first".into()).unwrap();
-        atomic_write(&path, "second".into()).unwrap();
+        atomic_write(&path, "first").unwrap();
+        atomic_write(&path, b"second").unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), "second");
         assert_eq!(fs::read_dir(&*dir).unwrap().count(), 1);
     }
@@ -495,7 +495,7 @@ mod tests {
         let path = dir.join("sunrise-mod.toml");
         let planted = dir.join("sunrise-mod.toml.sync");
         fs::write(&planted, "planted").unwrap();
-        atomic_write(&path, "written".into()).unwrap();
+        atomic_write(&path, "written").unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), "written");
         assert_eq!(fs::read_to_string(&planted).unwrap(), "planted");
     }
@@ -532,7 +532,7 @@ mod tests {
         // A non-empty directory at `path` cannot be replaced by a file.
         fs::create_dir(&path).unwrap();
         fs::write(path.join("keep"), "keep").unwrap();
-        assert!(atomic_write(&path, "x".into()).is_err());
+        assert!(atomic_write(&path, "x").is_err());
         assert!(fs::read_dir(&*dir).unwrap().all(|entry| {
             !entry
                 .unwrap()
@@ -558,7 +558,7 @@ mod tests {
         let (temporary, file) = create_temporary(&path, 3).unwrap();
         drop(file);
         assert_eq!(temporary, temporary_path(&path, 5));
-        atomic_write(&path, "written".into()).unwrap();
+        atomic_write(&path, "written").unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), "written");
         assert_eq!(fs::read_to_string(&referent).unwrap(), "keep");
         assert!(!dangling.exists());

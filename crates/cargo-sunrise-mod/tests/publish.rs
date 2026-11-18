@@ -1,0 +1,281 @@
+use base64::{Engine, engine::general_purpose::STANDARD};
+use std::{
+    fs,
+    path::Path,
+    process::{Command, Output},
+};
+use sunrise_mod_package::index::{self, registry::Entry};
+
+const BIN: &str = env!("CARGO_BIN_EXE_cargo-sunrise-mod");
+const ENTRY: &str = "mods/coords_hud.toml";
+const PAGE: &[&str] = &[
+    "--summary",
+    "Shows coordinates.",
+    "--owner",
+    "ada",
+    "--categories",
+    "utility",
+];
+
+fn manifest(dir: &Path, version: &str) {
+    fs::write(
+        dir.join("sunrise-mod.toml"),
+        format!(
+            "id = 'coords_hud'\nname = 'Coordinates HUD'\nversion = '{version}'\n\
+             description = 'A coordinates display for players who are exploring new places.'\n\
+             license = 'MIT'\nhomepage = 'https://github.com/ada/coords_hud'\n"
+        ),
+    )
+    .unwrap();
+}
+
+fn run(dir: &Path, args: &[&str]) -> Output {
+    Command::new(BIN)
+        .current_dir(dir)
+        .args(args)
+        .output()
+        .unwrap()
+}
+
+fn success(result: Output) -> String {
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    String::from_utf8(result.stdout).unwrap()
+}
+
+#[test]
+#[ignore = "daily"]
+fn bad_version_or_checkout_leaves_destination_and_outside_files_unchanged() {
+    let work = tempfile::tempdir().unwrap();
+    let root = work.path();
+    let out = root.join("out");
+    let checkout = root.join("registry");
+    for directory in [out.join("mods"), checkout.join("mods")] {
+        fs::create_dir_all(directory).unwrap();
+    }
+    fs::write(out.join(ENTRY), b"old destination").unwrap();
+    for sentinel in ["sentinel.smod", "sentinel.toml"] {
+        fs::write(root.join(sentinel), b"outside submission").unwrap();
+    }
+    let attempt = |expected: &str| {
+        let result = run(root, &["publish", "--out", "out", "--registry", "registry"]);
+        assert!(!result.status.success());
+        let error = String::from_utf8_lossy(&result.stderr);
+        assert!(error.contains(expected), "{error}");
+        assert_eq!(fs::read(out.join(ENTRY)).unwrap(), b"old destination");
+        for sentinel in ["sentinel.smod", "sentinel.toml"] {
+            assert_eq!(
+                fs::read(root.join(sentinel)).unwrap(),
+                b"outside submission"
+            );
+        }
+        assert_eq!(fs::read_dir(&out).unwrap().count(), 1);
+        assert!(!root.join("target").exists());
+    };
+    manifest(root, "1/../../sentinel");
+    attempt("sunrise-mod.toml: version");
+
+    manifest(root, "1");
+    fs::write(checkout.join(ENTRY), "id = [").unwrap();
+    attempt(ENTRY);
+    let entry = "kind = 'mod'\nowners = ['ada']\n";
+    fs::write(
+        checkout.join(ENTRY),
+        format!("id = '../../sentinel'\n{entry}"),
+    )
+    .unwrap();
+    attempt(ENTRY);
+
+    let correct = format!("id = 'coords_hud'\n{entry}");
+    fs::write(checkout.join(ENTRY), &correct).unwrap();
+    fs::write(checkout.join("mods/other.toml"), &correct).unwrap();
+    attempt("mods/other.toml");
+
+    fs::remove_file(checkout.join("mods/other.toml")).unwrap();
+    fs::write(checkout.join(ENTRY), format!("{correct}\n[[versions]]\nversion = '1'\npublished = '2026-11-18'\ngame = '26.3'\nfile = 'coords_hud-1.smod'\nsha256 = '{}'\n", "0".repeat(64))).unwrap();
+    attempt("coords_hud 1");
+}
+
+#[test]
+#[ignore = "daily"]
+fn check_command_accepts_an_update_without_shipping_history_or_the_icon_again() {
+    let work = tempfile::tempdir().unwrap();
+    let root = work.path();
+    let checkout = "Ada's registry";
+    let out = "new submission";
+    manifest(root, "1.0.0");
+    // A 64 × 64 PNG, not just the IHDR: the old package and the registry both read it.
+    fs::write(root.join("icon.png"), STANDARD.decode("iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAAAAACPAi4CAAAAG0lEQVR4nO3BgQAAAADDoPlT3+AEVQEAAAB8AxBAAAFGOA0dAAAAAElFTkSuQmCC").unwrap()).unwrap();
+    let mut args = vec!["publish", "--out", checkout];
+    args.extend_from_slice(PAGE);
+    success(run(root, &args));
+    let published = fs::read_to_string(root.join(checkout).join(ENTRY)).unwrap();
+    let old: Entry = toml::from_str(&published).unwrap();
+    // A whole-index check of that checkout succeeds, and uses Sunrise's own asset host.
+    success(run(
+        root,
+        &[
+            "registry",
+            "build",
+            checkout,
+            "--files",
+            "Ada's registry/files",
+            "--out",
+            "old-index.json",
+        ],
+    ));
+    let old_index: index::Index =
+        serde_json::from_slice(&fs::read(root.join("old-index.json")).unwrap()).unwrap();
+    assert_eq!(
+        old_index.projects[0].versions[0].file.url,
+        "https://github.com/sunrise-org/sunrise-mods/releases/download/coords_hud-1.0.0/coords_hud-1.0.0.smod"
+    );
+
+    manifest(root, "2.0.0");
+    let output = success(run(
+        root,
+        &["publish", "--registry", checkout, "--out", out],
+    ));
+    let staged_entry = fs::read_to_string(root.join(out).join(ENTRY)).unwrap();
+    let new: Entry = toml::from_str(&staged_entry).unwrap();
+    assert_eq!(new.versions[0].version, "2.0.0");
+    assert_eq!(&new.versions[1..], &old.versions);
+    assert_eq!(new.icon, old.icon);
+    assert!(!root.join(out).join(new.icon.unwrap()).exists());
+    assert!(
+        !root
+            .join(out)
+            .join("files")
+            .join(&old.versions[0].sha256)
+            .exists()
+    );
+    assert_eq!(
+        fs::read_to_string(root.join(checkout).join(ENTRY)).unwrap(),
+        published
+    );
+
+    #[cfg(unix)]
+    let checked = {
+        let printed = output
+            .lines()
+            .map(str::trim)
+            .find(|line| line.starts_with("cargo sunrise-mod registry check "))
+            .unwrap();
+        // Use the test binary in place of the installed Cargo subcommand, leaving the printed
+        // shell arguments untouched so both the spaces and apostrophe go through the shell.
+        success(
+            Command::new("sh")
+                .current_dir(root)
+                .env("SUNRISE_TEST_BIN", BIN)
+                .arg("-c")
+                .arg(format!(
+                    "cargo() {{ shift; \"$SUNRISE_TEST_BIN\" \"$@\"; }}\n{printed}"
+                ))
+                .output()
+                .unwrap(),
+        )
+    };
+    #[cfg(not(unix))]
+    let checked = {
+        assert!(output.contains("registry check"));
+        success(run(
+            root,
+            &[
+                "registry",
+                "check",
+                checkout,
+                out,
+                "--files",
+                "new submission/files",
+            ],
+        ))
+    };
+    assert!(checked.contains(&new.versions[0].sha256), "{checked}");
+    assert!(!checked.contains(&old.versions[0].sha256), "{checked}");
+}
+
+#[test]
+#[ignore = "daily"]
+fn signed_publish_stages_the_exact_prebuilt_package_with_the_checkout_key() {
+    let work = tempfile::tempdir().unwrap();
+    let root = work.path();
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../sunrise-mod-package/tests/index");
+    let signed = fs::read(fixtures.join("coords_hud-0.1.0.smod")).unwrap();
+    let key_file = fs::read_to_string(fixtures.join("test.pub")).unwrap();
+    let key = key_file.lines().last().unwrap();
+    let signature = fixtures.join("coords_hud-0.1.0.smod.minisig");
+    manifest(root, "0.1.0");
+    fs::create_dir_all(root.join("registry/mods")).unwrap();
+    let listed = format!("id = 'coords_hud'\nkind = 'mod'\nowners = ['ada']\nkey = '{key}'\n");
+    fs::write(root.join("registry").join(ENTRY), listed).unwrap();
+    let args = ["publish", "--registry", "registry", "--out", "out"];
+    let unsigned = run(root, &args);
+    assert!(!unsigned.status.success());
+    assert!(String::from_utf8_lossy(&unsigned.stderr).contains("--signature"));
+    assert!(!root.join("target").exists());
+    assert!(!root.join("out").exists());
+
+    let built = root.join("target/sunrise-mod/coords_hud.smod");
+    fs::create_dir_all(built.parent().unwrap()).unwrap();
+    fs::write(&built, &signed).unwrap();
+    let mut args = args.to_vec();
+    args.extend(["--key", key, "--signature", signature.to_str().unwrap()]);
+    success(run(root, &args));
+    let staged = root.join("out");
+    let entry: Entry = toml::from_str(&fs::read_to_string(staged.join(ENTRY)).unwrap()).unwrap();
+    assert_eq!(entry.key.as_deref(), Some(key));
+    assert_eq!(
+        entry.versions[0].signature.as_deref(),
+        Some(fs::read_to_string(signature).unwrap().as_str())
+    );
+    assert_eq!(
+        fs::read(staged.join("coords_hud-0.1.0.smod")).unwrap(),
+        signed
+    );
+    assert_eq!(fs::read(&built).unwrap(), signed);
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "daily"]
+fn output_replaces_file_symlinks_but_refuses_linked_directories() {
+    use std::os::unix::fs::{PermissionsExt, symlink};
+    let work = tempfile::tempdir().unwrap();
+    let root = work.path();
+    manifest(root, "1");
+    let outside = root.join("outside");
+    fs::create_dir(&outside).unwrap();
+    let sentinel = outside.join("coords_hud.toml");
+    fs::write(&sentinel, b"untouched").unwrap();
+    fs::set_permissions(&sentinel, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::create_dir(root.join("out")).unwrap();
+    fs::write(root.join("out/PULL_REQUEST.md"), b"old request").unwrap();
+    symlink(&outside, root.join("out/mods")).unwrap();
+    let args = ["publish", "--out", "out"];
+    let blocked = run(root, &args);
+    assert!(!blocked.status.success());
+    assert!(String::from_utf8_lossy(&blocked.stderr).contains("out/mods"));
+    assert_eq!(fs::read(&sentinel).unwrap(), b"untouched");
+    assert_eq!(
+        fs::read(root.join("out/PULL_REQUEST.md")).unwrap(),
+        b"old request"
+    );
+    assert!(!root.join("target").exists());
+
+    fs::remove_file(root.join("out/mods")).unwrap();
+    fs::create_dir(root.join("out/mods")).unwrap();
+    let dest = root.join("out").join(ENTRY);
+    symlink(&sentinel, &dest).unwrap();
+    success(run(root, &args));
+    let metadata = fs::symlink_metadata(dest).unwrap();
+    assert!(metadata.is_file());
+    assert_eq!(metadata.permissions().mode() & 0o111, 0);
+    assert_eq!(
+        fs::metadata(&sentinel).unwrap().permissions().mode() & 0o777,
+        0o700
+    );
+    assert_eq!(fs::read(&sentinel).unwrap(), b"untouched");
+}
