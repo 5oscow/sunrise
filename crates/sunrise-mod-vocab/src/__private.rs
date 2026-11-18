@@ -53,6 +53,16 @@ pub fn set_mod_enabled(id: &str, on: bool) -> bool {
     crate::set_mod_enabled(id, on)
 }
 
+/// Index the `(namespace, mod ID)` pairs admitted to the startup registries.
+pub fn install_content_owners<'a>(owners: impl IntoIterator<Item = (&'a str, &'a str)>) {
+    crate::runtime::install_content_owners(owners);
+}
+
+/// Whether the engine has bound content ownership for the installed dispatch.
+pub fn content_owners_published() -> bool {
+    crate::runtime::content_owners_published()
+}
+
 /// Whether the declaring package of this content is switched off.
 pub fn content_owner_disabled(id: &str) -> bool {
     crate::runtime::content_owner_disabled(id)
