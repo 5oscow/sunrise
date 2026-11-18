@@ -231,6 +231,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     self.emit(LevelEvent::Sound {
                         pos,
                         sound: "minecraft:block.comparator.click".into(),
+                        source: None,
                         volume: 0.3,
                         pitch,
                     });
@@ -321,6 +322,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     self.emit(LevelEvent::Sound {
                         pos,
                         sound: "minecraft:block.cave_vines.pick_berries".into(),
+                        source: None,
                         volume: 1.0,
                         pitch,
                     });
@@ -342,6 +344,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     self.emit(LevelEvent::Sound {
                         pos,
                         sound: "minecraft:block.sweet_berry_bush.pick_berries".into(),
+                        source: None,
                         volume: 1.0,
                         pitch,
                     });
@@ -571,6 +574,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         self.emit(LevelEvent::Sound {
             pos,
             sound: "minecraft:block.composter.empty".into(),
+            source: None,
             volume: 1.0,
             pitch: 1.0,
         });

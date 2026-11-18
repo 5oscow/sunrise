@@ -245,6 +245,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         self.level.emit(LevelEvent::Sound {
             pos,
             sound: sound.clone(),
+            source: None,
             volume,
             pitch,
         });

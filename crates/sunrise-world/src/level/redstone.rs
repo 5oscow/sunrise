@@ -843,6 +843,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         self.emit(LevelEvent::Sound {
             pos,
             sound: "minecraft:block.lever.click".into(),
+            source: None,
             volume: 0.3,
             pitch: if powered { 0.6 } else { 0.5 },
         });
@@ -1001,6 +1002,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 self.emit(LevelEvent::Sound {
                     pos,
                     sound: sound.into(),
+                    source: None,
                     volume: 1.0,
                     pitch: 1.0,
                 });
@@ -1083,6 +1085,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         self.emit(LevelEvent::Sound {
             pos,
             sound: sound.into(),
+            source: None,
             volume: 3.0,
             pitch,
         });
@@ -1193,6 +1196,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         self.emit(LevelEvent::Sound {
             pos,
             sound: "minecraft:block.bell.use".into(),
+            source: None,
             volume: 2.0,
             pitch: 1.0,
         });
