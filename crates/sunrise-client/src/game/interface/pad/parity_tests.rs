@@ -107,24 +107,6 @@ fn a_keyboard_release_keeps_the_sneak_the_pad_went_on_to_hold() {
 
 #[test]
 #[ignore = "daily"]
-fn keyboard_handoff_keeps_what_the_pad_holds() {
-    playing(|game| {
-        game.mapped_key(KeyCode::KeyW, true, false, KeyCode::KeyW, Source::Keyboard)
-            .unwrap();
-        pad_press(game, Button::South, "key.jump");
-        assert!(game.keys.held(Action::Jump) && game.keys.held(Action::Forward));
-        // Splitscreen: keyboard and mouse move to another player.
-        game.release_keyboard_mouse();
-        assert!(!game.keys.held(Action::Forward), "the keyboard's walk ends");
-        assert!(
-            game.keys.held(Action::Jump),
-            "the pad still holds jump; only the keyboard and mouse left"
-        );
-    });
-}
-
-#[test]
-#[ignore = "daily"]
 fn pad_smooth_camera_binding_toggles_the_cinematic_camera() {
     playing(|game| {
         game.settings
@@ -196,6 +178,23 @@ fn readers_of_the_movement_keys_see_the_stick() {
         // A screen takes the stick away.
         game.screen = Screen::Paused;
         assert!(!game.mapping("key.forward").unwrap().unwrap().down);
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn mapping_state_reads_what_mapping_reads_and_follows_the_binding() {
+    playing(|game| {
+        game.focused = true;
+        let (down, bound) = game.mapping_state("key.forward").unwrap();
+        assert!(!down);
+        game.pad.state.left = [-0.7, 0.7];
+        let held = game.mapping_state("key.forward").unwrap();
+        assert_eq!(held, (true, bound), "holding it leaves the binding's hash");
+        assert_eq!(held.0, game.mapping("key.forward").unwrap().unwrap().down);
+        game.settings.keys.set("key.forward", "key.keyboard.up");
+        assert_ne!(game.mapping_state("key.forward").unwrap().1, bound);
+        assert_eq!(game.mapping_state("key.not_a_mapping"), None);
     });
 }
 
@@ -287,15 +286,5 @@ fn a_release_from_a_screen_can_not_strand_the_pads_attack() {
         assert!(game.left);
         pad_release(game, Button::RightTrigger);
         assert!(!game.left, "nothing is physically held");
-    });
-}
-
-#[test]
-#[ignore = "daily"]
-fn keyboard_handoff_keeps_the_attack_the_pad_holds() {
-    playing(|game| {
-        pad_press(game, Button::RightTrigger, "key.attack");
-        game.release_keyboard_mouse();
-        assert!(game.left);
     });
 }

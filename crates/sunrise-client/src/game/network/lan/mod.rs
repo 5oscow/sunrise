@@ -27,7 +27,7 @@ use sunrise_client::{
         visible_effect_particles,
     },
     lan::{
-        self, Lan, NetConfig,
+        self, NetConfig,
         chunks::ChunkEncoder,
         data::{BIOME_REGISTRY, SyncData},
         entity::{EntityState, States},
@@ -1100,7 +1100,7 @@ impl Game<'_> {
         {
             // The hub is the server thread's.
             let status = server
-                .call(|g| g.lan_status())
+                .ask(super::owner_link::OwnerRequest::LanStatus)
                 .ok_or(super::integrated::NO_ANSWER)?;
             return Ok(Some(status));
         }
@@ -1131,7 +1131,7 @@ impl Game<'_> {
     }
 
     /// `sunrise-ctl lan status`.
-    fn lan_status(&self) -> serde_json::Value {
+    pub(super) fn lan_status(&self) -> serde_json::Value {
         use serde_json::json;
         match &self.lan {
             Some(h) if !self.serving() || self.published_port().is_some() => json!({
@@ -1182,7 +1182,7 @@ impl Game<'_> {
         let port = if let Some(server) = &self.integrated {
             // ShareToLanScreen: IntegratedServer.publishServer.
             server
-                .call(move |g| g.publish(settings))
+                .ask(|reply| super::owner_link::OwnerRequest::Publish(settings, reply))
                 .ok_or(super::integrated::NO_ANSWER)??
         } else if self.serving() {
             return self.publish(settings).map(drop).map_err(Into::into);
@@ -1273,7 +1273,7 @@ impl Game<'_> {
         self.lan_update_tag_sources(&mut encoder);
         let far = (net.lod_distance > 0)
             .then(|| sunrise_client::lod_net::Service::new(net.lod_distance, biome_names.clone()));
-        let lan = Lan::start_with(sync.clone(), net)?;
+        let lan = super::lan_configuration_tasks::start(sync.clone(), net)?;
         let mut hub = Hub::new(lan, sync, encoder, config, self.loop_context.clone());
         self.bind_guest_residency(&mut hub);
         self.passages.record_on(&mut hub);
@@ -1315,7 +1315,9 @@ impl Game<'_> {
     pub(super) fn lan_close(&mut self, announce: bool) {
         if self.integrated.is_some() || self.serving() {
             let closed = match &self.integrated {
-                Some(server) => server.call(|g| g.unpublish()).unwrap_or(false),
+                Some(server) => server
+                    .ask(super::owner_link::OwnerRequest::Unpublish)
+                    .unwrap_or(false),
                 None => self.unpublish(),
             };
             if closed {
@@ -1782,7 +1784,11 @@ impl Game<'_> {
     /// New command access and game mode forcing settings of the open world.
     pub(super) fn lan_apply_settings(&mut self, guest_commands: bool, force: bool) {
         if let Some(server) = &self.integrated {
-            server.call(move |g| g.lan_apply_settings(guest_commands, force));
+            server.ask(|done| super::owner_link::OwnerRequest::LanApplySettings {
+                guest_commands,
+                force,
+                done,
+            });
             return;
         }
         // An integrated server gives guests commands only where the world
@@ -2432,7 +2438,7 @@ impl Game<'_> {
         if self.level_pass.packets_drained {
             return;
         }
-        let Some(mut host) = self.lan.take() else {
+        let Some(mut host) = self.take_lan_for_packet_tick() else {
             return;
         };
         let holding = lan::Holding::start();

@@ -37,6 +37,23 @@ programs end in `.exe`:
 | `exporters/manifest.json` | in the checkout | `package`, `package-server` | sunrise-prepare compile-exporters --root CHECKOUT, then copy its server, client and manifest.json into CHECKOUT/exporters/ |
 <!-- end of required inputs -->
 
+`compile-exporters` compiles against the pinned Minecraft jars that an earlier preparation imported
+into the checkout, and it doesn't import them itself. It also needs a JDK of the Java version
+`research-lock.json` pins (`java_major`, 25 for 26.3). Prepare first, from your own Minecraft
+installation and the server jar you downloaded yourself:
+
+```sh
+cargo build -p sunrise-prepare
+CHECKOUT/target/debug/sunrise-prepare --prepare --root CHECKOUT --server-jar SERVER_JAR
+bundle=$(CHECKOUT/target/debug/sunrise-prepare compile-exporters --root CHECKOUT | tail -1)
+mkdir -p CHECKOUT/exporters
+cp -R "$bundle/server" "$bundle/client" "$bundle/manifest.json" CHECKOUT/exporters/
+```
+
+The preparation also writes the resources to `CHECKOUT/.local/sunrise-client/26.3`, which
+`developer-install` copies beside the base (below). `exporters/` is ignored by git, so the developer
+install still finds the checkout clean.
+
 The command returns a `developer-…` tag. Select that exact tag and pin an instance to it.
 Automatic updates do not replace a local unsigned base. Remove it with
 `sunrise-launcher remove DEVELOPER_TAG` when no instance needs it.
@@ -69,10 +86,14 @@ published SDK, build it from the same checkout and name its folder; one folder h
 
 ```sh
 python3 tools/prebuilt_game.py build SDK_FOLDER            # add --server for a dedicated server
-SUNRISE_LAUNCHER_DEVELOPER_SDK=SDK_FOLDER sunrise-launcher native-build MODS --version DEVELOPER_TAG --trust-native-code
+cargo build --release -p cargo-sunrise-mod                 # the native build tool, from the same checkout
+SUNRISE_LAUNCHER_DEVELOPER_SDK=SDK_FOLDER SUNRISE_LAUNCHER_DEVELOPER_TOOL=target/release/cargo-sunrise-mod \
+  sunrise-launcher native-build MODS --version DEVELOPER_TAG --trust-native-code
 ```
 
-The variable is read for developer bases only, and the folder is used where it is. It must be
+The variables are read for developer bases only, and the folder is used where it is. The launcher compiles
+through the tool (`cargo sunrise-mod native-build`, [its contract](../../reference/sdk/08-native-build.md)), as it
+runs the one a published SDK carries. It must be
 that commit's build for this computer, side and the launcher's Rust, as a downloaded SDK must;
 anything else is refused. Without it, the launcher uses the commit's SDK release when one is
 published, and otherwise says the build has no mod tools. The native mod builder never compiles the checkout itself. For native mixins, the pinned

@@ -143,6 +143,13 @@ impl Game<'_> {
             .unwrap_or(otherwise)
     }
 
+    /// `Player.entityInteractionRange`/`blockInteractionRange` for the tick's
+    /// picks: the attribute carries creative's and a server's modifiers.
+    pub(super) fn update_interaction_ranges(&mut self) {
+        self.entity_reach = self.interaction_range("minecraft:entity_interaction_range", 3.0, 5.0);
+        self.block_reach = self.interaction_range("minecraft:block_interaction_range", 4.5, 5.0);
+    }
+
     /// A stack's `minecraft:attack_range` component, falling back to the spear's
     /// default reach (`spear::REACH`) for spear items unless explicitly removed.
     fn attack_range_component(&self, stack: &ItemStack) -> Option<serde_json::Value> {
@@ -403,8 +410,10 @@ impl Game<'_> {
         };
         let reach = attack_reach(range, self.creative);
         let camera = self.remote_camera_id();
+        // AttackRange uses getManyEntityHitResult, which does not exclude
+        // entities sharing the camera's root vehicle.
         let boxes = (self.mobs.iter().enumerate())
-            .filter(|(_, m)| !m.removed && Some(m.id) != self.riding && Some(m.id) != camera)
+            .filter(|(_, m)| !m.removed && Some(m.id) != camera)
             .map(|(i, m)| (i, m.bounds()));
         let clip = |from: Vec3, to: Vec3| {
             let length = from.distance_squared(to).sqrt();
@@ -625,14 +634,17 @@ impl Game<'_> {
     }
     /// `MultiPlayerGameMode.sameDestroyTarget`'s item half for the stack
     /// `began` a break began with: `ItemStack.isSameItemSameComponents` with
-    /// the main hand now (count and damage left out, as vanilla's kept
-    /// reference sees an in-place change), which the parts of `began`'s item
-    /// may overturn (`IItemExtension.shouldCauseBlockBreakReset`).
+    /// the main hand now, which the parts of `began`'s item may overturn
+    /// (`IItemExtension.shouldCauseBlockBreakReset`). The count is left out
+    /// (not a component; vanilla's kept reference also sees a use shrink the
+    /// stack in place); the damage is compared, as a client's tool only wears
+    /// by the server sending a new stack for the slot, which the reference
+    /// kept from before doesn't share.
     pub(super) fn same_destroying_item(&self, began: &Option<ItemStack>) -> bool {
         let held = self.held();
         let same = match (began, held) {
             (None, None) => true,
-            (Some(a), Some(b)) => a.item == b.item && a.extra == b.extra,
+            (Some(a), Some(b)) => a.item == b.item && a.damage == b.damage && a.extra == b.extra,
             _ => false,
         };
         let Some(began) = began else {
@@ -666,6 +678,7 @@ impl Game<'_> {
             || before(self.cart_hit().map(|h| h.1))
             || before(self.interaction_hit().map(|h| h.1))
             || before(self.dragon_hit().map(|h| h.1))
+            || before(self.crystal_hit().map(|h| h.1))
             || before(self.mob_hit().map(|h| h.1))
             || before(self.redirectable_hit().map(|h| h.1))
     }

@@ -89,6 +89,12 @@ impl Game<'_> {
     /// again, a game with no mod listening to either, and a server's or a guest's `Game`
     /// are a plain assignment.
     pub(super) fn set_screen(&mut self, screen: Screen) {
+        self.set_screen_with(screen, |_| {});
+    }
+    /// `set_screen`, with `before` run once the hooks let the change go ahead and
+    /// before it applies: what a screen's own `onClose` does only when it really
+    /// closes (a container screen's close packet).
+    pub(super) fn set_screen_with(&mut self, screen: Screen, before: impl FnOnce(&mut Self)) {
         if self.screen == screen {
             return;
         }
@@ -112,6 +118,7 @@ impl Game<'_> {
         if self.screen == screen && owner.is_none() {
             return;
         }
+        before(self);
         if self.screen == Screen::Options {
             self.ui.options.discard_draw();
         }
@@ -1018,8 +1025,8 @@ impl Game<'_> {
         // left down, right down, left up sends no drag while right is still held.
         self.drag_button = pressed.then_some(button);
     }
-    pub(super) fn screen_mouse_dragged(&self, previous: (f32, f32)) -> ScreenMousePre {
-        if self.pad_synthetic_input() || self.cursor == previous {
+    pub(super) fn screen_mouse_dragged(&self, delta: [f32; 2]) -> ScreenMousePre {
+        if self.pad_synthetic_input() || delta == [0.0; 2] {
             return ScreenMousePre::NotFired;
         }
         let Some(button) = self
@@ -1032,7 +1039,6 @@ impl Game<'_> {
             return ScreenMousePre::NotFired;
         };
         let button = super::glfw_button(button);
-        let delta = [self.cursor.0 - previous.0, self.cursor.1 - previous.1];
         let mut canceled = false;
         self.native_screen_mouse_dragged_pre(
             &screen,
@@ -1816,34 +1822,6 @@ pub(super) fn sound_id(id: &str) -> bool {
         && path.chars().all(|c| allowed(c, true))
 }
 
-/// Sets the viewer counts `known` holds for `dim` to `now` and returns the
-/// changes as `(pos, previous, viewers)`, in position order. A container that
-/// is no longer counted goes to 0 and leaves `known`.
-pub(super) fn viewer_changes(
-    known: &mut HashMap<(&'static str, (i32, i32, i32)), u32>,
-    dim: &'static str,
-    mut now: HashMap<(i32, i32, i32), u32>,
-) -> Vec<((i32, i32, i32), u32, u32)> {
-    let mut changes = Vec::new();
-    known.retain(|&(d, pos), previous| {
-        if d != dim {
-            return true;
-        }
-        let viewers = now.remove(&pos).unwrap_or(0);
-        if viewers != *previous {
-            changes.push((pos, *previous, viewers));
-            *previous = viewers;
-        }
-        viewers > 0
-    });
-    for (pos, viewers) in now {
-        known.insert((dim, pos), viewers);
-        changes.push((pos, 0, viewers));
-    }
-    changes.sort_unstable();
-    changes
-}
-
 fn dimension_id(dimension: LevelDimension) -> &'static str {
     match dimension {
         LevelDimension::Overworld => "minecraft:overworld",
@@ -2541,6 +2519,17 @@ impl Game<'_> {
         if !mod_api::__private::listened(mod_api::HookId::EntityPlace) {
             return false;
         }
+        self.placement_canceled(self.entity(placer), pos, state, placed_against, companion)
+    }
+
+    fn placement_canceled(
+        &mut self,
+        placer: Option<EntityRef>,
+        pos: BlockPos,
+        state: BlockStateId,
+        placed_against: BlockStateId,
+        companion: Option<(BlockPos, BlockStateId)>,
+    ) -> bool {
         let placement = match companion {
             None => Placement::Single,
             Some((at, extra)) => {
@@ -2553,34 +2542,54 @@ impl Game<'_> {
                 ]))
             }
         };
-        let placer = self.entity(placer);
         let mut canceled = false;
         self.native_entity_place(placer, pos, state, placed_against, placement, &mut canceled);
         canceled
     }
-    /// Whether a mod canceled the block the player's `ctx` would place
-    /// (`entity_place`): nothing is previewed unless a mod listens.
-    pub(super) fn player_place_canceled(&mut self, ctx: &PlaceContext) -> bool {
+    /// Let `entity_place` veto exactly the decision the world will apply. If the
+    /// callback changed the inputs, do not choose another target behind its back.
+    pub(super) fn place_item_block(
+        &mut self,
+        ctx: &PlaceContext,
+        by_player: bool,
+    ) -> Option<(PlacementContext, BlockStateId)> {
         if !mod_api::__private::listened(mod_api::HookId::EntityPlace) {
-            return false;
+            return self
+                .with_level(|b, level, ticks| b.place_block_with_context(level, ticks, ctx));
         }
-        let Some(preview) =
-            self.with_level(|b, level, ticks| b.placement_preview(level, ticks, ctx))
-        else {
-            return false;
+        let (decision, preview) =
+            self.with_level(|b, level, ticks| b.decide_placement(level, ticks, ctx))?;
+        let against_pos = decision.placed_against_pos();
+        let block = |game: &Game<'_>, pos: BlockPos| game.world.block(pos.x, pos.y, pos.z);
+        let against = block(self, against_pos);
+        let target_before = block(self, preview.pos);
+        let companion_before = preview.companion.map(|(pos, _)| (pos, block(self, pos)));
+        let hand = if by_player {
+            self.held().cloned()
+        } else {
+            None
         };
-        let against_pos = ctx.placed_against_pos(preview.pos);
-        let against = self
-            .world
-            .block(against_pos.x, against_pos.y, against_pos.z);
-        let (_, entity) = self.native_clicker();
-        self.place_canceled(
-            entity.cast_unsigned(),
+        let placer = by_player
+            .then(|| self.native_clicker().1.cast_unsigned())
+            .and_then(|entity| self.entity(entity));
+        // The existing block revision and journal epoch cover rule inputs such as
+        // supporting blocks and block-entity shapes without tracing ordinary reads.
+        let level = (self.dim, self.world.revision, self.transactions.writes());
+        if self.placement_canceled(
+            placer,
             preview.pos,
             preview.state,
             against,
             preview.companion,
-        )
+        ) || level != (self.dim, self.world.revision, self.transactions.writes())
+            || block(self, preview.pos) != target_before
+            || block(self, against_pos) != against
+            || companion_before.is_some_and(|(pos, state)| block(self, pos) != state)
+            || (by_player && self.held() != hand.as_ref())
+        {
+            return None;
+        }
+        self.with_level(|b, level, ticks| b.apply_placement(level, ticks, decision))
     }
     /// `MobEvent::PlaceBlock`: a mob sets `state` at `pos` unless a mod
     /// cancels `entity_place`. Enderman attempts use `enderman_place_block`.
@@ -2938,6 +2947,7 @@ impl Game<'_> {
                     for list in c.faces.iter_mut().chain([&mut c.inputs, &mut c.outputs]) {
                         list.retain(|&s| s < n);
                     }
+                    c.insert_rules.truncate(n);
                     c.menu = c
                         .menu
                         .filter(|m| mod_menu(m).is_some_and(|(_, size)| size == n));
@@ -3038,44 +3048,6 @@ impl Game<'_> {
             m.items.resize(slots, None);
         }
         true
-    }
-    /// `ContainerOpenersCounter` for the mod containers of the level in place:
-    /// everyone with one open, recounted every tick, so a change is heard
-    /// whichever way an opener left (`native_mod_container_viewers`). The
-    /// openers are the guests (but not a spectator, `BarrelBlockEntity.startOpen`),
-    /// the host's own player, and the copper golems that opened it
-    /// (`chest_openers`).
-    pub(super) fn tick_mod_container_viewers(&mut self) {
-        let mut now: HashMap<(i32, i32, i32), u32> = HashMap::new();
-        let mut open = |game: &Self, pos: (i32, i32, i32), n: u32| {
-            if n > 0 && game.mod_menu_at(pos).is_some() {
-                *now.entry(pos).or_default() += n;
-            }
-        };
-        if let Some(host) = &self.lan {
-            for g in host
-                .hub
-                .guests
-                .iter()
-                .filter(|g| host.hub.here(g) && !g.spectator())
-            {
-                if let Some(m) = &g.menu
-                    && let Slots::Block(pos) = m.slots
-                {
-                    open(self, pos, 1);
-                }
-            }
-        }
-        if let Some(pos) = self.container.filter(|_| !self.spectator()) {
-            open(self, pos, 1);
-        }
-        for (&pos, &(golems, _)) in &self.world.chest_openers {
-            open(self, pos, golems.max(0) as u32);
-        }
-        let dim = self.dim.id();
-        for (pos, previous, viewers) in viewer_changes(&mut self.mod_container_viewers, dim, now) {
-            self.native_mod_container_viewers(dim, [pos.0, pos.1, pos.2], viewers, previous);
-        }
     }
     /// The menu type of the mod container at `key`, if it has one.
     pub(super) fn mod_menu_at(&self, key: Pos) -> Option<&'static str> {
@@ -3215,7 +3187,19 @@ impl Game<'_> {
                 );
             }
         }
-        self.native_screen_draw(&s.block, s.pos(), &s.data, batch, [ox, oy]);
+        if mod_api::__private::has_scoped_hook(mod_api::HookId::ScreenDraw) {
+            let gui_size = [batch.width as i32, batch.height as i32];
+            let mut draw = crate::game::host::draw::GameDrawContext::new(self, batch);
+            self.native_screen_draw(mod_api::__private::ScreenDrawCall {
+                block: &s.block,
+                pos: s.pos(),
+                data: &s.data,
+                origin: [ox, oy],
+                pointer: [self.cursor.0 as i32, self.cursor.1 as i32],
+                gui_size,
+                draw: &mut draw,
+            });
+        }
         self.draw_screen_phase(batch, sunrise_client::screen_draw::RenderPhase::Background);
         if s.screen.own_labels {
             return true;
@@ -3331,6 +3315,7 @@ impl Game<'_> {
         slot: Option<usize>,
         lines: &mut Vec<(sunrise_client::text::Text, u32)>,
     ) {
+        // Scoped hooks subscribe through Parts, not the global Hooks subscriber table.
         if !mod_api::__private::has_scoped_hook(mod_api::HookId::ScreenTooltip) {
             return;
         }
@@ -3342,7 +3327,25 @@ impl Game<'_> {
         });
         let (ox, oy) = self.inventory_origin(batch);
         let at = [self.cursor.0 - ox, self.cursor.1 - oy];
-        self.native_screen_tooltip(&screen.block, &screen.data, at, menu_slot, lines);
+        use crate::game::api_values::{TryIntoApi, TryIntoEngine};
+        // Keep the original tooltip if either conversion fails. A hovered
+        // item's text can fail on every frame, so do not log the refusal here.
+        let Ok(mut snapshot) = lines.try_into_api() else {
+            return;
+        };
+        self.native_screen_tooltip(mod_api::__private::ScreenTooltipCall {
+            block: &screen.block,
+            data: &screen.data,
+            at,
+            slot: menu_slot,
+            origin: [ox, oy],
+            pointer: [self.cursor.0 as i32, self.cursor.1 as i32],
+            gui_size: [batch.width as i32, batch.height as i32],
+            lines: &mut snapshot,
+        });
+        if let Ok(replacement) = snapshot.try_into_engine(&()) {
+            *lines = replacement;
+        }
     }
     /// Options > Mods' rows for loaded code mods, after the content-only rows.
     pub(super) fn list_native_mods(&mut self) {
@@ -3562,16 +3565,6 @@ impl Game<'_> {
         let mut params = [[0.0; 4]; 8];
         self.native_shader_params(partial, &mut params);
         finite_params(params)
-    }
-    /// The minimap a native mod shows.
-    pub(super) fn native_minimap_now(&self) -> Option<mod_api::Minimap> {
-        let mut minimap = None;
-        self.native_minimap(&mut minimap);
-        minimap.map(|m| mod_api::Minimap {
-            size: finite(m.size, 16.0, 256.0),
-            blocks_per_pixel: finite(m.blocks_per_pixel, 0.5, 4.0),
-            ..m
-        })
     }
 }
 

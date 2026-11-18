@@ -121,9 +121,12 @@ when the server acknowledges them, each block that takes the server's state back
 server update for a block still under a pending prediction is held, as in vanilla, and told when the
 acknowledgement applies it. A write that keeps the state is not told, so nothing has to rescan the
 loaded terrain. It needs no mod on the server: it runs on a client of any server, a LAN guest included.
-An integrated world's own blocks are the server's `block_changed`, and a level a server opens for
+All three hooks also fire in singleplayer, where the window is a client of its own in-process server.
+The server-side world still reports its edits through `block_changed`. A level a server opens for
 viewing (below) is not told. A section update tells each of its blocks, so keep the listener cheap:
 mark the chunk and redraw it later.
+sunrise-org/sunrise-minimap is such a mod: it redraws a marked chunk into its map's dynamic texture and draws
+the map in `render_gui_post`.
 
 ## Viewed levels
 
@@ -163,7 +166,8 @@ in distant terrain or return a block behind a targeted entity.
 
 A client `EntityRef` supports `bounding_box(host)`, `eye_height(host)` and
 `eye_position(host)`. For the local player these use the current predicted body and pose;
-for a tracked target they use the client's displayed body. Stale handles and entities the
+for a tracked target they use the client's displayed body. End crystals expose their 2 x 2 box;
+dragon parts expose their own box. Stale handles and entities the
 client cannot read return `None`.
 
 The local `PlayerRef` also supports `within_entity_reach(host, target, rule)`: it reads the

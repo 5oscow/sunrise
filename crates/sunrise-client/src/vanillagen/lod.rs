@@ -1,8 +1,9 @@
 //! Speculative decoration is isolated from gameplay and never writes normal saves.
 use super::*;
 use crate::{
+    columns::Surface,
     fast_hash::{FxHashMap, FxHashSet},
-    lod::{Column, Span, Surface},
+    lod::{Column, Span},
     streaming::LodDetail,
 };
 use std::{

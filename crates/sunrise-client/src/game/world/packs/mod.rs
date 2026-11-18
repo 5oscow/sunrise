@@ -599,8 +599,7 @@ impl Game<'_> {
             .block_entity_render()
             .set_shapes(block_entity_shapes);
         // The random entity textures and emissive overlays the new atlas packs. A new scan is
-        // a new generation:
-        // every mob (every splitscreen player's too) chooses again on its next tick.
+        // a new generation: every mob chooses again on its next tick.
         *self
             .res
             .mob_data()
@@ -643,8 +642,7 @@ impl Game<'_> {
         // New GPU textures: a renderer built from the reloaded resources; the
         // sections are uploaded again as they are meshed.
         if let Some(mut renderer) = renderer {
-            // The old one's size: a splitscreen player's view is smaller than the window the new
-            // one was sized from (it drew a window-sized frame into the view, cut off).
+            // Keep the current framebuffer size across the reload.
             if let Some(old) = &self.renderer {
                 renderer.resize(old.config.width, old.config.height);
             }
@@ -745,6 +743,7 @@ pub(super) fn stage_pack(
         panorama: Arc::new(panorama.unwrap_or_else(|p| std::panic::resume_unwind(p))),
         // `Game::apply_staged_pack` fills it with the client's setting.
         splashes: Arc::from(""),
+        plain_texts: Default::default(),
     };
     progress.set(2);
     let mut pack = PackResources::load(

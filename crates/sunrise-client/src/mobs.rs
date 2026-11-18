@@ -93,7 +93,6 @@ pub mod seen_grid;
 pub mod sheep_dye;
 pub mod shulker;
 pub mod skin;
-pub mod skin_layers;
 pub mod sniffer;
 pub mod spawn_rules;
 pub mod spawn_selection;
@@ -1590,6 +1589,9 @@ pub struct Mob {
     /// `Entity.isInPowderSnow` as of the last mob tick, for the skeleton's
     /// freezing tracker read at save time.
     pub in_powder_snow: bool,
+    /// `Entity.wasInPowderSnow`: `in_powder_snow` as the last tick left it,
+    /// kept by `Entity.baseTick` for `Mob.isSunBurnTick`.
+    pub was_in_powder_snow: bool,
     pub glowing: bool,
     pub air: i32,
     pub last_hurt: f32,
@@ -1625,9 +1627,6 @@ pub struct Mob {
     pub skin: Option<String>,
     /// `PlayerSkin.model` is `SLIM`: the player model with 3-pixel arms.
     pub slim: bool,
-    /// The 3D skin layers feature's model for this player: its outer layer
-    /// with every painted texel extruded (`skin_layers`, off by default).
-    pub skin_3d: Option<Arc<Part>>,
     /// `PlayerSkin.cape`: a player's cape texture, once every download of
     /// its skin is ready.
     pub cape: Option<String>,
@@ -3275,6 +3274,11 @@ pub struct MobWorld<'a> {
     pub thundering: bool,
     pub level: sunrise_core::LevelKey,
     pub block_tags: &'a HashMap<String, std::collections::HashSet<String>>,
+    /// [`crate::items::BlockTagFlags`] bits by block state id: the tags the
+    /// mob code asks about by name (`minecraft:climbable`, `minecraft:fire`
+    /// and the rest), so a tick tests a bit instead of hashing two strings.
+    /// Empty in a view built without a catalog: every flag reads false.
+    pub block_tag_flags: &'a [u16],
     /// Each block's `fallOn` rule (the player's landing registry).
     pub landing: &'a sunrise_world::block_landing::BlockLandingRegistry,
     pub biomes: &'a crate::biome::Biomes,
@@ -3640,6 +3644,7 @@ impl Mob {
             fire_ticks: 0,
             ticks_frozen: 0,
             in_powder_snow: false,
+            was_in_powder_snow: false,
             glowing: false,
             air: 300,
             last_hurt: 0.0,
@@ -3662,7 +3667,6 @@ impl Mob {
             outbox: Vec::new(),
             skin: None,
             slim: false,
-            skin_3d: None,
             cape: None,
             profile: None,
             random_textures: Default::default(),

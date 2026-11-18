@@ -42,7 +42,7 @@ impl Hooks for MyMod {
 | `ItemPart` | An item type, your own or vanilla's |
 | `MenuPart` | A mod menu type |
 | `FluidPart` | A mod world fluid type |
-| `EntityPart` | An entity type, your own or vanilla's; registered through `Registrar::entity_part`; on wasm only its `general_entity_tick` crosses |
+| `EntityPart` | An entity type, your own or vanilla's; registered through `Registrar::entity_part`; on wasm, `general_entity_tick` and `can_rider_interact` cross |
 
 - Annotate each part trait implementation with `#[mod_api::sunrise_part]`. For scoped hooks, the
   attribute subscribes the part only to the methods you implement.
@@ -51,6 +51,13 @@ impl Hooks for MyMod {
 - Parts implement `Send + Sync + 'static`.
 - In `has_analog_output`, answer from the block state alone. In `analog_output`, do not change the
   world. The game clamps the comparator signal to the range 0 to 15.
+
+## Fire eligibility
+
+`BlockPart::fire_odds` receives a read-only `LevelSide` on both sides. Its ignite odds
+control fire placement and shape prediction on the client, including flint-and-steel
+prediction; burn odds are used only by the server. The face points toward the fire.
+Return `None` to keep the table. Client fire animation still uses vanilla's built-in table.
 
 ## Campfire smoke sources
 
