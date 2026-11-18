@@ -280,11 +280,11 @@ pub fn position(
 }
 
 /// `VideoMode.refreshRateLabel`: whole rates without decimals.
-pub fn refresh_rate_label(hz: f64) -> String {
+pub fn refresh_rate_label(hz: f32) -> String {
     if hz == hz.round() {
-        format!("{}", hz as i64)
+        (hz as i32).to_string()
     } else {
-        format!("{hz:.2}")
+        sunrise_core::java_number::format_fixed2(f64::from(hz))
     }
 }
 
@@ -934,6 +934,7 @@ mod tests {
         );
         assert_eq!(refresh_rate_label(165.0), "165");
         assert_eq!(refresh_rate_label(59.94), "59.94");
+        assert_eq!(refresh_rate_label(59.125), "59.13"); // Temurin %.2f of 59.125f
     }
 
     #[test]
