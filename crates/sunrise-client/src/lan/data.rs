@@ -111,6 +111,7 @@ const PACK_REGISTRIES: &[&str] = &[
     "minecraft:dialog",
     "minecraft:dimension_type",
     "minecraft:enchantment",
+    "minecraft:world_clock",
 ];
 
 /// A registry's entries from the resource root's namespaces other than
@@ -269,6 +270,30 @@ fn mod_dimension_types(
             }
         }
         entries.push(((ns.to_owned(), path.to_owned()), value, true));
+    }
+}
+
+/// The clocks the mods' dimension types name as `default_clock` that no definition gives,
+/// below the packs': a client resolves a level's clock by its id in this registry.
+fn mod_clocks(
+    mods: &[sunrise_world::worldgen::overrides::ModDimension],
+    entries: &mut Vec<((String, String), Value, bool)>,
+) {
+    for dimension in mods {
+        let Ok(fields) = serde_json::from_str::<Value>(&dimension.dimension_type) else {
+            continue;
+        };
+        let Some((ns, path)) = fields["default_clock"]
+            .as_str()
+            .and_then(|c| c.split_once(':'))
+        else {
+            continue;
+        };
+        if !entries.iter().any(|((n, p), ..)| n == ns && p == path) {
+            // The host holds no definition of a mod's clock; a pack's goes over this empty one.
+            let key = (ns.to_owned(), path.to_owned());
+            entries.push((key, Value::Object(<_>::default()), true));
+        }
     }
 }
 
@@ -538,6 +563,12 @@ impl SyncData {
             } else if PACK_REGISTRIES.contains(key) {
                 if *key == "minecraft:dimension_type" {
                     mod_dimension_types(
+                        sunrise_world::worldgen::overrides::mod_dimensions(),
+                        &mut entries,
+                    );
+                }
+                if *key == "minecraft:world_clock" {
+                    mod_clocks(
                         sunrise_world::worldgen::overrides::mod_dimensions(),
                         &mut entries,
                     );
@@ -1689,6 +1720,78 @@ mod tests {
             serde_json::json!({"min_y":0,"height":64})
         );
         assert!(!entry("overworld").2);
+    }
+
+    #[test]
+    fn a_mods_dimension_type_brings_the_clock_it_names() {
+        use sunrise_world::worldgen::overrides::ModDimension;
+        let dimension = |id: &str, ty: &str| ModDimension {
+            id: id.into(),
+            stem: String::new(),
+            dimension_type: ty.into(),
+            sea_level: None,
+        };
+        let host = |path: &str| {
+            let key = ("minecraft".to_owned(), path.to_owned());
+            (key, serde_json::json!({}), false)
+        };
+        let mut entries = vec![host("overworld"), host("the_end")];
+        mod_clocks(
+            &[
+                dimension("test:frozen", r#"{"default_clock":"test:frozen"}"#),
+                dimension("test:twin", r#"{"default_clock":"test:frozen"}"#),
+                dimension("test:end", r#"{"default_clock":"minecraft:the_end"}"#),
+                dimension("test:dark", "{}"),
+            ],
+            &mut entries,
+        );
+
+        let ids: Vec<_> = entries
+            .iter()
+            .map(|((ns, p), _, sent)| (format!("{ns}:{p}"), *sent))
+            .collect();
+        assert_eq!(
+            ids,
+            [
+                ("minecraft:overworld".to_owned(), false),
+                ("minecraft:the_end".to_owned(), false),
+                ("test:frozen".to_owned(), true),
+            ],
+            "the host's clocks stay, a mod's clock is added once and sent"
+        );
+    }
+
+    #[test]
+    fn a_packs_clock_wins_over_the_one_a_mod_names() {
+        use sunrise_world::{loot::PackOverlay, worldgen::overrides::ModDimension};
+        assert!(
+            PACK_REGISTRIES.contains(&"minecraft:world_clock"),
+            "a world's packs reach the clock registry"
+        );
+        let mut entries = Vec::new();
+        mod_clocks(
+            &[ModDimension {
+                id: "test:frozen".into(),
+                stem: String::new(),
+                dimension_type: r#"{"default_clock":"test:frozen"}"#.into(),
+                sea_level: None,
+            }],
+            &mut entries,
+        );
+        let files = [(
+            "world_clock/test:frozen".to_owned(),
+            vec![br#"{"authored":true}"#.to_vec()],
+        )];
+        pack_entries("world_clock", &PackOverlay::new(&files), &mut entries);
+
+        assert_eq!(
+            entries,
+            [(
+                ("test".to_owned(), "frozen".to_owned()),
+                serde_json::json!({"authored":true}),
+                true
+            )]
+        );
     }
 
     #[test]
