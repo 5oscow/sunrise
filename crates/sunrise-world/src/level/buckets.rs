@@ -89,7 +89,7 @@ pub struct PlacedLiquid {
 }
 
 /// What a world pickup or placement of fluid changes ([`Behaviours::plan_fluid_pickup`],
-/// [`Behaviours::plan_fluid_place`]).
+/// [`Behaviours::plan_bucket_pour`]).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum FluidChange {
     /// `BucketPickup.pickupBlock`.

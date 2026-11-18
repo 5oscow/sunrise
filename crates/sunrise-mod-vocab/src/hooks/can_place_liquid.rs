@@ -8,7 +8,8 @@ pub trait Hooks {
     /// still replace a replaceable block, or try the block beside the hit.
     ///
     /// A player's bucket lends that player as `user`, including during client
-    /// prediction; dispensers and spreading fluid lend `None`. The host is
+    /// prediction. The fluid utility lends its optional player; dispensers and
+    /// spreading fluid lend `None`. The host is
     /// read-only on both sides. Answer from its reads, not from side effects.
     #[hook(
         side = "both",

@@ -54,18 +54,25 @@ A `BlockPart` can implement `can_place_liquid` to let its block accept fluid wit
 waterloggable template. Return `Some(true)` to accept as a container, `Some(false)` to refuse as a
 container, or `None` to keep the template's rule. A bucket can still replace a replaceable block or
 try the neighbouring cell. The read-only query hears both sides of bucket use, and server
-spreading and dispensers. Only a player's bucket supplies a `user`.
+spreading and dispensers. A player's bucket lends that player as `user`; the fluid utility lends
+its optional player. Spreading and dispensers don't lend a user.
 
 `place_liquid` is the server write: return `Some(true)` after storing the fluid and scheduling any
-needed tick, `Some(false)` if it was not placed, or `None` to run the template. Buckets supply a
-source state; spreading supplies the arriving state. A normal bucket still empties if the container
-returns false; a validated fluid-container operation fails instead. Player buckets and the fluid
-utility journal the part's writes; a false answer or fallthrough discards tentative writes. Root
-commit applies only the final state at each changed position, not the intermediate states. If any
-committed write there requested a neighbour, client or immediate update, that request survives;
-shape updates, drops and other effects are suppressed only if all writes there suppressed them.
-Aborted writes do not contribute. The direct dispenser and spreading paths skip the listener and
-log the refusal if a mod transaction is open, leaving the template's answer.
+needed tick, `Some(false)` if it was not placed, or `None` to pass to the next part, then the template.
+The first `Some` wins. Buckets supply a source state; spreading supplies the arriving state. Live
+structure templates restore the displaced fluid or a neighbouring source, without calling
+`can_place_liquid`. A normal bucket still empties if the container returns false; a validated
+fluid-container operation fails instead.
+
+Player buckets and the fluid utility journal each part's writes separately: a false answer or
+fallthrough discards its writes before the next part or the template can see them. Root commit
+applies only the final state at each changed position, not the intermediate states. If any committed
+write there requested a neighbour, client or immediate update, that request survives; shape
+updates, drops and other effects are suppressed only if all writes there suppressed them. Aborted
+writes do not contribute. Dispensers, spreading and live structure restores use a direct host;
+parts on these paths must not write before returning `None` or false. If a mod transaction is open,
+these paths skip the part and log the refusal, leaving the template's answer. Both hosts calculate
+`container_signal` from stored slots without generating deferred loot.
 
 ## Saving and game events
 
