@@ -2317,7 +2317,7 @@ registration path.
   thunder), on a block broken by a player or an explosion and on a mob's death loot; None on the other rolls. The game sets it
   around a roll with `with_native_loot_place`.
 
-- How a mod block ignites on either side and burns on the server, and whether it makes a campfire over it a signal fire on either side. `fire_odds(dimension, state, pos, face, odds)` answers
+- How a mod block ignites on either side and burns on the server. `fire_odds(dimension, state, pos, face, odds)` answers
   `FireBlock`'s flammability table (`FireBlock.setFlammable(block, igniteOdds, burnOdds)`) before vanilla's table, for the block at `pos` seen from its side `face` (the one facing the fire, or the air fire may take): put
   `(ignite, burn)` in `odds` for your own blocks. Ignite odds above zero let fire stand beside the block and spread
   to the air around it (planks 5, wool 30), so a face with ignite odds of zero isn't flammable; burn odds are how fast fire destroys it (planks 20, wool 60); `(0, 0)` never
