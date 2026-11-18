@@ -278,4 +278,20 @@ fn output_replaces_file_symlinks_but_refuses_linked_directories() {
         0o700
     );
     assert_eq!(fs::read(&sentinel).unwrap(), b"untouched");
+
+    // The build an unsigned publish runs first writes through no link either.
+    fs::remove_dir_all(root.join("target")).unwrap();
+    symlink(&outside, root.join("target")).unwrap();
+    assert!(!run(root, &args).status.success());
+    assert_eq!(fs::read_dir(&outside).unwrap().count(), 1);
+    fs::remove_file(root.join("target")).unwrap();
+    fs::create_dir_all(root.join("target/sunrise-mod")).unwrap();
+    // A link at a guessable temporary name beside the package is not written through.
+    symlink(
+        &sentinel,
+        root.join("target/sunrise-mod/coords_hud.smod.partial"),
+    )
+    .unwrap();
+    success(run(root, &args));
+    assert_eq!(fs::read(&sentinel).unwrap(), b"untouched");
 }

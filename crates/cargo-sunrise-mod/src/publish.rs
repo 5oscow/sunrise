@@ -345,6 +345,10 @@ pub fn run(entry_point: mod_surface::child::ChildEntry, args: &[String]) -> Resu
     let files = out.join("files");
     let icons = (first && icon.is_some()).then(|| out.join("icons"));
     let empty_base = o.registry.is_none().then(|| base.join(ENTRIES));
+    // An unsigned submission is built first, into the project's own output folder.
+    let built = signature
+        .is_none()
+        .then(|| [Path::new("target"), Path::new("target/sunrise-mod")]);
     // Refuse planted directory links before creating any output; the file replacements below
     // can safely replace links at the leaf itself.
     for dir in out.ancestors().filter(|p| !p.as_os_str().is_empty()).chain(
@@ -356,13 +360,14 @@ pub fn run(entry_point: mod_surface::child::ChildEntry, args: &[String]) -> Resu
             empty_base.as_deref(),
         ]
         .into_iter()
-        .flatten(),
+        .flatten()
+        .chain(built.into_iter().flatten()),
     ) {
         match fs::symlink_metadata(dir) {
             Ok(meta) if meta.is_dir() => {}
             Ok(_) => {
                 return Err(format!(
-                    "{} is not a real directory: choose a --out folder without symlinks",
+                    "{} is not a real directory: publish writes only into real folders; replace it with one, or choose a --out folder without symlinks",
                     dir.display()
                 ));
             }

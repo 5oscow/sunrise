@@ -591,10 +591,9 @@ fn pack_into(
     let bytes = Package::pack_directory_with(root, uses, Some(completed_manifest(&text, mixins)?))?;
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let path = dir.join(format!("{}.smod", package.manifest.id));
-    // Write then rename, so a running game never reads half a file.
-    let partial = path.with_extension("smod.partial");
-    std::fs::write(&partial, bytes).map_err(|e| e.to_string())?;
-    std::fs::rename(&partial, &path).map_err(|e| e.to_string())?;
+    // Written beside it and renamed, so a running game never reads half a file, through a
+    // temporary name made new: a link planted at a guessable name is never followed.
+    internals::atomic_write(&path, bytes)?;
     Ok(path)
 }
 
