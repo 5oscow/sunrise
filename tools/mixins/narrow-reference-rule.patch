@@ -324,7 +324,7 @@ index bca7938..2f2eb44 100644
 +    assert!(e.message.contains("selected site contains `?`"), "{e}");
 +}
 diff --git a/crates/horizon-mixins-cli/tests/integration.rs b/crates/horizon-mixins-cli/tests/integration.rs
-index fcf5a46..bbf431a 100644
+index fcf5a46..01b5554 100644
 --- a/crates/horizon-mixins-cli/tests/integration.rs
 +++ b/crates/horizon-mixins-cli/tests/integration.rs
 @@ -697,14 +697,14 @@ fn cfg_attributes_shared_module_sources_and_shadowing_fail_closed() {
@@ -346,7 +346,7 @@ index fcf5a46..bbf431a 100644
              "E_UNSUPPORTED_CONTROL_FLOW",
          ),
          (
-@@ -890,3 +890,645 @@ fn production_test_cfg_modules_are_indexed_and_applied() {
+@@ -890,3 +890,668 @@ fn production_test_cfg_modules_are_indexed_and_applied() {
      let error = build_plan(&f.root, &f.mods).unwrap_err();
      assert!(format!("{error:?}").contains("E_TARGET_NOT_FOUND"));
  }
@@ -387,6 +387,11 @@ index fcf5a46..bbf431a 100644
 +    pub trait Reads {{ fn read(&self) -> i32; }}
 +    impl Reads for Trap {{ fn read(&self) -> i32 {{ mark("read"); self.0 }} }}
 +    pub fn trap(ok: bool) -> Result<Trap, &'static str> {{ mark("trap"); if ok {{ Ok(Trap(7)) }} else {{ Err("no trap") }} }}
++    pub trait Marker {{}}
++    pub struct Item;
++    impl Marker for Item {{}}
++    impl Item {{ pub fn read(&self) -> i32 {{ mark("item"); 1 }} }}
++    pub fn boxed(ok: bool) -> Result<Box<Item>, &'static str> {{ mark("boxed"); if ok {{ Ok(Box::new(Item)) }} else {{ Err("no item") }} }}
 +    pub struct EventLoop;
 +    pub struct App(pub i32);
 +    impl EventLoop {{
@@ -587,6 +592,24 @@ index fcf5a46..bbf431a 100644
 +            message.contains("receiver_of_alpha_wrap_must_take_self_by_value"),
 +            "{message}"
 +        );
++    }
++
++    #[test]
++    fn an_owned_binding_that_could_unsize_the_receiver_is_refused() {
++        // The source calls `Item::read(&self)` on a `Box<Item>`; bound as `Box<dyn Marker>`, the
++        // receiver would be unsized at the call and the dot call could pick another method.
++        for ty in ["Box<dyn crate::Marker>", "Box<[i32]>", "Box<str>"] {
++            let f = res_fixture("Ok(boxed(ok)?.read())", ty, "boxed(ok)?.read");
++            let output = f.command("apply").output().unwrap();
++            assert!(!output.status.success(), "{ty}");
++            let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
++            assert_eq!(error["code"], "E_OPERATION_SIGNATURE", "{ty}: {error}");
++            assert_eq!(error["injection_id"], "wrap", "{ty}: {error}");
++            assert!(
++                error["message"].as_str().unwrap().contains("own type"),
++                "{ty}: {error}"
++            );
++        }
 +    }
 +
 +    #[test]
@@ -2011,7 +2034,7 @@ index 47fee7d..1d3220c 100644
  }
  
 diff --git a/crates/horizon-mixins-transform/src/lib.rs b/crates/horizon-mixins-transform/src/lib.rs
-index f4edd3d..31220c6 100644
+index f4edd3d..8014fdc 100644
 --- a/crates/horizon-mixins-transform/src/lib.rs
 +++ b/crates/horizon-mixins-transform/src/lib.rs
 @@ -1,5 +1,6 @@
@@ -2069,7 +2092,34 @@ index f4edd3d..31220c6 100644
          }
          let tree = &trees[&module.file];
          if source::fingerprint(tokens(tree)) != module.fingerprint {
-@@ -516,6 +522,7 @@ fn wrap_operation(call: &Expr, wrappers: &[&PlannedInjection]) -> Result<Expr> {
+@@ -343,6 +349,26 @@ pub fn transform(root: &Path, plan: &Plan) -> Result<BTreeMap<String, Vec<u8>>>
+     }
+     Ok(files)
+ }
++/// Whether `ty` names an unsized type (`dyn Trait`, `[T]`, `str`) that a smart pointer to a sized
++/// one could be coerced to.
++fn may_unsize(ty: &Type) -> bool {
++    struct Unsized(bool);
++    impl<'ast> syn::visit::Visit<'ast> for Unsized {
++        fn visit_type_trait_object(&mut self, _: &'ast syn::TypeTraitObject) {
++            self.0 = true;
++        }
++        fn visit_type_slice(&mut self, _: &'ast syn::TypeSlice) {
++            self.0 = true;
++        }
++        fn visit_type_path(&mut self, path: &'ast syn::TypePath) {
++            self.0 |= path.qself.is_none() && path.path.is_ident("str");
++            syn::visit::visit_type_path(self, path);
++        }
++    }
++    let mut found = Unsized(false);
++    syn::visit::Visit::visit_type(&mut found, ty);
++    found.0
++}
+ fn syntax(e: syn::Error) -> Diagnostic {
+     Diagnostic::new("E_TRANSFORM", e.to_string())
+ }
+@@ -516,6 +542,7 @@ fn wrap_operation(call: &Expr, wrappers: &[&PlannedInjection]) -> Result<Expr> {
  
      let mut original = call.clone();
      let mut arguments: Vec<Expr>;
@@ -2077,7 +2127,7 @@ index f4edd3d..31220c6 100644
      match &mut original {
          Expr::Call(c) => {
              arguments = c.args.iter().cloned().collect();
-@@ -523,16 +530,39 @@ fn wrap_operation(call: &Expr, wrappers: &[&PlannedInjection]) -> Result<Expr> {
+@@ -523,16 +550,52 @@ fn wrap_operation(call: &Expr, wrappers: &[&PlannedInjection]) -> Result<Expr> {
          }
          Expr::MethodCall(c) => {
              let receiver = &c.receiver;
@@ -2114,6 +2164,19 @@ index f4edd3d..31220c6 100644
 +                        "a computed receiver needs a named type, or a reference to one, to check that the method takes `self`",
 +                    ));
 +                }
++                ty if !place && may_unsize(ty) => {
++                    return Err(Diagnostic {
++                        mod_id: Some(wrappers[0].mod_id.clone().into()),
++                        injection_id: Some(wrappers[0].injection_id.clone().into()),
++                        ..Diagnostic::new(
++                            "E_OPERATION_SIGNATURE",
++                            format!(
++                                "a computed receiver bound by value must be bound at its own type: `{}` holds a `dyn`, slice or `str` type, so the receiver could be unsized on the way in and the method the call picks could change; declare the receiver's own type",
++                                tokens(ty).replace(' ', "")
++                            ),
++                        )
++                    });
++                }
 +                _ if !place => {
 +                    owned_receiver = Some((c.method.clone(), c.turbofish.clone()));
 +                    (**receiver).clone()
@@ -2127,7 +2190,7 @@ index f4edd3d..31220c6 100644
              };
              arguments = vec![receiver_arg];
              arguments.extend(c.args.iter().cloned());
-@@ -541,6 +571,36 @@ fn wrap_operation(call: &Expr, wrappers: &[&PlannedInjection]) -> Result<Expr> {
+@@ -541,6 +604,36 @@ fn wrap_operation(call: &Expr, wrappers: &[&PlannedInjection]) -> Result<Expr> {
          }
          _ => return Err(Diagnostic::new("E_PLAN_SITE", "wrapper site is not a call")),
      }
