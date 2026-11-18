@@ -6517,11 +6517,11 @@ impl Game<'_> {
         let stack = self.open_world_datapacks(&level.enabled_features)?;
         let root = self.options.resources.clone();
         self.damage_tag_generation = self.damage_tag_generation.wrapping_add(1);
-        self.resolve_parts()?;
         // A code-mod switch can have rebuilt the root since `Game::new`.
         self.structure_spawns = sunrise_client::mobs::spawn_selection::StructureSpawns::load(&root);
         // Native tag reads use the lock to tell that the tag tables are ready.
         self.session_lock = Some(session_lock);
+        self.resolve_parts()?;
         // Keep the no-pack preload; a world's packs replace it atomically.
         // A later /reload keeps this session's synchronized registries.
         lan::sync::open_world_sync_data(

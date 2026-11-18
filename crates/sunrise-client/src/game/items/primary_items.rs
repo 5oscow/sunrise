@@ -3,7 +3,7 @@ use super::*;
 
 impl Game<'_> {
     /// Resolve support on both sides before the server resolves primary eligibility.
-    /// Both hooks see default stacks and answer from the item/enchantment pair alone.
+    /// Both hooks see default stacks and the installed tag view.
     pub(in crate::game) fn resolve_primary_items(&self) {
         let mut support = sunrise_world::enchantment_answers::Answers::new();
         let enchantments = self.item_enchantments();
@@ -15,11 +15,10 @@ impl Game<'_> {
                 }
                 let stack = ItemStack::new(item, 1);
                 for enchantment in &enchantments.list {
-                    let vanilla = enchantments.default_supports(items, enchantment, item);
                     let mut answer = None;
                     self.native_supports_enchantment(&stack, &enchantment.id, &mut answer);
-                    let supported = answer.unwrap_or(vanilla);
-                    if supported != vanilla {
+                    // An explicit answer can equal one consumer's fallback but replace another's.
+                    if let Some(supported) = answer {
                         support
                             .entry(item.clone())
                             .or_default()

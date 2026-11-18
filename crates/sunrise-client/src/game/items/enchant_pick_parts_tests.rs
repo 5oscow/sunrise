@@ -11,12 +11,19 @@ use mod_api::{
 use std::sync::{Arc, Mutex};
 
 const SHARPNESS: &str = "minecraft:sharpness";
+const FIXTURE_ITEMS: [&str; 4] = [
+    "minecraft:stick",
+    "minecraft:diamond_sword",
+    "minecraft:stone",
+    "minecraft:enchanted_book",
+];
 
 /// What the parts answer, and what they were asked.
 #[derive(Clone, Default)]
 struct Answers {
     support: Arc<Mutex<Vec<(String, bool)>>>,
     support_asked: Arc<Mutex<usize>>,
+    tag_answers: Option<Arc<Mutex<Vec<Option<bool>>>>>,
     primary_incoming: Arc<Mutex<Vec<(String, bool)>>>,
     /// `is_primary_item_for`: the item and the answer for sharpness.
     primary: Arc<Mutex<Vec<(String, bool)>>>,
@@ -42,12 +49,24 @@ struct Part {
 impl ItemPart for Part {
     fn supports_enchantment(
         &self,
-        _: &dyn mod_api::Host,
+        host: &dyn mod_api::Host,
         event: &mut SupportsEnchantmentEvent<'_>,
     ) -> Option<bool> {
         *self.answers.support_asked.lock().unwrap() += 1;
         if event.enchantment != SHARPNESS {
             return None;
+        }
+        if let Some(seen) = &self.answers.tag_answers {
+            let sword = host
+                .item_key(&mod_api::Identifier::parse("minecraft:diamond_sword").unwrap())
+                .unwrap();
+            let tags = host.tags();
+            let swords = tags
+                .key(&mod_api::Identifier::parse("minecraft:swords").unwrap())
+                .unwrap();
+            let answer = tags.is_in_tag(sword, swords);
+            seen.lock().unwrap().push(answer);
+            return answer;
         }
         let answers = self.answers.support.lock().unwrap();
         answers
@@ -115,20 +134,15 @@ impl Hooks for Mod {
     }
 }
 
-/// Runs `test` on an integrated-server game with a part on the stick, the diamond sword and
-/// the stone, sharing one set of answers, after the parts resolved.
+/// Runs `test` on an integrated-server game after the fixture parts resolve.
 fn with_parts(test: impl FnOnce(&mut Game<'_>, &Answers)) {
     let answers = Answers::default();
-    let parts = [
-        "minecraft:stick",
-        "minecraft:diamond_sword",
-        "minecraft:stone",
-    ]
-    .map(|item| Part {
-        item,
-        answers: answers.clone(),
-    })
-    .to_vec();
+    let parts = FIXTURE_ITEMS
+        .map(|item| Part {
+            item,
+            answers: answers.clone(),
+        })
+        .to_vec();
     let mods: mod_api::Mods = vec![ModEntry::new("enchant_pick", Box::new(Mod(parts)))].into();
     mod_platform::testing::with_mods(mods.clone(), || {
         crate::game::api_values::install_parts(&mods).unwrap();
@@ -163,8 +177,9 @@ fn primary_answers_are_asked_at_install_and_read_by_selection() {
         let level_3 = vec![(SHARPNESS.to_owned(), 3)];
         assert!(sharpness_at_30(game, "minecraft:stick").is_empty());
         assert_eq!(sharpness_at_30(game, "minecraft:diamond_sword"), level_3);
-        // Asked once per registered enchantment for each of the three items, at install.
-        assert_eq!(*answers.primary_asked.lock().unwrap(), 3 * registered);
+        // Asked once per registered enchantment and fixture item, at install.
+        let per_install = FIXTURE_ITEMS.len() * registered;
+        assert_eq!(*answers.primary_asked.lock().unwrap(), per_install);
         *answers.primary.lock().unwrap() = vec![
             ("minecraft:stick".into(), true),
             ("minecraft:diamond_sword".into(), false),
@@ -172,14 +187,14 @@ fn primary_answers_are_asked_at_install_and_read_by_selection() {
         // Read from the table: no new answer until the parts resolve again.
         assert!(sharpness_at_30(game, "minecraft:stick").is_empty());
         game.resolve_parts().unwrap();
-        assert_eq!(*answers.primary_asked.lock().unwrap(), 6 * registered);
+        assert_eq!(*answers.primary_asked.lock().unwrap(), 2 * per_install);
         assert_eq!(sharpness_at_30(game, "minecraft:stick"), level_3);
         assert!(sharpness_at_30(game, "minecraft:diamond_sword").is_empty());
         // Selection asks no part: the count stays.
         for _ in 0..5 {
             sharpness_at_30(game, "minecraft:stick");
         }
-        assert_eq!(*answers.primary_asked.lock().unwrap(), 6 * registered);
+        assert_eq!(*answers.primary_asked.lock().unwrap(), 2 * per_install);
         // An unsubscribed plain book keeps its default eligibility.
         assert_eq!(sharpness_at_30(game, "minecraft:book"), level_3);
         // The answers are this server's snapshot's: its stations and its loot items read them.
@@ -318,7 +333,8 @@ fn support_snapshot_reaches_both_anvils_and_enchant_without_dispatching_inside_t
     use sunrise_client::menu::{Kind as MenuKind, Menu};
     with_parts(|game, answers| {
         let registered = game.stations().enchantments.list.len();
-        assert_eq!(*answers.support_asked.lock().unwrap(), 3 * registered);
+        let per_install = FIXTURE_ITEMS.len() * registered;
+        assert_eq!(*answers.support_asked.lock().unwrap(), per_install);
         *answers.support.lock().unwrap() = vec![
             ("minecraft:stick".into(), true),
             ("minecraft:diamond_sword".into(), false),
@@ -343,6 +359,30 @@ fn support_snapshot_reaches_both_anvils_and_enchant_without_dispatching_inside_t
             .unwrap(),
         );
         game.build_registries();
+        let check_anvils = |game: &mut Game<'_>, item: &str, allowed: bool| {
+            let mut book = ItemStack::new("minecraft:enchanted_book", 1);
+            book.set_crafting_enchantments(vec![(SHARPNESS.into(), 1)]);
+            let input = ItemStack::new(item, 1);
+            let mut menu = Menu::new(MenuKind::Anvil);
+            let env = game.menu_env();
+            menu.set_slot(&env, 0, Some(input.clone()));
+            menu.set_slot(&env, 1, Some(book.clone()));
+            menu.settle(&env);
+            assert_eq!(menu.slot(2).is_some(), allowed, "client-lib anvil: {item}");
+            if allowed {
+                assert_eq!(menu.slot(2).unwrap().enchantment_level(SHARPNESS), 1);
+            }
+            let mut station = Station::new(StationKind::Anvil, [0, 64, 0]);
+            station.inputs[0] = Some(input);
+            station.inputs[1] = Some(book);
+            game.station = Some(station);
+            game.station_changed();
+            let result = &game.station.as_ref().unwrap().result;
+            assert_eq!(result.is_some(), allowed, "game anvil: {item}");
+            if allowed {
+                assert_eq!(result.as_ref().unwrap().enchantment_level(SHARPNESS), 1);
+            }
+        };
         for role in [ExecutionRole::IntegratedServer, ExecutionRole::Client] {
             game.options.execution_role = role;
             if role == ExecutionRole::Client {
@@ -350,7 +390,7 @@ fn support_snapshot_reaches_both_anvils_and_enchant_without_dispatching_inside_t
                 game.resolve_primary_items();
                 assert_eq!(
                     *answers.support_asked.lock().unwrap(),
-                    asked + 3 * registered,
+                    asked + per_install,
                     "the client installs its support snapshot too"
                 );
             }
@@ -367,53 +407,31 @@ fn support_snapshot_reaches_both_anvils_and_enchant_without_dispatching_inside_t
                     assert_eq!(game.enchantment_supports(SHARPNESS, key), supported, "{id}");
                 }
             }
-            let mut book = ItemStack::new("minecraft:enchanted_book", 1);
-            book.set_crafting_enchantments(vec![(SHARPNESS.into(), 1)]);
-            for (item, allowed) in [
-                ("minecraft:stick", true),
-                ("minecraft:diamond_sword", false),
-            ] {
-                let input = ItemStack::new(item, 1);
-                let mut menu = Menu::new(MenuKind::Anvil);
-                let env = game.menu_env();
-                menu.set_slot(&env, 0, Some(input.clone()));
-                menu.set_slot(&env, 1, Some(book.clone()));
-                menu.settle(&env);
-                assert_eq!(menu.slot(2).is_some(), allowed, "client-lib anvil: {item}");
-                if allowed {
-                    assert_eq!(menu.slot(2).unwrap().enchantment_level(SHARPNESS), 1);
-                }
-                let mut station = Station::new(StationKind::Anvil, [0, 64, 0]);
-                station.inputs[0] = Some(input);
-                station.inputs[1] = Some(book.clone());
-                game.station = Some(station);
-                game.station_changed();
-                let result = &game.station.as_ref().unwrap().result;
-                assert_eq!(result.is_some(), allowed, "game anvil: {item}");
-                if allowed {
-                    assert_eq!(result.as_ref().unwrap().enchantment_level(SHARPNESS), 1);
-                }
-            }
+            check_anvils(game, "minecraft:stick", true);
+            check_anvils(game, "minecraft:diamond_sword", false);
+            check_anvils(game, "minecraft:enchanted_book", true);
             if role == ExecutionRole::IntegratedServer {
                 game.selected = 0;
-                game.inventory[0] = Some(ItemStack::new("minecraft:stick", 1));
-                assert!(game.as_console(|g| g.run_command("enchant @s minecraft:sharpness 1")));
-                assert_eq!(
-                    game.inventory[0]
-                        .as_ref()
-                        .unwrap()
-                        .enchantment_level(SHARPNESS),
-                    1
-                );
-                game.inventory[0] = Some(ItemStack::new("minecraft:diamond_sword", 1));
-                assert!(!game.as_console(|g| g.run_command("enchant @s minecraft:sharpness 1")));
-                assert_eq!(
-                    game.inventory[0]
-                        .as_ref()
-                        .unwrap()
-                        .enchantment_level(SHARPNESS),
-                    0
-                );
+                for (item, allowed) in [
+                    ("minecraft:stick", true),
+                    ("minecraft:diamond_sword", false),
+                    ("minecraft:enchanted_book", false),
+                ] {
+                    game.inventory[0] = Some(ItemStack::new(item, 1));
+                    assert_eq!(
+                        game.as_console(|g| g.run_command("enchant @s minecraft:sharpness 1")),
+                        allowed,
+                        "/enchant: {item}"
+                    );
+                    assert_eq!(
+                        game.inventory[0]
+                            .as_ref()
+                            .unwrap()
+                            .enchantment_level(SHARPNESS),
+                        u32::from(allowed),
+                        "{item}"
+                    );
+                }
             }
             assert_eq!(
                 *answers.support_asked.lock().unwrap(),
@@ -422,6 +440,17 @@ fn support_snapshot_reaches_both_anvils_and_enchant_without_dispatching_inside_t
             );
         }
         game.options.execution_role = ExecutionRole::IntegratedServer;
+        answers
+            .support
+            .lock()
+            .unwrap()
+            .push(("minecraft:enchanted_book".into(), false));
+        game.resolve_parts().unwrap();
+        check_anvils(game, "minecraft:enchanted_book", false);
+        answers.support.lock().unwrap().last_mut().unwrap().1 = true;
+        game.resolve_parts().unwrap();
+        game.inventory[0] = Some(ItemStack::new("minecraft:enchanted_book", 1));
+        assert!(game.as_console(|g| g.run_command("enchant @s minecraft:sharpness 1")));
         answers.support.lock().unwrap().clear();
         assert!(
             game.stations()
@@ -435,5 +464,111 @@ fn support_snapshot_reaches_both_anvils_and_enchant_without_dispatching_inside_t
             SHARPNESS,
             "minecraft:stick"
         ));
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn support_resolves_once_against_the_tags_published_by_world_open_and_play_packets() {
+    use crate::game::native_entity_refs::tests::{with_client_game, with_game};
+    use sunrise_protocol::packets::{
+        configuration::{RegistryTags, TagEntry, UpdateTags},
+        play::{self, Clientbound as C},
+    };
+
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let mods = vec![ModEntry::new(
+        "enchant_tag_probe",
+        Box::new(Mod(vec![Part {
+            item: "minecraft:stick",
+            answers: Answers {
+                tag_answers: Some(seen.clone()),
+                ..Answers::default()
+            },
+        }])),
+    )]
+    .into();
+    let supports = |game: &Game<'_>| {
+        game.item_enchantments()
+            .can_enchant(game.items(), SHARPNESS, "minecraft:stick")
+    };
+    mod_platform::testing::with_mods(mods, || {
+        with_game(|game| {
+            let scratch = tempfile::tempdir().unwrap();
+            let registry = Arc::new(sunrise_client::gamerules::RuleRegistry::vanilla());
+            let create = sunrise_client::title::WorldOptions::default();
+            let mut request = crate::game::world_loading::WorldRequest::new(
+                "enchant_tags",
+                Some("enchant_tags"),
+                Some(1),
+                true,
+                Some(&create),
+                registry,
+            )
+            .unwrap();
+            request.save_root = scratch.path().to_owned();
+            seen.lock().unwrap().clear();
+            game.load_world(request).unwrap();
+            assert_eq!(*seen.lock().unwrap(), [Some(true)]);
+            assert!(supports(game));
+            game.clear_world_parts();
+        });
+        with_client_game(|game| {
+            let (pipe, _server) = sunrise_protocol::connection::Pipe::pair();
+            game.connect_local(pipe, "EnchantTags").unwrap();
+            let sword = game
+                .remote
+                .as_ref()
+                .unwrap()
+                .builtin
+                .get("minecraft:item")
+                .unwrap()
+                .id("minecraft:diamond_sword")
+                .unwrap();
+            let tags = |ids| UpdateTags {
+                registries: vec![RegistryTags {
+                    registry: "minecraft:item".into(),
+                    tags: vec![TagEntry {
+                        name: "minecraft:swords".into(),
+                        ids,
+                    }],
+                }],
+            };
+            let registries = &mut game.remote.as_mut().unwrap().registries;
+            Arc::make_mut(registries).add_tags(&tags(vec![sword]));
+            seen.lock().unwrap().clear();
+            game.handle_packet(C::Login(play::Login {
+                player_id: 7,
+                hardcore: false,
+                levels: vec!["minecraft:overworld".into()],
+                max_players: 20,
+                chunk_radius: 8,
+                simulation_distance: 8,
+                reduced_debug_info: false,
+                show_death_screen: true,
+                limited_crafting: false,
+                spawn: play::SpawnInfo {
+                    dimension_type: 0,
+                    dimension: "minecraft:overworld".into(),
+                    seed: 1,
+                    game_type: 0,
+                    previous_game_type: None,
+                    debug: false,
+                    flat: false,
+                    last_death: None,
+                    portal_cooldown: 0,
+                    sea_level: 63,
+                },
+                online_mode: false,
+                enforces_secure_chat: false,
+            }))
+            .unwrap();
+            assert_eq!(*seen.lock().unwrap(), [Some(true)]);
+            assert!(supports(game));
+            game.handle_packet(C::UpdateTags(tags(Vec::new()))).unwrap();
+            assert_eq!(*seen.lock().unwrap(), [Some(true), Some(false)]);
+            assert!(!supports(game));
+            game.clear_world_parts();
+        });
     });
 }

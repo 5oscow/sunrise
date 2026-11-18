@@ -65,10 +65,10 @@ impl Game<'_> {
                 return;
             }
         };
-        self.install_parts(parts);
         if let Some(r) = self.remote.as_mut() {
             r.tags = Some(items);
         }
+        self.install_parts(parts);
         self.announce_data_bound(mod_api::TagsUpdateCause::ClientPacketReceived {
             integrated_server: self.integrated.is_some(),
         });

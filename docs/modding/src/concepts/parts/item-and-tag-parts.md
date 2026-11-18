@@ -135,10 +135,10 @@ Four methods use a read-only `Host`. `supports_enchantment` runs on both sides a
 `Option<bool>`; the other three run on the server and edit an answer in their event.
 
 - `ItemPart::supports_enchantment` is `IItemExtension.supportsEnchantment`: whether the item may receive
-  `event.enchantment`. The first `Some(bool)` replaces support; `None` tries the next part and then defaults
-  to true for an enchanted book or membership in `supported_items`.
-  Both anvil calculations, `/enchant`, and compatibility-filtered `enchant_randomly` in both loot engines read
-  this answer. Creative anvil use still bypasses support; enchantment conflicts remain separate.
+  `event.enchantment`. The first `Some(bool)` replaces support; `None` tries the next part and then keeps the
+  caller's vanilla rule. Both anvil calculations accept enchanted books by default; `/enchant` and
+  compatibility-filtered `enchant_randomly` use `supported_items` membership instead. Creative anvil use still
+  bypasses support; enchantment conflicts remain separate.
 - `ItemPart::is_primary_item_for` is `IItemExtension.isPrimaryItemFor`: whether selection may offer the pair
   in table offers/clues, loot `enchant_with_levels`, trades and spawn gear. Its default is true for a plain
   book; otherwise it reads support before checking `primary_items` when that set exists. A primary listener
@@ -155,9 +155,9 @@ Four methods use a read-only `Host`. `supports_enchantment` runs on both sides a
   `false`, and the pick uses that slot; with every stack kept, it uses the selected one.
 
 `supports_enchantment` and `is_primary_item_for` are **install-time snapshots**, not component-dependent
-held-stack queries. Each item's parts are asked once per registered enchantment when parts install (world
-open and `/reload`), with the item's default stack. The engines read the stored answers until the next
-install or the world closes: answer from the item and enchantment alone. Support resolves before the server
+held-stack queries. Each item's parts are asked once per registered enchantment after tags and parts are
+installed (server world open or `/reload`, or client tag packets), with the item's default stack. The
+engines read the stored answers until the next install or world close. Support resolves before the server
 resolves primary answers. Each snapshot owns its answers; publishing a fresh world-loot snapshot copies
 the current answers without asking listeners again. The client `Host::enchantment_supports` read is separate:
 it checks `supported_items` membership only.

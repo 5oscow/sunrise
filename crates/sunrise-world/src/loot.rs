@@ -978,9 +978,7 @@ impl LootData {
     fn supports(&self, item: &str, enchantment: &Enchantment) -> bool {
         self.support_answers
             .answer(item, &enchantment.name)
-            .unwrap_or_else(|| {
-                item == "minecraft:enchanted_book" || self.item_in(item, &enchantment.supported)
-            })
+            .unwrap_or_else(|| self.item_in(item, &enchantment.supported))
     }
     fn facts(&self, item: &str) -> ItemFacts {
         self.items.get(item).copied().unwrap_or(ItemFacts {
@@ -3037,7 +3035,7 @@ mod native_kinds_tests {
 
     #[test]
     fn world_random_enchantment_respects_support_only_when_compatibility_is_requested() {
-        for item in ["test:probe", "minecraft:enchanted_book"] {
+        for (item, supported) in [("test:probe", true), ("minecraft:enchanted_book", false)] {
             for compatible in [true, false] {
                 let data = enchantable_probe(
                     "support_snapshot",
@@ -3051,22 +3049,21 @@ mod native_kinds_tests {
                         .enchantments
                         .clone()
                 };
-                assert_eq!(roll(), [("test:sharp".into(), 1)]);
-                data.support_answers().install(HashMap::from([(
-                    item.into(),
-                    HashMap::from([("test:sharp".into(), false)]),
-                )]));
-                if compatible {
-                    assert!(roll().is_empty(), "a refusal filters {item}");
-                } else {
-                    assert_eq!(
-                        roll(),
-                        [("test:sharp".into(), 1)],
-                        "unfiltered random enchantment skips support"
-                    );
+                let answers = data.support_answers();
+                for answer in [None, Some(false), Some(true), None] {
+                    match answer {
+                        Some(value) => answers.install(HashMap::from([(
+                            item.into(),
+                            HashMap::from([("test:sharp".into(), value)]),
+                        )])),
+                        None => answers.clear(),
+                    }
+                    if !compatible || answer.unwrap_or(supported) {
+                        assert_eq!(roll(), [("test:sharp".into(), 1)]);
+                    } else {
+                        assert!(roll().is_empty(), "{item}, {answer:?}");
+                    }
                 }
-                data.support_answers().clear();
-                assert_eq!(roll(), [("test:sharp".into(), 1)]);
             }
         }
     }

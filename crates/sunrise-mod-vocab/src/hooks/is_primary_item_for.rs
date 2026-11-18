@@ -11,10 +11,10 @@ pub trait Hooks {
     /// including for a plain book.
     ///
     /// The answer is per item and enchantment: each item's parts are asked once
-    /// per registered enchantment when parts install (world open and `/reload`),
+    /// per registered enchantment after the world's tags and support answers are installed,
     /// with `stack` the item's default stack, and the engines read the answers
     /// stored on that side's enchantment registry until its next install or its
-    /// world closes. Answer from the item and `enchantment` alone. This is an
+    /// world closes. This is an
     /// install-time snapshot, not a query of the held stack's components.
     /// Only the `ItemPart`s attached to `stack`'s item are asked, on the logical
     /// server with a read-only `Host`. The snapshot limit is Sunrise's contract;

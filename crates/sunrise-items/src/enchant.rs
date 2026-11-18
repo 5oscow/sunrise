@@ -657,16 +657,21 @@ impl Enchantments {
             crate::properties::item_matches(spec, item, |tag| items.item_in_tag(tag, item))
         })
     }
-    /// The unmodified `supportsEnchantment` default, used when resolving the snapshot.
-    pub fn default_supports(&self, items: &Items, e: &Enchantment, item: &str) -> bool {
-        item == "minecraft:enchanted_book" || Self::item_in(items, &e.supported, item)
-    }
     fn supports(&self, items: &Items, e: &Enchantment, item: &str) -> bool {
         self.support_answers
             .answer(item, &e.id)
-            .unwrap_or_else(|| self.default_supports(items, e, item))
+            .unwrap_or_else(|| Self::item_in(items, &e.supported, item))
     }
-    /// `ItemStack.supportsEnchantment`, from this snapshot's install-time answers.
+    /// Support for `AnvilMenu.createResult`: only the anvil treats a left-hand
+    /// enchanted book as supported without an explicit part answer.
+    pub fn can_enchant_in_anvil(&self, items: &Items, e: &Enchantment, item: &str) -> bool {
+        if item == "minecraft:enchanted_book" {
+            self.support_answers.answer(item, &e.id).unwrap_or(true)
+        } else {
+            self.supports(items, e, item)
+        }
+    }
+    /// Explicit install-time support, or vanilla `Enchantment.isSupportedItem`.
     pub fn can_enchant(&self, items: &Items, id: &str, item: &str) -> bool {
         self.get(id).is_some_and(|e| self.supports(items, e, item))
     }
@@ -1957,7 +1962,10 @@ pub mod tests {
     fn items_random_enchantment_reads_support_without_filtering_unrestricted_rolls() {
         let mut items = sample_items();
         items.enchantments = sample().into();
-        for item in ["minecraft:diamond_sword", "minecraft:enchanted_book"] {
+        for (item, supported) in [
+            ("minecraft:diamond_sword", true),
+            ("minecraft:enchanted_book", false),
+        ] {
             for compatible in [true, false] {
                 let table = json!({"pools":[{"rolls":1,"entries":[{
                     "type":"minecraft:item", "name":item, "modifier":[{
@@ -1970,20 +1978,21 @@ pub mod tests {
                     .crafting_enchantments()
                     .to_vec()
                 };
-                assert_eq!(roll(), [(Arc::from("minecraft:mending"), 1)]);
-                items
-                    .enchantments
-                    .support_answers()
-                    .install(HashMap::from([(
-                        item.into(),
-                        HashMap::from([("minecraft:mending".into(), false)]),
-                    )]));
-                if compatible {
-                    assert!(roll().is_empty());
-                } else {
-                    assert_eq!(roll(), [(Arc::from("minecraft:mending"), 1)]);
+                let answers = items.enchantments.support_answers();
+                for answer in [None, Some(false), Some(true), None] {
+                    match answer {
+                        Some(value) => answers.install(HashMap::from([(
+                            item.into(),
+                            HashMap::from([("minecraft:mending".into(), value)]),
+                        )])),
+                        None => answers.clear(),
+                    }
+                    if !compatible || answer.unwrap_or(supported) {
+                        assert_eq!(roll(), [(Arc::from("minecraft:mending"), 1)]);
+                    } else {
+                        assert!(roll().is_empty(), "{item}, {answer:?}");
+                    }
                 }
-                items.enchantments.support_answers().clear();
             }
         }
     }

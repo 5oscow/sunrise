@@ -401,7 +401,7 @@ pub fn anvil_result(
                     (*level).max(current)
                 };
                 let Some(def) = e.get(id) else { continue };
-                let mut compatible = e.can_enchant(items, id, &input.item);
+                let mut compatible = e.can_enchant_in_anvil(items, def, &input.item);
                 if creative {
                     compatible = true;
                 }
