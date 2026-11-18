@@ -156,6 +156,58 @@ fn consuming_player_is_supplied_outside_a_guest_action() {
     );
 }
 
+struct ReplaceDrink;
+#[mod_api::__subscriptions]
+impl Hooks for ReplaceDrink {
+    fn consume_effect(&self, host: &mut dyn ServerHost, event: &mut ConsumeEffectEvent<'_>) {
+        let expected =
+            host.item_key(&mod_api::Identifier::parse("minecraft:honey_bottle").unwrap());
+        assert_eq!(Some(event.stack.item()), expected);
+        let living = host.living(event.user).unwrap();
+        let replacement = ItemStack::new("minecraft:stick", 1).try_into_api().unwrap();
+        assert_eq!(
+            living.set_hand_item(host, mod_api::Hand::Main, Some(replacement)),
+            Ok(true)
+        );
+    }
+}
+
+#[test]
+#[ignore = "daily"]
+fn replacing_the_consumed_hand_keeps_the_new_item_and_emits_no_remainder() {
+    let mods = vec![ModEntry::new("replace_drink", Box::new(ReplaceDrink))].into();
+    mod_platform::testing::with_mods(mods, || {
+        with_game(|game| {
+            let mut body =
+                sunrise_client::motion::PlayerMotion::new(game.motion, Vec3::new(0.0, 65.0, 0.0))
+                    .unwrap();
+            body.entity_id = 7;
+            game.player = Some(body);
+            game.bind_local_player_residency();
+            game.creative = false;
+            game.inventory.fill(None);
+            let mut stack = ItemStack::new("minecraft:honey_bottle", 1);
+            stack.data_mut().set_other(
+                "minecraft:consumable",
+                Some(Tag::compound([(
+                    "on_consume_effects",
+                    Tag::List(vec![Tag::compound([(
+                        "type",
+                        Tag::String("replace_drink:drink".into()),
+                    )])]),
+                )])),
+            );
+            let info = game.items().get(&stack.item).unwrap().clone();
+            let consumable = game.consumable(&stack).unwrap();
+            game.inventory[game.selected] = Some(stack.clone());
+            game.finish_consuming(&info, &consumable, &stack);
+            assert_eq!(game.held(), Some(&ItemStack::new("minecraft:stick", 1)));
+            assert_eq!(game.inventory.iter().flatten().count(), 1);
+            assert!(game.dropped.is_empty());
+        });
+    });
+}
+
 struct FoxConsumption(Arc<Mutex<Vec<(mod_api::EntityRef, mod_api::ItemStack)>>>);
 #[mod_api::__subscriptions]
 impl Hooks for FoxConsumption {

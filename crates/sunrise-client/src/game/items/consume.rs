@@ -82,6 +82,7 @@ impl Game<'_> {
         consumable: &ItemConsumable,
         stack: &ItemStack,
     ) {
+        let slot = self.held_slot();
         self.emit_consume(consumable, stack, 16);
         // ServerPlayer: the used statistic and the consume_item trigger.
         self.award_stat("used", &stack.item, 1);
@@ -129,7 +130,11 @@ impl Game<'_> {
         self.post_entity_event(event, Who::Player);
         // ItemStack.consume, then UseRemainder.convertIntoRemainder: nothing
         // with infinite materials, the hand when emptied, else the inventory
-        // (ServerPlayer.handleExtraItemsCreatedOnUse) or a drop.
+        // (ServerPlayer.handleExtraItemsCreatedOnUse) or a drop. A listener may
+        // replace the stack or change the selected slot; neither is this use.
+        if self.held_slot() != slot || self.stack_in(slot) != Some(stack) {
+            return;
+        }
         self.consume_held();
         let remainder = sunrise_client::item_sync::use_remainder(stack, info.use_remainder.clone());
         self.apply_use_remainder(remainder.as_deref(), stack.count);
