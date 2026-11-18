@@ -9293,7 +9293,7 @@ impl Game<'_> {
                 WindowEvent::RedrawRequested => {
                     if let Err(error) = self.render_closing_save() {
                         self.error = Some(error);
-                        self.exit_on_error(event_loop);
+                        event_loop.exit();
                     }
                 }
                 _ => {}
@@ -10577,7 +10577,7 @@ impl Game<'_> {
         self.screen_chars_typed(typed.as_deref());
         if let Err(e) = result {
             self.error = Some(e);
-            self.exit_on_error(event_loop);
+            event_loop.exit();
         }
     }
 }

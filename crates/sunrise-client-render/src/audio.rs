@@ -42,7 +42,7 @@ struct Channel {
     looping: bool,
     at: [f32; 3],
     relative: bool,
-    /// Whose sounds these are: 0 the game's, another splitscreen player's (`Audio::share`).
+    /// Sound owner: 0 for the primary backend; other ids come from `Audio::share`.
     owner: u8,
     /// Its world (`Mixer::world_id`; 0 none).
     world: u32,
@@ -102,7 +102,7 @@ struct Mixer {
     listener: [f64; 3],
     listener_yaw: f32,
     listener_pitch: f32,
-    /// Splitscreen: the other players' cameras (position, yaw, pitch) by owner. A world sound is
+    /// Additional listeners' cameras (position, yaw, pitch) by owner. A world sound is
     /// heard from the nearest camera, and panned half as wide while several share the speakers.
     listeners: HashMap<u8, ([f64; 3], f32, f32)>,
     /// Each camera's world by owner, as ids: the callback compares and copies integers.
@@ -348,7 +348,7 @@ pub struct MixerBackend {
     /// How many other players share this output: alone, a sound never looks for its copy.
     shares: Arc<std::sync::atomic::AtomicUsize>,
 }
-/// A splitscreen player's backend leaving: its camera and sounds go with it.
+/// Dropping a shared backend removes its camera and sounds.
 impl Drop for MixerBackend {
     fn drop(&mut self) {
         if self.owner == 0 {
@@ -364,9 +364,8 @@ impl Drop for MixerBackend {
         }
     }
 }
-/// Splitscreen: each shared backend's channel ids start at a block of their own, never handed out
-/// again, so a player in a seat used before never reuses an id a departed one's decoder may
-/// still attach to. The game's own backend counts from 0, as before.
+/// Each shared backend gets its own block of channel ids. Blocks are never reused, so a pending
+/// decode for a dropped backend cannot attach to a new one. The primary backend counts from 0.
 static SHARED_CHANNELS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Two players' copies of one sound: started within this of each other.
 const SAME_SOUND: std::time::Duration = std::time::Duration::from_millis(150);
@@ -621,7 +620,7 @@ fn variantless(key: &str) -> &str {
         .trim_end_matches(|c: char| c.is_ascii_digit())
 }
 impl MixerBackend {
-    /// Splitscreen: another player's game started this same sound here just now (both clients
+    /// Another local player's game started this same sound here just now (both clients
     /// heard it); this copy stays stopped, the first is heard from the nearest camera.
     ///
     /// A copy is recognised only by its file (without the variant), world, place and time: the
@@ -895,7 +894,7 @@ fn mix(mixer: &mut Mixer, data: &mut [f32], channels: usize, rate: u32) {
         ];
         (forward, up, right)
     };
-    // Every camera hearing (splitscreen: the other players' too), in the mixer's own buffer.
+    // Every active listener's camera, in the mixer's scratch buffer.
     mixer.cameras.clear();
     mixer.cameras.extend(
         std::iter::once((
@@ -1635,8 +1634,8 @@ impl Audio {
             }
         }
     }
-    /// Splitscreen: another player's sounds on this output, heard from its camera too
-    /// (`owner`: 1 to 255, its own). Dropped, its camera and sounds go.
+    /// Share this output with another listener and its independent sound engine.
+    /// Give it a unique nonzero `owner`. Dropping it removes its camera and sounds.
     pub fn share(&self, owner: u8) -> Self {
         assert_ne!(owner, 0, "shared audio owners must be nonzero");
         self.backend
@@ -1710,8 +1709,7 @@ impl Audio {
     /// found.
     #[cfg(feature = "audio")]
     fn should_change_device(&mut self) -> bool {
-        // A splitscreen share plays through the first player's output: it leaves the device,
-        // and the mixer's lost flag, to that output.
+        // Only the primary backend manages the shared output device and its lost flag.
         if self.backend.owner != 0 {
             return false;
         }
@@ -1841,8 +1839,8 @@ impl Audio {
     /// away and `lowpass` (0 to 1) dulling it, from untouched to a 300 Hz low-pass, fading in a
     /// straight line to none over `ticks` client ticks; the sound events in `exempt` (namespaced,
     /// `mymod:ear.ringing`) play clearly through it, those already playing too. It replaces any
-    /// muffle in place; `ticks` 0 or no strength ends it. The output's, so in splitscreen every
-    /// player hears it. False for an amount or strength outside 0 to 1.
+    /// muffle in place; `ticks` 0 or no strength ends it. It affects the shared output.
+    /// False for an amount or strength outside 0 to 1.
     pub fn muffle(&mut self, amount: f32, lowpass: f32, ticks: u32, exempt: &[&str]) -> bool {
         if !(0.0..=1.0).contains(&amount) || !(0.0..=1.0).contains(&lowpass) {
             return false;
@@ -2860,8 +2858,8 @@ mod tests {
     }
 
     #[test]
-    fn splitscreen_sounds_are_heard_from_the_nearest_camera() {
-        // P1 far away, a second player beside the source: heard at full gain, centred.
+    fn shared_sounds_are_heard_from_the_nearest_camera() {
+        // The primary listener is far away; the nearer listener hears full, centred gain.
         let mut m = Mixer {
             listener: [100.0, 0.0, 0.0],
             ..Mixer::default()
@@ -2875,7 +2873,7 @@ mod tests {
             data[0] > 0.5 && (data[0] - data[1]).abs() < 1e-4,
             "{data:?}"
         );
-        // Alone, P1 would not hear it: 100 blocks past its 16.
+        // The primary listener alone is beyond the 16-block range.
         m.listeners.clear();
         let mut data = [0.0; 2];
         mix(&mut m, &mut data, 2, 48_000);
@@ -2999,7 +2997,7 @@ mod tests {
             shares: shares.clone(),
         };
         let (mut p1, mut p2) = (backend(0), backend(1));
-        // P2 is listening (its camera is in the mixer), so two players share the speakers.
+        // The second listener is active, so the backends share the speakers.
         mixer
             .lock()
             .unwrap()
@@ -3011,15 +3009,15 @@ mod tests {
             !b.duplicate(id, ("minecraft", "mob/creeper/say1.ogg"))
         };
         assert!(started(&mut p1, [5.0, 64.0, 5.0]));
-        // P2's client got the same sound at the same place: one copy plays.
+        // The shared backend got the same sound at the same place: one copy plays.
         assert!(!started(&mut p2, [5.2, 64.0, 5.0]));
-        // Elsewhere, or P1's own second one, it is a sound of its own.
+        // A sound elsewhere, or repeated by the same backend, still plays.
         assert!(started(&mut p2, [40.0, 64.0, 5.0]));
         assert!(started(&mut p1, [5.0, 64.0, 5.0]));
         // Equal coordinates in another dimension describe a different sound.
         p2.world = mixer.lock().unwrap().world_id("nether");
         assert!(started(&mut p2, [5.0, 64.0, 5.0]));
-        // P2 leaving takes its sounds.
+        // Dropping the shared backend also removes its sounds.
         drop(p2);
         assert!(
             mixer

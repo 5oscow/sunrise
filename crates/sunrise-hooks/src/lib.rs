@@ -47,9 +47,8 @@ pub trait Hooks: Sync {
     fn shutdown(&self) {}
 
     /// Once a frame, before drawing: `sprites` takes the pictures the crate's
-    /// [`players::Sprites`] lacked. Only a window's game calls it (each splitscreen player in
-    /// turn, [`seat`]), never the integrated server's thread or a dedicated server; so are the
-    /// player methods below (not [`Hooks::tunnel`]).
+    /// [`players::Sprites`] lacked. The window's game calls it, as it does the player methods
+    /// below (except [`Hooks::tunnel`]); the integrated and dedicated servers do not.
     fn frame(&self, _frame: &players::Frame, _sprites: &mut dyn players::SpriteStore) {}
 
     /// Once a client tick while a world is shown: the player models in view.
@@ -100,7 +99,7 @@ pub trait Hooks: Sync {
     fn client_started(&self, _client: &Client) {}
 
     /// What the player is doing, for a status shown outside the game (Discord's): called when it
-    /// changes, not every frame. Splitscreen: the first player's only.
+    /// changes, not every frame.
     fn activity(&self, _now: Activity) {}
 
     /// Where a game started without its prepared files (run by hand, not from a launcher) sends
@@ -228,10 +227,8 @@ thread_local! {
     static SEAT: Cell<usize> = const { Cell::new(0) };
 }
 
-/// The splitscreen player whose turn it is: 0 for P1 (and without splitscreen), 1 for P2...
-/// Splitscreen players are one process, each `Game` in turn on the game's thread, so a crate's
-/// statics are shared by them: a crate that keeps per-player state (settings, pages, HUD) indexes
-/// it by this. A player keeps its seat while it plays. Other threads always see 0.
+/// The current thread's local-player index, zero by default.
+/// Per-player settings or UI state can use it as an index.
 pub fn seat() -> usize {
     SEAT.get()
 }
@@ -240,7 +237,8 @@ pub fn seat() -> usize {
 pub mod engine {
     use super::*;
 
-    /// The player whose turn starts on this thread ([`seat`]).
+    /// Set this thread's local-player scope ([`seat`]). The engine's scoped entry points
+    /// planned in #2498 will drive it; the stock runtime leaves it at zero.
     pub fn set_seat(seat: usize) {
         SEAT.set(seat);
     }

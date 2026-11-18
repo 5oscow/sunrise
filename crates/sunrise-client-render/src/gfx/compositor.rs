@@ -1,8 +1,6 @@
 //! Composes offscreen textures into rectangular regions of a window surface.
 use super::Renderer;
 use crate::Result;
-use std::sync::Arc;
-use winit::window::Window;
 
 pub struct Compositor {
     surface: wgpu::Surface<'static>,

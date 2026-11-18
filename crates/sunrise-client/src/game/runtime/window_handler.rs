@@ -280,7 +280,7 @@ impl Game<'_> {
                 }
                 Err(error) => {
                     self.error = Some(error);
-                    self.exit_on_error(event_loop);
+                    event_loop.exit();
                 }
             }
             return;
@@ -288,7 +288,7 @@ impl Game<'_> {
         if let Err(error) = sunrise_client::spans::time("world_entry", || self.resume_world_entry())
         {
             self.error = Some(error);
-            self.exit_on_error(event_loop);
+            event_loop.exit();
             return;
         }
         // The world a backup made before its upgrade opens (EditWorldScreen's callback).

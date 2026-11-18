@@ -84,8 +84,7 @@ impl Renderer {
                 lifts_world,
                 self.own_timing.as_mut(),
             ),
-            // Offscreen nothing shows HDR: the target gets the frame as SDR shows it, for
-            // splitscreen's compositor.
+            // With no HDR surface, the offscreen target receives the SDR frame.
             (Some(_), None) => {
                 if let Some(image) = &self.offscreen {
                     self.readback
@@ -249,9 +248,7 @@ impl Renderer {
         if self.surface.is_none() {
             // No swapchain paces offscreen frames: keep two on the GPU at most.
             self.in_flight.push_back(submission);
-            if !self.paced_elsewhere {
-                self.wait_in_flight();
-            }
+            self.wait_in_flight();
         }
         self.last_wait += present.elapsed();
         // Inside the present's time already.

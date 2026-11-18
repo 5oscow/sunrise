@@ -2343,6 +2343,8 @@ fn a_launch_as_another_account_leaves_the_selected_one() {
     assert_eq!(accounts.selected.as_deref(), Some(UUID));
 }
 
+/// A launch loads the accounts, asks the services for a while, then saves: a sign-in or sign-out
+/// made meanwhile stays, and only the names and skins it renewed are written.
 #[test]
 fn a_launch_saving_late_keeps_sign_ins_and_outs_made_meanwhile() {
     let store = MemoryStore::default();

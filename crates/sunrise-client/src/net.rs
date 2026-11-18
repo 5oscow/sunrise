@@ -52,7 +52,7 @@ use sunrise_hooks::tunnel;
 pub type Cookies = Arc<Mutex<HashMap<String, Vec<u8>>>>;
 
 /// A recording of the session's packets: the tap a replay recorder plugs into. Replay recording is a
-/// platform feature (docs/layers.md, "Controllers, splitscreen, replays and UI pages"); the engine only
+/// platform feature (docs/layers.md, "Controllers, replays and UI pages"); the engine only
 /// hands it the packets: the network thread what it receives, the game thread what the client makes for
 /// the recording itself (its own movement, pose and swings).
 pub trait PacketRecorder: Send {
