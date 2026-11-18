@@ -72,7 +72,6 @@ pub enum H {
     Preset,
     LodDistance,
     FarDetail,
-    BlueMapAutoDetect,
     BlueMapRadius,
     CaveCulling,
     GpuCulling,
@@ -204,11 +203,6 @@ pub fn rows() -> Vec<(Page, Vec<(&'static str, Vec<Setting>)>)> {
                             "Coarse distant terrain in local worlds. Integrated GPUs stop at 128 chunks.",
                         ),
                         h(H::FarDetail, Medium, far),
-                        h(
-                            H::BlueMapAutoDetect,
-                            None,
-                            "On servers, finds their BlueMap web map for far terrain. Next join.",
-                        ),
                         h(
                             H::BlueMapRadius,
                             None,
@@ -871,7 +865,6 @@ impl H {
                 n => labelled("LOD Distance", lang::tr("%s chunks", &[&n])),
             },
             H::FarDetail => labelled("Far Detail", g.far_detail.label()),
-            H::BlueMapAutoDetect => labelled("Find BlueMap", on_off(g.blue_map.auto_detect)),
             H::BlueMapRadius => labelled(
                 "BlueMap Radius",
                 lang::tr("%s chunks", &[&g.blue_map.radius_chunks()]),
@@ -1041,7 +1034,6 @@ impl H {
             H::FarDetail => {
                 g.far_detail = step(&[FarDetail::Full, FarDetail::Reduced], g.far_detail, back)
             }
-            H::BlueMapAutoDetect => g.blue_map.auto_detect = !g.blue_map.auto_detect,
             H::BlueMapRadius => {
                 g.blue_map.radius = step(&BLUE_MAP_RADII, g.blue_map.radius_chunks(), back)
             }
@@ -1210,7 +1202,6 @@ impl Item {
     pub fn switch(self, s: &Settings, out: &EffectiveOutput) -> Option<bool> {
         let g = &s.sunrise;
         Some(match self {
-            Item::Sunrise(H::BlueMapAutoDetect) => g.blue_map.auto_detect,
             Item::Sunrise(H::CaveCulling) => g.cave_culling,
             Item::Sunrise(H::OpaqueIce) => g.opaque_ice,
             Item::Sunrise(H::CacheShulkerBoxes) => g.cache_shulker_boxes,
@@ -1302,7 +1293,6 @@ impl Item {
             Item::Extra(_)
                 | Item::Sunrise(
                     H::Preset
-                        | H::BlueMapAutoDetect
                         | H::BlueMapRadius
                         | H::Overlay
                         | H::ScreenshotQuality
@@ -2223,7 +2213,6 @@ mod tests {
     #[test]
     fn blue_map_settings_sit_with_far_terrain() {
         let mut s = Settings::default();
-        let find = Item::Sunrise(H::BlueMapAutoDetect);
         let radius = Item::Sunrise(H::BlueMapRadius);
         let distance: Vec<Item> = rows()
             .into_iter()
@@ -2234,12 +2223,9 @@ mod tests {
             .iter()
             .map(|r| r.item)
             .collect();
-        assert!(distance.contains(&find) && distance.contains(&radius));
+        assert!(distance.contains(&radius));
         assert!(distance.contains(&Item::Sunrise(H::FarDetail)));
-        assert_eq!(find.switch(&s, &NONE), Some(false), "off by default");
         assert_eq!(radius.label(&s, &NONE).plain(), "BlueMap Radius: 64 chunks");
-        find.cycle(&mut s, false, FB, &NONE);
-        assert!(s.sunrise.blue_map.auto_detect);
         radius.cycle(&mut s, false, FB, &NONE);
         assert_eq!(s.sunrise.blue_map.radius, 128);
         radius.cycle(&mut s, true, FB, &NONE);

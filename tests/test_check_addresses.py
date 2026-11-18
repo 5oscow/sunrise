@@ -74,7 +74,7 @@ class CheckTests(unittest.TestCase):
     def test_home_vanilla_not_addresses_and_allowed_pass(self):
         found = [("crates/sunrise-addresses/src/lib.rs", "cosmetics.playsunrise.net"),
                  ("crates/sunrise-client-render/src/skins.rs", "textures.minecraft.net"),
-                 ("crates/sunrise-client-render/src/bluemap_detect.rs", "ddns.net"),
+                 ("crates/sunrise-server/src/discord.rs", "ddns.net"),
                  ("crates/sunrise-telemetry/src/lib.rs", "telemetry.playsunrise.net")]
         self.assertEqual(self.run_check(found), ([], []))
 
