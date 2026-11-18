@@ -25,6 +25,8 @@ pub mod mod_rows;
 pub mod pages;
 pub mod perf;
 pub mod players;
+#[cfg(feature = "extension-points")]
+pub mod points;
 mod registry;
 pub mod settings;
 pub mod tunnel;
@@ -236,7 +238,7 @@ impl<'a> Started<'a> {
     }
 }
 
-static HOOKS: Registry<dyn Hooks> = Registry::new();
+static HOOKS: Registry<&'static dyn Hooks> = Registry::new();
 
 /// Why [`register`] refused a hook.
 #[derive(Debug, PartialEq, Eq)]
@@ -291,6 +293,8 @@ pub mod engine {
         crate::lang::all();
         crate::mod_rows::engine::all();
         crate::containers::engine::any();
+        #[cfg(feature = "extension-points")]
+        crate::points::engine::seal();
     }
 
     /// [`Hooks::started`].

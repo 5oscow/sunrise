@@ -14,7 +14,7 @@ path = "src/main.rs"
 test = false
 
 [dependencies]
-sunrise-game = { path = "../sunrise-game" }
+sunrise-game = { path = "../sunrise-game", default-features = false, features = ["audio", "controllers"] }
 sunrise-platform = { path = "../sunrise-platform" }
 sunrise-heartbeat = { path = "../sunrise-heartbeat" }
 sunrise-friends = { path = "../sunrise-friends", features = ["game"] }
@@ -22,6 +22,11 @@ sunrise-addresses = { path = "../sunrise-addresses" }
 sunrise-discord = { path = "../sunrise-discord" }
 sunrise-perf-share = { path = "../sunrise-perf-share" }
 log = "0.4"
+
+[features]
+default = ["sunrise-extras"]
+# Sunrise Extras: the engine's extension points and Play with Friends' hosting. Without it the engine builds as vanilla.
+sunrise-extras = ["sunrise-game/extension-points", "sunrise-game/friends"]
 
 [build-dependencies]
 # The build script runs on the host, but embeds resources based on the target OS.

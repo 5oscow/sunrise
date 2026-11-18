@@ -80,6 +80,9 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: python3 tools/check_layers.py ${BASE_SHA:+--base "$BASE_SHA" --pull-request-merge}
+      # #2510 Q-L: `-p sunrise-game --no-default-features --features audio` turns on no extension-points, friends or sunrise-extras.
+      - name: The vanilla build turns on no Extras feature
+        run: python3 tools/check_vanilla_features.py
       # docs/layers.md#built-in-addresses: every built-in outside address in the Sunrise layer's home; the rest only shrinks.
       - name: Built-in addresses stay in their home
         env:
