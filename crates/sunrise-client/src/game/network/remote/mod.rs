@@ -420,10 +420,13 @@ impl Game<'_> {
     /// `Entity.commonTick` for the mount this client drives, `mobs[i]`: an
     /// interpolation it had going when the client took it over runs on, its
     /// target carried along by the mount's own moves (where the mount fits).
-    pub(super) fn interpolate_driven_mount(&mut self, i: usize) {
+    /// The mount's pose before the step: its tick saves the old pose
+    /// (setOldPosAndRot) before the step in vanilla, so `drive_mount` puts this one
+    /// back as the old pose once the tick has run.
+    pub(super) fn interpolate_driven_mount(&mut self, i: usize) -> Option<(Vec3, f32, f32)> {
         let id = self.mobs[i].id as i32;
         let Some(handler) = self.remote.as_mut().and_then(|r| r.stepped.get_mut(&id)) else {
-            return;
+            return None;
         };
         let m = &mut self.mobs[i];
         let mut scene = sunrise_client::collisions::SceneCollisions {
@@ -435,9 +438,16 @@ impl Game<'_> {
             let bounds = m.bounds_at(Vec3::new(to[0], to[1], to[2]));
             scene.unobstructed(bounds).unwrap_or(false)
         });
-        if let Some(at) = handler.interpolate() {
-            place_interpolated(m, at);
+        let before = (m.position, m.yaw, m.head_pitch);
+        let at = handler.interpolate()?;
+        place_interpolated(m, at);
+        // A step that crosses a section is filed where it happens.
+        let to = m.position;
+        if to != before.0 {
+            let from = before.0;
+            self.entity_section_step(id as u32, [from.x, from.y, from.z], [to.x, to.y, to.z]);
         }
+        Some(before)
     }
     /// `Entity.getClientPositionAndRotation` of the mount this client drives:
     /// while an interpolation runs, where it is going.

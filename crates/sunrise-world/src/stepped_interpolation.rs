@@ -194,10 +194,11 @@ impl SteppedInterpolation {
         // level's relative tick speed (1 at the normal tick rate).
         let at = self.new_position();
         self.advance(1.0);
-        // setLastPositionAndRotation, after setRot's wrap.
+        // setLastPositionAndRotation: the rotation setRot applied (setXRot clamps the
+        // pitch), so only the entity's own turns move the steps later.
         self.placed = PosRot {
             yaw: at.yaw % 360.0,
-            pitch: at.pitch % 360.0,
+            pitch: (at.pitch % 360.0).clamp(-90.0, 90.0),
             ..at
         };
         Some(at)
