@@ -4,12 +4,15 @@ import io
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from tools.ci import ignored_tests
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class PolicyFiles(unittest.TestCase):
@@ -118,6 +121,19 @@ class PolicyFiles(unittest.TestCase):
                 ["cargo", "test", "-p", "sunrise-world", "--lib", "--", "--ignored", "--exact", "f::shard"],
             ])
         self.assertEqual([row.test for row in ignored_tests.daily_rows()], ["c::slow"])
+
+    def test_a_windows_row_is_listed_for_the_windows_job_and_for_no_linux_leg(self):
+        self.write("daily-pkg.txt", "pkg a::slow lib daily slow\n"
+                                    "pkg z::windows_only test:hidden daily windows # #![cfg(windows)]\n"
+                                    "pkg b::windows_too test:hidden daily windows\n")
+        self.assertEqual([row.test for row in ignored_tests.daily_rows()], ["a::slow"])
+        self.assertEqual(ignored_tests.daily_rows_groups(ignored_tests.daily_rows()), {("pkg", "lib"): ["a::slow"]})
+        self.assertEqual(ignored_tests.windows_rows(),
+                         [("pkg", "test:hidden", "b::windows_too"), ("pkg", "test:hidden", "z::windows_only")])
+        listed = subprocess.run([sys.executable, str(ROOT / "tools/ci/ignored_tests.py"), "--windows-rows"],
+                                capture_output=True, text=True, check=True).stdout
+        self.assertIn("sunrise-prepare test:hidden_exporters exporters_write_to_their_log_file_without_a_console\n",
+                      listed)
 
     def test_an_unset_variable_runs_nothing(self):
         self.write("wasm-fixture.txt", "pkg a::one VAR needs\n")

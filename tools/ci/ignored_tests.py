@@ -46,6 +46,8 @@ it, and `--prebuilt FILE -p PACKAGE TARGET... -- ARGUMENTS` runs those targets' 
 for a job's other tests (the wasm fixture job: one build with one feature resolution instead of one per command).
 `--daily-tests PACKAGE TARGET` prints the tests one target's daily rows list, one per line (the Windows daily job
 runs sunrise-mod-package's with `-- --ignored --exact`).
+`--windows-rows` prints every `windows` daily row as `PACKAGE TARGET TEST`, one per line (launcher-windows-check.yml
+runs each by name on Windows: its target compiles only there, so no Linux leg runs or expects it).
 `--report FILE` also writes the run's verdict as JSON for the daily run's summary (tools/ci/daily_summary.py): each
 problem's package, test identity, kind, panic location and policy file, the tests that passed, and the runs that
 did not complete with why (stopped()). It is written before each run too, naming that run as in progress, so a job
@@ -113,7 +115,10 @@ LISTED = re.compile(r"^(\S+): test$")
 # A daily row's TARGET: the library, or one binary or integration test (cargo's --bin NAME, --test NAME).
 DAILY_TARGET = re.compile(r"^(?:lib|(?:bin|test):[\w-]+)$")
 # Why a test is a daily test (CONTRIBUTING.md "CI tiers"): slower than 2 s, or what it needs.
-DAILY_REASONS = ("slow", "game-boot", "resources", "child-process", "network", "wasm-fixture")
+DAILY_REASONS = ("slow", "game-boot", "resources", "child-process", "network", "wasm-fixture", "windows")
+# A daily reason for a test whose target compiles only on Windows (`#![cfg(windows)]`): no Linux shard or `daily-rows`
+# leg selects or expects it, and the Windows job of launcher-windows-check.yml runs it (--windows-rows).
+WINDOWS_REASON = "windows"
 # A daily reason that names an input only one job builds: its rows run there, each alone in its own process with the
 # `needs VARIABLE` rows (--needs VARIABLE --one-process-each), never in the shards, which do not have it.
 DAILY_INPUTS = {"wasm-fixture": "SUNRISE_WASM_FIXTURE"}
@@ -278,8 +283,20 @@ def known_failures():
 
 def daily_rows():
     """The rows marked `daily` that the shards run: tests moved out of verify that the daily run must run and pass.
-    A row whose reason is in DAILY_INPUTS is left out: the job that builds its input runs it (needs_commands)."""
-    return [row for row in listed_entries() if row.mark == "daily" and row.reason not in DAILY_INPUTS]
+    A row whose reason is in DAILY_INPUTS is left out: the job that builds its input runs it (needs_commands). So is a
+    `windows` row: its target does not compile on Linux, and the Windows job runs it (windows_rows)."""
+    return [row for row in listed_entries() if row.mark == "daily" and not kept_out(row)]
+
+
+def kept_out(row):
+    """Whether no Linux shard or `daily-rows` leg runs this daily row: another job does (DAILY_INPUTS, `windows`)."""
+    return row.reason in DAILY_INPUTS or row.reason == WINDOWS_REASON
+
+
+def windows_rows():
+    """(package, target, test) of every `windows` daily row, sorted: what the Windows job runs, each by name."""
+    return sorted((row.package, row.reference, row.test) for row in listed_entries()
+                  if row.mark == "daily" and row.reason == WINDOWS_REASON)
 
 
 def daily_tests(package, target):
@@ -311,7 +328,7 @@ def daily_rows_groups(rows):
     """The daily rows no package shard runs, as {(package, target): [test, ...]}: the `daily-rows` shard's runs."""
     groups = {}
     for row in rows:
-        if not shard_runs(row.package, row.reference) and row.reason not in DAILY_INPUTS:
+        if not shard_runs(row.package, row.reference) and not kept_out(row):
             groups.setdefault((row.package, row.reference), []).append(row.test)
     return {key: sorted(tests) for key, tests in sorted(groups.items())}
 
@@ -1211,8 +1228,8 @@ def main(shards, report=None):
                 if listed == package and in_leg(test, number, count) and not os.environ.get(variable):
                     print(f"{package} {safe_identity(test)}: refused, needs {variable}; run by the parity harness")
                     skip.append(test)
-            # The daily rows whose input only another job builds (DAILY_INPUTS) run there, never here.
-            skip += [row.test for row in listed_entries() if row.mark == "daily" and row.reason in DAILY_INPUTS
+            # The daily rows another job runs (DAILY_INPUTS, `windows`) never run here.
+            skip += [row.test for row in listed_entries() if row.mark == "daily" and kept_out(row)
                      and row.package == package and in_leg(row.test, number, count)]
             if package == "sunrise-client" and count == 2:
                 # Half `number` of 2 is legs number, number + 2, ... of 2 * CLIENT_BATCHES (in_leg's crc32 modulo).
@@ -1295,8 +1312,12 @@ if __name__ == "__main__":
     parser.add_argument("--build-tests", metavar="FILE", help="build the workspace's tests once; their executables to FILE")
     parser.add_argument("--daily-tests", nargs=2, metavar=("PACKAGE", "TARGET"),
                         help="print the daily rows' tests of one package's target, one per line")
+    parser.add_argument("--windows-rows", action="store_true",
+                        help="print the `windows` daily rows as `PACKAGE TARGET TEST`, one per line")
     args = parser.parse_args()
-    if args.build_tests:
+    if args.windows_rows:
+        sys.stdout.write("".join(f"{package} {target} {test}\n" for package, target, test in windows_rows()))
+    elif args.build_tests:
         sys.exit(write_built(args.build_tests))
     if args.daily_tests:
         # Nothing at all for no rows: an empty line would read as one empty name.
