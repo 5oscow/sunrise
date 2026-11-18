@@ -425,9 +425,7 @@ impl Game<'_> {
     /// back as the old pose once the tick has run.
     pub(super) fn interpolate_driven_mount(&mut self, i: usize) -> Option<(Vec3, f32, f32)> {
         let id = self.mobs[i].id as i32;
-        let Some(handler) = self.remote.as_mut().and_then(|r| r.stepped.get_mut(&id)) else {
-            return None;
-        };
+        let handler = self.remote.as_mut().and_then(|r| r.stepped.get_mut(&id))?;
         let m = &mut self.mobs[i];
         let mut scene = sunrise_client::collisions::SceneCollisions {
             world: &self.world,
