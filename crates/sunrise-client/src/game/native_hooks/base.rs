@@ -3142,9 +3142,15 @@ impl Game<'_> {
     /// it (`u32::MAX` keeps the text's own); `Text::legacy` reads `§` codes.
     /// The stack has its components (`stack.data()`). Asked each frame the
     /// tooltip shows, never for one the stack hides or a crossbow's loaded
-    /// projectile.
-    pub(in crate::game) fn native_tooltip(&self, stack: &ItemStack, lines: &mut Vec<(Text, u32)>) {
-        self.fire_tooltip(stack, lines);
+    /// projectile. `context` shares the player, flags and vanilla client-level
+    /// tick rate with component tooltip appenders.
+    pub(in crate::game) fn native_tooltip(
+        &self,
+        stack: &ItemStack,
+        context: &mod_api::TooltipAppendContext,
+        lines: &mut Vec<(Text, u32)>,
+    ) {
+        self.fire_tooltip(stack, context, lines);
     }
     /// Client-side image component for this stack's tooltip. Answer its width/height
     /// in GUI pixels; finite positive dimensions reserve space after text and any

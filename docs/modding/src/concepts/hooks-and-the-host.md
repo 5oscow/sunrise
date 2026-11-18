@@ -143,6 +143,17 @@ hooks can run on any loading thread; item default changes must be identical on e
 `Hooks` contains global hooks. Scoped hooks belong to `BlockPart`, `BlockEntityPart`,
 `ItemPart`, `MenuPart` or `FluidPart` and run for the registered object.
 
+## Item tooltip context
+
+The item's `tooltip` hook (`Item.appendHoverText`) receives `event.context`, a
+borrowed `TooltipAppendContext`. Component `TooltipAppender::append` callbacks
+receive the same context: local player identity, `advanced` (F3+H), `creative`
+(creative-tab slot), `nested` (a loaded crossbow projectile), and `tick_rate`.
+The rate follows vanilla 26.3's `Item.TooltipContext.tickRate()`: the current
+client level's tick-rate manager, or 20 when no level is present. It is not
+measured TPS or the frame rate. The item hook still does not fire for nested
+projectiles or hidden tooltips; adding context does not change line ordering.
+
 ## Level hosts
 
 Level hooks use access-specific hosts rather than `Host`. `LevelHost` provides
