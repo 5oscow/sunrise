@@ -7,7 +7,6 @@ rust-version.workspace = true
 description = "Core rendering primitives, math layouts, and GPU POD types for Sunrise"
 
 [dependencies]
-bytemuck = { version = "1.24", features = ["derive"] }
 glam = "0.30"
 
 [lints]

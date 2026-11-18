@@ -5389,7 +5389,6 @@ dependencies = [
 name = "sunrise-render-core"
 version = "0.1.0"
 dependencies = [
- "bytemuck",
  "glam",
 ]
 
