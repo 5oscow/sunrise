@@ -124,7 +124,9 @@ class ConcurrencyTests(unittest.TestCase):
             with self.subTest(workflow=path.name):
                 triggers = yaml.load(path.read_text(), Loader=yaml.BaseLoader)["on"]
                 self.assertEqual(set(triggers), {"workflow_call", "workflow_dispatch"})
-                self.assertEqual(set(triggers["workflow_call"]["inputs"]), {"commit"})
+                # fn-replace-check also takes the daily run's routing, decided when the run started.
+                inputs = {"commit", "self_hosted"} if path.name == "fn-replace-check.yml" else {"commit"}
+                self.assertEqual(set(triggers["workflow_call"]["inputs"]), inputs)
 
     def test_daily_calls_finish_and_hand_dispatches_keep_apart(self):
         for path in DAILY_LEGS:

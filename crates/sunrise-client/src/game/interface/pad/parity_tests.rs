@@ -107,24 +107,6 @@ fn a_keyboard_release_keeps_the_sneak_the_pad_went_on_to_hold() {
 
 #[test]
 #[ignore = "daily"]
-fn keyboard_handoff_keeps_what_the_pad_holds() {
-    playing(|game| {
-        game.mapped_key(KeyCode::KeyW, true, false, KeyCode::KeyW, Source::Keyboard)
-            .unwrap();
-        pad_press(game, Button::South, "key.jump");
-        assert!(game.keys.held(Action::Jump) && game.keys.held(Action::Forward));
-        // Splitscreen: keyboard and mouse move to another player.
-        game.release_keyboard_mouse();
-        assert!(!game.keys.held(Action::Forward), "the keyboard's walk ends");
-        assert!(
-            game.keys.held(Action::Jump),
-            "the pad still holds jump; only the keyboard and mouse left"
-        );
-    });
-}
-
-#[test]
-#[ignore = "daily"]
 fn pad_smooth_camera_binding_toggles_the_cinematic_camera() {
     playing(|game| {
         game.settings
@@ -287,15 +269,5 @@ fn a_release_from_a_screen_can_not_strand_the_pads_attack() {
         assert!(game.left);
         pad_release(game, Button::RightTrigger);
         assert!(!game.left, "nothing is physically held");
-    });
-}
-
-#[test]
-#[ignore = "daily"]
-fn keyboard_handoff_keeps_the_attack_the_pad_holds() {
-    playing(|game| {
-        pad_press(game, Button::RightTrigger, "key.attack");
-        game.release_keyboard_mouse();
-        assert!(game.left);
     });
 }

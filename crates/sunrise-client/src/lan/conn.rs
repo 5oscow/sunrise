@@ -1048,9 +1048,8 @@ fn serve_login(
         .filter(|_| online.is_none() && !c.is_memory());
     // `ServerLoginPacketListenerImpl.handleHello`: the integrated server's own player
     // (the name matches `getSingleplayerProfile`) logs in as that profile — the account's
-    // UUID — never as an offline profile made from the name. Every other memory player
-    // (a splitscreen seat) stays offline; a LAN guest could not own the name in online
-    // mode, and this keeps an offline host's name from being taken over a memory room.
+    // UUID — never as an offline profile made from the name. Other memory logins stay offline.
+    // TCP does not get this shortcut; the integrated server reserves the owner's identity.
     let singleplayer = shared
         .config
         .singleplayer_profile

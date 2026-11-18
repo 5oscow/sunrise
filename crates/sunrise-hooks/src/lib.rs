@@ -30,6 +30,26 @@ use registry::Registry;
 use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+/// How the client presents itself to the server it joins: its brand and the custom payloads it
+/// sends in the configuration phase, after the brand, in order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClientIdentity {
+    /// The `minecraft:brand` (`ClientBrandRetriever.getClientModName`).
+    pub brand: String,
+    /// Configuration-phase custom payloads: channel and data.
+    pub payloads: Vec<(String, Vec<u8>)>,
+}
+
+impl ClientIdentity {
+    /// Vanilla's: the brand `vanilla`, no payloads.
+    pub fn vanilla() -> Self {
+        Self {
+            brand: "vanilla".to_owned(),
+            payloads: Vec::new(),
+        }
+    }
+}
+
 /// What a crate above the engine hears from the game. Every method has an empty default:
 /// implement only those you need. Hooks run on the game's thread (the render thread) unless a
 /// method says otherwise; they must return quickly and must not panic.
@@ -47,9 +67,8 @@ pub trait Hooks: Sync {
     fn shutdown(&self) {}
 
     /// Once a frame, before drawing: `sprites` takes the pictures the crate's
-    /// [`players::Sprites`] lacked. Only a window's game calls it (each splitscreen player in
-    /// turn, [`seat`]), never the integrated server's thread or a dedicated server; so are the
-    /// player methods below (not [`Hooks::tunnel`]).
+    /// [`players::Sprites`] lacked. The window's game calls it, as it does the player methods
+    /// below (except [`Hooks::tunnel`]); the integrated and dedicated servers do not.
     fn frame(&self, _frame: &players::Frame, _sprites: &mut dyn players::SpriteStore) {}
 
     /// Once a client tick while a world is shown: the player models in view.
@@ -68,6 +87,16 @@ pub trait Hooks: Sync {
     /// The mark before the name of the player `uuid` in the player list, each frame it shows.
     /// The first hook that answers is used.
     fn player_mark(&self, _uuid: u128) -> Option<players::Mark> {
+        None
+    }
+
+    /// How this client presents itself to the server it is joining: the brand it reports
+    /// (`ClientBrandRetriever.getClientModName`, the `minecraft:brand` payload) and the custom
+    /// payloads it sends in the configuration phase after it. `server` is the address the player
+    /// joined as typed (host or host:port), before SRV or DNS resolution. The first hook that
+    /// answers is used; none answering is [`ClientIdentity::vanilla`]. Unlike the other methods
+    /// this runs on the network thread, once per join (a transfer is a new join).
+    fn client_identity(&self, _server: &str) -> Option<ClientIdentity> {
         None
     }
 
@@ -100,7 +129,7 @@ pub trait Hooks: Sync {
     fn client_started(&self, _client: &Client) {}
 
     /// What the player is doing, for a status shown outside the game (Discord's): called when it
-    /// changes, not every frame. Splitscreen: the first player's only.
+    /// changes, not every frame.
     fn activity(&self, _now: Activity) {}
 
     /// Where a game started without its prepared files (run by hand, not from a launcher) sends
@@ -228,10 +257,8 @@ thread_local! {
     static SEAT: Cell<usize> = const { Cell::new(0) };
 }
 
-/// The splitscreen player whose turn it is: 0 for P1 (and without splitscreen), 1 for P2...
-/// Splitscreen players are one process, each `Game` in turn on the game's thread, so a crate's
-/// statics are shared by them: a crate that keeps per-player state (settings, pages, HUD) indexes
-/// it by this. A player keeps its seat while it plays. Other threads always see 0.
+/// The local-instance index of the `Game` whose call runs on this thread: 0 for the
+/// process's first `Game`, and outside any `Game` call.
 pub fn seat() -> usize {
     SEAT.get()
 }
@@ -240,7 +267,7 @@ pub fn seat() -> usize {
 pub mod engine {
     use super::*;
 
-    /// The player whose turn starts on this thread ([`seat`]).
+    /// Engine-only: sets this thread's [`seat`] for a `Game` call.
     pub fn set_seat(seat: usize) {
         SEAT.set(seat);
     }
@@ -332,6 +359,14 @@ pub mod engine {
     /// [`Hooks::player_mark`].
     pub fn player_mark(uuid: u128) -> Option<players::Mark> {
         all().iter().find_map(|h| h.player_mark(uuid))
+    }
+
+    /// [`Hooks::client_identity`]: the first answer, or vanilla's.
+    pub fn client_identity(server: &str) -> ClientIdentity {
+        all()
+            .iter()
+            .find_map(|h| h.client_identity(server))
+            .unwrap_or_else(ClientIdentity::vanilla)
     }
 
     /// [`Hooks::player_layers`].
@@ -430,6 +465,12 @@ mod tests {
         }
         fn player_mark(&self, uuid: u128) -> Option<players::Mark> {
             (uuid == 9).then_some(MARK)
+        }
+        fn client_identity(&self, server: &str) -> Option<ClientIdentity> {
+            (server == "first.example").then(|| ClientIdentity {
+                brand: "first".to_owned(),
+                payloads: vec![("recorder:hello".to_owned(), vec![1, 2])],
+            })
         }
         fn camera(&self, own: &players::CameraView) -> Option<players::CameraOverride> {
             Some(players::CameraOverride::new(own.age / 10.0))
@@ -579,12 +620,24 @@ mod tests {
     struct Silent;
     impl Hooks for Silent {}
 
+    /// Registered after the recorder: answers for two servers, one the recorder answers too.
+    struct Later;
+    impl Hooks for Later {
+        fn client_identity(&self, server: &str) -> Option<ClientIdentity> {
+            matches!(server, "first.example" | "second.example").then(|| ClientIdentity {
+                brand: "later".to_owned(),
+                payloads: Vec::new(),
+            })
+        }
+    }
+
     static RECORDER: Recorder = Recorder(StdMutex::new(Vec::new()));
 
     #[test]
     fn registered_hooks_hear_the_game_and_late_ones_are_refused() {
         register(&RECORDER).unwrap();
         register(&Silent).unwrap();
+        register(&Later).unwrap();
         engine::started(&Started::new("0.2.31", std::path::Path::new("game")));
         // Changes only: the same state every frame is said once.
         for open in [false, true, true, true, false, false] {
@@ -621,6 +674,15 @@ mod tests {
         assert_eq!(engine::player_mark(8), None);
         let camera = engine::camera(&players::CameraView::new(5.0));
         assert_eq!(camera.map(|c| c.distance), Some(0.5));
+        // The first answer wins, a later hook answers what the first leaves, none gives vanilla.
+        let first = engine::client_identity("first.example");
+        assert_eq!(first.brand, "first");
+        assert_eq!(first.payloads, [("recorder:hello".to_owned(), vec![1, 2])]);
+        assert_eq!(engine::client_identity("second.example").brand, "later");
+        assert_eq!(
+            engine::client_identity("other.example"),
+            ClientIdentity::vanilla()
+        );
         let mut canvas = Canvas::default();
         engine::player_layers(&model(players::Kind::Player), &mut canvas);
         assert_eq!(

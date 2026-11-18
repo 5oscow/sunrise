@@ -1100,17 +1100,8 @@ struct Game<'a> {
     /// wanting it takes it again (`MouseHandler.grabMouse`, whose grab
     /// outlives the window's focus).
     regrab_on_refocus: bool,
-    /// Only the local player owning keyboard and mouse changes the native pointer.
-    keyboard_mouse: bool,
-    /// Offscreen rendering into a visible splitscreen window still accepts native input.
-    split_window: bool,
-    /// This view's corner in its shared window; cursor warps include the offset.
-    view_at: [u32; 2],
-    /// Splitscreen: what it draws over this player's view (its badge, questions, notices).
-    split_hud: split::Hud,
-    /// Splitscreen: this player's own Microsoft account session (one of the launcher's other
-    /// accounts), in place of the process's (P1's) for its connections and skin.
-    split_auth: Option<std::sync::Arc<sunrise_client::auth::AuthSession>>,
+    /// Controller connection notices.
+    controller_notice: sunrise_client::controller_notice::NoticeSlot,
     focused: bool,
     /// The visible window of a game an agent started, until a person clicks into it: its
     /// pointer grab stays inside the game as `--offscreen`'s does, so the person's pointer is
@@ -4969,7 +4960,7 @@ impl Game<'_> {
                 self.ui.options.discard_draw();
             }
             self.draw_screen_with_post_hook(&mut batch);
-            self.draw_split_hud(&mut batch, true);
+            self.draw_controller_notice(&mut batch);
             return batch;
         }
         self.settle_title_toasts();
@@ -7519,11 +7510,6 @@ impl Game<'_> {
         if !self.renderer.as_ref().is_some_and(Renderer::device_lost) {
             return Ok(());
         }
-        // Split-screen compositors and guests share the device; rebuilding one
-        // renderer alone would leave the other windows using invalid resources.
-        if self.options.paced_by_split {
-            return Err("the graphics device was lost during split-screen play".into());
-        }
         let now = Instant::now();
         if self
             .last_device_recovery
@@ -9294,7 +9280,7 @@ impl Game<'_> {
                 WindowEvent::RedrawRequested => {
                     if let Err(error) = self.render_closing_save() {
                         self.error = Some(error);
-                        self.exit_on_error(event_loop);
+                        event_loop.exit();
                     }
                 }
                 _ => {}
@@ -10578,7 +10564,7 @@ impl Game<'_> {
         self.screen_chars_typed(typed.as_deref());
         if let Err(e) = result {
             self.error = Some(e);
-            self.exit_on_error(event_loop);
+            event_loop.exit();
         }
     }
 }
@@ -10769,11 +10755,7 @@ impl<'a> Game<'a> {
             captured: false,
             capture_mode: None,
             regrab_on_refocus: false,
-            keyboard_mouse: true,
-            split_window: false,
-            view_at: [0, 0],
-            split_hud: Default::default(),
-            split_auth: None,
+            controller_notice: Default::default(),
             focused: true,
             unclaimed_window: false,
             unclaimed_modifiers: None,

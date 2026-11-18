@@ -67,11 +67,23 @@ jobs:
       skip: ${{ steps.commit.outputs.skip }}
       dry_run: ${{ steps.commit.outputs.dry_run }}
       parity_required: ${{ steps.commit.outputs.parity_required }}
+      self_hosted: ${{ steps.route.outputs.self_hosted }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: false
+      # The pool's routing for a leg that starts late (fn-replace-check waits for the SDK's Linux legs), decided now:
+      # the run's lease snapshot is judged only within an hour of the run's creation (tools/ci/dyna_ci_route.sh), and
+      # a route of its own an hour or more later sent fn-replace-check to GitHub's runners (daily 44065326913, 44145360054).
+      - id: route
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VARS_ENABLED: ${{ vars.DYNA_CI_SELF_HOSTED }}
+          VARS_LEASE: ${{ vars.DYNA_CI_POOL_UNTIL }}
+          SAME_REPO: true
+          EVENT: ${{ github.event_name }}
+        run: bash tools/ci/dyna_ci_route.sh >> "$GITHUB_OUTPUT"
       - id: commit
         env:
           GH_TOKEN: ${{ github.token }}
@@ -134,6 +146,7 @@ jobs:
     uses: ./.github/workflows/fn-replace-check.yml
     with:
       commit: ${{ needs.resolve.outputs.commit }}
+      self_hosted: ${{ needs.resolve.outputs.self_hosted }}
   # The launcher's Windows tests that start child processes: the runtime leases and the debug
   # launcher binary's subprocess tests (launcher-windows-check.yml launcher-processes).
   windows-runtime-leases:
