@@ -331,7 +331,7 @@ index bca7938..2f2eb44 100644
 +    assert!(e.message.contains("selected site contains `?`"), "{e}");
 +}
 diff --git a/crates/horizon-mixins-cli/tests/integration.rs b/crates/horizon-mixins-cli/tests/integration.rs
-index fcf5a46..89c297b 100644
+index fcf5a46..322d359 100644
 --- a/crates/horizon-mixins-cli/tests/integration.rs
 +++ b/crates/horizon-mixins-cli/tests/integration.rs
 @@ -697,14 +697,14 @@ fn cfg_attributes_shared_module_sources_and_shadowing_fail_closed() {
@@ -353,7 +353,7 @@ index fcf5a46..89c297b 100644
              "E_UNSUPPORTED_CONTROL_FLOW",
          ),
          (
-@@ -890,3 +890,819 @@ fn production_test_cfg_modules_are_indexed_and_applied() {
+@@ -890,3 +890,767 @@ fn production_test_cfg_modules_are_indexed_and_applied() {
      let error = build_plan(&f.root, &f.mods).unwrap_err();
      assert!(format!("{error:?}").contains("E_TARGET_NOT_FOUND"));
  }
@@ -377,7 +377,7 @@ index fcf5a46..89c297b 100644
 +    pub struct Failure(pub String);
 +    impl From<&'static str> for Failure {{ fn from(s: &'static str) -> Self {{ Failure(format!("converted {{s}}")) }} }}
 +    pub struct Engine(pub i32);
-+    impl Engine {{ pub fn go(self, x: i32) -> i32 {{ mark("go"); self.0 + x }} }}
++    impl Engine {{ pub fn go(&self, x: i32) -> i32 {{ mark("go"); self.0 + x }} }}
 +    pub fn make(ok: bool) -> Result<Engine, &'static str> {{ mark("make"); if ok {{ Ok(Engine(100)) }} else {{ Err("no engine") }} }}
 +    pub fn arg(ok: bool) -> Result<i32, &'static str> {{ mark("arg"); if ok {{ Ok(5) }} else {{ Err("no argument") }} }}
 +    pub fn sink(n: i32) -> i32 {{ n }}
@@ -400,6 +400,11 @@ index fcf5a46..89c297b 100644
 +    impl Marker for Item {{}}
 +    impl Item {{ pub fn read(&self) -> i32 {{ mark("item"); 1 }} }}
 +    pub fn boxed(ok: bool) -> Result<Box<Item>, &'static str> {{ mark("boxed"); if ok {{ Ok(Box::new(Item)) }} else {{ Err("no item") }} }}
++    pub struct Choice<T>(pub T);
++    impl Choice<i32> {{ pub fn read(self) -> i32 {{ 7 }} }}
++    pub trait Pick {{ fn read(self) -> i32; }}
++    impl<T> Pick for Choice<T> {{ fn read(self) -> i32 {{ 8 }} }}
++    pub fn choose<T>(x: T) -> Result<Choice<T>, &'static str> {{ Ok(Choice(x)) }}
 +    pub struct EventLoop;
 +    pub struct App(pub i32);
 +    impl EventLoop {{
@@ -420,7 +425,7 @@ index fcf5a46..89c297b 100644
 +        .unwrap();
 +        fs::write(
 +            f.mods.join("alpha/wrap.rs"),
-+            "fn wrap(engine: crate::Engine, x: i32, original: impl FnOnce(crate::Engine, i32) -> i32) -> i32 { crate::mark(\"wrap\"); original(engine, x + 1) }",
++            "fn wrap(engine: &crate::Engine, x: i32, original: impl FnOnce(&crate::Engine, i32) -> i32) -> i32 { crate::mark(\"wrap\"); original(engine, x + 1) }",
 +        )
 +        .unwrap();
 +        f
@@ -437,7 +442,7 @@ index fcf5a46..89c297b 100644
 +    require={require}
 +    ordinal=0
 +    helper="wrap.rs"
-+    bindings=[{{name="engine",ty="crate::Engine",value="$receiver"}},{{name="x",ty="i32",value="$arg0"}},{{name="original",ty="impl FnOnce(crate::Engine, i32) -> i32",value="$operation"}}]
++    bindings=[{{name="engine",ty="&crate::Engine",value="$receiver"}},{{name="x",ty="i32",value="$arg0"}},{{name="original",ty="impl FnOnce(&crate::Engine, i32) -> i32",value="$operation"}}]
 +    "#
 +        )
 +    }
@@ -559,96 +564,75 @@ index fcf5a46..89c297b 100644
 +        f.run("check");
 +    }
 +
-+    /// Runs `check` on `f` and returns the build error's message.
-+    fn build_error(f: &Fixture) -> String {
-+        let output = f.command("check").output().unwrap();
-+        assert!(!output.status.success());
-+        let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
-+        assert_eq!(error["code"], "E_BUILD", "{error}");
-+        error["message"].as_str().unwrap().to_string()
++    /// The plan's refusal of `f`.
++    fn plan_error(f: &Fixture) -> horizon_mixins_core::Diagnostic {
++        build_plan(&f.root, &f.mods).unwrap_err()
 +    }
 +
 +    #[test]
-+    fn an_owned_binding_on_a_method_that_borrows_its_receiver_fails_to_build_naming_the_row() {
-+        // Declared by value, `read(&self)` and `update(&mut self)` would drop the temporary before
-+        // the rest of the statement runs: the guard refuses them, in a function named for the row.
-+        for (body, selector) in [
-+            ("Ok(observe(res(ok)?.read()))", "res(ok)?.read"),
-+            ("Ok(res(ok)?.update())", "res(ok)?.update"),
++    fn an_owned_computed_receiver_is_refused_whatever_it_is_declared_as() {
++        // A by-value binding would take part in inferring the receiver's own type:
++        // `choose(1)?.read()` declared `Choice<i64>` is another `choose` and another `read`.
++        // Whether it is consumed, borrowed, unsized or inferred, the form is refused by name.
++        for (body, ty, selector) in [
++            (
++                "Ok(observe(res(ok)?.read()))",
++                "crate::Res",
++                "res(ok)?.read",
++            ),
++            ("Ok(res(ok)?.update())", "crate::Res", "res(ok)?.update"),
++            (
++                "Ok(observe(trap(ok)?.read()))",
++                "crate::Trap",
++                "trap(ok)?.read",
++            ),
++            (
++                "Ok(boxed(ok)?.read())",
++                "Box<dyn crate::Marker>",
++                "boxed(ok)?.read",
++            ),
++            ("Ok(boxed(ok)?.read())", "crate::Erased", "boxed(ok)?.read"),
++            (
++                "Ok(choose(1)?.read())",
++                "crate::Choice<i64>",
++                "choose(1)?.read",
++            ),
++            (
++                "Ok(choose(1)?.read())",
++                "crate::Choice<i32>",
++                "choose(1)?.read",
++            ),
 +        ] {
-+            let f = res_fixture(body, "crate::Res", selector);
-+            let message = build_error(&f);
-+            assert!(
-+                message.contains("receiver_of_alpha_wrap_must_take_self_by_value"),
-+                "{message}"
-+            );
++            let f = res_fixture(body, ty, selector);
++            let e = plan_error(&f);
++            assert_eq!(e.code, "E_OPERATION_SIGNATURE", "{ty}: {e}");
++            assert!(e.message.contains("owned computed receiver"), "{ty}: {e}");
 +        }
-+    }
-+
-+    #[test]
-+    fn an_owned_binding_is_refused_when_the_dot_call_selects_a_namesake_that_borrows() {
-+        // `Trap::read` names an associated function that takes `Trap`, but `trap(ok)?.read()`
-+        // calls the trait's `read(&self)`: the temporary would drop before `observe`. The check
-+        // follows the dot call, so the namesake cannot satisfy it.
-+        let f = res_fixture(
-+            "Ok(observe(trap(ok)?.read()))",
-+            "crate::Trap",
-+            "trap(ok)?.read",
++        // The consuming `EventLoop::new()?.run_app(&mut app)` shape is refused the same way.
++        let f = fixture(
++            "let mut app = App(0); EventLoop::new()?.run_app(&mut app)?; Ok(app.0)",
++            r#"
++    [[injection]]
++    id="wrap"
++    target="fixture_game::run"
++    kind="WRAP_OPERATION"
++    selector="EventLoop::new()?.run_app"
++    require=1
++    ordinal=0
++    helper="wrap_loop.rs"
++    bindings=[{name="event_loop",ty="crate::EventLoop",value="$receiver"},{name="app",ty="&mut crate::App",value="$arg0"},{name="original",ty="impl FnOnce(crate::EventLoop, &mut crate::App) -> Result<(), crate::Failure>",value="$operation"}]
++    "#,
 +        );
-+        let message = build_error(&f);
-+        assert!(
-+            message.contains("receiver_of_alpha_wrap_must_take_self_by_value"),
-+            "{message}"
-+        );
++        fs::write(f.mods.join("alpha/wrap_loop.rs"), "fn wrap_loop(event_loop: crate::EventLoop, app: &mut crate::App, original: impl FnOnce(crate::EventLoop, &mut crate::App) -> Result<(), crate::Failure>) -> Result<(), crate::Failure> { original(event_loop, app) }").unwrap();
++        let e = plan_error(&f);
++        assert_eq!(e.code, "E_OPERATION_SIGNATURE", "{e}");
++        assert!(e.message.contains("owned computed receiver"), "{e}");
 +    }
 +
 +    #[test]
-+    fn an_owned_binding_that_could_unsize_the_receiver_fails_to_build() {
-+        // The source calls `Item::read(&self)` on a `Box<Item>`; bound as `Box<dyn Marker>`, the
-+        // receiver would be unsized at the call and the dot call could pick another method. The
-+        // receiver keeps its own type, which must be the declared one, so every spelling fails to
-+        // build, also an alias a dependency crate defines.
-+        for ty in [
-+            "Box<dyn crate::Marker>",
-+            "Box<[i32]>",
-+            "Box<str>",
-+            "crate::Erased",
-+            "shapes::Erased",
-+        ] {
-+            let f = res_fixture("Ok(boxed(ok)?.read())", ty, "boxed(ok)?.read");
-+            if ty.starts_with("shapes") {
-+                fs::create_dir_all(f.root.join("shapes/src")).unwrap();
-+                fs::write(
-+                    f.root.join("shapes/Cargo.toml"),
-+                    "[package]\nname = \"shapes\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
-+                )
-+                .unwrap();
-+                fs::write(
-+                    f.root.join("shapes/src/lib.rs"),
-+                    "pub trait Dep {}\npub type Erased = Box<dyn Dep>;\n",
-+                )
-+                .unwrap();
-+                f.replace("Cargo.toml", "\"driver\"]", "\"driver\", \"shapes\"]");
-+                f.replace(
-+                    "Cargo.lock",
-+                    "name = \"fixture-game\"\nversion = \"0.1.0\"",
-+                    "name = \"fixture-game\"\nversion = \"0.1.0\"\ndependencies = [\n \"shapes\",\n]\n\n[[package]]\nname = \"shapes\"\nversion = \"0.1.0\"",
-+                );
-+                f.append(
-+                    "engine/Cargo.toml",
-+                    "\n[dependencies]\nshapes = { path = \"../shapes\" }\n",
-+                );
-+                f.append("engine/src/lib.rs", "impl shapes::Dep for Item {}\n");
-+            }
-+            let message = build_error(&f);
-+            assert!(message.contains("mismatched types"), "{ty}: {message}");
-+        }
-+    }
-+
-+    #[test]
-+    fn an_owned_receiver_keeps_the_temporaries_of_the_arguments_until_the_statement_ends() {
++    fn a_borrowed_receiver_keeps_the_temporaries_of_the_arguments_until_the_statement_ends() {
 +        // `res(ok)?.read()` borrows its `Res` for the whole statement: it drops after `observe`,
-+        // also when the call around it is wrapped with an owned receiver.
++        // also when the call around it is wrapped.
 +        let f = fixture(
 +            "let n = observe(make(ok)?.go(res(ok)?.read())); Ok(n)",
 +            &wrap("make(ok)?.go", 1),
@@ -664,42 +648,6 @@ index fcf5a46..89c297b 100644
 +            std::mem::take(&mut *LOG.lock().unwrap()),
 +            ["make", "res", "read", "wrap", "go", "observe", "drop"]
 +        );
-+    }
-+    "#,
-+        )
-+        .unwrap();
-+        f.run("check");
-+    }
-+
-+    #[test]
-+    fn an_owned_event_loop_is_wrapped_around_run_app_with_a_borrowed_argument() {
-+        let f = fixture(
-+            "let mut app = App(0); EventLoop::new()?.run_app(&mut app)?; Ok(app.0)",
-+            r#"
-+    [[injection]]
-+    id="wrap"
-+    target="fixture_game::run"
-+    kind="WRAP_OPERATION"
-+    selector="EventLoop::new()?.run_app"
-+    require=1
-+    ordinal=0
-+    helper="wrap_loop.rs"
-+    bindings=[{name="event_loop",ty="crate::EventLoop",value="$receiver"},{name="app",ty="&mut crate::App",value="$arg0"},{name="original",ty="impl FnOnce(crate::EventLoop, &mut crate::App) -> Result<(), crate::Failure>",value="$operation"}]
-+    "#,
-+        );
-+        fs::write(
-+            f.mods.join("alpha/wrap_loop.rs"),
-+            "fn wrap_loop(event_loop: crate::EventLoop, app: &mut crate::App, original: impl FnOnce(crate::EventLoop, &mut crate::App) -> Result<(), crate::Failure>) -> Result<(), crate::Failure> { crate::mark(\"wrap\"); original(event_loop, app) }",
-+        )
-+        .unwrap();
-+        fs::write(
-+            f.root.join("driver/src/lib.rs"),
-+            r#"
-+    use fixture_game::{run, LOG};
-+    #[test]
-+    fn the_wrapper_runs_between_the_event_loop_and_run_app() {
-+        assert_eq!(run(true, false), Ok(1));
-+        assert_eq!(std::mem::take(&mut *LOG.lock().unwrap()), ["new", "wrap", "run_app"]);
 +    }
 +    "#,
 +        )
@@ -1953,7 +1901,7 @@ index 5bac667..f85ac3c 100644
  pub mod modules;
  
 diff --git a/crates/horizon-mixins-core/src/plan.rs b/crates/horizon-mixins-core/src/plan.rs
-index 848dcc0..c8020cc 100644
+index 848dcc0..3359183 100644
 --- a/crates/horizon-mixins-core/src/plan.rs
 +++ b/crates/horizon-mixins-core/src/plan.rs
 @@ -1,5 +1,6 @@
@@ -2167,13 +2115,24 @@ index 848dcc0..c8020cc 100644
  fn contains_call(expr: &Expr) -> bool {
      struct Find(bool);
      impl<'ast> Visit<'ast> for Find {
-@@ -1395,11 +1499,14 @@ fn validate_operation_site(
+@@ -1395,11 +1499,25 @@ fn validate_operation_site(
                  }
              }
          }
 +        // A receiver that is a value (a call, with or without `?`) is evaluated at the call site
-+        // and moves into the operation as the binding's declared type.
-+        Expr::MethodCall(call) if !sites::is_place(&call.receiver) => {}
++        // and borrowed in place, declared as a reference. Moved in by value, the declaration would
++        // take part in inferring the receiver's own type (`choose(1)?.read()` declared
++        // `Choice<i64>` is another `choose` and another `read`), so it is refused.
++        Expr::MethodCall(call) if !sites::is_place(&call.receiver) => {
++            let declared: syn::Type = syn::parse_str(&operation.inputs[0])
++                .map_err(|e| Diagnostic::new("E_OPERATION_SIGNATURE", e.to_string()))?;
++            if !matches!(declared, syn::Type::Reference(_)) {
++                return Err(Diagnostic::new(
++                    "E_OPERATION_SIGNATURE",
++                    "owned computed receiver: its type could be changed by the declaration; declare the receiver as a reference, bind it to a local in the game's code, or wrap the call that computes it",
++                ));
++            }
++        }
          Expr::MethodCall(call) => {
              let Expr::Path(receiver) = &*call.receiver else {
                  return Err(Diagnostic::new(
@@ -2322,7 +2281,7 @@ index 47fee7d..1d3220c 100644
  }
  
 diff --git a/crates/horizon-mixins-transform/src/lib.rs b/crates/horizon-mixins-transform/src/lib.rs
-index f4edd3d..38c597b 100644
+index f4edd3d..3a65ae7 100644
 --- a/crates/horizon-mixins-transform/src/lib.rs
 +++ b/crates/horizon-mixins-transform/src/lib.rs
 @@ -1,5 +1,6 @@
@@ -2395,15 +2354,7 @@ index f4edd3d..38c597b 100644
          }
          let tree = &trees[&module.file];
          if source::fingerprint(tokens(tree)) != module.fingerprint {
-@@ -516,6 +535,7 @@ fn wrap_operation(call: &Expr, wrappers: &[&PlannedInjection]) -> Result<Expr> {
- 
-     let mut original = call.clone();
-     let mut arguments: Vec<Expr>;
-+    let mut owned_receiver = None;
-     match &mut original {
-         Expr::Call(c) => {
-             arguments = c.args.iter().cloned().collect();
-@@ -523,16 +543,45 @@ fn wrap_operation(call: &Expr, wrappers: &[&PlannedInjection]) -> Result<Expr> {
+@@ -523,16 +542,34 @@ fn wrap_operation(call: &Expr, wrappers: &[&PlannedInjection]) -> Result<Expr> {
          }
          Expr::MethodCall(c) => {
              let receiver = &c.receiver;
@@ -2420,9 +2371,8 @@ index f4edd3d..38c597b 100644
 +            // The binding's declared type is the receiver mode. A parameter is borrowed. A value
 +            // (a call, with or without `?`) is evaluated here, first: declared `&T` or `&mut T`
 +            // it is borrowed in place, a temporary that lives as long as the original receiver
-+            // did, and the method autorefs as Rust would (a reference a call returns coerces);
-+            // declared `T` it moves into the operation, and the continuation checks that the method
-+            // takes `self`, since a method that borrows would drop the temporary early.
++            // did, and the method autorefs as Rust would (a reference a call returns coerces). A
++            // value declared by type is refused at plan time.
 +            let place = sites::is_place(receiver);
 +            let receiver_arg = match &types[0] {
 +                Type::Reference(reference) if reference.mutability.is_some() => {
@@ -2440,16 +2390,6 @@ index f4edd3d..38c597b 100644
 +                        "a computed receiver needs a named type, or a reference to one, to check that the method takes `self`",
 +                    ));
 +                }
-+                _ if !place => {
-+                    owned_receiver = Some((c.method.clone(), c.turbofish.clone()));
-+                    // The receiver keeps its own type: `Some(x).or(None::<T>)` compiles only
-+                    // when the two are the same type, which no coercion can arrange (a
-+                    // `Box<Resource>` does not become a `Box<dyn Marker>` here, whatever `T` is
-+                    // spelled as), where passing it straight to a `T` parameter would unsize it.
-+                    // A receiver whose type only inference knows fails to infer: refused.
-+                    let ty = &types[0];
-+                    syn::parse_quote!(::core::option::Option::Some(#receiver).or(::core::option::Option::<#ty>::None).unwrap())
-+                }
 +                _ => {
 +                    return Err(Diagnostic::new(
 +                        "E_OPERATION_SIGNATURE",
@@ -2459,40 +2399,3 @@ index f4edd3d..38c597b 100644
              };
              arguments = vec![receiver_arg];
              arguments.extend(c.args.iter().cloned());
-@@ -541,6 +590,36 @@ fn wrap_operation(call: &Expr, wrappers: &[&PlannedInjection]) -> Result<Expr> {
-         }
-         _ => return Err(Diagnostic::new("E_PLAN_SITE", "wrapper site is not a call")),
-     }
-+    // An owned computed receiver is lowered by value, which drops it where the continuation ends
-+    // instead of at the end of the statement: only right if the method consumes it. The
-+    // continuation holds a dead copy of the original dot call, on a local of the declared type
-+    // inside a closure that must be `'static`: a closure that merely borrows the local is not,
-+    // so a method that takes `&self` or `&mut self` (the one the dot call selects, not a
-+    // namesake) fails to compile, in a function named for the row. The check sits in the
-+    // continuation, so the operands stay outside it and keep their temporaries' scopes.
-+    if let Some((method, turbofish)) = owned_receiver {
-+        let id: String = format!("{}_{}", wrappers[0].mod_id, wrappers[0].injection_id)
-+            .chars()
-+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-+            .collect();
-+        let name = format_ident!("__horizon_mixins_receiver_of_{id}_must_take_self_by_value");
-+        let ty = &types[0];
-+        let rest = &types[1..];
-+        let receiver = &names[0];
-+        original = syn::parse_quote!({
-+            #[allow(unreachable_code, unused_variables, unused_mut)]
-+            if false {
-+                fn #name<F: 'static>(_: F) {}
-+                fn never<A>() -> A { loop {} }
-+                let mut probe: #ty = never();
-+                #name(|| probe.#method #turbofish(#(never::<#rest>()),*));
-+            }
-+            // Bound mutably, for a method that takes `mut self`.
-+            #[allow(unused_mut)]
-+            let mut #receiver = #receiver;
-+            #original
-+        });
-+    }
-     let mut continuation: Expr =
-         syn::parse2(quote!(|#(#names: #types),*| #original)).map_err(syntax)?;
-     for p in wrappers.iter().rev() {
