@@ -49,13 +49,13 @@ impl Game<'_> {
 
     /// Runs `f` with guest `gi`'s own inventory, equipment and cursor in its hub record. In
     /// its own turn the game holds them and the record holds the outer player's, so a packet
-    /// built from the record would show that player's stacks. `f` works on the record: the
-    /// game's player fields hold the outer player's meanwhile.
+    /// built from the record would show that player's stacks. Only the LAN host and the item
+    /// table are available to `f`: game callbacks must run after the acting player is restored.
     pub(in crate::game) fn with_own_record<R>(
         &mut self,
         gi: usize,
-        f: impl FnOnce(&mut Self) -> R,
-    ) -> R {
+        f: impl FnOnce(&mut LanHost, &sunrise_client::items::Items) -> Option<R>,
+    ) -> Option<R> {
         let own = self
             .lan
             .as_ref()
@@ -76,7 +76,7 @@ impl Game<'_> {
         if own {
             swap(self);
         }
-        let result = f(self);
+        let result = f(self.lan.as_mut()?, world_items!(self));
         if own {
             swap(self);
         }

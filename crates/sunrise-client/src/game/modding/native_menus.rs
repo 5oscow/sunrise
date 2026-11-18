@@ -94,13 +94,9 @@ impl Game<'_> {
         self.close_for_open(conn, replace);
         let gi = self.guest_index(conn)?;
         // The first contents show the player's own inventory and cursor, in their turn too.
-        let window = self.with_own_record(gi, |game| {
-            game.lan.as_mut()?.hub.open_native_menu(
-                conn,
-                rows,
-                component_nbt(&title.component()),
-                items,
-            )
+        let window = self.with_own_record(gi, |lan, _| {
+            lan.hub
+                .open_native_menu(conn, rows, component_nbt(&title.component()), items)
         })?;
         self.player_menu_opening(conn);
         Some(window)
@@ -158,8 +154,8 @@ impl Game<'_> {
             .guest_index(conn)
             .ok_or(OpenMenuError::PlayerUnavailable)?;
         // The first contents show the player's own inventory and cursor, in their turn too.
-        let window = self.with_own_record(gi, |game| {
-            game.lan.as_mut()?.hub.open_menu_window(
+        let window = self.with_own_record(gi, |lan, _| {
+            lan.hub.open_menu_window(
                 conn,
                 &id,
                 component_nbt(&title.component()),
@@ -989,6 +985,97 @@ mod tests {
                 Some(ItemStack::new("minecraft:dirt", 9)),
                 "the outer player's cursor stays theirs"
             );
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn cursor_overflow_listeners_see_and_write_only_the_openers_inventory() {
+        use mod_api::{
+            EntityJoinLevelEvent, Flow, PlayerContainerCloseEvent, PlayerContainerOpenEvent,
+        };
+        use std::sync::Mutex;
+
+        struct Listen(Arc<Mutex<Vec<&'static str>>>);
+        #[mod_api::__subscriptions]
+        impl mod_api::Hooks for Listen {
+            fn entity_join_level(
+                &self,
+                host: &mut dyn ServerHost,
+                event: &mut EntityJoinLevelEvent<'_>,
+            ) -> Flow {
+                if event.kind == "minecraft:item" {
+                    let opener = host.player(123).unwrap();
+                    let stone = ItemStack::new("minecraft:stone", 64)
+                        .try_into_api()
+                        .unwrap();
+                    assert_eq!(
+                        opener.inventory_slots(host),
+                        Some((0..36).map(|slot| (slot, stone.clone())).collect()),
+                        "the listener sees the opener's full inventory after cursor reinsertion"
+                    );
+                    opener.set_inventory_slot(host, 3, None).unwrap();
+                    self.0.lock().unwrap().push("drop");
+                }
+                Flow::Continue
+            }
+
+            fn player_container_close(
+                &self,
+                _: &mut dyn ServerHost,
+                _: &mut PlayerContainerCloseEvent<'_>,
+            ) {
+                self.0.lock().unwrap().push("close");
+            }
+
+            fn player_container_open(
+                &self,
+                _: &mut dyn ServerHost,
+                _: &mut PlayerContainerOpenEvent<'_>,
+            ) {
+                self.0.lock().unwrap().push("open");
+            }
+        }
+
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let mods = vec![mod_api::ModEntry::new(
+            "overflow-listener",
+            Box::new(Listen(heard.clone())),
+        )];
+        mod_platform::testing::with_mods(mods.into(), || {
+            with_game(|game| {
+                let _rx = watched_guest(game);
+                let mut outer = guest(2);
+                outer.inventory[3] = Some(ItemStack::new("minecraft:diamond", 7));
+                let outer_inventory = outer.inventory.clone();
+                game.lan.as_mut().unwrap().hub.guests.push(outer);
+                open(game, 1, "old", MenuReplace::CloseFirst);
+                heard.lock().unwrap().clear();
+                game.lan.as_mut().unwrap().hub.guests.update(0, |g| {
+                    g.inventory
+                        .fill(Some(ItemStack::new("minecraft:stone", 64)));
+                    g.inventory[0] = Some(ItemStack::new("minecraft:stone", 62));
+                    g.carried = Some(ItemStack::new("minecraft:stone", 4));
+                });
+                let dropped = game.dropped.len();
+                game.as_guest(2, |game| {
+                    game.as_guest(1, |game| open(game, 1, "new", MenuReplace::CloseFirst))
+                        .unwrap();
+                })
+                .unwrap();
+                assert_eq!(*heard.lock().unwrap(), ["drop", "close", "open"]);
+                assert_eq!(game.dropped.len(), dropped + 1);
+                assert_eq!(
+                    game.dropped[dropped].stack,
+                    ItemStack::new("minecraft:stone", 2)
+                );
+                let guests = &game.lan.as_ref().unwrap().hub.guests;
+                assert_eq!(
+                    guests[0].inventory[3], None,
+                    "the listener's write belongs to the opener"
+                );
+                assert_eq!(guests[1].inventory, outer_inventory);
+            });
         });
     }
 
