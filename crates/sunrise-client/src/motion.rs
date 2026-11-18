@@ -4298,8 +4298,9 @@ mod tests {
             return;
         };
         let (assets, render, binding, resources) = (&v.assets, &v.render, &v.collision, &v.motion);
+        // On the scene's floor, clear of its stepped pyramid (|x|, |z| <= 10 from y = 4).
         let mut scene = World::test_scene(assets, render, 2).unwrap();
-        let start = Vec3::new(8.5, 4.0, 8.5);
+        let start = Vec3::new(20.5, 4.0, 20.5);
         let mut player = PlayerMotion::new(resources, start).unwrap();
         player.client_side = true;
         player.ground.on_ground = true;
