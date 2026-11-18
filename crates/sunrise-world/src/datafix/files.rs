@@ -765,13 +765,26 @@ fn upgrade_regions_with_threads(
     // A staged `.mcc` with no live copy may be the only one of its chunk (an
     // older upgrader replaced the region first): put it in place. A region
     // never reads a `.mcc` its chunk does not flag, so one it does not need
-    // there is harmless; one whose live copy exists is a stopped try's.
+    // there is harmless. One is dropped only when its region was never put in
+    // place (the live region is the old one, with its own payloads) or its
+    // live copy holds the same bytes. Otherwise the live path holds a folder
+    // or a stale or later payload: which one the live region needs cannot be
+    // told, so both stay and the region is not rewritten.
     for staged in files_with_suffix(&staging, ".mcc") {
-        let live = folder.join(staged.file_name().unwrap_or_default());
-        if live.try_exists()? {
+        let name = staged.file_name().unwrap_or_default();
+        let live = folder.join(name);
+        if !live.try_exists()? {
+            fs::rename(staged, live)?;
+        } else if staged_region_of(&staging, &name.to_string_lossy()).is_some_and(|r| r.is_file())
+            || (live.is_file() && fs::read(&live)? == fs::read(&staged)?)
+        {
             fs::remove_file(staged)?;
         } else {
-            fs::rename(staged, live)?;
+            return Err(io::Error::other(format!(
+                "{} and {} both hold a payload for the same chunk",
+                staged.display(),
+                live.display()
+            )));
         }
     }
     let next = AtomicUsize::new(0);
@@ -813,6 +826,16 @@ fn upgrade_regions_with_threads(
         return Err(e);
     }
     fs::remove_dir(&staging)
+}
+
+/// The staged region `r.X.Z.mca` in `staging` that a `c.X.Z.mcc` belongs to.
+fn staged_region_of(staging: &Path, mcc: &str) -> Option<PathBuf> {
+    let (x, z) = mcc
+        .strip_prefix("c.")?
+        .strip_suffix(".mcc")?
+        .split_once('.')?;
+    let (x, z) = (x.parse::<i32>().ok()?, z.parse::<i32>().ok()?);
+    Some(staging.join(format!("r.{}.{}.mca", x >> 5, z >> 5)))
 }
 
 /// One file of [`upgrade_regions`]: every chunk fixed, then the file written
@@ -1375,8 +1398,10 @@ mod upgrade_tests {
         region.write(pos, &record).unwrap();
         drop(region);
         assert!(dir.join("c.0.0.mcc").exists());
-        // What an earlier try that stopped before moving it leaves behind.
+        // What an earlier try that stopped before moving it leaves behind:
+        // the region it never put in place, and its `.mcc`.
         fs::create_dir_all(dir.join(".datafix")).unwrap();
+        fs::write(dir.join(".datafix/r.0.0.mca"), b"stale").unwrap();
         fs::write(dir.join(".datafix/c.0.0.mcc"), b"stale").unwrap();
 
         let progress = UpgradeProgress::new();
@@ -1442,12 +1467,11 @@ mod upgrade_tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// An earlier upgrader replaced the region before moving its `.mcc` out of
-    /// staging; the staged file is the chunk's only copy and is put in place.
-    #[test]
-    fn region_upgrade_recovers_a_staged_mcc_the_live_region_needs() {
-        let dir = std::env::temp_dir().join(format!("sunrise-mcc-staged-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
+    /// What an earlier upgrader that replaced the region before moving its
+    /// `.mcc` out of staging left in `dir` when the move failed: a live region
+    /// whose chunk 0, 0 is an external stub, its payload only in `.datafix`.
+    fn published_stub_with_staged_mcc(dir: &Path) {
+        let _ = fs::remove_dir_all(dir);
         let mut tag = old_chunk(0, 0);
         set(&mut tag, "Big", Tag::ByteArray(vec![0; 1_100_000]));
         let root = NamedTag {
@@ -1463,7 +1487,70 @@ mod upgrade_tests {
         fs::rename(dir.join(".datafix/r.0.0.mca"), dir.join("r.0.0.mca")).unwrap();
         assert!(dir.join(".datafix/c.0.0.mcc").exists());
         assert!(!dir.join("c.0.0.mcc").exists());
+    }
 
+    /// An earlier upgrader replaced the region before moving its `.mcc` out of
+    /// staging; the staged file is the chunk's only copy and is put in place.
+    #[test]
+    fn region_upgrade_recovers_a_staged_mcc_the_live_region_needs() {
+        let dir = std::env::temp_dir().join(format!("sunrise-mcc-staged-{}", std::process::id()));
+        published_stub_with_staged_mcc(&dir);
+        let progress = UpgradeProgress::new();
+        let run = Progress {
+            progress: &progress,
+            cancelable: true,
+        };
+        upgrade_regions_with_threads(&dir, &run, fix_overworld_chunk, 1).unwrap();
+        assert!(!dir.join(".datafix").exists());
+        assert_eq!(chunk_versions(&dir), vec![vec![CURRENT]]);
+        assert_eq!(big_len(&dir), Some(1_100_000));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The staged `.mcc` of a published stub cannot be put in place while
+    /// something else holds its live path (here a folder, which the reader
+    /// takes for a missing chunk; or a stale sidecar of an earlier write that
+    /// made the chunk inline): both stay as they are and the region is not
+    /// rewritten without the chunk.
+    #[test]
+    fn region_upgrade_keeps_a_staged_mcc_whose_live_path_is_taken() {
+        for (case, folder) in [("dir", true), ("file", false)] {
+            let dir = std::env::temp_dir()
+                .join(format!("sunrise-mcc-taken-{case}-{}", std::process::id()));
+            published_stub_with_staged_mcc(&dir);
+            let live = dir.join("c.0.0.mcc");
+            if folder {
+                fs::create_dir_all(&live).unwrap();
+            } else {
+                fs::write(&live, b"stale").unwrap();
+            }
+            let staged = fs::read(dir.join(".datafix/c.0.0.mcc")).unwrap();
+            let region = fs::read(dir.join("r.0.0.mca")).unwrap();
+
+            let progress = UpgradeProgress::new();
+            let run = Progress {
+                progress: &progress,
+                cancelable: true,
+            };
+            upgrade_regions_with_threads(&dir, &run, fix_overworld_chunk, 1).unwrap_err();
+            assert_eq!(fs::read(dir.join(".datafix/c.0.0.mcc")).unwrap(), staged);
+            assert_eq!(fs::read(dir.join("r.0.0.mca")).unwrap(), region);
+            if folder {
+                assert!(live.is_dir());
+            } else {
+                assert_eq!(fs::read(&live).unwrap(), b"stale");
+            }
+            let _ = fs::remove_dir_all(&dir);
+        }
+    }
+
+    /// A staged `.mcc` whose live copy holds the same bytes was moved in by a
+    /// try that stopped before removing it: the staged one goes.
+    #[test]
+    fn region_upgrade_drops_a_staged_mcc_already_in_place() {
+        let dir = std::env::temp_dir().join(format!("sunrise-mcc-same-{}", std::process::id()));
+        published_stub_with_staged_mcc(&dir);
+        fs::copy(dir.join(".datafix/c.0.0.mcc"), dir.join("c.0.0.mcc")).unwrap();
         let progress = UpgradeProgress::new();
         let run = Progress {
             progress: &progress,
