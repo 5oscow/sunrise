@@ -2245,16 +2245,66 @@ fn ray_box(eye: [f64; 3], dir: [f64; 3], reach: f64, b: Aabb) -> Option<f64> {
     }
     (t0 <= t1).then_some(t0)
 }
-/// `Entity.calculateViewVector`, which `GameRenderer.pick` aims with: float radians through `Mth.sin` and
-/// `Mth.cos`, vanilla's 65536-entry table. A placement's cursor and an interaction's point come from this ray, and
-/// the exact trigonometry below moved them by up to ~1e-4 of a block.
-fn pick_view_vector(yaw: f32, pitch: f32) -> [f64; 3] {
+/// `Entity.calculateViewVector`, behind `getViewVector`, `getLookAngle` and `GameRenderer.pick`: float radians
+/// through `Mth.sin` and `Mth.cos`, vanilla's 65536-entry table. Aims, a deflected projectile's motion, a spear's
+/// reach and a placement's cursor all come from it.
+fn view_vector(yaw: f32, pitch: f32) -> [f64; 3] {
     let v = sunrise_world::view_direction::view_vector(pitch, yaw);
     [v.x, v.y, v.z]
 }
-fn view_vector(yaw: f32, pitch: f32) -> [f64; 3] {
-    let (y, p) = (f64::from(yaw).to_radians(), f64::from(pitch).to_radians());
-    [-y.sin() * p.cos(), -p.sin(), y.cos() * p.cos()]
+#[cfg(test)]
+mod view_vector_tests {
+    /// `Entity.calculateViewVector` on HotSpot 25.0.4.1 (x86-64) for angles where double-precision `sin`/`cos`
+    /// gave other bits: (pitch, yaw) as float bits, vanilla's x, y and z as double bits.
+    #[test]
+    fn the_view_vector_has_vanillas_bits() {
+        let cases: [(u32, u32, [u64; 3]); 4] = [
+            (
+                0xc1d5_be2f,
+                0x43b0_17dc,
+                [
+                    0x3fbf_198b_0000_0000,
+                    0x3fdc_c507_6000_0000,
+                    0x3fec_514d_4000_0000,
+                ],
+            ),
+            (
+                0x42b4_0000,
+                0x43b4_0001,
+                [
+                    0x0000_0000_0000_0000,
+                    0xbff0_0000_0000_0000,
+                    0x3ca1_a626_4000_0000,
+                ],
+            ),
+            (
+                0xc2ad_4925,
+                0x43a0_0c61,
+                [
+                    0x3fa3_3b12_a000_0000,
+                    0x3fef_f1e7_2000_0000,
+                    0x3fa6_fe4a_e000_0000,
+                ],
+            ),
+            (
+                0x3b32_7d58,
+                0x4ea6_1ddd,
+                [
+                    0xbfd0_9895_4000_0000,
+                    0x8000_0000_0000_0000,
+                    0xbfee_e7c7_8000_0000,
+                ],
+            ),
+        ];
+        for (pitch, yaw, expected) in cases {
+            let v = super::view_vector(f32::from_bits(yaw), f32::from_bits(pitch));
+            assert_eq!(
+                v.map(f64::to_bits),
+                expected,
+                "pitch {pitch:#x}, yaw {yaw:#x}"
+            );
+        }
+    }
 }
 /// `Level.canHaveWeather`: sky light, no ceiling, and not the End (the one
 /// level the rule names by id).
@@ -2280,6 +2330,37 @@ fn camera_rotation(
         -view_pitch.to_radians(),
         0.0,
     )
+}
+/// The world directions of a camera-facing quad's x and y: `PoseStack.rotate` by the camera's
+/// orientation, as `FishingHookRenderer`, `DragonFireballRenderer` and
+/// `SubmitNodeCollection.submitNameTag` turn theirs. Both stay whole looking straight up or
+/// down, where the view vector has no horizontal part.
+fn billboard_axes(orientation: glam::Quat) -> [glam::DVec3; 2] {
+    [glam::Vec3::X, glam::Vec3::Y].map(|axis| (orientation * axis).as_dvec3())
+}
+#[cfg(test)]
+mod billboard_axes_tests {
+    /// `Camera.setRotation(30, -90)` (looking straight up) on HotSpot 25.0.4.1: its orientation
+    /// turns x and y to these, as float bits. glam's quaternion is not JOML's to the last bit.
+    #[test]
+    fn a_billboard_looking_straight_up_takes_the_cameras_axes() {
+        let expected: [[u32; 3]; 2] = [
+            [0xbf5d_b3d8, 0x0000_0000, 0xbf00_0002],
+            [0x3f00_0002, 0xb180_0001, 0xbf5d_b3d7],
+        ];
+        let axes = super::billboard_axes(super::camera_rotation(
+            sunrise_client::camera::CameraType::FirstPerson,
+            30.0,
+            -90.0,
+        ));
+        for (axis, expected) in axes.into_iter().zip(expected) {
+            let expected = glam::Vec3::from_array(expected.map(f32::from_bits)).as_dvec3();
+            assert!(
+                axis.abs_diff_eq(expected, 1e-6),
+                "{axis} against {expected}"
+            );
+        }
+    }
 }
 impl Game<'_> {
     /// `Level.canHaveWeather`, from the level's dimension type (sky light, no
@@ -2353,9 +2434,9 @@ impl Game<'_> {
         if let Some(e) = self.spectated_camera_snapshot() {
             let [x, y, z] = e.position;
             let eye = [x, y + f64::from(e.eye_height), z];
-            return Some((eye, pick_view_vector(e.y_rot, e.x_rot)));
+            return Some((eye, view_vector(e.y_rot, e.x_rot)));
         }
-        Some((self.eye_position()?, pick_view_vector(self.yaw, self.pitch)))
+        Some((self.eye_position()?, view_vector(self.yaw, self.pitch)))
     }
     /// `Player.blockInteractionRange`: the block pick's and mining's reach.
     fn reach(&self) -> f64 {
