@@ -1857,3 +1857,45 @@ fn a_placed_powder_snow_bucket_leaves_a_bucket_in_hand_on_both_sides() {
         }
     });
 }
+
+/// `Minecraft.startUseItem` on a cushion in the crosshair: the click is the
+/// cushion's (`Cushion.interact` answers CONSUME on a client), so it never
+/// reaches the block under it or the item. The stored pick's range check reads
+/// the cushion's box, which a cushion must have like every other picked entity.
+#[test]
+#[ignore = "daily"]
+fn right_click_on_a_cushion_is_taken_by_the_cushion_on_a_client() {
+    with_interaction_game(true, |game| {
+        game.cushions.push(sunrise_client::entities::Cushion {
+            attachment_lifetime: Default::default(),
+            join: Default::default(),
+            id: 953,
+            position: Vec3::new(0.5, 65.5, 5.5),
+            pos: [0, 65, 5],
+            yaw: 0.0,
+            color: 0,
+            check_interval: 0,
+            custom_name: None,
+        });
+        game.remote.as_mut().unwrap().entities.insert(
+            953,
+            super::Tracked {
+                kind: "minecraft:cushion".to_owned(),
+                position: [0.5, 65.5, 5.5],
+                codec_base: [0.5, 65.5, 5.5],
+                on_fire: false,
+                silent: false,
+                vehicle: None,
+            },
+        );
+        game.yaw = 0.0;
+        game.pitch = 0.0;
+        game.refresh_client_pick(1.0);
+        let cushion = game.entity(953).unwrap();
+        assert_eq!(
+            game.entity_bounding_box(cushion),
+            Some([[0.0, 65.5, 5.0], [1.0, 65.75, 6.0]])
+        );
+        assert!(game.remote_use_entity(Hand::Main));
+    });
+}

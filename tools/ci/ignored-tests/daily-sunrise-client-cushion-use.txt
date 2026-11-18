@@ -1,0 +1,1 @@
+sunrise-client game::remote::interaction_event_tests::right_click_on_a_cushion_is_taken_by_the_cushion_on_a_client lib daily resources
