@@ -847,10 +847,12 @@ pub const DYE_COLORS: [&str; 16] = [
 /// the vanilla entity types a mod's type may copy: thrown item
 /// projectiles (`ThrowableItemProjectile`), then living mobs
 /// ([`LIVING_TEMPLATES`]).
-pub const ENTITY_TEMPLATES: [&str; 7] = [
+pub const ENTITY_TEMPLATES: [&str; 9] = [
     "minecraft:snowball",
     "minecraft:cat",
+    "minecraft:drowned",
     "minecraft:parrot",
+    "minecraft:skeleton",
     "minecraft:villager",
     "minecraft:wandering_trader",
     "minecraft:wolf",
@@ -864,9 +866,15 @@ pub const ENTITY_TEMPLATES: [&str; 7] = [
 /// which a native mod can replace (`register_goals`); a villager's is its
 /// brain. The cat, the parrot and the wolf are the tameable ones
 /// (`TamableAnimal`): a type copying one tames, sits and follows its owner.
-pub const LIVING_TEMPLATES: [&str; 6] = [
+/// The skeleton is the ranged one (`AbstractSkeleton`): a type copying it
+/// draws and shoots a bow it holds, shuns the sun and flees wolves. The
+/// drowned is the aquatic fighter: a type copying it swims, goes to water,
+/// and fights with a trident or in melee.
+pub const LIVING_TEMPLATES: [&str; 8] = [
     "minecraft:cat",
+    "minecraft:drowned",
     "minecraft:parrot",
+    "minecraft:skeleton",
     "minecraft:villager",
     "minecraft:wandering_trader",
     "minecraft:wolf",
@@ -2803,6 +2811,14 @@ capabilities = ["registries"]
                 "data/ruby/sunrise/entity_type/tabby.json",
                 br#"{"template": "minecraft:cat"}"#,
             ),
+            (
+                "data/ruby/sunrise/entity_type/archer.json",
+                br#"{"template": "minecraft:skeleton"}"#,
+            ),
+            (
+                "data/ruby/sunrise/entity_type/diver.json",
+                br#"{"template": "minecraft:drowned"}"#,
+            ),
         ];
         let content = smod("living", MANIFEST_TEXT, files).unwrap();
         let types: Vec<_> = content
@@ -2822,6 +2838,8 @@ capabilities = ["registries"]
         assert_eq!(
             types,
             [
+                ("ruby:archer", "minecraft:skeleton", true, vec![]),
+                ("ruby:diver", "minecraft:drowned", true, vec![]),
                 (
                     "ruby:ghoul",
                     "minecraft:zombie",
