@@ -4473,6 +4473,7 @@ dependencies = [
  "fs4",
  "gilrs",
  "glam",
+ "libc",
  "log",
  "miniz_oxide 0.8.9",
  "naga",
