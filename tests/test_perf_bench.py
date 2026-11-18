@@ -436,6 +436,9 @@ class CompareTests(unittest.TestCase):
         noise = [0.02, -0.01, 0.03, -0.02, 0.01, 0.0, -0.03, 0.02, 0.01, -0.01, 0.02, -0.02]
         same = {r["figure"]: r for r in judge(games(5.0, 5.0, noise), 3, ["village"])}
         self.assertEqual((same["p50_ms"]["verdict"], same["p50_ms"]["passed"]), ("within_noise", True))
+        wide = {r["figure"]: r for r in judge(games(5.0, 5.0, [n * 20 for n in noise]), 3, ["village"])}["p50_ms"]
+        self.assertEqual((wide["verdict"], wide["interval_within_budget"], wide["passed"]), ("within_noise", False, True),
+                         "a wide interval around no change is reported, not failed")
         self.assertEqual((same["cpu_p50_ms"]["gated"], same["cpu_p50_ms"]["passed"]), (False, None))
         slower = {r["figure"]: r for r in judge(games(5.0, 5.25, noise), 3, ["village"])}["p50_ms"]
         self.assertEqual((slower["verdict"], slower["passed"]), ("slower", False), "5% over a 3% budget")
@@ -453,6 +456,10 @@ class CompareTests(unittest.TestCase):
                 for v in pick(1.0, 1.0)]
         row = {r["figure"]: r for r in judge(tick, 3, ["village"])}["server_tick_p50_ms"]
         self.assertFalse(row["passed"], "1.0 and 1.0 in 0.1 ms steps can hide 8% more")
+        tick = [{"village": {"p50_ms": 1.0, "p99_ms": 1.0, "server_tick_p50_ms": v, "server_tick_p99_ms": 9.0}}
+                for v in pick(5.0, 5.0)]
+        row = {r["figure"]: r for r in judge(tick, 3, ["village"])}["server_tick_p50_ms"]
+        self.assertTrue(row["passed"], "at 5 ms, half a step is within 3%")
         lacking = [{"village": {"p50_ms": 1.0, "p99_ms": 1.0}} for _ in range(12)]
         rows = {r["figure"]: r for r in judge(lacking, 3, ["village", "menu_hold"])}
         self.assertEqual((rows["server_tick_p50_ms"]["verdict"], rows["server_tick_p50_ms"]["passed"]), ("missing", False))

@@ -109,9 +109,12 @@ symmetric pair differences) and the verdict.
 
 - **Gated:** frame time p50 and p99, and the server thread's tick time p50 and p99; `menu_hold` gates frame time only,
   because Options may pause the integrated server.
-- **The rule:** a gated figure passes when the upper end of its interval, computed from unrounded values and widened by
-  the figure's resolution (0.1 ms for tick times), is at most `--budget` percent (default 3, #2510's pooled gate) of the
-  before figure. A `within_noise` with a wide interval still fails, and so does a gated figure any game lacks (`missing`).
+- **The rule:** a gated figure passes when its point estimate, computed from unrounded values plus how far rounding can
+  move it (half of 0.1 ms for tick times), is at most `--budget` percent (default 3, #2510's pooled gate) of the before
+  figure. Its interval is reported beside it ("ci95 within 3%"): a wide interval around no change is noise to report,
+  not a slowdown. A gated figure any game lacks fails (`missing`).
+- **Why not the interval:** `/tick query` sees only the server's last 100 ticks, in 0.1 ms steps, however long the
+  flight, so tick intervals are wider than 3% on one machine unless the run has many more pairs (hours per scene).
 - **Reported, not gated:** CPU and GPU frame p50.
 - **Output:** the table on the terminal; the workload (scenes, seconds, `--graphics`, packs), each game's build, start
   and end times and figures, and the results in `benchmarks/perf/<label>-compare-rd<N>.json`. The exit status is 1 when a
@@ -123,8 +126,8 @@ python3 tools/perf_bench.py --compare target-base/release target/release --budge
 
 The server tick figures are vanilla's `/tick query` after each flight: the integrated server's last 100 ticks, in 0.1 ms
 steps. They count only when all 100 fall inside the flight (`--seconds` 5 or more at 20 TPS); otherwise they're missing.
-A joined server's ticks aren't read, so `--compare` runs single player. At 0.1 ms steps a tick time under about 3.3 ms
-can't be shown within 3%.
+A joined server's ticks aren't read, so `--compare` runs single player. At 0.1 ms steps a tick time under about 1.7 ms
+can't pass within 3%.
 
 Set-up options for Sunrise: `--graphics KEY:VALUE` (a line of `sunrise-graphics.txt`, repeatable), `--resource-pack PATH`
 (turned on in `options.txt`, repeatable) and `--shader-pack PATH` (picked through `SUNRISE_SHADER_PACK`, a folder or a

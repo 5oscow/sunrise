@@ -1181,8 +1181,8 @@ GATED = ("p50_ms", "p99_ms", "server_tick_p50_ms", "server_tick_p99_ms")
 REPORTED = ("cpu_p50_ms", "gpu_p50_ms")
 # Options may pause the integrated server, so menu_hold gates frame time only.
 GATED_BY_SCENE = {MENU_HOLD[0]: ("p50_ms", "p99_ms")}
-# How far a figure can be off from its true value before pairing: /tick query's display step.
-RESOLUTION_MS = {"server_tick_p50_ms": TICK_STEP_MS, "server_tick_p99_ms": TICK_STEP_MS}
+# How far rounding can move a figure before pairing: half of /tick query's 0.1 ms display step.
+ROUNDING_MS = {"server_tick_p50_ms": TICK_STEP_MS / 2, "server_tick_p99_ms": TICK_STEP_MS / 2}
 # Game i runs build ARMS[i % 4]: B A A B counterbalances the order within each block of four games.
 ARMS = "BAAB"
 
@@ -1262,7 +1262,7 @@ def game_figures(result):
 
 
 def judge(games, budget_pct, scenes):
-    """Gate each scene's figures: the unrounded ci95 plus resolution within budget_pct of BEFORE, a missing one failing."""
+    """Gate each scene's figures: the unrounded point estimate plus rounding within budget_pct of BEFORE; missing fails."""
     pairs = len(games) // 2
     rows = []
     for scene in scenes:
@@ -1277,25 +1277,28 @@ def judge(games, budget_pct, scenes):
                 continue
             by_arm = [(values[i], values[i + 1]) if ARMS[i % 4] == "A" else (values[i + 1], values[i])
                       for i in range(0, 2 * pairs, 2)]
-            a, _, _, iv, _ = paired_raw(by_arm)
-            reach = iv and iv[0][1] + RESOLUTION_MS.get(figure, 0.0)
-            passed = bool(iv) and reach <= budget_pct / 100 * a
+            a, _, diff, iv, _ = paired_raw(by_arm)
+            budget = budget_pct / 100 * a
+            margin = ROUNDING_MS.get(figure, 0.0)
+            passed = bool(iv) and diff + margin <= budget
             rows.append({"scene": scene, "figure": figure, "gated": figure in gated,
-                         "passed": passed if figure in gated else None, **paired(by_arm)})
+                         "passed": passed if figure in gated else None,
+                         "interval_within_budget": bool(iv) and iv[0][1] + margin <= budget, **paired(by_arm)})
     return rows
 
 
 def print_judgement(rows, budget_pct):
-    print(f"| scene | figure | before | after | diff | ci95 | verdict | within {budget_pct:g}% |")
-    print("| --- | --- | --- | --- | --- | --- | --- | --- |")
+    print(f"| scene | figure | before | after | diff | ci95 | verdict | ci95 within {budget_pct:g}% | gate |")
+    print("| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
     for r in rows:
         if r["verdict"] == "missing":
-            print(f"| {r['scene']} | {r['figure']} | – | – | – | – | missing | FAIL |")
+            print(f"| {r['scene']} | {r['figure']} | – | – | – | – | missing | – | FAIL |")
             continue
         pct = f" ({r['diff_pct']:+.1f}%)" if r["diff_pct"] is not None else ""
         ci = "–" if r["ci95"] is None else f"{r['ci95'][0]:+.3f} to {r['ci95'][1]:+.3f}"
         gate = "reported" if not r["gated"] else "pass" if r["passed"] else "FAIL"
-        print(f"| {r['scene']} | {r['figure']} | {r['a']:.3f} | {r['b']:.3f} | {r['diff']:+.3f}{pct} | {ci} | {r['verdict']} | {gate} |")
+        within = "yes" if r["interval_within_budget"] else "no"
+        print(f"| {r['scene']} | {r['figure']} | {r['a']:.3f} | {r['b']:.3f} | {r['diff']:+.3f}{pct} | {ci} | {r['verdict']} | {within} | {gate} |")
 
 
 def compare(args):
