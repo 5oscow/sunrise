@@ -1829,6 +1829,11 @@ pub fn decode_components(components: Option<&Tag>) -> (u32, Option<Box<StackData
             let key = k.to_string_lossy();
             if key == "minecraft:villager_food" {
                 data.set_other(&key, Some(v.clone()));
+                // Persistence has no refusal channel. Retain a malformed patch
+                // for round-trip, but do not admit it to the nutrition cache.
+                if data.villager_food.is_none() {
+                    data.other.push((key, v.clone()));
+                }
                 continue;
             }
             if MODELLED.contains(&key.as_str())
@@ -1949,7 +1954,7 @@ fn villager_food_stack_override_and_removal() {
 
 #[cfg(test)]
 #[test]
-fn nonpositive_villager_food_patches_are_not_components() {
+fn malformed_persistent_villager_food_is_lossless_but_not_effective() {
     let id = "minecraft:villager_food";
     for nutrition in [0, -1] {
         let food = Tag::compound([("nutrition", Tag::Int(nutrition))]);
@@ -1957,10 +1962,14 @@ fn nonpositive_villager_food_patches_are_not_components() {
         stack.data_mut().set_loot_component(id, &Some(food.clone()));
         assert!(!stack.carries_component(None, id));
         assert_eq!(stack.villager_food(None), None);
-        let patch = Tag::compound([(id, food)]);
+        let patch = Tag::compound([(id, food.clone())]);
         stack.extra = decode_components(Some(&patch)).1;
-        assert!(!stack.carries_component(None, id));
         assert_eq!(stack.villager_food(None), None);
+        assert_eq!(stack.data().unwrap().other(id), Some(&food));
+        assert_eq!(
+            encode_components(&stack, &crate::items::Items::empty()),
+            Some(patch)
+        );
     }
 }
 
