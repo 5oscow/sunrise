@@ -651,11 +651,6 @@ fn existing_fieldless_enum_layouts_match_baseline() {
         "SpawnerKind"
     );
     assert_eq!(
-        <crate::item::item_stack::StackError as Wire>::layout(&mut vec![]),
-        0xe7f3dc8561be3e31,
-        "StackError"
-    );
-    assert_eq!(
         <crate::item::types::StatType as Wire>::layout(&mut vec![]),
         0x24743f4b7e1c51fd,
         "StatType"

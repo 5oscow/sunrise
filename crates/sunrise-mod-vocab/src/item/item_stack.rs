@@ -502,6 +502,29 @@ mod tests {
     }
 
     #[test]
+    fn stack_errors_keep_their_wire_tags_and_append_the_component_id() {
+        use crate::wire::{Reader, Writer};
+
+        for (error, bytes) in [
+            (StackError::Empty, &b"\x00\x00\x00\x00"[..]),
+            (StackError::CountOverflow, &b"\x01\x00\x00\x00"[..]),
+            (StackError::InvalidDamage, &b"\x02\x00\x00\x00"[..]),
+            (StackError::ConflictingDamage, &b"\x03\x00\x00\x00"[..]),
+            (
+                StackError::InvalidComponent {
+                    id: crate::ComponentId::new("minecraft:villager_food").unwrap(),
+                },
+                &b"\x04\x00\x00\x00\x17\x00\x00\x00minecraft:villager_food"[..],
+            ),
+        ] {
+            let mut out = Writer::new();
+            out.put(&error);
+            assert_eq!(out.bytes(), bytes);
+            assert_eq!(Reader::decode::<StackError>(bytes).unwrap(), error);
+        }
+    }
+
+    #[test]
     fn count_validation_is_atomic_and_registry_independent() {
         let key = ItemKey(0);
         assert!(ItemStack::new(key, 0).is_none());
