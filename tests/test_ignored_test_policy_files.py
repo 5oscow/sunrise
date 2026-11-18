@@ -135,6 +135,13 @@ class PolicyFiles(unittest.TestCase):
         self.assertIn("sunrise-prepare test:hidden_exporters exporters_write_to_their_log_file_without_a_console\n",
                       listed)
 
+    def test_windows_rows_on_the_command_line_prints_the_rows_and_runs_no_shard(self):
+        done = subprocess.run([sys.executable, str(ROOT / "tools/ci/ignored_tests.py"), "--windows-rows"],
+                              capture_output=True, text=True, cwd=ROOT)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout, "".join(f"{package} {target} {test}\n"
+                                              for package, target, test in ignored_tests.windows_rows()))
+
     def test_an_unset_variable_runs_nothing(self):
         self.write("wasm-fixture.txt", "pkg a::one VAR needs\n")
         with patch.dict(os.environ), patch.object(ignored_tests.subprocess, "Popen") as popen:

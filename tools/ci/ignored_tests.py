@@ -1315,11 +1315,11 @@ if __name__ == "__main__":
     parser.add_argument("--windows-rows", action="store_true",
                         help="print the `windows` daily rows as `PACKAGE TARGET TEST`, one per line")
     args = parser.parse_args()
+    if args.build_tests:
+        sys.exit(write_built(args.build_tests))
     if args.windows_rows:
         sys.stdout.write("".join(f"{package} {target} {test}\n" for package, target, test in windows_rows()))
-    elif args.build_tests:
-        sys.exit(write_built(args.build_tests))
-    if args.daily_tests:
+    elif args.daily_tests:
         # Nothing at all for no rows: an empty line would read as one empty name.
         sys.stdout.write("".join(f"{test}\n" for test in daily_tests(*args.daily_tests)))
     elif args.needs and args.list:
