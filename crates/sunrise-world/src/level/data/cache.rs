@@ -24,8 +24,8 @@ use std::{
 };
 
 const MAGIC: &[u8; 8] = b"HZBEHAV\0";
-const VERSION: u32 = 5;
-const FILE_NAME: &str = "behaviours-v5.bin";
+const VERSION: u32 = 7;
+const FILE_NAME: &str = "behaviours-v7.bin";
 const REGISTRY_MAGIC: &[u8; 8] = b"HZREGIS\0";
 const REGISTRY_VERSION: u32 = 1;
 const REGISTRY_FILE_NAME: &str = "registry-v1.bin";
