@@ -1,35 +1,29 @@
-//! Whether a native mod made for one game build fits another (SDK design §10): an API-only mod
-//! (no `[native.*]` table, no internals) is built against any build where every item it uses is
-//! unchanged, and only the built binary is exact to the build. The mod's uses table
-//! ([`uses::USES_FILE`], written by `cargo sunrise-mod build`) says what it uses, each item with
-//! its fingerprint at the build it was made for; the build's `surface.json` says what is there
-//! now; `mod_surface::uses::fits` compares the two. The compile against the build stays the final
-//! check, and the loader's build-id check is unchanged.
+//! Whether a native mod made for one game build fits another (SDK design §10), as the SDK's tool
+//! says (`cargo sunrise-mod native-check`): an API-only mod is built against any build where every
+//! item it uses is unchanged. This module says the tool's verdicts in the player's words. The
+//! compile against the build stays the final check, and the loader's build-id check is unchanged.
 //!
 //! People read "made for" (a mod's pin) and "fits"; builds by their Nightly names; and items as
 //! what they are ("the hook `player_logged_in`"), never surface ids or hashes.
-use super::{api, internals, prebuilt, sdk_cache};
+use super::uses::{self, ItemKind};
 use crate::i18n::{tr, trf};
-use mod_surface::uses::{self, Change, Fit, ItemKind, Misfit, UsesTable};
-use std::io::Read;
-use std::path::Path;
-use sunrise_mod_package::mod_surface;
+use serde::Deserialize;
 
 /// At most this many changed items are named in a message; the build log has them all.
 pub const SHOWN_ITEMS: usize = 5;
 
-/// How a mod stands against the build an instance plays.
-#[derive(Clone, Debug, PartialEq)]
+use super::sdk_cache;
+/// How a mod stands against the build an instance plays: `native-check`'s `verdict`.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum Verdict {
     /// Made for this build.
     MadeFor,
     /// Made for another build (`made_for`), and every item it uses is unchanged in this one.
     Fits { made_for: String },
-    /// It changes game code or names the game's internals (`why`: the table that does, or
-    /// `internals`): it works on the build it was made for only.
-    Exact { made_for: String, why: &'static str },
-    /// Its package doesn't say what it uses (made by an older tool, or its list is for another
-    /// build than its pin): it works on the build it was made for only.
+    /// It changes game code or names the game's internals (`why`: the table that does, or `internals`): it works on the build it was made for only.
+    Exact { made_for: String, why: String },
+    /// Its package doesn't say what it uses: it works on the build it was made for only.
     NoList { made_for: String },
     /// Items it uses changed in this build.
     DoesNotFit {
@@ -47,48 +41,25 @@ impl Verdict {
     }
 }
 
-/// The uses table `dir` carries, when it carries one this launcher reads. A table that is too
-/// large, of another schema or malformed is no table: the mod then works on its own build only.
-pub(super) fn table(dir: &Path) -> Option<UsesTable> {
-    let file = std::fs::File::open(dir.join(uses::USES_FILE)).ok()?;
-    let mut bytes = Vec::new();
-    file.take(uses::MAX_USES_BYTES as u64 + 1)
-        .read_to_end(&mut bytes)
-        .ok()?;
-    UsesTable::read(&bytes).ok()
+/// A used item that is not the same in the build: its surface id and how it changed.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct Misfit {
+    pub id: String,
+    pub change: Change,
 }
 
-/// How `project` stands against build `build`, whose surface `surface` gives (asked for only when
-/// the mod was made for another build) and whose build data `catalog` holds.
-pub(super) fn judge(
-    project: &api::Project<'_>,
-    build: &str,
-    surface: &mut dyn FnMut() -> Result<std::rc::Rc<mod_surface::Surface>, sdk_cache::Refusal>,
-    catalog: &mut dyn FnMut() -> Result<std::rc::Rc<internals::Catalog>, sdk_cache::Refusal>,
-) -> Result<Verdict, sdk_cache::Refusal> {
-    let made_for = project.bundle.native().sunrise.clone();
-    if made_for == build {
-        return Ok(Verdict::MadeFor);
-    }
-    if let Some(why) = prebuilt::changes_game(project) {
-        return Ok(Verdict::Exact { made_for, why });
-    }
-    let Some(table) = table(&project.bundle.dir).filter(|table| table.made_for == made_for) else {
-        return Ok(Verdict::NoList { made_for });
-    };
-    let target = surface()?;
-    if let Fit::DoesNotFit(misfits) = uses::fits(&table.entries, target.as_ref()) {
-        return Ok(Verdict::DoesNotFit { made_for, misfits });
-    }
-    if !project.bundle.manifest.inject.is_empty() {
-        if let Err(error) = catalog()?.check(&project.bundle.manifest) {
-            return Ok(Verdict::Points {
-                made_for,
-                why: error.to_string(),
-            });
-        }
-    }
-    Ok(Verdict::Fits { made_for })
+/// How a used item differs in the build (`native-check`'s `change`).
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Change {
+    Removed,
+    Changed,
+    LostImpl(String),
+    Fields { gained: Vec<String>, at: String },
+    Version { named: u64, now: u64 },
+    NotBuildable { at: String },
+    Path(String),
+    Route { from: String, owner: String },
 }
 
 /// An item as people read it: "the hook `player_logged_in`".
@@ -116,7 +87,7 @@ pub fn item(id: &str) -> String {
 /// What changed about one item, as people read it: "the hook `player_logged_in` (changed)".
 pub fn change(misfit: &Misfit) -> String {
     let what = item(&misfit.id);
-    let leaf = |id: &str| mod_surface::leaf(id).to_owned();
+    let leaf = |id: &str| uses::leaf(id).to_owned();
     match &misfit.change {
         Change::Removed => trf("{item} (removed)", &[("item", &what)]),
         Change::Changed => trf("{item} (changed)", &[("item", &what)]),

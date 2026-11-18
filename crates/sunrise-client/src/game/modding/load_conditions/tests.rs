@@ -238,7 +238,7 @@ fn load_conditions_recipe_reload_counts_and_failed_candidates_keep_old_recipes()
                     .iter()
                     .map(|(id, _)| id.clone())
                     .collect();
-                let old_generation = game.recipes().by_type["minecraft:crafting_shapeless"].clone();
+                let old_generation = game.recipes().by_type["minecraft:crafting"].clone();
                 let grid = [Some(sunrise_client::items::ItemStack::new(
                     "minecraft:flint",
                     1,
@@ -280,7 +280,7 @@ fn load_conditions_recipe_reload_counts_and_failed_candidates_keep_old_recipes()
                     assert!(game.recipes().recipe("testmod:enabled").is_some());
                     assert!(Arc::ptr_eq(
                         &old_generation,
-                        &game.recipes().by_type["minecraft:crafting_shapeless"],
+                        &game.recipes().by_type["minecraft:crafting"],
                     ));
                     assert!(game.recipes().recipe_matches(
                         &game.loop_context,
@@ -327,7 +327,7 @@ fn load_conditions_recipe_reload_counts_and_failed_candidates_keep_old_recipes()
                 assert!(game.recipes().recipe("testmod:content").is_some());
                 assert!(!Arc::ptr_eq(
                     &old_generation,
-                    &game.recipes().by_type["minecraft:crafting_shapeless"],
+                    &game.recipes().by_type["minecraft:crafting"],
                 ));
             });
         },

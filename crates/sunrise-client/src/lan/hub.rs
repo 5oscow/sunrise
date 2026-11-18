@@ -41,6 +41,7 @@ use {
 /// GameEvent types (ClientboundGameEventPacket).
 pub mod advancements;
 mod block_changes;
+mod carried_check;
 pub mod chat;
 pub mod chat_filter;
 mod fake_kicks;
@@ -2144,6 +2145,8 @@ impl Hub {
             g.teleport_tick = ticks;
             g.held_ticket_chunk = Some(g.ticket_chunk()); // teleport has no move
             g.pending_move = None;
+            g.on_collider = None;
+            g.carry_hint = None;
             if let Some(p) = position {
                 g.position = p;
                 g.previous_position = p;
@@ -3580,6 +3583,10 @@ impl Hub {
                         if let Some(add) = first.recipe_book_add {
                             g.send(&raw(ids::RECIPE_BOOK_ADD, add));
                         }
+                        // The game's own TICK trigger may have awarded these in the guest's
+                        // turn before this first tick: announced here, flush_advancements
+                        // must not send them again (vanilla awards them once).
+                        g.recipes_unlocked.retain(|id| !first.recipes.contains(id));
                         g.send(&raw(ids::UPDATE_ADVANCEMENTS, first.update_advancements));
                         g.advancements_visible = sync.advancements.visibility(&g.advancements);
                         g.advancements_changed.clear();
@@ -4159,6 +4166,13 @@ impl Hub {
                 S::MovePlayerStatus(p) => {
                     self.move_player(i, None, None, p.flags, ctx, events);
                 }
+                S::CustomPayload(p) if p.channel == sunrise_protocol::carry_age::CHANNEL => {
+                    // A payload that does not decode is no hint: it is only where a search starts.
+                    if let Ok(hint) = sunrise_protocol::carry_age::decode(&p.data) {
+                        self.guests
+                            .update(i, |g| g.carry_hint = Some((hint.collider, hint.ticks)));
+                    }
+                }
                 S::CustomPayload(p)
                     if p.channel == sunrise_protocol::passage_sync::CROSS_CHANNEL =>
                 {
@@ -4491,6 +4505,11 @@ impl Hub {
             to[2].clamp(-3.0E7, 3.0E7),
         ];
         let (yaw, pitch) = (wrap_degrees(yaw), wrap_degrees(pitch));
+        // A carried player's report is measured in the collider's frame, and judged in it.
+        let plan = (hearing != Hearing::Confirmation)
+            .then(|| self.carry_plan(i, to))
+            .flatten();
+        let reference = self.carry_speed_delta(i, to, plan.as_ref());
         let begin = self.guests.update(i, |g| {
             let owner = self.singleplayer_owner == Some(g.uuid);
             // A passenger only turns: its vehicle carries it (absSnapTo where it is).
@@ -4499,7 +4518,7 @@ impl Hub {
                 g.release_tickets();
                 return std::ops::ControlFlow::Break(false);
             }
-            let d = [0, 1, 2].map(|k| to[k] - g.first_good[k]);
+            let d = reference.unwrap_or_else(|| [0, 1, 2].map(|k| to[k] - g.first_good[k]));
             let moved = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
             if g.sleeping {
                 if moved > 1.0 {
@@ -4544,21 +4563,46 @@ impl Hub {
             std::ops::ControlFlow::Continue(start) => start,
             std::ops::ControlFlow::Break(resend) => {
                 if resend {
-                    self.resend_teleport(i, None);
+                    // A carried player's refusal puts it back where the server has it on its
+                    // collider, and is counted like any other.
+                    let carried = self.guests[i].on_collider;
+                    if carried.is_some() && reference.is_some() {
+                        self.carry_rejected(i);
+                    }
+                    let back = self.guests[i].carry_correction;
+                    self.guests.update(i, |g| g.carry_correction = None);
+                    self.resend_teleport(i, back);
+                    self.keep_carried(i, carried, back);
                 }
                 return;
             }
         };
-        let (wrongly, refused, stands) = self.collide(i, to, ctx);
+        // The confirmation of a teleport (a carried player's correction included) is committed in
+        // place against the world as it stands.
+        let (wrongly, refused, stands) = if hearing == Hearing::Confirmation {
+            self.collide(i, to, ctx)
+        } else {
+            self.collide_carried(i, to, ctx, plan)
+        };
         if wrongly {
             let line = format!("{} moved wrongly!", self.guests[i].name);
             events.push(HostEvent::Warn(line));
         }
         if refused {
             self.guests.update(i, |g| (g.yaw, g.pitch) = (yaw, pitch));
-            self.resend_teleport(i, Some(start));
+            // A carried player goes back to where the server has it on its collider now.
+            let back = self.guests[i].carry_correction.unwrap_or(start);
+            self.guests.update(i, |g| g.carry_correction = None);
+            let carried = self.guests[i].on_collider;
+            self.resend_teleport(i, Some(back));
+            self.keep_carried(i, carried, Some(back));
             return;
         }
+        // A carried player is where the server puts it: its local position under the
+        // collider's transform now, not the position in the frame the client held.
+        let committed = self.guests[i].carry_commit;
+        self.guests.update(i, |g| g.carry_commit = None);
+        let to = committed.unwrap_or(to);
         // The anticheat's `ground`: a claim of the ground with nothing to
         // stand on is dropped (no-fall, walking on water).
         let (mut flags, mut corrected) = (flags, false);
@@ -4623,7 +4667,16 @@ impl Hub {
             at[1] + f64::from(d.height) + 0.0625,
             at[2] + half,
         ];
+        // A moving collider's box under the feet holds the player up as a block does: it is not
+        // floating on one, and the colliders are where they stand now, as the player is committed.
         no_blocks_in(world, lo, hi, &self.encoder)
+            && !sunrise_client_render::moving_colliders::overlaps(
+                sunrise_world::entity_obstruction::EntityIdentity(self.guests[i].entity_id as u64),
+                sunrise_core::geometry::Aabb::new(
+                    sunrise_core::geometry::Vec3::new(lo[0], lo[1], lo[2]),
+                    sunrise_core::geometry::Vec3::new(hi[0], hi[1], hi[2]),
+                ),
+            )
     }
 
     /// `ServerGamePacketListenerImpl.forceSendPlayerSupportBlocks`: the blocks just under the
@@ -5235,11 +5288,14 @@ fn equipment_source(g: &Guest, index: usize) -> Option<&ItemStack> {
 
 #[cfg(test)]
 mod tests {
+    mod carried_check_tests;
     mod cave_air_tests;
     mod collision_exclusion_tests;
+    mod collision_part_tests;
     mod effect_meta_tests;
     #[path = "../far_tests.rs"]
     mod far_tests;
+    mod first_tick_recipe_tests;
     mod live_player_limit_tests;
     mod ordered_inbox_tests;
     mod pending_move_bound_tests;

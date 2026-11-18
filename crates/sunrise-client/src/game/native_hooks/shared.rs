@@ -2,8 +2,20 @@
 mod book_screen;
 #[path = "shared/item_fallthrough.rs"]
 mod item_fallthrough;
+#[cfg(test)]
+#[path = "shared/label_tests.rs"]
+mod label_tests;
 #[path = "shared/loot.rs"]
 mod loot;
+#[cfg(test)]
+#[path = "shared/screen_position_tests.rs"]
+mod screen_position_tests;
+#[cfg(test)]
+#[path = "shared/slot_icon_tests.rs"]
+mod slot_icon_tests;
+#[cfg(test)]
+#[path = "shared/slot_tooltip_tests.rs"]
+mod slot_tooltip_tests;
 
 use super::screen_build::ObservedScreen;
 use crate::game::api_values::{TryIntoApi, TryIntoEngine};
@@ -516,43 +528,59 @@ pub(super) struct OpenNativeScreen {
 /// take a move together from the next.
 #[derive(Default)]
 pub(super) struct SlotMoves {
-    committed: std::cell::RefCell<std::collections::HashMap<usize, [f32; 2]>>,
-    pending: std::cell::RefCell<std::collections::HashMap<usize, [f32; 2]>>,
+    /// Each moved slot's position, or None for a slot a mod hid.
+    committed: std::cell::RefCell<std::collections::HashMap<usize, Option<[f32; 2]>>>,
+    pending: std::cell::RefCell<std::collections::HashMap<usize, Option<[f32; 2]>>>,
     /// How many moves changed a position, for the layout build's cache key.
     count: std::cell::Cell<u32>,
 }
 
 impl SlotMoves {
-    /// Slot `slot`'s position this frame: where the last build committed it,
-    /// else `declared`.
-    fn position(&self, slot: usize, declared: [f32; 2]) -> [f32; 2] {
+    /// Slot `slot`'s position this frame: where the last build committed it
+    /// (None once hidden), else `declared`.
+    fn position(&self, slot: usize, declared: [f32; 2]) -> Option<[f32; 2]> {
         self.committed
             .borrow()
             .get(&slot)
             .copied()
-            .unwrap_or(declared)
+            .unwrap_or(Some(declared))
     }
-    /// Moves slot `slot` of a screen that declared `slots`, from the next
-    /// build. False, changing nothing, for a slot the screen does not show or
-    /// a position that is not finite.
-    fn set(&self, slots: &[Option<[f32; 2]>], slot: u32, x: f32, y: f32) -> bool {
-        let Some((slot, declared)) = usize::try_from(slot)
-            .ok()
-            .and_then(|i| Some((i, slots.get(i).copied().flatten()?)))
-            .filter(|_| x.is_finite() && y.is_finite())
-        else {
-            return false;
-        };
-        let mut pending = self.pending.borrow_mut();
-        let current = pending
-            .get(&slot)
-            .copied()
-            .unwrap_or_else(|| self.position(slot, declared));
-        if current != [x, y] {
-            pending.insert(slot, [x, y]);
+    /// Where slot `slot` of a screen that declared `slots` will be from the
+    /// next build: the last move, pending or committed, else its declaration.
+    fn latest(&self, slots: &[Option<mod_api::ScreenSlot>], slot: usize) -> Option<[f32; 2]> {
+        let declared = slots.get(slot)?.as_ref()?.position;
+        let pending = self.pending.borrow().get(&slot).copied();
+        match pending {
+            Some(pending) => pending,
+            None => self.position(slot, declared),
+        }
+    }
+    /// Moves slot `slot` of a screen that declared `slots` to `pos`, or hides
+    /// it with None, from the next build. A slot the screen hid when it opened
+    /// (the server's menu has no such slot) is never shown. Each refusal
+    /// changes nothing; repeating the slot's current place changes nothing
+    /// either, not even the move count.
+    fn set(
+        &self,
+        slots: &[Option<mod_api::ScreenSlot>],
+        slot: usize,
+        pos: Option<[f32; 2]>,
+    ) -> Result<(), mod_api::ScreenSlotRefusal> {
+        use mod_api::ScreenSlotRefusal;
+        match slots.get(slot) {
+            None => return Err(ScreenSlotRefusal::NoSuchSlot),
+            Some(None) if pos.is_some() => return Err(ScreenSlotRefusal::HiddenAtOpen),
+            Some(None) => return Ok(()),
+            Some(Some(_)) => {}
+        }
+        if pos.is_some_and(|[x, y]| !x.is_finite() || !y.is_finite()) {
+            return Err(ScreenSlotRefusal::BadPosition);
+        }
+        if self.latest(slots, slot) != pos {
+            self.pending.borrow_mut().insert(slot, pos);
             self.count.set(self.count.get().wrapping_add(1));
         }
-        true
+        Ok(())
     }
     /// Makes the pending moves the positions drawing and hit-testing read.
     fn commit(&self) {
@@ -1788,34 +1816,6 @@ pub(super) fn sound_id(id: &str) -> bool {
         && path.chars().all(|c| allowed(c, true))
 }
 
-/// Sets the viewer counts `known` holds for `dim` to `now` and returns the
-/// changes as `(pos, previous, viewers)`, in position order. A container that
-/// is no longer counted goes to 0 and leaves `known`.
-pub(super) fn viewer_changes(
-    known: &mut HashMap<(&'static str, (i32, i32, i32)), u32>,
-    dim: &'static str,
-    mut now: HashMap<(i32, i32, i32), u32>,
-) -> Vec<((i32, i32, i32), u32, u32)> {
-    let mut changes = Vec::new();
-    known.retain(|&(d, pos), previous| {
-        if d != dim {
-            return true;
-        }
-        let viewers = now.remove(&pos).unwrap_or(0);
-        if viewers != *previous {
-            changes.push((pos, *previous, viewers));
-            *previous = viewers;
-        }
-        viewers > 0
-    });
-    for (pos, viewers) in now {
-        known.insert((dim, pos), viewers);
-        changes.push((pos, 0, viewers));
-    }
-    changes.sort_unstable();
-    changes
-}
-
 fn dimension_id(dimension: LevelDimension) -> &'static str {
     match dimension {
         LevelDimension::Overworld => "minecraft:overworld",
@@ -2910,6 +2910,7 @@ impl Game<'_> {
                     for list in c.faces.iter_mut().chain([&mut c.inputs, &mut c.outputs]) {
                         list.retain(|&s| s < n);
                     }
+                    c.insert_rules.truncate(n);
                     c.menu = c
                         .menu
                         .filter(|m| mod_menu(m).is_some_and(|(_, size)| size == n));
@@ -3011,44 +3012,6 @@ impl Game<'_> {
         }
         true
     }
-    /// `ContainerOpenersCounter` for the mod containers of the level in place:
-    /// everyone with one open, recounted every tick, so a change is heard
-    /// whichever way an opener left (`native_mod_container_viewers`). The
-    /// openers are the guests (but not a spectator, `BarrelBlockEntity.startOpen`),
-    /// the host's own player, and the copper golems that opened it
-    /// (`chest_openers`).
-    pub(super) fn tick_mod_container_viewers(&mut self) {
-        let mut now: HashMap<(i32, i32, i32), u32> = HashMap::new();
-        let mut open = |game: &Self, pos: (i32, i32, i32), n: u32| {
-            if n > 0 && game.mod_menu_at(pos).is_some() {
-                *now.entry(pos).or_default() += n;
-            }
-        };
-        if let Some(host) = &self.lan {
-            for g in host
-                .hub
-                .guests
-                .iter()
-                .filter(|g| host.hub.here(g) && !g.spectator())
-            {
-                if let Some(m) = &g.menu
-                    && let Slots::Block(pos) = m.slots
-                {
-                    open(self, pos, 1);
-                }
-            }
-        }
-        if let Some(pos) = self.container.filter(|_| !self.spectator()) {
-            open(self, pos, 1);
-        }
-        for (&pos, &(golems, _)) in &self.world.chest_openers {
-            open(self, pos, golems.max(0) as u32);
-        }
-        let dim = self.dim.id();
-        for (pos, previous, viewers) in viewer_changes(&mut self.mod_container_viewers, dim, now) {
-            self.native_mod_container_viewers(dim, [pos.0, pos.1, pos.2], viewers, previous);
-        }
-    }
     /// The menu type of the mod container at `key`, if it has one.
     pub(super) fn mod_menu_at(&self, key: Pos) -> Option<&'static str> {
         let state = self.world.block(key.0, key.1, key.2).0;
@@ -3065,29 +3028,56 @@ impl Game<'_> {
             .as_mut()
             .is_some_and(|s| s.set_data(window, id, value))
     }
-    /// Where the open mod screen puts container slot `slot`: where a mod last
-    /// moved it, else where the screen declared it.
+    /// Where the open mod screen puts container slot `slot` this frame: where
+    /// a mod last moved it, else where the screen declared it; None once a mod
+    /// hid it.
     pub(super) fn native_screen_slot(&self, slot: usize) -> Option<(f32, f32)> {
         let s = self.shown_native_screen()?;
-        let declared = s.screen.slots.get(slot).copied().flatten()?;
-        let [x, y] = s.slot_moves.position(slot, declared);
+        let declared = s.screen.slots.get(slot)?.as_ref()?.position;
+        let [x, y] = s.slot_moves.position(slot, declared)?;
         Some((x, y))
     }
-    /// Moves container slot `slot` of the open mod screen to `x`, `y`
-    /// (relative to the screen's origin) from the next frame. False, changing
-    /// nothing, with no mod screen open, for a slot the screen does not show
-    /// or a position that is not finite.
-    pub(in crate::game) fn set_screen_slot_position(&self, slot: u32, x: f32, y: f32) -> bool {
-        self.shown_native_screen()
-            .is_some_and(|s| s.slot_moves.set(&s.screen.slots, slot, x, y))
+    pub(in crate::game) fn native_screen_slot_icon(&self, slot: usize) -> Option<&str> {
+        self.shown_native_screen()?
+            .screen
+            .slots
+            .get(slot)?
+            .as_ref()?
+            .no_item_icon
+            .as_deref()
     }
-    /// The container slots the open mod screen shows (300.. ids).
+    /// Where the open mod screen of `block` puts container slot `slot` from
+    /// the next frame: the mod's last move, else the screen's declaration;
+    /// None for a hidden slot, another block's screen or none.
+    pub(in crate::game) fn screen_slot(&self, block: &str, slot: usize) -> Option<[f32; 2]> {
+        let s = self.shown_native_screen().filter(|s| s.block == block)?;
+        s.slot_moves.latest(&s.screen.slots, slot)
+    }
+    /// Moves container slot `slot` of the open mod screen of `block` to `pos`
+    /// (relative to the screen's origin), or hides it with None, from the
+    /// next frame (`SlotMoves::set`).
+    pub(in crate::game) fn set_screen_slot(
+        &self,
+        block: &str,
+        slot: usize,
+        pos: Option<[f32; 2]>,
+    ) -> Result<(), mod_api::ScreenSlotRefusal> {
+        let s = self
+            .shown_native_screen()
+            .filter(|s| s.block == block)
+            .ok_or(mod_api::ScreenSlotRefusal::NoScreen)?;
+        s.slot_moves.set(&s.screen.slots, slot, pos)
+    }
+    /// The container slots the open mod screen shows this frame (300.. ids).
     pub(super) fn native_screen_slots(&self) -> Option<Vec<usize>> {
         let s = self.shown_native_screen()?;
         let shown = s.screen.slots.iter().enumerate();
         Some(
             shown
-                .filter(|(_, p)| p.is_some())
+                .filter(|(i, p)| {
+                    p.as_ref()
+                        .is_some_and(|p| s.slot_moves.position(*i, p.position).is_some())
+                })
                 .map(|(i, _)| 300 + i)
                 .collect(),
         )
@@ -3096,7 +3086,15 @@ impl Game<'_> {
     /// it (`Game::slot_count` asks every frame).
     pub(super) fn native_screen_slot_count(&self) -> Option<usize> {
         let s = self.shown_native_screen()?;
-        Some(s.screen.slots.iter().filter(|p| p.is_some()).count())
+        let shown = s.screen.slots.iter().enumerate();
+        Some(
+            shown
+                .filter(|(i, p)| {
+                    p.as_ref()
+                        .is_some_and(|p| s.slot_moves.position(*i, p.position).is_some())
+                })
+                .count(),
+        )
     }
     /// The first row of the player's inventory on the open mod screen.
     pub(super) fn native_screen_inventory_y(&self) -> Option<f32> {
@@ -3152,18 +3150,22 @@ impl Game<'_> {
                 );
             }
         }
-        self.native_screen_draw(&s.block, &s.data, batch, [ox, oy]);
+        self.native_screen_draw(&s.block, s.pos(), &s.data, batch, [ox, oy]);
         self.draw_screen_phase(batch, sunrise_client::screen_draw::RenderPhase::Background);
         if s.screen.own_labels {
             return true;
         }
         let grey = rgba(64, 64, 64, 255);
         if let Some(title) = self.remote_menu_title() {
-            batch.text_styled(atlas, &title, ox + 8.0, oy + 6.0, grey, false);
+            let [x, y] = s.screen.title_label.unwrap_or([8.0, 6.0]);
+            batch.text_styled(atlas, &title, ox + x, oy + y, grey, false);
         }
         let inventory = self.translate_with_fallback("container.inventory", "Inventory");
-        let label_y = oy + s.screen.inventory_y - 11.0;
-        batch.text(atlas, &inventory, ox + 8.0, label_y, grey, false);
+        let [x, y] = s
+            .screen
+            .inventory_label
+            .unwrap_or([8.0, s.screen.height - 94.0]);
+        batch.text(atlas, &inventory, ox + x, oy + y, grey, false);
         true
     }
     /// Puts back a mod block entity taken out for a call, unless the call
@@ -3252,16 +3254,30 @@ impl Game<'_> {
         if slot.is_some_and(|i| self.slot_view(i).is_some()) {
             return;
         }
-        let Some((block, data, at)) = self.native_screen_at() else {
+        let mut lines = Vec::new();
+        self.native_screen_tooltip_lines(batch, slot, &mut lines);
+        self.draw_tooltip_lines(batch, &lines, self.cursor.0, self.cursor.1);
+    }
+    /// The screen-specific line override, shared by filled-slot and empty-space tooltips.
+    /// Item images and component gathering remain on the stack's normal drawing path.
+    pub(super) fn native_screen_tooltip_lines(
+        &self,
+        batch: &HudBatch,
+        slot: Option<usize>,
+        lines: &mut Vec<(sunrise_client::text::Text, u32)>,
+    ) {
+        if !mod_api::__private::has_scoped_hook(mod_api::HookId::ScreenTooltip) {
+            return;
+        }
+        let Some(screen) = self.shown_native_screen() else {
             return;
         };
-        let mut lines = Vec::new();
-        self.native_screen_tooltip(&block, &data, at, &mut lines);
-        let lines: Vec<(sunrise_client::text::Text, u32)> = lines
-            .into_iter()
-            .map(|l| (sunrise_client::text::Text::literal(l), u32::MAX))
-            .collect();
-        self.draw_tooltip_lines(batch, &lines, self.cursor.0, self.cursor.1);
+        let menu_slot = slot.and_then(|slot| {
+            Self::menu_slot_index(self.native_screen_menu()?, slot).map(|slot| slot as u32)
+        });
+        let (ox, oy) = self.inventory_origin(batch);
+        let at = [self.cursor.0 - ox, self.cursor.1 - oy];
+        self.native_screen_tooltip(&screen.block, &screen.data, at, menu_slot, lines);
     }
     /// Options > Mods' rows for loaded code mods, after the content-only rows.
     pub(super) fn list_native_mods(&mut self) {
@@ -3492,16 +3508,6 @@ impl Game<'_> {
             ..m
         })
     }
-}
-
-/// Whether `rgba` is a whole `width` x `height` image that fits a
-/// `slot_width` x `slot_height` atlas slot (a native mod's `mod_image`).
-fn mod_image_fits(width: u32, height: u32, rgba: usize, slot_width: u32, slot_height: u32) -> bool {
-    width > 0
-        && height > 0
-        && width <= slot_width
-        && height <= slot_height
-        && rgba == width as usize * height as usize * 4
 }
 
 /// Whether F3's debug screen, open when `debug`, covers `corner`
@@ -3945,7 +3951,15 @@ mod tests {
             let error = root.unwrap_err().to_string();
             assert!(error.contains("be_test:shared"), "{error}");
             assert!(error.contains("be_test:missing"), "{error}");
-            assert!(!std::path::Path::new(".sunrise-cache").exists());
+            // A refused declaration builds no content root. The roots folder's own `.lock`
+            // is made by every start and never deleted, so it is not a root.
+            let built: Vec<_> = std::fs::read_dir(".sunrise-cache/mod-content")
+                .into_iter()
+                .flatten()
+                .map(|entry| entry.unwrap().file_name())
+                .filter(|name| name != ".lock")
+                .collect();
+            assert!(built.is_empty(), "{built:?}");
             return;
         }
         if let Some(id) = unknown {
@@ -4780,31 +4794,60 @@ mod tests {
     /// repeat of the effective position, declared or moved, keeps the layout).
     #[test]
     fn slot_moves_refuse_what_the_screen_does_not_show() {
-        let declared = [Some([8.0, 18.0]), None, Some([26.0, 18.0])];
+        let declared = [
+            Some(mod_api::ScreenSlot {
+                position: [8.0, 18.0],
+                ..Default::default()
+            }),
+            None,
+            Some(mod_api::ScreenSlot {
+                position: [26.0, 18.0],
+                ..Default::default()
+            }),
+        ];
+        use mod_api::ScreenSlotRefusal::*;
         let moves = super::SlotMoves::default();
-        assert!(moves.set(&declared, 0, 8.0, 18.0));
+        // The current place again changes nothing, not even the count.
+        assert_eq!(moves.set(&declared, 0, Some([8.0, 18.0])), Ok(()));
         assert_eq!(moves.count.get(), 0);
-        assert!(moves.set(&declared, 2, 100.5, -4.0));
+        assert_eq!(moves.set(&declared, 2, Some([100.5, -4.0])), Ok(()));
         assert_eq!(moves.count.get(), 1);
-        // Pending until the build commits it.
-        assert_eq!(moves.position(2, [26.0, 18.0]), [26.0, 18.0]);
+        // Pending until the build commits it; the read-back sees it at once.
+        assert_eq!(moves.position(2, [26.0, 18.0]), Some([26.0, 18.0]));
+        assert_eq!(moves.latest(&declared, 2), Some([100.5, -4.0]));
         moves.commit();
-        assert_eq!(moves.position(2, [26.0, 18.0]), [100.5, -4.0]);
-        assert_eq!(moves.position(0, [8.0, 18.0]), [8.0, 18.0]);
-        for (slot, x, y) in [
-            (1, 0.0, 0.0),
-            (3, 0.0, 0.0),
-            (u32::MAX, 0.0, 0.0),
-            (0, f32::NAN, 0.0),
-            (0, 0.0, f32::INFINITY),
+        assert_eq!(moves.position(2, [26.0, 18.0]), Some([100.5, -4.0]));
+        assert_eq!(moves.position(0, [8.0, 18.0]), Some([8.0, 18.0]));
+        // Refusals change nothing.
+        for (slot, pos, refusal) in [
+            (1, Some([0.0, 0.0]), HiddenAtOpen),
+            (3, Some([0.0, 0.0]), NoSuchSlot),
+            (usize::MAX, None, NoSuchSlot),
+            (0, Some([f32::NAN, 0.0]), BadPosition),
+            (0, Some([0.0, f32::INFINITY]), BadPosition),
         ] {
-            assert!(!moves.set(&declared, slot, x, y), "{slot} {x} {y}");
+            assert_eq!(
+                moves.set(&declared, slot, pos),
+                Err(refusal),
+                "{slot} {pos:?}"
+            );
         }
-        assert_eq!(moves.position(0, [8.0, 18.0]), [8.0, 18.0]);
-        assert!(moves.set(&declared, 2, 100.5, -4.0));
         assert_eq!(moves.count.get(), 1);
-        assert!(moves.set(&declared, 2, 100.5, -3.0));
+        assert_eq!(moves.position(0, [8.0, 18.0]), Some([8.0, 18.0]));
+        // Hiding a slot hidden at open is already so.
+        assert_eq!(moves.set(&declared, 1, None), Ok(()));
+        assert_eq!(moves.count.get(), 1);
+        // Hidden, then shown again where the mod puts it.
+        assert_eq!(moves.set(&declared, 2, None), Ok(()));
         assert_eq!(moves.count.get(), 2);
+        assert_eq!(moves.set(&declared, 2, None), Ok(()));
+        assert_eq!(moves.count.get(), 2);
+        moves.commit();
+        assert_eq!(moves.position(2, [26.0, 18.0]), None);
+        assert_eq!(moves.set(&declared, 2, Some([26.0, 18.0])), Ok(()));
+        moves.commit();
+        assert_eq!(moves.position(2, [26.0, 18.0]), Some([26.0, 18.0]));
+        assert_eq!(moves.count.get(), 3);
     }
 
     #[test]
@@ -4819,27 +4862,6 @@ mod tests {
             assert!(!line.contains("cfg"), "a cfg in the breathing hook: {line}");
             for mac in ["!(", "![", "! {", "!{"] {
                 assert!(!line.contains(mac), "a macro in the breathing hook: {line}");
-            }
-        }
-    }
-
-    #[test]
-    fn native_loot_kinds_stay_hookable() {
-        let source = include_str!("../../../../sunrise-world/src/loot.rs").replace("\r\n", "\n");
-        for hook in [
-            "pub fn native_invoke_loot_function(",
-            "pub fn native_invoke_loot_condition(",
-        ] {
-            let at = source
-                .find(hook)
-                .unwrap_or_else(|| panic!("{hook} not found"));
-            let start = source[..at].rfind("///").unwrap();
-            let body = &source[start..start + source[start..].find("\n}\n").unwrap()];
-            for line in body.lines() {
-                assert!(!line.contains("cfg"), "a cfg in a loot hook point: {line}");
-                for mac in ["!(", "![", "! {", "!{"] {
-                    assert!(!line.contains(mac), "a macro in a loot hook point: {line}");
-                }
             }
         }
     }
@@ -5028,18 +5050,6 @@ mod tests {
         assert!(!debug_takes(Corner::BottomRight, true, [true, false]));
         assert!(debug_takes(Corner::BottomRight, true, [false, true]));
     }
-
-    /// An image is taken whole, and only when it fits its slot.
-    #[test]
-    fn a_mod_image_is_taken_whole_and_only_when_it_fits() {
-        use super::mod_image_fits;
-        assert!(mod_image_fits(4, 2, 32, 1024, 1024));
-        assert!(mod_image_fits(1024, 1024, 1024 * 1024 * 4, 1024, 1024));
-        assert!(!mod_image_fits(0, 2, 0, 1024, 1024));
-        assert!(!mod_image_fits(4, 2, 31, 1024, 1024));
-        assert!(!mod_image_fits(4, 2, 33, 1024, 1024));
-        assert!(!mod_image_fits(2048, 1, 2048 * 4, 1024, 1024));
-    }
 }
 
 #[cfg(test)]
@@ -5105,6 +5115,8 @@ mod item_fall_on_tests {
     #[mod_api::__subscriptions]
     impl Hooks for LoanMod {
         fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
+            r.register_attachment_type("loan_test:progress", false)
+                .unwrap();
             let key = r.block_key("minecraft:stone");
             r.block_part(key, LoanPart(self.0.clone()));
         }

@@ -80,7 +80,26 @@ pub(super) fn emit<'a>(
         let is_render = is_render(hook);
         let external = free_function_source(target);
         let in_game = external.is_none();
-        let (method, call) = if let Some((krate, path)) = external {
+        // Effect cadence and action have one paired dispatcher. Generate the events and
+        // Part methods for both, but neither a `fire` wrapper nor a standalone dispatch.
+        let declaration_only = target == crate::hook_targets::EFFECT_TICK_TARGET
+            && hook
+                .scope
+                .as_ref()
+                .is_some_and(|scope| scope.kind == PartKind::Effect);
+        let (method, call) = if declaration_only {
+            let carrier = format!("{}Call", hook_id(name));
+            let receiver = if hook.host == Some(crate::catalog::HostAccess::Read) {
+                "&self"
+            } else {
+                "&mut self"
+            };
+            let method = syn::parse_str(&format!(
+                "fn {native}({receiver}, call: {carrier}<'_>) {{}}"
+            ))
+            .map_err(|error| format!("invalid declared signature for {name}: {error}"))?;
+            (method, format!("dispatch_{name}"))
+        } else if let Some((krate, path)) = external {
             let Some((module, function)) = path.rsplit_once("::") else {
                 return Err(format!("wrong target for {name}"));
             };
@@ -133,7 +152,7 @@ pub(super) fn emit<'a>(
                 format!("dispatch_{name}"),
             )
         };
-        let fill = !is_render && needs_fill(&method, &call, in_game)?;
+        let fill = !declaration_only && !is_render && needs_fill(&method, &call, in_game)?;
         let sig = &method.sig;
         let mut native_args = Vec::new();
         let mut receiver_mut = None;
@@ -150,6 +169,20 @@ pub(super) fn emit<'a>(
                 }
             }
         }
+        // Some callers must distinguish engine-selected inactivity from a listener reply.
+        // Keep that signal in the engine call, not in the event or its Wire layout.
+        let inert_signal = hook.inert.as_deref() == Some("signal");
+        if inert_signal
+            && (!in_game
+                || !hook.call.is_empty()
+                || !native_args.pop().is_some_and(|(arg, ty)| {
+                    arg == "inert" && ty.to_token_stream().to_string() == "& mut bool"
+                }))
+        {
+            return Err(format!(
+                "{name}: an inert signal needs a final engine-only inert: &mut bool"
+            ));
+        }
         // A hook that declares its parameters is called with them as one `<Name>Call`.
         let carrier = format!("{}Call", hook_id(name));
         let declared = hook
@@ -159,7 +192,12 @@ pub(super) fn emit<'a>(
             .collect::<Result<Vec<_>, syn::Error>>()
             .map_err(|e| format!("{name}: {e}"))?;
         let mut args: Vec<(String, &Type)> = if declared.is_empty() {
-            target_parameters(name, &native, sig.inputs.len(), &carrier)?;
+            target_parameters(
+                name,
+                &native,
+                sig.inputs.len() - usize::from(inert_signal),
+                &carrier,
+            )?;
             native_args
         } else {
             let taken_ticks = native_args.iter().position(|(arg, _)| arg == "ticks");
@@ -325,6 +363,7 @@ pub(super) fn emit<'a>(
                     PartKind::BlockEntity => ("BlockEntityPart", "block_entity"),
                     PartKind::Item => ("ItemPart", "item"),
                     PartKind::Menu => ("MenuPart", "menu"),
+                    PartKind::Effect => ("MobEffectPart", "effect"),
                     PartKind::Fluid => ("FluidPart", "fluid"),
                     PartKind::Entity => ("EntityPart", "entity"),
                 };
@@ -336,6 +375,9 @@ pub(super) fn emit<'a>(
                     .find(|(arg, _)| arg == key)
                     .ok_or_else(|| format!("key {key} is not an argument of {name}"))?;
                 let key_type = ty.to_token_stream().to_string().replace("mod_api :: ", "");
+                if hook.inert.is_some() && key_type != "BlockState" {
+                    return Err(format!("inert hook {name} requires a BlockState key"));
+                }
                 let lookup = match key_type.as_str() {
                     "BlockState" if table == "block" && observer_routed => {
                         let host = &host
@@ -354,6 +396,9 @@ pub(super) fn emit<'a>(
                     }
                     "& ItemStack" => {
                         format!("{table}(|| super::content::registry_keys::item_id({key}.item()))")
+                    }
+                    "EffectKey" if table == "effect" => {
+                        format!("effect(|| super::content::registry_keys::effect_id({key}))")
                     }
                     "BlockEntityTypeKey" if table == "block_entity" => format!(
                         "block_entity_kind(|| super::content::registry_keys::block_entity_type_name({key}))"
@@ -438,7 +483,7 @@ pub(super) fn emit<'a>(
             .map(|(name, _)| format!("let mut __previous_{name} = {name}.clone();"))
             .collect::<String>();
         let stack_after = stack_outputs.iter().map(|(output, _)| format!(
-            "if *{event}.{output} != __previous_{output} {{ match __validate_{output}({event}.{output}) {{ Ok(()) => __previous_{output} = {event}.{output}.clone(), Err(error) => {{ *{event}.{output} = __previous_{output}.clone(); log::warn!(\"mod {{}} hook {name} output {output} refused: {{error:?}}\", super::content::crash::current_native_mod().unwrap_or(\"unknown\")); }} }} }}"
+            "if *{event}.{output} != __previous_{output} {{ match __validate_{output}({event}.{output}) {{ Ok(()) => __previous_{output} = {event}.{output}.clone(), Err(error) => {{ *{event}.{output} = __previous_{output}.clone(); log::warn!(\"mod {{}} hook {name} output {output} refused: {{error:?}}\", super::content::crash::current_native_mod().unwrap_or(\"unknown\")); }} }} }}\n"
         )).collect::<String>();
         let collected = output.as_ref().filter(|_| contract == Contract::Collect);
         // A draw surface reaches mods as its context's trait object, which the native call
@@ -547,7 +592,7 @@ pub(super) fn emit<'a>(
         if let Some((name, ty)) = output.as_ref().filter(|_| contract != Contract::Collect) {
             dispatch_params.push(format!("{name}: {}", ty.to_token_stream()));
         }
-        if !declared.is_empty() {
+        if !declared.is_empty() && (!declaration_only || name == "apply_effect_tick") {
             dispatch_params.truncate(usize::from(host.is_some()));
             let (fields, generics) = carrier_fields(&carried);
             dispatch_params.push(format!(
@@ -555,7 +600,7 @@ pub(super) fn emit<'a>(
                 if generics.is_empty() { "" } else { "<'_>" }
             ));
             calls.push_str(&format!(
-                "/// What the game passes `dispatch_{name}`: the hook's declared parameters.\n#[doc(hidden)]\n#[allow(missing_docs)]\n// no wire: internal call carrier, not an owned boundary value.\npub struct {carrier}{generics} {{\n{fields}}}\n"
+                "/// The hook's declared parameters at the engine boundary.\n#[doc(hidden)]\n#[allow(missing_docs)]\n// no wire: internal call carrier, not an owned boundary value.\npub struct {carrier}{generics} {{\n{fields}}}\n"
             ));
         }
         for (name, ty) in &stack_outputs {
@@ -563,6 +608,9 @@ pub(super) fn emit<'a>(
                 "__validate_{name}: &mut dyn FnMut(&{ty}) -> Result<(), StackWriteError>",
                 ty = ty.to_token_stream()
             ));
+        }
+        if inert_signal {
+            dispatch_params.push("inert: &mut bool".into());
         }
         let (generics, elided) = match (lifetimes.a, lifetimes.b) {
             (_, true) => ("<'a, 'b>", "<'_, '_>"),
@@ -593,7 +641,7 @@ pub(super) fn emit<'a>(
             _ => "",
         };
         // Reuse the exact host and drawing conversions for generated game-side calls.
-        if in_game {
+        if in_game && !declaration_only {
             // A scoped read hook can run against either the game or a borrowed
             // tick view. Its native receiver carries the selected host.
             let scoped_read_host = target.contains("::NativeHookHost<");
@@ -629,6 +677,7 @@ pub(super) fn emit<'a>(
                 } else {
                     vec!["call".to_owned()]
                 })
+                .chain(inert_signal.then(|| "inert".to_owned()))
                 .collect::<Vec<_>>()
                 .join(", ");
             let mut signature = sig.clone();
@@ -732,6 +781,7 @@ pub(super) fn emit<'a>(
                             .unwrap_or(argument)
                     }))
                     .chain(crossing.validators.iter().cloned())
+                    .chain(inert_signal.then(|| "inert".to_owned()))
                     .collect::<Vec<_>>()
                     .join(", ");
                 if guarded_carrier {
@@ -846,6 +896,9 @@ pub(super) fn emit<'a>(
         dispatch.push_str(&format!(
             "/// What [`{trait_name}::{name}`] is told. Each field is that hook's argument of the same name, described in the hook's doc.\n#[allow(missing_docs)]\n{wire_form}\npub struct {event_type}{generics} {{\n{fields}}}\n"
         ));
+        if declaration_only {
+            continue;
+        }
         let build = format!(
             "{stack_snapshots}{}let {}{event} = {event_type} {{ {} }};",
             if answered && contract == Contract::Collect {
@@ -957,6 +1010,7 @@ pub(super) fn emit<'a>(
                 format!("{cancel}; {stack_after}")
             }
         };
+        let inert_owner = fresh_name("disabled_owner", &mut used);
         let (lookup, calls) = match &scoped {
             None if matches!(name, "blocks" | "items") => (
                 String::new(),
@@ -1008,11 +1062,33 @@ pub(super) fn emit<'a>(
                         format!("super::parts(HookId::{hook_id}, \"{name}\")")
                     }
                 ),
-                format!(
-                    "for {part_item} in super::entered_parts({part_list}, \"{name}\") {{ {} }}",
-                    call(&part_item, "break"),
-                ),
+                if let Some(inert) = &hook.inert {
+                    let inert = if inert_signal {
+                        "*inert = true;"
+                    } else {
+                        inert
+                    };
+                    // The synthetic answer occupies the owner's original place in the chain.
+                    // Earlier enabled Parts still get their regular call and can answer first.
+                    format!(
+                        "'dispatch_parts: {{ for {part_item} in super::entered_parts(&{part_list}[..{inert_owner}.unwrap_or({part_list}.len())], \"{name}\") {{ {} }} if {inert_owner}.is_some() {{ {inert} }} }}",
+                        call(&part_item, "break 'dispatch_parts"),
+                    )
+                } else {
+                    format!(
+                        "for {part_item} in super::entered_parts({part_list}, \"{name}\") {{ {} }}",
+                        call(&part_item, "break"),
+                    )
+                },
             ),
+        };
+        let lookup = if hook.inert.is_some() {
+            let key = &hook.scope.as_ref().expect("inert has a block scope").key;
+            format!(
+                "{lookup}\nlet {inert_owner} = if super::any_mod_disabled() {{ super::disabled_owner_part({part_list}, super::content::registry_keys::block_id({key}.block())) }} else {{ None }};"
+            )
+        } else {
+            lookup
         };
         let write_back = if name == "block_entity_tick" {
             format!(
@@ -2282,6 +2358,40 @@ fn main() {{ game::run(std::env::args_os().nth(1).unwrap().into()); }}
                 .unwrap()
                 .success()
         );
+    }
+
+    #[test]
+    fn inert_guard_is_owned_by_the_hook_declaration() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut hook = Hook {
+            name: "probe".into(),
+            contract: Contract::Cancel,
+            out: Some("handled".into()),
+            scope: Some(crate::catalog::PartScope {
+                kind: crate::catalog::PartKind::Block,
+                key: "state".into(),
+            }),
+            inert: Some("*handled = true;".into()),
+            ..Hook::sample(
+                "sunrise_client::game::native_hooks::probe::Game<'_>::native_probe",
+                Side::Server,
+            )
+        };
+        let method: syn::ItemFn = syn::parse_quote! {
+            fn native_probe(&mut self, state: BlockStateId, handled: &mut bool) { let _ = (state, handled); }
+        };
+        let declared = emit(
+            &root,
+            std::iter::once(&hook),
+            std::slice::from_ref(&method),
+            &[],
+        )
+        .unwrap();
+        assert!(declared.dispatch.contains("disabled_owner_part"));
+        assert!(declared.dispatch.contains("*handled = true;"));
+        hook.inert = None;
+        let undeclared = emit(&root, std::iter::once(&hook), &[method], &[]).unwrap();
+        assert!(!undeclared.dispatch.contains("disabled_owner_part"));
     }
 
     #[test]

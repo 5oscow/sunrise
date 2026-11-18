@@ -29,7 +29,6 @@ SUNRISE_CLIENT = [
     # The build script and the native hook tests read the hook targets' sources.
     "crates/sunrise-client-render/src", "crates/sunrise-world/src", "crates/sunrise-items/src",
     "crates/sunrise-guest-stack/src/guest_stack_constants.rs", "crates/sunrise-mod-wasm/tests/fixture/src",
-    "crates/sunrise-mod-wasm/tests/hook-fixture/src/pending_children.rs",
     "docs/api/launch-reference.md", "docs/sunrise-ctl-commands.md", "docs/modding/examples/src/worldgen.rs",
     "docs/parity/random-chance-seeded.jsonl", "packaging/executable_link.rs", "packaging/windows/exe.rs",
     "research-lock.json", "tests/fixture_support/item_resource_properties.rs", "tests/fixtures",
@@ -116,6 +115,10 @@ NOT_READS = {
         "crates/sunrise-client/src/native_main.rs.template", "crates/sunrise-core/src", "crates/sunrise-core/src/storage.rs",
         "crates/sunrise-mod-api", "crates/sunrise-mod-host", "crates/sunrise-mod-host/Cargo.toml", "crates/sunrise-official",
         "crates/sunrise-official/Cargo.toml",
+        # The discovery tests' scratch game source (`discover_tests.rs`).
+        "crates/sunrise-client/src/entry.rs", "crates/sunrise-client/src/game.rs", "crates/sunrise-client/src/lib.rs",
+        "crates/sunrise-engine-slots/Cargo.toml", "crates/sunrise-engine-slots/src/lib.rs",
+        "crates/sunrise-mod-api-gen/internals.txt", "crates/sunrise-mod-points/Cargo.toml",
     },
 }
 

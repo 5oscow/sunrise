@@ -71,6 +71,7 @@ fn client_and_server_layouts_require_and_ship_std() {
             "sunrise-perf",
             "sunrise-prepare",
             "sunrise-server",
+            "sunrise-port-pack",
         ] {
             fs::write(source.join(format!("{name}{suffix}")), b"program").unwrap();
         }

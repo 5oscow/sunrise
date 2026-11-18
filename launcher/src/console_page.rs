@@ -428,7 +428,7 @@ impl Launcher {
     /// patterns. Dark appearance only.
     pub(super) fn glass_console(&mut self, cx: &mut Context<Self>) -> Option<Div> {
         use crate::glass_ui::{self as ui, white};
-        use sunrise_theme::glass::{ink, radius};
+        use sunrise_launcher_theme::glass::{ink, radius};
         let t = self.theme;
         let logs = self
             .client_home
@@ -672,7 +672,7 @@ impl Launcher {
                     .mx(px(12.))
                     .mb(px(12.))
                     .p(px(16.))
-                    .rounded(px(radius::LARGE))
+                    .rounded(px(crate::glass_ui::rad(radius::LARGE)))
                     .bg(white(0.04))
                     .child(div().flex_1().min_w_0().child(
                         ui::text(13., FontWeight::NORMAL, ink::SOFT).child(tr(
@@ -772,8 +772,9 @@ impl Launcher {
             .min_h_0()
             .overflow_y_scroll()
             .take_wheel(&self.console.scroll)
-            .px(px(14.))
-            .py(px(10.))
+            .p(px(16.))
+            .rounded(px(crate::glass_ui::rad(radius::ROW)))
+            .bg(gpui::black().opacity(0.25))
             .font_family(theme::MONO)
             .text_size(px(12.))
             .line_height(px(20.))
@@ -830,7 +831,7 @@ impl Launcher {
             .h(px(380.))
             .mx(px(12.))
             .mb(px(12.))
-            .rounded(px(12.))
+            .rounded(px(crate::glass_ui::rad(12.)))
             .overflow_hidden()
             .bg(gpui::black().opacity(0.42))
             .border_1()

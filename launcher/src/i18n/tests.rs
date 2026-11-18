@@ -55,14 +55,12 @@ fn strings() -> (BTreeSet<String>, BTreeSet<String>) {
         &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
         &mut files,
     );
-    sources(
-        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../crates/sunrise-mod-package/src"),
-        &mut files,
-    );
-    sources(
-        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../crates/sunrise-native-build/src"),
-        &mut files,
-    );
+    for crate_src in ["crates/smod/src", "crates/sdk/src"] {
+        sources(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join(crate_src),
+            &mut files,
+        );
+    }
     let (mut asked, mut all) = (BTreeSet::new(), BTreeSet::new());
     for file in &files {
         strings_in(

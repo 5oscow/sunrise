@@ -31,7 +31,7 @@ pub(super) enum ModKind {
 }
 
 impl ModKind {
-    pub(super) fn of(manifest: &sunrise_mod_package::manifest::Manifest) -> Self {
+    pub(super) fn of(manifest: &sunrise_launcher_smod::manifest::Manifest) -> Self {
         if manifest.native.is_some() {
             Self::Native
         } else if manifest.wasm.is_some() {
@@ -304,6 +304,10 @@ impl Launcher {
             .flex_col()
             .gap(px(8.))
             .child(text_in(13., pal.ink).child(check.summary.clone()));
+        // A refused mod stops any build: the card says which and why, and offers no update.
+        if check.blocked {
+            return self.panel().child(body.child(div().flex().child(stay)));
+        }
         if back_up {
             body = body.child(
                 text_in(13., pal.warn).child(native_mods::fit::update_worlds(&check.worlds)),
@@ -374,7 +378,7 @@ impl Launcher {
             .gap(px(12.))
             .p(px(16.))
             .when(t.glass, |d| {
-                d.rounded(px(sunrise_theme::glass::radius::LARGE))
+                d.rounded(px(ui::rad(sunrise_launcher_theme::glass::radius::LARGE)))
                     .bg(ui::white(0.04))
             })
             .when(!t.glass, |d| {
@@ -676,7 +680,7 @@ impl Launcher {
                     .children(glyph.map(|g| ui::icon(g, 12., color)))
                     .child(text_in(12., color).child(s.label()))
             }));
-        let radius = sunrise_theme::glass::radius::CONTROL;
+        let radius = sunrise_launcher_theme::glass::radius::CONTROL;
         let icons = div()
             .flex()
             .items_center()
@@ -855,6 +859,7 @@ impl Launcher {
         } else {
             match route {
                 Route::Invalid { reason } => ("information-circle", pal.warn, tr("Needs attention").into(), reason.clone()),
+                Route::Unchecked { reason } => ("information-circle", pal.warn, tr("Can't check").into(), reason.clone()),
                 Route::Prebuilt => (
                     "flash",
                     pal.accent,
@@ -902,7 +907,7 @@ impl Launcher {
                 .items_center()
                 .justify_center()
                 .size(px(28.))
-                .rounded(px(8.))
+                .rounded(px(ui::rad(8.)))
                 .bg(color.opacity(if open { 0.24 } else { 0.14 }))
                 .cursor_pointer()
                 .child(ui::icon(glyph, 16., color)),
@@ -1152,7 +1157,7 @@ impl Render for NoteTooltip {
             .flex()
             .flex_col()
             .p(px(8.))
-            .rounded(px(8.))
+            .rounded(px(ui::rad(8.)))
             .bg(self.background)
             .children(
                 self.lines
@@ -1165,7 +1170,7 @@ impl Render for NoteTooltip {
 /// Text at `size` px in `color`, in the look's face.
 fn text_in(size: f32, color: Hsla) -> Div {
     div()
-        .font_family(sunrise_theme::glass::FONT)
+        .font_family(sunrise_launcher_theme::glass::FONT)
         .text_size(px(size))
         .line_height(px((size * 1.4).round()))
         .text_color(color)

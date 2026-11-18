@@ -9,7 +9,7 @@ use crate::picture_cache::Look;
 use gpui::RenderImage;
 use std::path::Path;
 use std::sync::Arc;
-use sunrise_theme::glass::{fill, radius};
+use sunrise_launcher_theme::glass::{fill, radius};
 
 /// The blurred copy is made this wide (and 16:9 tall), its blur this many of its pixels: about
 /// the mockup's 40 px over its tiles (163 to 335 px wide).
@@ -57,12 +57,12 @@ impl Launcher {
         match self.picture(path, look, cx) {
             Some(image) => gpui::img(image)
                 .size_full()
-                .rounded(px(radius::ROW))
+                .rounded(px(crate::glass_ui::rad(radius::ROW)))
                 .object_fit(gpui::ObjectFit::Cover)
                 .into_any_element(),
             None => div()
                 .size_full()
-                .rounded(px(radius::ROW))
+                .rounded(px(crate::glass_ui::rad(radius::ROW)))
                 .bg(white(fill::HOVER))
                 .into_any_element(),
         }

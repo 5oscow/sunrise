@@ -4,13 +4,14 @@
 //! GitHub's public API to an exact **release asset** (a `.smod`, kept by its SHA-256) or an exact
 //! **commit** (the archive of that commit, whose mod folder is packed into a `.smod`), never to a
 //! branch that moves. The result passes the checks the registry's `.smod`s pass
-//! (`sunrise_mod_package::index::native::Bundle::read`) before anything is installed, and the origin is
+//! (`sunrise_launcher_smod::index::native::Bundle::read`) before anything is installed, and the origin is
 //! kept beside the file (`sunrise-native-mods/<id>.origin.json`) for "check for updates".
 //!
 //! Nothing here runs the mod's code, and nothing here trusts it: the registry has not reviewed it.
 //! Callers show [`WARNING`] and ask first (`--trust-native-code`).
 use crate::backend;
 use crate::browser::java;
+use crate::i18n::{tr, trf};
 use crate::native_mods::{self, Bundle, INSTALLED};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -218,7 +219,7 @@ fn commit_of(api: Api, link: &Link, reference: &str) -> Result<String, String> {
     })?;
     found["sha"]
         .as_str()
-        .filter(|s| sunrise_mod_package::manifest::revision(s))
+        .filter(|s| sunrise_launcher_smod::manifest::revision(s))
         .map(str::to_owned)
         .ok_or_else(|| format!("GitHub did not name the commit of {reference}."))
 }
@@ -384,11 +385,13 @@ fn checked(bytes: &[u8], dir: &Path) -> Result<Packed, String> {
     fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let file = dir.join(format!("{}.smod", &sum[..16]));
     fs::write(&file, bytes).map_err(|e| format!("{}: {e}", file.display()))?;
-    let facts =
-        sunrise_mod_package::index::inspect(&sunrise_mod_package::index::Kind::NativeMod, &file)
-            .inspect_err(|_| {
-                let _ = fs::remove_file(&file);
-            })?;
+    let facts = sunrise_launcher_smod::index::inspect(
+        &sunrise_launcher_smod::index::Kind::NativeMod,
+        &file,
+    )
+    .inspect_err(|_| {
+        let _ = fs::remove_file(&file);
+    })?;
     Ok(Packed {
         id: facts.id.expect("native bundle has an id"),
         version: facts.version.expect("native bundle has a version"),
@@ -433,7 +436,7 @@ pub fn find_mods(root: &Path) -> Result<Vec<Bundle>, String> {
 
 /// Deterministically package a validated flat mod project.
 pub fn pack(bundle: &Bundle) -> Result<Vec<u8>, String> {
-    sunrise_mod_package::Package::pack_directory(&bundle.dir)
+    sunrise_launcher_smod::Package::pack_directory(&bundle.dir)
 }
 
 fn download(url: &str) -> Result<Vec<u8>, String> {
@@ -470,7 +473,7 @@ pub fn fetch(found: &Resolved) -> Result<Vec<Packed>, String> {
         "https://codeload.github.com/{}/{}/tar.gz/{}",
         found.owner, found.repo, found.commit
     );
-    let top = native_mods::unpack_archive(&url, &dir.join("source"), MAX_ARCHIVE)?;
+    let top = unpack_archive(&url, &dir.join("source"), MAX_ARCHIVE)?;
     let mods = find_mods(&top)?;
     if mods.is_empty() {
         return Err(format!(
@@ -484,6 +487,43 @@ pub fn fetch(found: &Resolved) -> Result<Vec<Packed>, String> {
         .collect();
     let _ = fs::remove_dir_all(dir.join("source"));
     packed
+}
+
+/// GitHub's archive (`.tar.gz`) of a commit, unpacked into the fresh folder `partial` without links or more than `limit` bytes: its one top folder.
+fn unpack_source(reader: impl std::io::Read, partial: &Path) -> Result<(), String> {
+    let mut archive = tar::Archive::new(reader);
+    for entry in archive.entries().map_err(|e| e.to_string())? {
+        let mut entry =
+            entry.map_err(|e| trf("Source interrupted: {error}", &[("error", &e.to_string())]))?;
+        let kind = entry.header().entry_type();
+        // Match downloaded sources: horizon-mixins refuses links, which the build does not need.
+        if !(kind.is_file() || kind.is_dir()) {
+            continue;
+        }
+        if !entry.unpack_in(partial).map_err(|e| {
+            trf(
+                "Could not unpack the source: {error}",
+                &[("error", &e.to_string())],
+            )
+        })? {
+            return Err(tr("The source archive contains a path outside its folder.").into());
+        }
+    }
+    Ok(())
+}
+
+fn unpack_archive(url: &str, partial: &Path, limit: u64) -> Result<PathBuf, String> {
+    let _ = fs::remove_dir_all(partial);
+    fs::create_dir_all(partial).map_err(|e| e.to_string())?;
+    let reader = flate2::read::GzDecoder::new(backend::get(url)?.into_reader()).take(limit);
+    unpack_source(reader, partial)?;
+    // The archive's one top folder (<repo>-<commit>/) is the source's root.
+    fs::read_dir(partial)
+        .map_err(|e| e.to_string())?
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| p.is_dir())
+        .ok_or_else(|| tr("The source archive is empty.").into())
 }
 
 /// Deletes what [`fetch`] left for `found` (the files of mods not installed).

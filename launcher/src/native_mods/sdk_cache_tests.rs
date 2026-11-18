@@ -1,11 +1,11 @@
 use super::*;
-use sunrise_mod_package::sdk::{Build, Mixins, Surface, Toolchain};
-use sunrise_release_sign::{sha256_hex, sums_file, SigningKey};
+use sunrise_launcher_release_verify::{sha256_hex, sums_file, SigningKey};
+use sunrise_launcher_sdk::{Build, Mixins, Surface, Toolchain};
 
 const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
 const TRIPLE: &str = "x86_64-unknown-linux-gnu";
 /// An xz tar the packager wrote, holding `deps/a.rmeta`.
-const SLICE: &[u8] = include_bytes!("../../../crates/sunrise-mod-package/src/sdk/fixture.tar.xz");
+const SLICE: &[u8] = include_bytes!("../../crates/sdk/src/sdk/fixture.tar.xz");
 
 fn runtime() -> String {
     Asset::name(Kind::Runtime, TRIPLE, Side::Client)
@@ -40,13 +40,13 @@ fn index_of(files: &[(&str, &[u8])], rust: &str) -> Index {
         schema: sdk::SCHEMA,
         build: Build {
             commit: COMMIT.into(),
-            game: sdk::GAME.into(),
+            game: crate::backend::PINNED_GAME.into(),
             date: "2026-11-13".into(),
             nightly: Some("nightly-2026-11-13".into()),
         },
         package_format: sdk::PACKAGE_FORMAT,
         toolchain: Toolchain { rust: rust.into() },
-        content_api: sunrise_mod_package::manifest::API.into(),
+        content_api: sunrise_launcher_smod::manifest::API.into(),
         surface: Surface {
             hash: "ab".repeat(16),
             previous: None,
@@ -55,11 +55,11 @@ fn index_of(files: &[(&str, &[u8])], rust: &str) -> Index {
             notes: Vec::new(),
         },
         mixins: Mixins {
-            rev: sunrise_mod_package::mixins_tool::REV.into(),
-            patch: sunrise_mod_package::mixins_tool::patch_hash(),
+            rev: "e59da9094f0c2fdda6c627fe9eff22dec6a906f0".into(),
+            patch: "52eaeef7cac10d894066635dc46b12f76d877416317f06eaf385f176de5e1c35".into(),
         },
         assets,
-        inputs: sdk::inputs(),
+        inputs: serde_json::from_str(include_str!("../../crates/sdk/src/sdk/inputs.json")).unwrap(),
     }
 }
 
@@ -245,7 +245,7 @@ fn the_api_route_fetches_its_two_slices_only_and_reuses_them_on_their_stamps() {
         &prebuilt,
         &sdk,
         &fixture.base(),
-        Route::Api,
+        "prebuilt-api",
         TRIPLE,
         Side::Client,
         &|fetched| heard.borrow_mut().push(fetched),
@@ -268,7 +268,7 @@ fn the_api_route_fetches_its_two_slices_only_and_reuses_them_on_their_stamps() {
         &prebuilt,
         &sdk,
         &fixture.base(),
-        Route::Engine,
+        "prebuilt",
         TRIPLE,
         Side::Client,
         &|_| {},
@@ -282,7 +282,7 @@ fn the_api_route_fetches_its_two_slices_only_and_reuses_them_on_their_stamps() {
         &prebuilt,
         &sdk,
         &fixture.base(),
-        Route::Api,
+        "prebuilt-api",
         TRIPLE,
         Side::Client,
         &|fetched| heard.borrow_mut().push(fetched),
@@ -301,7 +301,7 @@ fn the_api_route_fetches_its_two_slices_only_and_reuses_them_on_their_stamps() {
             &prebuilt,
             &sdk,
             &fixture.base(),
-            Route::Api,
+            "prebuilt-api",
             TRIPLE,
             Side::Client,
             &|_| {},
@@ -312,7 +312,7 @@ fn the_api_route_fetches_its_two_slices_only_and_reuses_them_on_their_stamps() {
             &prebuilt,
             &sdk,
             &fixture.base(),
-            Route::Api,
+            "prebuilt-api",
             TRIPLE,
             Side::Client,
             &|_| {},
@@ -342,7 +342,7 @@ fn a_stamp_from_another_index_is_not_trusted() {
         &prebuilt,
         &sdk,
         &fixture.base(),
-        Route::Api,
+        "prebuilt-api",
         TRIPLE,
         Side::Client,
         &|_| {},
@@ -383,7 +383,7 @@ fn a_game_release_names_its_build_through_its_signed_index() {
     let current = "nightly-2026-11-14-0123456";
     publish(
         &base,
-        sunrise_release_sign::NIGHTLY,
+        sunrise_launcher_release_verify::NIGHTLY,
         current,
         &fixture.key,
         index.as_bytes(),
@@ -427,7 +427,10 @@ fn a_game_release_names_its_build_through_its_signed_index() {
     // A snapshot is never read as a Nightly: a snapshot's index and signature served under the
     // Nightly's tags, for a Nightly version of the same date and commit, are refused.
     let as_nightly = "nightly-2026-11-15-0123456";
-    for tag in [sunrise_release_sign::NIGHTLY, "nightly-2026-11-15"] {
+    for tag in [
+        sunrise_launcher_release_verify::NIGHTLY,
+        "nightly-2026-11-15",
+    ] {
         publish(
             &base,
             tag,
@@ -529,4 +532,19 @@ fn a_refusal_offers_the_way_on_its_text_promises() {
         );
     }
     assert_eq!(way(Refusal::Host), None);
+}
+
+#[test]
+fn a_developer_tool_is_honoured_by_a_debug_launcher_or_for_a_developer_base_only() {
+    let _guard = super::super::tests::scratch_state();
+    let program =
+        std::env::temp_dir().join(format!("sunrise-developer-tool-{}", std::process::id()));
+    fs::write(&program, "").unwrap();
+    std::env::set_var(DEVELOPER_TOOL, &program);
+    let any_mod = developer_tool(false);
+    let developer_base = developer_tool(true);
+    std::env::remove_var(DEVELOPER_TOOL);
+    fs::remove_file(&program).unwrap();
+    assert_eq!(any_mod.is_some(), cfg!(debug_assertions));
+    assert_eq!(developer_base, Some(program));
 }

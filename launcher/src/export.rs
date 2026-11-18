@@ -11,12 +11,12 @@
 //! listed by its download (`files`, with its SHA-1 and SHA-512) instead of being copied; the
 //! rest goes under `overrides/`, which a launcher copies into the game folder.
 use crate::browser::installed::{Entry, Installed};
-use crate::browser::{FileRef, Kind, SourceId, GAME};
+use crate::browser::{FileRef, Kind, SourceId};
 use sha2::Digest;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use sunrise_platform::world::nbt::{self, Limits, Tag};
+use sunrise_launcher_nbt::{self as nbt, Limits, Tag};
 
 /// The game folder's own files that are the instance's settings.
 pub const FILES: [&str; 6] = [
@@ -174,7 +174,7 @@ fn index(name: &str, linked: &[&Linked]) -> serde_json::Value {
         "name": name,
         "summary": format!("{name}, exported from Sunrise."),
         "files": files,
-        "dependencies": { "minecraft": GAME },
+        "dependencies": { "minecraft": crate::browser::game() },
     })
 }
 
