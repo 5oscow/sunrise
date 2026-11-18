@@ -1538,8 +1538,8 @@ sunrise-client game::native_hooks::runtime_environment::tests::native_process_en
 sunrise-client game::native_hooks::server_tick_rate_changed::server_tick_rate_changed_tests::a_listener_runs_before_the_autosave_wait_is_adjusted lib daily resources
 sunrise-client game::native_hooks::server_tick_rate_changed::server_tick_rate_changed_tests::a_mod_hears_every_route_of_on_tick_rate_changed_once lib daily resources
 sunrise-client game::native_hooks::tests::a_trait_mod_measures_text_through_its_draw_context lib daily resources
-sunrise-client game::native_hooks::tests::client_host_reads_current_pause_state lib daily resources
-sunrise-client game::native_hooks::tests::client_host_reads_playing_and_key_mappings lib daily resources
+sunrise-client game::native_hooks::runtime_environment_tests::client_host_reads_current_pause_state lib daily resources
+sunrise-client game::native_hooks::runtime_environment_tests::client_host_reads_playing_and_key_mappings lib daily resources
 sunrise-client game::native_hooks::tests::declared_types_create_tick_and_reload_through_game lib daily resources
 sunrise-client game::native_hooks::tests::enchantment_registry_returns_records_and_unknown_cost lib daily resources
 sunrise-client game::native_hooks::tests::generated_fire_matches_dispatch lib daily resources
