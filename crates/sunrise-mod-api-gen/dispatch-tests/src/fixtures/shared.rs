@@ -132,8 +132,7 @@ mod generated {
         // The generated standalone-model dispatch builds the stub `Answered` and names the type through this path.
         pub(super) use super::super::Answered;
         pub(super) use super::super::{
-            Command, Config, Dispensed, InteractionResult, MapDecoration, MapInfo, Minimap, Screen,
-            Zoom,
+            Command, Config, Dispensed, InteractionResult, MapDecoration, MapInfo, Screen, Zoom,
         };
         pub struct FluidModel;
         #[derive(Clone, Copy)]

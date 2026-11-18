@@ -891,10 +891,6 @@ impl Game<'_> {
     pub(in crate::game) fn native_shader_params(&self, partial: f32, params: &mut [[f32; 4]; 8]) {
         self.fire_shader_params(partial, params);
     }
-    /// The minimap a native mod shows: set `minimap` when it is none yet.
-    pub(in crate::game) fn native_minimap(&self, minimap: &mut Option<mod_api::Minimap>) {
-        self.fire_minimap(minimap);
-    }
     /// Register namespaced NBT component types before content loads.
     pub(in crate::game) fn native_component_types(
         context: &mod_api::RegistrationContext,

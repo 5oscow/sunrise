@@ -307,7 +307,7 @@ mod tests {
             asked.push(file.to_owned());
             match file {
                 // The engine's own lines, and a key the store's name merely starts.
-                "sunrise-extras.txt" => Some("fps:true\nzoom : true\nzoomLevel:4\n".into()),
+                "sunrise-extras.txt" => Some("sort:true\nzoom : true\nzoomLevel:4\n".into()),
                 _ => Some("zoom:true\nrumble:maybe\n".into()),
             }
         });
@@ -326,9 +326,9 @@ mod tests {
         let zoom = Switch::new("sunrise-extras.txt", "zoom");
         let pad = Switch::new("sunrise-pad.txt", "rumble");
         let stores: [&dyn Store; 2] = [&zoom, &pad];
-        let mut text = "fps:true\n".to_owned();
+        let mut text = "sort:true\n".to_owned();
         assert!(append_lines(&stores, "sunrise-extras.txt", &mut text));
-        assert_eq!(text, "fps:true\nzoom:false\n");
+        assert_eq!(text, "sort:true\nzoom:false\n");
         zoom.set(true);
         let mut text = String::new();
         assert!(!append_lines(&stores, "sunrise-extras.txt", &mut text));

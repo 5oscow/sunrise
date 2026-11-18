@@ -80,7 +80,6 @@ pub mod mark_sprite;
 pub mod menu_blur;
 pub mod menu_style;
 pub mod mesher;
-pub mod minimap;
 pub mod mipmap;
 pub mod mod_animations;
 pub mod mod_block_state_models;
