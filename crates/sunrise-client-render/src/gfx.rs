@@ -600,6 +600,9 @@ pub struct Renderer {
     depth: wgpu::TextureView,
     sections: resident::Resident<SectionGpu>,
     lods: FxHashMap<crate::lod::TileKey, lod::Tile>,
+    /// The same tiles by cell (`lod::TileGrid`), to test them a handful of
+    /// boxes at a time (`draw_frame`).
+    lod_cells: lod::TileGrid,
     /// Far tiles' occlusion culling slots (`lod::Tile::cull_slot`): those
     /// free, and the next never used.
     lod_cull_free: Vec<u32>,
@@ -3396,6 +3399,7 @@ impl Renderer {
             depth,
             sections: resident::Resident::default(),
             lods: FxHashMap::default(),
+            lod_cells: lod::TileGrid::default(),
             lod_cull_free: Vec::new(),
             lod_cull_next: 0,
             lod_cutout: Default::default(),
