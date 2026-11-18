@@ -17,7 +17,7 @@ pub trait Hooks {
     /// `origin` is the panel's top-left in the same coordinates. The pointer may
     /// be outside the panel; use these frame values rather than caching a size.
     #[hook(
-        version = 4,
+        version = 3,
         side = "client",
         contract = "collect",
         out = "lines",
