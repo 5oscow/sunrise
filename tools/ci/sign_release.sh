@@ -48,15 +48,16 @@ if [[ -n "$launcher_for" ]]; then
 fi
 rm -f "$dir/SHA256SUMS.sig" "$dir/SHA256SUMS.v2.sig" "$dir/SHA256SUMS.launcher.sig" "$dir/ephemeral.pub"
 
-sign_one() {  # key file, message file, signature file to append to
-  "$openssl" pkeyutl -sign -rawin -inkey "$1" -keyform DER -in "$2" -out "$work/signature"
+sign_one() {  # base64 key, message file, signature file to append to
+  # The key reaches OpenSSL through an anonymous pipe: never a file, an argument or output.
+  "$openssl" pkeyutl -sign -rawin -inkey /dev/fd/3 -keyform DER -in "$2" -out "$work/signature" 3< <(printf '%s' "$1" | base64 --decode)
   # base64 of the 64 bytes on one line (GNU base64 wraps at 76 characters).
   base64 < "$work/signature" | tr -d '\n' >> "$3"
   echo >> "$3"
   rm -f "$work/signature"
 }
 
-sign_with() {  # the key file in $1: both messages, then the key goes
+sign_with() {  # the base64 key in $1: every message
   sign_one "$1" "$work/message" "$dir/SHA256SUMS.sig"
   if [[ -n "$also" ]]; then
     sign_one "$1" "$work/message.v2" "$dir/SHA256SUMS.v2.sig"
@@ -64,19 +65,16 @@ sign_with() {  # the key file in $1: both messages, then the key goes
   if [[ -n "$launcher_for" ]]; then
     sign_one "$1" "$work/message.launcher" "$dir/SHA256SUMS.launcher.sig"
   fi
-  rm -f "$1"
 }
 
 if [[ -n "${EPHEMERAL:-}" ]]; then
-  "$openssl" genpkey -algorithm ed25519 -outform DER -out "$work/key"
-  "$openssl" pkey -inform DER -in "$work/key" -pubout -outform DER | tail -c 32 | base64 > "$dir/ephemeral.pub"
-  sign_with "$work/key"
+  ephemeral=$("$openssl" genpkey -algorithm ed25519 -outform DER | base64 | tr -d '\n')
+  printf '%s' "$ephemeral" | base64 --decode | "$openssl" pkey -inform DER -pubout -outform DER | tail -c 32 | base64 > "$dir/ephemeral.pub"
+  sign_with "$ephemeral"
 else
   for name in RELEASE_SIGNING_KEY RELEASE_SIGNING_KEY_NEXT; do
     if [[ -n "${!name:-}" ]]; then
-      # From the environment into a private temporary file: never an argument, never printed.
-      printf '%s' "${!name}" | base64 --decode > "$work/key"
-      sign_with "$work/key"
+      sign_with "${!name}"
     fi
   done
 fi

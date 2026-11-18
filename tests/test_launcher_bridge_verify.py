@@ -1,4 +1,5 @@
 """launcher-bridge.yml: sign_release.sh signs a launcher release for both tags, and verify_launcher_release.sh accepts only what was signed."""
+import base64
 import shutil
 import subprocess
 import tempfile
@@ -57,6 +58,18 @@ class LauncherBridge(unittest.TestCase):
         self.assertFalse(self.sign(launcher_for="v1.2.0"))
         self.assertFalse(self.sign(tag="nightly", launcher_for="v1.1.0"))
         self.assertFalse(self.sign(launcher_for="v1.1.0-rc1"))
+
+    def test_a_release_key_from_the_environment_signs_both(self):
+        der = subprocess.run(["openssl", "genpkey", "-algorithm", "ed25519", "-outform", "DER"], check=True, capture_output=True).stdout
+        public = subprocess.run(["openssl", "pkey", "-inform", "DER", "-pubout", "-outform", "DER"], input=der, check=True, capture_output=True).stdout[-32:]
+        keys = self.work / "release-keys.txt"
+        keys.write_text(base64.b64encode(public).decode() + "\n")
+        env = {"PATH": "/usr/bin:/bin", "LAUNCHER_FOR": "v1.1.0", "RELEASE_SIGNING_KEY": base64.b64encode(der).decode()}
+        files = [str(self.dist / name) for name in ASSETS]
+        subprocess.run(["bash", SIGN, "launcher@1.1.0", *files], env=env, check=True, capture_output=True)
+        self.assertFalse((self.dist / "ephemeral.pub").exists())
+        self.assertTrue(self.accepts("launcher@1.1.0", keys, self.dist / "SHA256SUMS.sig"))
+        self.assertTrue(self.accepts("v1.1.0", keys, self.dist / "SHA256SUMS.launcher.sig"))
 
     def test_without_a_listed_key_nothing_passes(self):
         self.assertTrue(self.sign())

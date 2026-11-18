@@ -24,20 +24,21 @@ env:
   VERSION: ${{ inputs.version }}
 
 jobs:
-  # The draft's files, exactly SHA256SUMS's and built by sunrise-launcher's release.yml on its main at the tagged commit (build provenance), and nothing published yet under either tag.
-  check:
+  # From main only, and the only reader of the draft: GitHub shows a draft only to a push-capable token, so this job holds the sunny App key and runs no repository code.
+  fetch:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
       dry_run: ${{ steps.mode.outputs.dry_run }}
+      release_id: ${{ steps.draft.outputs.release_id }}
+      commit: ${{ steps.draft.outputs.commit }}
     steps:
       - id: mode
         env:
           ASKED: ${{ inputs.dry_run }}
         run: |
-          dry=true
-          [[ "$GITHUB_REF" == refs/heads/main && "$ASKED" == false ]] && dry=false
-          echo "dry_run=$dry" >> "$GITHUB_OUTPUT"
+          [[ "$GITHUB_REF" == refs/heads/main ]] || { echo "::error::the bridge runs from main only, dry runs included"; exit 1; }
+          echo "dry_run=$([[ "$ASKED" == false ]] && echo false || echo true)" >> "$GITHUB_OUTPUT"
       - name: The version is a stable X.Y.Z newer than launcher@1.0.1, and launcher@X.Y.Z is not here yet
         env:
           GH_TOKEN: ${{ github.token }}
@@ -59,9 +60,8 @@ jobs:
           private-key: ${{ secrets.SUNNY_APP_PRIVATE_KEY }}
           owner: sunrise-org
           repositories: sunrise-launcher
-          # GitHub shows draft releases and their files only to a token with push access; this one only reads.
           permission-contents: write
-      - name: The draft v${{ inputs.version }} and its files
+      - name: The draft v${{ inputs.version }}, its tag's commit and its files
         id: draft
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
@@ -70,35 +70,61 @@ jobs:
           tag="v$VERSION"
           gh api --paginate "repos/$LAUNCHER_REPOSITORY/releases" --jq ".[] | select(.tag_name == \"$tag\")" | jq -s . > "$RUNNER_TEMP/releases.json"
           [[ "$(jq length "$RUNNER_TEMP/releases.json")" == 1 && "$(jq '.[0].draft' "$RUNNER_TEMP/releases.json")" == true ]] ||
-            { echo "::error::$LAUNCHER_REPOSITORY has no single unsigned draft $tag (run its release.yml first)"; exit 1; }
+            { echo "::error::$LAUNCHER_REPOSITORY has no single draft $tag (run its release.yml first)"; exit 1; }
+          echo "release_id=$(jq -r '.[0].id' "$RUNNER_TEMP/releases.json")" >> "$GITHUB_OUTPUT"
           ref=$(gh api "repos/$LAUNCHER_REPOSITORY/git/ref/tags/$tag")
           [[ "$(jq -r .object.type <<< "$ref")" == commit ]] || { echo "::error::$tag is not a lightweight tag of a commit"; exit 1; }
           echo "commit=$(jq -r .object.sha <<< "$ref")" >> "$GITHUB_OUTPUT"
           mkdir dist
-          jq -r '.[0].assets[] | "\(.id) \(.name)"' "$RUNNER_TEMP/releases.json" | while read -r id name; do
+          # A SHA256SUMS.sig is an earlier attempt's signature: publish compares it with this run's, so it isn't fetched.
+          jq -r '.[0].assets[] | select(.name != "SHA256SUMS.sig") | "\(.id) \(.name)"' "$RUNNER_TEMP/releases.json" | while read -r id name; do
             [[ "$name" =~ ^(SHA256SUMS|sunrise-launcher-[A-Za-z0-9._-]+)$ ]] || { echo "::error::the draft holds $name"; exit 1; }
             gh api -H 'Accept: application/octet-stream' "repos/$LAUNCHER_REPOSITORY/releases/assets/$id" > "dist/$name"
           done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: draft
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 3
+
+  # No secret: the files are exactly SHA256SUMS's, and exactly the release record that sunrise-launcher's release.yml attested on a dispatch from main at the tag's commit.
+  check:
+    needs: fetch
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: repo
-          sparse-checkout: tools/ci/verify_launcher_release.sh
+          sparse-checkout: |
+            tools/ci/verify_launcher_release.sh
+            tools/ci/check_launcher_release_record.py
           sparse-checkout-cone-mode: false
           persist-credentials: false
-      - name: Exactly SHA256SUMS's files, unsigned, each matching
-        run: |
-          [[ ! -e dist/SHA256SUMS.sig && ! -e dist/SHA256SUMS.launcher.sig ]] || { echo "::error::the draft is already signed"; exit 1; }
-          bash repo/tools/ci/verify_launcher_release.sh dist
-      - name: Built by sunrise-launcher's release.yml on main, at the tagged commit, on GitHub's runners
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: draft
+          path: dist
+          digest-mismatch: error
+      - name: Exactly SHA256SUMS's files, each matching
+        run: bash repo/tools/ci/verify_launcher_release.sh dist
+      - name: Exactly the attested release record, and every file's build provenance
         env:
           GH_TOKEN: ${{ github.token }}
-          COMMIT: ${{ steps.draft.outputs.commit }}
+          COMMIT: ${{ needs.fetch.outputs.commit }}
         run: |
+          set -euo pipefail
+          verify() {
+            gh attestation verify "$1" -R "$LAUNCHER_REPOSITORY" --signer-workflow "$LAUNCHER_REPOSITORY/.github/workflows/release.yml" \
+              --source-ref refs/heads/main --source-digest "$COMMIT" --deny-self-hosted-runners --format json "${@:2}"
+          }
+          first=$(cd dist && find . -maxdepth 1 -name 'sunrise-launcher-*' -printf '%f\n' | sort | head -1)
+          verify "dist/$first" --predicate-type https://playsunrise.net/attestation/launcher-release/v1 > "$RUNNER_TEMP/record.json"
+          python3 -I repo/tools/ci/check_launcher_release_record.py --attestations "$RUNNER_TEMP/record.json" --tag "v$VERSION" --commit "$COMMIT" --dist dist
           for file in dist/sunrise-launcher-*; do
-            gh attestation verify "$file" -R "$LAUNCHER_REPOSITORY" \
-              --signer-workflow "$LAUNCHER_REPOSITORY/.github/workflows/release.yml" \
-              --source-ref refs/heads/main --source-digest "$COMMIT" --deny-self-hosted-runners > /dev/null
-            echo "$file: built by release.yml at $COMMIT"
+            [[ "$(verify "$file" | jq -r '[.[].verificationResult.signature.certificate.buildTrigger] | unique | join(",")')" == workflow_dispatch ]] ||
+              { echo "::error::$file's provenance isn't only from a dispatch"; exit 1; }
           done
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -109,10 +135,10 @@ jobs:
 
   # The only job that holds this repository's release key, bound only on a real run; it runs nothing from the repository but sign_release.sh and the check.
   sign:
-    needs: check
+    needs: [fetch, check]
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    environment: ${{ needs.check.outputs.dry_run == 'false' && 'release' || '' }}
+    environment: ${{ needs.fetch.outputs.dry_run == 'false' && 'release' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -129,9 +155,9 @@ jobs:
           digest-mismatch: error
       - name: Sign SHA256SUMS for launcher@${{ inputs.version }} and for the launcher's v${{ inputs.version }}
         env:
-          DRY_RUN: ${{ needs.check.outputs.dry_run }}
-          RELEASE_SIGNING_KEY: ${{ needs.check.outputs.dry_run == 'false' && secrets.RELEASE_SIGNING_KEY || '' }}
-          RELEASE_SIGNING_KEY_NEXT: ${{ needs.check.outputs.dry_run == 'false' && secrets.RELEASE_SIGNING_KEY_NEXT || '' }}
+          DRY_RUN: ${{ needs.fetch.outputs.dry_run }}
+          RELEASE_SIGNING_KEY: ${{ needs.fetch.outputs.dry_run == 'false' && secrets.RELEASE_SIGNING_KEY || '' }}
+          RELEASE_SIGNING_KEY_NEXT: ${{ needs.fetch.outputs.dry_run == 'false' && secrets.RELEASE_SIGNING_KEY_NEXT || '' }}
         run: |
           set -euo pipefail
           if [[ "$DRY_RUN" == false ]]; then
@@ -144,7 +170,7 @@ jobs:
           cmp "$RUNNER_TEMP/draft-SHA256SUMS" dist/SHA256SUMS || { echo "::error::the draft's SHA256SUMS differs from the files'"; exit 1; }
       - name: Both signatures check with the key launchers trust
         env:
-          DRY_RUN: ${{ needs.check.outputs.dry_run }}
+          DRY_RUN: ${{ needs.fetch.outputs.dry_run }}
         run: |
           set -euo pipefail
           keys=crates/sunrise-release-sign/release-keys.txt
@@ -160,10 +186,10 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
-  # A real run on main only: rechecks everything with the key launchers trust, then publishes the launcher's vX.Y.Z and launcher@X.Y.Z here.
+  # A real run only: rechecks with the key launchers trust, then publishes the checked draft (by its id) and launcher@X.Y.Z here.
   publish:
-    needs: [check, sign]
-    if: needs.check.outputs.dry_run == 'false'
+    needs: [fetch, check, sign]
+    if: needs.fetch.outputs.dry_run == 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -201,26 +227,33 @@ jobs:
           owner: sunrise-org
           repositories: sunrise-launcher
           permission-contents: write
-      - name: Publish v${{ inputs.version }} in sunrise-launcher, its draft unchanged and now signed
+      - name: Publish v${{ inputs.version }} in sunrise-launcher, exactly as checked and signed
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
+          RELEASE_ID: ${{ needs.fetch.outputs.release_id }}
         run: |
           set -euo pipefail
-          tag="v$VERSION"
-          gh api --paginate "repos/$LAUNCHER_REPOSITORY/releases" --jq ".[] | select(.tag_name == \"$tag\")" | jq -s . > release.json
-          [[ "$(jq length release.json)" == 1 ]] || { echo "::error::$tag is not one release"; exit 1; }
-          if [[ "$(jq '.[0].draft' release.json)" == false ]]; then
-            # A re-run after this step went through: only the same signature may already be there.
-            [[ "$(jq -r '.[0].assets[] | select(.name == "SHA256SUMS.sig") | .digest' release.json)" == "sha256:$(sha256sum < dist/SHA256SUMS.launcher.sig | cut -d' ' -f1)" ]] ||
-              { echo "::error::$tag is published, and not with this signature"; exit 1; }
-            exit 0
+          digest() { echo "sha256:$(sha256sum < "$1" | cut -d' ' -f1)"; }
+          payload=$( (cd dist && for f in sunrise-launcher-* SHA256SUMS; do echo "$f $(digest "$f")"; done) | sort)
+          signed=$( (echo "$payload"; echo "SHA256SUMS.sig $(digest dist/SHA256SUMS.launcher.sig)") | sort)
+          release() { gh api "repos/$LAUNCHER_REPOSITORY/releases/$RELEASE_ID"; }
+          assets() { jq -r '.assets[] | "\(.name) \(.digest)"' <<< "$1" | sort; }
+          now=$(release)
+          [[ "$(jq -r .tag_name <<< "$now")" == "v$VERSION" ]] || { echo "::error::release $RELEASE_ID is no longer v$VERSION"; exit 1; }
+          if [[ "$(jq .draft <<< "$now")" == true ]]; then
+            # Unchanged since it was checked; an earlier attempt's signature is the same bytes (Ed25519 is deterministic).
+            if [[ "$(assets "$now")" == "$payload" ]]; then
+              cp dist/SHA256SUMS.launcher.sig "$RUNNER_TEMP/SHA256SUMS.sig"
+              gh api -X POST "https://uploads.github.com/repos/$LAUNCHER_REPOSITORY/releases/$RELEASE_ID/assets?name=SHA256SUMS.sig" \
+                -H 'Content-Type: application/octet-stream' --input "$RUNNER_TEMP/SHA256SUMS.sig" > /dev/null
+              now=$(release)
+            fi
+            [[ "$(assets "$now")" == "$signed" ]] || { echo "::error::draft v$VERSION changed since it was checked"; exit 1; }
+            gh api -X PATCH "repos/$LAUNCHER_REPOSITORY/releases/$RELEASE_ID" -F draft=false -f make_latest=true > /dev/null
+            now=$(release)
           fi
-          expected=$( (cd dist && for f in sunrise-launcher-* SHA256SUMS; do echo "$f sha256:$(sha256sum < "$f" | cut -d' ' -f1)"; done) | sort)
-          present=$(jq -r '.[0].assets[] | "\(.name) \(.digest)"' release.json | sort)
-          [[ "$expected" == "$present" ]] || { echo "::error::the draft $tag changed since it was checked"; exit 1; }
-          cp dist/SHA256SUMS.launcher.sig "$RUNNER_TEMP/SHA256SUMS.sig"
-          gh release upload "$tag" -R "$LAUNCHER_REPOSITORY" "$RUNNER_TEMP/SHA256SUMS.sig"
-          gh api -X PATCH "repos/$LAUNCHER_REPOSITORY/releases/$(jq -r '.[0].id' release.json)" -F draft=false -f make_latest=true > /dev/null
+          [[ "$(jq .draft <<< "$now")" == false && "$(assets "$now")" == "$signed" ]] ||
+            { echo "::error::v$VERSION is public but not exactly the signed release: check it now"; exit 1; }
       - name: Tag launcher@${{ inputs.version }} here, never over another tag
         env:
           GH_TOKEN: ${{ github.token }}
