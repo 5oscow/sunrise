@@ -430,8 +430,8 @@ impl References<'_> {
         };
         let mut ids = Vec::new();
         recipe_ids(&recipe, &mut ids);
-        for id in ids {
-            self.id_in_registry(name, &id, "item", "the ingredient or result");
+        for (field, id) in ids {
+            self.id_in_registry(name, id, "item", &format!("the recipe item at {field}"));
         }
         Ok(())
     }
@@ -779,8 +779,8 @@ fn type_of(object: &Value) -> Option<&str> {
 /// The item ids of a recipe, read as the recipe kinds the game knows read them: each kind's
 /// ingredient fields and its `result`. A recipe of another kind (a mod's own, with fields only it
 /// reads) and the data beside the ids (`components`, `group`, `category`) name nothing.
-fn recipe_ids(recipe: &Value, out: &mut Vec<String>) {
-    let Some(kind) = recipe.get("type").and_then(Value::as_str) else {
+fn recipe_ids<'v>(recipe: &'v Value, out: &mut Vec<(String, &'v str)>) {
+    let Some(kind) = type_of(recipe) else {
         return;
     };
     let (ingredients, keyed, result): (&[&str], bool, bool) =
@@ -797,17 +797,22 @@ fn recipe_ids(recipe: &Value, out: &mut Vec<String>) {
         };
     for field in ingredients {
         if let Some(ingredient) = recipe.get(field) {
-            ingredient_ids(ingredient, out);
+            ingredient_ids(ingredient, field, out);
         }
     }
     if keyed && let Some(Value::Object(key)) = recipe.get("key") {
-        key.values()
-            .for_each(|ingredient| ingredient_ids(ingredient, out));
+        for (symbol, ingredient) in key {
+            ingredient_ids(ingredient, &format!("key[{symbol:?}]"), out);
+        }
     }
     if result {
         match recipe.get("result") {
-            Some(Value::String(id)) => out.push(id.clone()),
-            Some(stack) => out.extend(stack.get("id").and_then(Value::as_str).map(str::to_owned)),
+            Some(Value::String(id)) => out.push(("result".to_owned(), id)),
+            Some(stack) => {
+                if let Some(id) = stack.get("id").and_then(Value::as_str) {
+                    out.push(("result.id".to_owned(), id));
+                }
+            }
             None => {}
         }
     }
@@ -816,17 +821,27 @@ fn recipe_ids(recipe: &Value, out: &mut Vec<String>) {
 /// The item ids an ingredient names: an id, a list of ingredients, or an ingredient type's own
 /// fields (`neoforge:compound`, `difference`, `components`...). A `#tag` and a type only a mod
 /// reads name no id.
-fn ingredient_ids(ingredient: &Value, out: &mut Vec<String>) {
+fn ingredient_ids<'v>(ingredient: &'v Value, path: &str, out: &mut Vec<(String, &'v str)>) {
     match ingredient {
-        Value::String(id) if !id.starts_with('#') => out.push(id.clone()),
-        Value::Array(list) => list.iter().for_each(|i| ingredient_ids(i, out)),
+        Value::String(id) if !id.starts_with('#') => out.push((path.to_owned(), id)),
+        Value::Array(list) => {
+            for (index, entry) in list.iter().enumerate() {
+                ingredient_ids(entry, &format!("{path}[{index}]"), out);
+            }
+        }
         Value::Object(object) => {
             let kind = object
-                .get("type")
-                .or_else(|| object.get("neoforge:ingredient_type"))
+                .get("neoforge:ingredient_type")
+                .or_else(|| object.get("type"))
                 .and_then(Value::as_str);
             let fields: &[&str] = match kind {
-                Some("neoforge:compound" | "neoforge:intersection") => &["children", "ingredients"],
+                // WalkedIngredient uses `ingredients` only if `children` is absent.
+                Some("neoforge:compound" | "neoforge:intersection")
+                    if object.contains_key("children") =>
+                {
+                    &["children"]
+                }
+                Some("neoforge:compound" | "neoforge:intersection") => &["ingredients"],
                 Some("neoforge:difference") => &["base", "subtracted"],
                 Some("neoforge:custom_display") => &["base"],
                 Some("neoforge:components") => &["items"],
@@ -836,7 +851,7 @@ fn ingredient_ids(ingredient: &Value, out: &mut Vec<String>) {
             };
             for field in fields {
                 if let Some(part) = object.get(*field) {
-                    ingredient_ids(part, out);
+                    ingredient_ids(part, &format!("{path}.{field}"), out);
                 }
             }
         }
@@ -1066,10 +1081,36 @@ mod tests {
         let recipe = r#"{"type":"minecraft:crafting_shaped","pattern":["S"],"key":{"S":"gb:shrad"},"result":{"id":"minecraft:stick","count":1}}"#;
         let e = errors(&[("data/gb/recipe/slab.json", recipe)]);
         assert_eq!(e.len(), 1, "{e:?}");
-        assert_eq!(
-            e[0],
-            "data/gb/recipe/slab.json: the ingredient or result gb:shrad is not an item this mod declares (declared: shard, slab). Did you mean gb:shard? Fix the id."
-        );
+        assert!(e[0].starts_with("data/gb/recipe/slab.json:"));
+        assert!(e[0].contains("key[\"S\"]"));
+        assert!(e[0].contains("gb:shrad is not an item"));
+        assert!(e[0].contains("Did you mean gb:shard?"));
+    }
+
+    #[test]
+    fn an_ingredient_checks_only_the_selected_children_field() {
+        let file = "data/gb/recipe/slab.json";
+        for kind in ["compound", "intersection"] {
+            let recipe = |fields: &str| {
+                format!(
+                    r#"{{"type":"minecraft:stonecutting","ingredient":{{"neoforge:ingredient_type":"neoforge:{kind}",{fields}}},"result":{{"id":"gb:slab"}}}}"#
+                )
+            };
+            clean(
+                MANIFEST,
+                &[(
+                    file,
+                    &recipe(r#""children":["gb:shard"],"ingredients":["gb:missing"]"#),
+                )],
+            );
+            for field in ["children", "ingredients"] {
+                let e = errors(&[(file, &recipe(&format!(r#""{field}":["gb:missing"]"#)))]);
+                assert_eq!(e.len(), 1, "{e:?}");
+                assert!(e[0].starts_with(file));
+                assert!(e[0].contains(&format!("ingredient.{field}[0]")));
+                assert!(e[0].contains("gb:missing is not an item"));
+            }
+        }
     }
 
     #[test]
