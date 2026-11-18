@@ -8,8 +8,9 @@ behaviour, the disabled block is inert rather than inheriting its vanilla templa
   to any Part, including enabled Parts. Re-enabling the owner dispatches each held occurrence once,
   with its original deadline, priority and order.
 - `can_be_hydrated` leaves the farmland's moisture and block state unchanged unless an earlier
-  enabled Part finds a fluid that waters it. Moisture and dry-out checks resume when the owner
-  is switched back on. Farmland without a hydration Part from its owner follows its usual rules.
+  enabled Part finds a fluid that waters it. Rain and session water tickets do not wet held
+  farmland. Moisture and dry-out checks resume when the owner is switched back on. Farmland
+  without a hydration Part from its owner follows its usual rules.
 - `update_shape` keeps the input state. `can_survive` keeps the existing block, including a block
   settling after a piston move or a fall. `may_place_on` and `can_sustain_plant` likewise keep
   a plant that already occupies the cell or is settling there. These survival rules do not let a player bypass support checks to place a new block or plant.

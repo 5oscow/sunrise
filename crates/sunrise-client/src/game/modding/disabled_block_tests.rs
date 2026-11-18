@@ -58,15 +58,41 @@ mod tests {
             Some((Some(remainder), 0))
         }
     }
-    struct HydratesWith(&'static str);
+    struct HydratesWithWater;
     #[mod_api::sunrise_part]
-    impl BlockPart for HydratesWith {
+    impl BlockPart for HydratesWithWater {
         fn can_be_hydrated(
             &self,
             _: &dyn mod_api::LevelHost,
             event: &mut CanBeHydratedEvent,
         ) -> Option<bool> {
-            (mod_api::__private::fluid_id(event.fluid.fluid) == Some(self.0)).then_some(true)
+            (mod_api::__private::fluid_id(event.fluid.fluid) == Some("minecraft:water"))
+                .then_some(true)
+        }
+    }
+
+    struct HydratesWithLava;
+    #[mod_api::sunrise_part]
+    impl BlockPart for HydratesWithLava {
+        fn can_be_hydrated(
+            &self,
+            _: &dyn mod_api::LevelHost,
+            event: &mut CanBeHydratedEvent,
+        ) -> Option<bool> {
+            (mod_api::__private::fluid_id(event.fluid.fluid) == Some("minecraft:lava"))
+                .then_some(true)
+        }
+    }
+
+    struct HydratesWithAnyFluid;
+    #[mod_api::sunrise_part]
+    impl BlockPart for HydratesWithAnyFluid {
+        fn can_be_hydrated(
+            &self,
+            _: &dyn mod_api::LevelHost,
+            _: &mut CanBeHydratedEvent,
+        ) -> Option<bool> {
+            Some(true)
         }
     }
 
@@ -77,7 +103,7 @@ mod tests {
             let block = r.block_key("inert_test:machine");
             r.block_part(block, Earlier(self.0.clone()));
             let farmland = r.block_key("inert_test:farmland");
-            r.block_part(farmland, HydratesWith("minecraft:water"));
+            r.block_part(farmland, HydratesWithWater);
         }
     }
 
@@ -150,7 +176,7 @@ mod tests {
             let soil = r.block_key("inert_test:soil");
             r.block_part(soil, Soil);
             let farmland = r.block_key("inert_test:farmland");
-            r.block_part(farmland, HydratesWith("minecraft:lava"));
+            r.block_part(farmland, HydratesWithLava);
         }
         fn blocks(&self, _: &RegistrationContext, e: &mut mod_api::BlocksEvent<'_>) {
             e.blocks.push(
@@ -176,7 +202,7 @@ mod tests {
     impl Hooks for Observer {
         fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
             let farmland = r.block_key("inert_test:farmland");
-            r.block_part(farmland, HydratesWith("minecraft:lava"));
+            r.block_part(farmland, HydratesWithAnyFluid);
         }
         fn block_tool_modification(
             &self,
