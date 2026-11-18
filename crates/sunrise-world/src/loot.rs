@@ -856,6 +856,10 @@ impl LootData {
         &self.predicates
     }
 
+    pub fn item_modifiers(&self) -> &HashMap<String, Value> {
+        &self.modifiers
+    }
+
     /// The table snapshot used by this loot data.
     pub fn tables(&self) -> &Arc<LootTables> {
         &self.tables

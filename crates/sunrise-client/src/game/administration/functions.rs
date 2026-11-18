@@ -338,9 +338,18 @@ impl Game<'_> {
     /// only after substitution, but ordinary lines in a macro file still
     /// have to compile (`CommandFunction.fromLines`).
     pub(super) fn admit_store(&mut self, mut store: DataStore, stack: &PackStack) {
-        // On explicit reload the actual content tables have already refreshed.
-        // The candidate's named predicates/modifiers must also be available to
-        // argument codecs before any of its functions can be exposed.
+        // The installed candidate already selected and checked the same winners
+        // gameplay uses, including the native contributions.
+        if let Some(tables) = &self.world_tables {
+            let copy = |entries: &std::collections::HashMap<String, serde_json::Value>| {
+                entries
+                    .iter()
+                    .map(|(id, value)| (id.clone(), value.clone()))
+                    .collect()
+            };
+            store.predicates = copy(tables.loot.predicates());
+            store.item_modifiers = copy(tables.loot.item_modifiers());
+        }
         self.sync_enchantment_registries();
         // A function's `loot ... loot <id>` names the reloaded packs' tables.
         self.sync_loot_table_ids();

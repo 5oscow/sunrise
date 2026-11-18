@@ -22,7 +22,7 @@ impl Game<'_> {
                     .map_err(ReloadStageError::DataSource)?,
             );
         }
-        self.prepare_server_reload(stack, resources)
+        self.prepare_server_reload(stack)
     }
     pub(super) fn prepare_pack_condition_reload(
         &mut self,

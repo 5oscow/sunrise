@@ -838,20 +838,6 @@ pub fn registry_files(
 
 impl DataStore {
     pub fn load(packs: &[&DataPack]) -> Self {
-        Self::load_impl(packs, None)
-    }
-    /// Command resources and function tags share the owning server load's
-    /// conditions; raw JSON stacks remain intact for world-table readers.
-    pub fn load_with_conditions(
-        packs: &[&DataPack],
-        conditions: &sunrise_world::conditions::LoadConditions,
-    ) -> Self {
-        Self::load_impl(packs, Some(conditions))
-    }
-    fn load_impl(
-        packs: &[&DataPack],
-        conditions: Option<&sunrise_world::conditions::LoadConditions>,
-    ) -> Self {
         let mut s = Self::default();
         for pack in packs {
             // `tags` walks the whole tags tree, so a `tags/function` file is
@@ -950,12 +936,6 @@ impl DataStore {
                     s.slot_sources.insert(id, v);
                 }
             }
-        }
-        if let Some(conditions) = conditions {
-            s.predicates
-                .retain(|id, value| conditions.allows_id(value, "predicate", id));
-            s.item_modifiers
-                .retain(|id, value| conditions.allows_id(value, "item_modifier", id));
         }
         s
     }
@@ -1990,13 +1970,6 @@ mod tests {
         }
         assert!(store.predicates.contains_key("demo:nested/entry"));
         assert!(store.item_modifiers.contains_key("demo:nested/entry"));
-        let filtered = DataStore::load_with_conditions(
-            &packs.iter().collect::<Vec<_>>(),
-            &sunrise_world::conditions::LoadConditions::vanilla(),
-        );
-        assert!(filtered.predicates.is_empty());
-        assert!(filtered.item_modifiers.is_empty());
-        assert_eq!(filtered.files, store.files);
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -2018,16 +1991,14 @@ mod tests {
             std::fs::write(file, value.to_string()).unwrap();
         }
         let pack = DataPack::from_source("pack".into(), ResourceSource::directory(root.clone()));
-        let conditions = sunrise_world::conditions::LoadConditions::new([]);
-        let store = DataStore::load_with_conditions(&[&pack], &conditions);
+        let store = DataStore::load(&[&pack]);
         std::fs::remove_dir_all(&root).unwrap();
         assert_eq!(store.predicates.get("demo:entry"), Some(&predicate));
         assert_eq!(store.item_modifiers.get("demo:entry"), Some(&modifier));
-        assert_eq!(conditions.check_errors(), Ok(()));
     }
 
     #[test]
-    fn command_json_selects_before_conditions_and_function_tags_gate_each_layer() {
+    fn function_tags_ignore_top_level_load_conditions() {
         let root =
             std::env::temp_dir().join(format!("sunrise-command-conditions-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -2039,15 +2010,6 @@ mod tests {
             } else {
                 serde_json::json!([])
             };
-            for kind in ["predicate", "item_modifier"] {
-                let file = folder.join(format!("data/demo/{kind}/entry.json"));
-                std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-                std::fs::write(
-                    file,
-                    serde_json::json!({"layer":name,"neoforge:conditions":conditions}).to_string(),
-                )
-                .unwrap();
-            }
             let dir = folder.join("data/demo/tags/function");
             std::fs::create_dir_all(&dir).unwrap();
             std::fs::write(dir.join("load.json"), serde_json::json!({"replace":true,"values":[format!("demo:{name}")],"neoforge:conditions":conditions}).to_string()).unwrap();
@@ -2061,27 +2023,12 @@ mod tests {
                 ResourceSource::directory(folder),
             ));
         }
-        let refs = packs.iter().collect::<Vec<_>>();
-        let off = DataStore::load_with_conditions(
-            &refs,
-            &sunrise_world::conditions::LoadConditions::vanilla(),
-        );
-        assert!(off.predicates.is_empty());
-        assert!(off.item_modifiers.is_empty());
+        let store = DataStore::load(&packs.iter().collect::<Vec<_>>());
         assert_eq!(
-            off.function_tags["demo:load"],
+            store.function_tags["demo:load"],
             [("demo:high".into(), true, false)]
         );
-        assert!(off.function_tags["demo:unknown"].is_empty());
-        let enabled = sunrise_world::conditions::LoadConditions::new(["provider"]);
-        let on = DataStore::load_with_conditions(&refs, &enabled);
-        assert_eq!(on.predicates["demo:entry"]["layer"], "high");
-        assert_eq!(on.item_modifiers["demo:entry"]["layer"], "high");
-        assert_eq!(
-            on.function_tags["demo:load"],
-            [("demo:high".into(), true, false)]
-        );
-        assert_eq!(on.files, off.files);
+        assert!(store.function_tags["demo:unknown"].is_empty());
         std::fs::remove_dir_all(root).unwrap();
     }
 

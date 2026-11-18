@@ -7,6 +7,22 @@ use mod_api::{
 struct RegistryMod;
 #[mod_api::__subscriptions]
 impl Hooks for RegistryMod {
+    fn data_pack_files(
+        &self,
+        _: &mut dyn mod_api::ServerHost,
+        event: &mut mod_api::DataPackFilesEvent<'_>,
+    ) {
+        event.files.extend([
+            (
+                "predicate/registry_test:native".into(),
+                br#"{"condition":"minecraft:random_chance","chance":1}"#.to_vec(),
+            ),
+            (
+                "item_modifier/registry_test:native".into(),
+                br#"{"function":"minecraft:set_count","count":3}"#.to_vec(),
+            ),
+        ]);
+    }
     fn data_map_types(
         &self,
         _: &mut dyn mod_api::ServerHost,
@@ -76,7 +92,25 @@ fn datapack_game_open_reload_and_exhaustion_are_atomic() {
         vec![ModEntry::new("registry_test", Box::new(RegistryMod))].into(),
         || {
             with_game(|game| {
+                let builtin = root.join("builtin");
+                for kind in ["predicate", "item_modifier"] {
+                    write(
+                        &builtin.join(format!("data/registry_test/{kind}/native.json")),
+                        r#"{"neoforge:conditions":[{"type":"absent:overridden"}]}"#,
+                    );
+                }
+                let source = sunrise_assets::resource_source::ResourceSource::directory(builtin);
+                game.pack.data_source = source.clone();
+                game.pack.data_changes = source;
                 game.load_world(request(root)).unwrap();
+                assert_eq!(
+                    game.fns.store.predicates["registry_test:native"]["chance"],
+                    1
+                );
+                assert_eq!(
+                    game.fns.store.item_modifiers["registry_test:native"]["count"],
+                    3
+                );
                 assert_eq!(power(game), DatapackValue::Int(7));
                 assert_eq!(
                     game.mods
