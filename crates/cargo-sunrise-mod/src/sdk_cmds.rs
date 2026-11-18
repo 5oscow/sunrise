@@ -247,8 +247,13 @@ fn package_subject(path: &Path) -> Result<Subject, String> {
         return Ok(Subject::NotApplicable(content_text(&name)));
     }
     let Some(bytes) = Package::entry(path, USES_FILE, MAX_USES)? else {
+        let pin = package
+            .manifest
+            .native
+            .as_ref()
+            .map_or("a build", |native| native.sunrise.as_str());
         return Ok(Subject::NotApplicable(format!(
-            "{name}'s package was made by an older tool and doesn't say what it uses, so it works on the build it was made for only. Rebuild it with the current `cargo sunrise-mod`."
+            "{name} pins build {pin} and its package carries no list of what it uses, so it can't be shown to fit another build. Pack it with `cargo sunrise-mod build`, which writes the list, or repin it with `cargo sunrise-mod update --sunrise <build>` first."
         )));
     };
     let table = UsesTable::read(&bytes).map_err(|e| format!("{USES_FILE}: {e}"))?;

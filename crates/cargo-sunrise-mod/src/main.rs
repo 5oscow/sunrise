@@ -36,6 +36,7 @@ use sunrise_mod_package::{Content, Manifest, Package, manifest::MANIFEST};
 mod bounded;
 mod check;
 mod dev;
+mod help;
 mod inject;
 mod inject_sync;
 mod internals;
@@ -52,9 +53,6 @@ use std::{
     path::{Path, PathBuf},
     process::{Command, ExitCode},
 };
-
-/// What `cargo sunrise-mod` prints with no command or `--help`, and after an unknown command.
-const USAGE: &str = "cargo sunrise-mod new <path> [--name \"Name\"] [--template content|native|wasm [--sunrise <build>]] | update [--sunrise <build>] | inject update [--accept <id>]… | inject sync --repo <game checkout> | inject add <at> --kind <kind> [--call <canonical callee>] [--nth N] [--with <fn>] | internals sync [--repo <path>] | internals add <path>… [--kind <kind>] | build [--wasm] [--update-lock] | wasm-std <out.wasm> | run [--game <sunrise-client>] [--resources <folder>] [-- <game args>] | check [--uses] | check <file> [--kind <kind>] [--key <public key> --signature <file.minisig>] [--json] | hooks <text> [--all] | sdk diff <build> <build> | fits [<file.smod>] [--build <name>]… | registry build|review|check|list | use-jar <path> | native-build < plan.json | native-check < plan.json | native-discover < plan.json | native-lock < plan.json | native-layout < plan.json";
 
 fn is_compiler_wrapper(name: &str) -> bool {
     name.strip_suffix(".exe").unwrap_or(name).ends_with("rustc")
@@ -98,6 +96,13 @@ fn main() -> ExitCode {
     }
     if args.first().is_some_and(|a| a == "sunrise-mod") {
         args.remove(0);
+    }
+    if let Some((command, rest)) = args.split_first()
+        && help::asked(rest)
+        && let Some(text) = help::of(command)
+    {
+        print!("{text}");
+        return ExitCode::SUCCESS;
     }
     let result = match args.first().map(String::as_str) {
         Some("new") => new(&args[1..], &sdk_fetch::fetch_pinned).and_then(|code| match code {
@@ -156,27 +161,29 @@ fn main() -> ExitCode {
         Some("native-layout") => return native_build::layout(&args[1..]),
         Some("internals") => internals::run(&args[1..]),
         Some("inject") => inject::run(&args[1..]),
-        Some("update") => {
-            sdk_cmds::update_report(entry, Path::new("."), flag(&args[1..], "--sunrise"))
-                .and_then(|()| {
-                    update(
-                        Path::new("."),
-                        &sdk_fetch::fetch_build,
-                        flag(&args[1..], "--sunrise"),
-                        &args[1..]
-                            .windows(2)
-                            .filter(|pair| pair[0] == "--accept")
-                            .map(|pair| pair[1].as_str())
-                            .collect::<Vec<_>>(),
-                    )
-                })
-                .map(|()| println!("Run `cargo sunrise-mod check`."))
-        }
-        None | Some("--help" | "-h" | "help") => {
-            println!("usage: {USAGE}");
+        Some("update") => pins_a_build(Path::new("."))
+            .and_then(|()| {
+                sdk_cmds::update_report(entry, Path::new("."), flag(&args[1..], "--sunrise"))
+            })
+            .and_then(|()| {
+                update(
+                    Path::new("."),
+                    &sdk_fetch::fetch_build,
+                    flag(&args[1..], "--sunrise"),
+                    &args[1..]
+                        .windows(2)
+                        .filter(|pair| pair[0] == "--accept")
+                        .map(|pair| pair[1].as_str())
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .map(|()| println!("Run `cargo sunrise-mod check`.")),
+        None | Some("--help" | "-h") => {
+            print!("{}", help::short());
             Ok(())
         }
-        _ => Err(format!("usage: {USAGE}")),
+        Some("help") => help::run(&args[1..]).map(|text| print!("{text}")),
+        Some(other) => Err(help::unknown(other)),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -341,6 +348,24 @@ fn pin(sunrise: Option<&str>) -> Result<String, String> {
 /// Repins the mod. A native mod's declared internals and injects are checked against the new
 /// build first, reporting signature changes before writing; a wasm mod has none, so only its pin
 /// moves. `Cargo.toml` names the SDK by path, so the next command fetches the new one.
+/// `update` in a content mod: it pins no game build, so there is nothing to repin.
+fn refuse_content_update(dir: &Path, manifest: &Manifest) -> Result<(), String> {
+    // A wasm project has no `[wasm]` table until its first `build --wasm`: its Cargo.toml says it is code.
+    if manifest.native.is_none() && manifest.wasm.is_none() && !code_project(dir) {
+        return Err(format!(
+            "{MANIFEST}: a content mod pins no game build, so there is nothing to update"
+        ));
+    }
+    Ok(())
+}
+
+/// Refuses `update` before anything runs when the mod in `dir` is a content mod.
+fn pins_a_build(dir: &Path) -> Result<(), String> {
+    let path = dir.join(MANIFEST);
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    refuse_content_update(dir, &Manifest::parse(&text)?)
+}
+
 fn update(
     dir: &Path,
     fetch: FetchSdk,
@@ -350,6 +375,7 @@ fn update(
     let path = dir.join(MANIFEST);
     let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     let manifest = Manifest::parse(&text)?;
+    refuse_content_update(dir, &manifest)?;
     let sunrise = pin(sunrise)?;
     let Some(native) = manifest.native.as_ref() else {
         sdk_fetch::repin(dir, &sunrise)?;
@@ -711,6 +737,16 @@ mod tests {
         let newer = "89abcdef0123456789abcdef0123456789abcdef";
         assert!(update(&path, &broken, Some(newer), &[]).is_err());
         assert_eq!(std::fs::read(path.join(MANIFEST)).unwrap(), before);
+    }
+
+    #[test]
+    fn update_in_a_content_mod_says_it_pins_no_build() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gems");
+        new(&[path.display().to_string()], &offline).unwrap();
+        let error = update(&path, &offline, None, &[]).unwrap_err();
+        assert!(error.contains("pins no game build"), "{error}");
+        assert!(pins_a_build(&path).is_err());
     }
 
     #[test]

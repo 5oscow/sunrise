@@ -27,26 +27,37 @@ pub const MAX_TOTAL: u64 = 512 << 20;
 /// `[a-z0-9_.-]`, none of them `.` or `..` (vanilla's resource-location
 /// characters, so the path means the same on every OS).
 pub fn check_path(name: &str) -> Result<(), String> {
-    let bad = || format!("{name:?} is not a plain assets/ or data/ path");
+    let plain_char = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit() || "_.-".contains(c);
     let mut parts = name.split('/');
-    if !matches!(parts.next(), Some("assets" | "data")) {
-        return Err(bad());
+    let top = parts.next();
+    let rest: Vec<&str> = parts.collect();
+    let named_ok = matches!(top, Some("assets" | "data"))
+        && rest.len() >= 2 // assets/<namespace>/<file> at least.
+        && rest
+            .iter()
+            .all(|part| !part.is_empty() && *part != "." && *part != "..");
+    if named_ok && rest.iter().all(|part| part.chars().all(plain_char)) {
+        return Ok(());
     }
-    let mut count = 0;
-    for part in parts {
-        count += 1;
-        let chars_ok = part
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"_.-".contains(&b));
-        if part.is_empty() || part == "." || part == ".." || !chars_ok {
-            return Err(bad());
-        }
+    let mut error = format!(
+        "{name:?} is not a plain assets/ or data/ path: after assets/ or data/, every part is made of a-z, 0-9, _, . and - (vanilla's resource-location characters, so the path means the same on every OS), and none is . or .."
+    );
+    if named_ok {
+        let fixed: Vec<String> = rest
+            .iter()
+            .map(|part| {
+                part.to_ascii_lowercase()
+                    .chars()
+                    .map(|c| if plain_char(c) { c } else { '_' })
+                    .collect()
+            })
+            .collect();
+        error.push_str(&format!(
+            "; rename it {:?}",
+            format!("{}/{}", top.unwrap_or(""), fixed.join("/"))
+        ));
     }
-    // assets/<namespace>/<file> at least.
-    if count < 2 {
-        return Err(bad());
-    }
-    Ok(())
+    Err(error)
 }
 
 /// The shared resource namespace fence for folders and native archives.
@@ -3939,6 +3950,11 @@ capabilities = ["registries"]
         ] {
             assert!(check_path(bad).is_err(), "{bad}");
         }
+        let error = check_path("data/ruby/Glow-Slab.json").unwrap_err();
+        assert!(
+            error.contains("a-z, 0-9") && error.contains("\"data/ruby/glow-slab.json\""),
+            "{error}"
+        );
     }
 }
 

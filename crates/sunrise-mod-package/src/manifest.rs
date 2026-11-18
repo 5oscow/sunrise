@@ -359,6 +359,62 @@ impl Internal {
     }
 }
 
+/// A manifest's TOML error in the tool's words: no caret box, the missing field with a line to add,
+/// an unknown field with the nearest valid key when one is a few edits away.
+fn toml_error(text: &str, e: &toml::de::Error) -> String {
+    let message = e.message();
+    let line = e
+        .span()
+        .map(|span| text[..span.start.min(text.len())].matches('\n').count() + 1);
+    let at = line.map_or(String::new(), |line| format!(" (line {line})"));
+    let quoted = |after: &str| -> Option<String> {
+        let rest = message.strip_prefix(after)?;
+        Some(rest.split('`').next()?.to_owned())
+    };
+    if let Some(field) = quoted("missing field `") {
+        let example = match field.as_str() {
+            "id" => "id = \"my_mod\"".to_owned(),
+            "name" => "name = \"My Mod\"".to_owned(),
+            "version" => "version = \"0.1.0\"".to_owned(),
+            "game" => "game = \"26.3\"".to_owned(),
+            "sunrise" => "sunrise = \"<the 40-character game build commit>\"".to_owned(),
+            other => format!("{other} = …"),
+        };
+        return format!("{MANIFEST}: the field {field} is missing; add {example}");
+    }
+    if let Some(field) = quoted("unknown field `") {
+        let nearest = message
+            .split("expected ")
+            .nth(1)
+            .into_iter()
+            .flat_map(|list| list.split('`').skip(1).step_by(2))
+            .map(|key| (edit_distance(&field, key), key))
+            .min()
+            .filter(|(distance, key)| *distance <= (key.len() / 3).clamp(1, 2));
+        let hint = nearest.map_or(String::new(), |(_, key)| format!("; did you mean `{key}`?"));
+        return format!("{MANIFEST}: {message}{at}{hint}");
+    }
+    format!("{MANIFEST}: {message}{at}")
+}
+
+/// The number of single-character edits between two keys.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let b: Vec<char> = b.chars().collect();
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, x) in a.chars().enumerate() {
+        let mut diagonal = row[0];
+        row[0] = i + 1;
+        for (j, y) in b.iter().enumerate() {
+            let above = row[j + 1];
+            row[j + 1] = (diagonal + usize::from(x != *y))
+                .min(above + 1)
+                .min(row[j] + 1);
+            diagonal = above;
+        }
+    }
+    row[b.len()]
+}
+
 impl Manifest {
     pub fn parse(text: &str) -> Result<Self, String> {
         let both = || {
@@ -415,7 +471,7 @@ impl Manifest {
             if native_alone {
                 wasm_loop().unwrap_or_else(both)
             } else {
-                format!("{MANIFEST}: {e}")
+                toml_error(text, &e)
             }
         })?;
         inject::Inject::check_all(&m.inject, &m.id, m.native.is_some() || m.wasm.is_some())
@@ -1526,6 +1582,20 @@ version = "0.1.0"
 api = "0.2"
 capabilities = ["registries"]
 "#;
+
+    #[test]
+    fn a_missing_or_misspelled_field_is_named_with_the_line_to_write() {
+        let missing = Manifest::parse(&EXAMPLE.replace("version = \"0.1.0\"\n", "")).unwrap_err();
+        assert_eq!(
+            missing,
+            "sunrise-mod.toml: the field version is missing; add version = \"0.1.0\""
+        );
+        let typo = Manifest::parse(&EXAMPLE.replace("version =", "vrsion =")).unwrap_err();
+        assert!(typo.contains("unknown field `vrsion`"), "{typo}");
+        assert!(typo.contains("did you mean `version`?"), "{typo}");
+        let far = Manifest::parse(&format!("{EXAMPLE}zzzzzzzz = 1\n")).unwrap_err();
+        assert!(!far.contains("did you mean"), "{far}");
+    }
 
     #[test]
     fn refuses_bad_ids_and_retired_manifests() {
