@@ -161,7 +161,7 @@ jobs:
           CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 16
         run: |
           python3 tools/prebuilt_game.py build "$FNR_SCRATCH/prebuilt" --server
-          python3 tools/prebuilt_game.py pack "$FNR_SCRATCH/prebuilt" "$FNR_SCRATCH/legs/sdk-leg-server"
+          python3 tools/prebuilt_game.py pack "$FNR_SCRATCH/prebuilt" "$FNR_SCRATCH/legs/sdk-leg-server" --with-tool
       # The daily run's SDK: the Linux legs only, the ones this check reads (sdk-publish.yml gathers every leg).
       - uses: actions/download-artifact@v4
         if: steps.sdk.outputs.source == 'legs'

@@ -45,7 +45,7 @@ jobs:
         run: |
           rustup target add wasm32-unknown-unknown
           commit=$(git rev-parse HEAD)
-          python tools/prebuilt_game.py pack prebuilt legs/sdk-leg-windows-server
+          python tools/prebuilt_game.py pack prebuilt legs/sdk-leg-windows-server --with-tool
           python tools/prebuilt_game.py gather legs dist
           python tools/sdk_api_source.py build api-source
           python tools/sdk_api_source.py archive api-source dist/api-source.tar.xz
