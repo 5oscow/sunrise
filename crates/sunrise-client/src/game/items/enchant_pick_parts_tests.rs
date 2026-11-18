@@ -359,9 +359,10 @@ fn support_snapshot_reaches_both_anvils_and_enchant_without_dispatching_inside_t
             .unwrap(),
         );
         game.build_registries();
+        let sharpness = [(Arc::<str>::from(SHARPNESS), 1)];
         let check_anvils = |game: &mut Game<'_>, item: &str, allowed: bool| {
             let mut book = ItemStack::new("minecraft:enchanted_book", 1);
-            book.set_crafting_enchantments(vec![(SHARPNESS.into(), 1)]);
+            book.set_crafting_enchantments(sharpness.to_vec());
             let input = ItemStack::new(item, 1);
             let mut menu = Menu::new(MenuKind::Anvil);
             let env = game.menu_env();
@@ -370,7 +371,7 @@ fn support_snapshot_reaches_both_anvils_and_enchant_without_dispatching_inside_t
             menu.settle(&env);
             assert_eq!(menu.slot(2).is_some(), allowed, "client-lib anvil: {item}");
             if allowed {
-                assert_eq!(menu.slot(2).unwrap().enchantment_level(SHARPNESS), 1);
+                assert_eq!(menu.slot(2).unwrap().crafting_enchantments(), sharpness);
             }
             let mut station = Station::new(StationKind::Anvil, [0, 64, 0]);
             station.inputs[0] = Some(input);
@@ -380,7 +381,7 @@ fn support_snapshot_reaches_both_anvils_and_enchant_without_dispatching_inside_t
             let result = &game.station.as_ref().unwrap().result;
             assert_eq!(result.is_some(), allowed, "game anvil: {item}");
             if allowed {
-                assert_eq!(result.as_ref().unwrap().enchantment_level(SHARPNESS), 1);
+                assert_eq!(result.as_ref().unwrap().crafting_enchantments(), sharpness);
             }
         };
         for role in [ExecutionRole::IntegratedServer, ExecutionRole::Client] {
@@ -423,12 +424,10 @@ fn support_snapshot_reaches_both_anvils_and_enchant_without_dispatching_inside_t
                         allowed,
                         "/enchant: {item}"
                     );
+                    let expected = if allowed { sharpness.as_slice() } else { &[] };
                     assert_eq!(
-                        game.inventory[0]
-                            .as_ref()
-                            .unwrap()
-                            .enchantment_level(SHARPNESS),
-                        u32::from(allowed),
+                        game.inventory[0].as_ref().unwrap().crafting_enchantments(),
+                        expected,
                         "{item}"
                     );
                 }
@@ -451,6 +450,10 @@ fn support_snapshot_reaches_both_anvils_and_enchant_without_dispatching_inside_t
         game.resolve_parts().unwrap();
         game.inventory[0] = Some(ItemStack::new("minecraft:enchanted_book", 1));
         assert!(game.as_console(|g| g.run_command("enchant @s minecraft:sharpness 1")));
+        assert_eq!(
+            game.inventory[0].as_ref().unwrap().stored_enchantments(),
+            sharpness
+        );
         answers.support.lock().unwrap().clear();
         assert!(
             game.stations()
