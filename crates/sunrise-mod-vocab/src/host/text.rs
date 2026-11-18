@@ -14,7 +14,8 @@ pub trait TextHost {
     /// player's language. A dedicated server uses built-in English, then
     /// adds English from its enabled mods and data packs once before
     /// `server_starting`. Keybind components there return the literal ID.
-    /// A component-valued translation replaces its arguments and fallback.
+    /// On a dedicated server, a component-valued translation replaces its
+    /// arguments and fallback.
     /// Available outside drawing, including setup, on native and wasm.
     #[access(Metadata)]
     fn text_string(&self, text: &Text) -> Result<String, TextFormError>;

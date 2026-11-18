@@ -49,16 +49,18 @@ string. Invalid components return the same boundary errors as the other text rea
 - **Dedicated server:** starts with vanilla's built-in `en_us`. Just before
   `server_starting`, it loads `assets/<namespace>/lang/en_us.json` from
   enabled mods and data packs. The mod layer goes first, then the enabled
-  data packs in pack priority order. Within a layer, namespaces sort
-  lexically; the last value for a key wins. Vanilla's deprecated keys are
+  data packs in pack priority order. NeoForge doesn't specify precedence
+  between namespaces; Sunrise sorts them lexically within a layer so the
+  last value for a key always wins. Vanilla's deprecated keys are
   applied to the result. Neither client resource packs nor later server
   data-pack reloads affect this language. Keybind components give their
   literal IDs.
 
 A missing key uses its component fallback, or the key itself without a
-fallback. A language file may also supply an object or array representing a
-component: it replaces the whole translation, including its arguments and
-fallback. A recursive reference to the same language entry resolves to no text.
+fallback. On a dedicated server, a pack language file may also supply an
+object or array representing a component: it replaces the whole translation,
+including its arguments and fallback. A recursive reference to the same
+language entry resolves to no text.
 
 Send an unresolved component to a player when the result should use that player's
 language. Do not cache resolved strings across language changes.

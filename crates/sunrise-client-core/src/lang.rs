@@ -108,7 +108,7 @@ pub fn install_crate_files(files: &'static [&'static [(&'static str, &'static st
 
 /// The crates' entries for language `code` (through [`bundled_code`]'s variants) that the
 /// engine's own `sunrise` file for it doesn't have: on a key both have, the engine wins.
-fn read_crate_files(files: &[&[(&str, &str)]], code: &str, language: &mut Language) {
+fn read_crate_files(files: &[&[(&str, &str)]], code: &str, map: &mut HashMap<String, String>) {
     if files.is_empty() {
         return;
     }
@@ -129,8 +129,7 @@ fn read_crate_files(files: &[&[(&str, &str)]], code: &str, language: &mut Langua
         }
         for (key, value) in theirs {
             if !own.contains_key(&key) {
-                language.components.remove(&key);
-                language.map.insert(key, value);
+                map.insert(key, value);
             }
         }
     }
@@ -480,7 +479,10 @@ pub fn apply_deprecated<T>(map: &mut HashMap<String, T>, json: &[u8]) {
 pub fn read_lang_file(bytes: &[u8], map: &mut HashMap<String, String>) {
     use sunrise_world::datafix::json::{Json, parse_lenient};
     if let Ok(entries) = serde_json::from_slice::<HashMap<String, String>>(bytes) {
-        map.extend(entries);
+        map.extend(entries.into_iter().map(|(key, mut value)| {
+            normalize_numeric_placeholders(&mut value);
+            (key, value)
+        }));
         return;
     }
     let text = String::from_utf8_lossy(bytes);
@@ -491,13 +493,40 @@ pub fn read_lang_file(bytes: &[u8], map: &mut HashMap<String, String>) {
         return;
     };
     for (key, value) in entries {
-        let value = match value {
+        let mut value = match value {
             Json::Str(s) => String::from_utf16_lossy(&s),
             Json::Num(n) => n,
             Json::Bool(b) => b.to_string(),
             Json::Null | Json::Arr(_) | Json::Obj(_) => break,
         };
+        normalize_numeric_placeholders(&mut value);
         map.insert(String::from_utf16_lossy(&key), value);
+    }
+}
+
+/// `Language.loadFromJson` treats numeric placeholders as strings:
+/// `%[n$][digits or dots][df]` becomes `%[n$]s`.
+fn normalize_numeric_placeholders(template: &mut String) {
+    let mut out = String::new();
+    let mut start = 0;
+    for (at, _) in template.match_indices('%') {
+        let tail = &template[at + 1..];
+        let digits = tail.bytes().take_while(u8::is_ascii_digit).count();
+        let index = if digits != 0 && tail.as_bytes().get(digits) == Some(&b'$') {
+            digits + 1
+        } else {
+            0
+        };
+        let rest = tail[index..].trim_start_matches(|c: char| c.is_ascii_digit() || c == '.');
+        if rest.starts_with(['d', 'f']) {
+            out.push_str(&template[start..at + 1 + index]);
+            out.push('s');
+            start = template.len() - rest.len() + 1;
+        }
+    }
+    if start != 0 {
+        out.push_str(&template[start..]);
+        *template = out;
     }
 }
 
@@ -535,6 +564,8 @@ impl Language {
         }
         for pack in packs {
             let mut namespaces = pack.namespaces();
+            // NeoForge leaves collisions between namespaces unspecified.
+            // Sort them so the same packs always choose the same winner.
             namespaces.sort_unstable();
             for ns in namespaces {
                 if let Some(bytes) = pack.read(&format!("assets/{ns}/lang/en_us.json")) {
@@ -545,32 +576,6 @@ impl Language {
         if let Some(bytes) = vanilla.read("assets/minecraft/lang/deprecated.json") {
             language.deprecate(&bytes);
         }
-        for template in language.map.values_mut().filter(|s| s.contains('%')) {
-            // Language.loadFromJson normalizes Java's numeric placeholders to
-            // strings: %[n$][digits or dots][d or f] -> %[n$]s.
-            let mut out = String::new();
-            let mut start = 0;
-            for (at, _) in template.match_indices('%') {
-                let tail = &template[at + 1..];
-                let digits = tail.bytes().take_while(u8::is_ascii_digit).count();
-                let index = if digits != 0 && tail.as_bytes().get(digits) == Some(&b'$') {
-                    digits + 1
-                } else {
-                    0
-                };
-                let rest =
-                    tail[index..].trim_start_matches(|c: char| c.is_ascii_digit() || c == '.');
-                if rest.starts_with(['d', 'f']) {
-                    out.push_str(&template[start..at + 1 + index]);
-                    out.push('s');
-                    start = template.len() - rest.len() + 1;
-                }
-            }
-            if start != 0 {
-                out.push_str(&template[start..]);
-                *template = out;
-            }
-        }
         language
     }
 
@@ -578,7 +583,7 @@ impl Language {
         use serde_json::{Map, Value};
         if let Ok(entries) = serde_json::from_slice::<Map<String, Value>>(bytes) {
             for (key, value) in entries {
-                let template = match value {
+                let mut template = match value {
                     Value::String(value) => value,
                     Value::Number(value) => value.to_string(),
                     Value::Bool(value) => value.to_string(),
@@ -589,6 +594,7 @@ impl Language {
                     }
                     Value::Null => continue,
                 };
+                normalize_numeric_placeholders(&mut template);
                 self.components.remove(&key);
                 self.map.insert(key, template);
             }
@@ -625,9 +631,9 @@ impl Language {
         code: &str,
         crate_files: &[&[(&str, &str)]],
     ) -> Self {
-        let mut language = Self::of(code, []);
+        let mut map = HashMap::new();
         // What vanilla's client would load from the same sources: everything but the engine's.
-        let mut vanilla = Self::of(code, []);
+        let mut vanilla = HashMap::new();
         let mut engine_keys = false;
         let mut codes = vec![DEFAULT];
         if code != DEFAULT {
@@ -649,15 +655,15 @@ impl Language {
                         if engine {
                             engine_keys = true;
                         } else {
-                            vanilla.overlay(&bytes);
+                            read_lang_file(&bytes, &mut vanilla);
                         }
-                        language.overlay(&bytes);
+                        read_lang_file(&bytes, &mut map);
                     }
                     // The crates' text right after the engine's own (`Bundled`, the first source).
                     if engine {
-                        let before = language.map.len();
-                        read_crate_files(crate_files, c, &mut language);
-                        engine_keys |= language.map.len() != before;
+                        let before = map.len();
+                        read_crate_files(crate_files, c, &mut map);
+                        engine_keys |= map.len() != before;
                     }
                 }
             }
@@ -668,15 +674,26 @@ impl Language {
             .iter()
             .find_map(|s| s.read("assets/minecraft/lang/deprecated.json"))
         {
-            language.deprecate(&bytes);
-            vanilla.deprecate(&bytes);
+            apply_deprecated(&mut map, &bytes);
+            apply_deprecated(&mut vanilla, &bytes);
         }
-        language.bidirectional = available(sources)
+        let bidirectional = available(sources)
             .iter()
             .any(|info| info.code == code && info.bidirectional);
-        vanilla.bidirectional = language.bidirectional;
-        language.vanilla = engine_keys.then(|| Arc::new(vanilla));
-        language
+        Self {
+            code: code.to_owned(),
+            bidirectional,
+            map,
+            vanilla: engine_keys.then(|| {
+                Arc::new(Self {
+                    code: code.to_owned(),
+                    bidirectional,
+                    map: vanilla,
+                    ..Self::default()
+                })
+            }),
+            ..Self::default()
+        }
     }
     pub fn get(&self, key: &str) -> Option<&str> {
         self.map.get(key).map(String::as_str)
@@ -953,6 +970,18 @@ mod tests {
                 "Value: key.keyboard.space / name fallback test.removed"
             );
         });
+    }
+
+    #[test]
+    fn client_lang_stops_at_non_primitive_values() {
+        let client = Mem(HashMap::from([(
+            "assets/minecraft/lang/en_us.json".into(),
+            br#"{"test.good":"%2$03d / %.2f","test.component":{"text":"not a string"},"test.after":"unread"}"#.to_vec(),
+        )]));
+        let lang = Language::load(&[&client], "en_us");
+        assert_eq!(lang.get("test.good"), Some("%2$s / %s"));
+        assert_eq!(lang.get("test.component"), None);
+        assert_eq!(lang.get("test.after"), None);
     }
 
     #[test]
