@@ -50,7 +50,7 @@ pub trait ClientViewClientHost {
     #[access(ClientSetup)]
     fn clock(&self) -> Option<Clock>;
     /// Side: client.
-    /// The first block along the view within `distance` (at most 1024), past the loaded chunks over the distant terrain.
+    /// The first block along the view within `distance` (at most 1024), in the loaded chunks.
     #[access(ClientSetup)]
     fn raycast(&self, distance: f32) -> Option<Hit>;
     /// Side: client.
