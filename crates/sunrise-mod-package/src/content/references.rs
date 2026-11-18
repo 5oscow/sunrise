@@ -34,7 +34,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use sunrise_assets::{
     blockstate::{BlockStateFile, VariantSet},
     item_model::ClientItem,
-    model::{CuboidModel, TextureSlot},
+    model::{CuboidModel, Loader, TextureSlot},
 };
 
 /// What [`check_references`] found, each a sentence that names the file.
@@ -47,12 +47,16 @@ pub struct Findings {
 /// The most declared ids a message lists.
 const LISTED: usize = 8;
 
-/// A model file's parent and its sprites by slot, as the model decoder reads them.
 struct Model {
     file: String,
-    parent: Option<String>,
-    textures: BTreeMap<String, String>,
-    slots: BTreeSet<String>,
+    definition: CuboidModel,
+}
+
+#[derive(Clone, Copy)]
+enum Asset {
+    Model,
+    Parent,
+    Texture { inline_override: bool },
 }
 
 /// Checks the references among `content`'s files; `Err` only when a file cannot be read.
@@ -226,21 +230,37 @@ impl References<'_> {
 
     /// `id` as a file of this mod, `assets/<ns>/<folder>/<path><extension>`: an error when the
     /// file is missing and nothing else could supply it, a warning when something could.
-    fn missing(&mut self, name: &str, id: &str, folder: &str, extension: &str, what: &str) {
+    fn missing(&mut self, name: &str, field: &str, id: &str, kind: Asset) {
         let Some((namespace, path)) = self.own(id) else {
             return;
+        };
+        let (folder, extension, what) = match kind {
+            Asset::Model => ("models", ".json", "model"),
+            Asset::Parent => ("models", ".json", "parent model"),
+            Asset::Texture { .. } => ("textures", ".png", "texture"),
         };
         let file = format!("assets/{namespace}/{folder}/{path}{extension}");
         if self.has(&file) {
             return;
         }
         let near = near_file(self, folder, extension, id);
-        match self.supplier(folder == "textures") {
+        let supplier = self.supplier(folder == "textures");
+        let reason = match (kind, supplier) {
+            (
+                Asset::Texture {
+                    inline_override: true,
+                },
+                _,
+            ) => Some("an inline composite child may override the slot".to_owned()),
+            (_, Some(other)) => Some(format!("{other} may supply it")),
+            (_, None) => None,
+        };
+        match reason {
             None => self.findings.errors.push(format!(
-                "{name}: the {what} {id} is not a file of this mod (expected {file}). Add the file or fix the id{near}."
+                "{name}: the {what} {id} at {field} is not a file of this mod (expected {file}). Add the file or fix the id{near}."
             )),
-            Some(other) => self.findings.warnings.push(format!(
-                "{name}: could not find the {what} {id} in this mod (expected {file}); if {other} supplies it, ignore this. Otherwise add the file or fix the id{near}."
+            Some(reason) => self.findings.warnings.push(format!(
+                "{name}: could not find the {what} {id} at {field} in this mod (expected {file}); {reason}. If not, add the file or fix the id{near}."
             )),
         }
     }
@@ -253,16 +273,37 @@ impl References<'_> {
         let Ok(BlockStateFile::Vanilla(definition)) = BlockStateFile::from_json(&text) else {
             return Ok(());
         };
-        let mut sets: Vec<&VariantSet> = Vec::new();
-        sets.extend(definition.variants.iter().flatten().map(|(_, set)| set));
-        sets.extend(definition.multipart.iter().flatten().map(|s| &s.variant));
-        for set in sets {
-            let models: Vec<&str> = match set {
-                VariantSet::Single(variant) => vec![variant.model.as_str()],
-                VariantSet::Weighted(list) => list.iter().map(|(v, _)| v.model.as_str()).collect(),
-            };
-            for model in models {
-                self.missing(name, model, "models", ".json", "model");
+        let variants = definition
+            .variants
+            .iter()
+            .flatten()
+            .map(|(key, set)| (format!("variants[{key:?}]"), set));
+        let multipart = definition
+            .multipart
+            .iter()
+            .flatten()
+            .enumerate()
+            .map(|(index, part)| (format!("multipart[{index}].apply"), &part.variant));
+        for (field, set) in variants.chain(multipart) {
+            match set {
+                VariantSet::Single(variant) => {
+                    self.missing(
+                        name,
+                        &format!("{field}.model"),
+                        &variant.model,
+                        Asset::Model,
+                    );
+                }
+                VariantSet::Weighted(list) => {
+                    for (index, (variant, _)) in list.iter().enumerate() {
+                        self.missing(
+                            name,
+                            &format!("{field}[{index}].model"),
+                            &variant.model,
+                            Asset::Model,
+                        );
+                    }
+                }
             }
         }
         Ok(())
@@ -274,62 +315,97 @@ impl References<'_> {
         let Some((text, _)) = self.json(name)? else {
             return Ok(());
         };
-        let Ok(model) = CuboidModel::from_json(&text) else {
+        let Ok(definition) = CuboidModel::from_json(&text) else {
             return Ok(());
         };
-        let textures = model
-            .textures
-            .iter()
-            .filter_map(|(slot, texture)| match texture {
-                TextureSlot::Material(material) => Some((slot.clone(), material.sprite.clone())),
-                TextureSlot::Reference(_) => None,
-            })
-            .collect();
         self.models.insert(
             format!("{namespace}:{path}"),
             Model {
                 file: name.to_owned(),
-                parent: model.parent.clone(),
-                textures,
-                slots: model.textures.keys().cloned().collect(),
+                definition,
             },
         );
-        // Composite children bring parents of their own.
-        for parent in model.referenced_models() {
-            self.missing(name, &parent, "models", ".json", "parent model");
-        }
         Ok(())
     }
 
-    /// The sprites of each model, except a slot that a model built on it sets itself: that
-    /// model's own sprite is the one drawn.
+    /// Follow parent chains from both model files and inline children. An inline override only
+    /// affects that child, which may itself be hidden; it cannot prove the parent sprite is unused.
     fn check_models(&mut self) {
-        let overridden = |id: &str, slot: &str| {
-            self.models.iter().any(|(other, model)| {
-                let mut at = model.parent.as_deref();
-                let mut depth = 0;
-                while let Some(parent) = at
-                    && depth < 64
-                {
-                    if parent == id && model.slots.contains(slot) && other != id {
-                        return true;
-                    }
-                    at = self.models.get(parent).and_then(|m| m.parent.as_deref());
-                    depth += 1;
-                }
-                false
-            })
-        };
-        let mut missing = Vec::new();
+        let mut overridden = BTreeSet::new();
+        let mut inline_overridden = BTreeSet::new();
+        let mut references = Vec::new();
         for (id, model) in &self.models {
-            for (slot, sprite) in &model.textures {
-                if !overridden(id, slot) {
-                    missing.push((model.file.clone(), sprite.clone()));
+            let mut pending = vec![(&model.definition, String::new())];
+            while let Some((child, field)) = pending.pop() {
+                if let Some(Loader::Composite { children, .. }) = &child.loader {
+                    pending.extend(children.iter().map(|(key, child)| {
+                        (child.as_ref(), format!("{field}children[{key:?}]."))
+                    }));
+                }
+                let Some(parent) = child.parent.as_deref() else {
+                    continue;
+                };
+                references.push((
+                    model.file.clone(),
+                    format!("{field}parent"),
+                    parent.to_owned(),
+                    Asset::Parent,
+                ));
+                let (inline, overrides) = if field.is_empty() {
+                    (false, &mut overridden)
+                } else {
+                    (true, &mut inline_overridden)
+                };
+                let mut at = Some(parent);
+                for _ in 0..64 {
+                    let Some(ancestor) = at else { break };
+                    if !inline && ancestor == id {
+                        break;
+                    }
+                    let Some(parent) = self.models.get(ancestor) else {
+                        break;
+                    };
+                    for slot in child.textures.keys() {
+                        if parent.definition.textures.contains_key(slot) {
+                            overrides.insert((ancestor, slot.as_str()));
+                        }
+                    }
+                    at = parent.definition.parent.as_deref();
                 }
             }
         }
-        for (file, sprite) in missing {
-            self.missing(&file, &sprite, "textures", ".png", "texture");
+        for (id, model) in &self.models {
+            // One diagnostic per missing sprite, preferring a slot with no override.
+            let mut by_sprite = BTreeMap::new();
+            for (slot, texture) in &model.definition.textures {
+                let key = (id.as_str(), slot.as_str());
+                if let TextureSlot::Material(material) = texture
+                    && !overridden.contains(&key)
+                {
+                    let inline_override = inline_overridden.contains(&key);
+                    let entry = by_sprite
+                        .entry(&material.sprite)
+                        .or_insert((slot, inline_override));
+                    if !inline_override {
+                        *entry = (slot, false);
+                    }
+                }
+            }
+            references.extend(
+                by_sprite
+                    .into_iter()
+                    .map(|(sprite, (slot, inline_override))| {
+                        (
+                            model.file.clone(),
+                            format!("textures[{slot:?}]"),
+                            sprite.clone(),
+                            Asset::Texture { inline_override },
+                        )
+                    }),
+            );
+        }
+        for (file, field, id, kind) in references {
+            self.missing(&file, &field, &id, kind);
         }
     }
 
@@ -343,7 +419,7 @@ impl References<'_> {
         let mut models = Vec::new();
         item.model.dependencies(&mut models);
         for model in models {
-            self.missing(name, &model, "models", ".json", "model");
+            self.missing(name, "model", &model, Asset::Model);
         }
         Ok(())
     }
@@ -944,7 +1020,8 @@ mod tests {
         let e = errors(&[("assets/gb/models/block/slab.json", "")]);
         // The blockstate and the item definition both name it.
         assert_eq!(e.len(), 2, "{e:?}");
-        assert!(e[0].contains("the model gb:block/slab is not a file"));
+        assert!(e[0].contains("gb:block/slab"));
+        assert!(e[0].contains("variants[\"\"].model"));
         let e = errors(&[(
             "assets/gb/blockstates/slab.json",
             r#"{"variants":{"":{"model":"gb:block/slabb"}}}"#,
@@ -1229,6 +1306,35 @@ mod tests {
             ),
         ]);
         assert!(e[0].contains("the texture gb:block/placeholder"), "{e:?}");
+    }
+
+    #[test]
+    fn an_inline_composite_child_can_override_an_inherited_sprite() {
+        let base = "assets/gb/models/block/base.json";
+        let slab = "assets/gb/models/block/slab.json";
+        let placeholder =
+            r##"{"parent":"minecraft:block/cube_all","textures":{"all":"gb:block/placeholder"}}"##;
+        let composite = |slots| {
+            format!(
+                r#"{{"loader":"neoforge:composite","children":{{"body":{{"parent":"gb:block/base"{slots}}}}}}}"#
+            )
+        };
+        let f = findings(
+            MANIFEST,
+            &[
+                (base, placeholder),
+                (slab, &composite(r#", "textures":{"all":"gb:block/stone"}"#)),
+            ],
+        );
+        assert!(f.errors.is_empty(), "{f:?}");
+        assert_eq!(f.warnings.len(), 1, "{f:?}");
+        assert!(f.warnings[0].starts_with(base));
+        assert!(f.warnings[0].contains("inline composite child"));
+        assert!(f.warnings[0].contains("textures[\"all\"]"));
+        let e = errors(&[(base, placeholder), (slab, &composite(""))]);
+        assert_eq!(e.len(), 1, "{e:?}");
+        assert!(e[0].starts_with(base));
+        assert!(e[0].contains("gb:block/placeholder"));
     }
 
     /// 7. Payloads only a mod or the stack reads name no ids.
