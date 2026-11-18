@@ -14,7 +14,6 @@ impl Game<'_> {
         self.lod_source_attempted = false;
         self.lod_observe.clear();
         self.lod_blue_map = None;
-        self.far_beacons.clear();
         self.lod_covered_at = None;
         if let Some(renderer) = &mut self.renderer {
             renderer.clear_lods();

@@ -1015,9 +1015,6 @@ struct Game<'a> {
     /// The server's BlueMap far terrain draws from, when the player named one
     /// or Find BlueMap found it.
     lod_blue_map: Option<Arc<sunrise_client::bluemap::BlueMap>>,
-    /// Beacon beam sections kept after their chunk unloads, so far terrain
-    /// LOD still draws their beams (`beacon_geometry` refreshes them).
-    far_beacons: HashMap<(i32, i32, i32), Vec<(u32, i32)>>,
     /// The detail revision, centre and radius `Lod::update` last had covered for.
     lod_covered_at: Option<(u64, (i32, i32), i32)>,
     /// Whether the view's columns have all arrived, and how new it is: large
@@ -10699,7 +10696,6 @@ impl<'a> Game<'a> {
             streaming,
             lod: None,
             lod_source_attempted: false,
-            far_beacons: HashMap::new(),
             lod_observe: Default::default(),
             lod_level: None,
             lod_blue_map: None,
