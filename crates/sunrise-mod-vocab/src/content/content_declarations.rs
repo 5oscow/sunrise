@@ -89,6 +89,10 @@ pub struct BlockProperties {
     pub max_horizontal_offset: Option<f32>,
     /// Maximum downward displacement, 0 to 0.2 (default 0.2 for XYZ; XZ has no vertical offset).
     pub max_vertical_offset: Option<f32>,
+    /// Opt into `VegetationBlock` survival and neighbour checks independently of the
+    /// template. Templates that already inherit `VegetationBlock` keep their rules.
+    /// Otherwise the default support is `minecraft:supports_vegetation`.
+    pub vegetation: bool,
 }
 
 /// Vanilla's per-column offset mode (`BlockBehaviour.OffsetType`).

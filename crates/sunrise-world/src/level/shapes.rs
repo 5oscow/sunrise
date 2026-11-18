@@ -54,6 +54,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         if self.b.data(state).declared_waterlogged {
             self.waterlogged_tick(state, pos);
         }
+        if self.b.data(state).declared_vegetation && !self.can_survive(state, pos) {
+            return self.b.air();
+        }
         self.update_shape_at(0, state, pos, direction, neighbour_pos, neighbour)
     }
 

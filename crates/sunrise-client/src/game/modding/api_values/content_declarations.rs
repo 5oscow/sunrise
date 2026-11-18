@@ -78,6 +78,7 @@ impl TryIntoEngine<()> for mod_api::BlockProperties {
             }),
             max_horizontal_offset: self.max_horizontal_offset,
             max_vertical_offset: self.max_vertical_offset,
+            vegetation: self.vegetation,
         })
     }
 }

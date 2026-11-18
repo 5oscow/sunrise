@@ -234,6 +234,9 @@ pub struct BlockData {
     pub sounds: Arc<Sounds>,
     pub item: Arc<str>,
     pub dynamic_shape: bool,
+    /// A content block opts into base VegetationBlock survival instead of its
+    /// template's survival. The loader leaves native vegetation chains alone.
+    pub(super) declared_vegetation: bool,
 }
 impl BlockData {
     pub fn is(&self, class: Class) -> bool {
@@ -1040,6 +1043,8 @@ fn build_with_gameplay<G: GameplayStateSource>(
             class,
             chain,
             classes,
+            declared_vegetation: json["declared_vegetation"].as_bool() == Some(true)
+                && !classes.contains(Class::Vegetation),
             interfaces,
             set_type,
             gate_open,

@@ -48,6 +48,21 @@ cargo sunrise-mod check target/sunrise-mod/my_mod.smod   # the registry's checks
 - `use-jar <path>` records an original Java jar as an external asset/data source, without copying it into the mod
   ([Java jars as external assets](#java-jars-as-external-assets)).
 
+## Vegetation behaviour is independent of the template
+
+Set `properties.vegetation` to `true` in block JSON or in a code declaration's
+`BlockProperties` to give a block `VegetationBlock` survival, even on a glass or
+stairs template. Placement refuses unsupported ground and a neighbour update
+removes an unsupported plant. The default support is `minecraft:supports_vegetation`
+on both sides. Templates that already inherit `VegetationBlock` keep their own
+checks, such as crop light requirements.
+
+On the server, the soil's `can_sustain_plant` answer decides first. If it returns
+`None`, the plant's `may_place_on` Part can override the ground rule. Neither
+registering a Part for a block nor registering one on a tag changes what kind
+of block it is. The client predicts using the default rule without running these
+server Parts.
+
 ## Declare content in code
 
 Code mods declare content through `BlocksEvent` and `ItemsEvent`, using API-owned

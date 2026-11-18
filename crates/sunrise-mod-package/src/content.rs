@@ -168,6 +168,9 @@ pub struct BlockProperties {
     /// Maximum downward displacement, 0 to 0.2 (default 0.2 for XYZ; XZ has no vertical offset).
     #[serde(default, deserialize_with = "deserialize_vertical_offset")]
     pub max_vertical_offset: Option<f32>,
+    /// Opt into `VegetationBlock` survival independently of the template.
+    #[serde(default)]
+    pub vegetation: bool,
 }
 
 /// Vanilla's per-column offset mode (`BlockBehaviour.OffsetType`).

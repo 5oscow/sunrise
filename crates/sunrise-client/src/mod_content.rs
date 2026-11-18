@@ -2224,6 +2224,9 @@ impl<'a> Plan<'a> {
                             fields.set("connectsTo", J::Str(tag.clone()));
                             v.set("fields", fields);
                         }
+                        if b.decl.properties.vegetation {
+                            v.set("declared_vegetation", J::Bool(true));
+                        }
                         blocks.push(v);
                     }
                 }
