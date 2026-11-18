@@ -587,6 +587,15 @@ pub(super) fn tool(sdk: &Sdk, base: &Base, progress: &dyn Fn(Fetched)) -> Result
 /// Names a developer's own `cargo-sunrise-mod`, built from the same checkout as [`DEVELOPER_SDK`]'s folder: the tool its builds run.
 pub(super) const DEVELOPER_TOOL: &str = "SUNRISE_LAUNCHER_DEVELOPER_TOOL";
 
+/// The tool [`DEVELOPER_TOOL`] names, honoured as the SDK key override is (a debug launcher), or for a developer base's own SDK.
+pub(super) fn developer_tool(developer_base: bool) -> Option<PathBuf> {
+    (cfg!(debug_assertions) || developer_base)
+        .then(|| std::env::var_os(DEVELOPER_TOOL))
+        .flatten()
+        .map(PathBuf::from)
+        .filter(|program| program.is_file())
+}
+
 /// Names the folder of a prebuilt game built from a developer install's checkout
 /// (`tools/prebuilt_game.py build`). Read for developer installs only: their commit has no release.
 pub(super) const DEVELOPER_SDK: &str = "SUNRISE_LAUNCHER_DEVELOPER_SDK";
@@ -595,15 +604,36 @@ pub(super) const DEVELOPER_SDK: &str = "SUNRISE_LAUNCHER_DEVELOPER_SDK";
 /// `revision`'s for this computer and `target`, then laid out afresh as its slices by links, so
 /// the developer's folder is never changed. A release's game comes from its SDK instead
 /// ([`slices`]).
-pub(super) fn developer(revision: &str, target: Target, local: &Path) -> Result<Package, String> {
+pub(super) fn developer(
+    program: &Path,
+    revision: &str,
+    target: Target,
+    local: &Path,
+) -> Result<Package, String> {
     let host = rust_toolchain::host().ok_or_else(|| Refusal::Host.to_string())?;
-    prebuilt::check_identity(local, revision, host.target, target)?;
     let unit = unit(revision, host.target, prebuilt::side(target));
-    let build = super::root()
+    let out = super::root()
         .join("prebuilt")
         .join(format!("{unit}.developer"));
-    let _ = fs::remove_dir_all(&build);
-    prebuilt::lay_out(local, &build, true)
+    let reply = super::tool::ask(
+        crate::process::command(program),
+        "native-layout",
+        &serde_json::json!({
+            "prebuilt": local, "build": revision, "host": host.target,
+            "target": target.name(), "out": out,
+        }),
+    )?;
+    let folder = |slice: &str| {
+        reply["package"][slice]
+            .as_str()
+            .map(PathBuf::from)
+            .ok_or_else(|| tr("The native build tool laid out no package.").to_owned())
+    };
+    Ok(Package {
+        runtime: folder("runtime")?,
+        api: folder("api")?,
+        engine: folder("engine")?,
+    })
 }
 
 /// The folder a build's slices for `triple` and `side` are kept in.
