@@ -59,10 +59,6 @@ user's step, because it allows native code on their install.
 - Extra crates.io dependencies are allowed and are pinned by the mod's own `Cargo.lock`; a git or path dependency
   outside the mod is refused. The `sunrise-mod-api` path in `Cargo.toml` points at `.sunrise/sdk/` and stays as
   written.
-- A crate the game also locks (`zip`, for example) takes the game's version, pinned with `=`:
-  `zip = { version = "=9.1.3", … }`. Look the version up in `.sunrise/sdk/api/Cargo.lock`, the game's locked
-  versions of what the API uses. A native build that refuses with "moved or changed its dependency graph" names
-  the crate: pin it to the game's version.
 - Do not commit `.sunrise/` (the template's `.gitignore` already skips it).
 - Run `cargo sunrise-mod check` before saying the work is done, and show its output. For the registry's checks on
   the packed file, run `cargo sunrise-mod build`, then `cargo sunrise-mod check target/sunrise-mod/<id>.smod`.
