@@ -1141,6 +1141,10 @@ pub struct Extra {
     pub swing_stab: bool,
     pub flag: bool,
     pub flag2: bool,
+    /// `Bat.DATA_ID_FLAGS` without bit 0 (resting, which is `flag`): bits only
+    /// a save or summon sets, which `Bat.setResting` leaves alone and the bat
+    /// saves back.
+    pub bat_flags: u8,
     /// `AbstractHorse`'s `Bred` save flag: nothing sets it at runtime (no
     /// vanilla code calls `setBred` outside `readAdditionalSaveData`), so only
     /// a save or `/summon` gives it, and `followMommy` reads it.

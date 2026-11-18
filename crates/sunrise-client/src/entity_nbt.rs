@@ -1082,7 +1082,9 @@ pub fn mob_to_nbt(
             }
         }
         "minecraft:bat" => {
-            map.insert("BatFlags".into(), Tag::Byte(i8::from(m.extra.flag)));
+            // Bat.addAdditionalSaveData: the whole DATA_ID_FLAGS byte.
+            let flags = m.extra.bat_flags | u8::from(m.extra.flag);
+            map.insert("BatFlags".into(), Tag::Byte(flags as i8));
         }
         "minecraft:turtle" => {
             map.insert("has_egg".into(), Tag::Byte(i8::from(m.extra.flag)));
@@ -2074,8 +2076,10 @@ fn mob_from_nbt_at(
         _ => 0,
     };
     if m.species() == crate::mobs::Species::Bat {
-        // Bat.readAdditionalSaveData: BatFlags bit 0, resting.
-        m.extra.flag = number(tag.get("BatFlags")).unwrap_or(0) & 1 != 0;
+        // Bat.readAdditionalSaveData: the raw BatFlags byte; bit 0 is resting.
+        let flags = number(tag.get("BatFlags")).unwrap_or(0) as u8;
+        m.extra.flag = flags & 1 != 0;
+        m.extra.bat_flags = flags & !1;
     }
     if m.species() == crate::mobs::Species::Creeper {
         m.extra.charged = flag(tag, "powered");
@@ -4659,6 +4663,37 @@ mod tests {
         };
         assert_eq!(id("body"), "minecraft:diamond_horse_armor");
         assert_eq!(id("head"), "minecraft:iron_helmet");
+    }
+
+    /// `Bat.readAdditionalSaveData` sets `DATA_ID_FLAGS` to the raw `BatFlags`
+    /// byte, `Bat.setResting` changes bit 0 only and `addAdditionalSaveData`
+    /// writes the byte back: `6b` saves `6b`, and `-1b` saves `-2b` once the
+    /// bat wakes. Saved without the loaded compound, so the bat itself keeps it.
+    #[test]
+    fn a_bat_saves_its_whole_flags_byte() {
+        let mut kind = crate::mobs::sensor_scan_tests::kind();
+        let ty = Arc::make_mut(&mut kind);
+        ty.id = "minecraft:bat".into();
+        ty.species = crate::mobs::Species::Bat;
+        let types = [("minecraft:bat".into(), kind)].into();
+        let load = |flags: i8| {
+            let raw = Tag::compound([
+                ("id", string("minecraft:bat")),
+                ("Pos", doubles(&[4.5, 220.0, 4.5])),
+                ("BatFlags", Tag::Byte(flags)),
+            ]);
+            mob_from_nbt(&raw, &types, 1, None).unwrap()
+        };
+        let saved = |m: &Mob| {
+            mob_to_nbt(m, [0; 4], None, None, |_| None, &Default::default())
+                .get("BatFlags")
+                .cloned()
+        };
+        assert_eq!(saved(&load(6)), Some(Tag::Byte(6)));
+        let mut m = load(-1);
+        assert!(crate::mobs::bat::resting(&m));
+        crate::mobs::bat::set_resting(&mut m, false);
+        assert_eq!(saved(&m), Some(Tag::Byte(-2)));
     }
 
     /// A body item taken off (`/item replace entity <cube> armor.body with minecraft:air`)
