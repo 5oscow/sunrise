@@ -163,10 +163,52 @@ index a2ac95a..bab6251 100644
 +    build_plan(&f.root, &f.mods).unwrap();
  }
 diff --git a/crates/horizon-mixins-cli/tests/cases/returns.rs b/crates/horizon-mixins-cli/tests/cases/returns.rs
-index bca7938..988c1ce 100644
+index bca7938..0d154bf 100644
 --- a/crates/horizon-mixins-cli/tests/cases/returns.rs
 +++ b/crates/horizon-mixins-cli/tests/cases/returns.rs
-@@ -104,7 +104,7 @@ fn return_hooks_still_refuse_references_to_calls_and_closures_in_the_values_they
+@@ -45,6 +45,41 @@ bindings=[{name="value",ty="i32",value="$value"}]
+     f
+ }
+
++#[test]
++fn return_hook_binds_self_as_the_impl_type() {
++    let f = fixture("0");
++    f.append(
++        "engine/src/lib.rs",
++        "pub struct Counter(pub i32); impl Counter { pub fn new() -> Self { Self(3) } }",
++    );
++    fs::write(
++        f.mods.join("alpha/horizon-mixin.toml"),
++        r#"
++[mod]
++id="alpha"
++version="1"
++[[injection]]
++id="return"
++target="fixture_game::Counter::new"
++kind="RETURN"
++helper="return.rs"
++bindings=[{name="value",ty="Counter",value="$value"}]
++"#,
++    )
++    .unwrap();
++    fs::write(
++        f.mods.join("alpha/return.rs"),
++        "fn modify(value: Counter) -> Counter { Counter(value.0 + 1) }",
++    )
++    .unwrap();
++    fs::write(
++        f.root.join("driver/src/lib.rs"),
++        "#[test] fn observes_modified_result() { assert_eq!(fixture_game::Counter::new().0, 4); }",
++    )
++    .unwrap();
++    f.run("check");
++}
++
+ #[test]
+ fn return_hooks_leave_references_to_calls_and_closures_outside_exit_values_alone() {
+     // As in Horizon's `picked_stack`: `decode(Some(&Tag::Compound(all)))` in a statement,
+@@ -104,7 +139,7 @@ fn return_hooks_still_refuse_references_to_calls_and_closures_in_the_values_they
          let e = build_plan(&f.root, &f.mods).unwrap_err();
          assert_eq!(e.code, "E_UNSUPPORTED_CONTROL_FLOW", "{body}: {e}");
      }
@@ -175,7 +217,7 @@ index bca7938..988c1ce 100644
      let f = fixture(r#"let arg = sink(size(&Guard::new("argument", 2))); sink(arg)"#);
      f.append(
          "mods/alpha/horizon-mixin.toml",
-@@ -115,13 +115,14 @@ target="fixture_game::run"
+@@ -115,13 +150,14 @@ target="fixture_game::run"
  kind="BEFORE_CALL"
  selector="sink"
  require=2
@@ -191,7 +233,7 @@ index bca7938..988c1ce 100644
  }
 
  #[test]
-@@ -200,3 +201,208 @@ fn the_helper_sees_each_exit_value_once() {
+@@ -200,3 +236,208 @@ fn the_helper_sees_each_exit_value_once() {
      .unwrap();
      f.run("check");
  }
@@ -1406,7 +1448,7 @@ index fcf5a46..5d71485 100644
 +    }
 +}
 diff --git a/crates/horizon-mixins-core/src/helpers.rs b/crates/horizon-mixins-core/src/helpers.rs
-index 55a9372..0daa2d7 100644
+index 55a9372..026772e 100644
 --- a/crates/horizon-mixins-core/src/helpers.rs
 +++ b/crates/horizon-mixins-core/src/helpers.rs
 @@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
@@ -1522,7 +1564,23 @@ index 55a9372..0daa2d7 100644
  }
  fn parse_type(text: &str) -> Result<Type> {
      syn::parse_str(text).map_err(|e| Diagnostic::new("E_INVALID_BINDING", e.to_string()))
-@@ -385,9 +471,14 @@ pub fn validate_helper(
+@@ -161,6 +247,15 @@ pub fn contract(
+ ) -> Result<Contract> {
+     let helper = parse_helper(helper_source)?;
+     let result = return_type(&f.signature);
++    // A plain `Self` in an impl method names exactly its owner. Projections such as
++    // `Self::Output` still need type resolution and remain unsupported.
++    let result = if kind == Kind::Return
++        && matches!(&result, Type::Path(path) if path.qself.is_none() && path.path.is_ident("Self"))
++    {
++        f.self_type.clone().unwrap_or(result)
++    } else {
++        result
++    };
+     let value = if matches!(
+         kind,
+         Kind::Return
+@@ -385,9 +480,14 @@ pub fn validate_helper(
          ));
      }
      // OVERWRITE retains the MVP's compiler-validated return compatibility.
@@ -1539,7 +1597,7 @@ index 55a9372..0daa2d7 100644
      {
          let why = if cancellable {
              "cancellable hook helper must return core::ops::ControlFlow<TargetResult>"
-@@ -439,7 +530,15 @@ pub fn validate_helper(
+@@ -439,7 +539,15 @@ pub fn validate_helper(
                      let output = parse_type(&op.output)?;
                      let expected: Type =
                          syn::parse2(quote!(impl FnOnce(#(#inputs),*) -> #output)).unwrap();
@@ -1555,7 +1613,7 @@ index 55a9372..0daa2d7 100644
                  } else {
                      binding.value == "$receiver"
                          || binding
-@@ -528,3 +627,78 @@ fn binding_expr(expr: &Expr, parameters: &std::collections::BTreeSet<String>) ->
+@@ -528,3 +636,78 @@ fn binding_expr(expr: &Expr, parameters: &std::collections::BTreeSet<String>) ->
          _ => false,
      }
  }
