@@ -527,49 +527,6 @@ fn shrugs(direct: Option<&ProjectileKind>) -> bool {
         Some(ProjectileKind::Arrow { .. } | ProjectileKind::Trident | ProjectileKind::WindCharge)
     )
 }
-/// `#minecraft:no_knockback` by the damage type's id: `dealDefaultKnockback` skips these.
-fn is_no_knockback_type(ty: &str) -> bool {
-    matches!(
-        ty.trim_start_matches("minecraft:"),
-        "explosion"
-            | "player_explosion"
-            | "bad_respawn_point"
-            | "in_fire"
-            | "lightning_bolt"
-            | "on_fire"
-            | "lava"
-            | "hot_floor"
-            | "sulfur_cube_hot"
-            | "in_wall"
-            | "cramming"
-            | "drown"
-            | "starve"
-            | "cactus"
-            | "fall"
-            | "ender_pearl"
-            | "fly_into_wall"
-            | "out_of_world"
-            | "generic"
-            | "magic"
-            | "wither"
-            | "dragon_breath"
-            | "dry_out"
-            | "sweet_berry_bush"
-            | "freeze"
-            | "stalagmite"
-            | "outside_border"
-            | "generic_kill"
-            | "campfire"
-            | "spear"
-    )
-}
-/// `#minecraft:is_explosion` by the damage type's id.
-fn is_explosion_type(ty: &str) -> bool {
-    matches!(
-        ty.trim_start_matches("minecraft:"),
-        "fireworks" | "explosion" | "player_explosion" | "bad_respawn_point"
-    )
-}
 /// `Vec3.normalize`: zero under a length of `1.0E-5F`.
 fn vanilla_normalize(v: glam::DVec3) -> glam::DVec3 {
     let len = v.length();
@@ -1699,12 +1656,15 @@ impl Game<'_> {
             direct: direct_entity,
             position: from.map(|p| [p.x, p.y, p.z]),
         };
+        // The world's tags, so a datapack type is classed as vanilla's are.
+        let explosion = self.damage_in_tag(ty, "minecraft:is_explosion");
+        let no_knockback = self.damage_in_tag(ty, "minecraft:no_knockback");
         let level = super::entity::damage_level_of!(self, self.combat.attack(), no_push, None);
         let reaches_base = self.dragon.as_ref().is_some_and(|d| {
             d.reaches_base_check(
                 BODY,
                 amount,
-                player.is_some() || is_explosion_type(ty),
+                player.is_some() || explosion,
                 shrugs(direct.as_ref()),
             )
         });
@@ -1740,9 +1700,9 @@ impl Game<'_> {
         let Some(d) = self.dragon.as_mut().filter(|d| d.id == id) else {
             return false;
         };
-        let counts = player.is_some() || is_explosion_type(ty);
+        let counts = player.is_some() || explosion;
         // With no source position the push has no direction (knockback(0.4, 0, 0)).
-        let knock = (!is_no_knockback_type(ty)).then(|| from.unwrap_or(d.position));
+        let knock = (!no_knockback).then(|| from.unwrap_or(d.position));
         let entity_id = match by {
             Some(Target::Projectile(id) | Target::Trident(id)) => Some(id as i32),
             _ => None,
@@ -1783,10 +1743,7 @@ impl Game<'_> {
             .filter(|t| matches!(t, Target::Player | Target::Guest(_)))
             .and_then(|t| self.for_player(t, |g| g.creative))
             .unwrap_or(false);
-        let bypass = matches!(
-            ty.trim_start_matches("minecraft:"),
-            "out_of_world" | "generic_kill"
-        ) || creative;
+        let bypass = self.damage_in_tag(ty, "minecraft:bypasses_invulnerability") || creative;
         let vanilla = (self.crystals[index].invulnerable && !bypass) || is_fire(kind);
         let entity_id = |target| match target {
             Some(Target::Player) => self.own_entity_id(),
@@ -1809,7 +1766,7 @@ impl Game<'_> {
         }
         // destroy_crystal keeps a crystal invulnerable to everything else.
         self.crystals[index].invulnerable = false;
-        let damage = if is_explosion_type(ty) {
+        let damage = if self.damage_in_tag(ty, "minecraft:is_explosion") {
             CrystalDamage::Explosion
         } else {
             CrystalDamage::Direct

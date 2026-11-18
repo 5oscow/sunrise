@@ -2312,31 +2312,159 @@ mod datapack_damage_tests {
     /// registry, and `/damage` with it hurts a mob, as `DamageCommand.damage`
     /// does with the `Holder` it resolved there. Every hurt path reads the
     /// world's registry, not the startup catalog, which holds no pack.
+    /// The world's registry with the `dmgtest` pack: `zap` untagged, `boom` in
+    /// `#is_explosion` and `#no_knockback`, `rush` in `#bypasses_cooldown`, `calm` in
+    /// `#no_anger`.
+    fn with_pack(game: &mut crate::game::Game<'_>) {
+        let root = std::path::PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap());
+        let ty = |name: &str| {
+            (
+                format!("damage_type/dmgtest:{name}"),
+                vec![
+                    format!(r#"{{"message_id":"{name}","scaling":"never","exhaustion":0.1}}"#)
+                        .into_bytes(),
+                ],
+            )
+        };
+        let tag = |tag: &str, values: &[&str]| {
+            let values: Vec<String> = values.iter().map(|v| format!("\"dmgtest:{v}\"")).collect();
+            (
+                format!("tags/minecraft:damage_type/{tag}"),
+                vec![format!(r#"{{"values":[{}]}}"#, values.join(",")).into_bytes()],
+            )
+        };
+        let files = vec![
+            ty("zap"),
+            ty("boom"),
+            ty("rush"),
+            ty("calm"),
+            tag("is_explosion", &["boom"]),
+            tag("no_knockback", &["boom"]),
+            tag("bypasses_cooldown", &["rush"]),
+            tag("no_anger", &["calm"]),
+        ];
+        game.health_resources = game
+            .motion
+            .health
+            .with_packs(&root, &PackOverlay::new(&files), false)
+            .unwrap();
+        assert!(game.motion.health.damage.id("dmgtest:zap").is_none());
+    }
+
+    fn pig(game: &mut crate::game::Game<'_>, id: u32, at: Vec3) {
+        let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+        let mut pig = Mob::new(id, kind, at, 0.0);
+        pig.no_ai = true;
+        game.mobs.push(pig);
+    }
+
+    /// #2647: a damage type a world's datapack declares is in the world's frozen
+    /// registry, and `/damage` with it hurts a mob, as `DamageCommand.damage`
+    /// does with the `Holder` it resolved there. Every hurt path reads the
+    /// world's registry, not the startup catalog, which holds no pack.
     #[test]
     #[ignore = "daily"]
     fn a_datapack_damage_type_hurts_a_mob() {
         with_game(|game| {
-            let root =
-                std::path::PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap());
-            let files = vec![(
-                "damage_type/dmgtest:zap".into(),
-                vec![br#"{"message_id":"zap","scaling":"never","exhaustion":0.1}"#.to_vec()],
-            )];
-            game.health_resources = game
-                .motion
-                .health
-                .with_packs(&root, &PackOverlay::new(&files), false)
-                .unwrap();
-            assert!(game.motion.health.damage.id("dmgtest:zap").is_none());
-            let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
-            let mut pig = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
-            pig.no_ai = true;
-            game.mobs.push(pig);
+            with_pack(game);
+            pig(game, 1, Vec3::new(0.5, 64.0, 0.5));
             assert!(game.hurt_target(Target::Mob(1), 1.0, "dmgtest:zap", None, None, None));
             assert_eq!(game.mobs[0].health, 9.0);
             // A type neither registry holds is still refused.
             assert!(!game.hurt_target(Target::Mob(1), 1.0, "dmgtest:missing", None, None, None));
             assert_eq!(game.mobs[0].health, 9.0);
+        });
+    }
+
+    /// A datapack type's tags in the world's registry decide as vanilla's do:
+    /// `#bypasses_cooldown` lets an equal repeat hit land inside the hurt
+    /// cooldown, which the untagged type's is refused; `#no_anger` records no
+    /// attacker on the mob.
+    #[test]
+    #[ignore = "daily"]
+    fn a_datapack_types_tags_reach_the_mob_hurt_path() {
+        with_game(|game| {
+            with_pack(game);
+            pig(game, 1, Vec3::new(0.5, 64.0, 0.5));
+            pig(game, 2, Vec3::new(4.5, 64.0, 0.5));
+            assert!(game.hurt_target(Target::Mob(1), 1.0, "dmgtest:zap", None, None, None));
+            assert!(!game.hurt_target(Target::Mob(1), 1.0, "dmgtest:zap", None, None, None));
+            assert_eq!(game.mobs[0].health, 9.0);
+            assert!(game.hurt_target(Target::Mob(1), 1.0, "dmgtest:rush", None, None, None));
+            assert_eq!(game.mobs[0].health, 8.0);
+            // A mob's hit names its attacker, unless the type is in `#no_anger`.
+            pig(game, 3, Vec3::new(8.5, 64.0, 0.5));
+            let attacker = Some(Target::Mob(1));
+            assert!(game.hurt_target(
+                Target::Mob(2),
+                1.0,
+                "dmgtest:calm",
+                attacker,
+                attacker,
+                None
+            ));
+            assert!(game.hurt_target(Target::Mob(3), 1.0, "dmgtest:zap", attacker, attacker, None));
+            let last_hurt_by = |game: &crate::game::Game<'_>, id: u32| {
+                game.mobs
+                    .iter()
+                    .find(|m| m.id == id)
+                    .unwrap()
+                    .ai
+                    .last_hurt_by
+            };
+            assert_eq!(last_hurt_by(game, 2), None, "#no_anger records no attacker");
+            assert!(last_hurt_by(game, 3).is_some(), "the untagged type does");
+        });
+    }
+
+    /// A datapack type in `#is_explosion` takes the End crystal away without
+    /// the crystal's own blast, so a pig beside it is untouched; the untagged
+    /// type sets the blast off. With no player behind it, it still hurts the
+    /// dragon.
+    #[test]
+    #[ignore = "daily"]
+    fn a_datapack_explosion_type_removes_a_crystal_quietly_and_hurts_the_dragon() {
+        with_game(|game| {
+            with_pack(game);
+            let crystal = |game: &mut crate::game::Game<'_>, id: u32| {
+                game.crystals.push(crate::game::dragon::Crystal {
+                    attachment_lifetime: Default::default(),
+                    join: Default::default(),
+                    id,
+                    position: Vec3::new(0.5, 64.0, 0.5),
+                    show_bottom: false,
+                    time: 0,
+                    beam: None,
+                    invulnerable: false,
+                    fall: (false, 0.0),
+                });
+            };
+            pig(game, 1, Vec3::new(2.5, 64.0, 0.5));
+            crystal(game, 50);
+            assert!(game.hurt_target(Target::Crystal(50), 1.0, "dmgtest:boom", None, None, None));
+            assert!(game.crystals.is_empty());
+            assert_eq!(game.mobs[0].health, 10.0, "no blast");
+            crystal(game, 51);
+            assert!(game.hurt_target(Target::Crystal(51), 1.0, "dmgtest:zap", None, None, None));
+            assert!(game.crystals.is_empty());
+            assert!(
+                game.mobs.first().is_none_or(|pig| pig.health < 10.0),
+                "the crystal's blast"
+            );
+
+            let dragon = game
+                .spawn_dragon_spawned([0.5, 80.0, 0.5], crate::game::creatures::SpawnSite::Plain)
+                .unwrap();
+            let before = game.dragon.as_ref().unwrap().health;
+            assert!(game.hurt_target(
+                Target::Dragon(dragon),
+                4.0,
+                "dmgtest:boom",
+                None,
+                None,
+                None
+            ));
+            assert!(game.dragon.as_ref().unwrap().health < before);
         });
     }
 }

@@ -583,9 +583,14 @@ impl NamedDamage {
     pub const IS_EXPLOSION: u32 = 1 << 8;
     pub const IS_FALL: u32 = 1 << 9;
     pub const BYPASSES_ENCHANTMENTS: u32 = 1 << 10;
+    pub const BYPASSES_COOLDOWN: u32 = 1 << 11;
+    pub const DAMAGES_HELMET: u32 = 1 << 12;
+    pub const IS_FREEZING: u32 = 1 << 13;
+    pub const WITCH_RESISTANT_TO: u32 = 1 << 14;
+    pub const NO_ANGER: u32 = 1 << 15;
 
     /// Each flag with the damage tag it stands for.
-    const TAG_FLAGS: [(u32, &'static str); 11] = [
+    const TAG_FLAGS: [(u32, &'static str); 16] = [
         (Self::IS_FIRE, "minecraft:is_fire"),
         (Self::BYPASSES_ARMOR, "minecraft:bypasses_armor"),
         (Self::NO_KNOCKBACK, "minecraft:no_knockback"),
@@ -603,6 +608,11 @@ impl NamedDamage {
             Self::BYPASSES_ENCHANTMENTS,
             "minecraft:bypasses_enchantments",
         ),
+        (Self::BYPASSES_COOLDOWN, "minecraft:bypasses_cooldown"),
+        (Self::DAMAGES_HELMET, "minecraft:damages_helmet"),
+        (Self::IS_FREEZING, "minecraft:is_freezing"),
+        (Self::WITCH_RESISTANT_TO, "minecraft:witch_resistant_to"),
+        (Self::NO_ANGER, "minecraft:no_anger"),
     ];
 
     pub const fn new(name: &'static str, tags: u32) -> Self {
@@ -739,6 +749,47 @@ impl DamageKind {
             return named.has(NamedDamage::BYPASSES_ENCHANTMENTS);
         }
         matches!(self, DamageKind::SonicBoom)
+    }
+    /// DamageTypeTags.BYPASSES_COOLDOWN: empty in vanilla.
+    pub fn bypasses_cooldown(self) -> bool {
+        matches!(self, Self::Named(named) if named.has(NamedDamage::BYPASSES_COOLDOWN))
+    }
+    /// DamageTypeTags.DAMAGES_HELMET: falling anvils, blocks and stalactites.
+    pub fn damages_helmet(self) -> bool {
+        if let Self::Named(named) = self {
+            return named.has(NamedDamage::DAMAGES_HELMET);
+        }
+        matches!(
+            self,
+            DamageKind::FallingBlock | DamageKind::FallingAnvil | DamageKind::FallingStalactite
+        )
+    }
+    /// DamageTypeTags.IS_FREEZING: `freeze` alone in vanilla.
+    pub fn is_freezing(self) -> bool {
+        if let Self::Named(named) = self {
+            return named.has(NamedDamage::IS_FREEZING);
+        }
+        self == DamageKind::Freeze
+    }
+    /// DamageTypeTags.WITCH_RESISTANT_TO: magic, indirect magic, sonic boom and thorns.
+    pub fn witch_resistant_to(self) -> bool {
+        if let Self::Named(named) = self {
+            return named.has(NamedDamage::WITCH_RESISTANT_TO);
+        }
+        matches!(
+            self,
+            DamageKind::Magic
+                | DamageKind::IndirectMagic
+                | DamageKind::SonicBoom
+                | DamageKind::Thorns
+        )
+    }
+    /// DamageTypeTags.NO_ANGER: `mob_attack_no_aggro` alone in vanilla, a goat's ram.
+    pub fn no_anger(self) -> bool {
+        if let Self::Named(named) = self {
+            return named.has(NamedDamage::NO_ANGER);
+        }
+        self == DamageKind::MobAttackNoAggro
     }
 }
 /// `source.getEntity()` of a blow, as `SulfurCube.knockback` reads it: `getEyePosition()`,
@@ -3992,15 +4043,11 @@ impl Mob {
         amount -= blocked;
         container.record_block(blocked);
         // #damages_helmet: falling anvils, blocks and stalactites.
-        if matches!(
-            source.kind,
-            DamageKind::FallingBlock | DamageKind::FallingAnvil | DamageKind::FallingStalactite
-        ) && self.extra.head_id().is_some()
-        {
+        if source.kind.damages_helmet() && self.extra.head_id().is_some() {
             amount *= 0.75;
         }
         // LivingEntity.hurtServer: `#freeze_hurts_extra_types` take five times.
-        if source.kind == DamageKind::Freeze
+        if source.kind.is_freezing()
             && matches!(
                 self.species(),
                 Species::Strider | Species::Blaze | Species::MagmaCube
@@ -4015,7 +4062,8 @@ impl Mob {
         // with `lastHurt` by this incoming amount, before armor and Resistance,
         // and `actuallyHurt` gets only what it adds.
         let incoming = amount;
-        let cooldown = self.invulnerable as f32 > 10.0;
+        // `#bypasses_cooldown` skips the comparison.
+        let cooldown = self.invulnerable as f32 > 10.0 && !source.kind.bypasses_cooldown();
         if cooldown {
             if incoming <= self.last_hurt {
                 return false;
@@ -4098,13 +4146,7 @@ impl Mob {
         if witch {
             if source.attacker == Some(Who::Mob(self.id)) {
                 amount = 0.0;
-            } else if matches!(
-                source.kind,
-                DamageKind::Magic
-                    | DamageKind::IndirectMagic
-                    | DamageKind::SonicBoom
-                    | DamageKind::Thorns
-            ) {
+            } else if source.kind.witch_resistant_to() {
                 amount *= 0.15;
             }
         }

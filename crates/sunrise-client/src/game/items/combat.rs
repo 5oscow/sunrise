@@ -612,7 +612,9 @@ impl Game<'_> {
             self.combat.in_combat = false;
         }
     }
-    fn damage_in_tag(&self, name: &str, tag: &str) -> bool {
+    /// Whether damage type `name` is in `tag` (with or without its `minecraft:`) in the
+    /// world's frozen registry, the one that holds the world's datapack types and tags.
+    pub(in crate::game) fn damage_in_tag(&self, name: &str, tag: &str) -> bool {
         let damage = &self.health_resources.damage;
         damage.id(name).is_some_and(|id| {
             damage.in_tag(id, tag) || damage.in_tag(id, &format!("minecraft:{tag}"))
