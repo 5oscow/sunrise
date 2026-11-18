@@ -589,6 +589,39 @@ class OracleReuseTests(unittest.TestCase):
         self.assertEqual(self.output.read_text(), "b")
         self.assertEqual(len([entry for entry in keep.glob("??/*") if not entry.name.startswith(".")]), 2)
 
+    def new_checkout(self):
+        import shutil
+        shutil.rmtree(self.env["PARITY_SHIM_CACHE"])
+        self.output.unlink()
+
+    def test_a_kept_run_is_not_replayed_for_another_jdk_or_jvm_options(self):
+        keep = self.bin.parent / "keep"
+        self.env["PARITY_ORACLE_KEEP"] = str(keep)
+        # The fake launcher's JDK home is bin's parent; an update in place changes its release file.
+        release = self.bin.parent / "release"
+        release.write_text('JAVA_VERSION="25.0.1"\n')
+        self.assertEqual(self.oracle(), 1)
+        self.new_checkout()
+        release.write_text('JAVA_VERSION="25.0.2"\n')
+        self.assertEqual(self.oracle(), 2)
+        self.new_checkout()
+        self.env["JAVA_TOOL_OPTIONS"] = "-Dsunrise.seed=2"
+        self.assertEqual(self.oracle(), 3)
+        self.new_checkout()
+        self.assertEqual(self.oracle(), 3)  # the same JDK and options as the last run: replayed
+
+    def test_a_damaged_kept_run_runs_the_oracle_and_writes_nothing_of_it(self):
+        keep = self.bin.parent / "keep"
+        self.env["PARITY_ORACLE_KEEP"] = str(keep)
+        self.assertEqual(self.oracle(), 1)
+        entry = next(entry for entry in keep.glob("??/*") if not entry.name.startswith("."))
+        (entry / "stdout").unlink()
+        (entry / "files" / "0").write_text("kept output")
+        self.new_checkout()
+        self.assertEqual(self.oracle(), 2)
+        self.assertEqual(self.output.read_text(), "a")
+        self.assertEqual([path.name for path in self.output.parent.iterdir() if "restore" in path.name], [])
+
     def wrapper(self, folder, put_the_shim_back=False):
         """A `java` that runs the first other `java` on PATH, as JDK selectors and build wrappers do. It stops
         itself after a few rounds, so a shim that loops fails this test instead of filling the machine."""
@@ -640,20 +673,50 @@ class OracleKeepTests(unittest.TestCase):
                 os.utime(keep / "ab" / name, (now - age, now - age))
             entry("old", 15 * 86400, 1)
             entry(".killed-writer.tmp", 2 * 86400, 1)
+            entry(".being-written.tmp", 60, 1)
             entry("used-long-ago", 3600, 8)
             entry("used-lately", 60, 8)
+            # Within the budget, only age decides.
+            with mock.patch.object(parity, "ORACLE_KEEP_BUDGET", 100):
+                parity.prune_oracle_keep(keep)
+            self.assertEqual(sorted(path.name for path in (keep / "ab").iterdir()),
+                             [".being-written.tmp", "used-lately", "used-long-ago"])
+            # Over it, the least recently used go first.
             with mock.patch.object(parity, "ORACLE_KEEP_BUDGET", 10):
                 parity.prune_oracle_keep(keep)
-            self.assertEqual(sorted(path.name for path in (keep / "ab").iterdir()), ["used-lately"])
+            self.assertEqual(sorted(path.name for path in (keep / "ab").iterdir()), [".being-written.tmp", "used-lately"])
 
-    def test_harnesses_that_pass_only_fresh_are_remembered_for_a_while(self):
+    def test_only_a_fresh_pass_after_a_reuse_failure_is_remembered_and_only_for_a_while(self):
         import time
         with tempfile.TemporaryDirectory() as tmp:
             keep = Path(tmp)
             long_ago = time.strftime("%Y-%m-%d", time.gmtime(time.time() - 40 * 86400))
-            parity.remember_fresh_only(keep, {"expired": long_ago},
-                                       {"loot": {"oracle_reuse": False}, "light": {"oracle_reuse": True}})
-            self.assertEqual(set(parity.fresh_only(keep)), {"loot"})
+            lately = time.strftime("%Y-%m-%d", time.gmtime(time.time() - 5 * 86400))
+            parity.remember_fresh_only(keep, {"expired": long_ago, "inherited": lately}, {
+                "loot": {"status": "pass", "retried": "reused oracle results", "oracle_reuse": False},
+                "inherited": {"status": "pass", "oracle_reuse": False},
+                "failed": {"status": "fail", "retried": "reused oracle results", "oracle_reuse": True},
+                "light": {"status": "pass", "oracle_reuse": True}})
+            self.assertEqual(parity.fresh_only(keep), {"loot": time.strftime("%Y-%m-%d", time.gmtime()),
+                                                       "inherited": lately})
+
+    def test_a_run_whose_streams_are_too_large_or_whose_keep_is_unwritable_is_not_kept(self):
+        from tools import parity_shim
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output = root / "out.txt"
+            output.write_text("small")
+            entry = root / "keep" / "ab" / "abcd"
+            entry.parent.mkdir(parents=True)
+            with mock.patch.object(parity_shim, "KEPT_FILE", 16):
+                parity_shim.keep(entry, {str(output): None}, {"stdout": b"x" * 17, "stderr": b""})
+            self.assertFalse(entry.exists())
+            # A keep that can't be written to: nothing raises, nothing is kept.
+            blocked = root / "file" / "ab" / "abcd"
+            (root / "file").write_text("not a folder")
+            parity_shim.keep(blocked, {str(output): None}, {"stdout": b"", "stderr": b""})
+            parity_shim.keep(entry, {str(output): None}, {"stdout": b"done", "stderr": b""})
+            self.assertEqual((entry / "files" / "0").read_text(), "small")
 
 
 

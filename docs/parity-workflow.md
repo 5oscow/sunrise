@@ -43,8 +43,8 @@ on `PATH`, rather than copying Java to each fixture directory. Keep the firewall
 python3 tools/parity.py              # harnesses whose inputs changed, or that never passed
 python3 tools/parity.py food light   # these harnesses, whatever their state
 python3 tools/parity.py --failed     # the ones that failed last time
-python3 tools/parity.py --all        # everything, from scratch
-python3 tools/parity.py --all --skip-named-only  # the daily’s automatic set, from scratch
+python3 tools/parity.py --all        # everything, ignoring earlier passes
+python3 tools/parity.py --all --skip-named-only  # the daily’s automatic set
 python3 tools/parity.py --fresh food # don't reuse vanilla oracle results
 python3 tools/parity.py --repeat 3 food   # run it three times; the runs must agree
 python3 tools/parity.py --hosts macmini,playsunrise   # with other machines (default: tools/parity_hosts.json's default list, empty)
@@ -58,7 +58,10 @@ CI runs the automatic harnesses only in the [daily on main's head](release-flow.
 
 Each harness runs unmodified under a tracer that records the files it depended on: its Python modules, its Java oracle and the oracle sources javac pulled in, other repository files it read, and the Rust sources of the probes it ran (from Cargo's `.d` dep-info files). A pass stands until one of those files, the pinned vanilla artifacts, `Cargo.lock` or the Rust/Java toolchains change. State and logs are in `.local/parity-runner/`; each harness's own outputs stay in its `.local/<name>/` directory.
 
-Vanilla oracle runs are reused as well. `tools/parity_shim.py` stands in for `java` and `javac`: it records each oracle run's outputs and the content of every file under the paths its arguments name, and replays the run while those are unchanged. After a Rust-only change a harness pays only for its Rust side (`block_update`: 53 s to 5 s). Files an oracle writes outside its named paths aren't tracked, so a harness that fails while reusing oracle results is rerun fresh, and stops reusing them if it then passes. `--all` and `--fresh` never reuse them.
+Vanilla oracle runs are reused as well. `tools/parity_shim.py` stands in for `java` and `javac`: it records each oracle run's outputs and the content of every file under the paths its arguments name, and replays the run while those are unchanged. After a Rust-only change a harness pays only for its Rust side (`block_update`: 53 s to 5 s). Files an oracle writes outside its named paths aren't tracked, so a harness that fails while reusing oracle results is rerun fresh, and stops reusing them if it then passes. `--fresh` never reuses them; `--all` reuses only runs kept in
+`PARITY_ORACLE_KEEP`, a folder that outlives the checkout. The daily names its CI host's keep (`$DYNA_CI_KEEP/oracles`):
+there a run is replayed only for the same command, JVM option variables and JDK content on byte-identical input files,
+while every harness's Rust side runs. A harness that failed with reuse on and passed fresh runs fresh for 30 days.
 
 Probes build into `.local/parity-target/` with release optimisation but no LTO and 16 codegen units. On ludodesktop that rebuilds every `sunrise-world` probe in 3 seconds after a one-line change, against 122 seconds with the release profile. Rust gives these settings identical results (no fast-math; overflow checks as in release), and the full harness suite passes under them. Probes that harnesses build in the dev profile get `opt-level = 3` too, keeping their overflow checks and debug assertions. Harnesses must locate binaries through `cargo metadata` or `lab.cargo_target()`, never a hard-coded `target/`.
 

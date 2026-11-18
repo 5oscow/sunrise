@@ -2,8 +2,8 @@
 """Run the vanilla differential harnesses (tools/test_*_parity.py) quickly.
 
     python3 tools/parity.py                 # harnesses whose inputs changed, or that never passed
-    python3 tools/parity.py --all           # every harness, from scratch
-    python3 tools/parity.py --all --skip-named-only  # the daily’s automatic set, from scratch
+    python3 tools/parity.py --all           # every harness, ignoring earlier passes
+    python3 tools/parity.py --all --skip-named-only  # the daily’s automatic set
     python3 tools/parity.py --fresh ...     # don't reuse vanilla oracle results
     python3 tools/parity.py food light      # these harnesses (names without test_/_parity.py)
     python3 tools/parity.py --failed        # the ones that failed last time
@@ -1111,12 +1111,14 @@ def prune_oracle_keep(keep):
     recently used runs until the keep fits ORACLE_KEEP_BUDGET (tools/parity_shim.py touches a run it replays)."""
     now, kept = time.time(), []
     for entry in keep.glob("??/*"):
-        age = now - entry.stat().st_mtime
+        try:
+            age = now - entry.stat().st_mtime
+        except FileNotFoundError:  # a run being kept by another harness, renamed meanwhile
+            continue
         if age > ORACLE_KEEP_DAYS * 86400 or (entry.name.startswith(".") and age > 86400):
             shutil.rmtree(entry, ignore_errors=True)
         elif not entry.name.startswith("."):
-            kept.append((entry.stat().st_mtime, sum(file.stat().st_size for file in entry.rglob("*") if file.is_file()),
-                         entry))
+            kept.append((now - age, sum(file.stat().st_size for file in entry.rglob("*") if file.is_file()), entry))
     total = sum(size for _, size, _ in kept)
     for _, size, entry in sorted(kept):
         if total <= ORACLE_KEEP_BUDGET:
@@ -1134,8 +1136,11 @@ def fresh_only(keep):
 
 
 def remember_fresh_only(keep, names, results):
+    """Add the harnesses that failed with oracle reuse on and then passed fresh in this run. A reuse-enabled run that
+    failed may not have replayed anything: the list says what passed only fresh, not that a kept run was wrong."""
     today = time.strftime("%Y-%m-%d", time.gmtime())
-    names = dict(names, **{name: today for name, record in results.items() if record.get("oracle_reuse") is False})
+    names = dict(names, **{name: today for name, record in results.items()
+                           if record["status"] == "pass" and record.get("retried") == "reused oracle results"})
     temporary = keep / f".fresh-only.{os.getpid()}.json"
     temporary.write_text(json.dumps(names, indent=1, sort_keys=True) + "\n", encoding="utf-8")
     temporary.replace(keep / "fresh-only.json")
@@ -1687,7 +1692,8 @@ def main():
         return worker_main(sys.argv[2])
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("names", nargs="*", help="harness names, e.g. food or block_update")
-    parser.add_argument("--all", action="store_true", help="run every harness from scratch, ignoring earlier passes")
+    parser.add_argument("--all", action="store_true", help="run every harness, ignoring earlier passes; oracle runs are "
+                        "reused only from PARITY_ORACLE_KEEP")
     parser.add_argument("--skip-named-only", action="store_true", help="omit named-only harnesses from --all (the daily set)")
     parser.add_argument("--exclude", action="append", default=[], help="exclude a harness and its shards")
     parser.add_argument("--fresh", action="store_true", help="run the vanilla oracles even if their inputs are unchanged")
@@ -1847,9 +1853,13 @@ def main():
         reuse_oracles = not args.fresh and (not args.all or ORACLE_KEEP is not None)
         kept_fresh_only = {}
         if reuse_oracles and ORACLE_KEEP:
-            ORACLE_KEEP.mkdir(parents=True, exist_ok=True)
-            prune_oracle_keep(ORACLE_KEEP)
-            kept_fresh_only = fresh_only(ORACLE_KEEP)
+            # The keep only saves work: a keep that can't be read or tidied leaves this run without its list.
+            try:
+                ORACLE_KEEP.mkdir(parents=True, exist_ok=True)
+                prune_oracle_keep(ORACLE_KEEP)
+                kept_fresh_only = fresh_only(ORACLE_KEEP)
+            except (OSError, ValueError) as error:
+                print(f"oracle keep {ORACLE_KEEP}: {error}; running without its upkeep", flush=True)
         local = LocalExecutor(jobs, int(memory_available() * 0.75), args.timeout,
                               REMOTE_LOCAL_PEAK if remotes and args.jobs is None else None)
         local.solo = solo_harnesses(config)
@@ -1862,7 +1872,11 @@ def main():
         results, elapsed = run(selected, state, hasher, environment_key(hasher), [*remotes, local], reuse_oracles,
                                rounds, known_flaky(config), set(kept_fresh_only))
         if reuse_oracles and ORACLE_KEEP:
-            remember_fresh_only(ORACLE_KEEP, kept_fresh_only, results)
+            try:
+                remember_fresh_only(ORACLE_KEEP, kept_fresh_only, results)
+            except OSError as error:
+                print(f"oracle keep {ORACLE_KEEP}: {error}; the harnesses that passed only fresh are not kept",
+                      flush=True)
     finally:
         for executor in [*remotes, *([local] if local else [])]:
             executor.stop()

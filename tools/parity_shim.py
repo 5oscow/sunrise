@@ -19,14 +19,19 @@ stops reusing its oracle results.
 A run that reads stdin from a pipe, or fails, is never cached.
 PARITY_JAVA_CACHE=0 disables reuse (tools/parity.py --fresh).
 
+A run's identity includes the JVM option variables (JVM_ENVIRONMENT), which
+change what java does without changing its command line.
+
 PARITY_ORACLE_KEEP names a folder that outlives the checkout (the daily's
-per-repository CI keep). There a run is also kept by content: its command
-and the hash of every file under its named paths before it ran, with its
-stdout, stderr and the content of its outputs. A checkout with no record of
-its own replays a kept run whose command and files match exactly, writing
-its outputs back. Entries are written under a temporary name in the keep
-and moved into place, so a reader never sees half of one; a run whose
-outputs are larger than KEPT_FILE or KEPT_RUN is not kept.
+per-repository CI keep). There a run is also kept by content: its command,
+the content of the JDK it ran on (toolchain()), and the hash of every file
+under its named paths before it ran, with its stdout, stderr and the content
+of its outputs. A checkout with no record of its own replays a kept run whose
+command, JDK and files match exactly, writing its outputs back. Entries are
+written under a temporary name in the keep and moved into place, so a reader
+never sees half of one; a run whose outputs or streams are larger than
+KEPT_FILE or KEPT_RUN is not kept. The keep only ever saves work: an entry that
+can't be read whole is a miss, and one that can't be written is skipped.
 """
 
 import hashlib
@@ -41,7 +46,12 @@ import threading
 
 CACHE = Path(os.environ.get("PARITY_SHIM_CACHE", ".local/parity-runner/oracle-cache"))
 KEEP = Path(os.environ["PARITY_ORACLE_KEEP"]) if os.environ.get("PARITY_ORACLE_KEEP") else None
-KEEP_FORMAT = 1
+KEEP_FORMAT = 2
+# Read by the JVM itself: the same command line runs differently under each.
+JVM_ENVIRONMENT = ("JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS", "_JAVA_OPTIONS", "CLASSPATH")
+# The files of a JDK that decide what its programs do, relative to its home (the launcher's folder's parent): an
+# update in place changes at least these.
+JDK_FILES = ("release", "lib/modules", "lib/server/libjvm.so", "lib/server/libjvm.dylib")
 # Larger oracle outputs (chunk dumps) run again instead: the keep holds 20 GiB for every kept run.
 KEPT_FILE, KEPT_RUN = 64 << 20, 256 << 20
 PATH_OPTIONS = {"-cp", "-classpath", "--class-path", "-sourcepath", "--source-path", "-p", "--module-path"}
@@ -199,34 +209,54 @@ def reusable(saved, paths, hashes):
     return all(hashes.file(path) == sha for path, sha in saved["inputs"].items())
 
 
-def keep_entry(command, inputs):
-    """The keep's folder for this command run on exactly these files."""
-    digest = hashlib.sha256(json.dumps({"format": KEEP_FORMAT, "command": command, "inputs": inputs},
+def toolchain(program, hashes):
+    """The content of the JDK `program` belongs to: the launcher and JDK_FILES that exist."""
+    home = Path(program).parent.parent
+    files = [Path(program), *(home / name for name in JDK_FILES)]
+    return {str(path): hashes.file(str(path)) for path in files if path.is_file()}
+
+
+def keep_entry(command, jdk, inputs):
+    """The keep's folder for this command run by this JDK on exactly these files."""
+    digest = hashlib.sha256(json.dumps({"format": KEEP_FORMAT, "command": command, "jdk": jdk, "inputs": inputs},
                                        sort_keys=True).encode()).hexdigest()
     return KEEP / digest[:2] / digest
 
 
 def restore(entry):
-    """Write a kept run's outputs back; returns their paths, its stdout and its stderr."""
-    kept = json.loads((entry / "run.json").read_text())
-    for index, path in enumerate(kept["outputs"]):
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        temporary = f"{path}.{os.getpid()}.restore"
-        shutil.copyfile(entry / "files" / str(index), temporary)
+    """Put a kept run's outputs in place; returns their paths, its stdout and its stderr. None, with no output
+    touched, when the entry is missing or can't be read whole (pruned meanwhile, a damaged keep)."""
+    staged = []
+    try:
+        kept = json.loads((entry / "run.json").read_text())
+        stdout, stderr = (entry / "stdout").read_bytes(), (entry / "stderr").read_bytes()
+        for index, path in enumerate(kept["outputs"]):
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            temporary = f"{path}.{os.getpid()}.restore"
+            staged.append((temporary, path))
+            shutil.copyfile(entry / "files" / str(index), temporary)
+    except (OSError, ValueError, KeyError, TypeError):
+        for temporary, _ in staged:
+            Path(temporary).unlink(missing_ok=True)
+        return None
+    for temporary, path in staged:
         os.replace(temporary, path)
-    # Its mtime orders the keep's pruning (tools/parity.py): a replayed run stays.
-    os.utime(entry)
-    return kept["outputs"], (entry / "stdout").read_bytes(), (entry / "stderr").read_bytes()
+    # Its mtime orders the keep's pruning (tools/parity.py): a replayed run stays. Pruned meanwhile, it was still read.
+    try:
+        os.utime(entry)
+    except OSError:
+        pass
+    return kept["outputs"], stdout, stderr
 
 
 def keep(entry, outputs, captured):
-    """Keep a run for later checkouts, unless its outputs are too large. Best effort: a full or vanished keep
-    costs only the reuse."""
-    sizes = [os.path.getsize(path) for path in outputs]
-    if entry.exists() or any(size > KEPT_FILE for size in sizes) or sum(sizes) > KEPT_RUN:
-        return
+    """Keep a run for later checkouts, unless its outputs or streams are too large. Best effort: a full or vanished
+    keep costs only the reuse."""
     temporary = entry.parent / f".{entry.name}.{os.getpid()}.tmp"
     try:
+        sizes = [os.path.getsize(path) for path in outputs] + [len(captured["stdout"]), len(captured["stderr"])]
+        if entry.exists() or any(size > KEPT_FILE for size in sizes) or sum(sizes) > KEPT_RUN:
+            return
         (temporary / "files").mkdir(parents=True)
         for index, path in enumerate(outputs):
             shutil.copyfile(path, temporary / "files" / str(index))
@@ -260,7 +290,8 @@ def main():
     if stdin is None:
         os.execv(program, [program, *arguments])
     paths = named_paths(arguments)
-    command = {"program": os.path.realpath(program), "arguments": arguments, "cwd": os.getcwd(), "stdin": stdin}
+    command = {"program": os.path.realpath(program), "arguments": arguments, "cwd": os.getcwd(), "stdin": stdin,
+               "environment": {name: os.environ[name] for name in JVM_ENVIRONMENT if name in os.environ}}
     key = hashlib.sha256(json.dumps(command, sort_keys=True).encode()).hexdigest()
     record = CACHE / f"{key}.json"
     saved = json.loads(record.read_text()) if record.exists() else None
@@ -271,10 +302,11 @@ def main():
         return 0
     before = snapshot(paths)
     inputs = {path: hashes.file(path) for path in files_under(paths)}
-    entry = keep_entry(command, inputs) if KEEP else None
-    if entry and (entry / "run.json").exists():
-        restored, stdout, stderr = restore(entry)
-        outputs = {path: snapshot([path])[path] for path in restored}
+    entry = keep_entry(command, toolchain(command["program"], hashes), inputs) if KEEP else None
+    kept = restore(entry) if entry else None
+    if kept:
+        paths_written, stdout, stderr = kept
+        outputs = {path: snapshot([path])[path] for path in paths_written}
         record_run(record, key, command, {path: sha for path, sha in inputs.items() if path not in outputs}, outputs,
                    stdout, stderr)
         sys.stdout.buffer.write(stdout)
