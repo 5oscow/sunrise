@@ -550,7 +550,7 @@ impl mod_api::LevelHost for super::GameLevel<'_> {
         support: mod_api::SupportType,
     ) -> Option<bool> {
         if !self.native_authoritative {
-            return None;
+            self.api_level?;
         }
         super::native_world_read::block_face_sturdy(
             self.world,
@@ -563,9 +563,9 @@ impl mod_api::LevelHost for super::GameLevel<'_> {
     }
     fn can_see_sky(&self, pos: [i32; 3]) -> Option<bool> {
         if !self.native_authoritative {
-            return None;
+            self.api_level?;
         }
-        super::native_world_read::can_see_sky(self.world, pos)
+        Some(super::native_world_read::can_see_sky(self.world, pos))
     }
     fn block_entity(&self, pos: [i32; 3]) -> Option<mod_api::BlockEntityRef> {
         super::native_block_entity_refs::world_block_entity(self.world, self.api_level?, pos)

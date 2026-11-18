@@ -2965,7 +2965,11 @@ impl Game<'_> {
             cake_probe: false,
             cake_requested: std::cell::Cell::new(false),
             cake_answer: None,
-            api_level: self.level(self.dim.id()),
+            api_level: if native_authoritative {
+                self.level(self.dim.id())
+            } else {
+                self.native_client_level()
+            },
             part_state_index: self.attachment_indexes.get(&self.dim),
             command_block_transition: None,
             positions: piston_carry_state::PositionState {
