@@ -57,14 +57,6 @@ pub use sunrise_java_properties as java_properties;
 /// [`hooks::register`] it before the game starts (docs/layers.md, "How a Sunrise crate plugs
 /// in"). The engine's dispatch side is not part of the API.
 pub mod hooks {
-    /// The players the game shows (`sunrise_hooks::players`): the views [`Hooks::frame`] and
-    /// [`Hooks::tick`] get, the pose a crate lays over a player's body, what goes by their names,
-    /// the crate's sprites, the camera, and what a crate draws on them.
-    pub use sunrise_hooks::players::{
-        BODY_PARTS, Badge, BodyPose, Bone, CameraOverride, CameraView, Frame, Gear, Kind, Light,
-        Look, Mark, Mesh, Motion, NameDecoration, PartPoses, Particle, Pass, PlayerDraw,
-        PlayerModel, PlayerModels, Quad, SpriteStore, Sprites, View,
-    };
     pub use sunrise_hooks::{
         Activity, Client, ClientIdentity, Dimension, GameMode, GetTheGame, Hooks, Play, Started,
         TooLate, perf, register, seat, tunnel,

@@ -233,7 +233,7 @@ use std::path::PathBuf;
 
 impl Session {
     /// A number of its own for each connection, never 0: entity ids are per connection, so what
-    /// is kept by id goes when it changes (`sunrise_hooks::players::PlayerModels::connection`).
+    /// is kept by id goes when it changes.
     pub fn serial(&self) -> u64 {
         self.serial
     }

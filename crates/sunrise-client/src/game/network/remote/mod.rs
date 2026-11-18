@@ -6538,7 +6538,6 @@ impl Game<'_> {
         if !self.replay.playing() {
             self.tick_player_model();
         }
-        self.client_hooks_tick();
         if !dead {
             self.remote_tick_using();
         }
