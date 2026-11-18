@@ -31,7 +31,7 @@ API follows its clean-break rules ([AGENTS.md](AGENTS.md#mod-api-the-clean-break
   cargo run --release -p sunrise-game
   ```
 
-- **Launcher:** its own Cargo workspace in `launcher/` (`cd launcher && cargo run`; on NixOS, `nix-shell` first).
+- **Launcher:** its own repository, [sunrise-org/sunrise-launcher](https://github.com/sunrise-org/sunrise-launcher) (`cargo run` there; on NixOS, `nix-shell` first).
 
 ## Vanilla first
 
@@ -142,7 +142,7 @@ needs prepared resources, a child process or the network.
 | Tier | Runs on | What |
 | --- | --- | --- |
 | Push | every pull request push | `format`, `verify-static` |
-| Gate | rollup and sync pull requests, pushes to main | `lint`, `verify` (unit tests only), `verify-static`, `launcher` |
+| Gate | rollup and sync pull requests, pushes to main | `lint`, `verify` (unit tests only), `verify-static` |
 | Daily | once a day on main's head | every test that boots the game or needs prepared resources, the wasm fixture, `fn-replace-check`, the SDK build and its linkage probe, the machine sample built against the mod API, and vanilla parity on the main head captured at dispatch |
 
 **A unit test** uses no prepared resources, boots no game, starts no child process, uses no network and no compiled
