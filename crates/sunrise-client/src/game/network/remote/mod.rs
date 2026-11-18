@@ -8145,19 +8145,23 @@ impl Game<'_> {
     }
 
     /// Whether a main-hand right click with `held` would end on the block hit, for the gameplay
-    /// guide: what `remote_block_reacts` answers on its dry level.
+    /// guide: what `remote_block_reacts` answers on its dry level, by the templates' rules alone,
+    /// so looking asks no mod's placement or survival hook.
     pub(super) fn block_takes_click(&mut self, hit: &super::Hit, held: Option<&ItemStack>) -> bool {
-        self.remote_block_reacts(hit, held).0.consumes_action()
+        self.remote_block_reacts(hit, held, false)
+            .0
+            .consumes_action()
     }
     /// `InteractionResult.CONSUME` for this click: the block keeps it and does nothing, so the
-    /// item in hand never gets it either (an empty flower pot, a pressed button).
+    /// item in hand never gets it either (an empty flower pot, a pressed button). For the
+    /// guide's look, as `block_takes_click`.
     pub(super) fn block_swallows_click(
         &mut self,
         hit: &super::Hit,
         held: Option<&ItemStack>,
     ) -> bool {
         matches!(
-            self.remote_block_reacts(hit, held).0,
+            self.remote_block_reacts(hit, held, false).0,
             InteractionResult::Consume
         )
     }
@@ -8167,11 +8171,12 @@ impl Game<'_> {
     /// the block react (no sneaking with full hands): a door, a button, a
     /// container, and the blocks it changed. Vanilla's client runs it on its
     /// own level first; this runs it on a copy, and `predict_use` keeps the
-    /// changes it predicts.
+    /// changes it predicts. `asks_mods` as for `DryLevel`.
     fn remote_block_reacts(
         &mut self,
         hit: &super::Hit,
         held: Option<&ItemStack>,
+        asks_mods: bool,
     ) -> (InteractionResult, DryUse) {
         // AbstractCauldronBlock.useItemOn (CauldronInteractions): a bucket,
         // bottle or dye the cauldron takes fills or lowers it, and the click
@@ -8205,7 +8210,7 @@ impl Game<'_> {
         if self.composter_takes(hit.pos, held) {
             return (InteractionResult::Success, DryUse::default());
         }
-        self.remote_block_template(hit, held, false)
+        self.remote_block_template(hit, held, false, asks_mods)
     }
 
     /// The shared dry-level boundary for a normal block use or the empty
@@ -8215,6 +8220,7 @@ impl Game<'_> {
         hit: &super::Hit,
         held: Option<&ItemStack>,
         without_item: bool,
+        asks_mods: bool,
     ) -> (InteractionResult, DryUse) {
         use sunrise_core::geometry::Direction;
         let face = match hit.face {
@@ -8229,6 +8235,7 @@ impl Game<'_> {
         self.with_block_use_level(|b, level, live| {
             let mut level = DryLevel::new(level);
             level.reads = Some(live);
+            level.asks_mods = asks_mods;
             let hit = sunrise_core::geometry::BlockHit {
                 block: sunrise_core::position::BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]),
                 direction: face,

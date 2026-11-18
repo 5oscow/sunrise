@@ -204,19 +204,32 @@ impl BlockPart for Counted {
     }
 }
 
+/// A dandelion's survival, asked from a neighbour's shape update.
+struct CountedSurvival;
+#[mod_api::sunrise_part]
+impl BlockPart for CountedSurvival {
+    fn can_survive(&self, _: LevelSide<'_>, _: &mut CanSurviveEvent) -> Option<bool> {
+        GUIDE_ASKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        None
+    }
+}
+
 struct GuideMod;
 #[mod_api::__subscriptions]
 impl Hooks for GuideMod {
     fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
         let dirt = r.block_key("minecraft:dirt");
         r.block_part(dirt, Counted);
+        let dandelion = r.block_key("minecraft:dandelion");
+        r.block_part(dandelion, CountedSurvival);
     }
 }
 
-/// The controller guide's look at what a click would place asks no part; the click does.
+/// The controller guide's look at what a click would do (place a block, flip a lever) asks no
+/// placement or survival part; the click does.
 #[test]
 #[ignore = "daily"]
-fn the_guide_s_look_asks_no_placement_part_and_the_click_does() {
+fn the_guide_s_look_asks_no_placement_or_survival_part_and_the_click_does() {
     use std::sync::atomic::Ordering;
     let mods: mod_api::Mods = vec![mod_api::ModEntry::new("guide_test", Box::new(GuideMod))].into();
     on_a_client(mods, |game| {
@@ -232,6 +245,44 @@ fn the_guide_s_look_asks_no_placement_part_and_the_click_does() {
         assert!(game.remote_would_place(&top_of(0, 0), &dirt));
         assert_eq!(GUIDE_ASKS.load(Ordering::Relaxed), 0);
         assert!(game.remote_can_place(&top_of(0, 0), &dirt).is_some());
+        assert!(GUIDE_ASKS.load(Ordering::Relaxed) > 0);
+
+        // A lever flipped beside a dandelion updates its shape, which asks its survival: the
+        // guide's look at the lever doesn't, the click does.
+        let registry = game.pack.assets.registry;
+        let lever = registry
+            .resolve(&sunrise_world::chunk::BlockState {
+                name: "minecraft:lever".into(),
+                properties: [("face", "floor"), ("facing", "north"), ("powered", "false")]
+                    .into_iter()
+                    .map(|(key, value)| (key.into(), value.into()))
+                    .collect(),
+            })
+            .unwrap();
+        for x in [4, 5] {
+            game.world.set(x, 64, 0, stone).unwrap();
+        }
+        game.world.set(4, 65, 0, lever).unwrap();
+        game.world
+            .set(
+                5,
+                65,
+                0,
+                registry.default_state("minecraft:dandelion").unwrap(),
+            )
+            .unwrap();
+        let hit = crate::game::Hit {
+            pos: [4, 65, 0],
+            face: [0, 1, 0],
+            point: [4.5, 65.1, 0.5],
+            inside: false,
+        };
+        GUIDE_ASKS.store(0, Ordering::Relaxed);
+        assert!(game.block_takes_click(&hit, None));
+        assert!(!game.block_swallows_click(&hit, None));
+        assert_eq!(GUIDE_ASKS.load(Ordering::Relaxed), 0);
+        let (result, _) = game.remote_block_reacts(&hit, None, true);
+        assert!(result.consumes_action());
         assert!(GUIDE_ASKS.load(Ordering::Relaxed) > 0);
     });
 }
