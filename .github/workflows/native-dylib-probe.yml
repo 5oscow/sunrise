@@ -119,6 +119,11 @@ jobs:
       - name: Cap build parallelism to the runner
         if: runner.environment == 'self-hosted'
         run: echo "CARGO_BUILD_JOBS=$(python3 tools/ci/cargo_jobs.py --job-mib 4096 --cap)" | tee -a "$GITHUB_ENV"
+      # rustc's MIR builder recurses once per candidate of a very large `match` (sunrise-mod-points' generated tables);
+      # macOS reports its 8 MiB thread stack running out as SIGBUS, where Linux's runner stack does not.
+      - name: Give rustc a larger thread stack
+        if: runner.os == 'macOS'
+        run: echo "RUST_MIN_STACK=268435456" >> "$GITHUB_ENV"
       - name: Build the unmodified prebuilt SDK topology
         run: >-
           "$PROBE_PYTHON" tools/prebuilt_game.py build "$SDK_OUT"
