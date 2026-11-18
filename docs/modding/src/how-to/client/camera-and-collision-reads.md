@@ -19,7 +19,10 @@ height (`Window.getGuiScaledWidth/Height`).
 
 `LevelRef::brightness(host, layer, pos)` (`getBrightness`, the stored light 0 to 15) reads on a client too: the
 light of the level the client shows, as the server sent it for a chunk the client holds. It is `None` for a
-chunk the client does not hold and before login; `can_see_sky` stays a server read.
+chunk the client does not hold and before login. `LevelRef::block_face_sturdy(host, pos, face, support)` uses
+that level's local shapes for a loaded block inside build height. `LevelRef::can_see_sky(host, pos)` reads
+its published sky light, even outside build height or in an unloaded column. See
+[Level hosts](../../concepts/hooks-and-the-host.md#level-hosts) for the boundary rules.
 
 `ClientHost::playing()` is true while the player is in the world with nothing over it: no screen, title, sign
 editor or book, so keys and zoom apply. `ClientHost::mapping(name)` reads a vanilla key mapping (`key.forward`,
