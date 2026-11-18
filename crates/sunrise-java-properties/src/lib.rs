@@ -362,6 +362,8 @@ pub fn now_millis() -> i64 {
 }
 
 /// java.util.Date.toString in UTC: "EEE MMM dd HH:mm:ss zzz yyyy".
+/// Dates before the Gregorian cutover use the Julian calendar; the displayed
+/// year is year-of-era (so 1 BCE and 1 CE both print as `1`).
 pub fn date_string(millis: i64) -> String {
     const DAYS: [&str; 7] = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
     const MONTHS: [&str; 12] = [
@@ -370,7 +372,22 @@ pub fn date_string(millis: i64) -> String {
     let secs = millis.div_euclid(1000);
     let days = secs.div_euclid(86_400);
     let rem = secs.rem_euclid(86_400);
-    let (y, m, d) = civil_from_days(days);
+    let (y, m, d) = if days < days_from_civil(1582, 10, 15) {
+        // Julian day number (Unix epoch = 2_440_588), shifted to a March-based
+        // Julian calendar. Euclidean division keeps the four-year cycle valid
+        // before its origin, including for Date(Long.MIN_VALUE).
+        let day = days + 2_440_588 + 32_082;
+        let year = (4 * day + 3).div_euclid(1461);
+        let day_of_year = day - (1461 * year).div_euclid(4);
+        let month = (5 * day_of_year + 2).div_euclid(153);
+        let jan_or_feb = month / 10;
+        let y = year - 4800 + jan_or_feb;
+        let m = month + 3 - 12 * jan_or_feb;
+        let d = day_of_year - (153 * month + 2) / 5 + 1;
+        (if y > 0 { y } else { 1 - y }, m as u32, d as u32)
+    } else {
+        civil_from_days(days)
+    };
     format!(
         "{} {} {:02} {:02}:{:02}:{:02} UTC {}",
         DAYS[days.rem_euclid(7) as usize],
@@ -455,5 +472,18 @@ mod tests {
         assert_eq!(date_string(0), "Thu Jan 01 00:00:00 UTC 1970");
         assert_eq!(days_from_civil(2026, 10, 12), 20_738);
         assert_eq!(civil_from_days(20_738), (2026, 10, 12));
+    }
+
+    #[test]
+    fn date_text_uses_the_julian_cutover_and_year_of_era() {
+        // java.util.Date.toString under UTC on Temurin 25.0.5.
+        for (millis, expected) in [
+            (-12_219_292_800_001, "Thu Oct 04 23:59:59 UTC 1582"),
+            (-12_219_292_800_000, "Fri Oct 15 00:00:00 UTC 1582"),
+            (-62_167_219_200_000, "Sat Jan 03 00:00:00 UTC 1"),
+            (i64::MIN, "Sun Dec 02 16:47:04 UTC 292269055"),
+        ] {
+            assert_eq!(date_string(millis), expected);
+        }
     }
 }
