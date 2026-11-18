@@ -202,3 +202,78 @@ fn a_give_to_a_player_in_another_level_keeps_their_open_menu() {
         assert_eq!(guest.menu.as_ref().map(|m| m.window), Some(window));
     });
 }
+
+/// A diamond that fills a Nether guest's last slot from an Overworld hook completes their
+/// `inventory_changed` advancement in their own level, on their own tick: not at the give, in
+/// the hook's level, where its item reward would drop out of their reach.
+#[test]
+#[ignore = "daily"]
+fn an_inventory_reward_for_a_player_in_another_level_waits_for_their_own_tick() {
+    const ID: &str = "snapshot:diamonds";
+    let _publication = sunrise_client::datapack_net::isolate_server_publication();
+    with_guests(|game| {
+        let world = tempfile::tempdir().unwrap();
+        let data = world.path().join("datapacks/rewards/data/snapshot");
+        std::fs::create_dir_all(data.join("advancement")).unwrap();
+        std::fs::create_dir_all(data.join("loot_table")).unwrap();
+        std::fs::write(
+            world.path().join("datapacks/rewards/pack.mcmeta"),
+            r#"{"pack":{"description":"rewards"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            data.join("advancement/diamonds.json"),
+            r#"{"criteria":{"d":{"trigger":"minecraft:inventory_changed","conditions":{"items":[{"items":"minecraft:diamond"}]}}},
+                "requirements":[["d"]],"rewards":{"loot":["snapshot:reward"]}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            data.join("loot_table/reward.json"),
+            r#"{"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:emerald"}]}]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            world.path().join("datapacks.json"),
+            r#"{"enabled":["file/rewards"],"disabled":[]}"#,
+        )
+        .unwrap();
+        game.world_root = world.path().to_path_buf();
+        game.reload_datapacks(true, &[]).unwrap();
+        let diamond = in_the_nether(game);
+        let before = dropped(game);
+        let done = |game: &super::Game<'_>, conn| {
+            let guest = game.lan.as_ref().unwrap().hub.guest(conn).unwrap();
+            guest.advancements.has(ID, "d")
+        };
+        for (conn, in_transaction) in [(13, false), (12, true)] {
+            let player = game.player(u128::from(conn)).unwrap();
+            let case = format!("guest {conn}, in transaction: {in_transaction}");
+            let host: &mut dyn ServerHost = game;
+            let given = if in_transaction {
+                host.transaction(|host, _| Ok::<_, ()>(player.give_stack(host, diamond.clone())))
+                    .unwrap()
+            } else {
+                player.give_stack(host, diamond.clone())
+            };
+            assert_eq!(given, Ok(None), "{case}");
+            assert_eq!(diamonds(game, conn), 1, "{case}");
+            assert!(!done(game, conn), "{case}: not judged in the hook's level");
+            assert_eq!(dropped(game), before, "{case}: nothing dropped yet");
+
+            game.enter_level(Dim::Nether).unwrap();
+            game.as_guest(conn, |game| game.tick_advancements())
+                .unwrap();
+            game.enter_level(Dim::Overworld).unwrap();
+            assert!(done(game, conn), "{case}: done on their own tick");
+            // Their inventory is full: the reward lies in the Nether, where they are.
+            assert_eq!(
+                dropped(game),
+                [before[0], before[1] + 1],
+                "{case}: the reward drops in their level"
+            );
+            game.enter_level(Dim::Nether).unwrap();
+            game.dropped.clear();
+            game.enter_level(Dim::Overworld).unwrap();
+        }
+    });
+}
