@@ -89,8 +89,13 @@ const KEY: &str = "discordPresence";
 const LABEL: &str = "sunrise.extras.discord_presence";
 const ABOUT: &str = "sunrise.extras.discord_presence.tooltip";
 
-/// The switch (off until Sunrise has a Discord application). One presence per process.
+/// The process-wide switch (off until Sunrise has a Discord application).
 static ON: AtomicBool = AtomicBool::new(false);
+
+/// Only the first local instance owns the process-wide setting.
+fn owns_switch() -> bool {
+    hooks::seat() == 0
+}
 
 /// Turns the presence on or off; off clears the activity at once.
 pub fn set_enabled(on: bool) {
@@ -126,6 +131,9 @@ impl Store for Setting {
         key == KEY
     }
     fn load(&self, _key: &str, value: &str) {
+        if !owns_switch() {
+            return;
+        }
         match value {
             "true" => set_enabled(true),
             "false" => set_enabled(false),
@@ -133,10 +141,12 @@ impl Store for Setting {
         }
     }
     fn save(&self, line: &mut dyn FnMut(&str, &str)) {
-        line(KEY, if enabled() { "true" } else { "false" });
+        if owns_switch() {
+            line(KEY, if enabled() { "true" } else { "false" });
+        }
     }
     fn is_default(&self) -> bool {
-        !enabled()
+        !enabled() || !owns_switch()
     }
 }
 
@@ -157,13 +167,16 @@ impl Page for Section {
         Place::Extras
     }
     fn rows(&self, rows: &mut Vec<Row>) {
+        if !owns_switch() {
+            return;
+        }
         rows.push(Row::Toggle {
             label: LABEL,
             on: enabled(),
         });
     }
     fn act(&self, row: usize, act: Act) {
-        if row == 0 && matches!(act, Act::Press | Act::PressBack) {
+        if row == 0 && owns_switch() && matches!(act, Act::Press | Act::PressBack) {
             set_enabled(!enabled());
         }
     }
