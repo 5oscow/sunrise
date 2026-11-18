@@ -606,6 +606,7 @@ impl Renderer {
         self.sections.clear();
         self.ray_clear();
         self.lods.clear();
+        self.lod_cells.clear();
         self.lod_cutout.clear();
         self.lod_retiring.clear();
         self.lod_leaving.clear();

@@ -540,11 +540,20 @@ impl Renderer {
         if frame.title {
             visible.clear();
         } else {
-            visible_lods.extend(
-                self.lods
-                    .iter()
-                    .filter_map(|(&key, tile)| tile.visible(key, camera, &view, now)),
-            );
+            // Far tiles take the frustum test a cell at a time: a cell out of
+            // view leaves every tile in it out, and one wholly in view leaves
+            // them only their distance. The sort below is the same either way.
+            let lods = &self.lods;
+            self.lod_cells.walk(camera, &view, |inside, key| {
+                let Some(tile) = lods.get(&key) else {
+                    return;
+                };
+                visible_lods.extend(if inside {
+                    tile.visible_inside(key, camera, now)
+                } else {
+                    tile.visible(key, camera, &view, now)
+                });
+            });
             visible_lods.sort_unstable_by_key(|v| (v.distance, v.key));
         }
         let mut shadow_visible = std::mem::take(&mut self.shadow_visible);
