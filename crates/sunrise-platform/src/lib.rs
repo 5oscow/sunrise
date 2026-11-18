@@ -88,6 +88,14 @@ pub mod lang {
     pub use sunrise_hooks::lang::{Files, register};
 }
 
+/// Rows a crate adds to the Mods screen (docs/layers.md, "Platform registries").
+pub mod mod_rows {
+    pub use sunrise_hooks::mod_rows::{Row, register};
+}
+
+/// The game's own release: [`release::VERSION`] is what its Mods screen row shows.
+pub use sunrise_core::release;
+
 /// Drawing on the HUD (docs/layers.md, "Platform registries").
 pub mod hud {
     pub use sunrise_hooks::hud::{Canvas, Corner, Layer, register};
