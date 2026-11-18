@@ -123,7 +123,7 @@ index bca7938..2f2eb44 100644
      assert_eq!(e.code, "E_UNSUPPORTED_CONTROL_FLOW", "{e}");
 +    assert!(e.message.contains("beneath a reference"), "{e}");
  }
- 
+
  #[test]
 @@ -200,3 +201,204 @@ fn the_helper_sees_each_exit_value_once() {
      .unwrap();
@@ -331,7 +331,7 @@ index bca7938..2f2eb44 100644
 +    assert!(e.message.contains("selected site contains `?`"), "{e}");
 +}
 diff --git a/crates/horizon-mixins-cli/tests/integration.rs b/crates/horizon-mixins-cli/tests/integration.rs
-index fcf5a46..3a8bb03 100644
+index fcf5a46..2790baf 100644
 --- a/crates/horizon-mixins-cli/tests/integration.rs
 +++ b/crates/horizon-mixins-cli/tests/integration.rs
 @@ -697,14 +697,14 @@ fn cfg_attributes_shared_module_sources_and_shadowing_fail_closed() {
@@ -353,7 +353,7 @@ index fcf5a46..3a8bb03 100644
              "E_UNSUPPORTED_CONTROL_FLOW",
          ),
          (
-@@ -890,3 +890,806 @@ fn production_test_cfg_modules_are_indexed_and_applied() {
+@@ -890,3 +890,809 @@ fn production_test_cfg_modules_are_indexed_and_applied() {
      let error = build_plan(&f.root, &f.mods).unwrap_err();
      assert!(format!("{error:?}").contains("E_TARGET_NOT_FOUND"));
  }
@@ -375,6 +375,7 @@ index fcf5a46..3a8bb03 100644
 +    pub fn mark(what: &'static str) {{ LOG.lock().unwrap().push(what); }}
 +    #[derive(Debug, PartialEq)]
 +    pub struct Failure(pub String);
++    impl From<usize> for Failure {{ fn from(n: usize) -> Self {{ Failure(format!("size {{n}}")) }} }}
 +    impl From<&'static str> for Failure {{ fn from(s: &'static str) -> Self {{ Failure(format!("converted {{s}}")) }} }}
 +    pub struct Engine(pub i32);
 +    impl Engine {{ pub fn go(&self, x: i32) -> i32 {{ mark("go"); self.0 + x }} }}
@@ -419,7 +420,8 @@ index fcf5a46..3a8bb03 100644
 +    impl Outer {{ pub fn read(&self) -> i32 {{ 22 }} }}
 +    pub fn outer(ok: bool) -> Result<Outer, &'static str> {{ if ok {{ Ok(Outer(Inner)) }} else {{ Err("no outer") }} }}
 +    pub fn scale<T: Into<f64>>(t: T) -> f64 {{ t.into() }}
-+    pub fn default_value(x: f64) -> Result<f64, &'static str> {{ Ok(x) }}
++    pub fn default_value<T>(x: T) -> Result<T, &'static str> {{ Ok(x) }}
++    pub fn fail<T>() -> Result<T, usize> {{ Err(std::mem::size_of::<T>()) }}
 +    pub fn run_param(engine: &Engine, x: i32) -> i32 {{ engine.go(x) }}
 +    pub fn run(ok: bool, bad_arg: bool) -> Result<i32, Failure> {{ {body} }}
 +    "#
@@ -698,10 +700,11 @@ index fcf5a46..3a8bb03 100644
 +            ("Ok(scale(default_value(0.1)?) as i32)", "f32"),
 +            ("Ok(scale(default_value(0.1)?) as i32)", "f64"),
 +            (
-+                "Ok(scale(if ok { return Ok(7) } else { Err(0usize)? }) as i32)",
++                "Ok(scale(if ok { return Ok(7) } else { fail()? }) as i32)",
 +                "i64",
 +            ),
 +            ("Ok(scale(unsafe { 1i32 }) as i32)", "i32"),
++            ("Ok(scale(const { 1i32 }) as i32)", "i32"),
 +        ] {
 +            let f = scale_fixture(body, ty);
 +            let e = plan_error(&f);
@@ -1170,7 +1173,7 @@ index 55a9372..0daa2d7 100644
      visit::{self, Visit},
 +    visit_mut::{self, VisitMut},
  };
- 
+
  #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 @@ -82,13 +83,98 @@ pub fn return_type(sig: &syn::Signature) -> Type {
          ReturnType::Type(_, ty) => *ty.clone(),
@@ -1412,7 +1415,7 @@ index 740c0dc..94df671 100644
      pub types: Vec<TypeDefinition>,
      pub blocked: BTreeSet<String>,
 @@ -147,6 +152,12 @@ pub fn macro_attributes(attrs: &[Attribute]) -> bool {
- 
+
  impl Index {
      pub fn load(root: &Path) -> Result<Self> {
 +        Self::load_with(root, None)
@@ -1936,11 +1939,11 @@ index 5bac667..f85ac3c 100644
 +pub use plan::{
 +    Plan, PlannedInjection, build_plan, build_plan_with, build_staged, build_staged_with,
 +};
- 
+
  pub mod modules;
- 
+
 diff --git a/crates/horizon-mixins-core/src/plan.rs b/crates/horizon-mixins-core/src/plan.rs
-index 848dcc0..a7f4bc4 100644
+index 848dcc0..8a80e7c 100644
 --- a/crates/horizon-mixins-core/src/plan.rs
 +++ b/crates/horizon-mixins-core/src/plan.rs
 @@ -1,5 +1,6 @@
@@ -2038,7 +2041,7 @@ index 848dcc0..a7f4bc4 100644
 +                {
 +                    return Err(context(Diagnostic::new(
 +                        "E_OPERATION_SIGNATURE",
-+                        "a computed receiver (a call result) cannot be wrapped with a declared type: the declaration takes part in inferring the receiver's own type and can change the call the game makes. Mark the receiver opaque (`opaque_receiver`), or wrap a method on a target function's reference parameter; binding the receiver to a local in the game's code is not a row",
++                        "a computed receiver (a call result) cannot be wrapped with a declared type: the declaration takes part in inferring the receiver's own type and can change the call the game makes. Wrap a method on a target function's reference parameter instead; binding the receiver to a local in the game's code is not a row",
 +                    ).file(&f.file)));
 +                }
 +                // The site moves into generated code, where a `?` would leave a closure instead
@@ -2275,7 +2278,7 @@ index 47fee7d..7b18f8f 100644
 +        self.references -= usize::from(reference);
      }
  }
- 
+
 diff --git a/crates/horizon-mixins-transform/src/lib.rs b/crates/horizon-mixins-transform/src/lib.rs
 index f4edd3d..d2a70cb 100644
 --- a/crates/horizon-mixins-transform/src/lib.rs
