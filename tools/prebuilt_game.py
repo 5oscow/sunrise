@@ -729,16 +729,16 @@ def smoke(out: Path) -> None:
 
 # What `smoke` adds to the starter for `smoke_user` to call; never inlined, so the call crosses the libraries.
 SMOKE_LIBRARY_ITEM = """
-/// Called from `smoke_user`'s library.
+/// Called from `smoke_user`'s library. Named apart from the starter's own items (its private `greeting`).
 #[inline(never)]
-pub fn greeting() -> &'static str {
+pub fn library_name() -> &'static str {
     "smoke"
 }
 """
 SMOKE_USER_ITEM = """
 /// A call into `smoke`'s library.
-pub fn greeting_length() -> usize {
-    smoke::greeting().len()
+pub fn library_name_length() -> usize {
+    smoke::library_name().len()
 }
 """
 
