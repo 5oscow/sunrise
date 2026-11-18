@@ -1016,7 +1016,7 @@ index fcf5a46..01b5554 100644
 +    }
 +}
 diff --git a/crates/horizon-mixins-core/src/helpers.rs b/crates/horizon-mixins-core/src/helpers.rs
-index 55a9372..f6b548d 100644
+index 55a9372..45c0638 100644
 --- a/crates/horizon-mixins-core/src/helpers.rs
 +++ b/crates/horizon-mixins-core/src/helpers.rs
 @@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
@@ -1027,7 +1027,7 @@ index 55a9372..f6b548d 100644
  };
  
  #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-@@ -82,13 +83,88 @@ pub fn return_type(sig: &syn::Signature) -> Type {
+@@ -82,13 +83,98 @@ pub fn return_type(sig: &syn::Signature) -> Type {
          ReturnType::Type(_, ty) => *ty.clone(),
      }
  }
@@ -1100,8 +1100,18 @@ index 55a9372..f6b548d 100644
 +            .map(|s| s.ident.to_string())
 +            .collect();
 +        let names: Vec<_> = names.iter().map(String::as_str).collect();
++        // Only the last segment takes arguments, and a bare name is relative: `::ControlFlow`
++        // names a crate.
++        let prefixes_plain = path
++            .path
++            .segments
++            .iter()
++            .rev()
++            .skip(1)
++            .all(|s| s.arguments.is_none());
 +        match names.as_slice() {
-+            ["ControlFlow"] | ["core" | "std", "ops", "ControlFlow"] => path.path.segments.last(),
++            ["ControlFlow"] if path.path.leading_colon.is_none() => path.path.segments.last(),
++            ["core" | "std", "ops", "ControlFlow"] if prefixes_plain => path.path.segments.last(),
 +            _ => None,
 +        }
 +    }
@@ -1122,7 +1132,7 @@ index 55a9372..f6b548d 100644
  }
  fn parse_type(text: &str) -> Result<Type> {
      syn::parse_str(text).map_err(|e| Diagnostic::new("E_INVALID_BINDING", e.to_string()))
-@@ -385,9 +461,14 @@ pub fn validate_helper(
+@@ -385,9 +471,14 @@ pub fn validate_helper(
          ));
      }
      // OVERWRITE retains the MVP's compiler-validated return compatibility.
@@ -1139,7 +1149,7 @@ index 55a9372..f6b548d 100644
      {
          let why = if cancellable {
              "cancellable hook helper must return core::ops::ControlFlow<TargetResult>"
-@@ -439,7 +520,13 @@ pub fn validate_helper(
+@@ -439,7 +530,13 @@ pub fn validate_helper(
                      let output = parse_type(&op.output)?;
                      let expected: Type =
                          syn::parse2(quote!(impl FnOnce(#(#inputs),*) -> #output)).unwrap();
@@ -1153,7 +1163,7 @@ index 55a9372..f6b548d 100644
                  } else {
                      binding.value == "$receiver"
                          || binding
-@@ -528,3 +615,70 @@ fn binding_expr(expr: &Expr, parameters: &std::collections::BTreeSet<String>) ->
+@@ -528,3 +625,78 @@ fn binding_expr(expr: &Expr, parameters: &std::collections::BTreeSet<String>) ->
          _ => false,
      }
  }
@@ -1209,6 +1219,14 @@ index 55a9372..f6b548d 100644
 +        }
 +        assert!(!cancels("ControlFlow<Result<i32, E>, bool>", contract));
 +        assert!(!cancels("other::ControlFlow<Result<i32, E>>", contract));
++        // Generic arguments on a prefix segment, and a leading `::` on the bare name, are other types.
++        for other in [
++            "core::<u8>::ops::ControlFlow<Result<i32, E>>",
++            "core::ops::<u8>::ControlFlow<Result<i32, E>>",
++            "::ControlFlow<Result<i32, E>>",
++        ] {
++            assert!(!cancels(other, contract), "{other}");
++        }
 +        assert!(!cancels(
 +            "ControlFlow<std::ops::Range<u8>>",
 +            "ControlFlow<Range<u8>>"
