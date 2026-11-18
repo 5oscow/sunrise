@@ -10,11 +10,14 @@
 //! their shared `MobType`, which the game's types never replace while it runs), whose renderer
 //! draws in place of the model and its vanilla layers, primed TNT (`minecraft:tnt`), experience
 //! orbs (`minecraft:experience_orb`), paintings (`minecraft:painting`), and item frames
-//! (`minecraft:item_frame`, `minecraft:glow_item_frame`). Each other entity family becomes a route
+//! (`minecraft:item_frame`, `minecraft:glow_item_frame`), and a mod's general entity types (by
+//! their slot in the frozen catalog, `general_type_catalog`), which the renderer draws through
+//! `submit_with_host`. Each other entity family becomes a route
 //! of its own; until then a registration for one of its types is kept and the type keeps its
 //! drawing.
 //! Each load also asks for the layers of the living renderers (`native_entity_layers`), which draw
 //! through the same guard ([`Game::guarded_entity_draw`]).
+use super::general::GeneralTypeCatalog;
 use super::{
     Game, host::draw::GameBlockEntityDrawContext, native_block_entity_draw::BlockEntityDraw,
 };
@@ -60,6 +63,10 @@ static ANY_PAINTING: AtomicBool = AtomicBool::new(false);
 /// Whether the last load resolved a renderer for an item frame or a glow item frame: a frame
 /// checks only this when none was registered, so the vanilla frame route stays off the table lock.
 static ANY_ITEM_FRAME: AtomicBool = AtomicBool::new(false);
+
+/// Whether the last load resolved a renderer for any general entity type: a frame checks only this
+/// when none was registered, so the general route stays off the table lock.
+static ANY_GENERAL: AtomicBool = AtomicBool::new(false);
 
 /// The player's entity type: its model goes by its skin, not by entity type.
 const PLAYER: &str = "minecraft:player";
@@ -113,17 +120,21 @@ pub(super) struct EntityRendererTable {
     item_frame: Option<Arc<Resolved<dyn EntityRenderer>>>,
     /// A glow item frame (`minecraft:glow_item_frame`).
     glow_item_frame: Option<Arc<Resolved<dyn EntityRenderer>>>,
+    /// By the general type's slot in the frozen catalog (`GeneralTypeCatalog::slot`).
+    general: Vec<Option<Arc<Resolved<dyn EntityRenderer>>>>,
 }
 
 impl EntityRendererTable {
     /// The table for `registered`, with `thrown` the content mods' thrown types, `mobs` the
-    /// living types the game draws as mobs and `known` whether an id is any entity type; and the
-    /// ids of the registrations for no entity type, which it leaves out. A registration for a
-    /// known type no route reads yet is kept silently: the type keeps its own drawing.
+    /// living types the game draws as mobs, `general` the mods' general entity types and `known`
+    /// whether an id is any other entity type; and the ids of the registrations for no entity
+    /// type, which it leaves out. A registration for a known type no route reads yet is kept
+    /// silently: the type keeps its own drawing.
     pub(super) fn resolve(
         registered: &BTreeMap<String, Arc<dyn EntityRenderer>>,
         thrown: &[ThrownType],
         mobs: &HashMap<String, Arc<MobType>>,
+        general: &GeneralTypeCatalog,
         known: impl Fn(&str) -> bool,
     ) -> (Self, Vec<String>) {
         let mut table = Self {
@@ -134,6 +145,7 @@ impl EntityRendererTable {
             painting: None,
             item_frame: None,
             glow_item_frame: None,
+            general: vec![None; general.len()],
         };
         let mut unknown = Vec::new();
         for (id, renderer) in registered {
@@ -152,6 +164,8 @@ impl EntityRendererTable {
                 table.item_frame = Some(resolved());
             } else if id == GLOW_ITEM_FRAME {
                 table.glow_item_frame = Some(resolved());
+            } else if let Some(slot) = general.slot(id) {
+                table.general[slot] = Some(resolved());
             } else if !known(id) {
                 unknown.push(id.clone());
             }
@@ -182,6 +196,19 @@ impl EntityRendererTable {
     /// The renderer of a painting, when a mod registered one for `minecraft:painting`.
     pub(super) fn painting(&self) -> Option<&Arc<Resolved<dyn EntityRenderer>>> {
         self.painting.as_ref()
+    }
+
+    /// The renderer of the general type in catalog slot `slot`, when a mod registered one.
+    pub(super) fn general(&self, slot: usize) -> Option<&Arc<Resolved<dyn EntityRenderer>>> {
+        self.general.get(slot)?.as_ref()
+    }
+
+    /// The general types of `catalog` no mod registered a renderer for: their rows draw nothing.
+    pub(super) fn unrendered_general<'c>(&self, catalog: &'c GeneralTypeCatalog) -> Vec<&'c str> {
+        (0..catalog.len())
+            .filter(|&slot| self.general(slot).is_none())
+            .map(|slot| catalog.key(slot))
+            .collect()
     }
 
     /// The renderer of an item frame or glow item frame, when a mod registered one for that type.
@@ -254,6 +281,16 @@ pub(in crate::game) fn item_frame_renderer(
     table.as_ref()?.item_frame(glow).cloned()
 }
 
+/// The renderer the last resource load resolved for the general type in catalog slot `slot`, when
+/// a mod registered one: with none registered for any general type, one flag check, with no lock.
+pub(in crate::game) fn general_renderer(slot: usize) -> Option<Arc<Resolved<dyn EntityRenderer>>> {
+    if !ANY_GENERAL.load(Ordering::Relaxed) {
+        return None;
+    }
+    let table = TABLE.read().unwrap_or_else(PoisonError::into_inner);
+    table.as_ref()?.general(slot).cloned()
+}
+
 impl Game<'_> {
     /// Resolves the registered renderers against the entity types of the resources now loaded, then
     /// asks for the living renderers' layers: at the first load and on every reload after it. A
@@ -261,10 +298,12 @@ impl Game<'_> {
     pub(in crate::game) fn resolve_entity_renderers(&self) {
         let registered = REGISTERED.get().unwrap_or(&NO_RENDERERS);
         let rows = super::entity_type_rows::entity_type_rows(&self.options.resources);
+        let catalog = super::general::general_type_catalog();
         let (table, unknown) = EntityRendererTable::resolve(
             registered,
             sunrise_client::projectiles::thrown_types(),
             self.res.mob_types(),
+            catalog,
             |id| rows.contains(id),
         );
         for id in unknown {
@@ -272,17 +311,25 @@ impl Game<'_> {
                 "Sunrise: an entity renderer is registered for {id}, which is no entity type; it is left out"
             );
         }
+        // A general type has no vanilla look to fall back to: its rows draw nothing.
+        for id in table.unrendered_general(catalog) {
+            log::info!(
+                "Sunrise: no entity renderer is registered for general entity type {id}; its entities draw nothing"
+            );
+        }
         let any_living = !table.living.is_empty();
         let any_tnt = table.tnt.is_some();
         let any_experience_orb = table.experience_orb.is_some();
         let any_painting = table.painting.is_some();
         let any_item_frame = table.item_frame.is_some() || table.glow_item_frame.is_some();
+        let any_general = table.general.iter().any(Option::is_some);
         *TABLE.write().unwrap_or_else(PoisonError::into_inner) = Some(table);
         ANY_LIVING.store(any_living, Ordering::Relaxed);
         ANY_TNT.store(any_tnt, Ordering::Relaxed);
         ANY_EXPERIENCE_ORB.store(any_experience_orb, Ordering::Relaxed);
         ANY_PAINTING.store(any_painting, Ordering::Relaxed);
         ANY_ITEM_FRAME.store(any_item_frame, Ordering::Relaxed);
+        ANY_GENERAL.store(any_general, Ordering::Relaxed);
         self.resolve_entity_layers(&rows, registered);
     }
 
@@ -310,6 +357,33 @@ impl Game<'_> {
             light,
             out,
             |draw| resolved.inner.submit(entity, draw),
+        )
+    }
+
+    /// [`Self::mod_entity_renderer_geometry`] for a general entity row: the renderer is asked
+    /// through `submit_with_host`, with this game as the host its synced attachments are read
+    /// from.
+    #[allow(clippy::too_many_arguments)]
+    pub(in crate::game) fn mod_general_renderer_geometry(
+        &self,
+        resolved: &Resolved<dyn EntityRenderer>,
+        entity: &EntityRenderState,
+        entity_type: &str,
+        at: DVec3,
+        block: [i32; 3],
+        light: u32,
+        out: &mut Vec<Vertex>,
+    ) -> bool {
+        let pose = Mat4::from_translation(at.as_vec3());
+        self.guarded_entity_draw(
+            &resolved.failed,
+            entity.partial,
+            entity_type,
+            block,
+            pose,
+            light,
+            out,
+            |draw| resolved.inner.submit_with_host(self, entity, draw),
         )
     }
 

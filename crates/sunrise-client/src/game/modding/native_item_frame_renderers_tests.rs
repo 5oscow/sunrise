@@ -223,15 +223,20 @@ fn an_item_frame_registration_resolves_to_the_frame_slots() {
             Arc::new(Mark) as Arc<dyn EntityRenderer>,
         ),
     ]);
-    let (table, unknown) =
-        EntityRendererTable::resolve(&registered, &[], &Default::default(), |id| {
+    let (table, unknown) = EntityRendererTable::resolve(
+        &registered,
+        &[],
+        &Default::default(),
+        &crate::game::general::GeneralTypeCatalog::freeze(&[]).unwrap(),
+        |id| {
             [
                 "minecraft:item_frame",
                 "minecraft:glow_item_frame",
                 "minecraft:oak_boat",
             ]
             .contains(&id)
-        });
+        },
+    );
     assert!(table.item_frame(false).is_some());
     assert!(table.item_frame(true).is_some());
     assert_eq!(unknown, Vec::<String>::new());

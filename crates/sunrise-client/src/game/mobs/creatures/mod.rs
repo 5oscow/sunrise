@@ -7981,6 +7981,7 @@ impl Game<'_> {
             (a, at)
         });
         self.projectile_geometry(camera, alpha, live, out);
+        self.general_entity_geometry(camera, alpha, out);
     }
 
     pub(super) fn pickup_arrow_geometry(
