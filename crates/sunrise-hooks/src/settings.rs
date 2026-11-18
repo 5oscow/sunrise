@@ -65,42 +65,83 @@ pub mod engine {
     }
 
     /// A settings file's text, `None` when there is none. Bytes that aren't UTF-8 read as
-    /// U+FFFD, as vanilla's `Options.load` reads them, so every other line survives.
-    pub fn read(path: &Path) -> io::Result<Option<String>> {
+    /// U+FFFD, as vanilla's `Options.load` reads them, so every other line loads; such a file is
+    /// `lossy`, and is never written over, so the bytes it couldn't decode stay as they are.
+    pub fn read(path: &Path) -> io::Result<Option<FileText>> {
         match fs::read(path) {
-            Ok(bytes) => Ok(Some(String::from_utf8_lossy(&bytes).into_owned())),
+            Ok(bytes) => Ok(Some(match String::from_utf8(bytes) {
+                Ok(text) => FileText { text, lossy: false },
+                Err(e) => FileText {
+                    text: String::from_utf8_lossy(e.as_bytes()).into_owned(),
+                    lossy: true,
+                },
+            })),
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
             Err(e) => Err(e),
         }
     }
 
-    /// Replaces `path` with `text` in one step: a sibling temporary file, synced, then renamed
+    /// Replaces `path` with `text` in one step: a new sibling temporary file, synced, then renamed
     /// over it, so a failure or an interruption leaves the old file whole.
     pub fn replace(path: &Path, text: &str) -> io::Result<()> {
-        use std::io::Write;
         use std::sync::atomic::{AtomicU64, Ordering};
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let name = path
             .file_name()
             .and_then(|n| n.to_str())
-            .unwrap_or("settings");
-        let n = NEXT.fetch_add(1, Ordering::Relaxed);
-        let temp = path.with_file_name(format!(".{name}.{}.{n}.tmp", std::process::id()));
-        let written = fs::File::create(&temp).and_then(|mut file| {
-            file.write_all(text.as_bytes())?;
-            file.sync_all()
-        });
-        let result = written.and_then(|()| fs::rename(&temp, path));
-        if result.is_err() {
-            let _ = fs::remove_file(&temp);
+            .unwrap_or("settings")
+            .to_owned();
+        let pid = std::process::id();
+        let names = std::iter::repeat_with(|| NEXT.fetch_add(1, Ordering::Relaxed))
+            .map(|n| path.with_file_name(format!(".{name}.{pid}.{n}.tmp")));
+        replace_through(path, text, names.take(16))
+    }
+
+    /// `replace` through the first of `temps` that doesn't exist yet: one that does is left alone.
+    pub(super) fn replace_through(
+        path: &Path,
+        text: &str,
+        temps: impl IntoIterator<Item = std::path::PathBuf>,
+    ) -> io::Result<()> {
+        use std::io::Write;
+        let mut taken = io::Error::new(io::ErrorKind::AlreadyExists, "no free temporary name");
+        for temp in temps {
+            let mut file = match fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temp)
+            {
+                Ok(file) => file,
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+                    taken = e;
+                    continue;
+                }
+                Err(e) => return Err(e),
+            };
+            let result = file
+                .write_all(text.as_bytes())
+                .and_then(|()| file.sync_all())
+                .and_then(|()| fs::rename(&temp, path));
+            if result.is_err() {
+                let _ = fs::remove_file(&temp);
+            }
+            return result;
         }
-        result
+        Err(taken)
     }
 
     /// The keys of `text`'s `key:value` lines: what the stores wrote.
     pub fn keys(text: &str) -> Vec<&str> {
         lines(text).map(|(_, key, _)| key).collect()
     }
+}
+
+/// A settings file's text as [`engine::read`] gives it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileText {
+    pub text: String,
+    /// Some bytes weren't UTF-8 and read as U+FFFD: the file must not be written over.
+    pub lossy: bool,
 }
 
 /// Each file the stores use, once, in registration order.
@@ -161,7 +202,12 @@ fn save_files(
         }
         let path = dir.join(file);
         let existing = match engine::read(&path) {
-            Ok(existing) => existing,
+            Ok(Some(read)) if read.lossy => {
+                let why = "it has bytes that aren't UTF-8, so it is left as it is";
+                failed.push((file, io::Error::new(io::ErrorKind::InvalidData, why)));
+                continue;
+            }
+            Ok(existing) => existing.map(|read| read.text),
             Err(e) => {
                 failed.push((file, e));
                 continue;
@@ -172,14 +218,18 @@ fn save_files(
         if existing.is_none() && default {
             continue;
         }
-        // Lines no store wrote now: another build's, a setting whose crate isn't in this one, or
-        // one a store left alone this time.
+        // Lines no store wrote now, as written: another build's, a setting whose crate isn't in
+        // this one, one a store left alone this time, or one that isn't `key:value` at all.
         let written = engine::keys(&text);
         let mut kept = String::new();
-        for (line, key, _) in lines(existing.as_deref().unwrap_or_default()) {
-            if !written.contains(&key) {
-                kept.push_str(line);
-                kept.push('\n');
+        for record in existing
+            .as_deref()
+            .unwrap_or_default()
+            .split_inclusive('\n')
+        {
+            let key = record.split_once(':').map(|(key, _)| key.trim());
+            if !key.is_some_and(|key| written.contains(&key)) {
+                kept.push_str(record);
             }
         }
         text.push_str(&kept);
@@ -364,13 +414,48 @@ mod tests {
     }
 
     #[test]
-    fn a_file_with_a_bad_byte_reads_its_other_lines() {
+    fn a_file_with_a_bad_byte_loads_its_other_lines_and_is_never_written_over() {
         let dir = scratch("bad-byte");
         let path = dir.join("sunrise-pad.txt");
-        fs::write(&path, b"rumble:true\nname:\xff\n").unwrap();
-        let text = engine::read(&path).unwrap().unwrap();
-        assert!(text.starts_with("rumble:true\n"));
+        let bytes = b"rumble:false\nname:\xff\nno colon \xfe\r\n";
+        fs::write(&path, bytes).unwrap();
+        let read = engine::read(&path).unwrap().unwrap();
+        assert!(read.lossy && read.text.starts_with("rumble:false\n"));
         assert_eq!(engine::read(&dir.join("absent.txt")).unwrap(), None);
+        let pad = Switch::new("sunrise-pad.txt", "rumble");
+        pad.set(true);
+        let stores: [&dyn Store; 1] = [&pad];
+        assert_eq!(save_files(&stores, &dir, &[]).len(), 1, "the save says why");
+        assert_eq!(fs::read(&path).unwrap(), bytes);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn kept_records_are_saved_as_written_the_last_one_unterminated() {
+        let dir = scratch("kept-records");
+        let path = dir.join("sunrise-pad.txt");
+        fs::write(&path, "rumble:false\r\nno colon here\r\nother : 2 ").unwrap();
+        let pad = Switch::new("sunrise-pad.txt", "rumble");
+        pad.set(true);
+        let stores: [&dyn Store; 1] = [&pad];
+        assert!(save_files(&stores, &dir, &[]).is_empty());
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "rumble:true\nno colon here\r\nother : 2 "
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_file_at_the_temporary_name_is_left_alone() {
+        let dir = scratch("temp-taken");
+        let target = dir.join("sunrise-pad.txt");
+        let (taken, free) = (dir.join(".taken.tmp"), dir.join(".free.tmp"));
+        fs::write(&taken, "someone else's").unwrap();
+        engine::replace_through(&target, "rumble:true\n", [taken.clone(), free.clone()]).unwrap();
+        assert_eq!(fs::read_to_string(&taken).unwrap(), "someone else's");
+        assert_eq!(fs::read_to_string(&target).unwrap(), "rumble:true\n");
+        assert!(!free.exists());
         let _ = fs::remove_dir_all(dir);
     }
 }

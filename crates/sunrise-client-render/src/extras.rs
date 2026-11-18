@@ -111,8 +111,9 @@ pub struct Extras {
     pub music_page: bool,
     /// Lines no setting here reads, by key and as written, kept in file order so a setting that moved to a store survives a run without it.
     unknown: Vec<(String, String)>,
-    /// The file is there but couldn't be read: it is never overwritten.
-    unreadable: bool,
+    /// The file is there but couldn't be read whole (an I/O error, or bytes that aren't UTF-8):
+    /// it is never written over, so nothing in it is lost.
+    keep_file: bool,
     /// The PvP & HUD page's options (`pvp`).
     pub pvp: crate::pvp::Pvp,
 }
@@ -160,7 +161,7 @@ impl Default for Extras {
             music_off: Vec::new(),
             music_page: false,
             unknown: Vec::new(),
-            unreadable: false,
+            keep_file: false,
             pvp: Default::default(),
         }
     }
@@ -170,13 +171,16 @@ fn bool_text(v: bool) -> &'static str {
 }
 impl Extras {
     pub fn load(dir: &Path) -> Self {
-        Self::from_text(Self::read_text(dir).as_deref())
+        let (text, keep) = Self::read_text(dir);
+        Self::from_text(&text, keep)
     }
     pub fn parse(text: &str) -> Self {
         let mut e = Self::default();
         for raw in text.split_inclusive('\n') {
             let line = raw.trim_end_matches(['\n', '\r']);
             let Some((key, value)) = line.split_once(':') else {
+                // Not `key:value`: no setting reads it, and it is kept as written.
+                e.unknown.push((String::new(), raw.to_owned()));
                 continue;
             };
             let value = value.trim();
@@ -342,12 +346,10 @@ impl Extras {
         push("musicOff", &self.music_off.join(","));
         push("musicPage", &bool_text(self.music_page));
         self.pvp.serialize(&mut text);
+        // As written: only the file's last record can lack a line end, and nothing follows it here.
         for (key, raw) in &self.unknown {
             if !owned(key) {
                 text.push_str(raw);
-                if !raw.ends_with('\n') {
-                    text.push('\n');
-                }
             }
         }
         text
@@ -375,35 +377,44 @@ impl Extras {
     fn save_with(&self, dir: &Path, stores: &str, stores_default: bool) {
         use sunrise_hooks::settings::engine;
         let path = dir.join(FILE);
-        if self.unreadable || (*self == Self::default() && stores_default && !path.exists()) {
+        if self.keep_file || (*self == Self::default() && stores_default && !path.exists()) {
             return;
         }
         let written = engine::keys(stores);
         let mut text = self.serialize_but(&|key| written.contains(&key));
+        if !stores.is_empty() && !text.is_empty() && !text.ends_with('\n') {
+            text.push('\n');
+        }
         text.push_str(stores);
         if let Err(e) = engine::replace(&path, &text) {
             log::warn!("Sunrise: {FILE} is not saved: {e}");
         }
     }
-    /// The file's text in `dir`, or the defaults' (empty) when there is none. A file that is there
-    /// but can't be read gives `None`: its settings stay at their defaults and it is never written.
-    pub fn read_text(dir: &Path) -> Option<String> {
+    /// The file's text in `dir` (empty when there is none), and whether the file must be kept
+    /// as it is: it couldn't be read (its settings stay at their defaults) or had bytes that
+    /// aren't UTF-8 (its other lines load).
+    pub fn read_text(dir: &Path) -> (String, bool) {
         match sunrise_hooks::settings::engine::read(&dir.join(FILE)) {
-            Ok(text) => Some(text.unwrap_or_default()),
+            Ok(None) => (String::new(), false),
+            Ok(Some(read)) => {
+                if read.lossy {
+                    log::warn!(
+                        "Sunrise: {FILE} has bytes that aren't UTF-8, so it won't be saved over"
+                    );
+                }
+                (read.text, read.lossy)
+            }
             Err(e) => {
                 log::warn!("Sunrise: {FILE} could not be read, so it won't be saved over: {e}");
-                None
+                (String::new(), true)
             }
         }
     }
-    /// The settings of `text` from [`Self::read_text`]; `None` marks the file unreadable.
-    pub fn from_text(text: Option<&str>) -> Self {
-        match text {
-            Some(text) => Self::parse(text),
-            None => Self {
-                unreadable: true,
-                ..Self::default()
-            },
+    /// The settings of `text` from [`Self::read_text`]; `keep` leaves the file as it is.
+    pub fn from_text(text: &str, keep: bool) -> Self {
+        Self {
+            keep_file: keep,
+            ..Self::parse(text)
         }
     }
 }
@@ -906,24 +917,39 @@ mod tests {
 
     #[test]
     fn kept_lines_keep_their_spacing_and_line_ends() {
-        let e = Extras::parse("futureKey : 7 \r\nownNameTag:true\nlast:x");
+        let e = Extras::parse("futureKey : 7 \r\nno colon here\nownNameTag:true\nlast:x");
         let out = e.serialize();
-        assert!(out.contains("futureKey : 7 \r\n"), "{out:?}");
-        assert!(out.ends_with("last:x\n"), "{out:?}");
+        assert!(out.contains("futureKey : 7 \r\nno colon here\n"), "{out:?}");
+        assert!(out.ends_with("\nlast:x"), "{out:?}");
         assert!(e.own_name_tag);
+        // A store's lines after an unterminated last record start on a line of their own.
+        let dir = scratch("unterminated");
+        e.save_with(&dir, "discordPresence:true\n", false);
+        let text = fs::read_to_string(dir.join(FILE)).unwrap();
+        assert!(
+            text.ends_with("\nlast:x\ndiscordPresence:true\n"),
+            "{text:?}"
+        );
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
     fn a_file_that_cannot_be_read_is_never_saved_over() {
         let dir = scratch("unreadable");
-        // Bytes that aren't UTF-8 cost only themselves: every other line still loads.
-        fs::write(dir.join(FILE), b"ownNameTag:true\nname:\xff\n").unwrap();
-        assert!(Extras::load(&dir).own_name_tag);
+        // Bytes that aren't UTF-8 cost only themselves: every other line still loads, and a
+        // save leaves the file's bytes as they were.
+        let bytes = b"ownNameTag:true\nname:\xff\nno colon \xfe\n";
+        fs::write(dir.join(FILE), bytes).unwrap();
+        let mut e = Extras::load(&dir);
+        assert!(e.own_name_tag);
+        e.fullbright = true;
+        e.save(&dir);
+        assert_eq!(fs::read(dir.join(FILE)).unwrap(), bytes);
         // A file that can't be read at all (a folder in its place) is left alone.
         let other = scratch("unreadable-dir");
         fs::create_dir_all(other.join(FILE).join("kept")).unwrap();
         let e = Extras::load(&other);
-        assert!(e.unreadable);
+        assert!(e.keep_file);
         let mut changed = e.clone();
         changed.own_name_tag = true;
         changed.save(&other);

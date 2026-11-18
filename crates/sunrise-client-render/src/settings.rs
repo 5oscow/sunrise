@@ -367,18 +367,18 @@ impl Settings {
             .parent()
             .map(crate::gamepad::PadSettings::load)
             .unwrap_or_default();
-        let extras_text = path
+        let (extras_text, keep_extras) = path
             .parent()
-            .map_or(Some(String::new()), crate::extras::Extras::read_text);
-        let mut extras = crate::extras::Extras::from_text(extras_text.as_deref());
-        let extras_text = extras_text.unwrap_or_default();
+            .map_or((String::new(), false), crate::extras::Extras::read_text);
+        let extras = crate::extras::Extras::from_text(&extras_text, keep_extras);
         // The settings stores of the crates above the engine: their lines of this file, or of
         // their own (docs/layers.md, "Platform registries").
         sunrise_hooks::settings::engine::load(&mut |file| match path.parent() {
             _ if file == crate::extras::FILE => Some(extras_text.clone()),
             Some(dir) => sunrise_hooks::settings::engine::read(&dir.join(file))
                 .ok()
-                .flatten(),
+                .flatten()
+                .map(|read| read.text),
             None => None,
         });
         // The enabled mods are the game folder's, shared by its players (`--player-dir`).
