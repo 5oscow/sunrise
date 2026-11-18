@@ -294,4 +294,26 @@ mod state_tests {
         assert!(error.contains("attachment"), "{error}");
         std::fs::remove_dir_all(dir).unwrap();
     }
+
+    #[test]
+    fn a_source_bundle_with_old_width_layout_metadata_validates_and_stages() {
+        let dir = super::super::tests::dir("legacy-layouts");
+        super::super::tests::write_bundle(&dir, "old", "");
+        std::fs::write(
+            dir.join(sunrise_mod_package::layouts::FILE),
+            br#"{"old":{"old::T":"0123456789abcdef"}}"#,
+        )
+        .unwrap();
+        let bundle = super::read(&dir).unwrap().expect("a bundle");
+        let names: Vec<_> = super::files(&bundle)
+            .unwrap()
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+        assert!(names.iter().any(|name| name == "layouts.json"), "{names:?}");
+        let staged = dir.join("staged");
+        super::copy(&bundle, &staged).unwrap();
+        assert!(staged.join("layouts.json").is_file());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

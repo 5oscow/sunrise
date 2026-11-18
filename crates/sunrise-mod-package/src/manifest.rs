@@ -1064,12 +1064,7 @@ impl Package {
             file.take((1 << 20) + 1)
                 .read_to_end(&mut bytes)
                 .map_err(|e| e.to_string())?;
-            if crate::layouts::Layouts::read(bytes.as_slice())?.is_legacy() {
-                return Err(format!(
-                    "{}: a file of the old format: build the mod again to write it",
-                    crate::layouts::FILE
-                ));
-            }
+            crate::layouts::Layouts::read(bytes.as_slice())?;
             files.insert(crate::layouts::FILE.into(), bytes);
         }
         if let Some(icon) = &self.icon {
@@ -1168,6 +1163,16 @@ impl Package {
     pub fn pack_directory_with(root: &Path, uses: Option<&[u8]>) -> Result<Vec<u8>, String> {
         let package = Self::read(root)?;
         let mut files = package.directory_files(root)?;
+        // A source folder with the old file is valid to read and to build from; a package is
+        // written only from a file the build wrote again.
+        if let Some(bytes) = files.get(crate::layouts::FILE)
+            && crate::layouts::Layouts::read(bytes.as_slice())?.is_legacy()
+        {
+            return Err(format!(
+                "{}: a file of the old format: build the mod again to write it",
+                crate::layouts::FILE
+            ));
+        }
         if let Some(uses) = uses {
             files.insert(USES_FILE.to_owned(), uses.to_vec());
         }
@@ -2148,6 +2153,25 @@ issues = \"http://example.org/issues\"
         symlink(&dir, &link).unwrap();
         let error = Package::read(&link).err().unwrap();
         assert!(error.contains("unsupported file type"), "{error}");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_package_is_not_written_from_old_width_layout_metadata() {
+        let root = std::env::temp_dir().join(format!("legacy-pack-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(MANIFEST), EXAMPLE).unwrap();
+        std::fs::write(
+            root.join(crate::layouts::FILE),
+            br#"{"ruby":{"ruby::T":"0123456789abcdef"}}"#,
+        )
+        .unwrap();
+        // The folder reads and its files select; only writing the archive refuses.
+        let package = Package::read(&root).unwrap();
+        assert!(package.directory_files(&root).is_ok());
+        let error = Package::pack_directory_with(&root, None).unwrap_err();
+        assert!(error.contains("old format"), "{error}");
         std::fs::remove_dir_all(root).unwrap();
     }
 }
