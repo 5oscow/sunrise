@@ -6,6 +6,8 @@ Rules for code: implement `mod_api::Hooks` at the crate root with `#[mod_api::su
 
 ## Getting started
 
+- [Using an AI agent](https://sunrise-org.github.io/sunrise/for-agents.html): the install and quickstart commands and the rules, on one page.
+- [Install the mod tool](https://sunrise-org.github.io/sunrise/start/install-tool.html): the prebuilt `cargo-sunrise-mod` for Linux, macOS and Windows.
 - [Installing and using mods](https://sunrise-org.github.io/sunrise/start/installing.html)
 - [Your first content mod](https://sunrise-org.github.io/sunrise/start/first-content-mod.html)
 - [Your first native mod](https://sunrise-org.github.io/sunrise/start/first-mod.html)

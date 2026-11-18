@@ -7,31 +7,15 @@ fn run_refuses_code_mods_without_building() {
         .join("../../target")
         .join(format!("native-run-refusal-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
+    // A code mod's folder, made by hand: `run` looks for its `Cargo.toml` and nothing else.
     let project = dir.join("machine");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(
+        project.join("Cargo.toml"),
+        "[package]\nname = 'machine'\nversion = '0.1.0'\n",
+    )
+    .unwrap();
     let executable = env!("CARGO_BIN_EXE_cargo-sunrise-mod");
-    // An empty folder as the SDK base: `new` writes the project, then names the SDK it could not
-    // fetch, and nothing reaches the network.
-    let no_sdk = dir.join("no-sdk");
-    std::fs::create_dir_all(&no_sdk).unwrap();
-    let created = Command::new(executable)
-        .env("SUNRISE_SDK_BASE", &no_sdk)
-        .args([
-            "new",
-            project.to_str().unwrap(),
-            "--template",
-            "native",
-            "--sunrise",
-        ])
-        .arg("0123456789abcdef0123456789abcdef01234567")
-        .output()
-        .unwrap();
-    assert!(!created.status.success(), "{created:?}");
-    assert!(
-        String::from_utf8_lossy(&created.stderr).contains("SHA256SUMS"),
-        "{created:?}"
-    );
-    assert!(project.join("Cargo.toml").is_file());
-    assert!(!project.join("target").exists());
 
     let refused = Command::new(executable)
         .current_dir(&project)

@@ -7,11 +7,7 @@ You need Rust 1.95 or newer (`cargo`) and the Sunrise launcher with an instance 
 
 ## 1. Install the mod tool
 
-```sh
-cargo install --locked --git https://github.com/sunrise-org/sunrise cargo-sunrise-mod
-```
-
-This adds the `cargo sunrise-mod` command.
+Follow [Install the mod tool](install-tool.md). It adds the `cargo sunrise-mod` command.
 
 ## 2. Make the project
 

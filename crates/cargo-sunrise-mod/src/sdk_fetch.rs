@@ -47,6 +47,8 @@ pub(crate) struct PinnedSdk {
     /// The form people read: `nightly-2026-11-13 (afe471c)`, or the short sha.
     pub(crate) name: String,
     pub(crate) dir: PathBuf,
+    /// The horizon-mixins revision the build's `sdk.json` names: the tool a native mod pins.
+    pub(crate) mixins: String,
     /// The build's surface export, `surface.json` in `dir`.
     pub(crate) surface: PathBuf,
 }
@@ -54,8 +56,12 @@ pub(crate) struct PinnedSdk {
 /// The SDK the project at `project` pins, in its `.sunrise/sdk/`, fetched first when the folder is
 /// missing or holds another build.
 pub(crate) fn ensure_sdk(project: &Path) -> Result<PinnedSdk, String> {
-    let build = pin(project)?;
-    fetch(&Base::from_env(), &keys(), &build, &project.join(DIR), true)
+    fetch_pinned(project, &pin(project)?)
+}
+
+/// `build`'s SDK in the project's `.sunrise/sdk/`, API source included.
+pub(crate) fn fetch_pinned(project: &Path, build: &str) -> Result<PinnedSdk, String> {
+    fetch(&Base::from_env(), &keys(), build, &project.join(DIR), true)
 }
 
 /// The game checkout the project at `project` builds against, when its `sunrise-mod-api`
@@ -404,6 +410,7 @@ fn pinned(index: &Index, dir: &Path) -> PinnedSdk {
         },
         build,
         dir: dir.to_owned(),
+        mixins: index.mixins.rev.clone(),
         surface: dir.join(SURFACE),
     }
 }
