@@ -2579,7 +2579,21 @@ impl Game<'_> {
     /// (PowderSnowBlock.canEntityWalkOnPowderSnow), freeze-immune wear
     /// (LivingEntity.canFreeze), the dimension's FAST_LAVA, the sleeping
     /// pose and blindness (Player.isMobilityRestricted, which stops a sprint).
+    /// The window's or the guest's own body reads the item in its selected slot
+    /// (`getMainHandItem`) for the shapes that depend on it.
+    pub(crate) fn sync_main_hand(&mut self) {
+        let held = self
+            .inventory
+            .get(self.selected)
+            .and_then(Option::as_ref)
+            .filter(|stack| stack.count > 0)
+            .map(|stack| stack.item.clone());
+        if let Some(player) = self.player.as_mut() {
+            player.main_hand = held;
+        }
+    }
     pub(crate) fn sync_player_body(&mut self) {
+        self.sync_main_hand();
         let glider = self.glider_worn();
         let sleeping = self.sleeping.is_some();
         let item_in_use = self
@@ -4557,6 +4571,10 @@ impl Game<'_> {
         cancel
     }
     fn tick(&mut self) -> Result<()> {
+        // Held through the carry too: a carried body's move asks the parts as its own does.
+        let _parts = (!self.is_logical_server())
+            .then(|| self.collision_parts())
+            .flatten();
         // A client's tick of the level it shows holds the colliders as it began, then carries
         // its own player with the one it stands on; a server's level tick holds its own scope.
         let start = (!self.is_logical_server()).then(|| self.placed_moving_colliders());
