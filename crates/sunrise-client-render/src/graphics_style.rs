@@ -115,18 +115,14 @@ pub fn panel(batch: &mut HudBatch, atlas: &HudAtlas, [x, y, w, h]: [f32; 4], in_
     };
     ui::tiled(batch, atlas, sprite, x, y, w, h, 32.0, WHITE);
 }
-/// The search field and other wells: vanilla's text field.
-pub fn well(batch: &mut HudBatch, atlas: &HudAtlas, [x, y, w, h]: [f32; 4]) {
-    ui::nine_slice(
-        batch,
-        atlas,
-        "gui/sprites/widget/text_field",
-        x,
-        y,
-        w,
-        h,
-        WHITE,
-    );
+/// The search field and other wells: vanilla's text field, highlighted while focused.
+pub fn well(batch: &mut HudBatch, atlas: &HudAtlas, [x, y, w, h]: [f32; 4], focused: bool) {
+    let sprite = if focused {
+        "gui/sprites/widget/text_field_highlighted"
+    } else {
+        "gui/sprites/widget/text_field"
+    };
+    ui::nine_slice(batch, atlas, sprite, x, y, w, h, WHITE);
 }
 /// Vanilla's scroller: its background on the track, the scroller on the thumb.
 pub fn scroller(batch: &mut HudBatch, atlas: &HudAtlas, track: [f32; 4], thumb: [f32; 4]) {
@@ -156,12 +152,20 @@ pub fn scroller(batch: &mut HudBatch, atlas: &HudAtlas, track: [f32; 4], thumb: 
 /// `text` cut to `width` with an ellipsis, as a long name gives way to its control: the HUD
 /// kit's `fit::ellipsize`.
 pub use crate::hud_kit::fit::ellipsize as fit;
-/// Vanilla's 17 px check box ending at `right`, centred in the row at `y`; greyed when it can't change.
-pub fn checkbox(batch: &mut HudBatch, atlas: &HudAtlas, right: f32, y: f32, on: bool, live: bool) {
-    let sprite = if on {
-        "gui/sprites/widget/checkbox_selected"
-    } else {
-        "gui/sprites/widget/checkbox"
+/// Vanilla's 17 px check box ending at `right`, centred in the row at `y`; `lit` when pointed at or focused.
+pub fn checkbox(
+    batch: &mut HudBatch,
+    atlas: &HudAtlas,
+    right: f32,
+    y: f32,
+    on: bool,
+    (lit, live): (bool, bool),
+) {
+    let sprite = match (on, lit && live) {
+        (true, true) => "gui/sprites/widget/checkbox_selected_highlighted",
+        (true, false) => "gui/sprites/widget/checkbox_selected",
+        (false, true) => "gui/sprites/widget/checkbox_highlighted",
+        (false, false) => "gui/sprites/widget/checkbox",
     };
     let tint = if live { WHITE } else { muted() };
     let top = y + ((ROW - 17.0) / 2.0).floor();
@@ -228,18 +232,23 @@ fn scrolling_label(
         color,
     );
 }
-/// Vanilla's slider: its track, the 8 px handle at `position` (0..1) and the value centred over them.
+/// Vanilla's slider: its track (highlighted while focused), the 8 px handle at `position` (0..1), the value over them.
 pub fn slider(
     batch: &mut HudBatch,
     atlas: &HudAtlas,
     rect: [f32; 4],
     value: &Text,
     position: f32,
-    (hover, live): (bool, bool),
+    (hover, live, focused): (bool, bool, bool),
 ) {
     let [x, y, w, h] = rect;
     let tint = if live { WHITE } else { muted() };
-    ui::nine_slice(batch, atlas, "gui/sprites/widget/slider", x, y, w, h, tint);
+    let track = if live && focused {
+        "gui/sprites/widget/slider_highlighted"
+    } else {
+        "gui/sprites/widget/slider"
+    };
+    ui::nine_slice(batch, atlas, track, x, y, w, h, tint);
     let handle = if hover && live {
         "gui/sprites/widget/slider_handle_highlighted"
     } else {
@@ -309,7 +318,7 @@ mod tests {
                 button(b, a, r, t, (false, true, false))
             }),
             ("slider", |b, a, r, t| {
-                slider(b, a, r, t, 0.5, (false, true))
+                slider(b, a, r, t, 0.5, (false, true, false))
             }),
             ("cycler", |b, a, r, t| cycler(b, a, r, t, (false, true))),
         ];

@@ -293,7 +293,7 @@ pub(crate) fn search_field(
     focused: bool,
 ) {
     let rect = cols.search();
-    style::well(batch, atlas, rect);
+    style::well(batch, atlas, rect, focused);
     search.focused = focused;
     let [x, y, _, h] = rect;
     let clear = cols.clear();
@@ -516,7 +516,7 @@ pub(crate) fn row(batch: &mut HudBatch, atlas: &HudAtlas, cols: &Columns, y: f32
     let color = if live { style::WHITE } else { style::muted() };
     let soft = if live { style::soft() } else { style::muted() };
     let ty = y + ((style::ROW - 8.0) / 2.0).floor();
-    let lit = live && (hover || held);
+    let lit = live && (hover || held || focused);
     let left = rect[0] + style::INSET;
     // An action (Calibrate...) is a button across the row, as vanilla's lists have them.
     if switch.is_none() && slider.is_none() && value.is_none() {
@@ -533,12 +533,13 @@ pub(crate) fn row(batch: &mut HudBatch, atlas: &HudAtlas, cols: &Columns, y: f32
             (None, None) => right - vw - 18.0,
         };
         match (switch, slider) {
-            (Some(on), _) => style::checkbox(batch, atlas, right, y, on, live),
+            (Some(on), _) => style::checkbox(batch, atlas, right, y, on, (lit, live)),
             // A slider shows its track, the value on it, while it is pointed at, focused or held.
             (None, Some(position)) => {
                 let value = Text::literal(value);
                 if active {
-                    style::slider(batch, atlas, control, &value, position, (lit, live));
+                    let focus = live && focused;
+                    style::slider(batch, atlas, control, &value, position, (lit, live, focus));
                 } else {
                     batch.text_styled(atlas, &value, start, ty, soft, true);
                 }
