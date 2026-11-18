@@ -331,7 +331,7 @@ index bca7938..2f2eb44 100644
 +    assert!(e.message.contains("selected site contains `?`"), "{e}");
 +}
 diff --git a/crates/horizon-mixins-cli/tests/integration.rs b/crates/horizon-mixins-cli/tests/integration.rs
-index fcf5a46..322d359 100644
+index fcf5a46..3a8bb03 100644
 --- a/crates/horizon-mixins-cli/tests/integration.rs
 +++ b/crates/horizon-mixins-cli/tests/integration.rs
 @@ -697,14 +697,14 @@ fn cfg_attributes_shared_module_sources_and_shadowing_fail_closed() {
@@ -353,7 +353,7 @@ index fcf5a46..322d359 100644
              "E_UNSUPPORTED_CONTROL_FLOW",
          ),
          (
-@@ -890,3 +890,767 @@ fn production_test_cfg_modules_are_indexed_and_applied() {
+@@ -890,3 +890,806 @@ fn production_test_cfg_modules_are_indexed_and_applied() {
      let error = build_plan(&f.root, &f.mods).unwrap_err();
      assert!(format!("{error:?}").contains("E_TARGET_NOT_FOUND"));
  }
@@ -412,6 +412,15 @@ index fcf5a46..322d359 100644
 +        pub fn run_app(self, app: &mut App) -> Result<(), Failure> {{ app.0 += 1; mark("run_app"); Ok(()) }}
 +    }}
 +    pub fn observe(n: i32) -> i32 {{ mark("observe"); n }}
++    pub struct Inner;
++    impl Inner {{ pub fn read(&self) -> i32 {{ 11 }} }}
++    pub struct Outer(pub Inner);
++    impl std::ops::Deref for Outer {{ type Target = Inner; fn deref(&self) -> &Inner {{ &self.0 }} }}
++    impl Outer {{ pub fn read(&self) -> i32 {{ 22 }} }}
++    pub fn outer(ok: bool) -> Result<Outer, &'static str> {{ if ok {{ Ok(Outer(Inner)) }} else {{ Err("no outer") }} }}
++    pub fn scale<T: Into<f64>>(t: T) -> f64 {{ t.into() }}
++    pub fn default_value(x: f64) -> Result<f64, &'static str> {{ Ok(x) }}
++    pub fn run_param(engine: &Engine, x: i32) -> i32 {{ engine.go(x) }}
 +    pub fn run(ok: bool, bad_arg: bool) -> Result<i32, Failure> {{ {body} }}
 +    "#
 +            ),
@@ -448,25 +457,37 @@ index fcf5a46..322d359 100644
 +    }
 +
 +    #[test]
-+    fn a_wrapped_call_evaluates_a_receiver_and_arguments_with_try_at_the_call_site() {
-+        let f = fixture(CALL, &wrap("make(ok)?.go", 1));
++    fn a_method_on_a_reference_parameter_is_wrapped_through_its_reference_type() {
++        // The named path: the receiver is the target function's own reference parameter, so its
++        // type is the parameter's. The arguments are plain expressions.
++        let f = fixture(CALL, "");
++        f.append(
++            "mods/alpha/horizon-mixin.toml",
++            r#"
++    [[injection]]
++    id="wrap"
++    target="fixture_game::run_param"
++    kind="WRAP_OPERATION"
++    selector="engine.go"
++    require=1
++    ordinal=0
++    helper="wrap.rs"
++    bindings=[{name="engine",ty="&Engine",value="$receiver"},{name="x",ty="i32",value="$arg0"},{name="original",ty="impl FnOnce(&Engine, i32) -> i32",value="$operation"}]
++    "#,
++        );
++        fs::write(
++            f.mods.join("alpha/wrap.rs"),
++            "fn wrap(engine: &Engine, x: i32, original: impl FnOnce(&Engine, i32) -> i32) -> i32 { crate::mark(\"wrap\"); original(engine, x + 1) }",
++        )
++        .unwrap();
 +        fs::write(
 +            f.root.join("driver/src/lib.rs"),
 +            r#"
-+    use fixture_game::{run, Failure, LOG};
-+    fn log() -> Vec<&'static str> { std::mem::take(&mut *LOG.lock().unwrap()) }
-+    // One test: they share the log.
++    use fixture_game::{run_param, Engine, LOG};
 +    #[test]
-+    fn try_returns_from_the_engine_function_before_the_wrapper_runs() {
-+        // The receiver fails first: its own error, converted by `run`'s `From`, and nothing after it.
-+        assert_eq!(run(false, false), Err(Failure("converted no engine".into())));
-+        assert_eq!(log(), ["make"]);
-+        // The receiver is fine and an argument fails: the receiver came first, the wrapper is not run.
-+        assert_eq!(run(true, true), Err(Failure("converted no argument".into())));
-+        assert_eq!(log(), ["make", "arg"]);
-+        // Both are fine: receiver, then argument, then the wrapper (which adds one), then the call.
-+        assert_eq!(run(true, false), Ok(106));
-+        assert_eq!(log(), ["make", "arg", "wrap", "go"]);
++    fn the_wrapper_runs_around_the_call() {
++        assert_eq!(run_param(&Engine(100), 5), 106);
++        assert_eq!(std::mem::take(&mut *LOG.lock().unwrap()), ["wrap", "go"]);
 +    }
 +    "#,
 +        )
@@ -482,9 +503,12 @@ index fcf5a46..322d359 100644
 +        assert_eq!(e.code, "E_MATCH_COUNT", "{e}");
 +        assert!(e.message.contains("found 0"), "{e}");
 +        assert!(e.message.contains("use `make(ok)?.go`"), "{e}");
-+        // Written with its receiver, it is the one match.
++        // Written with its receiver, it is the one match (and then the computed receiver is refused).
 +        let f = fixture(CALL, &wrap("make(ok)?.go", 1));
-+        build_plan(&f.root, &f.mods).unwrap();
++        assert_eq!(
++            build_plan(&f.root, &f.mods).unwrap_err().code,
++            "E_OPERATION_SIGNATURE"
++        );
 +        // Another receiver is another selector.
 +        let f = fixture(CALL, &wrap("make(false)?.go", 1));
 +        let e = build_plan(&f.root, &f.mods).unwrap_err();
@@ -542,39 +566,34 @@ index fcf5a46..322d359 100644
 +        f
 +    }
 +
-+    #[test]
-+    fn a_ref_self_method_on_a_temporary_keeps_the_temporary_until_the_statement_ends() {
-+        // The temporary `res(ok)?` outlives `observe`, as in the original: a `&self` method does not
-+        // consume it, so the wrapper borrows it in place (declared `&Res`) and does not move it.
-+        let f = res_fixture(
-+            "Ok(observe(res(ok)?.read()))",
-+            "&crate::Res",
-+            "res(ok)?.read",
-+        );
-+        f.run("check");
-+    }
-+
-+    #[test]
-+    fn a_mut_self_method_on_a_computed_receiver_borrows_the_temporary_mutably() {
-+        let f = res_fixture(
-+            "Ok(res(ok)?.update())",
-+            "&mut crate::Res",
-+            "res(ok)?.update",
-+        );
-+        f.run("check");
-+    }
-+
 +    /// The plan's refusal of `f`.
 +    fn plan_error(f: &Fixture) -> horizon_mixins_core::Diagnostic {
 +        build_plan(&f.root, &f.mods).unwrap_err()
 +    }
 +
 +    #[test]
-+    fn an_owned_computed_receiver_is_refused_whatever_it_is_declared_as() {
-+        // A by-value binding would take part in inferring the receiver's own type:
-+        // `choose(1)?.read()` declared `Choice<i64>` is another `choose` and another `read`.
-+        // Whether it is consumed, borrowed, unsized or inferred, the form is refused by name.
++    fn a_computed_receiver_is_refused_whatever_it_is_declared_as() {
++        // A declared type is an expected type for the receiver, by value or by reference:
++        // `choose(1)?.read()` declared `Choice<i64>` or `&Choice<i64>` is another `choose` and
++        // another `read`, and a guard's `outer()` declared as its `Deref` target is another
++        // `read`. Every such form is refused by name.
 +        for (body, ty, selector) in [
++            (
++                "Ok(observe(res(ok)?.read()))",
++                "&crate::Res",
++                "res(ok)?.read",
++            ),
++            (
++                "Ok(res(ok)?.update())",
++                "&mut crate::Res",
++                "res(ok)?.update",
++            ),
++            (
++                "Ok(choose(1)?.read())",
++                "&crate::Choice<i64>",
++                "choose(1)?.read",
++            ),
++            ("Ok(outer(ok)?.read())", "&crate::Inner", "outer(ok)?.read"),
 +            (
 +                "Ok(observe(res(ok)?.read()))",
 +                "crate::Res",
@@ -606,7 +625,7 @@ index fcf5a46..322d359 100644
 +            let f = res_fixture(body, ty, selector);
 +            let e = plan_error(&f);
 +            assert_eq!(e.code, "E_OPERATION_SIGNATURE", "{ty}: {e}");
-+            assert!(e.message.contains("owned computed receiver"), "{ty}: {e}");
++            assert!(e.message.contains("computed receiver"), "{ty}: {e}");
 +        }
 +        // The consuming `EventLoop::new()?.run_app(&mut app)` shape is refused the same way.
 +        let f = fixture(
@@ -626,33 +645,7 @@ index fcf5a46..322d359 100644
 +        fs::write(f.mods.join("alpha/wrap_loop.rs"), "fn wrap_loop(event_loop: crate::EventLoop, app: &mut crate::App, original: impl FnOnce(crate::EventLoop, &mut crate::App) -> Result<(), crate::Failure>) -> Result<(), crate::Failure> { original(event_loop, app) }").unwrap();
 +        let e = plan_error(&f);
 +        assert_eq!(e.code, "E_OPERATION_SIGNATURE", "{e}");
-+        assert!(e.message.contains("owned computed receiver"), "{e}");
-+    }
-+
-+    #[test]
-+    fn a_borrowed_receiver_keeps_the_temporaries_of_the_arguments_until_the_statement_ends() {
-+        // `res(ok)?.read()` borrows its `Res` for the whole statement: it drops after `observe`,
-+        // also when the call around it is wrapped.
-+        let f = fixture(
-+            "let n = observe(make(ok)?.go(res(ok)?.read())); Ok(n)",
-+            &wrap("make(ok)?.go", 1),
-+        );
-+        fs::write(
-+            f.root.join("driver/src/lib.rs"),
-+            r#"
-+    use fixture_game::{run, LOG};
-+    #[test]
-+    fn argument_temporaries_drop_after_the_statement() {
-+        assert_eq!(run(true, false), Ok(108));
-+        assert_eq!(
-+            std::mem::take(&mut *LOG.lock().unwrap()),
-+            ["make", "res", "read", "wrap", "go", "observe", "drop"]
-+        );
-+    }
-+    "#,
-+        )
-+        .unwrap();
-+        f.run("check");
++        assert!(e.message.contains("computed receiver"), "{e}");
 +    }
 +
 +    #[test]
@@ -669,14 +662,60 @@ index fcf5a46..322d359 100644
 +        assert!(!e.message.contains("use `"), "{e}");
 +    }
 +
++    /// A wrap of the function `scale`, whose argument is bound as `ty`.
++    fn scale_row(ty: &str) -> String {
++        format!(
++            r#"
++    [[injection]]
++    id="wrap"
++    target="fixture_game::run"
++    kind="WRAP_OPERATION"
++    selector="scale"
++    require=1
++    ordinal=0
++    helper="wrap_scale.rs"
++    bindings=[{{name="x",ty="{ty}",value="$arg0"}},{{name="original",ty="impl FnOnce({ty}) -> f64",value="$operation"}}]
++    "#
++        )
++    }
++    fn scale_fixture(body: &str, ty: &str) -> Fixture {
++        let f = fixture(body, &scale_row(ty));
++        fs::write(
++            f.mods.join("alpha/wrap_scale.rs"),
++            format!("fn wrap_scale(x: {ty}, original: impl FnOnce({ty}) -> f64) -> f64 {{ original(x) }}"),
++        )
++        .unwrap();
++        f
++    }
++
 +    #[test]
-+    fn the_methods_generic_arguments_stay_checked_for_moved_control_flow() {
-+        let f = fixture(
-+            "Ok(make(ok)?.go::<{ const { 1 } }>(1))",
-+            &wrap("make(ok)?.go::<{const{1}}>", 1),
-+        );
-+        let e = build_plan(&f.root, &f.mods).unwrap_err();
-+        assert_eq!(e.code, "E_UNSUPPORTED_CONTROL_FLOW", "{e}");
++    fn an_argument_carrying_a_try_or_a_block_is_refused() {
++        // The wrapper's declared type is an expected type for the argument: `f32` on
++        // `scale(default_value(0.1)?)` converts `0.1` through `f32` (0.1 becomes
++        // 0.10000000149011612), and the never-type fallback of `fail()?` in a 2024 diverging
++        // `if` changes with a declared `i64`. A `?` (or a block) in an argument is refused.
++        for (body, ty) in [
++            ("Ok(scale(default_value(0.1)?) as i32)", "f32"),
++            ("Ok(scale(default_value(0.1)?) as i32)", "f64"),
++            (
++                "Ok(scale(if ok { return Ok(7) } else { Err(0usize)? }) as i32)",
++                "i64",
++            ),
++            ("Ok(scale(unsafe { 1i32 }) as i32)", "i32"),
++        ] {
++            let f = scale_fixture(body, ty);
++            let e = plan_error(&f);
++            assert_eq!(e.code, "E_UNSUPPORTED_CONTROL_FLOW", "{body} {ty}: {e}");
++        }
++    }
++
++    #[test]
++    fn arguments_without_a_try_or_a_block_are_still_wrapped() {
++        // The forms the tool accepted before: any other expression, typed by the declaration.
++        let f = scale_fixture("Ok(scale(observe(2) as i32) as i32)", "i32");
++        f.run("plan");
++        let f = scale_fixture("Ok(scale(1.5f32) as i32)", "f32");
++        f.run("plan");
 +    }
 +
 +    #[test]
@@ -1901,7 +1940,7 @@ index 5bac667..f85ac3c 100644
  pub mod modules;
  
 diff --git a/crates/horizon-mixins-core/src/plan.rs b/crates/horizon-mixins-core/src/plan.rs
-index 848dcc0..3359183 100644
+index 848dcc0..a7f4bc4 100644
 --- a/crates/horizon-mixins-core/src/plan.rs
 +++ b/crates/horizon-mixins-core/src/plan.rs
 @@ -1,5 +1,6 @@
@@ -1987,20 +2026,25 @@ index 848dcc0..3359183 100644
                  }
                  let ordinal = injection.ordinal.unwrap();
                  let site = matches.get(ordinal).ok_or_else(|| {
-@@ -633,6 +669,39 @@ pub fn build_staged(workspace: &Path, mods: &Path) -> Result<(Plan, crate::nativ
+@@ -633,6 +669,44 @@ pub fn build_staged(workspace: &Path, mods: &Path) -> Result<(Plan, crate::nativ
                  {
                      return Err(context(Diagnostic::new("E_UNSUPPORTED_SITE", "the selected site contains a closure, which this hook would move into generated code").file(&f.file)));
                  }
++                // A declared type is an expected type for the receiver it wraps: on a computed
++                // receiver it can retype the receiver or change the method the dot call picks.
++                if injection.kind == Kind::WrapOperation
++                    && let Expr::MethodCall(call) = &site.expr
++                    && !sites::is_place(&call.receiver)
++                {
++                    return Err(context(Diagnostic::new(
++                        "E_OPERATION_SIGNATURE",
++                        "a computed receiver (a call result) cannot be wrapped with a declared type: the declaration takes part in inferring the receiver's own type and can change the call the game makes. Mark the receiver opaque (`opaque_receiver`), or wrap a method on a target function's reference parameter; binding the receiver to a local in the game's code is not a row",
++                    ).file(&f.file)));
++                }
 +                // The site moves into generated code, where a `?` would leave a closure instead
-+                // of the function.
-+                // A WRAP_OPERATION evaluates its receiver and arguments there, so a `?` in them
-+                // still returns from the function; only the callee moves.
-+                let moved_exit = if injection.kind == Kind::WrapOperation {
-+                    sites::wrap_moves_exit_or_block(&site.expr)
-+                } else {
-+                    sites::contains_exit_or_block(&site.expr)
-+                };
-+                if moved_exit {
++                // of the function. A wrapped call's arguments are typed by the wrapper's
++                // declaration, so one that carries a `?` (or a block) is refused too.
++                if sites::contains_exit_or_block(&site.expr) {
 +                    return Err(context(Diagnostic::new(CLOSURES_ETC.0, "the selected site contains `?`, an `unsafe` or a `const` block, which this hook would move into generated code").file(&f.file)));
 +                }
 +                // The site moves into generated code: a borrow of a call inside it could have
@@ -2027,7 +2071,7 @@ index 848dcc0..3359183 100644
                  if (injection.kind == Kind::BeforeCall
                      || (injection.kind == Kind::AfterCall && injection.cancellable))
                      && !site.whole_expression
-@@ -924,6 +993,11 @@ pub fn build_staged(workspace: &Path, mods: &Path) -> Result<(Plan, crate::nativ
+@@ -924,6 +998,11 @@ pub fn build_staged(workspace: &Path, mods: &Path) -> Result<(Plan, crate::nativ
          schema: SCHEMA,
          transformer: env!("CARGO_PKG_VERSION").into(),
          rustc: rustc(&root)?,
@@ -2039,7 +2083,7 @@ index 848dcc0..3359183 100644
          inputs,
          injections,
          bridges: planned_bridges,
-@@ -979,6 +1053,9 @@ pub(crate) fn validate_target_with(
+@@ -979,6 +1058,9 @@ pub(crate) fn validate_target_with(
          // are checked in those values only ([`exit_value_error`]). MODIFY_VARIABLE likewise
          // replaces only the value it selects ([`modified_value_error`]).
          rewrites_body: !matches!(kind, Kind::Return | Kind::ModifyVariable),
@@ -2049,7 +2093,7 @@ index 848dcc0..3359183 100644
          // A `?` is an exit RETURN would miss; MODIFY_VARIABLE leaves one outside its value alone.
          try_outside_value: kind == Kind::ModifyVariable,
          body_macros: false,
-@@ -1005,7 +1082,10 @@ pub(crate) fn validate_target_with(
+@@ -1005,7 +1087,10 @@ pub(crate) fn validate_target_with(
      // any exit or expression inside a macro, just like ordinary HEAD.
      safety.body_macros = safety.boundary;
      safety.in_body = true;
@@ -2061,7 +2105,7 @@ index 848dcc0..3359183 100644
      if safety.error.is_none() && kind == Kind::Return {
          safety.error = exit_value_error(&f.block);
      }
-@@ -1173,6 +1253,7 @@ struct Safety {
+@@ -1173,6 +1258,7 @@ struct Safety {
      error: Option<(&'static str, &'static str)>,
      boundary: bool,
      rewrites_body: bool,
@@ -2069,7 +2113,7 @@ index 848dcc0..3359183 100644
      try_outside_value: bool,
      body_macros: bool,
      relaxed: bool,
-@@ -1237,6 +1318,9 @@ impl<'ast> Visit<'ast> for Safety {
+@@ -1237,6 +1323,9 @@ impl<'ast> Visit<'ast> for Safety {
              // RETURN never rewrites inside a closure; what is inside is still checked.
              Expr::Closure(c) if (!self.rewrites_body || self.relaxed) && c.asyncness.is_none() => {}
              Expr::Try(_) if self.try_outside_value => {}
@@ -2079,7 +2123,7 @@ index 848dcc0..3359183 100644
              Expr::Closure(_)
              | Expr::Async(_)
              | Expr::Await(_)
-@@ -1247,7 +1331,10 @@ impl<'ast> Visit<'ast> for Safety {
+@@ -1247,7 +1336,10 @@ impl<'ast> Visit<'ast> for Safety {
              | Expr::Const(_) => self.error = Some(CLOSURES_ETC),
              // Calls under a reference can depend on temporary lifetime extension.
              Expr::Reference(r)
@@ -2091,7 +2135,7 @@ index 848dcc0..3359183 100644
              {
                  self.error = Some(REFERENCED_CALL)
              }
-@@ -1346,6 +1433,23 @@ impl<'ast> Visit<'ast> for Safety {
+@@ -1346,6 +1438,23 @@ impl<'ast> Visit<'ast> for Safety {
          }
      }
  }
@@ -2115,38 +2159,11 @@ index 848dcc0..3359183 100644
  fn contains_call(expr: &Expr) -> bool {
      struct Find(bool);
      impl<'ast> Visit<'ast> for Find {
-@@ -1395,11 +1499,25 @@ fn validate_operation_site(
-                 }
-             }
-         }
-+        // A receiver that is a value (a call, with or without `?`) is evaluated at the call site
-+        // and borrowed in place, declared as a reference. Moved in by value, the declaration would
-+        // take part in inferring the receiver's own type (`choose(1)?.read()` declared
-+        // `Choice<i64>` is another `choose` and another `read`), so it is refused.
-+        Expr::MethodCall(call) if !sites::is_place(&call.receiver) => {
-+            let declared: syn::Type = syn::parse_str(&operation.inputs[0])
-+                .map_err(|e| Diagnostic::new("E_OPERATION_SIGNATURE", e.to_string()))?;
-+            if !matches!(declared, syn::Type::Reference(_)) {
-+                return Err(Diagnostic::new(
-+                    "E_OPERATION_SIGNATURE",
-+                    "owned computed receiver: its type could be changed by the declaration; declare the receiver as a reference, bind it to a local in the game's code, or wrap the call that computes it",
-+                ));
-+            }
-+        }
-         Expr::MethodCall(call) => {
-             let Expr::Path(receiver) = &*call.receiver else {
-                 return Err(Diagnostic::new(
-                     "E_UNSUPPORTED_SITE",
--                    "wrapped method receiver must be a target reference parameter",
-+                    "wrapped method receiver must be a target reference parameter, or a value such as a call result",
-                 ));
-             };
-             if receiver.path.segments.len() != 1 {
 diff --git a/crates/horizon-mixins-core/src/sites.rs b/crates/horizon-mixins-core/src/sites.rs
-index 47fee7d..1d3220c 100644
+index 47fee7d..7b18f8f 100644
 --- a/crates/horizon-mixins-core/src/sites.rs
 +++ b/crates/horizon-mixins-core/src/sites.rs
-@@ -17,6 +17,56 @@ pub fn contains_closure(expr: &Expr) -> bool {
+@@ -17,6 +17,35 @@ pub fn contains_closure(expr: &Expr) -> bool {
      find.visit_expr(expr);
      find.0
  }
@@ -2169,27 +2186,6 @@ index 47fee7d..1d3220c 100644
 +    find.visit_expr(expr);
 +    find.0
 +}
-+/// What a `WRAP_OPERATION` cannot carry out of the function: the receiver and the arguments
-+/// are evaluated at the call site, where a `?` still returns from the function, and only the
-+/// callee of a function call moves into the generated closure.
-+pub fn wrap_moves_exit_or_block(call: &Expr) -> bool {
-+    match call {
-+        Expr::Call(c) => {
-+            contains_exit_or_block(&c.func) || c.args.iter().any(|a| contains_block(a, false))
-+        }
-+        // The method's own generic arguments move into the continuation, where a `?` would leave
-+        // the closure and an inline `const` or `unsafe` block would be evaluated there.
-+        Expr::MethodCall(c) => {
-+            contains_block(&c.receiver, false)
-+                || c.args.iter().any(|a| contains_block(a, false))
-+                || c.turbofish.as_ref().is_some_and(|t| {
-+                    let probe: Expr = syn::parse_quote!(f #t ());
-+                    contains_exit_or_block(&probe)
-+                })
-+        }
-+        _ => contains_exit_or_block(call),
-+    }
-+}
 +/// A place expression: a receiver of this shape is borrowed, never moved, by a method call.
 +pub fn is_place(expr: &Expr) -> bool {
 +    match expr {
@@ -2203,7 +2199,7 @@ index 47fee7d..1d3220c 100644
  pub fn is_call(expr: &Expr) -> bool {
      matches!(expr, Expr::Call(_) | Expr::MethodCall(_))
  }
-@@ -90,6 +140,39 @@ pub fn call_matches(expr: &Expr, selector: &Expr) -> bool {
+@@ -90,6 +119,39 @@ pub fn call_matches(expr: &Expr, selector: &Expr) -> bool {
      let key = call_identity(expr);
      key.is_some() && key == call_identity(selector)
  }
@@ -2243,7 +2239,7 @@ index 47fee7d..1d3220c 100644
  pub fn parse_call_selector(selector: &str) -> Result<Expr> {
      let parsed = syn::parse_str::<Expr>(&format!("{selector}()"));
      if parsed.as_ref().ok().and_then(call_key).as_deref() != Some(selector) {
-@@ -114,6 +197,9 @@ pub struct Site {
+@@ -114,6 +176,9 @@ pub struct Site {
      pub const_context: bool,
      /// Inside a closure body: the closure may run later, elsewhere or never.
      pub in_closure: bool,
@@ -2253,7 +2249,7 @@ index 47fee7d..1d3220c 100644
  }
  #[derive(Default)]
  pub struct Sites {
-@@ -124,6 +210,7 @@ pub struct Sites {
+@@ -124,6 +189,7 @@ pub struct Sites {
      next_is_root: bool,
      const_context: bool,
      closures: usize,
@@ -2261,7 +2257,7 @@ index 47fee7d..1d3220c 100644
  }
  impl Sites {
      pub fn in_block(block: &syn::Block) -> Self {
-@@ -186,6 +273,7 @@ impl<'ast> Visit<'ast> for Sites {
+@@ -186,6 +252,7 @@ impl<'ast> Visit<'ast> for Sites {
              whole_expression: root,
              const_context: self.const_context,
              in_closure: self.closures > 0,
@@ -2269,7 +2265,7 @@ index 47fee7d..1d3220c 100644
          };
          self.values.push(site(expression));
          if is_call(expr) {
-@@ -198,7 +286,10 @@ impl<'ast> Visit<'ast> for Sites {
+@@ -198,7 +265,10 @@ impl<'ast> Visit<'ast> for Sites {
          if matches!(expr, Expr::Paren(_)) {
              self.next_is_root = root;
          }
@@ -2281,7 +2277,7 @@ index 47fee7d..1d3220c 100644
  }
  
 diff --git a/crates/horizon-mixins-transform/src/lib.rs b/crates/horizon-mixins-transform/src/lib.rs
-index f4edd3d..3a65ae7 100644
+index f4edd3d..d2a70cb 100644
 --- a/crates/horizon-mixins-transform/src/lib.rs
 +++ b/crates/horizon-mixins-transform/src/lib.rs
 @@ -1,5 +1,6 @@
@@ -2354,7 +2350,7 @@ index f4edd3d..3a65ae7 100644
          }
          let tree = &trees[&module.file];
          if source::fingerprint(tokens(tree)) != module.fingerprint {
-@@ -523,16 +542,34 @@ fn wrap_operation(call: &Expr, wrappers: &[&PlannedInjection]) -> Result<Expr> {
+@@ -523,16 +542,18 @@ fn wrap_operation(call: &Expr, wrappers: &[&PlannedInjection]) -> Result<Expr> {
          }
          Expr::MethodCall(c) => {
              let receiver = &c.receiver;
@@ -2368,28 +2364,12 @@ index f4edd3d..3a65ae7 100644
 -                syn::parse_quote!(&mut *(#receiver))
 -            } else {
 -                syn::parse_quote!(&*(#receiver))
-+            // The binding's declared type is the receiver mode. A parameter is borrowed. A value
-+            // (a call, with or without `?`) is evaluated here, first: declared `&T` or `&mut T`
-+            // it is borrowed in place, a temporary that lives as long as the original receiver
-+            // did, and the method autorefs as Rust would (a reference a call returns coerces). A
-+            // value declared by type is refused at plan time.
-+            let place = sites::is_place(receiver);
++            // The receiver is a parameter, borrowed through its reference type.
 +            let receiver_arg = match &types[0] {
 +                Type::Reference(reference) if reference.mutability.is_some() => {
-+                    if place {
-+                        syn::parse_quote!(&mut *(#receiver))
-+                    } else {
-+                        syn::parse_quote!(&mut (#receiver))
-+                    }
++                    syn::parse_quote!(&mut *(#receiver))
 +                }
-+                Type::Reference(_) if place => syn::parse_quote!(&*(#receiver)),
-+                Type::Reference(_) => syn::parse_quote!(&(#receiver)),
-+                Type::ImplTrait(_) | Type::Infer(_) | Type::Never(_) if !place => {
-+                    return Err(Diagnostic::new(
-+                        "E_OPERATION_SIGNATURE",
-+                        "a computed receiver needs a named type, or a reference to one, to check that the method takes `self`",
-+                    ));
-+                }
++                Type::Reference(_) => syn::parse_quote!(&*(#receiver)),
 +                _ => {
 +                    return Err(Diagnostic::new(
 +                        "E_OPERATION_SIGNATURE",
