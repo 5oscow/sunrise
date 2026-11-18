@@ -221,6 +221,59 @@ fn each_level_collides_with_its_own_colliders() {
     });
 }
 
+/// A call into the level in place, made while another level's colliders are in scope (a hook of
+/// one level reaching into another), reads the level in place's colliders, and the caller's
+/// are back afterwards.
+#[test]
+#[ignore = "daily"]
+fn a_call_into_another_level_reads_that_levels_colliders_and_restores_the_callers() {
+    use sunrise_core::geometry::Aabb;
+    use sunrise_world::entity_obstruction::EntityIdentity;
+    with_world(|game| {
+        let (spot, other) = ([1.5, 70.0, 1.5], [10.5, 70.0, 10.5]);
+        stand(game, spot).set_collider(game, Some(deck())).unwrap();
+        game.enter_level(Dim::Nether).unwrap();
+        game.native_level_opened(Dim::Nether);
+        game.world
+            .chunks
+            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+        game.streaming.forced.insert((0, 0));
+        stand(game, other).set_collider(game, Some(deck())).unwrap();
+        // Each level ticks once, so each has recorded its colliders.
+        tick_level(game);
+        game.enter_level(Dim::Overworld).unwrap();
+        tick_level(game);
+        let meets = |at: [f64; 3]| {
+            let mut found = Vec::new();
+            let bounds = Aabb::new(
+                Vec3::new(at[0] - 0.5, 69.2, at[2] - 0.5),
+                Vec3::new(at[0] + 0.5, 69.8, at[2] + 0.5),
+            );
+            sunrise_client_render::moving_colliders::near(EntityIdentity(0), bounds, &mut found);
+            found.len()
+        };
+        // The overworld's colliders are the caller's scope.
+        let placed = game.placed_moving_colliders();
+        sunrise_client_render::moving_colliders::in_level(placed, || {
+            assert_eq!((meets(spot), meets(other)), (1, 0));
+            game.enter_level(Dim::Nether).unwrap();
+            game.in_this_levels_colliders(|_| {
+                assert_eq!(
+                    (meets(spot), meets(other)),
+                    (0, 1),
+                    "the level in place's colliders, not the caller's"
+                );
+            });
+            assert_eq!(
+                (meets(spot), meets(other)),
+                (1, 0),
+                "the caller's colliders are back"
+            );
+            game.enter_level(Dim::Overworld).unwrap();
+        });
+    });
+}
+
 /// A game that simulates its overworld, with the chunk the tests build on loaded.
 fn with_world(test: impl FnOnce(&mut Game<'_>)) {
     super::native_entity_refs::tests::with_game(|game| {
@@ -428,9 +481,10 @@ fn siblings_riding_one_vehicle_share_a_stack() {
 }
 
 /// What a level's tick costs with 200 items over a collider at the box cap: with no collider,
-/// with one that stays, and with one that moves every tick (Create's normal case), each timed
-/// over the same ticks. The numbers go to stderr (`--nocapture`); the test holds the
-/// outcome: the items rest on the capped collider, moving or not.
+/// with one that stays, with one rebuilt every tick but moved before it begins, and with one
+/// that moves during the tick and carries all 200 (Create's normal case), each timed over the
+/// same ticks. The numbers go to stderr (`--nocapture`); the test holds the outcome: the items
+/// rest on the capped collider, moving or not, and go with it when it moves.
 #[test]
 #[ignore = "daily"]
 fn two_hundred_items_over_a_capped_collider_rest_and_the_tick_is_timed() {
@@ -502,8 +556,26 @@ fn two_hundred_items_over_a_capped_collider_rest_and_the_tick_is_timed() {
         };
         let moving = time(game, 40, Some(&mut step));
         assert_eq!(rests(game), 200, "and they still rest on it while it moves");
+        // The collider moves during the tick, after the bodies were placed, so the carry pass
+        // carries all 200 items (the phase above moves it before the tick: its pass sees none).
+        let from: Vec<f64> = on.iter().map(|id| item_at(game, *id).x).collect();
+        let began = Instant::now();
+        for _ in 0..40 {
+            tick_level_moving(game, |g| {
+                g.mobs.update(index, |m| m.position.x += 0.05);
+            });
+        }
+        let carried = began.elapsed().as_secs_f64() * 1000.0 / 40.0;
+        assert_eq!(rests(game), 200, "and they are carried with it");
+        for (id, x) in on.iter().zip(&from) {
+            let carried_by = item_at(game, *id).x - x;
+            assert!(
+                (carried_by - 2.0).abs() < 0.05,
+                "item {id} moved {carried_by} with a collider that moved 2.0"
+            );
+        }
         eprintln!(
-            "tick of the level, 200 items, ms per tick: no collider {open:.3}, capped collider still {still:.3}, capped collider moving {moving:.3}"
+            "tick of the level, 200 items, ms per tick: no collider {open:.3}, capped collider still {still:.3}, capped collider moved before the tick {moving:.3}, carried {carried:.3}"
         );
     });
 }

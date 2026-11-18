@@ -8,7 +8,7 @@ hardness/tool rules, collect drops from the block loot tables, place blocks,
 craft in the 2x2 inventory grid or on a crafting table, and save and reload worlds
 in vanilla's Anvil format.
 
-**Status:** playable; players get it through [the launcher](../launcher/README.md). The [harness table](status.md#what-the-harnesses-compare)
+**Status:** playable; players get it through [the launcher](https://github.com/sunrise-org/sunrise-launcher/blob/main/README.md). The [harness table](status.md#what-the-harnesses-compare)
 in the README scores each subsystem against vanilla and lists what is still
 missing; [Rust rewrite status](rust-parity.md) has the details.
 
@@ -433,7 +433,7 @@ While Discord runs on the same computer, the player's Discord profile shows
 ("In the Nether") and the time since they entered the world. It never shows a
 world's name or a server's address. The switch is on the Extras page, in its
 Multiplayer group (**Discord Rich Presence**, on by default; `discordPresence`
-in `sunrise-extras.txt`; in splitscreen only the first player has it), and
+in `sunrise-extras.txt`), and
 `SUNRISE_NO_DISCORD=1` turns it off for one run.
 
 The crate `sunrise-discord` (Sunrise layer) speaks Discord's local IPC itself

@@ -9,7 +9,7 @@ and every launcher and `sunrise-server update` install it ([Nightly only](#night
 ## Pull request checks
 
 Rollups, syncs and main's pushes are checked by one gate, `dyna-checks` (`.github/workflows/dyna-ci.yml`: `lint`,
-`verify`, `verify-static`, `launcher`); a plain pull request gets its cheap checks there (`format`, `verify-static`)
+`verify`, `verify-static`); a plain pull request gets its cheap checks there (`format`, `verify-static`)
 ([CONTRIBUTING.md](../CONTRIBUTING.md#ci-tiers)). The `checks` workflow (`.github/workflows/ci.yml`) adds a free
 full `verify` on GitHub's runners for a fork's pull request only (opened, pushed to or reopened; labels never start
 it): this repository's own pull requests get the cheap checks alone, and their rollups the heavy gate. It also runs
@@ -84,7 +84,7 @@ Three kinds of game build (CI tiers, owner 2026-11-13):
 
 | Build | Who starts it | What it needs | Published as |
 |---|---|---|---|
-| [Snapshot](#snapshot) | root, by dispatching `release.yml -f kind=snapshot -f dry_run=false` on main | the gate (`lint`, `verify`, `verify-static`, `launcher`) green on that commit | pre-release `snapshot-<date>-<short>`; no launcher offers it |
+| [Snapshot](#snapshot) | root, by dispatching `release.yml -f kind=snapshot -f dry_run=false` on main | the gate (`lint`, `verify`, `verify-static`) green on that commit | pre-release `snapshot-<date>-<short>`; no launcher offers it |
 | Nightly | dispatch, or the [daily run](#daily-run) | main’s head or an explicit commit of main, with its dyna-checks gate green and its SDK published first | pre-release `nightly`, every launcher's update |
 | Release (`v*`) | by hand, from a Nightly | | the release |
 
@@ -98,7 +98,9 @@ commit on main. In order:
    newest dyna-checks main-push run did not pass every gate job (a pending job is not passed). Nothing else holds
    it: no daily tests, no `daily-green`, no batch rules, no daily cap, no pause, no release-blocker.
 2. `snapshot-sdk` builds the commit's prebuilt SDK on every OS (`prebuilt-game-build.yml`; skipped when
-   `sdk-<sha>` already exists) and `snapshot-sdk-publish` signs and publishes it as `sdk-<sha>` from this run's
+   `sdk-<sha>` already exists). A build it makes runs the SDK's own checks too, as the daily run's does: the native
+   linkage probe on the Linux and Windows client legs and the API-source check on Linux; an `sdk-<sha>` that already
+   exists is reused as it is, and neither check runs again. `snapshot-sdk-publish` signs and publishes it as `sdk-<sha>` from this run's
    artifacts through `sdk-publish.yml`, the one workflow that publishes an SDK (the daily run and `prebuilt-game.yml` call it too).
 3. `snapshot` starts `nightly build` with `kind=snapshot` and that commit. It re-checks the gate and the SDK, builds
    the commit alone (no picked pull requests, no build branch, no nightly-state), as `SUNRISE_VERSION`
@@ -123,10 +125,10 @@ dispatches it (`-f commit=<sha>`, `-f dry_run=false` to write). One run runs and
 dispatch replaces an older waiting one. The schedule stops when main's head already has a completed real daily run;
 a hand dispatch never does, so it retries a run whose tag move, issues or nightly failed. Its legs are the workflows that left main pushes:
 the ignored-tests data shards (`ignored-tests.yml`), the wasm fixture and guest stacks (`wasm-mods.yml`),
-`fn-replace-check.yml`, the native linkage probe (`native-dylib-probe.yml`), the launcher's Windows runtime-lease
-tests (`launcher-windows-check.yml`), the machine sample built against the commit's mod API (`machine-sample.yml`)
-and the prebuilt SDK of the commit
-(`prebuilt-game-build.yml`; each leg packs its slices, and `sdk-publish` signs and publishes them as the mod SDK's
+`fn-replace-check.yml`, the game's Windows runtime-lease tests (`windows-runtime-leases.yml`), the machine sample
+built against the commit's mod API (`machine-sample.yml`) and the prebuilt SDK of the commit
+(`prebuilt-game-build.yml`; each leg packs its slices after the checks, including the [native linkage probe](native-dylib-probe.md)
+on the Linux and Windows client builds. `sdk-publish` signs and publishes the slices as the mod SDK's
 release `sdk-<sha>` (`sdk-publish.yml`) only when its own legs are green on a real run on main, before the Nightly that
 needs them; a failed publish files one issue, `Daily: sdk-publish did not complete`), each called
 with the commit. The [vanilla parity leg](#parity-on-main) runs after the shards when applicable. Its
@@ -141,7 +143,7 @@ summary (`tools/ci/daily_summary.py`) reads each leg's result and its sanitised 
   sample is no break: its one issue, `Daily: update the machine sample for the mod API change`, asks for the sample
   to follow the API change and its pin to move.
 
-The SDK publishes on its own legs (`sdk`, `linkage`, `machine-sample`, `fn-replace-check`: the summary's `sdk_green`) until a runner with prepared data exists (umceko, 2026-11-16).
+The SDK publishes on its own legs (`sdk`, `machine-sample`, `fn-replace-check`: the summary's `sdk_green`) until a runner with prepared data exists (umceko, 2026-11-16). A red linkage probe fails its `sdk / build linux` or `sdk / build windows` job and blocks publication.
 
 Only a run on `main` with `dry_run` false moves the tag, files issues or publishes; any other run prints what it
 would do. On Sunrise a Nightly ships a commit of main with its dyna-checks gate green and its SDK, `sdk-<sha>`, published
@@ -192,11 +194,6 @@ Ludovic decided on 2026-10-28 that Sunrise ships only the Nightly. No `vX.Y.Z` g
 the last one stays GitHub's *latest*, so launchers and servers from before the switch (which don't read Nightlies)
 keep a working build until they update themselves. `.github/release-line.txt` still numbers the launcher's releases
 (`launcher@X.Y.Z`).
-
-A launcher that carries the launcher split (#2080, #2163) waits for the game it installs: `release_train.py decide
---kind launcher` holds it until the published `nightly`'s commit has `sunrise-prepare needs` and its `sdk-<commit>`
-carries the SDK's `tool` slices, both of which it asks for (umceko, 2026-11-17). Its summary names which one is
-missing. A launcher without the split (a hotfix of `launcher@1.0.1`) isn't held.
 
 - **Launchers** (#3342) install the current `nightly` pre-release as their update, as the version
   `nightly-<date>-<commit>`, after checking its checksums signed for the Nightly channel. A player on the newest
@@ -495,48 +492,19 @@ No SDK compilation is needed to evaluate this design.
 
 ## Launcher releases
 
-`.github/workflows/launcher.yml` releases the launcher the same way. It starts on a push to main that changes
-`launcher/`, `crates/sunrise-prepare/` or `crates/sunrise-theme/` (what the launcher builds in), every hour at :47,
-and by hand; pushes to `launcher` and `launcher-*` branches only build.
+The launcher lives in [sunrise-org/sunrise-launcher](https://github.com/sunrise-org/sunrise-launcher) and is built, tested and released there. This repository
+no longer builds it: `.github/workflows/launcher-bridge.yml` takes a launcher release from that repository, signs its
+checksums here with the game's release key (`tools/ci/sign_release.sh`; `tools/ci/verify_launcher_release.sh` checks
+the result against `crates/sunrise-release-sign/release-keys.txt`) and publishes it there and here as `launcher@X.Y.Z`, so
+launchers installed from here update to it. Making a launcher release GitHub's latest here would break servers: every
+`sunrise-server` already installed, `install.sh` and `install.ps1` ask for `releases/latest` and expect the game's
+archives there, so the game release stays the latest.
 
-- `tools/release_train.py decide --kind launcher` counts the pull requests merged since the last published
-  launcher release that changed those paths (not `launcher/links.json`, which the launcher reads from main, nor
-  tests or Markdown), with the same batching rule (5 pull requests settled 5 minutes, or the oldest 6 hours), `release-now`, `skip-release` and `RELEASES_PAUSED`.
-- The tag is `launcher@X.Y.Z` on the release line (`launcher@0.2.0` first; the game and the launcher count their
-  patches separately). Without `.github/release-line.txt`, `launcher-vX.Y.Z`: the patch after the last launcher tag,
-  or the next minor (`X.Y+1.0`) when one of those pull requests is labelled `feature`. `launcher-v0.2.0` was taken
-  long before 0.2, hence the new prefix.
-- No version-bump commits: the build gets the version in `SUNRISE_LAUNCHER_VERSION` and the tag in
-  `SUNRISE_LAUNCHER_TAG`, which `launcher/src/backend.rs` reads with `option_env!` (falling back to `Cargo.toml`'s),
-  so `--version`, the window, the User-Agent and the self-update comparison all use them. Each build checks
-  `--version` says it.
-- Linux on GitHub `ubuntu-22.04`, Windows x64 on `windows-latest`, Windows ARM64 on `windows-11-vs2026-arm`, and
-  macOS on the Mac mini's runner; each runs the launcher's tests and checks its libraries. The smoke test installs
-  the newest game build for that platform; Intel macOS skips only the install step while no matching build is
-  available yet, and Windows ARM64 installs the x64 build (under emulation) from a Nightly without an ARM64 one.
-- Published as a pre-release with `--latest=false`: the repository's latest release stays a game release. Notes list the pull
-  requests under New and Fixed; Kira posts launcher releases without pinging.
-- Windows also publishes `sunrise-launcher-setup.exe` (x64) and `sunrise-launcher-setup-arm64.exe`, the launcher's
-  binary under another name: with no
-  arguments it opens the per-user setup (`launcher/src/installer.rs`) instead of Home, and
-  `sunrise-launcher.exe uninstall` removes it again. Both files are in the release's signed `SHA256SUMS`.
-
-Making a launcher release GitHub's latest instead would break servers: every `sunrise-server` already installed,
-`install.sh` and `install.ps1` ask for `releases/latest` and expect the game's archives there, and a server that
-can't update can't fetch the fix either. So the game release stays the latest, and it sends people to the launcher
-(#1647): its notes open with a "Want to play? Download the Sunrise launcher" block (`PLAYERS` in
-`tools/release_train.py`: raw HTML, which GitHub shows and launchers' notes skip; the site's Releases page leaves
-it out too), which `PLAYERS_FOOTER` repeats above the disclaimer at the end, and its archives carry labels ("Game files the
-launcher installs: Linux (…)") that GitHub shows in place of the file names. Everything that downloads matches
-the asset's name, which is unchanged.
-
-Starting by hand, pausing and rolling back work as for the game (`gh workflow run launcher …`,
-`RELEASES_PAUSED`, `gh release edit launcher@X.Y.Z --draft`). Launchers older than the withdrawn release then
-see the previous one as the newest; launchers that already updated keep running.
-
-With several game releases a day, the newest launcher release soon falls out of the newest 100 releases the
-launcher and the website read: both then look the newest launcher tags up one by one
-(`git/matching-refs/tags/launcher@`, then `launcher-v` if there is none, then `releases/tags/<tag>`).
+The game's release notes still send people to the launcher (#1647): they open with a "Want to play? Download the
+Sunrise launcher" block (`PLAYERS` in `tools/release_train.py`: raw HTML, which GitHub shows and launchers' notes skip;
+the site's Releases page leaves it out too), which `PLAYERS_FOOTER` repeats above the disclaimer at the end, and the
+game archives carry labels ("Game files the launcher installs: Linux (…)") that GitHub shows in place of the file
+names. Everything that downloads matches the asset's name, which is unchanged.
 
 ## Nightly channel
 
@@ -636,7 +604,7 @@ comment on any issue or pull request (`.github/workflows/nightly-command.yml`, `
   2026-10-27), and lists each in its summary. It never deletes the newest build, a build a published `nightly` or
   `nightly-<date>` release points to, or any other branch (`nightly.py prune-builds`).
 - **Refused.** A pull request that changes a path CODEOWNERS gives to the council (`.github/`, `tools/ci/`, the
-  signing and update code, `launcher/src/backend.rs`, `launcher/links.json`…), more than 30 in a set, and more than
+  signing and update code, `https://github.com/sunrise-org/sunrise-launcher/blob/main/src/backend.rs`, `https://github.com/sunrise-org/sunrise-launcher/blob/main/links.json`…), more than 30 in a set, and more than
   12 builds a day (the scheduled one always runs; 6 until 2026-10-28).
 - **No repository role.** Reviewers need no permission on the repository: the list file and the workflow are the
   whole of it.

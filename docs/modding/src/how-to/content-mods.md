@@ -48,6 +48,21 @@ cargo sunrise-mod check target/sunrise-mod/my_mod.smod   # the registry's checks
 - `use-jar <path>` records an original Java jar as an external asset/data source, without copying it into the mod
   ([Java jars as external assets](#java-jars-as-external-assets)).
 
+## Vegetation behaviour is independent of the template
+
+Set `properties.vegetation` to `true` in block JSON or in a code declaration's
+`BlockProperties` to give a block `VegetationBlock` survival, even on a glass or
+stairs template. Placement refuses unsupported ground and a neighbour update
+removes an unsupported plant. The default support is `minecraft:supports_vegetation`
+on both sides. Templates that already inherit `VegetationBlock` keep their own
+checks, such as crop light requirements.
+
+On the server, the soil's `can_sustain_plant` answer decides first. If it returns
+`None`, the plant's `may_place_on` Part can override the ground rule. Neither
+registering a Part for a block nor registering one on a tag changes what kind
+of block it is. The client predicts using the default rule without running these
+server Parts.
+
 ## Declare content in code
 
 Code mods declare content through `BlocksEvent` and `ItemsEvent`, using API-owned
@@ -205,11 +220,15 @@ A block names its template and what differs from it:
 ```
 
 A fence gate needs no kind of its own: a block whose template is a vanilla `minecraft:*_fence_gate` is a
-`FenceGateBlock`, with the template wood's open and close sounds. `"open_sound"` and `"close_sound"` (sound event ids,
-such as `"minecraft:block.chain.break"` or a sound of the mod's own `sounds.json`) replace them, as a gate built with its
-own `WoodType` has, and they are what opening by hand, a redstone signal and a wind-charge or other explosion toggle all
-play. Either key needs a `*_fence_gate` template and a `namespace:path` id, or the load fails naming the file; leaving
-both out keeps the wood's sounds.
+`FenceGateBlock`, with the template wood's open and close sounds. `"open_sound"` and `"close_sound"` accept a sound
+event id, such as `"minecraft:block.chain.break"` or a sound of the mod's own `sounds.json`, to replace that sound at
+all three sites. They also accept an object, for example `"open_sound": {"use": "rope:open", "redstone": "rope:powered"}`:
+`use` is a player's interaction (including client prediction), `explosion` is an unpowered gate triggered by an
+explosion, and `redstone` is a power change that changes the open state. A missing site keeps the **template wood's**
+sound, not another site's override. Native and wasm declarations use `GateSound::All` or `GateSound::Sites` with
+`on_use`, `on_explosion`, and `on_redstone`. Both keys need a `*_fence_gate` template; unknown sites and invalid
+`namespace:path` sound ids fail the load naming the file and key. Leaving both keys out keeps the wood's sounds.
+Pitch draws, volume, sound source, player exclusion and game events are unchanged.
 
 A block gets a block item of its own id by default. `"item": false` gives it none: pick-block takes nothing and
 `Block.asItem` is air (what a block drops comes from its loot table). `"block_item": "<item id>"` (with `"item": false`) makes the block
@@ -310,6 +329,23 @@ A declared name may not be one the template already has, and `default_state`
 takes one value per declared property too, so a block's default is exactly one
 state of its own. Every combination has to fit in the states a world holds
 (2^20), so a declaration that would not is refused when the mods load.
+
+A declared **boolean** `waterlogged` also makes the block a `SimpleWaterloggedBlock`: buckets fill and drain it,
+water can flow into it, and draining breaks it if it cannot survive dry. This applies even to a stone template.
+The default placement takes `waterlogged` from source water at the target cell (flowing water leaves it dry); a shape update schedules the contained
+water's tick. A block's `state_for_placement` or `update_shape` Part answer replaces the corresponding default.
+A double plant keeps its template's class and companion-half behaviour, so this declares a two-high water plant:
+
+```json
+{ "template": "minecraft:tall_grass",
+  "state_properties": { "waterlogged": { "type": "boolean" } },
+  "default_state": { "waterlogged": "true" } }
+```
+
+The placed half takes source water at its cell; the companion half uses the water tag at its own cell, so an upper half above the water line is dry. An enum named `waterlogged`,
+a template that already has that property, a standalone liquid block such as `minecraft:lava`, or an
+always-water template (`seagrass`, `tall_seagrass`, `kelp`, `kelp_plant`, `bubble_column`) is refused.
+Native and wasm `Block` declarations use the same rule.
 
 A block with template `minecraft:farmland` may set `"base_block": "namespace:block"` to choose the block it becomes when it dries out, is trampled, or has a solid block placed above it. The ID must name a registered block; without the key, the template's dirt base is used.
 
@@ -1200,7 +1236,10 @@ that replaces a biome keeps the mods' changes too.
 
 **A biome of your own.** A mod's `data/<ns>/worldgen/biome/<path>.json` (any namespace but `minecraft`) adds a biome.
 The game loads it into its biome table after vanilla's biomes, sorted by path and then namespace, so vanilla's biome ids
-never move. A joining client receives it in the biome registry with its data even when it has the vanilla pack, builds
+never move. The content build puts it in the content root's biome bundle as `<ns>:<path>`, after vanilla's biomes and
+in namespace then path order; a file in the `minecraft` namespace is ignored, since mods cannot replace vanilla's
+biomes. Biome tags keep the mod's ids, biome modifiers apply over vanilla's biomes and the mods' together (a modifier
+reaches a mod biome through its tag and never drops it), and `/locate biome` and `/place` suggest it. A joining client receives it in the biome registry with its data even when it has the vanilla pack, builds
 it from that data, and plays its colours, ambient particles, ambient sounds and music from it; a client with the same
 mod already has it. Its network id is its place in the registry sorted by path, then namespace, as in vanilla.
 Saved worlds name a column's biomes, not their ids: a world saved before the mod existed holds only vanilla names and

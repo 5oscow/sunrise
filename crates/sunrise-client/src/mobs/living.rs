@@ -4,6 +4,7 @@
 //! damage, fire and the walk animation.
 use super::{Mob, MobEvent, MobWorld};
 use crate::health::DamageLevel;
+use crate::items::BlockTagFlags;
 use crate::{blocks::Fluid, collisions::SceneCollisions};
 use sunrise_core::{
     geometry::{Aabb, Vec3, trig},
@@ -1064,7 +1065,7 @@ impl Mob {
         let on = self.supported_on_pos(w, supporting, 1.0e-5);
         let state = w.world.block(on[0], on[1], on[2]);
         let climbable = w.facts.get(state).name.as_ref() == "minecraft:powder_snow"
-            || w.has_tag("minecraft:climbable", &w.facts.get(state).name);
+            || w.state_flag(state, BlockTagFlags::CLIMBABLE);
         let steps = &mut self.ai.steps;
         steps.move_dist += if climbable { full } else { horizontal };
         steps.fly_dist += full;
@@ -2659,6 +2660,7 @@ mod tests {
                 thundering: false,
                 level: sunrise_core::LevelKey::OVERWORLD,
                 block_tags: &items.block_tags,
+                block_tag_flags: items.block_tag_flags.bits(),
                 landing: &motion.landing,
                 biomes: &biomes,
                 universal_anger: false,
@@ -2790,6 +2792,7 @@ mod tests {
                 thundering: false,
                 level: sunrise_core::LevelKey::OVERWORLD,
                 block_tags: &items.block_tags,
+                block_tag_flags: items.block_tag_flags.bits(),
                 landing: &motion.landing,
                 biomes: &biomes,
                 universal_anger: false,
@@ -2922,6 +2925,7 @@ mod tests {
             thundering: false,
             level: sunrise_core::LevelKey::OVERWORLD,
             block_tags: &items.block_tags,
+            block_tag_flags: items.block_tag_flags.bits(),
             landing: &motion.landing,
             biomes: &biomes,
             universal_anger: false,
@@ -3063,6 +3067,7 @@ mod tests {
                 thundering: false,
                 level: sunrise_core::LevelKey::OVERWORLD,
                 block_tags: &items.block_tags,
+                block_tag_flags: items.block_tag_flags.bits(),
                 landing: &motion.landing,
                 biomes: &biomes,
                 universal_anger: false,

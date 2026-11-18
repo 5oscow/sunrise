@@ -729,6 +729,12 @@ impl Game<'_> {
     }
 
     pub(super) fn prepare_parts(&self, items: &Items) -> Result<PreparedParts> {
+        // Some unit fixtures construct the Part tables without loading game content.
+        #[cfg(not(test))]
+        debug_assert!(
+            mod_api::__private::content_owners_published(),
+            "admitted ownership must be published before caching the block Part owner slots"
+        );
         let registry = self.pack.assets.registry;
         let block_tags = &items.block_tags;
         let tags = self.block_tag_sets(items);
@@ -788,7 +794,13 @@ impl Game<'_> {
             {
                 Some(sources) => sources,
                 None => {
-                    lan::sync::prepare_server_sources(root, &self.res.core.item_data, &overlay)?
+                    let sources = lan::sync::prepare_server_sources(
+                        root,
+                        &self.res.core.item_data,
+                        &overlay,
+                    )?;
+                    sources.check()?;
+                    sources
                 }
             };
             Some(

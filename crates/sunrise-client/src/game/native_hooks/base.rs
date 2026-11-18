@@ -349,26 +349,6 @@ impl GameLevel<'_> {
         self.fire_update_shape(ticks, call);
     }
 
-    /// On an authoritative server, `VegetationBlock.mayPlaceOn` for the
-    /// plant `state` on `ground` at `ground_pos`, before the plant answers
-    /// it: the blocks a mod plant (one whose template is a vanilla plant,
-    /// such as a crop) can stand on. Its template's `canSurvive` asks it, so
-    /// the plant is refused there and pops off when its ground changes to
-    /// one it can't stand on. Answer only for your own blocks. The level is
-    /// read-only.
-    #[inline(always)]
-    pub(in crate::game) fn native_may_place_on(
-        &self,
-        dimension: LevelDimension,
-        state: BlockStateId,
-        ground: BlockStateId,
-        ground_pos: BlockPos,
-        may: &mut Option<bool>,
-        inert: &mut bool,
-    ) {
-        self.fire_may_place_on(dimension, state, ground, ground_pos, may, inert);
-    }
-
     /// An authoritative server's `ServerLevel.tickBlock` is about to run a
     /// due scheduled tick of the block `state` at `pos` (`BlockState.tick`):
     /// the block is still the one the tick was scheduled for. Change the
@@ -891,10 +871,6 @@ impl Game<'_> {
     pub(in crate::game) fn native_shader_params(&self, partial: f32, params: &mut [[f32; 4]; 8]) {
         self.fire_shader_params(partial, params);
     }
-    /// The minimap a native mod shows: set `minimap` when it is none yet.
-    pub(in crate::game) fn native_minimap(&self, minimap: &mut Option<mod_api::Minimap>) {
-        self.fire_minimap(minimap);
-    }
     /// Register namespaced NBT component types before content loads.
     pub(in crate::game) fn native_component_types(
         context: &mod_api::RegistrationContext,
@@ -1126,15 +1102,8 @@ impl Game<'_> {
     /// bigger value wraps), and `data` is empty until the server's first
     /// values arrive, so read it with `get`. Draw with `native_sprite`, `native_fill` and
     /// `native_text`.
-    pub(in crate::game) fn native_screen_draw(
-        &self,
-        block: &str,
-        pos: Option<[i32; 3]>,
-        data: &[i32],
-        draw: &mut HudBatch,
-        origin: [f32; 2],
-    ) {
-        self.fire_screen_draw(block, pos, data, draw, origin);
+    pub(in crate::game) fn native_screen_draw(&self, call: mod_api::__private::ScreenDrawCall<'_>) {
+        self.fire_screen_draw(call);
     }
     /// The open screen has drawn itself and its tooltips (`Screen.render`,
     /// the point of `ScreenEvent.Render.Post`): draw over it with
@@ -1363,13 +1332,9 @@ impl Game<'_> {
     /// a mapped slot. The listener's final lines replace the item's lines.
     pub(in crate::game) fn native_screen_tooltip(
         &self,
-        block: &str,
-        data: &[i32],
-        at: [f32; 2],
-        slot: Option<u32>,
-        lines: &mut Vec<(Text, u32)>,
+        call: mod_api::__private::ScreenTooltipCall<'_>,
     ) {
-        self.fire_screen_tooltip(block, data, at, slot, lines);
+        self.fire_screen_tooltip(call);
     }
     /// A player pressed a mod container's button (`clickMenuButton`), on
     /// the server. The block entity is out of the world during the call;
@@ -4587,14 +4552,9 @@ impl Game<'_> {
             return;
         }
         let [x, y] = at;
-        batch.text_styled(
-            &self.gui.atlas,
-            &Text::literal(text),
-            x,
-            y,
-            rgba(r, g, b, a),
-            shadow,
-        );
+        self.gui.plain_texts.with(text, |text| {
+            batch.text_styled(&self.gui.atlas, text, x, y, rgba(r, g, b, a), shadow)
+        });
     }
     /// The clock of the world this window shows, for client mods: its game
     /// time and time of day as the server last sent them
@@ -4605,6 +4565,20 @@ impl Game<'_> {
             game_time: self.world.game_time,
             day_time: self.world.day_time,
         })
+    }
+    /// `native_text` scaled by `scale` about `at`, its top-left corner (a GUI pose's scale).
+    pub(in crate::game) fn native_text_scaled(
+        &self,
+        batch: &mut HudBatch,
+        text: &str,
+        at: [f32; 2],
+        scale: f32,
+        argb: u32,
+        shadow: bool,
+    ) {
+        let start = batch.vertices.len();
+        self.native_text(batch, text, at, argb, shadow);
+        batch.scale_since(start, at[0], at[1], scale, scale);
     }
     /// The saved key and modifiers for an owner-bound registration, or its declared default.
     pub(in crate::game) fn mod_key(
@@ -4792,9 +4766,11 @@ impl Game<'_> {
 
 /// The level a placement or survival question is asked of: the game's level with the
 /// simulation's ticks shared beside it, which a signal read needs (comparator outputs, moving
-/// pistons). The listener's `&dyn LevelHost` is this, so `state_for_placement` and `can_survive`
-/// can read redstone and shapes. A read goes only through `Signals`, which asks the signal hooks
-/// and never `state_for_placement` or `can_survive`: a listener cannot re-enter itself through it.
+/// pistons). The listener's `&dyn LevelHost` is this, so `state_for_placement`, `can_survive`,
+/// `may_place_on` and `can_sustain_plant` can read redstone and shapes; asked from a preview
+/// (a client's guess at a click), it reads over the blocks the preview set. A read goes only
+/// through `Signals`, which asks the signal hooks and never `state_for_placement` or
+/// `can_survive`: a listener cannot re-enter itself through it.
 pub(in crate::game) type LevelView<'a> =
     super::super::mod_api_host::LevelTicks<'a, &'a GameLevel<'a>, &'a Ticks>;
 impl GameLevel<'_> {
@@ -4804,15 +4780,35 @@ impl GameLevel<'_> {
     }
 }
 impl LevelView<'_> {
-    /// On an authoritative server, `BlockState.canSurvive` for `state` at
-    /// `pos` (`BlockBehaviour.canSurvive`), before the block answers it: as
-    /// it is placed (`BlockItem.canPlace`), from a shape update of a block
-    /// whose template checks it (a plant, a torch, a sign: false breaks the
-    /// block with its drops), and wherever else vanilla asks. `state` may not
-    /// be in the world yet, so decide from `state`. Answer only for your own
-    /// blocks: `Some(false)` refuses the spot, `Some(true)` allows it, and
-    /// the block's own rule doesn't run. The level is read-only. Asked on
-    /// every shape update of such a block: keep it short.
+    /// `VegetationBlock.mayPlaceOn` for the plant `state` on `ground` at
+    /// `ground_pos`, when the soil's `can_sustain_plant` leaves the decision to
+    /// the plant. The plant inherits vegetation rules from its template or opts
+    /// into them in its block declaration. Answer only for your own blocks.
+    /// The level is read-only. Asked on both sides: a client asks it from its
+    /// placement prediction and its own shape updates.
+    #[inline(always)]
+    pub(in crate::game) fn native_may_place_on(
+        &self,
+        dimension: LevelDimension,
+        state: BlockStateId,
+        ground: BlockStateId,
+        ground_pos: BlockPos,
+        may: &mut Option<bool>,
+        inert: &mut bool,
+    ) {
+        self.fire_may_place_on(dimension, state, ground, ground_pos, may, inert);
+    }
+
+    /// `BlockState.canSurvive` for `state` at `pos`
+    /// (`BlockBehaviour.canSurvive`), before the block answers it: as it is
+    /// placed (`BlockItem.canPlace`), from a shape update of a block whose
+    /// template checks it (a plant, a torch, a sign: false breaks the block with
+    /// its drops), and wherever else vanilla asks. `state` may not be in the
+    /// world yet, so decide from `state`. Answer only for your own blocks:
+    /// `Some(false)` refuses the spot, `Some(true)` allows it, and the block's
+    /// own rule doesn't run. The level is read-only. Asked on every shape update
+    /// of such a block: keep it short. Asked on both sides: a client asks it from
+    /// its placement prediction and its own shape updates.
     #[inline(always)]
     pub(in crate::game) fn native_can_survive(
         &self,
@@ -4843,8 +4839,8 @@ impl LevelView<'_> {
     /// dispenser's `DirectionalPlaceContext`), and the answer still takes its
     /// survival and entity obstruction checks. A trait mod returns
     /// `Some(Some(state))` to choose a state, `Some(None)` to refuse, or
-    /// `None` to leave the answer to the next mod or vanilla.
-    /// Authoritative servers only.
+    /// `None` to leave the answer to the next mod or vanilla. Asked on both
+    /// sides: a client asks it from its placement prediction.
     #[inline(always)]
     #[allow(clippy::option_option)]
     pub(in crate::game) fn native_state_for_placement(

@@ -6,6 +6,7 @@
 //! network threads ([`io_pool`]): they forward decoded packets to the game
 //! thread, frame, compress and encrypt what the game queues, and keep the
 //! keep-alive schedule on their own so a long tick never times a client out.
+mod configuration_tasks;
 mod payloads;
 use super::config_payloads::ConfigIo;
 use super::{
@@ -1048,9 +1049,8 @@ fn serve_login(
         .filter(|_| online.is_none() && !c.is_memory());
     // `ServerLoginPacketListenerImpl.handleHello`: the integrated server's own player
     // (the name matches `getSingleplayerProfile`) logs in as that profile — the account's
-    // UUID — never as an offline profile made from the name. Every other memory player
-    // (a splitscreen seat) stays offline; a LAN guest could not own the name in online
-    // mode, and this keeps an offline host's name from being taken over a memory room.
+    // UUID — never as an offline profile made from the name. Other memory logins stay offline.
+    // TCP does not get this shortcut; the integrated server reserves the owner's identity.
     let singleplayer = shared
         .config
         .singleplayer_profile
@@ -1589,6 +1589,15 @@ fn login_and_configure(
         lost(shared, &format!("{name} ({})", uuid_string(uuid)), &text);
         return Ok(None);
     }
+    configuration_tasks::configure(
+        c,
+        shared,
+        uuid,
+        name,
+        &mut info,
+        &payload_transport,
+        &mut payload_negotiation,
+    )?;
     if let Some(epoch) = payload_transport.epoch()
         && !epoch.wait_main()
     {
@@ -2655,7 +2664,7 @@ mod tests {
     }
 
     /// Logs in through `c` and answers the `LoginFinished` profile.
-    fn login_profile(c: &mut Connection, name: &str) -> login::GameProfile {
+    pub(super) fn login_profile(c: &mut Connection, name: &str) -> login::GameProfile {
         c.send(
             &handshake::Serverbound::Intention(handshake::Intention {
                 protocol: sunrise_protocol::PROTOCOL_VERSION,

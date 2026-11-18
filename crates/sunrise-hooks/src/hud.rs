@@ -27,7 +27,7 @@ pub trait Canvas {
     /// A filled rectangle.
     fn fill(&mut self, x: f32, y: f32, w: f32, h: f32, argb: u32);
     /// Where a `w` × `h` box goes in `corner`: below (or above) what the corner holds already,
-    /// the minimap, the PvP widgets and mods' boxes. `None` while the corner is hidden (the debug
+    /// the PvP widgets and mods' boxes. `None` while the corner is hidden (the debug
     /// screen covers the top left): draw nothing there then.
     fn place(&mut self, corner: Corner, w: f32, h: f32) -> Option<(f32, f32)>;
 }

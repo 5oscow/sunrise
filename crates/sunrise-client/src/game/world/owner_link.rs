@@ -20,7 +20,6 @@ use std::{
 };
 use sunrise_core::geometry::Vec3;
 use sunrise_perf_format::v1::StopReason;
-use sunrise_protocol::connection::Pipe;
 
 /// Where the server puts the answer to a request the window waits for.
 pub(super) type Reply<T> = SyncSender<T>;
@@ -52,10 +51,6 @@ pub(super) enum OwnerRequest {
         Dim,
         Reply<Option<Arc<dyn sunrise_client::streaming::LodSource>>>,
     ),
-    /// A splitscreen player (offline uuid) joins through memory.
-    JoinSplit(u128, Reply<Option<Pipe>>),
-    /// A splitscreen player (offline uuid) left.
-    LeaveSplit(u128, Reply<()>),
     /// The pregen commands are on or off.
     SetPregen(bool),
     /// A live content mod switch: the data packs reload from the new root.
@@ -169,15 +164,6 @@ impl Game<'_> {
             OwnerRequest::LodSource(dim, reply) => {
                 let _ = reply.send(self.lod_source_in(dim));
             }
-            OwnerRequest::JoinSplit(uuid, reply) => {
-                let _ = reply.send(self.join_split_seat(uuid));
-            }
-            OwnerRequest::LeaveSplit(uuid, done) => {
-                if let Some(host) = self.lan.as_mut() {
-                    host.hub.ops.remove(&uuid);
-                }
-                let _ = done.send(());
-            }
             OwnerRequest::SetPregen(enabled) => self.set_pregen_commands(enabled),
             OwnerRequest::ReloadMods(reload) => self.apply_mods_reload(*reload),
             OwnerRequest::StartServerCapture(target, live, reply) => {
@@ -270,15 +256,6 @@ impl Game<'_> {
                 let _ = copied.recv();
             }
         }
-    }
-
-    /// A splitscreen seat gets the owner's permissions and a connection through memory.
-    fn join_split_seat(&mut self, uuid: u128) -> Option<Pipe> {
-        let host = self.lan.as_mut()?;
-        let owner = host.owner.as_ref()?.uuid;
-        let level = host.hub.ops.get(&owner).copied().unwrap_or(0);
-        host.hub.ops.insert(uuid, level);
-        host.hub.lan.connect_local().ok()
     }
 
     /// The command tree shows the pregen commands only while they are on.
