@@ -641,10 +641,11 @@ fn validated_fluid_utility_keeps_only_accepted_writes_in_its_outer_transaction()
     });
 }
 
-struct LiquidIsolationPart(bool);
+struct DecliningLiquidPart(Arc<std::sync::atomic::AtomicBool>);
+struct AcceptingLiquidPart;
 
 #[mod_api::sunrise_part]
-impl mod_api::BlockPart for LiquidIsolationPart {
+impl mod_api::BlockPart for DecliningLiquidPart {
     fn can_place_liquid(
         &self,
         _: mod_api::LevelSide<'_>,
@@ -660,34 +661,45 @@ impl mod_api::BlockPart for LiquidIsolationPart {
     ) -> Option<bool> {
         let floor = [AT[0], AT[1] - 1, AT[2]];
         let emerald = level.block_state_id("minecraft:emerald_block").unwrap();
-        if self.0 {
-            assert_eq!(
-                level.block_state(floor),
-                level.block_state_id("minecraft:dirt")
-            );
-            Some(level.set_block(AT, emerald, mod_api::BlockUpdateFlags::CLIENTS))
-        } else {
-            assert!(level.set_block(floor, emerald, mod_api::BlockUpdateFlags::CLIENTS));
-            None
-        }
+        assert!(level.set_block(floor, emerald, mod_api::BlockUpdateFlags::CLIENTS));
+        self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+        None
+    }
+}
+
+#[mod_api::sunrise_part]
+impl mod_api::BlockPart for AcceptingLiquidPart {
+    fn place_liquid(
+        &self,
+        level: &mut dyn mod_api::LevelWriteHost,
+        _: &mut mod_api::PlaceLiquidEvent,
+    ) -> Option<bool> {
+        let floor = [AT[0], AT[1] - 1, AT[2]];
+        assert_eq!(
+            level.block_state(floor),
+            level.block_state_id("minecraft:dirt")
+        );
+        let emerald = level.block_state_id("minecraft:emerald_block").unwrap();
+        Some(level.set_block(AT, emerald, mod_api::BlockUpdateFlags::CLIENTS))
     }
 }
 
 #[mod_api::__subscriptions]
-impl mod_api::Hooks for LiquidIsolationPart {
+impl mod_api::Hooks for DecliningLiquidPart {
     fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
         let block = r.block_key("minecraft:dandelion");
-        r.block_part(block, LiquidIsolationPart(false));
-        r.block_part(block, LiquidIsolationPart(true));
+        r.block_part(block, DecliningLiquidPart(Arc::clone(&self.0)));
+        r.block_part(block, AcceptingLiquidPart);
     }
 }
 
 #[test]
 #[ignore = "daily"]
 fn declining_liquid_part_writes_never_reach_the_next_part_or_commit() {
+    let declined = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let mods = vec![mod_api::ModEntry::new(
         "liquid_isolation",
-        Box::new(LiquidIsolationPart(false)),
+        Box::new(DecliningLiquidPart(Arc::clone(&declined))),
     )]
     .into();
     mod_platform::testing::with_mods(mods, || {
@@ -705,6 +717,7 @@ fn declining_liquid_part_writes_never_reach_the_next_part_or_commit() {
                 outer.transaction()
             ));
             game.transaction_close(&outer, true);
+            assert!(declined.load(std::sync::atomic::Ordering::Relaxed));
             assert_eq!(block(game), state(game, "minecraft:emerald_block"));
             assert_eq!(
                 game.world.block(AT[0], AT[1] - 1, AT[2]),
@@ -807,6 +820,12 @@ fn live_structure_restores_fluid_directly_and_retries_with_a_neighbour_source() 
     use sunrise_core::{nbt::parse_snbt, position::BlockPos};
     use sunrise_world::worldgen::structure::{Mirror, Rotation, StructureTemplate};
     with_liquid_part(|game, _, calls| {
+        crate::game::growth::install_live_features(
+            game.res,
+            &game.pack,
+            &game.options,
+            &Default::default(),
+        );
         let water = state(game, "minecraft:water");
         let [x, y, z] = AT;
         game.world.set(x, y, z, water).unwrap();
