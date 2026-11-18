@@ -10,6 +10,31 @@ pub(super) struct Writer {
     thread: std::thread::JoinHandle<()>,
 }
 
+/// The sole owner of completion for a queued record. Pending readers borrow
+/// only the record; dropping this job releases them even on cancellation,
+/// coalescing, or an unwind before the record reaches the writer.
+pub(super) struct QueuedWrite {
+    pub(super) key: (i32, i32),
+    pub(super) record: Record,
+    seq: u64,
+}
+
+impl QueuedWrite {
+    pub(super) fn new(key: (i32, i32), record: Record, seq: u64) -> Self {
+        Self {
+            key,
+            record: record.track_block_entity_edits(),
+            seq,
+        }
+    }
+}
+
+impl Drop for QueuedWrite {
+    fn drop(&mut self) {
+        self.record.resolve_block_entity_edits(false);
+    }
+}
+
 /// Writes still queued or running, with a condition to wait for none.
 #[derive(Default)]
 pub(super) struct Outstanding {
@@ -69,16 +94,19 @@ impl SaveDir {
             {
                 let mut pending = self.pending.lock().map_err(|_| "pending writes poisoned")?;
                 for (key, record) in records {
-                    let record = record.track_block_entity_edits();
-                    let seq = self.sequence.fetch_add(1, Ordering::Relaxed);
-                    pending.insert((folder, key.0, key.1), (seq, record.clone()));
-                    batch.push((key, record, seq));
+                    let job = QueuedWrite::new(
+                        key,
+                        record,
+                        self.sequence.fetch_add(1, Ordering::Relaxed),
+                    );
+                    pending.insert((folder, key.0, key.1), (job.seq, job.record.clone()));
+                    batch.push(job);
                 }
             }
             // After the pending writes: a search reads the new chunks from here on.
             self.outstanding
                 .portals
-                .written(folder, batch.iter().map(|(key, _, _)| *key));
+                .written(folder, batch.iter().map(|job| job.key));
             *self
                 .outstanding
                 .count
@@ -91,10 +119,7 @@ impl SaveDir {
                 0
             };
             self.outstanding.chunks.fetch_add(chunks, Ordering::Relaxed);
-            if let Err(mpsc::SendError((_, batch))) = writer.send.send((folder, batch)) {
-                for (_, record, _) in &batch {
-                    record.finish_block_entity_edits(false);
-                }
+            if writer.send.send((folder, batch)).is_err() {
                 self.outstanding.chunks.fetch_sub(chunks, Ordering::Relaxed);
                 *self
                     .outstanding
@@ -136,8 +161,7 @@ impl SaveDir {
                     Folder::Poi => 2,
                 };
                 while let Ok(first) = receive.recv() {
-                    let mut groups: [(Vec<((i32, i32), Record, u64)>, usize); 3] =
-                        Default::default();
+                    let mut groups: [(Vec<QueuedWrite>, usize); 3] = Default::default();
                     let mut total = 0;
                     let mut next = Some(first);
                     while let Some((kind, batch)) = next.take() {
@@ -168,39 +192,41 @@ impl SaveDir {
                         };
                         let resolved: Vec<_> = batch
                             .iter()
-                            .filter(|(k, _, seq)| newest(k, *seq))
-                            .filter_map(|(k, r, _)| Some((*k, resolve_poi(&root, cache, *k, r)?)))
+                            .filter(|job| newest(&job.key, job.seq))
+                            .filter_map(|job| {
+                                Some((job.key, resolve_poi(&root, cache, job.key, &job.record)?))
+                            })
                             .collect();
                         let records: Vec<_> = resolved.iter().map(|(k, r)| (*k, r)).collect();
                         let result = (|| -> Result<()> {
                             chunk_disk::prepare_batch(&batch)?;
                             write_region_records(&root, cache, folder, &records)
                         })();
-                        // Release readers of failed or coalesced records. Only the writer
-                        // can admit the edits of a record it actually wrote.
-                        for (_, record, _) in &batch {
-                            record.finish_block_entity_edits(false);
-                        }
                         if let Err(e) = &result {
                             chunk_disk::note_failed(&batch);
                             let message = format!("failed to write {folder} files: {e}");
                             log::warn!("Sunrise: {message}");
                             *outstanding.error.lock().unwrap() = Some(message);
-                            for (k, _, _) in &batch {
-                                crate::chunk_io::report_save_failure(&root, k.0, k.1, e);
+                            for job in &batch {
+                                crate::chunk_io::report_save_failure(
+                                    &root, job.key.0, job.key.1, e,
+                                );
                             }
                         }
                         if result.is_ok()
                             && let Ok(mut pending) = pending.lock()
                         {
-                            for (k, _, seq) in &batch {
-                                if pending.get(&(kind, k.0, k.1)).is_some_and(|p| p.0 == *seq) {
-                                    pending.remove(&(kind, k.0, k.1));
+                            for job in &batch {
+                                let key = (kind, job.key.0, job.key.1);
+                                if pending.get(&key).is_some_and(|p| p.0 == job.seq) {
+                                    pending.remove(&key);
                                 }
                             }
                         }
+                        let chunk_count = batch.len();
+                        drop(batch);
                         if kind == Folder::Region {
-                            outstanding.chunks.fetch_sub(batch.len(), Ordering::Relaxed);
+                            outstanding.chunks.fetch_sub(chunk_count, Ordering::Relaxed);
                         }
                         if let Ok(mut count) = outstanding.count.lock() {
                             *count -= batch_count;

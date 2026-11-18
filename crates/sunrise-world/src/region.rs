@@ -52,7 +52,18 @@ impl ChunkRecord {
         timestamp: u32,
         limits: Limits,
     ) -> io::Result<Self> {
-        let bytes = nbt::write_named(root, limits).map_err(|e| invalid(e.to_string()))?;
+        Self::from_nbt_with_string_fallback(root, compression, timestamp, limits, true)
+    }
+    /// Encode a record without replacing overlong names or values when fallback is disabled.
+    pub fn from_nbt_with_string_fallback(
+        root: &NamedTag,
+        compression: Compression,
+        timestamp: u32,
+        limits: Limits,
+        empty_long_strings: bool,
+    ) -> io::Result<Self> {
+        let bytes = nbt::write_named_with_string_fallback(root, limits, empty_long_strings)
+            .map_err(|e| invalid(e.to_string()))?;
         Ok(Self {
             compression,
             compressed: compression.encode(&bytes)?,

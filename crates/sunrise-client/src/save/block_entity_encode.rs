@@ -15,6 +15,31 @@ pub fn encode(
     encode_with(p, e, block, items, |_, _| None)
 }
 
+/// Merge modeled stacks with saved rows the engine did not take ownership of.
+pub fn mod_items(
+    m: &crate::containers::ModBlockEntity,
+    items: &crate::items::Items,
+) -> Option<Tag> {
+    let mut entries = sunrise_items::item_nbt::encode_items_using(&m.items, |stack| {
+        sunrise_items::item_nbt::item_to_nbt(stack, items)
+    });
+    match m.nbt.get(&"Items".into()) {
+        Some(Tag::List(raw)) => {
+            entries.extend(
+                raw.iter()
+                    .filter(|entry| {
+                        saved_item_slot(entry).is_none_or(|slot| m.has_opaque_item_slot(slot))
+                    })
+                    .cloned(),
+            );
+            Some(Tag::List(entries))
+        }
+        // A non-list is opaque; unoccupied modeled slots introduce no field.
+        raw if entries.is_empty() => raw.cloned(),
+        _ => Some(Tag::List(entries)),
+    }
+}
+
 /// Encode a live block entity, allowing its owner to supply the mod payload
 /// before the engine adds identity, position, item slots and published shapes.
 pub fn encode_with(
@@ -28,7 +53,10 @@ pub fn encode_with(
         |stack: &crate::items::ItemStack| sunrise_items::item_nbt::item_to_nbt(stack, items);
     use crate::containers::BlockEntity;
     let encode_items = |slots: &[Option<crate::items::ItemStack>]| {
-        sunrise_items::item_nbt::encode_items_using(slots, item_to_nbt)
+        Tag::List(sunrise_items::item_nbt::encode_items_using(
+            slots,
+            item_to_nbt,
+        ))
     };
     if let BlockEntity::Mod(m) = e {
         let mut map = save_additional(m.id(), &m.nbt).unwrap_or_else(|| m.nbt.clone());
@@ -38,29 +66,10 @@ pub fn encode_with(
         map.insert("id".into(), string(m.id()));
         if !m.items.is_empty() {
             let key = "Items".into();
-            let Tag::List(mut entries) = encode_items(&m.items) else {
-                unreachable!("the item slot encoder returns a list")
-            };
-            match m.nbt.get(&key) {
-                Some(Tag::List(raw)) => {
-                    entries.extend(
-                        raw.iter()
-                            .filter(|entry| {
-                                saved_item_slot(entry).is_none_or(|slot| slot >= m.items.len())
-                            })
-                            .cloned(),
-                    );
-                    map.insert(key, Tag::List(entries));
-                }
-                // No slot key to merge; keep the opaque value unless a modeled
-                // item needs the field. Otherwise ContainerHelper.saveAllItems's
-                // default always-write rule includes even an empty modeled list.
-                Some(raw) if entries.is_empty() => {
-                    map.insert(key, raw.clone());
-                }
-                _ => {
-                    map.insert(key, Tag::List(entries));
-                }
+            if let Some(items) = mod_items(m, items) {
+                map.insert(key, items);
+            } else {
+                map.remove(&key);
             }
         }
         for (key, v) in [("x", p.0), ("y", p.1), ("z", p.2)] {

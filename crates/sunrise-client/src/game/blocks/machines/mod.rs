@@ -862,7 +862,7 @@ impl Game<'_> {
         {
             m.items.resize(view.len(), None);
         }
-        entity.slots_mut().get_mut(i)
+        entity.slot_mut(i)
     }
     /// `BlockEntity.setChanged` for every block entity of a container.
     fn view_changed(&mut self, view: &View) {
@@ -1071,8 +1071,9 @@ impl Game<'_> {
         if view.kind == Kind::Pot {
             return self.pot_take_one(view.parts[0].0);
         }
+        self.containers().get(view, slot)?;
         let target = self.slot_mut_at(view, slot)?;
-        let current = target.as_mut().filter(|s| s.count > 0)?;
+        let current = target.as_mut()?;
         let one = ItemStack {
             count: 1,
             ..current.clone()

@@ -554,7 +554,7 @@ impl Game<'_> {
                 if m.items.len() < size {
                     m.items.resize(size, None);
                 }
-                m.items[i] = stack;
+                *m.item_slot_mut(i).unwrap() = stack;
             }
             Some(entity) => entity.slots_mut()[i] = stack,
             None => return false,

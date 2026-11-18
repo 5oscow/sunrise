@@ -1,6 +1,6 @@
 //! Engine-owned mod block entity storage and revision tracking.
 use super::published_shapes::{PublishedShapes, SHAPES_KEY};
-use std::sync::Arc;
+use std::{collections::BTreeSet, sync::Arc};
 use sunrise_core::nbt::{Compound, Tag};
 use sunrise_items::items::ItemStack;
 /// A mod's block entity, read and changed through its fields
@@ -19,6 +19,8 @@ pub struct ModBlockEntity {
     pub(crate) numeric_id: Option<u32>,
     pub(crate) fields: ModBlockEntityFields,
     pub(crate) revision: ModRevision,
+    /// Indexed `Items` rows that could not be modeled. Claiming a slot never claims its neighbors.
+    opaque_item_slots: BTreeSet<usize>,
     /// What its block's collision and outline are while it holds some
     /// (`BlockEntityRef::set_shapes`). Saved and sent with it, outside its `nbt`.
     pub(crate) shapes: Option<Arc<PublishedShapes>>,
@@ -63,8 +65,38 @@ impl ModBlockEntity {
     /// Apply a validated callback snapshot in place, keeping this entity's identity.
     /// The game passes the snapshot's original write count, including no-op writes.
     pub fn apply_snapshot(&mut self, fields: ModBlockEntityFields, changes: u64) {
+        self.opaque_item_slots
+            .retain(|&slot| !fields.items.get(slot).is_some_and(Option::is_some));
         self.fields = fields;
         self.revision.changes = changes;
+    }
+
+    /// Install the opaque indices identified by the saved-data decoder.
+    pub fn with_opaque_item_slots(mut self, slots: BTreeSet<usize>) -> Self {
+        self.opaque_item_slots = slots;
+        self
+    }
+
+    pub fn has_opaque_item_slot(&self, slot: usize) -> bool {
+        self.opaque_item_slots.contains(&slot)
+    }
+
+    /// Restore the saved-data ownership bit from a single-slot transaction journal.
+    pub fn restore_opaque_item_slot(&mut self, slot: usize, opaque: bool) {
+        if opaque {
+            self.opaque_item_slots.insert(slot);
+        } else {
+            self.opaque_item_slots.remove(&slot);
+        }
+    }
+
+    /// A write (including an explicit clear) supersedes the raw row for this index.
+    pub fn item_slot_mut(&mut self, slot: usize) -> Option<&mut Option<ItemStack>> {
+        if slot >= self.items.len() {
+            return None;
+        }
+        self.opaque_item_slots.remove(&slot);
+        self.items.get_mut(slot)
     }
 
     pub fn new(id: String, fields: ModBlockEntityFields) -> Self {
@@ -80,6 +112,7 @@ impl ModBlockEntity {
                 born: sunrise_mod_runtime::block_entities::new_identity(),
                 changes: 0,
             },
+            opaque_item_slots: BTreeSet::new(),
             shapes: None,
             shapes_cleared: false,
         }
@@ -196,6 +229,7 @@ impl Default for ModBlockEntity {
 impl Clone for ModBlockEntity {
     fn clone(&self) -> Self {
         let mut copy = Self::with_numeric_id(self.id.clone(), self.numeric_id, self.fields.clone());
+        copy.opaque_item_slots.clone_from(&self.opaque_item_slots);
         copy.shapes.clone_from(&self.shapes);
         copy.shapes_cleared = self.shapes_cleared;
         copy
@@ -203,7 +237,10 @@ impl Clone for ModBlockEntity {
 }
 impl PartialEq for ModBlockEntity {
     fn eq(&self, other: &Self) -> bool {
-        self.id == other.id && self.fields == other.fields && self.shapes == other.shapes
+        self.id == other.id
+            && self.fields == other.fields
+            && self.opaque_item_slots == other.opaque_item_slots
+            && self.shapes == other.shapes
     }
 }
 impl std::fmt::Debug for ModBlockEntity {
@@ -211,6 +248,7 @@ impl std::fmt::Debug for ModBlockEntity {
         f.debug_struct("ModBlockEntity")
             .field("id", &self.id)
             .field("fields", &self.fields)
+            .field("opaque_item_slots", &self.opaque_item_slots)
             .field("shapes", &self.shapes)
             .finish()
     }

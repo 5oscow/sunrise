@@ -23,7 +23,7 @@ pub(super) enum Record {
 }
 /// The pending reader only waits for this record's final payload selection.
 pub(super) struct EditedChunk {
-    pub(super) original: Record,
+    original: Record,
     admitted: OnceLock<bool>,
 }
 
@@ -59,7 +59,11 @@ impl Record {
         }
     }
 
-    pub(super) fn finish_block_entity_edits(&self, admitted: bool) {
+    pub(super) fn accept_block_entity_edits(&self) {
+        self.resolve_block_entity_edits(true);
+    }
+
+    pub(super) fn resolve_block_entity_edits(&self, admitted: bool) {
         if let Self::EditedChunk(record) = self {
             let _ = record.admitted.set(admitted);
         }
@@ -82,9 +86,7 @@ impl Record {
     /// Re-encode only the stored block-entity payloads from this same save snapshot.
     pub(super) fn without_block_entity_edits(&self) -> Option<Arc<NamedTag>> {
         match self {
-            Self::EditedChunk(record) if record.admitted.get().is_none() => {
-                record.original.without_block_entity_edits()
-            }
+            Self::EditedChunk(record) => record.original.without_block_entity_edits(),
             Self::Disk(record) => record.without_block_entity_edits(),
             Self::Chunk(chunk, e, blending) => {
                 chunk.saved.as_ref()?.block_entity_save_edits.as_ref()?;

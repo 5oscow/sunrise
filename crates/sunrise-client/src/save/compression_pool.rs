@@ -167,12 +167,20 @@ fn worker_loop(weak_inner: Weak<Inner>) {
     }
 }
 
+pub(super) struct CompressedWrite {
+    pub(super) record: ChunkRecord,
+    /// The first candidate, rather than a retry with stored block-entity payloads.
+    pub(super) primary: bool,
+}
+
+type Prepared = io::Result<Option<CompressedWrite>>;
+
 pub(super) fn compress_record(
     record: &Record,
     compression: Compression,
     timestamp: u32,
     limits: Limits,
-) -> io::Result<Option<ChunkRecord>> {
+) -> Prepared {
     if let Record::Chunk(_, encoding, _) | Record::Proto(_, encoding) = record.source() {
         encoding
             .biomes
@@ -182,26 +190,40 @@ pub(super) fn compress_record(
     let Some(tag) = super::chunk_disk::encode_record(record)? else {
         return Ok(None);
     };
-    let error = match ChunkRecord::from_nbt(&tag, compression, timestamp, limits) {
-        Ok(record) => return Ok(Some(record)),
+    let error = match ChunkRecord::from_nbt_with_string_fallback(
+        &tag,
+        compression,
+        timestamp,
+        limits,
+        !record.has_block_entity_edits(),
+    ) {
+        Ok(record) => {
+            return Ok(Some(CompressedWrite {
+                record,
+                primary: true,
+            }));
+        }
         Err(error) => error,
     };
     drop(tag);
     let Some(stored) = record.without_block_entity_edits() else {
         return Err(error);
     };
-    record.finish_block_entity_edits(false);
     log::warn!(
         "block_entity_save_additional: discarding listener edits from the chunk record: {error}"
     );
-    ChunkRecord::from_nbt(&stored, compression, timestamp, limits).map(Some)
+    let record = ChunkRecord::from_nbt(&stored, compression, timestamp, limits)?;
+    Ok(Some(CompressedWrite {
+        record,
+        primary: false,
+    }))
 }
 
-pub fn compress_records_with_pool(
+pub(super) fn compress_records_with_pool(
     records: &[((i32, i32), &Record)],
     timestamp: u32,
     pool: &CompressionPool,
-) -> Vec<io::Result<Option<ChunkRecord>>> {
+) -> Vec<Prepared> {
     let count = records.len();
     if count == 0 {
         return Vec::new();
@@ -213,7 +235,7 @@ pub fn compress_records_with_pool(
         return records.iter().map(|(_, r)| compress(r)).collect();
     }
     let records_arc: Arc<[Record]> = records.iter().map(|(_, r)| (*r).clone()).collect();
-    let results: Arc<Mutex<Vec<Option<io::Result<Option<ChunkRecord>>>>>> =
+    let results: Arc<Mutex<Vec<Option<Prepared>>>> =
         Arc::new(Mutex::new((0..count).map(|_| None).collect()));
 
     let recs = Arc::clone(&records_arc);
@@ -231,9 +253,8 @@ pub fn compress_records_with_pool(
         .collect()
 }
 
-pub fn compress_records(
-    records: &[((i32, i32), &Record)],
-    timestamp: u32,
-) -> Vec<io::Result<Option<ChunkRecord>>> {
+/// Encode and compress records on the worker pool in submission order.
+/// A deletion has no compressed record.
+pub(super) fn compress_records(records: &[((i32, i32), &Record)], timestamp: u32) -> Vec<Prepared> {
     compress_records_with_pool(records, timestamp, pool())
 }

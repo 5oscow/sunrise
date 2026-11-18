@@ -190,6 +190,7 @@ pub(super) struct Level {
 /// replaced it.
 struct KeptSlot {
     stack: Option<ItemStack>,
+    opaque: bool,
     generation: Option<u64>,
 }
 
@@ -752,13 +753,13 @@ impl Game<'_> {
         if level.block_entities.contains_key(&pos) {
             return;
         }
-        level.slots.entry((pos, slot)).or_insert_with(|| KeptSlot {
-            stack: self
-                .world
-                .block_entities
-                .get(&pos)
-                .and_then(|entity| entity.slots().get(slot).cloned().flatten()),
-            generation: self.world.block_entities.generation(&pos),
+        level.slots.entry((pos, slot)).or_insert_with(|| {
+            let entity = self.world.block_entities.get(&pos);
+            KeptSlot {
+                stack: entity.and_then(|entity| entity.slots()[slot].clone()),
+                opaque: matches!(entity, Some(BlockEntity::Mod(m)) if m.has_opaque_item_slot(slot)),
+                generation: self.world.block_entities.generation(&pos),
+            }
         });
     }
     /// Keeps `holder`'s attachment map as it is, if a transaction is open and hasn't yet: a
@@ -1242,13 +1243,13 @@ impl Game<'_> {
             if self.world.block_entities.generation(&pos) != kept.generation {
                 continue;
             }
-            if let Some(target) = self
-                .world
-                .block_entities
-                .get_mut(&pos)
-                .and_then(|entity| entity.slots_mut().get_mut(slot))
+            if let Some(entity) = self.world.block_entities.get_mut(&pos)
+                && let Some(target) = entity.slots_mut().get_mut(slot)
             {
                 *target = kept.stack;
+                if let BlockEntity::Mod(m) = entity {
+                    m.restore_opaque_item_slot(slot, kept.opaque);
+                }
                 #[cfg(test)]
                 if let Some(trace) = &self.transactions.trace {
                     trace
