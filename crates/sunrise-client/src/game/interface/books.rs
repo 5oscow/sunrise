@@ -461,15 +461,6 @@ impl Game<'_> {
         if !((0..9).contains(&p.slot) || p.slot == super::shield::OFFHAND_SLOT as i32) {
             return;
         }
-        if let Some(title) = &p.title
-            && !self.chat_filter_text(
-                conn,
-                &[title],
-                sunrise_client::lan::hub::chat_filter::Place::Book,
-            )
-        {
-            return;
-        }
         let menu_slot = if p.slot == super::shield::OFFHAND_SLOT as i32 {
             45
         } else {

@@ -100,8 +100,7 @@ pub trait PlayerSessionBackendMut {
     /// again. Hovering the shown name gives the real one, which stays in the
     /// log, commands, selectors and the server's events. Kept until a mod
     /// sets it again or the server stops (also if they leave and come back).
-    /// Plain text: the mod checks it (`Messages::text_allowed`, its length,
-    /// other players' names). False when the server list is unavailable,
+    /// Plain text: the mod checks it (its length, other players' names). False when the server list is unavailable,
     /// the handle is stale or the player isn't online.
     #[access(WorldOnly)]
     fn player_set_nickname(&mut self, player: PlayerRef, nickname: Option<&str>) -> bool;

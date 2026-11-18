@@ -185,17 +185,6 @@ pub(super) fn cached_user_by_id(id: u128) -> Option<NameAndId> {
     USER_CACHE.lock().unwrap().as_mut()?.get_by_id(id)
 }
 
-/// `server.toml`'s `[chat_filter]` (docs/chat-filter.md), through the filter the executable installed
-/// (`sunrise_server_files::chat_guard`): none without one.
-fn load_chat_filter() -> Option<Box<dyn sunrise_server_files::chat_guard::ChatGuard>> {
-    let text = std::fs::read_to_string("server.toml").unwrap_or_default();
-    let loaded = sunrise_server_files::chat_guard::load(&text, std::path::Path::new("."));
-    for (level, line) in &loaded.log {
-        log(level, line);
-    }
-    loaded.guard
-}
-
 /// `server.toml`'s `[entities]` (docs/server.md): `villager_lobotomize` and its check interval. Off without
 /// the file or the section, and (with an error logged) when the section is wrong.
 fn load_entities() {
@@ -1299,7 +1288,6 @@ impl Game<'_> {
             host.hub.transfers = Some(transfers);
         }
         self.sync_ops(&lists);
-        let chat_filter = load_chat_filter();
         self.read_runtime_level_cap(|key| props.raw.get(key));
         load_entities();
         // Sunrise's far ring (docs/hosting.md): server.toml's `max_view_distance`.
@@ -1318,7 +1306,6 @@ impl Game<'_> {
                     &format!("Sending saved chunks up to {far} chunks away (max_view_distance)"),
                 );
             }
-            host.hub.set_chat_filter(chat_filter);
             // The viewed areas' chunk caps (#3716): server.toml's `max_viewed_*` settings.
             let (caps, clamped) = viewed::ViewedCaps::from_properties(|key| props.raw.get(key));
             if let Some(asked) = clamped {
@@ -2012,20 +1999,6 @@ impl Game<'_> {
                 }
             }
             "whitelist" => self.console_whitelist(state, &rest),
-            // The chat filter's (game/interface/chat_filter.rs), on servers that filter.
-            command
-                if super::chat_filter::MUTE_COMMANDS.contains(&command)
-                    && self.lan.as_ref().is_some_and(|h| h.hub.chat_filter_on()) =>
-            {
-                if let Some(mut host) = self.lan.take() {
-                    let words: Vec<&str> = [command].into_iter().chain(rest).collect();
-                    let replies = self.mute_command(&mut host, &words, "Server");
-                    self.lan = Some(host);
-                    for reply in replies {
-                        self.console_reply(reply.text());
-                    }
-                }
-            }
             "ban" if !rest.is_empty() => {
                 let Some(user) = self.resolve(rest[0]) else {
                     return;
@@ -2947,7 +2920,7 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// A temporary ban (the chat filter's) keeps the player out and says when it ends;
+    /// A temporary ban keeps the player out and says when it ends;
     /// once it has ended, or after `/pardon`, they come in.
     #[test]
     fn a_temporarily_banned_player_is_refused_with_the_end_until_it_has_passed() {

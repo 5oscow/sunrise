@@ -97,8 +97,8 @@ public API that mods, desktop-class ports and the Sunrise layer build on.
 
 - **Belongs:** the mod API and mod formats, the native mod host, the shader API and pack formats beyond vanilla
   (OptiFine, Polytone, `shaders/`), HDR, controllers, replay recording and playback, the HUD widget
-  framework, UI pages and the settings system, agent control (`sunrise-ctl`, MCP), the dedicated server's chat
-  filter, modpack porting, the design tokens of non-vanilla screens.
+  framework, UI pages and the settings system, agent control (`sunrise-ctl`, MCP),
+  modpack porting, the design tokens of non-vanilla screens.
 - **Exposes what vanilla already uses.** FOV changes, potion effects, the player's state, screens, rendering
   hooks and so on become public API with stable types (arismoko/horizon#1608's patterns). Then a mod, a port or a
   Sunrise feature builds on them instead of editing or copying engine code.
@@ -195,7 +195,6 @@ and Parts registration state; it is not yet a stateless or unsafe-free interface
 | A mod hook or host interface | engine + platform | `sunrise-mod-vocab` owns the engine vocabulary and dispatch; `sunrise-mod-api` re-exports it for mods and owns guest transport |
 | A mod package format | platform | `sunrise-mod-package` |
 | A shader or resource pack format vanilla doesn't read | platform | `sunrise-shaders`, `sunrise-optifine`, `sunrise-polytone`, or a new platform crate |
-| A dedicated server option (chat filter) | platform | `sunrise-chat-filter` |
 | Controller support: a device, bindings, glyphs, pad menus | platform | the pad modules, on the engine's input hooks ([Controllers](#controllers-replays-and-ui-pages)) |
 | Splitscreen | official native mod (planned) | removed from the engine and launcher; the mod will use the existing mod API and native patch route |
 | A render pipeline capability vanilla's path doesn't use but a higher layer can't add without rebuilding the pipeline (the compositor) | engine | `gfx.rs` and `gfx/`, doing nothing on vanilla's path |
@@ -253,7 +252,7 @@ it. Mods loaded as WebAssembly run as separate modules, not linked into the exec
 | The links the launcher and the site read (Discord, website) | `https://github.com/sunrise-org/sunrise-launcher/blob/main/links.json` |
 
 These stay without it: builds of this repository from source, sunrise-plain, and `packaging/server/install.sh`
-and `install.ps1` (the dedicated server). The server's chat filter is a platform feature.
+and `install.ps1` (the dedicated server).
 
 ## How a Sunrise crate plugs in
 

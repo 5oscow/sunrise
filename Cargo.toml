@@ -37,7 +37,6 @@ members = [
     "crates/sunrise-items",
     "crates/sunrise-server-files",
     "crates/sunrise-java-properties",
-    "crates/sunrise-chat-filter",
     # The Model Context Protocol, shared by sunrise-ctl, sunrise-server and the launcher.
     "crates/sunrise-mcp",
     "crates/sunrise-server",

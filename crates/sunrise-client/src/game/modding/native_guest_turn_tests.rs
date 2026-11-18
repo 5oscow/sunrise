@@ -987,7 +987,6 @@ fn server_services_preserve_identity_and_message_delivery() {
             game.chat_capture.take().unwrap()[0].plain(),
             "command answer"
         );
-        assert_eq!(game.messages().text_allowed("message"), Some(true));
         game.as_guest(12, |game| {
             assert_eq!(game.players().acting_player(), Some(a));
             assert_eq!(game.players().server_players(), players);
