@@ -6409,7 +6409,11 @@ def check_frames(host, guest, out):
             player.raw('mouse', 'right', 'click')
             player.wait(10)
             server_reply(player, f'data get entity {selector} CustomName', creative_name)
-            server_reply(other, f'data get entity {selector} CustomName', creative_name)
+            # Each game's own copy of the stand has the new name: shown, it is the tag each draws.
+            player('command', command=f'data merge entity {selector} {{CustomNameVisible:1b}}')
+            for side in (player, other):
+                side.until(lambda: side('status').get('name_tags') or [], lambda tags: creative_name in tags,
+                           ticks=40)
             assert player('inventory')['counts'].get('minecraft:name_tag') == 3, 'creative tag was consumed'
             player('command', command='gamemode survival')
             result[label] = {'frame': 'diamond, turned', 'stand': 'helmet on and off; named tag consumed'}
@@ -7446,6 +7450,7 @@ def run(ctl, out, resources, checks):
             try:
                 # Cases assert their own deaths, menus and held actions before returning.
                 # Do not let those states turn later independent cases into false failures.
+                resets = []
                 for game in (host, guest):
                     game.raw('release')
                     back_to_game(game)
@@ -7467,6 +7472,15 @@ def run(ctl, out, resources, checks):
                         state = wait_dimension(game, OVERWORLD, 400)
                         assert state.get('dimension') == OVERWORLD and state.get('player'), \
                             f'{game.name} did not return to the Overworld before {name}: {state}'
+                    resets.append((game, (x, y, z)))
+                # Both games have their teleport before one is placed by the other's position: a game
+                # already in the Overworld passes the dimension wait before it arrives.
+                for game, at in resets:
+                    near = lambda p: all(abs(p[i] - at[i]) < (1.0 if i == 1 else 0.5) for i in range(3))
+                    game.until(lambda: game('state'),
+                               lambda s: s.get('dimension') == OVERWORLD and s.get('player')
+                               and near(s['player']['position']),
+                               ticks=100)
                 # And facing each other, as after joining.
                 face_each_other(host, guest)
                 detail = CHECK_FNS[name](host, guest, out)
