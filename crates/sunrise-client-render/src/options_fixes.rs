@@ -1,6 +1,9 @@
 //! The `OPTIONS` data fixers of 26.3 (`DataFixTypes.OPTIONS`), applied to the
 //! raw key/value strings of an `options.txt` older than the current version.
 use std::collections::HashMap;
+pub use sunrise_core::java_float_parse::{
+    parse_java_double as java_parse_double, parse_java_float as java_parse_float,
+};
 
 /// A fixer threw an exception; vanilla abandons loading the file.
 #[derive(Debug)]
@@ -131,62 +134,6 @@ pub fn java_parse_int(text: &str) -> Option<i32> {
         return None;
     }
     text.parse::<i32>().ok()
-}
-
-enum Number<'a> {
-    Special(f64),
-    Decimal(bool, &'a str),
-}
-
-fn java_number(text: &str) -> Option<Number<'_>> {
-    let t = text.trim_matches(|c: char| c <= ' ');
-    let (negative, body) = match t.strip_prefix('-') {
-        Some(rest) => (true, rest),
-        None => (false, t.strip_prefix('+').unwrap_or(t)),
-    };
-    match body {
-        "NaN" => return Some(Number::Special(f64::NAN)),
-        "Infinity" => {
-            return Some(Number::Special(if negative {
-                f64::NEG_INFINITY
-            } else {
-                f64::INFINITY
-            }));
-        }
-        _ => {}
-    }
-    let body = body.strip_suffix(['f', 'F', 'd', 'D']).unwrap_or(body);
-    if body.is_empty()
-        || !body
-            .chars()
-            .all(|c| c.is_ascii_digit() || matches!(c, '.' | 'e' | 'E' | '+' | '-'))
-        || !body.chars().any(|c| c.is_ascii_digit())
-    {
-        return None;
-    }
-    Some(Number::Decimal(negative, body))
-}
-
-/// `Double.parseDouble(String)` for decimal and special forms.
-pub fn java_parse_double(text: &str) -> Option<f64> {
-    match java_number(text)? {
-        Number::Special(v) => Some(v),
-        Number::Decimal(negative, body) => body
-            .parse::<f64>()
-            .ok()
-            .map(|v| if negative { -v } else { v }),
-    }
-}
-
-/// `Float.parseFloat(String)`.
-pub fn java_parse_float(text: &str) -> Option<f32> {
-    match java_number(text)? {
-        Number::Special(v) => Some(v as f32),
-        Number::Decimal(negative, body) => body
-            .parse::<f32>()
-            .ok()
-            .map(|v| if negative { -v } else { v }),
-    }
 }
 
 fn rename(raw: &mut Raw, from: &str, to: &str, fix: impl FnOnce(&str) -> String) {
