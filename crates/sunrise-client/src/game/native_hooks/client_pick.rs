@@ -17,9 +17,17 @@ pub(in crate::game) struct ClientPick {
     result: Option<CrosshairTarget>,
     pub entity_metadata: (bool, bool),
     dispatching: bool,
+    /// How many picks have been taken.
+    taken: u64,
 }
 
 impl Game<'_> {
+    /// How many picks (a tick's or a frame's) have been taken: an agent command that turned
+    /// waits for the count to move before it reads the target.
+    pub(in crate::game) fn client_picks(&self) -> u64 {
+        self.client_pick.taken
+    }
+
     pub(in crate::game) fn uses_stored_pick(&self) -> bool {
         self.native_window() && self.client_pick.ray.is_none()
     }
@@ -151,6 +159,7 @@ impl Game<'_> {
             _ => block_candidate,
         });
         self.publish_client_pick(original);
+        self.client_pick.taken += 1;
         self.client_pick.ray = None;
         if !mod_api::__private::listened(mod_api::HookId::ClientPick) {
             return;

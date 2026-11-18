@@ -1,6 +1,7 @@
 //! The agent's turns toward a point read the pick the game takes after the turn: `attack ID`
 //! and `look-at entity ID` wait for the next tick or frame pick (client_pick.rs) instead of
-//! picking themselves, so a `client_pick` listener runs only in those calls.
+//! picking themselves, so a `client_pick` listener runs only in those calls. `attack ID`
+//! reports what the pick its click was taken with held.
 use super::*;
 use crate::game::native_client_session::tests::logged_client;
 use crate::game::native_entity_refs::tests::with_client_game;
@@ -65,6 +66,11 @@ fn finish_login(server: &mut Connection) {
 /// A guest at (0.5, 1, 0.5) looking west (yaw 90), its stored pick taken that way, with a pig
 /// (entity 31) 1.5 blocks east of it, behind its back. The listener's count starts at zero.
 fn with_pig_behind(run: impl FnOnce(&mut Game<'_>, &Mutex<Listener>)) {
+    with_pig_and_server(|game, listener, _| run(game, listener));
+}
+
+/// [`with_pig_behind`], with the server's end of the connection.
+fn with_pig_and_server(run: impl FnOnce(&mut Game<'_>, &Mutex<Listener>, &mut Connection)) {
     let listener = Arc::new(Mutex::new(Listener::default()));
     let mods = vec![mod_api::ModEntry::new(
         "agent_picks",
@@ -115,7 +121,7 @@ fn with_pig_behind(run: impl FnOnce(&mut Game<'_>, &Mutex<Listener>)) {
             game.refresh_client_pick(1.0);
             assert!(game.mob_hit().is_none(), "the pig starts behind the view");
             listener.lock().unwrap().calls = 0;
-            run(game, &listener);
+            run(game, &listener, &mut server);
         })
     });
 }
@@ -137,11 +143,31 @@ fn frame(game: &mut Game<'_>) {
     game.advance_agent();
 }
 
-/// A game tick's pick before its inputs, then the control poll's agent step.
+/// A game tick: its pick before its inputs, the attack clicks queued since the last tick
+/// (`handleKeybinds`' `startAttack`), then the control poll's agent step.
 fn tick(game: &mut Game<'_>) {
     game.ticks += 1;
     game.refresh_client_pick(1.0);
+    while game.toggles.0[2].consume_click() {
+        game.remote_start_attack();
+    }
     game.advance_agent();
+}
+
+/// The entities the client has sent attacks on since the last call.
+fn attacks_sent(game: &Game<'_>, server: &mut Connection) -> Vec<i32> {
+    use sunrise_protocol::packets::{configuration::Ping, play::Serverbound as S};
+    // A fence: everything before it was sent before this call.
+    game.send(S::Pong(Ping { id: i32::MIN }));
+    let mut attacks = Vec::new();
+    loop {
+        let (id, payload) = server.recv().unwrap();
+        match S::decode(id, &payload).unwrap() {
+            S::Attack(hit) => attacks.push(hit.id),
+            S::Pong(ping) if ping.id == i32::MIN => return attacks,
+            _ => {}
+        }
+    }
 }
 
 /// The attack clicks `KeyMapping.click` has queued and nothing has consumed yet.
@@ -179,6 +205,31 @@ fn look_at_entity_replies_with_the_entity_it_turned_to() {
 
 #[test]
 #[ignore = "daily"]
+fn look_at_entity_replies_after_a_tick_pick_with_no_frame() {
+    with_pig_behind(|game, listener| {
+        let (_, replies) = command(game, "look-at entity 31");
+        tick(game);
+        assert_eq!(game.frames, 0, "no frame was drawn");
+        assert_eq!(calls(listener), 1, "the tick's own pick");
+        let reply = reply(&replies);
+        assert_eq!(reply["target"]["entity"]["id"], json!(31), "{reply}");
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn a_turn_with_motion_replies_after_the_frame_that_turns_it() {
+    with_pig_behind(|game, _| {
+        let (_, replies) = command(game, "mouse-move 10 0");
+        tick(game);
+        assert!(replies.try_recv().is_err(), "a tick's pick turns nothing");
+        frame(game);
+        assert_eq!(reply(&replies)["motion"], json!([10.0, 0.0]));
+    });
+}
+
+#[test]
+#[ignore = "daily"]
 fn look_at_over_previews_the_angle_without_picking() {
     with_pig_behind(|game, listener| {
         let (handled, _replies) = command(game, "look-at entity 31 --over 1");
@@ -196,7 +247,7 @@ fn look_at_over_previews_the_angle_without_picking() {
 #[test]
 #[ignore = "daily"]
 fn attack_by_id_hits_the_entity_it_turned_to() {
-    with_pig_behind(|game, listener| {
+    with_pig_and_server(|game, listener, server| {
         let (attacked, replies) = command(game, "attack 31");
         assert!(
             matches!(attacked, Ok(Handled::Deferred)),
@@ -221,10 +272,84 @@ fn attack_by_id_hits_the_entity_it_turned_to() {
             assert!(replies.try_recv().is_err());
             tick(game);
         }
+        assert_eq!(
+            attacks_sent(game, server),
+            [31],
+            "the next tick took the click"
+        );
         let reply = reply(&replies);
         assert_eq!(reply["target"], json!(31), "{reply}");
         assert_eq!(reply["hit"], json!(true), "{reply}");
         assert_eq!(reply["health_before"], json!(health), "{reply}");
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn attack_by_id_reports_the_pick_the_click_was_taken_with() {
+    with_pig_and_server(|game, listener, server| {
+        let pig = game
+            .remote
+            .as_ref()
+            .unwrap()
+            .builtin
+            .get("minecraft:entity_type")
+            .unwrap()
+            .id("minecraft:pig")
+            .unwrap();
+        game.handle_packet(C::AddEntity(play::AddEntity {
+            id: 32,
+            uuid: 32,
+            kind: pig,
+            position: [2.0, 1.0, 1.5],
+            velocity: [0.0; 3],
+            pitch: 0,
+            yaw: 0,
+            head_yaw: 0,
+            data: 0,
+        }))
+        .unwrap();
+        let (_, replies) = command(game, "attack 31");
+        tick(game);
+        assert_eq!(attack_clicks(game), 1, "the first tick's pick held pig 31");
+        // The next tick's pick, the one its input takes the click with, holds pig 32.
+        listener.lock().unwrap().result = Some(Some(CrosshairTarget::Entity {
+            entity: game.entity(32).unwrap(),
+            point: [1.55, 1.45, 1.5],
+        }));
+        tick(game);
+        assert_eq!(attacks_sent(game, server), [32], "the click hit pig 32");
+        // Past the report tick: the reply is the error, never a hit on pig 31.
+        for _ in 0..4 {
+            tick(game);
+        }
+        let reply = reply(&replies);
+        assert_eq!(
+            reply["error"],
+            json!("another target was under the crosshair when the click was taken"),
+            "{reply}"
+        );
+        assert_eq!(reply["picked"], json!(32), "{reply}");
+        assert!(game.agent.task.is_none());
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn attack_by_id_reports_a_click_no_tick_took() {
+    with_pig_behind(|game, _| {
+        let (_, replies) = command(game, "attack 31");
+        tick(game);
+        assert_eq!(attack_clicks(game), 1);
+        // The click waits in its queue: no tick's input takes it before the report.
+        for _ in 0..4 {
+            game.ticks += 1;
+            game.advance_agent();
+        }
+        assert_eq!(
+            reply(&replies)["error"],
+            json!("the attack click was not taken")
+        );
     });
 }
 

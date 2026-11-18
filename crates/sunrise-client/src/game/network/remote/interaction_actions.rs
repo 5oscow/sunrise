@@ -163,6 +163,8 @@ impl Game<'_> {
         instant
     }
     pub(in crate::game) fn remote_start_attack(&mut self) -> bool {
+        // An agent's `attack ID` checks its entity against the pick its click is taken with.
+        self.note_agent_attack_pick();
         self.with_interaction_swing_scope(Game::remote_start_attack_inner)
     }
     fn remote_continue_attack_inner(&mut self, down: bool) {

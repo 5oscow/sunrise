@@ -267,10 +267,21 @@ enum TaskKind {
         id: Option<u32>,
         health: Option<f32>,
         report_tick: u64,
-        /// `attack ID` turned to the entity at this tick: the reach check and the click
-        /// wait for the next tick's pick (client_pick.rs), the one its input reads.
-        aimed: Option<u64>,
+        /// Where `attack ID`'s click is; `None` for `attack` with no ID.
+        aimed: Option<AttackAim>,
     },
+}
+/// `attack ID`'s click, from the turn to the tick that takes it. Each tick picks before its
+/// input (client_pick.rs), so the click queued after one tick's pick is taken with the next
+/// tick's pick, which can hold another entity.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum AttackAim {
+    /// Turned to the entity at this tick: the reach check waits for the next tick's pick.
+    Turned(u64),
+    /// Clicked: the next tick's input takes the click.
+    Clicked,
+    /// The entity the pick held when the tick's input took the click.
+    Taken(Option<u32>),
 }
 impl TaskKind {
     /// Whether the keys and buttons are released when the task ends. A wait
@@ -329,6 +340,9 @@ struct Glide {
     fed: (f64, f64),
     started: Instant,
     over: Duration,
+    /// The pick count (client_pick.rs) at the start: a glide with no motion replies after the
+    /// next pick, a tick's or a frame's.
+    picks: u64,
     /// The frame count when motion was last fed: the reply waits for the
     /// frame that turns the view with it.
     fed_frame: u64,
@@ -1376,7 +1390,8 @@ impl Game<'_> {
                         self.face_point(c)?;
                         // The crosshair target is picked once per tick and per frame
                         // (client_pick.rs): with no motion to feed, the reply waits for the
-                        // next frame's pick along the new view.
+                        // next pick along the new view, a tick's or a frame's, so a game with
+                        // no renderer replies too.
                         if over.is_none() {
                             return self.start_glide((0.0, 0.0), 0.0, Some("entity"), reply);
                         }
@@ -1422,7 +1437,7 @@ impl Game<'_> {
                             id: Some(id),
                             health: None,
                             report_tick: 0,
-                            aimed: Some(self.ticks),
+                            aimed: Some(AttackAim::Turned(self.ticks)),
                         },
                         reply,
                         5.0,
@@ -1921,6 +1936,7 @@ impl Game<'_> {
             fed: (0.0, 0.0),
             started: now,
             over,
+            picks: self.client_picks(),
             fed_frame: self.frames,
             deadline: now + over + Duration::from_secs(10),
             reply: reply.clone(),
@@ -1931,7 +1947,8 @@ impl Game<'_> {
     }
 
     /// Feed the motion due by now (eased over the glide's time); reply once
-    /// all of it has been turned by a frame.
+    /// all of it has been turned by a frame, or with no motion once a pick
+    /// (a tick's or a frame's) has been taken since the start.
     fn advance_glide(&mut self) {
         let Some(mut g) = self.agent.glide.take() else {
             return;
@@ -1970,7 +1987,12 @@ impl Game<'_> {
             g.fed = due;
             g.fed_frame = self.frames;
         }
-        if t >= 1.0 && self.frames > g.fed_frame {
+        let turned = if g.total == (0.0, 0.0) {
+            self.client_picks() > g.picks
+        } else {
+            self.frames > g.fed_frame
+        };
+        if t >= 1.0 && turned {
             let extra = match g.aim {
                 Some("block") | Some("entity") => json!({ "target": self.looking_at() }),
                 _ => json!({}),
@@ -1986,6 +2008,30 @@ impl Game<'_> {
             return;
         }
         self.agent.glide = Some(g);
+    }
+
+    /// The tick's input is taking an attack click (`Minecraft.startAttack`): an `attack ID`
+    /// that clicked keeps the entity this tick's pick holds, the pick the click is taken with.
+    pub(in crate::game) fn note_agent_attack_pick(&mut self) {
+        let Some(Task {
+            kind:
+                TaskKind::Attack {
+                    aimed: Some(AttackAim::Clicked),
+                    ..
+                },
+            ..
+        }) = self.agent.task
+        else {
+            return;
+        };
+        let picked = self.mob_hit().map(|(i, _, _)| self.mobs[i].id);
+        if let Some(Task {
+            kind: TaskKind::Attack { aimed, .. },
+            ..
+        }) = self.agent.task.as_mut()
+        {
+            *aimed = Some(AttackAim::Taken(picked));
+        }
     }
 
     /// Advance the running agent task; reply when it ends.
@@ -2188,7 +2234,7 @@ impl Game<'_> {
                 report_tick,
                 aimed,
             } => {
-                if let Some(at) = *aimed {
+                if let Some(AttackAim::Turned(at)) = *aimed {
                     if self.ticks <= at && !timed_out && interrupted.is_none() {
                         return None;
                     }
@@ -2198,7 +2244,7 @@ impl Game<'_> {
                     if timed_out {
                         return Some(json!({ "error": "game ticks are not advancing (paused?)" }));
                     }
-                    *aimed = None;
+                    *aimed = Some(AttackAim::Clicked);
                     let target = self.mob_hit().map(|(i, _, _)| &self.mobs[i]);
                     if target.map(|m| m.id) != *id {
                         return Some(
@@ -2216,8 +2262,21 @@ impl Game<'_> {
                     *report_tick = self.ticks + 4;
                     return None;
                 }
+                // The check above read an earlier pick: the one the click was taken with
+                // decides what it hit.
+                if let Some(AttackAim::Taken(picked)) = *aimed
+                    && picked != *id
+                {
+                    return Some(json!({
+                        "error": "another target was under the crosshair when the click was taken",
+                        "picked": picked,
+                    }));
+                }
                 if self.ticks < *report_tick && !timed_out {
                     return None;
+                }
+                if *aimed == Some(AttackAim::Clicked) {
+                    return Some(json!({ "error": "the attack click was not taken" }));
                 }
                 let now = id.and_then(|id| self.mobs.iter().find(|m| m.id == id));
                 Some(json!({
