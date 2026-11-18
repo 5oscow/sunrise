@@ -502,6 +502,8 @@ pub(super) struct Remote {
     /// The block, item and fluid tags of `registries` by name, as native mods read them
     /// (`install_remote_tags`).
     pub(super) tags: Option<sunrise_client::items::Items>,
+    /// Whether the published snapshot includes the item registry, even if its table is empty.
+    pub(super) has_item_tags: bool,
     /// The game's enchantments and the server's that it lacks (a data
     /// pack's), from their synced data; `None` when the server has none.
     pub(super) enchantments: Option<Arc<sunrise_client::enchant::Enchantments>>,
@@ -979,14 +981,13 @@ impl Game<'_> {
         let info = self
             .settings
             .client_information(client_view_distance(self.settings.render_distance));
-        if local.is_none() && !self.options.split_guest {
+        if local.is_none() {
             mod_api::content::crash::set_detail(
                 "Server",
                 sunrise_client::net::shown_address(address),
             );
         }
-        // A signed-in account always plays under its own name; a splitscreen player signs in
-        // with its own account when it picked one.
+        // A signed-in account always plays under its own name.
         let auth = self.auth();
         let name = auth.as_ref().map_or(name, |a| a.name.as_str());
         let user = auth.as_ref().map_or_else(
@@ -1144,6 +1145,7 @@ impl Game<'_> {
             lang,
             registries: Arc::new(Dynamic::default()),
             tags: None,
+            has_item_tags: false,
             enchantments: None,
             joined: false,
             reconfiguring: None,
@@ -1389,6 +1391,7 @@ impl Game<'_> {
             lang,
             registries: Arc::new(Dynamic::default()),
             tags: None,
+            has_item_tags: false,
             enchantments: None,
             joined: false,
             reconfiguring: None,
@@ -1594,10 +1597,7 @@ impl Game<'_> {
             }
             None => false,
         };
-        // A splitscreen player leaving says nothing of where P1 plays.
-        if !self.options.split_guest {
-            mod_api::content::crash::clear_detail("Server");
-        }
+        mod_api::content::crash::clear_detail("Server");
         self.clock = Default::default();
         self.adv = Default::default();
         self.stats = Default::default();
@@ -2085,18 +2085,10 @@ impl Game<'_> {
         )
     }
 
-    /// This player's account: a splitscreen player's own, else the game's (P1's).
+    /// The account playing this game.
     pub(super) fn auth(&self) -> Option<std::sync::Arc<sunrise_client::auth::AuthSession>> {
-        match self.options.split_guest {
-            true => self.split_auth.clone(),
-            false => sunrise_client::auth::current(),
-        }
+        sunrise_client::auth::current()
     }
-    /// Connected to a server in online mode (its Login): each player needs its own account.
-    pub(super) fn online_server(&self) -> bool {
-        self.remote.as_ref().is_some_and(|r| r.online_mode)
-    }
-
     /// `ClientSuggestionProvider.customCompletionSuggestions` of the server
     /// connection (none without one).
     pub(super) fn remote_custom_completions(&self) -> std::collections::BTreeSet<String> {
@@ -2368,6 +2360,7 @@ impl Game<'_> {
             .as_ref()
             .map(|d| (d.dimension.clone(), d.pos));
         if !same {
+            self.clock.reset_client_level_tick_state();
             // A new ClientLevel: Minecraft.setLevel stops every sound.
             self.stop_sounds_for_new_level();
             let mut streaming = Streaming::new(
@@ -5221,12 +5214,15 @@ impl Game<'_> {
                 self.remote_server_data(p.icon.as_deref());
             }
             C::MapItemData(p) => self.remote_map_item_data(&p),
-            // handleTickingState / handleTickingStep: the level's TickRateManager.
-            C::TickingState(p) => {
+            // handleTickingState / handleTickingStep do nothing without a ClientLevel.
+            C::TickingState(p) if self.remote.as_ref().is_some_and(Remote::has_level) => {
                 self.clock.set_rate(p.rate);
                 self.clock.set_frozen(p.frozen);
             }
-            C::TickingStep(p) => self.clock.set_frozen_ticks_to_run(p.steps),
+            C::TickingStep(p) if self.remote.as_ref().is_some_and(Remote::has_level) => {
+                self.clock.set_frozen_ticks_to_run(p.steps);
+            }
+            C::TickingState(_) | C::TickingStep(_) => {}
             C::UpdateAdvancements(p) => self.remote_advancements(p),
             // handleAwardStats: StatsCounter.setValue for each.
             C::AwardStats(p) => {
@@ -5504,41 +5500,6 @@ impl Game<'_> {
     /// `PlayerInfo.getSkin` for every player entity, including NPCs that are
     /// never in the tab list: resolve each profile's textures and give the
     /// level's player models their skin.
-    /// The 3D skin layers model for a player (Options → Skin Customization,
-    /// `threeDSkinLayers`): `kind`'s outer layer with one slab per painted
-    /// texel, built once per (skin, slim) from the decoded image the skin
-    /// downloader still holds (`sunrise_client::mobs::skin_layers`). `None`
-    /// while the option is off or the image is not in memory yet.
-    fn skin_3d_model(
-        &self,
-        kind: &std::sync::Arc<sunrise_client::mobs::MobType>,
-        skin: &str,
-        slim: bool,
-    ) -> Option<std::sync::Arc<sunrise_client::mobs::Part>> {
-        use sunrise_client::mobs::skin_layers;
-        if !self.settings.extras.three_d_skin_layers {
-            return None;
-        }
-        let key = (skin.to_owned(), slim);
-        if let Some(model) = self.skin_3d.borrow_mut().get(&key) {
-            return Some(model);
-        }
-        let model_key = if slim { "player_slim#main" } else { "main" };
-        let base = kind
-            .layer(model_key)
-            .cloned()
-            .unwrap_or_else(|| kind.model.clone());
-        let image = self.skin_downloads.borrow().image(skin)?.to_vec();
-        let model = std::sync::Arc::new(skin_layers::extrude(
-            &base,
-            &image,
-            skin_layers::SIZE,
-            skin_layers::DEPTH,
-        )?);
-        self.skin_3d.borrow_mut().insert(key, model.clone());
-        Some(model)
-    }
-
     pub(super) fn update_remote_skins(&mut self) {
         let local = self.remote.as_ref().map(|r| r.profile);
         self.poll_own_profile();
@@ -5618,6 +5579,10 @@ impl Game<'_> {
         {
             const OFFLINE: &str = "capes/offline";
             if !self.skin_slots.contains(OFFLINE) || !self.gui.atlas.sprites.contains_key(OFFLINE) {
+                // Kept for `again`, which finds no download or disk file for this cape.
+                self.skin_downloads
+                    .borrow_mut()
+                    .remember_image(OFFLINE, rgba);
                 self.store_skin(OFFLINE.into(), rgba.to_vec());
             }
             capes.insert(local, OFFLINE.into());
@@ -5658,13 +5623,10 @@ impl Game<'_> {
                 continue;
             };
             let (skin, is_slim) = self.drawn_skin(uuid, skin_of(&skins, uuid));
-            let kind = self.mobs[i].kind.clone();
-            let skin_3d = self.skin_3d_model(&kind, &skin, is_slim);
             let cape = capes.get(&uuid).filter(|c| self.again_skin(c)).cloned();
             let mob = &mut self.mobs[i];
             mob.skin = Some(skin);
             mob.slim = is_slim;
-            mob.skin_3d = skin_3d;
             mob.cape = cape;
         }
         if self.player_model.is_some() {
@@ -5675,14 +5637,9 @@ impl Game<'_> {
                 .filter(|_| self.settings.file.bool("modelPart_cape"))
                 .filter(|c| self.again_skin(c))
                 .cloned();
-            let kind = self.player_model.as_ref().map(|m| m.kind.clone());
-            let skin_3d = kind
-                .as_ref()
-                .and_then(|kind| self.skin_3d_model(kind, &skin, is_slim));
             if let Some(mob) = self.player_model.as_mut() {
                 mob.skin = Some(skin);
                 mob.slim = is_slim;
-                mob.skin_3d = skin_3d;
                 mob.cape = cape;
             }
         }
@@ -5763,10 +5720,6 @@ impl Game<'_> {
     /// Puts a downloaded skin in an atlas skin slot (`SkinSlots::place`),
     /// unless every slot holds a skin drawn in the last frame.
     pub(super) fn store_skin(&mut self, location: String, rgba: Vec<u8>) {
-        // 3D skin layers reads the pixels back when it builds the slabs.
-        self.skin_downloads
-            .borrow_mut()
-            .remember_image(&location, &rgba);
         let Some((slot, evicted)) = self.skin_slots.place(location.clone()) else {
             return;
         };
@@ -6259,39 +6212,22 @@ impl Game<'_> {
         // Those added before it tick before it: their pushes reach this move.
         let pushed = self.remote_pushes(true);
         let sprint_window = self.settings.sprint_window;
-        let Some(player) = self.player.as_mut() else {
-            return Ok(());
-        };
-        let (cx, cz) = (
-            (player.position.x.floor() as i32) >> 4,
-            (player.position.z.floor() as i32) >> 4,
-        );
-        if !self.streaming.is_lit(cx, cz) {
-            // LocalPlayer.tick can wait for chunks, but Minecraft.tick still
-            // calls sendChanges: rotations and the 20-tick position reminder
-            // must continue, as well as moves into the unloaded area.
-            if let Some(r) = self.remote.as_ref()
-                && r.loaded_sent
-            {
-                let input = r.last_input;
-                self.remote_send_state(input);
-            }
+        if self.player.is_none() {
             return Ok(());
         }
-        // LocalPlayer.tick reaches Player.tick only once the client has loaded
-        // and the player's chunk is there; its endpoints bracket that work
-        // alone, also on the death screen, not the level pass before it.
-        let player = self
-            .remote
-            .as_ref()
-            .is_some_and(|r| r.loaded_sent)
-            .then(|| {
-                (mod_api::__private::listened(mod_api::HookId::PlayerTickPre)
-                    || mod_api::__private::listened(mod_api::HookId::PlayerTickPost))
-                .then(|| self.local_player())
-                .flatten()
-            })
-            .flatten();
+        // LocalPlayer.tick and sendChanges run once the client has loaded (hasClientLoaded),
+        // wherever the player is: a chunk that hasn't come yet has no blocks here, as vanilla's
+        // empty chunk has none, so the player falls through it until the chunk comes.
+        if !self.remote.as_ref().is_some_and(|r| r.loaded_sent) {
+            return Ok(());
+        }
+        // LocalPlayer.tick reaches Player.tick only once the client has loaded; its
+        // endpoints bracket that work alone, also on the death screen, not the level
+        // pass before it.
+        let player = (mod_api::__private::listened(mod_api::HookId::PlayerTickPre)
+            || mod_api::__private::listened(mod_api::HookId::PlayerTickPost))
+        .then(|| self.local_player())
+        .flatten();
         let player_from = entity_section_steps::player_before(self);
         if let Some(player) = player {
             self.native_player_tick_pre(mod_api::__private::PlayerTickPreCall { player });
@@ -11362,6 +11298,49 @@ pub(crate) mod tests {
         });
     }
 
+    /// `MultiPlayerGameMode.piercingAttack`: a spear's jab sends its STAB action and nothing else,
+    /// even with the look changed since the last move packet, so the 20-tick position reminder
+    /// keeps its count.
+    #[test]
+    #[ignore = "daily"]
+    fn a_spear_jab_sends_only_its_stab() {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            use std::sync::Arc;
+            use sunrise_client::{chunk::Chunk, items::ItemStack, motion::PlayerMotion};
+            use sunrise_core::geometry::Vec3;
+            use sunrise_protocol::packets::play;
+            let (mut peer, _writer) = connect_menu_test(game);
+            peer.set_read_timeout(Some(std::time::Duration::from_millis(50)))
+                .unwrap();
+            game.set_mode_id(0);
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::new(0.5, 64.0, 0.5)).unwrap());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            game.inventory[0] = Some(ItemStack::new("minecraft:iron_spear", 1));
+            game.selected = 0;
+            game.hand_strength.ticker = 100;
+            while peer.recv().is_ok() {}
+            game.yaw = 37.0;
+            assert!(game.remote_start_attack());
+            let mut sent = Vec::new();
+            while let Ok((id, bytes)) = peer.recv() {
+                match play::Serverbound::decode(id, &bytes) {
+                    Ok(play::Serverbound::PlayerAction(a)) => {
+                        sent.push(format!("action {}", a.action))
+                    }
+                    Ok(
+                        play::Serverbound::MovePlayerPos(_)
+                        | play::Serverbound::MovePlayerPosRot(_)
+                        | play::Serverbound::MovePlayerRot(_),
+                    ) => sent.push("move".into()),
+                    _ => {}
+                }
+            }
+            assert_eq!(sent, ["action 8"]);
+        });
+    }
+
     /// A client connecting through a local pipe and through configuration, as
     /// the client menu tests drive it: the server end's reader (what the
     /// client sends) and writer.
@@ -14718,6 +14697,8 @@ pub(crate) mod tests {
         }
         let registry = load_registry(&resources).unwrap();
         let behaviours = Behaviours::load(&registry, &resources).unwrap();
+        impl super::dry_level::PredictionBase for Level {}
+
         let mut base = Level {
             air: registry.default_state("minecraft:air").unwrap(),
             stone: registry.default_state("minecraft:stone").unwrap(),

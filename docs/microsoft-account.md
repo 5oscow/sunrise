@@ -54,7 +54,9 @@ All requests use HTTPS and JSON except the two OAuth calls (form-encoded):
    browser's private window (`launcher/src/private_window.rs`: the `https` ProgId on Windows, LaunchServices
    on macOS, `xdg-settings` on Linux; `--incognito`, `--inprivate`, `--private`, `--private-window`) has no
    Microsoft session. Safari and unknown browsers get **Copy link** and a hint instead. **Use a different
-   Microsoft account** opens `login.live.com/logout.srf` and then the code page.
+   Microsoft account** opens the end-session page `…/consumers/oauth2/v2.0/logout` and then the code page.
+   It signs the browser out of login.live.com and ends on Microsoft's signed-out page;
+   `login.live.com/logout.srf` opened on its own continues to msn.com (#2034).
 2. **Poll** `POST …/consumers/oauth2/v2.0/token` (`grant_type=urn:ietf:params:oauth:grant-type:device_code`)
    every `interval` seconds; `authorization_pending` waits, `slow_down` adds 5 s, `authorization_declined`,
    `expired_token` and `bad_verification_code` end the sign-in with a message. Result: the Microsoft
@@ -254,16 +256,6 @@ machine can read it in the process list. Sunrise keeps it out of argv:
 - `SUNRISE_SESSION_FILE` is the same as `--session-file` (development and harnesses).
 - `--session-stdin` takes the same JSON on standard input instead, so nothing touches the disk (for other
   launchers: [the Launch API](api/launch.md)).
-
-
-- While the game's Splitscreen setting is on (`splitscreen:true` in `sunrise-extras.txt`), the
-  other signed-in accounts get a session file each too, for splitscreen players to sign in with, listed in `SUNRISE_ACCOUNT_SESSIONS` (`[{"name", "uuid", "file"}]`). Each token is renewed
-  first when due; after ten seconds no further renewal starts (an in-flight request finishes).
-  Accounts whose sessions cannot be provided are listed with `skipped` instead
-  of `file`, with no token. They remain in the picker marked “(Offline)”, with a “Sign in again
-  in the launcher” tooltip; valid sessions have a “Microsoft online” tooltip. The game logs
-  unavailable accounts and still starts. These names can play in P1's world or on local offline-mode
-  servers; external and online-mode servers require a valid session from the launcher.
 
 ## Online-mode login (game)
 

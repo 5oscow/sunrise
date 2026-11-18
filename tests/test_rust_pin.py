@@ -20,7 +20,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github/workflows"
 # Upstream's workflows, disabled on this fork and kept as upstream writes them for syncs: nothing runs them.
-DISABLED = {"ci.yml", "launcher.yml", "mod-registry.yml", "nightly.yml", "pack-bench.yml", "parity-main.yml"}
+DISABLED = {"ci.yml", "launcher.yml", "mod-registry.yml", "pack-bench.yml"}
 RELEASE = r"(?:stable|beta|nightly|\d+\.\d+(?:\.\d+)?)\b"
 FORBIDDEN = [
     (re.compile(rf"rustup_install\.sh\s+{RELEASE}"), "rustup_install.sh takes the pin itself"),
@@ -53,7 +53,7 @@ class RustPinTests(unittest.TestCase):
         self.assertRegex((ROOT / "tools/ci/rust-version").read_text(), r"^\d+\.\d+\.\d+\n?$")
 
     def test_the_launcher_and_wasm_toolchains_read_the_pin(self):
-        for path, include in (("launcher/src/rust_toolchain.rs", '"../../tools/ci/rust-version"'),
+        for path, include in (("launcher/src/rust_toolchain.rs", '"../rust-version"'),
                               ("crates/cargo-sunrise-mod/src/wasm.rs", '"../../../tools/ci/rust-version"')):
             with self.subTest(path=path):
                 self.assertIn(f"include_str!({include}).trim_ascii()", (ROOT / path).read_text())

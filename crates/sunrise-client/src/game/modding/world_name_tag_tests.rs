@@ -461,8 +461,10 @@ fn a_wasm_mods_labels_draw_the_same_pixels_as_a_native_mods() {
         || {
             sunrise_guest_stack::run_on_guest_stack(|| {
                 sunrise_mod_wasm::copy_probe::with_load_budget(|| {
+                    // The native control only draws labels; leave the process-wide block entity
+                    // table unset until the wasm fixture loads its declared types.
                     let native: mod_api::Mods =
-                        vec![mod_api::ModEntry::new("wasm_fixture", Box::new(Native))].into();
+                        vec![mod_api::ModEntry::new("native_labels", Box::new(Native))].into();
                     let mut expected = None;
                     mod_platform::testing::with_mods(native, || {
                         with_client_game(|game| expected = Some(scene_frame(game)));
