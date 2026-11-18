@@ -1,2 +1,0 @@
-# The daily test of cargo sunrise-mod's internals sync (README.md). Rows: PACKAGE TEST TARGET daily REASON, sorted.
-cargo-sunrise-mod internals::tests::sync_stops_before_discovery_when_the_mod_names_no_internals bin:cargo-sunrise-mod daily child-process

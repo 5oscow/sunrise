@@ -236,10 +236,20 @@ impl<'a> Project<'a> {
     }
 
     pub fn read(bundle: &'a Bundle) -> Result<Self, ProjectError> {
+        let path = bundle.dir.join("Cargo.toml");
+        let text = fs::read_to_string(&path).map_err(|e| ProjectError::Cargo {
+            mod_id: bundle.manifest.id.clone(),
+            reason: format!("{}: {e}", path.display()),
+        })?;
+        Self::parse(bundle, &text)
+    }
+
+    /// Parses the staged Cargo manifest, or one read by a caller with its own input bounds.
+    pub fn parse(bundle: &'a Bundle, text: &str) -> Result<Self, ProjectError> {
         let mod_id = || bundle.manifest.id.clone();
-        let cargo = read(&bundle.dir.join("Cargo.toml")).map_err(|reason| ProjectError::Cargo {
+        let cargo: toml::Table = text.parse().map_err(|e| ProjectError::Cargo {
             mod_id: mod_id(),
-            reason,
+            reason: format!("{}: {e}", bundle.dir.join("Cargo.toml").display()),
         })?;
         for section in ["patch", "replace"] {
             if cargo.contains_key(section) {
@@ -265,14 +275,29 @@ impl<'a> Project<'a> {
             .and_then(toml::Value::as_str)
             .ok_or_else(|| ProjectError::PackageName { mod_id: mod_id() })?
             .to_owned();
-        for table in std::iter::once(&cargo).chain(
-            cargo
-                .get("target")
-                .and_then(toml::Value::as_table)
-                .into_iter()
-                .flat_map(|targets| targets.values())
-                .filter_map(toml::Value::as_table),
-        ) {
+        let cargo_error = |reason| ProjectError::Cargo {
+            mod_id: mod_id(),
+            reason,
+        };
+        let targets = cargo
+            .get("target")
+            .map(|targets| {
+                targets
+                    .as_table()
+                    .ok_or_else(|| cargo_error("[target] must be a table".into()))
+            })
+            .transpose()?;
+        let configs = std::iter::once((None, Ok(&cargo))).chain(targets.into_iter().flatten().map(
+            |(target, config)| {
+                let table = config
+                    .as_table()
+                    .ok_or_else(|| cargo_error(format!("[target.{target}] must be a table")));
+                (Some(target.as_str()), table)
+            },
+        ));
+        let mut api_deps = Vec::new();
+        for (target, table) in configs {
+            let table = table?;
             for kind in [
                 "dependencies",
                 "dev-dependencies",
@@ -280,21 +305,36 @@ impl<'a> Project<'a> {
                 "dev_dependencies",
                 "build_dependencies",
             ] {
-                for (key, value) in table
-                    .get(kind)
-                    .and_then(toml::Value::as_table)
-                    .into_iter()
-                    .flatten()
-                {
-                    let package = value
-                        .get("package")
-                        .and_then(toml::Value::as_str)
-                        .unwrap_or(key);
-                    if let Some(&(sdk, _)) = PACKAGES.iter().find(|(sdk, _)| *sdk == package) {
-                        sdk_source(key, sdk, value).map_err(|reason| ProjectError::Cargo {
-                            mod_id: mod_id(),
-                            reason,
-                        })?;
+                let Some(dependencies) = table.get(kind) else {
+                    continue;
+                };
+                let dependencies = dependencies
+                    .as_table()
+                    .ok_or_else(|| cargo_error(format!("[{kind}] must be a table")))?;
+                for (key, value) in dependencies {
+                    if !(value.is_str() || value.is_table()) {
+                        return Err(cargo_error(format!(
+                            "{key} in [{kind}] must be a version string or a table"
+                        )));
+                    }
+                    let package = match value.get("package") {
+                        Some(package) => package.as_str().ok_or_else(|| {
+                            cargo_error(format!("{key} in [{kind}]: package must be a string"))
+                        })?,
+                        None => key,
+                    };
+                    if let Some(&(package, library)) =
+                        PACKAGES.iter().find(|(sdk, _)| *sdk == package)
+                    {
+                        sdk_source(key, package, value).map_err(cargo_error)?;
+                        if kind == "dependencies" {
+                            api_deps.push(ApiDependency {
+                                target: target.map(str::to_owned),
+                                key: key.clone(),
+                                package,
+                                library,
+                            });
+                        }
                     } else {
                         for selector in [
                             "git",
@@ -315,37 +355,12 @@ impl<'a> Project<'a> {
                             }
                         }
                     }
-                    if value
-                        .get("package")
-                        .and_then(toml::Value::as_str)
-                        .unwrap_or(key)
-                        == "sunrise-client"
-                    {
+                    if package == "sunrise-client" {
                         return Err(ProjectError::GameDependency {
                             mod_id: mod_id(),
                             key: key.clone(),
                         });
                     }
-                }
-            }
-        }
-        let mut api_deps = Vec::new();
-        for (target, dependencies) in dependency_tables(&cargo) {
-            for (key, value) in dependencies {
-                let package = value
-                    .get("package")
-                    .and_then(toml::Value::as_str)
-                    .unwrap_or(key);
-                if let Some(&(package, library)) =
-                    PACKAGES.iter().find(|(name, _)| *name == package)
-                {
-                    api_deps.push(ApiDependency {
-                        target: target.map(str::to_owned),
-                        key: key.clone(),
-                        package,
-                        library,
-                    });
-                    continue;
                 }
             }
         }
@@ -377,6 +392,13 @@ impl<'a> Project<'a> {
     /// `[target.<cfg>.dependencies]`.
     pub fn dependency_tables(&self) -> impl Iterator<Item = (Option<&str>, &toml::Table)> + '_ {
         dependency_tables(&self.cargo)
+    }
+
+    /// Whether the mod links its game internals facade, under any dependency alias.
+    pub fn uses_internals(&self) -> bool {
+        self.api_deps
+            .iter()
+            .any(|api| api.package == INTERNALS_PACKAGE)
     }
 
     /// Whether the mod links the game's wasmtime ([`WASMTIME_PACKAGE`]).
