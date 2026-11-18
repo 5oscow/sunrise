@@ -1,6 +1,6 @@
 //! The one stored pick, refreshed before tick inputs and frame extraction.
 use super::*;
-use crate::game::{Dim, pick_view_vector};
+use crate::game::{Dim, view_vector};
 use mod_api::CrosshairTarget;
 
 #[cfg(test)]
@@ -111,7 +111,7 @@ impl Game<'_> {
                     0.0
                 }
         });
-        let direction = pick_view_vector(
+        let direction = view_vector(
             camera.view_y_rot(partial_tick),
             camera.view_x_rot(partial_tick),
         );

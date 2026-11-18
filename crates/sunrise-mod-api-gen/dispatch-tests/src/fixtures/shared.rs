@@ -482,7 +482,7 @@ fn inert_support_signals_that_the_simulation_decides() {
         let state = BlockState::new(key, 0);
         let (mut survives, mut inert) = (None, false);
         dispatch_can_survive(
-            &TestLevel,
+            LevelSide::Server(&TestLevel),
             LevelDimension,
             BlockPos,
             state,
@@ -493,7 +493,7 @@ fn inert_support_signals_that_the_simulation_decides() {
 
         let (mut may, mut inert) = (None, false);
         dispatch_may_place_on(
-            &TestLevel,
+            LevelSide::Server(&TestLevel),
             LevelDimension,
             state,
             other,
@@ -505,7 +505,7 @@ fn inert_support_signals_that_the_simulation_decides() {
 
         let (mut sustains, mut inert) = (None, false);
         dispatch_can_sustain_plant(
-            &TestLevel,
+            LevelSide::Server(&TestLevel),
             LevelDimension,
             other,
             state,
