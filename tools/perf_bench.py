@@ -36,7 +36,13 @@ containers, signs, banners, particles), built by the same vanilla commands in ev
     python3 tools/perf_bench.py --game sunrise --scenes stress --distances 16 --label stress-sunrise
 
 --port-work loads the mods a sunrise-port-pack work folder carried over into
-Sunrise as dev mods.
+Sunrise as dev mods. --graphics, --resource-pack and --shader-pack set up
+Sunrise's game folder; --scenes menu_hold holds the Options screen instead of flying.
+
+Two builds against each other, games alternating (B A A B), each gated figure
+within a budget of the first build's (#2510's 3% gate; exit status 1 when one misses):
+
+    python3 tools/perf_bench.py --compare BEFORE_DIR AFTER_DIR --budget 3 --repeats 6
 
 Results: benchmarks/perf/<label>-rd<N>.json, one benchmark report per render
 distance (docs/benchmark-report.md), over --repeats games. Games run with no
@@ -84,6 +90,9 @@ SCENES = [
     ("ocean", (-300.0, 85.0, -420.0), (-300.0, 85.0, -228.0), 10.0),
     ("mountain", (560.0, 260.0, 860.0), (752.0, 260.0, 860.0), 30.0),
 ]
+# Options held open, keyboard focus stepping every 250 ms (#2498): at the village flight's start.
+MENU_HOLD = ("menu_hold", SCENES[0][1], SCENES[0][1], SCENES[0][3])
+MENU_STEP_S = 0.25
 # One options.txt for every game: vanilla's own keys, which Sunrise reads too.
 # The graphics settings are those of vanilla's default preset (Fancy) with the
 # preset set to Custom, so the render distance is the one asked for (a preset
@@ -332,7 +341,8 @@ def scene_list(args):
         picked += stress_scenes.NAMES
     # --server-bots adds the crowd scene over the bots.
     return ([s for s in SCENES if s[0] in picked] + list(getattr(args, "extra_scenes", None) or [])
-            + [stress_scenes.scene(n) for n in stress_scenes.NAMES if n in picked])
+            + [stress_scenes.scene(n) for n in stress_scenes.NAMES if n in picked]
+            + [MENU_HOLD] * (MENU_HOLD[0] in picked))
 
 
 # Seconds a stress scene settles after its setup: the server spawns, the client receives and draws it.
@@ -594,10 +604,69 @@ def scene_commands(args, control, start, pitch):
         control("tp {} {} {}".format(*start))
 
 
+def game_folder_extras(args, game_dir):
+    """--graphics, --resource-pack and --shader-pack in Sunrise's game folder: the options.txt lines and environment added."""
+    if args.graphics:
+        (game_dir / "sunrise-graphics.txt").write_text("".join(f"{line}\n" for line in args.graphics))
+    lines, env = "", {}
+    packs = [Path(p).resolve() for p in args.resource_pack or ()]
+    for pack in packs:
+        copy = shutil.copytree if pack.is_dir() else shutil.copy2
+        (game_dir / "resourcepacks").mkdir(exist_ok=True)
+        copy(pack, game_dir / "resourcepacks" / pack.name)
+    if packs:
+        lines = "resourcePacks:" + json.dumps(["vanilla"] + [f"file/{p.name}" for p in packs], separators=(",", ":")) + "\n"
+        with (game_dir / "options.txt").open("a") as out:
+            out.write(lines)
+    if args.shader_pack:
+        pack = Path(args.shader_pack).resolve()
+        (shutil.copytree if pack.is_dir() else shutil.copy2)(pack, (game_dir / "shaderpacks").joinpath(pack.name))
+        env["SUNRISE_SHADER_PACK"] = pack.name
+    return lines, env
+
+
+TICK_PERCENTILES = re.compile(r"P50: ([\d.]+) ?ms P95: ([\d.]+) ?ms P99: ([\d.]+) ?ms")
+
+
+def parse_tick_query(lines):
+    """`/tick query`'s percentiles line as {p50_ms, p95_ms, p99_ms}; None without one."""
+    for line in lines:
+        if m := TICK_PERCENTILES.search(line):
+            return dict(zip(("p50_ms", "p95_ms", "p99_ms"), map(float, m.groups())))
+    return None
+
+
+def server_ticks(control):
+    """The server thread's tick times over its last 100 ticks, in vanilla's 0.1 ms steps (`/tick query`)."""
+    try:
+        return parse_tick_query(control("command tick query").get("chat") or [])
+    except (OSError, ValueError, RuntimeError):
+        return None
+
+
+def menu_hold(control, seconds):
+    """The menu-hold scene: Options open while Tab steps the keyboard focus; the frames' summary, as `fly` gives."""
+    control("options")
+    control("stats reset")
+    end = time.time() + seconds
+    while time.time() < end:
+        control("key tab tap")
+        time.sleep(MENU_STEP_S)
+    summary = control("stats raw")
+    for _ in range(5):
+        if control("status").get("screen") == "playing":
+            break
+        control("key escape tap")
+        time.sleep(0.2)
+    return summary
+
+
 def run_sunrise(args, distance):
     game_dir = WORK / "sunrise"
     shutil.rmtree(game_dir, ignore_errors=True)
     options = write_options(game_dir, distance)
+    extra_options, extra_env = game_folder_extras(args, game_dir)
+    options += extra_options
     sock = control_path()
     sock.unlink(missing_ok=True)
     client = Path(args.build).resolve() / ("sunrise-client.exe" if sys.platform == "win32" else "sunrise-client")
@@ -610,7 +679,7 @@ def run_sunrise(args, distance):
         command.append("--offscreen")
     for carry in dev_mods(args):
         command += ["--dev-mod", str(carry)]
-    env = lab.game_env()
+    env = lab.game_env(**extra_env)
     if args.warm:
         # A first start to the title screen builds what later starts reuse (the content-mod
         # root, the block behaviour snapshot). It is not measured: players see it once.
@@ -668,7 +737,10 @@ def run_sunrise(args, distance):
             before = control("status")
             loaded_meshes = before["meshed_sections"]
             begin = time.time()
-            summary = control("fly {} {} {} {} {} {} {} {} raw".format(*start, *end, args.seconds, pitch))
+            if name == MENU_HOLD[0]:
+                summary = menu_hold(control, args.seconds)
+            else:
+                summary = control("fly {} {} {} {} {} {} {} {} raw".format(*start, *end, args.seconds, pitch))
             windows.append((begin, time.time()))
             scene_windows[name] = windows[-1]
             scene.update({k: summary.get(k) or [] for k in ("frame_ms", "cpu_ms", "gpu_ms")})
@@ -679,6 +751,9 @@ def run_sunrise(args, distance):
             if ticks > 0 and tick_phase is not None:
                 scene["client_tick_ms"] = tick_phase * summary.get("frames", 0) / ticks
             scene["entities"] = {"mobs": status.get("mobs"), "block_entities": status.get("block_entities")}
+            # The integrated server's ticks while flying; a joined server's aren't ours to read.
+            if not args.server and name != MENU_HOLD[0]:
+                scene["server_tick"] = server_ticks(control)
             if name in stress_scenes.NAMES:
                 for line in stress_scenes.cleanup(name):
                     control("command " + line)
@@ -1052,6 +1127,11 @@ def report(args, distance, runs, app):
                   "offscreen": bool(args.offscreen), "repeats": len(runs), "warmup_s": args.settle}
     if getattr(args, "server", None):
         conditions["server"] = args.server
+    for key, value in (("graphics", getattr(args, "graphics", None)),
+                       ("resource_packs", [Path(p).name for p in getattr(args, "resource_pack", None) or ()]),
+                       ("shader_pack", getattr(args, "shader_pack", None) and Path(args.shader_pack).name)):
+        if value:
+            conditions[key] = value
     if first["load_before"] is not None:
         conditions["load_avg_1m"] = rnd(first["load_before"])
     if size:
@@ -1076,6 +1156,8 @@ def report(args, distance, runs, app):
         metric(f"memory.{name}.gpu_mb", [s.get("gpu_mb") for s in scenes])
         metric(f"memory.{name}.rss_mb", [s.get("rss_mb") for s in scenes])
         metric(f"tick.{name}.client_ms", [s.get("client_tick_ms") for s in scenes])
+        for key in ("p50_ms", "p99_ms"):
+            metric(f"tick.{name}.server_{key}", [(s.get("server_tick") or {}).get(key) for s in scenes])
         metric(f"cpu.{name}.p50_ms", [f.get("cpu_p50_ms") for f in flights if f])
     metric("memory.rss_peak_mb", [r["memory"].get("rss_peak_mb") for r in runs])
     metric("memory.rss_steady_mb", [r["memory"].get("rss_steady_mb") for r in runs])
@@ -1085,6 +1167,132 @@ def report(args, distance, runs, app):
             "created": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "app": app, "hardware": hw, "conditions": conditions, "metrics": metrics, "frames": entries,
             "label": args.label}
+
+
+# Comparing two builds (--compare) -------------------------------------------
+
+# Gated by --budget: frame time and the server thread's tick time. Reported: where a cost sits.
+GATED = ("p50_ms", "p99_ms", "server_tick_p50_ms", "server_tick_p99_ms")
+REPORTED = ("cpu_p50_ms", "gpu_p50_ms")
+# Game i runs build ARMS[i % 4]: pair k is games 2k and 2k+1, adjacent in time, so linear drift cancels.
+ARMS = "BAAB"
+
+
+def median(values):
+    v = sorted(values)
+    n = len(v)
+    return 0.0 if n == 0 else v[n // 2] if n % 2 else (v[n // 2 - 1] + v[n // 2]) / 2
+
+
+def round4(v):
+    return math.copysign(math.floor(abs(v) * 10000 + 0.5), v) / 10000
+
+
+def wilcoxon_interval(n, walsh):
+    """sunrise_bench::compare::interval: the exact signed-rank 95% interval of sorted Walsh averages, and its confidence."""
+    m = len(walsh)
+    p = [1.0] + [0.0] * m
+    for r in range(1, n + 1):
+        for t in range(m, -1, -1):
+            p[t] = (p[t] + (p[t - r] if t >= r else 0.0)) / 2
+    k, tail, best = 0, 0.0, 0.0
+    while k < m:
+        tail += p[k]
+        if tail > 0.025:
+            break
+        k += 1
+        best = tail
+    return ([walsh[k - 1], walsh[m - k]], 1 - 2 * best) if k >= 1 else None
+
+
+def paired(pairs):
+    """sunrise_bench::compare::paired over (a, b) per pair: Hodges-Lehmann diff of b - a, its interval, the verdict."""
+    n = len(pairs)
+    a, b = median([x for x, _ in pairs]), median([y for _, y in pairs])
+    d = [y - x for x, y in pairs]
+    walsh = sorted((d[i] + d[j]) / 2 for i in range(n) for j in range(i, n))
+    diff = median(walsh)
+    iv = wilcoxon_interval(n, walsh)
+    if iv is None:
+        verdict = "too_few_pairs"
+    elif iv[0][0] <= 0 <= iv[0][1]:
+        verdict = "within_noise"
+    elif abs(diff) < max(0.05, 0.02 * a):
+        verdict = "negligible"
+    else:
+        verdict = "slower" if iv[0][0] > 0 else "faster"
+    return {"pairs": n, "a": rnd(a) + 0.0, "b": rnd(b) + 0.0, "diff": rnd(diff) + 0.0,
+            "diff_pct": rnd(100 * diff / a) + 0.0 if a else None,
+            "ci95": [rnd(iv[0][0]) + 0.0, rnd(iv[0][1]) + 0.0] if iv else None,
+            "confidence": round4(iv[1]) if iv else None, "verdict": verdict}
+
+
+def game_figures(result):
+    """{scene: {figure: value}} of one game, from run_sunrise's result."""
+    out = {}
+    for name, scene in result["scenes"].items():
+        f = frames(name, 0, scene["frame_ms"], scene.get("cpu_ms", ()), scene.get("gpu_ms", ())) or {}
+        figures = {k: f[k] for k in ("p50_ms", "p99_ms") + REPORTED if k in f}
+        tick = scene.get("server_tick") or {}
+        figures.update({f"server_tick_{k}": tick[k] for k in ("p50_ms", "p99_ms") if k in tick})
+        out[name] = figures
+    return out
+
+
+def judge(games, budget_pct):
+    """Each scene's figures over games in ARMS order; a gated one passes when its ci95 reaches at most budget_pct of BEFORE's."""
+    pairs = len(games) // 2
+    scenes = [s for s in games[0] if all(s in g for g in games)] if games else []
+    rows = []
+    for scene in scenes:
+        for figure in GATED + REPORTED:
+            values = [g[scene].get(figure) for g in games[:2 * pairs]]
+            if not values or any(v is None for v in values):
+                continue
+            by_arm = [(values[i], values[i + 1]) if ARMS[i % 4] == "A" else (values[i + 1], values[i])
+                      for i in range(0, 2 * pairs, 2)]
+            stat = paired(by_arm)
+            gated = figure in GATED
+            passed = stat["ci95"] is not None and stat["ci95"][1] <= budget_pct / 100 * stat["a"]
+            rows.append({"scene": scene, "figure": figure, "gated": gated, "passed": passed if gated else None, **stat})
+    return rows
+
+
+def print_judgement(rows, budget_pct):
+    print(f"| scene | figure | before | after | diff | ci95 | verdict | within {budget_pct:g}% |")
+    print("| --- | --- | --- | --- | --- | --- | --- | --- |")
+    for r in rows:
+        pct = f" ({r['diff_pct']:+.1f}%)" if r["diff_pct"] is not None else ""
+        ci = "–" if r["ci95"] is None else f"{r['ci95'][0]:+.3f} to {r['ci95'][1]:+.3f}"
+        gate = "reported" if not r["gated"] else "pass" if r["passed"] else "FAIL"
+        print(f"| {r['scene']} | {r['figure']} | {r['a']:.3f} | {r['b']:.3f} | {r['diff']:+.3f}{pct} | {ci} | {r['verdict']} | {gate} |")
+
+
+def compare(args):
+    """--compare BEFORE AFTER: games of the two builds alternating, judged per render distance and window size."""
+    before, after = (str(Path(b).resolve()) for b in args.compare)
+    label, failed = args.label, False
+    for args.width, args.height in parse_sizes(args.sizes):
+        args.label = size_label(label, args.width, args.height)
+        for d in [int(x) for x in args.distances.split(",")]:
+            games, arms = [], []
+            for i in range(2 * args.repeats):
+                arm = ARMS[i % 4]
+                args.build = before if arm == "A" else after
+                print(f"rd {d} game {i + 1} of {2 * args.repeats}: {'before' if arm == 'A' else 'after'}", flush=True)
+                games.append(game_figures(run_sunrise(args, d)))
+                arms.append("before" if arm == "A" else "after")
+            rows = judge(games, args.budget)
+            print_judgement(rows, args.budget)
+            failed |= any(r["gated"] and not r["passed"] for r in rows)
+            out = ROOT / "benchmarks/perf" / f"{args.label}-compare-rd{d}.json"
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(json.dumps({"before": before, "after": after, "budget_pct": args.budget,
+                                       "render_distance": d, "window": [args.width, args.height],
+                                       "hardware": hardware(), "games": [{"build": a, "scenes": g} for a, g in zip(arms, games)],
+                                       "results": rows}, indent=1) + "\n")
+            print(out)
+    return 1 if failed else 0
 
 
 def table(labels):
@@ -1194,8 +1402,27 @@ def main():
                    help="--server: this many sunrise-bots walk around the spawn, and a 'crowd' scene flies over them")
     p.add_argument("--bots-build", help="--server-bots: sunrise-bots' folder (default --build)")
     p.add_argument("--table", nargs="+", metavar="LABEL", help="compare saved runs with matching recorded conditions, and exit")
+    p.add_argument("--graphics", action="append", metavar="KEY:VALUE", help="sunrise: a line of sunrise-graphics.txt (repeatable)")
+    p.add_argument("--resource-pack", action="append", metavar="PATH", help="sunrise: a resource pack, folder or zip, turned on (repeatable)")
+    p.add_argument("--shader-pack", metavar="PATH", help="sunrise: a shader pack, folder or zip, picked through SUNRISE_SHADER_PACK")
+    p.add_argument("--compare", nargs=2, metavar=("BEFORE", "AFTER"),
+                   help="sunrise: two builds' folders, games alternating; --repeats is the pairs per render distance")
+    p.add_argument("--budget", type=float, default=3.0,
+                   help="--compare: how far, in %% of BEFORE, a gated figure's interval may reach (default 3)")
     args = p.parse_args()
     SEED = args.seed
+    sunrise_only = [o for o, v in (("--graphics", args.graphics), ("--resource-pack", args.resource_pack),
+                                   ("--shader-pack", args.shader_pack), ("--compare", args.compare)) if v]
+    if args.game != "sunrise" and (sunrise_only or MENU_HOLD[0] in (args.scenes or "").split(",")):
+        p.error(f"{', '.join(sunrise_only) or 'menu_hold'} needs --game sunrise")
+    if args.compare:
+        if args.server:
+            p.error("--compare runs single player: drop --server")
+        if args.repeats < 6:
+            p.error("--compare needs --repeats 6 or more: the interval needs 6 pairs")
+        args.label = args.label or f"compare-{platform.node().split('.')[0]}"
+        WORK.mkdir(parents=True, exist_ok=True)
+        sys.exit(compare(args))
     if args.table:
         try:
             table(args.table)
