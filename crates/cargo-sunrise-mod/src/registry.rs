@@ -12,7 +12,7 @@ const SITE: &str = "https://horizon-rust.github.io/horizon-mods/";
 
 const USAGE: &str = "usage: cargo sunrise-mod registry build <checkout> --files <dir> --out <index.json> [--release <url>] [--site <url>] [--generated <time>] [--counts <counts.json>]
        cargo sunrise-mod registry review <base checkout> <head checkout> --author <login> [--files <dir>] [--json]
-       cargo sunrise-mod registry check <base checkout> <head checkout> --files <dir>
+       cargo sunrise-mod registry check <base checkout> <head checkout> --files <dir> [--json]
        cargo sunrise-mod registry list <checkout>
        cargo sunrise-mod registry release <checkout> <id> <file> --tag <tag> --published <YYYY-MM-DD> [--notes <file>] [--signature <file>] [--game <version>]
        cargo sunrise-mod registry page <checkout> <id> <sunrise-registry.toml>";
@@ -154,29 +154,8 @@ pub fn main(args: &[String]) -> Result<(), String> {
             };
             let checkout = Path::new(head);
             let (entries, revoked) = registry::load(checkout).map_err(lines)?;
-            let mut failed = 0;
-            for e in &entries {
-                for v in e.versions.iter().filter(|v| !old.contains(&v.sha256)) {
-                    println!("{} {} ({}):", e.id, v.version, v.file);
-                    let report = crate::check::check(
-                        &files.join(&v.sha256),
-                        e.kind.clone(),
-                        e.key.as_deref(),
-                        v.signature.as_deref(),
-                    );
-                    match report {
-                        Ok(r) => print!("{}", r.text()),
-                        Err(err) => {
-                            failed += 1;
-                            println!("  error: {err}");
-                        }
-                    }
-                }
-            }
-            if failed != 0 {
-                return Err(format!("{failed} file(s) failed their check"));
-            }
-            registry::candidate(
+            let json = rest.iter().any(|a| a == "--json");
+            let assembled = registry::candidate(
                 &entries,
                 revoked,
                 &Sources {
@@ -186,9 +165,53 @@ pub fn main(args: &[String]) -> Result<(), String> {
                     site: SITE,
                     generated: String::new(),
                 },
-            )
-            .map_err(lines)?
-            .check()
+            );
+            let mut reports = Vec::new();
+            let errors = match assembled {
+                Err(errors) => errors,
+                Ok(index) => {
+                    let mut errors: Vec<_> = index.check().err().into_iter().collect();
+                    // The candidate has already validated filenames, hashes and the files they
+                    // name. Show the package reports only for files added by this submission.
+                    for e in &entries {
+                        for v in e.versions.iter().filter(|v| !old.contains(&v.sha256)) {
+                            match crate::check::check(
+                                &files.join(&v.sha256),
+                                e.kind.clone(),
+                                e.key.as_deref(),
+                                v.signature.as_deref(),
+                            ) {
+                                Ok(report) if json => reports.push(serde_json::json!({
+                                    "project": e.id, "version": v.version, "file": v.file,
+                                    "report": report.json(),
+                                })),
+                                Ok(report) => println!(
+                                    "{} {} ({}):\n{}",
+                                    e.id,
+                                    v.version,
+                                    v.file,
+                                    report.text().trim_end()
+                                ),
+                                Err(error) => {
+                                    errors.push(format!("{} {}: {error}", e.id, v.version))
+                                }
+                            }
+                        }
+                    }
+                    errors
+                }
+            };
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({"files": reports, "errors": errors})
+                );
+            }
+            if errors.is_empty() {
+                Ok(())
+            } else {
+                Err(lines(errors))
+            }
         }
         // The files CI must download for `build`: `<sha256> <id> <version> <file>`.
         Some("list") => {
