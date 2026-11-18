@@ -14752,6 +14752,8 @@ pub(crate) mod tests {
         }
         let registry = load_registry(&resources).unwrap();
         let behaviours = Behaviours::load(&registry, &resources).unwrap();
+        impl super::dry_level::PredictionBase for Level {}
+
         let mut base = Level {
             air: registry.default_state("minecraft:air").unwrap(),
             stone: registry.default_state("minecraft:stone").unwrap(),

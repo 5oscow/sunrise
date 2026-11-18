@@ -79,6 +79,10 @@ name = "no_wire_registration"
 required-features = ["listener-fixture"]
 
 [[test]]
+name = "collision_shape"
+required-features = ["listener-fixture"]
+
+[[test]]
 name = "bench"
 required-features = ["listener-fixture"]
 

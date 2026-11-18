@@ -30,9 +30,11 @@ impl GameLevel<'_> {
         face: Direction,
         odds: &mut Option<(i32, i32)>,
     ) {
-        if self.native_authoritative {
-            self.native_fire_odds(self.dimension, state, pos, face, odds);
+        super::mod_api_host::FireOddsLevel {
+            base: self,
+            prediction: None,
         }
+        .native_fire_odds(self.dimension, state, pos, face, odds);
     }
 
     /// `before_is_fire_source`: the block's parts answer `is_fire_source`.

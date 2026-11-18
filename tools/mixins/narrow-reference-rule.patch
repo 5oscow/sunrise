@@ -271,7 +271,7 @@ index bca7938..2f2eb44 100644
 +    assert!(e.message.contains("selected site contains `?`"), "{e}");
 +}
 diff --git a/crates/horizon-mixins-cli/tests/integration.rs b/crates/horizon-mixins-cli/tests/integration.rs
-index fcf5a46..40c84a0 100644
+index fcf5a46..d31e7f6 100644
 --- a/crates/horizon-mixins-cli/tests/integration.rs
 +++ b/crates/horizon-mixins-cli/tests/integration.rs
 @@ -697,14 +697,14 @@ fn cfg_attributes_shared_module_sources_and_shadowing_fail_closed() {
@@ -293,6 +293,376 @@ index fcf5a46..40c84a0 100644
              "E_UNSUPPORTED_CONTROL_FLOW",
          ),
          (
+@@ -890,3 +890,369 @@ fn production_test_cfg_modules_are_indexed_and_applied() {
+     let error = build_plan(&f.root, &f.mods).unwrap_err();
+     assert!(format!("{error:?}").contains("E_TARGET_NOT_FOUND"));
+ }
++
++mod wrap_receiver {
++    use super::*;
++
++    /// An engine whose `run` calls `make(ok)?.go(arg(ok)?)`: a receiver and an argument that each
++    /// carry a `?`, and an error that `run`'s own error type converts. `body` replaces that call.
++    fn fixture(body: &str, injections: &str) -> Fixture {
++        let f = Fixture::new();
++        fs::remove_dir_all(&f.mods).unwrap();
++        fs::create_dir_all(f.mods.join("alpha")).unwrap();
++        fs::write(
++            f.root.join("engine/src/lib.rs"),
++            format!(
++                r#"
++    pub static LOG: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
++    pub fn mark(what: &'static str) {{ LOG.lock().unwrap().push(what); }}
++    #[derive(Debug, PartialEq)]
++    pub struct Failure(pub String);
++    impl From<&'static str> for Failure {{ fn from(s: &'static str) -> Self {{ Failure(format!("converted {{s}}")) }} }}
++    pub struct Engine(pub i32);
++    impl Engine {{ pub fn go(self, x: i32) -> i32 {{ mark("go"); self.0 + x }} }}
++    pub fn make(ok: bool) -> Result<Engine, &'static str> {{ mark("make"); if ok {{ Ok(Engine(100)) }} else {{ Err("no engine") }} }}
++    pub fn arg(ok: bool) -> Result<i32, &'static str> {{ mark("arg"); if ok {{ Ok(5) }} else {{ Err("no argument") }} }}
++    pub fn sink(n: i32) -> i32 {{ n }}
++    pub struct Res(pub i32);
++    impl Drop for Res {{ fn drop(&mut self) {{ mark("drop"); }} }}
++    impl Res {{
++        pub fn read(&self) -> i32 {{ mark("read"); self.0 }}
++        pub fn update(&mut self) -> i32 {{ self.0 += 1; mark("update"); self.0 }}
++    }}
++    pub fn res(ok: bool) -> Result<Res, &'static str> {{ mark("res"); if ok {{ Ok(Res(7)) }} else {{ Err("no res") }} }}
++    pub struct Trap(pub i32);
++    impl Drop for Trap {{ fn drop(&mut self) {{ mark("drop"); }} }}
++    impl Trap {{ pub fn read(_: Trap) -> i32 {{ 0 }} }}
++    pub trait Reads {{ fn read(&self) -> i32; }}
++    impl Reads for Trap {{ fn read(&self) -> i32 {{ mark("read"); self.0 }} }}
++    pub fn trap(ok: bool) -> Result<Trap, &'static str> {{ mark("trap"); if ok {{ Ok(Trap(7)) }} else {{ Err("no trap") }} }}
++    pub struct EventLoop;
++    pub struct App(pub i32);
++    impl EventLoop {{
++        pub fn new() -> Result<EventLoop, &'static str> {{ mark("new"); Ok(EventLoop) }}
++        pub fn run_app(self, app: &mut App) -> Result<(), Failure> {{ app.0 += 1; mark("run_app"); Ok(()) }}
++    }}
++    pub fn observe(n: i32) -> i32 {{ mark("observe"); n }}
++    pub fn run(ok: bool, bad_arg: bool) -> Result<i32, Failure> {{ {body} }}
++    "#
++            ),
++        )
++        .unwrap();
++        fs::write(f.root.join("driver/src/lib.rs"), "").unwrap();
++        fs::write(
++            f.mods.join("alpha/horizon-mixin.toml"),
++            format!("[mod]\nid=\"alpha\"\nversion=\"1\"\n{injections}"),
++        )
++        .unwrap();
++        fs::write(
++            f.mods.join("alpha/wrap.rs"),
++            "fn wrap(engine: crate::Engine, x: i32, original: impl FnOnce(crate::Engine, i32) -> i32) -> i32 { crate::mark(\"wrap\"); original(engine, x + 1) }",
++        )
++        .unwrap();
++        f
++    }
++    const CALL: &str = "Ok(make(ok)?.go(arg(!bad_arg)?))";
++    fn wrap(selector: &str, require: usize) -> String {
++        format!(
++            r#"
++    [[injection]]
++    id="wrap"
++    target="fixture_game::run"
++    kind="WRAP_OPERATION"
++    selector="{selector}"
++    require={require}
++    ordinal=0
++    helper="wrap.rs"
++    bindings=[{{name="engine",ty="crate::Engine",value="$receiver"}},{{name="x",ty="i32",value="$arg0"}},{{name="original",ty="impl FnOnce(crate::Engine, i32) -> i32",value="$operation"}}]
++    "#
++        )
++    }
++
++    #[test]
++    fn a_wrapped_call_evaluates_a_receiver_and_arguments_with_try_at_the_call_site() {
++        let f = fixture(CALL, &wrap("make(ok)?.go", 1));
++        fs::write(
++            f.root.join("driver/src/lib.rs"),
++            r#"
++    use fixture_game::{run, Failure, LOG};
++    fn log() -> Vec<&'static str> { std::mem::take(&mut *LOG.lock().unwrap()) }
++    // One test: they share the log.
++    #[test]
++    fn try_returns_from_the_engine_function_before_the_wrapper_runs() {
++        // The receiver fails first: its own error, converted by `run`'s `From`, and nothing after it.
++        assert_eq!(run(false, false), Err(Failure("converted no engine".into())));
++        assert_eq!(log(), ["make"]);
++        // The receiver is fine and an argument fails: the receiver came first, the wrapper is not run.
++        assert_eq!(run(true, true), Err(Failure("converted no argument".into())));
++        assert_eq!(log(), ["make", "arg"]);
++        // Both are fine: receiver, then argument, then the wrapper (which adds one), then the call.
++        assert_eq!(run(true, false), Ok(106));
++        assert_eq!(log(), ["make", "arg", "wrap", "go"]);
++    }
++    "#,
++        )
++        .unwrap();
++        f.run("check");
++    }
++
++    #[test]
++    fn a_bare_method_name_finds_no_method_call_and_the_error_names_the_receiver_to_write() {
++        // `go` selects a function named `go`; this function calls a method of that name.
++        let f = fixture(CALL, &wrap("go", 1));
++        let e = build_plan(&f.root, &f.mods).unwrap_err();
++        assert_eq!(e.code, "E_MATCH_COUNT", "{e}");
++        assert!(e.message.contains("found 0"), "{e}");
++        assert!(e.message.contains("use `make(ok)?.go`"), "{e}");
++        // Written with its receiver, it is the one match.
++        let f = fixture(CALL, &wrap("make(ok)?.go", 1));
++        build_plan(&f.root, &f.mods).unwrap();
++        // Another receiver is another selector.
++        let f = fixture(CALL, &wrap("make(false)?.go", 1));
++        let e = build_plan(&f.root, &f.mods).unwrap_err();
++        assert_eq!(e.code, "E_MATCH_COUNT", "{e}");
++        // A bare name that is no method gets no hint.
++        let f = fixture(CALL, &wrap("missing", 1));
++        let e = build_plan(&f.root, &f.mods).unwrap_err();
++        assert!(!e.message.contains("method"), "{e}");
++    }
++
++    /// A wrap of `selector` on a `Res` receiver whose binding is `ty`.
++    fn wrap_res(selector: &str, ty: &str) -> String {
++        format!(
++            r#"
++    [[injection]]
++    id="wrap"
++    target="fixture_game::run"
++    kind="WRAP_OPERATION"
++    selector="{selector}"
++    require=1
++    ordinal=0
++    helper="wrap_res.rs"
++    bindings=[{{name="res",ty="{ty}",value="$receiver"}},{{name="original",ty="impl FnOnce({ty}) -> i32",value="$operation"}}]
++    "#
++        )
++    }
++    fn res_fixture(body: &str, ty: &str, selector: &str) -> Fixture {
++        let f = fixture(body, &wrap_res(selector, ty));
++        fs::write(
++            f.mods.join("alpha/wrap_res.rs"),
++            format!("fn wrap_res(res: {ty}, original: impl FnOnce({ty}) -> i32) -> i32 {{ crate::mark(\"wrap\"); original(res) }}"),
++        )
++        .unwrap();
++        fs::write(
++            f.root.join("driver/src/lib.rs"),
++            r#"
++    use fixture_game::{run, LOG};
++    #[test]
++    fn the_receiver_keeps_its_mode_and_its_temporary_lifetime() {
++        assert_eq!(run(true, false), Ok(EXPECTED));
++        assert_eq!(std::mem::take(&mut *LOG.lock().unwrap()), LOGGED);
++    }
++    "#
++            .replace("EXPECTED", if body.contains("update") { "8" } else { "7" })
++            .replace(
++                "LOGGED",
++                if body.contains("update") {
++                    "[\"res\", \"wrap\", \"update\", \"drop\"]"
++                } else {
++                    "[\"res\", \"wrap\", \"read\", \"observe\", \"drop\"]"
++                },
++            ),
++        )
++        .unwrap();
++        f
++    }
++
++    #[test]
++    fn a_ref_self_method_on_a_temporary_keeps_the_temporary_until_the_statement_ends() {
++        // The temporary `res(ok)?` outlives `observe`, as in the original: a `&self` method does not
++        // consume it, so the wrapper borrows it in place (declared `&Res`) and does not move it.
++        let f = res_fixture(
++            "Ok(observe(res(ok)?.read()))",
++            "&crate::Res",
++            "res(ok)?.read",
++        );
++        f.run("check");
++    }
++
++    #[test]
++    fn a_mut_self_method_on_a_computed_receiver_borrows_the_temporary_mutably() {
++        let f = res_fixture(
++            "Ok(res(ok)?.update())",
++            "&mut crate::Res",
++            "res(ok)?.update",
++        );
++        f.run("check");
++    }
++
++    /// Runs `check` on `f` and returns the build error's message.
++    fn build_error(f: &Fixture) -> String {
++        let output = f.command("check").output().unwrap();
++        assert!(!output.status.success());
++        let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
++        assert_eq!(error["code"], "E_BUILD", "{error}");
++        error["message"].as_str().unwrap().to_string()
++    }
++
++    #[test]
++    fn an_owned_binding_on_a_method_that_borrows_its_receiver_fails_to_build_naming_the_row() {
++        // Declared by value, `read(&self)` and `update(&mut self)` would drop the temporary before
++        // the rest of the statement runs: the guard refuses them, in a function named for the row.
++        for (body, selector) in [
++            ("Ok(observe(res(ok)?.read()))", "res(ok)?.read"),
++            ("Ok(res(ok)?.update())", "res(ok)?.update"),
++        ] {
++            let f = res_fixture(body, "crate::Res", selector);
++            let message = build_error(&f);
++            assert!(
++                message.contains("receiver_of_alpha_wrap_must_take_self_by_value"),
++                "{message}"
++            );
++        }
++    }
++
++    #[test]
++    fn an_owned_binding_is_refused_when_the_dot_call_selects_a_namesake_that_borrows() {
++        // `Trap::read` names an associated function that takes `Trap`, but `trap(ok)?.read()`
++        // calls the trait's `read(&self)`: the temporary would drop before `observe`. The check
++        // follows the dot call, so the namesake cannot satisfy it.
++        let f = res_fixture(
++            "Ok(observe(trap(ok)?.read()))",
++            "crate::Trap",
++            "trap(ok)?.read",
++        );
++        let message = build_error(&f);
++        assert!(
++            message.contains("receiver_of_alpha_wrap_must_take_self_by_value"),
++            "{message}"
++        );
++    }
++
++    #[test]
++    fn an_owned_receiver_keeps_the_temporaries_of_the_arguments_until_the_statement_ends() {
++        // `res(ok)?.read()` borrows its `Res` for the whole statement: it drops after `observe`,
++        // also when the call around it is wrapped with an owned receiver.
++        let f = fixture(
++            "let n = observe(make(ok)?.go(res(ok)?.read())); Ok(n)",
++            &wrap("make(ok)?.go", 1),
++        );
++        fs::write(
++            f.root.join("driver/src/lib.rs"),
++            r#"
++    use fixture_game::{run, LOG};
++    #[test]
++    fn argument_temporaries_drop_after_the_statement() {
++        assert_eq!(run(true, false), Ok(108));
++        assert_eq!(
++            std::mem::take(&mut *LOG.lock().unwrap()),
++            ["make", "res", "read", "wrap", "go", "observe", "drop"]
++        );
++    }
++    "#,
++        )
++        .unwrap();
++        f.run("check");
++    }
++
++    #[test]
++    fn an_owned_event_loop_is_wrapped_around_run_app_with_a_borrowed_argument() {
++        let f = fixture(
++            "let mut app = App(0); EventLoop::new()?.run_app(&mut app)?; Ok(app.0)",
++            r#"
++    [[injection]]
++    id="wrap"
++    target="fixture_game::run"
++    kind="WRAP_OPERATION"
++    selector="EventLoop::new()?.run_app"
++    require=1
++    ordinal=0
++    helper="wrap_loop.rs"
++    bindings=[{name="event_loop",ty="crate::EventLoop",value="$receiver"},{name="app",ty="&mut crate::App",value="$arg0"},{name="original",ty="impl FnOnce(crate::EventLoop, &mut crate::App) -> Result<(), crate::Failure>",value="$operation"}]
++    "#,
++        );
++        fs::write(
++            f.mods.join("alpha/wrap_loop.rs"),
++            "fn wrap_loop(event_loop: crate::EventLoop, app: &mut crate::App, original: impl FnOnce(crate::EventLoop, &mut crate::App) -> Result<(), crate::Failure>) -> Result<(), crate::Failure> { crate::mark(\"wrap\"); original(event_loop, app) }",
++        )
++        .unwrap();
++        fs::write(
++            f.root.join("driver/src/lib.rs"),
++            r#"
++    use fixture_game::{run, LOG};
++    #[test]
++    fn the_wrapper_runs_between_the_event_loop_and_run_app() {
++        assert_eq!(run(true, false), Ok(1));
++        assert_eq!(std::mem::take(&mut *LOG.lock().unwrap()), ["new", "wrap", "run_app"]);
++    }
++    "#,
++        )
++        .unwrap();
++        f.run("check");
++    }
++
++    #[test]
++    fn the_hint_names_only_a_bare_method_name_and_only_a_selector_that_matches() {
++        for selector in ["crate::go", "::go", "go::<u8>"] {
++            let f = fixture(CALL, &wrap(selector, 1));
++            let e = build_plan(&f.root, &f.mods).unwrap_err();
++            assert!(!e.message.contains("use `"), "{selector}: {e}");
++        }
++        // `make(ok as bool)?.go` would compact to `make(okasbool)?.go`, a different receiver.
++        let f = fixture("Ok(make(ok as bool)?.go(1))", &wrap("go", 1));
++        let e = build_plan(&f.root, &f.mods).unwrap_err();
++        assert_eq!(e.code, "E_MATCH_COUNT", "{e}");
++        assert!(!e.message.contains("use `"), "{e}");
++    }
++
++    #[test]
++    fn the_methods_generic_arguments_stay_checked_for_moved_control_flow() {
++        let f = fixture(
++            "Ok(make(ok)?.go::<{ const { 1 } }>(1))",
++            &wrap("make(ok)?.go::<{const{1}}>", 1),
++        );
++        let e = build_plan(&f.root, &f.mods).unwrap_err();
++        assert_eq!(e.code, "E_UNSUPPORTED_CONTROL_FLOW", "{e}");
++    }
++
++    #[test]
++    fn a_wrap_still_refuses_a_callee_with_try_and_the_unsupported_contexts() {
++        // The callee of a function call moves into the generated closure, where `?` would leave the
++        // closure and not the function. The wrapper binds only `$arg0` here.
++        let f = fixture("Ok(pick()?(1))", "");
++        f.append(
++            "engine/src/lib.rs",
++            "pub fn pick() -> Result<fn(i32) -> i32, &'static str> { Ok(sink) }\n",
++        );
++        f.append(
++            "mods/alpha/horizon-mixin.toml",
++            r#"
++    [[injection]]
++    id="wrap"
++    target="fixture_game::run"
++    kind="WRAP_OPERATION"
++    selector="pick()?"
++    require=1
++    ordinal=0
++    helper="wrap_free.rs"
++    bindings=[{name="x",ty="i32",value="$arg0"},{name="original",ty="impl FnOnce(i32) -> i32",value="$operation"}]
++    "#,
++        );
++        fs::write(
++            f.mods.join("alpha/wrap_free.rs"),
++            "fn wrap_free(x: i32, original: impl FnOnce(i32) -> i32) -> i32 { original(x) }",
++        )
++        .unwrap();
++        let e = build_plan(&f.root, &f.mods).unwrap_err();
++        assert_eq!(e.code, "E_UNSUPPORTED_CONTROL_FLOW", "{e}");
++        // Async closures and nested items elsewhere in the function stay refused.
++        for body in [
++            "let f = async || 1; Ok(make(ok)?.go(1))",
++            "fn inner() {} Ok(make(ok)?.go(1))",
++        ] {
++            let f = fixture(body, &wrap("make(ok)?.go", 1));
++            let e = build_plan(&f.root, &f.mods).unwrap_err();
++            assert_eq!(e.code, "E_UNSUPPORTED_CONTROL_FLOW", "{body}: {e}");
++        }
++    }
++}
 diff --git a/crates/horizon-mixins-core/src/helpers.rs b/crates/horizon-mixins-core/src/helpers.rs
 index 55a9372..e11c750 100644
 --- a/crates/horizon-mixins-core/src/helpers.rs
@@ -489,16 +859,42 @@ index 55a9372..e11c750 100644
 +    }
 +}
 diff --git a/crates/horizon-mixins-core/src/plan.rs b/crates/horizon-mixins-core/src/plan.rs
-index 848dcc0..153c68d 100644
+index 848dcc0..d3b1bde 100644
 --- a/crates/horizon-mixins-core/src/plan.rs
 +++ b/crates/horizon-mixins-core/src/plan.rs
-@@ -633,6 +633,32 @@ pub fn build_staged(workspace: &Path, mods: &Path) -> Result<(Plan, crate::nativ
+@@ -604,7 +604,17 @@ pub fn build_staged(workspace: &Path, mods: &Path) -> Result<(Plan, crate::nativ
+                         .collect()
+                 };
+                 if matches.len() != injection.require.unwrap() {
+-                    return Err(context(Diagnostic::new("E_MATCH_COUNT", format!("selector '{selector}' requires {} syntactic matches, found {} in pristine {}", injection.require.unwrap(), matches.len(), f.id)).file(&f.file)));
++                    // A bare name is a function call; the method of that name is a different
++                    // selector, which writes its receiver.
++                    let hint = (matches.is_empty()
++                        && !matches!(
++                            injection.kind,
++                            Kind::ModifyConstant | Kind::ModifyExpressionValue
++                        ))
++                    .then(|| sites::method_hint(selector, &catalog.calls, &inside))
++                    .flatten()
++                    .unwrap_or_default();
++                    return Err(context(Diagnostic::new("E_MATCH_COUNT", format!("selector '{selector}' requires {} syntactic matches, found {} in pristine {}{hint}", injection.require.unwrap(), matches.len(), f.id)).file(&f.file)));
+                 }
+                 let ordinal = injection.ordinal.unwrap();
+                 let site = matches.get(ordinal).ok_or_else(|| {
+@@ -633,6 +643,39 @@ pub fn build_staged(workspace: &Path, mods: &Path) -> Result<(Plan, crate::nativ
                  {
                      return Err(context(Diagnostic::new("E_UNSUPPORTED_SITE", "the selected site contains a closure, which this hook would move into generated code").file(&f.file)));
                  }
 +                // The site moves into generated code, where a `?` would leave a closure instead
 +                // of the function.
-+                if sites::contains_exit_or_block(&site.expr) {
++                // A WRAP_OPERATION evaluates its receiver and arguments there, so a `?` in them
++                // still returns from the function; only the callee moves.
++                let moved_exit = if injection.kind == Kind::WrapOperation {
++                    sites::wrap_moves_exit_or_block(&site.expr)
++                } else {
++                    sites::contains_exit_or_block(&site.expr)
++                };
++                if moved_exit {
 +                    return Err(context(Diagnostic::new(CLOSURES_ETC.0, "the selected site contains `?`, an `unsafe` or a `const` block, which this hook would move into generated code").file(&f.file)));
 +                }
 +                // The site moves into generated code: a borrow of a call inside it could have
@@ -525,7 +921,7 @@ index 848dcc0..153c68d 100644
                  if (injection.kind == Kind::BeforeCall
                      || (injection.kind == Kind::AfterCall && injection.cancellable))
                      && !site.whole_expression
-@@ -979,6 +1005,9 @@ pub(crate) fn validate_target_with(
+@@ -979,6 +1022,9 @@ pub(crate) fn validate_target_with(
          // are checked in those values only ([`exit_value_error`]). MODIFY_VARIABLE likewise
          // replaces only the value it selects ([`modified_value_error`]).
          rewrites_body: !matches!(kind, Kind::Return | Kind::ModifyVariable),
@@ -535,7 +931,7 @@ index 848dcc0..153c68d 100644
          // A `?` is an exit RETURN would miss; MODIFY_VARIABLE leaves one outside its value alone.
          try_outside_value: kind == Kind::ModifyVariable,
          body_macros: false,
-@@ -1005,7 +1034,10 @@ pub(crate) fn validate_target_with(
+@@ -1005,7 +1051,10 @@ pub(crate) fn validate_target_with(
      // any exit or expression inside a macro, just like ordinary HEAD.
      safety.body_macros = safety.boundary;
      safety.in_body = true;
@@ -547,7 +943,7 @@ index 848dcc0..153c68d 100644
      if safety.error.is_none() && kind == Kind::Return {
          safety.error = exit_value_error(&f.block);
      }
-@@ -1173,6 +1205,7 @@ struct Safety {
+@@ -1173,6 +1222,7 @@ struct Safety {
      error: Option<(&'static str, &'static str)>,
      boundary: bool,
      rewrites_body: bool,
@@ -555,7 +951,7 @@ index 848dcc0..153c68d 100644
      try_outside_value: bool,
      body_macros: bool,
      relaxed: bool,
-@@ -1237,6 +1270,9 @@ impl<'ast> Visit<'ast> for Safety {
+@@ -1237,6 +1287,9 @@ impl<'ast> Visit<'ast> for Safety {
              // RETURN never rewrites inside a closure; what is inside is still checked.
              Expr::Closure(c) if (!self.rewrites_body || self.relaxed) && c.asyncness.is_none() => {}
              Expr::Try(_) if self.try_outside_value => {}
@@ -565,7 +961,7 @@ index 848dcc0..153c68d 100644
              Expr::Closure(_)
              | Expr::Async(_)
              | Expr::Await(_)
-@@ -1247,7 +1283,10 @@ impl<'ast> Visit<'ast> for Safety {
+@@ -1247,7 +1300,10 @@ impl<'ast> Visit<'ast> for Safety {
              | Expr::Const(_) => self.error = Some(CLOSURES_ETC),
              // Calls under a reference can depend on temporary lifetime extension.
              Expr::Reference(r)
@@ -577,7 +973,7 @@ index 848dcc0..153c68d 100644
              {
                  self.error = Some(REFERENCED_CALL)
              }
-@@ -1346,6 +1385,23 @@ impl<'ast> Visit<'ast> for Safety {
+@@ -1346,6 +1402,23 @@ impl<'ast> Visit<'ast> for Safety {
          }
      }
  }
@@ -601,34 +997,124 @@ index 848dcc0..153c68d 100644
  fn contains_call(expr: &Expr) -> bool {
      struct Find(bool);
      impl<'ast> Visit<'ast> for Find {
+@@ -1395,11 +1468,14 @@ fn validate_operation_site(
+                 }
+             }
+         }
++        // A receiver that is a value (a call, with or without `?`) is evaluated at the call site
++        // and moves into the operation as the binding's declared type.
++        Expr::MethodCall(call) if !sites::is_place(&call.receiver) => {}
+         Expr::MethodCall(call) => {
+             let Expr::Path(receiver) = &*call.receiver else {
+                 return Err(Diagnostic::new(
+                     "E_UNSUPPORTED_SITE",
+-                    "wrapped method receiver must be a target reference parameter",
++                    "wrapped method receiver must be a target reference parameter, or a value such as a call result",
+                 ));
+             };
+             if receiver.path.segments.len() != 1 {
 diff --git a/crates/horizon-mixins-core/src/sites.rs b/crates/horizon-mixins-core/src/sites.rs
-index 47fee7d..c79f8b0 100644
+index 47fee7d..1d3220c 100644
 --- a/crates/horizon-mixins-core/src/sites.rs
 +++ b/crates/horizon-mixins-core/src/sites.rs
-@@ -17,6 +17,22 @@ pub fn contains_closure(expr: &Expr) -> bool {
+@@ -17,6 +17,56 @@ pub fn contains_closure(expr: &Expr) -> bool {
      find.visit_expr(expr);
      find.0
  }
 +/// Whether `expr` holds a `?`, a try block, or an `unsafe` or `const` block.
 +pub fn contains_exit_or_block(expr: &Expr) -> bool {
-+    struct Find(bool);
++    contains_block(expr, true)
++}
++/// Whether `expr` holds a try block, or an `unsafe` or `const` block, and a `?` too when
++/// `try_operator` is set.
++fn contains_block(expr: &Expr, try_operator: bool) -> bool {
++    struct Find(bool, bool);
 +    impl<'ast> Visit<'ast> for Find {
 +        fn visit_expr(&mut self, e: &'ast Expr) {
-+            self.0 |= matches!(
-+                e,
-+                Expr::Try(_) | Expr::TryBlock(_) | Expr::Unsafe(_) | Expr::Const(_)
-+            );
++            self.0 |= matches!(e, Expr::TryBlock(_) | Expr::Unsafe(_) | Expr::Const(_))
++                || (self.1 && matches!(e, Expr::Try(_)));
 +            visit::visit_expr(self, e);
 +        }
 +    }
-+    let mut find = Find(false);
++    let mut find = Find(false, try_operator);
 +    find.visit_expr(expr);
 +    find.0
++}
++/// What a `WRAP_OPERATION` cannot carry out of the function: the receiver and the arguments
++/// are evaluated at the call site, where a `?` still returns from the function, and only the
++/// callee of a function call moves into the generated closure.
++pub fn wrap_moves_exit_or_block(call: &Expr) -> bool {
++    match call {
++        Expr::Call(c) => {
++            contains_exit_or_block(&c.func) || c.args.iter().any(|a| contains_block(a, false))
++        }
++        // The method's own generic arguments move into the continuation, where a `?` would leave
++        // the closure and an inline `const` or `unsafe` block would be evaluated there.
++        Expr::MethodCall(c) => {
++            contains_block(&c.receiver, false)
++                || c.args.iter().any(|a| contains_block(a, false))
++                || c.turbofish.as_ref().is_some_and(|t| {
++                    let probe: Expr = syn::parse_quote!(f #t ());
++                    contains_exit_or_block(&probe)
++                })
++        }
++        _ => contains_exit_or_block(call),
++    }
++}
++/// A place expression: a receiver of this shape is borrowed, never moved, by a method call.
++pub fn is_place(expr: &Expr) -> bool {
++    match expr {
++        Expr::Path(_) | Expr::Field(_) | Expr::Index(_) => true,
++        Expr::Unary(u) => matches!(u.op, syn::UnOp::Deref(_)),
++        Expr::Paren(p) => is_place(&p.expr),
++        Expr::Group(g) => is_place(&g.expr),
++        _ => false,
++    }
 +}
  pub fn is_call(expr: &Expr) -> bool {
      matches!(expr, Expr::Call(_) | Expr::MethodCall(_))
  }
-@@ -114,6 +130,9 @@ pub struct Site {
+@@ -90,6 +140,39 @@ pub fn call_matches(expr: &Expr, selector: &Expr) -> bool {
+     let key = call_identity(expr);
+     key.is_some() && key == call_identity(selector)
+ }
++/// What to add to a count of zero for a bare-name selector (`run_app`) when the function calls a
++/// method of that name: a bare name matches function calls only, and a method selector writes its
++/// receiver as source text.
++pub fn method_hint(
++    selector: &str,
++    calls: &[Site],
++    inside: &dyn Fn(usize) -> bool,
++) -> Option<String> {
++    let expected = parse_call_selector(selector).ok()?;
++    let Expr::Call(call) = &expected else {
++        return None;
++    };
++    // Only an unqualified single name: `crate::go`, `::go` and `go::<T>` are not bare method names.
++    let Expr::Path(path) = &*call.func else {
++        return None;
++    };
++    let name = path.path.get_ident()?.to_string();
++    if path.qself.is_some() || path.path.leading_colon.is_some() {
++        return None;
++    }
++    // Suggest only a selector that parses and matches the receiver it came from.
++    let found = calls.iter().find_map(|s| match &s.expr {
++        Expr::MethodCall(m) if m.method == name && inside(s.expression) => {
++            let key = call_key(&s.expr)?;
++            let parsed = parse_call_selector(&key).ok()?;
++            call_matches(&s.expr, &parsed).then_some(key)
++        }
++        _ => None,
++    })?;
++    Some(format!(
++        "; `{name}` is called here as a method, and a method selector writes its receiver as source text: use `{found}`"
++    ))
++}
+ pub fn parse_call_selector(selector: &str) -> Result<Expr> {
+     let parsed = syn::parse_str::<Expr>(&format!("{selector}()"));
+     if parsed.as_ref().ok().and_then(call_key).as_deref() != Some(selector) {
+@@ -114,6 +197,9 @@ pub struct Site {
      pub const_context: bool,
      /// Inside a closure body: the closure may run later, elsewhere or never.
      pub in_closure: bool,
@@ -638,7 +1124,7 @@ index 47fee7d..c79f8b0 100644
  }
  #[derive(Default)]
  pub struct Sites {
-@@ -124,6 +143,7 @@ pub struct Sites {
+@@ -124,6 +210,7 @@ pub struct Sites {
      next_is_root: bool,
      const_context: bool,
      closures: usize,
@@ -646,7 +1132,7 @@ index 47fee7d..c79f8b0 100644
  }
  impl Sites {
      pub fn in_block(block: &syn::Block) -> Self {
-@@ -186,6 +206,7 @@ impl<'ast> Visit<'ast> for Sites {
+@@ -186,6 +273,7 @@ impl<'ast> Visit<'ast> for Sites {
              whole_expression: root,
              const_context: self.const_context,
              in_closure: self.closures > 0,
@@ -654,7 +1140,7 @@ index 47fee7d..c79f8b0 100644
          };
          self.values.push(site(expression));
          if is_call(expr) {
-@@ -198,7 +219,10 @@ impl<'ast> Visit<'ast> for Sites {
+@@ -198,7 +286,10 @@ impl<'ast> Visit<'ast> for Sites {
          if matches!(expr, Expr::Paren(_)) {
              self.next_is_root = root;
          }
@@ -665,3 +1151,102 @@ index 47fee7d..c79f8b0 100644
      }
  }
  
+diff --git a/crates/horizon-mixins-transform/src/lib.rs b/crates/horizon-mixins-transform/src/lib.rs
+index f4edd3d..e27c335 100644
+--- a/crates/horizon-mixins-transform/src/lib.rs
++++ b/crates/horizon-mixins-transform/src/lib.rs
+@@ -516,6 +516,7 @@ fn wrap_operation(call: &Expr, wrappers: &[&PlannedInjection]) -> Result<Expr> {
+ 
+     let mut original = call.clone();
+     let mut arguments: Vec<Expr>;
++    let mut owned_receiver = None;
+     match &mut original {
+         Expr::Call(c) => {
+             arguments = c.args.iter().cloned().collect();
+@@ -523,16 +524,39 @@ fn wrap_operation(call: &Expr, wrappers: &[&PlannedInjection]) -> Result<Expr> {
+         }
+         Expr::MethodCall(c) => {
+             let receiver = &c.receiver;
+-            let Type::Reference(reference) = &types[0] else {
+-                return Err(Diagnostic::new(
+-                    "E_OPERATION_SIGNATURE",
+-                    "method wrapper needs a reference receiver",
+-                ));
+-            };
+-            let receiver_arg = if reference.mutability.is_some() {
+-                syn::parse_quote!(&mut *(#receiver))
+-            } else {
+-                syn::parse_quote!(&*(#receiver))
++            // The binding's declared type is the receiver mode. A parameter is borrowed. A value
++            // (a call, with or without `?`) is evaluated here, first: declared `&T` or `&mut T`
++            // it is borrowed in place, a temporary that lives as long as the original receiver
++            // did, and the method autorefs as Rust would (a reference a call returns coerces);
++            // declared `T` it moves into the operation, and the continuation checks that the method
++            // takes `self`, since a method that borrows would drop the temporary early.
++            let place = sites::is_place(receiver);
++            let receiver_arg = match &types[0] {
++                Type::Reference(reference) if reference.mutability.is_some() => {
++                    if place {
++                        syn::parse_quote!(&mut *(#receiver))
++                    } else {
++                        syn::parse_quote!(&mut (#receiver))
++                    }
++                }
++                Type::Reference(_) if place => syn::parse_quote!(&*(#receiver)),
++                Type::Reference(_) => syn::parse_quote!(&(#receiver)),
++                Type::ImplTrait(_) | Type::Infer(_) | Type::Never(_) if !place => {
++                    return Err(Diagnostic::new(
++                        "E_OPERATION_SIGNATURE",
++                        "a computed receiver needs a named type, or a reference to one, to check that the method takes `self`",
++                    ));
++                }
++                _ if !place => {
++                    owned_receiver = Some((c.method.clone(), c.turbofish.clone()));
++                    (**receiver).clone()
++                }
++                _ => {
++                    return Err(Diagnostic::new(
++                        "E_OPERATION_SIGNATURE",
++                        "method wrapper needs a reference receiver",
++                    ));
++                }
+             };
+             arguments = vec![receiver_arg];
+             arguments.extend(c.args.iter().cloned());
+@@ -541,6 +565,36 @@ fn wrap_operation(call: &Expr, wrappers: &[&PlannedInjection]) -> Result<Expr> {
+         }
+         _ => return Err(Diagnostic::new("E_PLAN_SITE", "wrapper site is not a call")),
+     }
++    // An owned computed receiver is lowered by value, which drops it where the continuation ends
++    // instead of at the end of the statement: only right if the method consumes it. The
++    // continuation holds a dead copy of the original dot call, on a local of the declared type
++    // inside a closure that must be `'static`: a closure that merely borrows the local is not,
++    // so a method that takes `&self` or `&mut self` (the one the dot call selects, not a
++    // namesake) fails to compile, in a function named for the row. The check sits in the
++    // continuation, so the operands stay outside it and keep their temporaries' scopes.
++    if let Some((method, turbofish)) = owned_receiver {
++        let id: String = format!("{}_{}", wrappers[0].mod_id, wrappers[0].injection_id)
++            .chars()
++            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
++            .collect();
++        let name = format_ident!("__horizon_mixins_receiver_of_{id}_must_take_self_by_value");
++        let ty = &types[0];
++        let rest = &types[1..];
++        let receiver = &names[0];
++        original = syn::parse_quote!({
++            #[allow(unreachable_code, unused_variables, unused_mut)]
++            if false {
++                fn #name<F: 'static>(_: F) {}
++                fn never<A>() -> A { loop {} }
++                let mut probe: #ty = never();
++                #name(|| probe.#method #turbofish(#(never::<#rest>()),*));
++            }
++            // Bound mutably, for a method that takes `mut self`.
++            #[allow(unused_mut)]
++            let mut #receiver = #receiver;
++            #original
++        });
++    }
+     let mut continuation: Expr =
+         syn::parse2(quote!(|#(#names: #types),*| #original)).map_err(syntax)?;
+     for p in wrappers.iter().rev() {
