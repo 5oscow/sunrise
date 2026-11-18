@@ -162,7 +162,8 @@ class ReleaseTrainTests(unittest.TestCase):
                     if isinstance(spec, dict) and "path" in spec:
                         todo.append(base / spec["path"])
         crates = {folder.relative_to(train.ROOT).as_posix() for folder in seen}
-        self.assertIn("crates/sunrise-mod-api-gen", crates)
+        # The standalone launcher vendors its path crates below launcher/; don't pin an old external dependency.
+        self.assertIn("launcher/**", paths)
         for crate in crates - {"launcher"} | {prefix.rstrip("/") for prefix in train.LAUNCHER_PATHS}:
             with self.subTest(crate=crate):
                 self.assertTrue(crate.startswith("launcher/") or f"{crate}/**" in paths)
