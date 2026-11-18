@@ -16,8 +16,8 @@ mod picture;
 mod settings;
 pub mod upload;
 
-pub use settings::{ConfigureTab, SettingsDraft};
 use picture::{face_from_skin, realm_name_valid, resample_icon, slot_name, template_none_lines};
+pub use settings::{ConfigureTab, SettingsDraft};
 use settings::{
     SETTINGS_CELL_PADDING, SETTINGS_LABEL_HEIGHT, SETTINGS_LABEL_SPACING, SETTINGS_WIDGET_HEIGHT,
     can_play, changed_distance, configure_screen, preference_label, region_rows,
@@ -263,8 +263,6 @@ fn extend_link(server: &RealmServer, profile: u128, expired: bool) -> String {
     }
 }
 
-
-
 /// `WorldSelectionList.filterAccepts`: the level name or its folder contains the filter,
 /// case-insensitively (`String.toLowerCase(Locale.ROOT)`).
 fn upload_matches(world: &crate::title::WorldEntry, query: &str) -> bool {
@@ -321,8 +319,6 @@ fn slot_picture(slot: i32, empty: bool, image: Option<&str>) -> SlotPicture<'_> 
         _ => SlotPicture::Empty,
     }
 }
-
-
 
 /// Upload a decoded 64x64 picture into a `sunrise/world-iconN` atlas slot (the slots the
 /// title world list uses) and name its sprite. `None` when the atlas has no such slot.
