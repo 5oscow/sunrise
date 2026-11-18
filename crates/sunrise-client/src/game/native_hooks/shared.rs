@@ -3995,131 +3995,163 @@ mod tests {
             ),
         ]);
         mod_platform::__private::install(mods.clone());
-        crate::game::api_values::install_parts(&mods).unwrap();
+        // `be_user` attaches a Part to the type `be_test` declares, which names `be_test`
+        // among its dependencies.
+        let package = |id: &str, depends_on: &[&str]| {
+            PackageInfo::new(
+                id.into(),
+                "1".into(),
+                PackageKind::Code,
+                Side::Both,
+                vec![id.into()],
+                depends_on
+                    .iter()
+                    .map(|owner| {
+                        PackageDependency::new(
+                            (*owner).into(),
+                            "*".into(),
+                            DependencyKind::Required,
+                            DependencyOrder::After,
+                            Side::Both,
+                            None,
+                            None,
+                        )
+                    })
+                    .collect(),
+            )
+        };
         let base = std::path::PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap());
-        let root = super::super::mods::content_root(&base, &Default::default());
-        if invalid {
-            let error = root.unwrap_err().to_string();
-            assert!(error.contains("be_test:shared"), "{error}");
-            assert!(error.contains("be_test:missing"), "{error}");
-            // A refused declaration builds no content root. The roots folder's own `.lock`
-            // is made by every start and never deleted, so it is not a root.
-            let built: Vec<_> = std::fs::read_dir(".sunrise-cache/mod-content")
-                .into_iter()
-                .flatten()
-                .map(|entry| entry.unwrap().file_name())
-                .filter(|name| name != ".lock")
-                .collect();
-            assert!(built.is_empty(), "{built:?}");
-            return;
-        }
-        if let Some(id) = unknown {
-            let error = root.unwrap_err().to_string();
-            assert!(error.contains("be_user"), "{error}");
-            assert!(error.contains("unknown block entity type"), "{error}");
-            assert!(error.contains(id), "{error}");
-            assert!(sunrise_client::block_entity_types::current().is_none());
-            return;
-        }
-        assert_eq!(keys.shared.get(), keys.own.get());
-        with_game_at(root.unwrap().prepared().to_path_buf(), |game| {
-            game.options.dedicated = Some(Vec::new());
-            game.world
-                .chunks
-                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
-            let level = game.level(game.dim.id()).unwrap();
-            let stone = game
-                .pack
-                .assets
-                .registry
-                .default_state("minecraft:stone")
-                .unwrap();
-            for (x, block) in [
-                (1, FIRST),
-                (2, SECOND),
-                (3, EMPTY),
-                (4, PLAIN),
-                (5, "minecraft:chest"),
-            ] {
-                let state = game.pack.assets.registry.default_state(block).unwrap();
-                assert_eq!(
-                    game.level_set_block(level, [x, 63, 0], stone, BlockUpdateFlags::NONE),
-                    Ok(true)
-                );
-                assert_eq!(
-                    game.level_set_block(level, [x, 64, 0], state, BlockUpdateFlags::NONE),
-                    Ok(true)
-                );
-                let pos = (x, 64, 0);
-                if block == PLAIN {
-                    // No declared type claims it, and no mod adds it to `minecraft:banner`'s
-                    // valid blocks, so its template creates no entity (`validateBlockState`).
-                    assert!(game.world.block_entities.get(&pos).is_none());
-                    assert!(game.block_entity(level, [x, 64, 0]).is_none());
-                    continue;
+        mod_platform::__private::with_test_package_inventory(
+            vec![package("be_test", &[]), package("be_user", &["be_test"])],
+            || {
+                crate::game::api_values::install_parts(&mods).unwrap();
+                let root = super::super::mods::content_root(&base, &Default::default());
+                if invalid {
+                    let error = root.unwrap_err().to_string();
+                    assert!(error.contains("be_test:shared"), "{error}");
+                    assert!(error.contains("be_test:missing"), "{error}");
+                    // A refused declaration builds no content root. The roots folder's own `.lock`
+                    // is made by every start and never deleted, so it is not a root.
+                    let built: Vec<_> = std::fs::read_dir(".sunrise-cache/mod-content")
+                        .into_iter()
+                        .flatten()
+                        .map(|entry| entry.unwrap().file_name())
+                        .filter(|name| name != ".lock")
+                        .collect();
+                    assert!(built.is_empty(), "{built:?}");
+                    return;
                 }
-                let handle = game.block_entity(level, [x, 64, 0]).unwrap();
-                if block == "minecraft:chest" {
-                    assert_eq!(handle.kind(game).as_ref(), keys.vanilla.get());
-                    let probe = level.capability(game, &PROBE, [x, 64, 0], None).unwrap();
-                    assert_eq!((probe.value(), probe.owner()), (26, "be_user".into()));
-                    continue;
+                if let Some(id) = unknown {
+                    let error = root.unwrap_err().to_string();
+                    assert!(error.contains("be_user"), "{error}");
+                    assert!(error.contains("unknown block entity type"), "{error}");
+                    assert!(error.contains(id), "{error}");
+                    assert!(sunrise_client::block_entity_types::current().is_none());
+                    return;
                 }
-                let Some(BlockEntity::Mod(entity)) = game.world.block_entities.get(&pos) else {
-                    panic!("declared type did not override its banner template");
-                };
-                if block == EMPTY {
-                    assert_eq!(entity.id(), "be_test:empty");
-                    assert!(entity.nbt.is_empty());
-                    continue;
-                }
-                assert_eq!(entity.id(), "be_test:shared");
-                assert_eq!(entity.nbt.get(&"energy".into()), Some(&Tag::Long(6300)));
-                assert_eq!(handle.kind(game).as_ref(), keys.shared.get());
-                let probe = level.capability(game, &PROBE, [x, 64, 0], None).unwrap();
-                assert_eq!((probe.value(), probe.owner()), (6300, "be_user".into()));
-                game.tick_mod_block_entity(pos);
-                let saved = save::block_entity_encode::encode(
-                    pos,
-                    game.world.block_entities.get(&pos).unwrap(),
-                    block,
-                    &Default::default(),
-                );
-                assert_eq!(saved.get("energy"), Some(&Tag::Long(6301)));
-                let (saved_pos, restored) =
-                    save::decode_block_entity_for_block(&saved, block).unwrap();
-                assert_eq!(saved_pos, pos);
-                assert_eq!(restored.id(), "be_test:shared");
-                assert!(save::decode_block_entity_for_block(&saved, EMPTY).is_none());
-                game.world.block_entities.insert(pos, restored);
-                game.tick_mod_block_entity(pos);
-                let saved = save::block_entity_encode::encode(
-                    pos,
-                    game.world.block_entities.get(&pos).unwrap(),
-                    block,
-                    &Default::default(),
-                );
-                assert_eq!(saved.get("energy"), Some(&Tag::Long(6302)));
-            }
+                assert_eq!(keys.shared.get(), keys.own.get());
+                with_game_at(root.unwrap().prepared().to_path_buf(), |game| {
+                    game.options.dedicated = Some(Vec::new());
+                    game.world
+                        .chunks
+                        .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+                    let level = game.level(game.dim.id()).unwrap();
+                    let stone = game
+                        .pack
+                        .assets
+                        .registry
+                        .default_state("minecraft:stone")
+                        .unwrap();
+                    for (x, block) in [
+                        (1, FIRST),
+                        (2, SECOND),
+                        (3, EMPTY),
+                        (4, PLAIN),
+                        (5, "minecraft:chest"),
+                    ] {
+                        let state = game.pack.assets.registry.default_state(block).unwrap();
+                        assert_eq!(
+                            game.level_set_block(level, [x, 63, 0], stone, BlockUpdateFlags::NONE),
+                            Ok(true)
+                        );
+                        assert_eq!(
+                            game.level_set_block(level, [x, 64, 0], state, BlockUpdateFlags::NONE),
+                            Ok(true)
+                        );
+                        let pos = (x, 64, 0);
+                        if block == PLAIN {
+                            // No declared type claims it, and no mod adds it to `minecraft:banner`'s
+                            // valid blocks, so its template creates no entity (`validateBlockState`).
+                            assert!(game.world.block_entities.get(&pos).is_none());
+                            assert!(game.block_entity(level, [x, 64, 0]).is_none());
+                            continue;
+                        }
+                        let handle = game.block_entity(level, [x, 64, 0]).unwrap();
+                        if block == "minecraft:chest" {
+                            assert_eq!(handle.kind(game).as_ref(), keys.vanilla.get());
+                            let probe = level.capability(game, &PROBE, [x, 64, 0], None).unwrap();
+                            assert_eq!((probe.value(), probe.owner()), (26, "be_user".into()));
+                            continue;
+                        }
+                        let Some(BlockEntity::Mod(entity)) = game.world.block_entities.get(&pos)
+                        else {
+                            panic!("declared type did not override its banner template");
+                        };
+                        if block == EMPTY {
+                            assert_eq!(entity.id(), "be_test:empty");
+                            assert!(entity.nbt.is_empty());
+                            continue;
+                        }
+                        assert_eq!(entity.id(), "be_test:shared");
+                        assert_eq!(entity.nbt.get(&"energy".into()), Some(&Tag::Long(6300)));
+                        assert_eq!(handle.kind(game).as_ref(), keys.shared.get());
+                        let probe = level.capability(game, &PROBE, [x, 64, 0], None).unwrap();
+                        assert_eq!((probe.value(), probe.owner()), (6300, "be_user".into()));
+                        game.tick_mod_block_entity(pos);
+                        let saved = save::block_entity_encode::encode(
+                            pos,
+                            game.world.block_entities.get(&pos).unwrap(),
+                            block,
+                            &Default::default(),
+                        );
+                        assert_eq!(saved.get("energy"), Some(&Tag::Long(6301)));
+                        let (saved_pos, restored) =
+                            save::decode_block_entity_for_block(&saved, block).unwrap();
+                        assert_eq!(saved_pos, pos);
+                        assert_eq!(restored.id(), "be_test:shared");
+                        assert!(save::decode_block_entity_for_block(&saved, EMPTY).is_none());
+                        game.world.block_entities.insert(pos, restored);
+                        game.tick_mod_block_entity(pos);
+                        let saved = save::block_entity_encode::encode(
+                            pos,
+                            game.world.block_entities.get(&pos).unwrap(),
+                            block,
+                            &Default::default(),
+                        );
+                        assert_eq!(saved.get("energy"), Some(&Tag::Long(6302)));
+                    }
 
-            // A level hook's `LevelWriteHost::set_block` fires the same hook in its write.
-            let first = game.pack.assets.registry.default_state(FIRST).unwrap();
-            use crate::game::api_values::TryIntoApi;
-            let written = game.with_level(|_, level, ticks| {
-                LevelWriteHost::set_block(
-                    &mut super::super::mod_api_host::LevelTicks::new(level, ticks),
-                    [5, 64, 0],
-                    first.try_into_api().unwrap(),
-                    BlockUpdateFlags::NONE,
-                )
-            });
-            assert!(written);
-            let Some(BlockEntity::Mod(entity)) = game.world.block_entities.get(&(5, 64, 0)) else {
-                panic!("a level write did not create the declared block entity");
-            };
-            assert_eq!(entity.id(), "be_test:shared");
-            assert_eq!(entity.nbt.get(&"energy".into()), Some(&Tag::Long(6300)));
-        });
+                    // A level hook's `LevelWriteHost::set_block` fires the same hook in its write.
+                    let first = game.pack.assets.registry.default_state(FIRST).unwrap();
+                    use crate::game::api_values::TryIntoApi;
+                    let written = game.with_level(|_, level, ticks| {
+                        LevelWriteHost::set_block(
+                            &mut super::super::mod_api_host::LevelTicks::new(level, ticks),
+                            [5, 64, 0],
+                            first.try_into_api().unwrap(),
+                            BlockUpdateFlags::NONE,
+                        )
+                    });
+                    assert!(written);
+                    let Some(BlockEntity::Mod(entity)) = game.world.block_entities.get(&(5, 64, 0))
+                    else {
+                        panic!("a level write did not create the declared block entity");
+                    };
+                    assert_eq!(entity.id(), "be_test:shared");
+                    assert_eq!(entity.nbt.get(&"energy".into()), Some(&Tag::Long(6300)));
+                });
+            },
+        );
     }
 
     #[test]

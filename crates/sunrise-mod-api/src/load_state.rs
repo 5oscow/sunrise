@@ -47,11 +47,9 @@ pub fn with_test_packages<R>(ids: &[&str], f: impl FnOnce() -> R) -> R {
     with_test_package_inventory(packages, f)
 }
 
+/// Runs `f` with exactly these packages installed, dependencies included, for tests.
 #[cfg(any(test, feature = "testing"))]
-pub(crate) fn with_test_package_inventory<R>(
-    packages: Vec<PackageInfo>,
-    f: impl FnOnce() -> R,
-) -> R {
+pub fn with_test_package_inventory<R>(packages: Vec<PackageInfo>, f: impl FnOnce() -> R) -> R {
     let previous = TEST_PACKAGES.replace(Some(packages.into()));
     let _ = crate::__private::initialize();
     let result = f();
