@@ -258,6 +258,79 @@ fn datapack_game_open_reload_and_exhaustion_are_atomic() {
 
 #[test]
 #[ignore = "daily"]
+fn world_open_and_wire_use_the_pack_biome_instead_of_the_bundled_file() {
+    use crate::game::native_entity_refs::tests::{fixture_root, with_game_at};
+    use sunrise_client::lan::data::BIOME_REGISTRY;
+
+    fn copy_tree(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for entry in std::fs::read_dir(from).unwrap() {
+            let entry = entry.unwrap();
+            let target = to.join(entry.file_name());
+            if entry.file_type().unwrap().is_dir() {
+                copy_tree(&entry.path(), &target);
+            } else {
+                std::fs::copy(entry.path(), target).unwrap();
+            }
+        }
+    }
+
+    let scratch = tempfile::tempdir().unwrap();
+    let resources = scratch.path().join("resources");
+    copy_tree(&fixture_root(), &resources);
+    let bundle_path = resources.join("worldgen/biomes.json");
+    let mut bundle: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&bundle_path).unwrap()).unwrap();
+    let mut winner: serde_json::Value =
+        serde_json::from_str(bundle["minecraft:plains"].as_str().unwrap()).unwrap();
+    let id = "registry_test:replacement";
+    let mut bundled = winner.clone();
+    bundled["neoforge:conditions"] = serde_json::json!([{"type":"absent:bundled_biome"}]);
+    bundle[id] = serde_json::json!(bundled.to_string());
+    write(&bundle_path, &bundle.to_string());
+
+    let world = scratch.path().join("world");
+    let pack = world.join("datapacks/override");
+    write(
+        &pack.join("pack.mcmeta"),
+        r#"{"pack":{"description":"fixture","min_format":94,"max_format":94}}"#,
+    );
+    write(
+        &world.join("datapacks.json"),
+        r#"{"enabled":["vanilla","file/override"],"disabled":[]}"#,
+    );
+    winner["temperature"] = serde_json::json!(0.125);
+    write(
+        &pack.join("data/registry_test/worldgen/biome/replacement.json"),
+        &winner.to_string(),
+    );
+    // A packed damage type makes world open decode the wire registries eagerly.
+    write(
+        &pack.join("data/registry_test/damage_type/fixture.json"),
+        r#"{"message_id":"fixture","scaling":"never","exhaustion":0}"#,
+    );
+    let _publication = sunrise_client::datapack_net::isolate_server_publication();
+    with_game_at(resources, |game| {
+        game.load_world(request(&world)).unwrap();
+        let sync = crate::game::lan::sync::cached_reload_sync().unwrap();
+        let biome = sync
+            .registry_packets(true, &game.level_shapes)
+            .into_iter()
+            .find(|registry| registry.registry == BIOME_REGISTRY)
+            .unwrap()
+            .entries
+            .into_iter()
+            .find(|entry| entry.id == id)
+            .unwrap();
+        assert_eq!(
+            biome.data,
+            Some(sunrise_client::lan::data::json_to_nbt(&winner))
+        );
+    });
+}
+
+#[test]
+#[ignore = "daily"]
 fn remote_reload_never_decodes_local_registry_files() {
     let scratch = tempfile::tempdir().unwrap();
     let root = scratch.path();

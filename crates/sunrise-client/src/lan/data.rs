@@ -229,6 +229,9 @@ fn synchronized_entries(
             let (ns, path) = id.split_once(':').unwrap_or(("minecraft", &id));
             entries.push(((ns.to_owned(), path.to_owned()), value, true));
         }
+        // Use the world's winner in both staging and eager decoding, even
+        // before a hub supplies the world's biome table with modifiers applied.
+        pack_entries(path, overlay, &mut entries);
     }
     // These gameplay tables already select pack winners. Wire validation
     // must not read a losing bootstrap instrument or song instead.
@@ -591,15 +594,6 @@ impl SyncData {
                 }
                 pack_entries(path, overlay, &mut entries);
             }
-            condition_filter::filter(
-                &mut entries,
-                damage_entries.is_some(),
-                overlay.conditions,
-                path,
-            );
-            if *key == "minecraft:enchantment" {
-                holder_sets::expand_enchantments(&mut entries, resources, overlay, defaults)?;
-            }
             // A biome the mods' modifiers changed is not the client's own file any more:
             // its data is sent, as a pack's biome is.
             let modified = match *key == BIOME_REGISTRY {
@@ -625,6 +619,15 @@ impl SyncData {
                     let packed = pack.is_some() || modified.contains(name);
                     entries.push(((ns.to_owned(), p.to_owned()), json, packed));
                 }
+            }
+            condition_filter::filter(
+                &mut entries,
+                damage_entries.is_some(),
+                overlay.conditions,
+                path,
+            );
+            if *key == "minecraft:enchantment" {
+                holder_sets::expand_enchantments(&mut entries, resources, overlay, defaults)?;
             }
             let mut entries = damage_entries.unwrap_or_else(|| {
                 entries
