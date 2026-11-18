@@ -165,6 +165,7 @@ impl Game {
     fn stop_mining(&mut self) { self.mining = false; }
     fn studio_up(&self) -> bool { self.replay.playing() || self.studio.flying() }
     fn reset_inventory_clicks(&mut self) {}
+    fn restore_held_keys(&mut self) {} // This fixture exercises pointer state, not key mappings.
     fn dialog_open(&self) -> bool { false }
     fn scripted_run(&self) -> bool { self.scripted }
     fn handle_window_event(&mut self, _: &dyn EventLoopCtl, _: WindowId, event: WindowEvent,

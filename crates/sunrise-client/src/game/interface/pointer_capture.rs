@@ -107,6 +107,31 @@ impl Game<'_> {
             self.set_screen(Screen::Paused);
         }
     }
+    /// `KeyMapping.setAll`: every key physically held is held again, as the
+    /// mapping it is bound to, so a key pressed or kept down behind a screen
+    /// counts once the game has the keyboard back. A sneak or sprint that
+    /// toggles keeps its toggle state (`shouldSetOnIngameFocus`).
+    pub(super) fn restore_held_keys(&mut self) {
+        let held: Vec<KeyCode> = self.physical_keys.iter().copied().collect();
+        let toggles = [self.settings.toggle_crouch, self.settings.toggle_sprint];
+        for key in held {
+            for mapped in self.settings.keys.translate_all(key) {
+                match mapped {
+                    Ok(slot_key @ (KeyCode::ShiftLeft | KeyCode::ControlLeft)) => {
+                        let slot = usize::from(slot_key == KeyCode::ControlLeft);
+                        if !toggles[slot] {
+                            self.toggles.0[slot].set_down(true, false);
+                            self.sync_toggle(slot);
+                        }
+                    }
+                    Ok(other) => {
+                        self.keys.insert(other);
+                    }
+                    Err(_) => {}
+                }
+            }
+        }
+    }
     /// `MouseHandler.grabMouse` / `releaseMouse`. Both put the pointer at
     /// the window's centre, so a screen opened from gameplay (inventory,
     /// chest, pause, chat, sign, book, death) starts with the cursor in the
@@ -143,6 +168,11 @@ impl Game<'_> {
         }
         // The real pointer takes over from an agent's.
         self.agent_pointer = false;
+        if capture && !self.captured && !cfg!(target_os = "macos") {
+            // MouseHandler.grabMouse: KeyMapping.setAll unless
+            // InputQuirks.RESTORE_KEY_STATE_AFTER_MOUSE_GRAB is off (macOS).
+            self.restore_held_keys();
+        }
         let Some(window) = &self.window else { return };
         let size = self.renderer.as_ref().map_or_else(
             || window.inner_size().into(),
@@ -384,6 +414,54 @@ fn top_screen_pauses(dialog: Option<bool>, book: Option<bool>, screen: bool, win
 #[cfg(test)]
 mod tests {
     use super::{studio_suppresses_focus_pause, top_screen_pauses};
+
+    #[test]
+    #[ignore = "daily"]
+    fn movement_key_held_behind_a_screen_counts_after_pointer_grab() {
+        use super::*;
+        use sunrise_assets::resource_source::{ResourceRoot, ResourceSource};
+
+        let root = PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap());
+        let settings = Settings::default();
+        let loaded = load_resources(
+            ResourceRoot::directory(root.clone()),
+            Vec::new(),
+            None,
+            &root,
+            &settings,
+            Instant::now(),
+            false,
+            execution_role::ExecutionRole::IntegratedServer,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.execution_role = execution_role::ExecutionRole::IntegratedServer;
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&ResourceSource::directory(root)),
+            None,
+        )
+        .unwrap();
+
+        game.focused = true;
+        game.screen = Screen::Paused;
+        game.physical_keys.insert(KeyCode::KeyW);
+        assert!(!game.movement_key_held(KeyCode::KeyW));
+
+        game.screen = Screen::Playing;
+        game.capture(true);
+        assert_eq!(
+            game.movement_key_held(KeyCode::KeyW),
+            !cfg!(target_os = "macos")
+        );
+    }
 
     #[test]
     fn studio_replay_and_freecam_never_pause_on_focus_loss() {
