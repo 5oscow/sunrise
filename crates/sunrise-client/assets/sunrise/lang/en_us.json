@@ -1163,17 +1163,5 @@
   "sunrise.studio.topbar.view_short": "View",
   "sunrise.studio.unknown_server": "Unknown",
   "sunrise.title.not_affiliated": "Not affiliated with Mojang or Microsoft",
-  "sunrise.title.playing_offline": "Playing offline",
-  "sunrise.touch.attack": "Attack",
-  "sunrise.touch.chat": "Chat",
-  "sunrise.touch.dismount": "Dismount",
-  "sunrise.touch.down": "Down",
-  "sunrise.touch.jump": "Jump",
-  "sunrise.touch.settings": "Touch",
-  "sunrise.touch.shield": "Shield",
-  "sunrise.touch.sneak": "Sneak",
-  "sunrise.touch.sprint": "Sprint",
-  "sunrise.touch.swap": "Swap",
-  "sunrise.touch.up": "Up",
-  "sunrise.touch.use": "Use"
+  "sunrise.title.playing_offline": "Playing offline"
 }
