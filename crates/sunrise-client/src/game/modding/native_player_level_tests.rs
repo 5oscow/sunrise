@@ -43,6 +43,13 @@ fn in_the_nether(game: &mut super::Game<'_>) -> mod_api::ItemStack {
         .unwrap()
 }
 
+/// `count` diamonds, as a mod reads them from SNBT.
+fn some_diamonds(game: &super::Game<'_>, count: u32) -> mod_api::ItemStack {
+    let host: &dyn mod_api::Host = game;
+    host.item_from_snbt(&format!(r#"{{id:"minecraft:diamond",count:{count}}}"#))
+        .unwrap()
+}
+
 fn diamonds(game: &super::Game<'_>, conn: u32) -> u32 {
     let guest = game.lan.as_ref().unwrap().hub.guest(conn).unwrap();
     let held = guest.inventory.iter().flatten();
@@ -69,7 +76,10 @@ fn a_give_to_a_player_in_another_level_fills_their_inventory_and_returns_the_res
             let host: &mut dyn ServerHost = game;
             assert_eq!(player.give_stack(host, diamond.clone()), Ok(None), "{case}");
             let given = host
-                .transaction(|host, _| Ok::<_, ()>(player.give_stack(host, diamond.clone())))
+                .transaction(|host, _| {
+                    assert_eq!(host.dimension(), "minecraft:overworld");
+                    Ok::<_, ()>(player.give_stack(host, diamond.clone()))
+                })
                 .unwrap();
             assert_eq!(given, Ok(None), "{case}");
             assert_eq!(diamonds(game, conn), 2, "{case}");
@@ -89,6 +99,7 @@ fn a_give_to_a_player_in_another_level_fills_their_inventory_and_returns_the_res
             );
             let taken = host
                 .transaction(|host, tx| {
+                    assert_eq!(host.dimension(), "minecraft:overworld");
                     let slot = ItemPlace::PlayerSlot {
                         player: u128::from(conn),
                         slot: 0,
@@ -98,6 +109,29 @@ fn a_give_to_a_player_in_another_level_fills_their_inventory_and_returns_the_res
                 .unwrap();
             assert_eq!(taken, 0, "{case}: a full slot takes nothing");
             assert_eq!(diamonds(game, conn), 0, "{case}");
+            // One unit of room in the only matching stack, three offered: one is taken, two
+            // come back, directly and in a transaction.
+            let (three, two) = (some_diamonds(game, 3), some_diamonds(game, 2));
+            for in_transaction in [false, true] {
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .update_guest(conn, |g| {
+                        g.inventory[8] = Some(ItemStack::new("minecraft:diamond", 63))
+                    })
+                    .unwrap();
+                let host: &mut dyn ServerHost = game;
+                let rest = if in_transaction {
+                    host.transaction(|host, _| Ok::<_, ()>(player.give_stack(host, three.clone())))
+                        .unwrap()
+                } else {
+                    player.give_stack(host, three.clone())
+                };
+                let case = format!("{case}, partial, in transaction: {in_transaction}");
+                assert_eq!(rest, Ok(Some(two.clone())), "{case}");
+                assert_eq!(diamonds(game, conn), 64, "{case}");
+            }
             assert_eq!(dropped(game), before, "{case}: nothing dropped anywhere");
             assert_eq!(game.dim, Dim::Overworld);
         }
