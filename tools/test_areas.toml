@@ -355,6 +355,7 @@ cargo = [
   { package = "sunrise-client", target = "lib", filter = "game::native_" },
   { package = "sunrise-client", target = "lib", filter = "game::transactions::" },
   { package = "sunrise-client", target = "lib", filter = "game::gui_entity::" },
+  { package = "sunrise-client", target = "lib", filter = "game::host::" },
   { package = "sunrise-client", target = "lib", filter = "game::api_values::" },
   { package = "sunrise-client", target = "lib", filter = "game::load_conditions::" },
   { package = "sunrise-client", target = "lib", filter = "game::creatures::pending_birth_wasm_tests" },
