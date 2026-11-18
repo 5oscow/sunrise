@@ -35,7 +35,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tools.ci import ignored_inventory, ignored_shards, ignored_tests, rust_tests
 
+sys.path.insert(0, str(Path(__file__).with_name("vendor") / "pyyaml-6.0.3.zip"))
+import yaml
+
 ROOT = Path(__file__).resolve().parents[2]
+WINDOWS_WORKFLOW = ".github/workflows/launcher-windows-check.yml"
 ADD_ROW = ("add its row: `python3 tools/ci/move_to_daily.py apply LIST` (its docstring has the list format), or write "
            "`PACKAGE TEST TARGET daily REASON` into tools/ci/ignored-tests/daily-PACKAGE-TOPIC.txt")
 
@@ -45,6 +49,7 @@ def daily_problems(rows, targets, matrix):
     problems = []
     groups = ignored_tests.daily_rows_groups(rows)
     workflows = "\n".join(path.read_text() for path in sorted((ROOT / ".github/workflows").glob("*.y*ml")))
+    windows_wired = not any(row.reason == ignored_tests.WINDOWS_REASON for row in rows) or windows_daily_runs(ROOT)
     for row in rows:
         where = f"{row.file}: {row.package} {row.test}"
         if row.package not in targets:
@@ -52,8 +57,9 @@ def daily_problems(rows, targets, matrix):
         elif row.reference not in targets[row.package]:
             problems.append(f"{where}: {row.package} has no target {row.reference}")
         elif row.reason == ignored_tests.WINDOWS_REASON:
-            if "--windows-rows" not in workflows:
-                problems.append(f"{where}: no workflow runs the `windows` rows (ignored_tests.py --windows-rows)")
+            if not windows_wired:
+                problems.append(f"{where}: daily.yml must call {WINDOWS_WORKFLOW}'s runtime-leases job and run "
+                                "ignored_tests.py --windows-rows --run there")
         elif variable := ignored_tests.DAILY_INPUTS.get(row.reason):
             if f"--needs {variable}" not in workflows:
                 problems.append(f"{where}: no workflow runs the tests that need {variable} (ignored_tests.py --needs)")
@@ -64,6 +70,40 @@ def daily_problems(rows, targets, matrix):
                 row.test not in groups.get((row.package, row.reference), ()):
             problems.append(f"{where}: no leg runs it (the {leg} leg is missing)")
     return problems
+
+
+def windows_daily_runs(root):
+    """Verify the daily's named call and the enabled step whose verdict the summary reads."""
+    daily_path = root / ".github/workflows/daily.yml"
+    windows_path = root / WINDOWS_WORKFLOW
+    if not daily_path.is_file() or not windows_path.is_file():
+        return False
+    # BaseLoader preserves Actions' unquoted `on` key rather than treating it as a YAML 1.1 boolean.
+    daily = yaml.load(daily_path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader) or {}
+    windows = yaml.load(windows_path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader) or {}
+    events = windows.get("on") or ()
+    if not (events == "workflow_call" if isinstance(events, str) else "workflow_call" in events):
+        return False
+    call = (daily.get("jobs") or {}).get("windows-runtime-leases") or {}
+    if call.get("uses") != f"./{WINDOWS_WORKFLOW}":
+        return False
+    # Recognize the daily's non-skipped resolve path and the commit it passes; do not guess whether arbitrary
+    # expressions are true. Likewise the called job either is unconditional or accepts a nonempty commit.
+    enabled = (None, "true", "${{ true }}")
+    if call.get("if") not in (*enabled, "needs.resolve.outputs.skip == 'false'"):
+        return False
+    job = (windows.get("jobs") or {}).get("runtime-leases") or {}
+    if (job.get("if") not in enabled and
+            (job.get("if") != "inputs.commit != '' || github.event_name == 'workflow_dispatch'" or
+             call.get("with", {}).get("commit") != "${{ needs.resolve.outputs.commit }}")):
+        return False
+    if job.get("runs-on") != "windows-latest" or job.get("needs"):
+        return False
+    default_cwd = next((cwd for scope in (job, windows)
+                        if (cwd := scope.get("defaults", {}).get("run", {}).get("working-directory"))), ".")
+    return any(step.get("if") in enabled and step.get("working-directory", default_cwd) == "." and re.fullmatch(
+        r"python3?\s+tools/ci/ignored_tests\.py\s+--windows-rows\s+--run\s+--report\s+\S+",
+        step.get("run", "").strip()) for step in job.get("steps", ()))
 
 
 def windows_target_problems(rows, root=ROOT):
