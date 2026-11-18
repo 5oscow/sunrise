@@ -25,7 +25,7 @@ with the same hooks, Parts, attachments and `[dependencies]`. The build target i
 
 <div class="cards">
 
-[**Install and play with mods**](start/installing.md)
+[**Install and play with mods**](players/installing-mods.md)
 Where mods go, how to turn them on, and what the Mods screen shows.
 
 [**Make a content mod**](start/first-content-mod.md)

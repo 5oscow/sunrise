@@ -74,7 +74,7 @@ start-up: after you edit a file, run the command again.
 
 To play it in a game folder you already use, copy `glowing_blocks.smod` into that folder's `sunrise-mods/` (the game
 folder is the one that holds `options.txt`; create `sunrise-mods/` if it is missing) and turn it on with the line
-`mod.glowing_blocks:true` in `sunrise-mods.txt` there ([Installing and using mods](installing.md)).
+`mod.glowing_blocks:true` in `sunrise-mods.txt` there ([Installing and using mods](../players/installing-mods.md)).
 
 ## 5. Check it before you publish
 
