@@ -1,6 +1,7 @@
 //! The `OPTIONS` data fixers of 26.3 (`DataFixTypes.OPTIONS`), applied to the
 //! raw key/value strings of an `options.txt` older than the current version.
 use std::collections::HashMap;
+pub use sunrise_core::text::parse_java_integer as java_parse_int;
 
 /// A fixer threw an exception; vanilla abandons loading the file.
 #[derive(Debug)]
@@ -123,15 +124,6 @@ const LWJGL3: &[(i32, &str)] = &[
     (21, "key.y"),
     (44, "key.z"),
 ];
-
-/// `Integer.parseInt(String)`.
-pub fn java_parse_int(text: &str) -> Option<i32> {
-    let digits = text.strip_prefix(['+', '-']).unwrap_or(text);
-    if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) {
-        return None;
-    }
-    text.parse::<i32>().ok()
-}
 
 enum Number<'a> {
     Special(f64),

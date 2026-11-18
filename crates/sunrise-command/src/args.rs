@@ -7,7 +7,7 @@ use sunrise_client_core::text::Text;
 pub use sunrise_client_core::registries::{
     CustomCompletionAction, Registries, RegistryIds, modify_custom_completions,
 };
-pub use sunrise_core::game_mode::GameMode;
+pub use sunrise_core::{game_mode::GameMode, text::parse_java_integer as java_parse_int};
 
 /// How much of the command line a registered custom argument takes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -821,14 +821,6 @@ pub fn read_float_bounds(reader: &mut Reader) -> CmdResult<(Option<f32>, Option<
         |s| java_parse_double(s).map(|v| v as f32),
         "parsing.float.invalid",
     )
-}
-/// Integer.parseInt over number characters.
-pub fn java_parse_int(s: &str) -> Option<i32> {
-    let digits = s.strip_prefix(['-', '+']).unwrap_or(s);
-    if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) {
-        return None;
-    }
-    s.parse().ok()
 }
 /// Double.parseDouble over the characters StringReader reads as a number.
 pub fn java_parse_double(s: &str) -> Option<f64> {
