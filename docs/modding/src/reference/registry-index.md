@@ -120,7 +120,7 @@ sits in a linked folder, refuses the import before anything is written.
 
 ## Submitting a project
 
-> **This book documents the fork's mod API.** A code mod (native or wasm) that uses it runs on the fork's builds, not on upstream Horizon, so do not submit it to the registry at playsunrise.net: the registry serves upstream's players, who could not load it. A content-only mod loads there only if it uses nothing the fork added. Until the mod API ships in a joint release, share the `.smod` file ([installing by hand](../start/installing.md)) or your mod's GitHub repository: the fork's launcher installs a native mod from it with **Add from GitHub** and marks it "Not reviewed by the Sunrise registry" ([Install from GitHub](../how-to/native-mods/08-install-from-github.md)).
+> **This book documents the fork's mod API.** A code mod (native or wasm) that uses it runs on the fork's builds, not on upstream Horizon, so do not submit it to the registry at playsunrise.net: the registry serves upstream's players, who could not load it. A content-only mod loads there only if it uses nothing the fork added. Until the mod API ships in a joint release, share the `.smod` file ([installing by hand](../players/installing-mods.md)) or your mod's GitHub repository: the fork's launcher installs a native mod from it with **Add from GitHub** and marks it "Not reviewed by the Sunrise registry" ([Install from GitHub](../how-to/native-mods/08-install-from-github.md)).
 
 Submit through [playsunrise.net/mods/submit](https://playsunrise.net/mods/submit) ([Publishing your mod](../how-to/publish.md)); the service opens a pull request on
 [horizon-rust/horizon-mods](https://github.com/horizon-rust/horizon-mods). Your page needs:
