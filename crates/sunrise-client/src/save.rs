@@ -4276,7 +4276,9 @@ impl Level {
         }
         // An upload's level.dat names no player (`createTag(null)`); every other file
         // names this world's own.
-        let uuid = (!upload).then(|| self.ensure_player_uuid());
+        // A keep-owner write names nothing new: the on-disk `singleplayer_uuid` (or its absence)
+        // stays, so reopening loads the same owner file as before.
+        let uuid = (!upload && !keep_legacy_player).then(|| self.ensure_player_uuid());
         // A new world's first spawn point is its world spawn.
         if self.world_spawn.is_none() {
             self.world_spawn = self.spawn.map(|s| {
@@ -8349,6 +8351,50 @@ mod tests {
         );
         assert!(!dir.join("players").join("data").exists());
         assert_eq!(Level::read(&dir).unwrap().day_time, 777);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A keep-owner write leaves `singleplayer_uuid` as it was on disk, absent included:
+    /// naming the offline `Player` would make a reopen load another account's file.
+    #[test]
+    fn keeping_the_owner_keeps_the_on_disk_singleplayer_uuid() {
+        let dir = std::env::temp_dir().join(format!("sunrise-keep-uuid-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let mut level = Level {
+            name: "Test".into(),
+            ..Level::default()
+        };
+        let set_uuid = |uuid: Option<Tag>| {
+            let mut root = read_dat(&dir.join("level.dat")).unwrap();
+            let Tag::Compound(root_map) = &mut root else {
+                panic!("level.dat is a compound");
+            };
+            let Some(Tag::Compound(data)) = root_map.get_mut(&JavaString::from("Data")) else {
+                panic!("level.dat has Data");
+            };
+            match uuid {
+                Some(tag) => data.insert(JavaString::from("singleplayer_uuid"), tag),
+                None => data.remove(&JavaString::from("singleplayer_uuid")),
+            };
+            write_dat(&dir.join("level.dat"), root).unwrap();
+        };
+        let on_disk = || {
+            read_dat(&dir.join("level.dat"))
+                .unwrap()
+                .get("Data")
+                .and_then(|d| d.get("singleplayer_uuid"))
+                .cloned()
+        };
+        level.write_without_player(&dir).unwrap();
+
+        set_uuid(None);
+        level.write_keeping_player(&dir).unwrap();
+        assert_eq!(on_disk(), None, "a level.dat without a uuid keeps none");
+
+        let owner = Tag::IntArray(vec![1, 2, 3, 4]);
+        set_uuid(Some(owner.clone()));
+        level.write_keeping_player(&dir).unwrap();
+        assert_eq!(on_disk(), Some(owner), "a uuid stays the same");
         let _ = fs::remove_dir_all(&dir);
     }
 
