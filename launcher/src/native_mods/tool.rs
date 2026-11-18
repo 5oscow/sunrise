@@ -1,5 +1,5 @@
 //! The SDK's native build tool, `cargo sunrise-mod native-build`, run as a process with the launcher's toolchain (docs/modding/src/reference/sdk/08-native-build.md).
-use crate::i18n::trf;
+use crate::i18n::{tr, trf};
 use crate::rust_toolchain::Toolchain;
 use serde::Deserialize;
 use serde_json::Value;
@@ -40,10 +40,31 @@ pub(super) struct Plan<'a> {
 }
 
 /// The registry crates a build would add, which the player says yes or no to.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Consent {
     pub added_crates: usize,
     pub build_scripts: Vec<String>,
     pub proc_macros: Vec<String>,
+}
+
+impl Consent {
+    pub fn label(&self) -> String {
+        trf(
+            "Native mod adds {count} registry crates",
+            &[("count", &self.added_crates.to_string())],
+        )
+    }
+
+    pub fn detail(&self) -> String {
+        let none = tr("None");
+        let scripts = self.build_scripts.join(", ");
+        let macros = self.proc_macros.join(", ");
+        [
+            tr("Registry dependencies are native code. Their build scripts and proc macros run during compilation, before the game starts.").to_owned(),
+            trf("Build scripts: {crates}", &[("crates", if self.build_scripts.is_empty() { none } else { &scripts })]),
+            trf("Proc macros: {crates}", &[("crates", if self.proc_macros.is_empty() { none } else { &macros })]),
+        ].join("\n\n")
+    }
 }
 
 /// The mod a failed build stops at, and how.
@@ -110,18 +131,23 @@ impl From<String> for Failure {
     }
 }
 
-/// The plan's JSON line: the toolchain as the launcher set it up.
+/// The toolchain as a plan names it: the launcher's, as it set it up.
+pub(super) fn toolchain(rust: &Toolchain) -> Value {
+    serde_json::json!({
+        "dir": rust.dir,
+        "target": rust.host.target,
+        "cargo_home": crate::rust_toolchain::cargo_home(),
+        "cargo_config": rust.cargo_config(),
+        "c_bin": rust.c_bin(),
+    })
+}
+
+/// The plan's JSON line.
 fn plan_line(rust: &Toolchain, plan: &Plan<'_>) -> String {
     serde_json::json!({
         "contract": CONTRACT,
         "work": plan.work,
-        "toolchain": {
-            "dir": rust.dir,
-            "target": rust.host.target,
-            "cargo_home": crate::rust_toolchain::cargo_home(),
-            "cargo_config": rust.cargo_config(),
-            "c_bin": rust.c_bin(),
-        },
+        "toolchain": toolchain(rust),
         "package": {"runtime": plan.package.runtime, "api": plan.package.api, "engine": plan.package.engine},
         "mods": plan.mods,
         "target": if plan.server { "server" } else { "client" },
@@ -335,12 +361,22 @@ pub(super) fn stop() {
 /// `native-check`'s reply: each mod's refusal, verdict or the file it needs.
 #[derive(Debug, Deserialize)]
 pub(super) struct Checked {
+    /// Absent from a tool older than this launcher; `null` when no mod is usable.
+    #[serde(default, deserialize_with = "present")]
+    pub route: Option<Option<String>>,
     pub mods: Vec<CheckedMod>,
+}
+
+/// A field that is there, `null` or not: [`Checked::route`]'s absence is told apart from its `null`.
+fn present<'de, D: serde::Deserializer<'de>>(field: D) -> Result<Option<Option<String>>, D::Error> {
+    Option::<String>::deserialize(field).map(Some)
 }
 
 #[derive(Debug, Deserialize)]
 pub(super) struct CheckedMod {
     pub id: String,
+    #[serde(default)]
+    pub refusal: Option<String>,
     #[serde(default)]
     pub verdict: Option<super::fit::Verdict>,
     #[serde(default)]
@@ -349,9 +385,25 @@ pub(super) struct CheckedMod {
 
 /// Asks the tool at `program` how the mods `plan` names stand against its build (`native-check`).
 pub(super) fn check(program: &Path, plan: &Value) -> Result<Checked, String> {
-    let mut command = crate::process::command(program);
+    let value = ask(crate::process::command(program), "native-check", plan)?;
+    serde_json::from_value(value).map_err(|e| {
+        trf(
+            "The native build tool's answer couldn't be read: {error}. Update the launcher.",
+            &[("error", &e.to_string())],
+        )
+    })
+}
+
+/// Runs one of the tool's one-line commands (`native-check`, `native-discover`, `native-lock`, `native-layout`) with `plan` (its `contract` filled in): its reply, or its error's message.
+pub(super) fn ask(
+    mut command: std::process::Command,
+    name: &str,
+    plan: &Value,
+) -> Result<Value, String> {
+    let mut plan = plan.clone();
+    plan["contract"] = CONTRACT.into();
     command
-        .arg("native-check")
+        .arg(name)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped());
     let (mut child, errors) = start(command)?;
@@ -377,14 +429,16 @@ pub(super) fn check(program: &Path, plan: &Value) -> Result<Checked, String> {
     result
 }
 
-/// `native-check`'s reply line: its checks, its error, or (no line at all) a tool from before the command.
-fn reply(line: Option<&str>) -> Result<Checked, String> {
-    let too_old = || {
-        crate::i18n::tr(
-            "This build's native build tool is too old for this launcher: install a newer version.",
-        )
-        .to_owned()
-    };
+/// What a tool from before a command or reply field this launcher needs is told.
+pub(super) fn too_old() -> String {
+    crate::i18n::tr(
+        "This build's native build tool is too old for this launcher: install a newer version.",
+    )
+    .to_owned()
+}
+
+/// A one-line command's reply: its value, its error's message, or (no line at all) a tool from before the command.
+fn reply(line: Option<&str>) -> Result<Value, String> {
     let value: Value = serde_json::from_str(line.ok_or_else(too_old)?).map_err(|_| too_old())?;
     if let Some(error) = value.get("error") {
         return Err(trf(
@@ -392,12 +446,7 @@ fn reply(line: Option<&str>) -> Result<Checked, String> {
             &[("error", error["message"].as_str().unwrap_or_default())],
         ));
     }
-    serde_json::from_value(value).map_err(|e| {
-        trf(
-            "The native build tool's answer couldn't be read: {error}. Update the launcher.",
-            &[("error", &e.to_string())],
-        )
-    })
+    Ok(value)
 }
 
 fn unrun(error: std::io::Error) -> String {

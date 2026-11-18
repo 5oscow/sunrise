@@ -481,6 +481,12 @@ impl Levels {
         self.runtime.clear();
     }
 
+    pub(super) fn abort_parked_generation(&mut self) {
+        for level in self.parked.values_mut() {
+            level.streaming.abort_generation();
+        }
+    }
+
     /// A parked level, without opening or loading it.
     pub(super) fn parked_world(&self, dim: Dim) -> Option<&World> {
         self.parked.get(&dim).map(|level| &level.world)
@@ -1245,6 +1251,7 @@ impl Game<'_> {
             let tick_span = sunrise_client::spans::guard("level_tick");
             // This level's moving colliders, solid to its movers for this tick only.
             let colliders = self.placed_moving_colliders();
+            let parts = self.collision_parts();
             let history = self
                 .collider_history(&colliders)
                 .map(sunrise_client_render::moving_colliders::HistoryScope::enter);
@@ -1278,6 +1285,7 @@ impl Game<'_> {
                     || self.carry_pass(&colliders),
                 );
             }
+            drop(parts);
             drop(tick_span);
             self.drain_entity_inside();
             if result.is_err() {

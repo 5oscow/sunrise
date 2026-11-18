@@ -156,6 +156,20 @@ pub fn block_key_listens(hook: HookId, key: crate::BlockKey) -> bool {
     parts(hook, "block routing").listens.listens(hook, key)
 }
 
+/// The ids of the mods whose parts on this API block key answer `hook`, in dispatch order: what a
+/// diagnostic about the block's parts names.
+pub fn block_key_owners(hook: HookId, key: crate::BlockKey) -> Vec<&'static str> {
+    parts(hook, "block routing")
+        .for_hook(hook)
+        .map_or_else(Vec::new, |table| {
+            table
+                .block_key(Some(key))
+                .iter()
+                .map(|attached| attached.mod_id)
+                .collect()
+        })
+}
+
 /// Whether every part on this API block key that answers `explosion_resistance` declares the
 /// answer pure (`BlockPart::explosion_resistance_is_pure`), so a batched read may ask once a state.
 pub fn explosion_resistance_key_pure(key: crate::BlockKey) -> bool {
