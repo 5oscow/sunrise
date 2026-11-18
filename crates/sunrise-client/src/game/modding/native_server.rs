@@ -1140,8 +1140,8 @@ impl Game<'_> {
     /// `item_toss` asked first. Nothing is taken from an inventory: the stack is the caller's
     /// (take it out through the item places first). `thrown_by_player` names the player as the
     /// thrower, as the drop key does. None once the item is in the world; the stack back,
-    /// untouched, for an empty stack, a stale or dead player, a toss a mod canceled and, inside a
-    /// transaction, a player in another level, so a refused drop never loses items.
+    /// untouched, for an empty stack, a stale or dead player, a player in another level than the
+    /// one in place and a toss a mod canceled, so a refused drop never loses items.
     pub(super) fn player_drop_stack(
         &mut self,
         player: PlayerRef,
@@ -1157,18 +1157,12 @@ impl Game<'_> {
         // `throw_from_eyes` discards a vetoed toss, as `item_toss` always has: keep a copy so
         // the caller gets it back.
         let copy = stack.clone();
-        // The toss is not deferred to a commit, and a transaction's level stays in place: a
-        // player in another level can't throw into theirs from inside one.
-        let elsewhere = matches!(
-            self.player_handle_read(player),
-            Some(PlayerRead::Guest(g)) if g.dimension != self.dim.id()
-        );
-        if elsewhere && !self.transactions.is_empty() {
-            return Some(copy);
-        }
         let mut dropped = false;
-        let ran = self.native_as_player_handle_in_their_level(player, |game| {
-            dropped = game.drop_stack_from_eyes(stack, thrown_by_player).is_some();
+        let ran = self.native_as_player_handle(player, |game| {
+            // A stack thrown from a player in another level would land in this one.
+            if game.acting_in_level_in_place() {
+                dropped = game.drop_stack_from_eyes(stack, thrown_by_player).is_some();
+            }
         });
         (!(ran && dropped)).then_some(copy)
     }
@@ -1880,83 +1874,44 @@ impl Game<'_> {
         orb.age = age.unwrap_or(orb.age);
         true
     }
-    /// Runs `f` in the turn of the player a handle names, against the level in place: for work
-    /// at a place in a level the caller names. False when it didn't run: stale or dead.
+    /// Runs `f` in the turn of the player a handle names, against the level in place. False
+    /// when it didn't run: stale or dead.
     pub(super) fn native_as_player_handle(
         &mut self,
         player: PlayerRef,
         f: impl FnOnce(&mut Self),
     ) -> bool {
-        self.native_player_handle_turn(player, false, f)
-    }
-
-    /// [`Self::native_as_player_handle`] in the player's own level
-    /// ([`Self::as_guest_in_their_level`]), for what reaches the player's surroundings.
-    pub(super) fn native_as_player_handle_in_their_level(
-        &mut self,
-        player: PlayerRef,
-        f: impl FnOnce(&mut Self),
-    ) -> bool {
-        self.native_player_handle_turn(player, true, f)
-    }
-
-    fn native_player_handle_turn(
-        &mut self,
-        player: PlayerRef,
-        their_level: bool,
-        f: impl FnOnce(&mut Self),
-    ) -> bool {
-        let guest = match self.player_handle_read(player) {
-            None => return false,
-            Some(PlayerRead::Acting { .. }) => None,
-            Some(PlayerRead::Guest(g)) if !g.dead => Some((g.conn, Dim::from_id(&g.dimension))),
-            Some(PlayerRead::Guest(_)) => return false,
-        };
-        match guest {
-            None => self.native_as_acting(f),
-            Some((conn, there)) => self.native_guest_turn(conn, there, their_level, f),
+        match self.player_handle_read(player) {
+            None => false,
+            Some(PlayerRead::Acting { .. }) => self.native_as_acting(f),
+            Some(PlayerRead::Guest(g)) if !g.dead => {
+                let conn = g.conn;
+                self.as_guest(conn, f).is_some()
+            }
+            Some(PlayerRead::Guest(_)) => false,
         }
     }
 
     /// Runs `f` with the player `uuid`'s state in place, against the level in place: theirs
     /// already when they are acting (a guest in their turn, or the `Game`'s own player where no
     /// guest holds them), else a guest's through `as_guest`, including within another guest's
-    /// turn. For work at a place in a level the caller names. False when it didn't run: no
-    /// such player here, or dead.
+    /// turn. What `f` writes to the player's own state holds wherever they are; what would land
+    /// in the world checks [`Self::acting_in_level_in_place`]. False when it didn't run: no such
+    /// player here, or dead.
     pub(super) fn native_as_player(&mut self, uuid: u128, f: impl FnOnce(&mut Self)) -> bool {
-        self.native_player_turn(uuid, false, f)
-    }
-
-    /// [`Self::native_as_player`] in the player's own level
-    /// ([`Self::as_guest_in_their_level`]), for what reaches the player's surroundings: a
-    /// stack thrown from their eyes, a sound at them, their advancement triggers.
-    pub(super) fn native_as_player_in_their_level(
-        &mut self,
-        uuid: u128,
-        f: impl FnOnce(&mut Self),
-    ) -> bool {
-        self.native_player_turn(uuid, true, f)
-    }
-
-    fn native_player_turn(
-        &mut self,
-        uuid: u128,
-        their_level: bool,
-        f: impl FnOnce(&mut Self),
-    ) -> bool {
         if self.lan_acting_uuid == Some(uuid) {
             return self.native_as_acting(f);
         }
         // With no guest's turn running, `native_acting_id` is the world's owner: on a server
         // thread that owner is a guest too, whose state is theirs, not the `Game`'s own.
-        let guest = self
+        let conn = self
             .lan
             .as_ref()
             .and_then(|host| host.hub.holder_guest(uuid, self.dim.id()))
             .filter(|g| !g.dead)
-            .map(|g| (g.conn, Dim::from_id(&g.dimension)));
-        match guest {
-            Some((conn, there)) => self.native_guest_turn(conn, there, their_level, f),
+            .map(|g| g.conn);
+        match conn {
+            Some(conn) => self.as_guest(conn, f).is_some(),
             None if uuid == self.native_acting_id() => self.native_as_acting(f),
             None => false,
         }
@@ -1975,18 +1930,18 @@ impl Game<'_> {
         true
     }
 
-    fn native_guest_turn(
-        &mut self,
-        conn: u32,
-        there: Dim,
-        their_level: bool,
-        f: impl FnOnce(&mut Self),
-    ) -> bool {
-        if their_level {
-            self.as_guest_in_their_level(conn, there, f)
-        } else {
-            self.as_guest(conn, f).is_some()
-        }
+    /// Whether the acting player is in the level in place: a guest's own level is their hub
+    /// record's, also when a hook of another level borrows them into its turn. What lands
+    /// in the world at a player (a thrown stack, an overflow drop, a sound, a broken block) is
+    /// left out for a player in another level, whose inventory and data writes still hold.
+    pub(in crate::game) fn acting_in_level_in_place(&self) -> bool {
+        let Some(conn) = self.lan_acting else {
+            return true;
+        };
+        self.lan
+            .as_ref()
+            .and_then(|host| host.hub.guest(conn))
+            .is_none_or(|g| g.dimension == self.dim.id())
     }
 }
 

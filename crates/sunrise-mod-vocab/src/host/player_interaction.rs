@@ -102,7 +102,7 @@ pub trait PlayerInteractionBackendMut {
     /// the block. Breaking from `break_block` or `block_drops` makes them hear these breaks too:
     /// a mod keeps its own guard, and a break started from inside eight others is refused (a
     /// Sunrise safeguard that the reference does not have). True when the block was removed; false, with nothing broken, for a stale handle, a player who
-    /// isn't here or is dead, air, an unloaded block, a block no survival player can break
+    /// isn't here, is dead or is in another level than the hook's, air, an unloaded block, a block no survival player can break
     /// (bedrock), a canceled break, and off a server.
     #[access(WorldOnly)]
     fn player_destroy_block(

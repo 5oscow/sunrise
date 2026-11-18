@@ -7,10 +7,19 @@ impl Game<'_> {
     /// `GiveCommand.giveItem`'s handing over of one stack to the acting player:
     /// `Inventory.add`, then what did not fit thrown from the eyes with no pickup delay and
     /// `owner` (the player's UUID) its only taker, or the pickup sound when it all went in.
-    pub(in crate::game) fn give_acting_stack(&mut self, stack: ItemStack, owner: Option<[i32; 4]>) {
+    /// For a player in another level than the one in place nothing lands in the world: what
+    /// did not fit is returned and no sound plays.
+    pub(in crate::game) fn give_acting_stack(
+        &mut self,
+        stack: ItemStack,
+        owner: Option<[i32; 4]>,
+    ) -> Option<ItemStack> {
         let uuid = self.native_acting_id();
         self.journal_player(uuid);
         let left = self.add_stack_to_inventory(stack);
+        if !self.acting_in_level_in_place() {
+            return left;
+        }
         // At the player who gets them.
         if let Some(rest) = left {
             let uuid = self.native_acting_id();
@@ -21,6 +30,7 @@ impl Game<'_> {
             let uuid = self.native_acting_id();
             self.after_commit(crate::game::transactions::After::GivePickup(uuid));
         }
+        None
     }
     pub(in crate::game) fn give_pickup(&mut self) {
         let p = self

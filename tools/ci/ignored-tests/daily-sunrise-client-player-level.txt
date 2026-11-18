@@ -1,0 +1,4 @@
+sunrise-client game::native_player_level_tests::a_give_to_a_player_in_another_level_fills_their_inventory_and_returns_the_rest lib daily resources
+sunrise-client game::native_player_level_tests::a_give_to_a_player_in_another_level_keeps_their_open_menu lib daily resources
+sunrise-client game::native_player_level_tests::a_player_borrowed_into_another_levels_turn_drops_nothing_there lib daily resources
+sunrise-client game::native_player_level_tests::a_throw_or_break_for_a_player_in_another_level_changes_nothing lib daily resources

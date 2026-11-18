@@ -259,8 +259,8 @@ mod owner {
     }
 
     /// A hook running in another level than the owner's reaches the owner's own inventory,
-    /// never the `Game`'s player: the insert is accepted as for any player, what doesn't fit
-    /// waits for the commit, and the abort puts the owner's stacks back and drops nothing.
+    /// never the `Game`'s player: a full slot takes nothing, nothing drops, and the abort puts
+    /// the giver's diamond back.
     #[test]
     #[ignore = "daily"]
     fn a_hook_in_another_level_leaves_the_owners_inventory_and_drops_alone() {
@@ -313,7 +313,7 @@ mod owner {
             let moved: Result<(), ()> = (game as &mut dyn ServerHost).transaction(|host, tx| {
                 let taken = source.extract(host, tx, &diamond, 1);
                 assert_eq!(taken, 1);
-                assert_eq!(slot.insert(host, tx, &diamond, taken), 1);
+                assert_eq!(slot.insert(host, tx, &diamond, taken), 0);
                 Err(())
             });
             assert!(moved.is_err());
@@ -330,7 +330,7 @@ mod owner {
     }
 
     /// A transaction that clears a stack of a guest in the Nether and aborts restores it, and
-    /// a stack given to them with a full inventory is delivered at commit, in the Nether.
+    /// a stack given to them with a full inventory comes back to the mod, dropped nowhere.
     #[test]
     #[ignore = "daily"]
     fn a_non_owner_guest_in_another_level_keeps_their_stack_through_an_abort() {
@@ -375,14 +375,12 @@ mod owner {
                 })
                 .unwrap();
             let dropped = game.dropped.len();
-            let given: Result<(), ()> = (game as &mut dyn ServerHost).transaction(|host, _| {
-                player.give_stack(host, diamond).unwrap();
-                Ok(())
-            });
-            assert!(given.is_ok());
+            let given = (game as &mut dyn ServerHost)
+                .transaction(|host, _| Ok::<_, ()>(player.give_stack(host, diamond.clone())));
+            assert_eq!(given, Ok(Ok(Some(diamond))));
             assert_eq!(game.dropped.len(), dropped);
             game.enter_level(super::super::Dim::Nether).unwrap();
-            assert_eq!(game.dropped.len(), 1);
+            assert_eq!(game.dropped.len(), 0);
         });
     }
 }
