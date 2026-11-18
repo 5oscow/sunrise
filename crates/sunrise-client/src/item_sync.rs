@@ -2735,10 +2735,10 @@ mod tests {
             let mut r = Reader::new(&w.data);
             let read = Slot::read(&mut r).unwrap().unwrap();
             assert_eq!(r.remaining(), 0);
-            from_network(&read, &builtin, &dynamic)
+            (from_network(&read, &builtin, &dynamic), read)
         };
         let stock = crate::mobs::raider::ominous_banner();
-        let back = round_trip(stock.clone());
+        let (back, _) = round_trip(stock.clone());
         assert_eq!(back.banner_layers().len(), layers.len());
         assert!(back.matches(&stock));
 
@@ -2754,7 +2754,7 @@ mod tests {
         };
         edited.copy_changed_components_from(snapshot, &["minecraft:item_name".to_owned()]);
         assert!(!edited.data().unwrap().ominous_banner);
-        let received = round_trip(edited.clone());
+        let (received, _) = round_trip(edited.clone());
         assert_eq!(
             received.data().unwrap().other("minecraft:item_name"),
             Some(&name)
@@ -2763,6 +2763,34 @@ mod tests {
             !crate::item_tooltip::tooltip_display(&received).shows("minecraft:banner_patterns")
         );
         assert!(received.matches(&edited));
+
+        edited.data_mut().set_other(
+            "minecraft:tooltip_display",
+            Some(Tag::compound([(
+                "hidden_components",
+                Tag::List(
+                    [
+                        "banner_patterns",
+                        "minecraft:item_name",
+                        "minecraft:banner_patterns",
+                        "banner_patterns",
+                    ]
+                    .map(|id| Tag::String(id.into()))
+                    .into(),
+                ),
+            )])),
+        );
+        let (received, slot) = round_trip(edited);
+        assert_eq!(
+            slot.component(component::TOOLTIP_DISPLAY),
+            Some(&Component::TooltipDisplay {
+                hide: false,
+                hidden: vec![component::BANNER_PATTERNS, component::ITEM_NAME],
+            })
+        );
+        assert!(
+            !crate::item_tooltip::tooltip_display(&received).shows("minecraft:banner_patterns")
+        );
     }
 
     /// A painting's `painting/variant` (a `painting_variant` holder, id 109)

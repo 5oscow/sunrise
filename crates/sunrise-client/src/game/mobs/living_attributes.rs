@@ -142,7 +142,6 @@ impl Game<'_> {
         &mut self,
         id: u32,
         before: Option<ModifierSnapshot>,
-        explicit: Option<(&str, &str)>,
     ) {
         if self.remote.is_some() || self.options.execution_role.is_client() {
             return;
@@ -155,7 +154,7 @@ impl Game<'_> {
         collect_equipment(&catalog, items, m);
         if let Some(before) = before
             && let Some(after) = snapshot(&catalog, m)
-            && let Some(changes) = before.diff(after, explicit)
+            && let Some(changes) = before.diff(&after)
         {
             self.transactions.journal_modifier_changes(id, changes);
         }
@@ -374,15 +373,25 @@ impl Game<'_> {
         // once, so the next read — a hit's armor, the attribute sync — sees
         // them (#941).
         if let Target::Mob(id) = t {
-            let explicit = explicit
-                .as_deref()
-                .filter(|_| done)
-                .map(|modifier| (name, modifier));
-            if let Some((attribute, modifier)) = explicit {
-                self.transactions
-                    .keep_explicit_modifier_write(id, attribute, modifier);
+            // Invalidation is part of the explicit-write step. Keep its
+            // collateral changes separate from what equipment collection does
+            // after it, even when both steps write the same modifier key.
+            let after_write = before
+                .as_ref()
+                .and_then(|_| self.snapshot_mob_modifiers(id));
+            if let (Some(before), Some(after)) = (before.as_ref(), after_write.as_ref())
+                && let Some(changes) = before.diff(after)
+            {
+                self.transactions.journal_modifier_changes(id, changes);
             }
-            self.collect_mob_equipment_attributes(id, before, explicit);
+            if done && let Some(modifier) = explicit {
+                // The explicit write persists through abort. Earlier entries
+                // for that row must not undo it; the subsequent refresh,
+                // however, is journaled against the newly written value.
+                self.transactions
+                    .keep_explicit_modifier_write(id, name, &modifier);
+            }
+            self.collect_mob_equipment_attributes(id, after_write);
         }
         Some(done)
     }

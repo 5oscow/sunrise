@@ -273,6 +273,7 @@ pub struct ModifierSnapshot {
     rows: BTreeMap<(String, String), ModifierState>,
 }
 
+#[derive(Clone)]
 struct ModifierState {
     modifier: Modifier,
     permanent: bool,
@@ -317,33 +318,32 @@ impl ModifierChanges {
 }
 
 impl ModifierSnapshot {
-    /// Keep only the rows a refresh actually changed. An explicit modifier
-    /// write has its own lifetime and is not reverted with the refresh.
-    pub fn diff(self, mut after: Self, explicit: Option<(&str, &str)>) -> Option<ModifierChanges> {
+    /// Keep only the rows and detection cache a single step actually changed.
+    pub fn diff(&self, after: &Self) -> Option<ModifierChanges> {
         let mut changes = ModifierChanges {
-            worn_before: (self.worn != after.worn).then_some(self.worn),
+            worn_before: (self.worn != after.worn).then(|| self.worn.clone()),
             ..Default::default()
         };
-        for ((attribute, id), before) in self.rows {
-            let key = (attribute, id);
-            let after = after.rows.remove(&key);
-            let (attribute, id) = key;
-            if explicit != Some((&attribute, &id)) && Some(&before) != after.as_ref() {
+        for (key, before) in &self.rows {
+            let after = after.rows.get(key);
+            if Some(before) != after {
+                let (attribute, id) = key.clone();
                 changes.modifiers.push(ModifierChange {
                     attribute,
                     id,
-                    before: Some(before),
-                    after,
+                    before: Some(before.clone()),
+                    after: after.cloned(),
                 });
             }
         }
-        for ((attribute, id), after) in after.rows {
-            if explicit != Some((&attribute, &id)) {
+        for (key, after) in &after.rows {
+            if !self.rows.contains_key(key) {
+                let (attribute, id) = key.clone();
                 changes.modifiers.push(ModifierChange {
                     attribute,
                     id,
                     before: None,
-                    after: Some(after),
+                    after: Some(after.clone()),
                 });
             }
         }

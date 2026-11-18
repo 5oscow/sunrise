@@ -1005,7 +1005,7 @@ impl Game<'_> {
             } else {
                 None
             };
-            self.collect_mob_equipment_attributes(id, before, None);
+            self.collect_mob_equipment_attributes(id, before);
             return true;
         }
         // `LivingEntity.onEquipItem` for the entities that keep no equip state

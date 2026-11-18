@@ -1523,22 +1523,7 @@ pub(super) mod tests {
             })
             .unwrap();
             assert_eq!(gravity(game), 0.625);
-            let saved = sunrise_client::entity_nbt::mob_to_nbt(
-                &game.mobs[0],
-                [0, 0, 0, 1],
-                None,
-                None,
-                |_| None,
-                game.items(),
-            );
-            let Some(Tag::List(attrs)) = saved.get("attributes") else {
-                panic!("the mob must save its permanent attribute modifier");
-            };
-            let attribute = Tag::String(attribute.into());
-            let entry = attrs
-                .iter()
-                .find(|entry| entry.get("id") == Some(&attribute))
-                .unwrap();
+            let entry = saved_mob_attribute(game, entity, attribute);
             assert_eq!(
                 entry.get("modifiers"),
                 Some(&Tag::List(vec![Tag::compound([
@@ -1548,6 +1533,112 @@ pub(super) mod tests {
                 ])]))
             );
         });
+    }
+
+    fn saved_mob_attribute(game: &super::Game<'_>, entity: u32, attribute: &str) -> mod_api::Tag {
+        use mod_api::Tag;
+        let mob = game.mobs.iter().find(|mob| mob.id == entity).unwrap();
+        let saved = sunrise_client::entity_nbt::mob_to_nbt(
+            mob,
+            [0, 0, 0, 1],
+            None,
+            None,
+            |_| None,
+            game.items(),
+        );
+        let Some(Tag::List(attributes)) = saved.get("attributes") else {
+            panic!("the mob must save its live attributes");
+        };
+        let id = Tag::String(attribute.into());
+        attributes
+            .iter()
+            .find(|entry| entry.get("id") == Some(&id))
+            .unwrap()
+            .clone()
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn a_same_id_gear_refresh_only_keeps_its_overwrite_on_commit() {
+        use mod_api::{
+            AttributeModifier, AttributeOperation, EquipmentSlot, Identifier, ModifierLifetime, Tag,
+        };
+
+        for commit in [false, true] {
+            with_game(|game| {
+                let entity = zombie(game);
+                let living = game.living(game.entity(entity).unwrap()).unwrap();
+                let slot = EquipmentSlot::Chest;
+                let place = ItemPlace::Equipment { entity, slot };
+                let attribute = "minecraft:max_health";
+                let modifier = "test:bonus";
+                assert!(living.set_attribute_base(game, attribute, 20.0));
+                assert!(game.living_set_equipment(
+                    living,
+                    slot,
+                    Some(ItemStack::new("minecraft:diamond_chestplate", 1))
+                ));
+                let before = place.resource(game).unwrap();
+                let mut after = None;
+                let result = game.transaction(|host, tx| {
+                    place
+                        .edit(host, tx, |stack| {
+                            let rows = Tag::List(vec![Tag::compound([
+                                ("type", Tag::String(attribute.into())),
+                                ("id", Tag::String(modifier.into())),
+                                ("amount", Tag::Double(3.0f64.to_bits())),
+                                ("operation", Tag::String("add_value".into())),
+                                ("slot", Tag::String("chest".into())),
+                            ])]);
+                            stack
+                                .apply_components(
+                                    &[("minecraft:attribute_modifiers".into(), rows)].into(),
+                                )
+                                .unwrap();
+                        })
+                        .unwrap();
+                    assert_eq!(
+                        living.attribute_value(host, attribute),
+                        Some(20.0),
+                        "the edit is quiet"
+                    );
+                    after = place.resource(host);
+                    assert_ne!(after.as_ref(), Some(&before));
+                    assert!(living.add_attribute_modifier(
+                        host,
+                        attribute,
+                        AttributeModifier::new(
+                            Identifier::parse(modifier).unwrap(),
+                            5.0,
+                            AttributeOperation::AddValue
+                        ),
+                        ModifierLifetime::Permanent,
+                    ));
+                    assert_eq!(
+                        living.attribute_value(host, attribute),
+                        Some(23.0),
+                        "refresh applies the now-worn item"
+                    );
+                    commit.then_some(()).ok_or(())
+                });
+                assert_eq!(result.is_ok(), commit);
+                assert_eq!(
+                    place.resource(game),
+                    if commit { after } else { Some(before) }
+                );
+                assert_eq!(
+                    living.attribute_value(game, attribute),
+                    Some(if commit { 23.0 } else { 25.0 })
+                );
+                let entry = saved_mob_attribute(game, entity, attribute);
+                let permanent = Tag::List(vec![Tag::compound([
+                    ("id", Tag::String(modifier.into())),
+                    ("amount", Tag::Double(5.0f64.to_bits())),
+                    ("operation", Tag::String("add_value".into())),
+                ])]);
+                assert_eq!(entry.get("modifiers"), (!commit).then_some(&permanent));
+            });
+        }
     }
 
     /// A living entity's [`ENTITY_ITEMS`] is its equipment (#932): seven slots by

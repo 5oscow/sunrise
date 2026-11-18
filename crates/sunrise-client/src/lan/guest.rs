@@ -1848,13 +1848,16 @@ pub(super) fn network_stack(
         if let Some(display @ sunrise_core::nbt::Tag::Compound(_)) =
             d.saved_other("minecraft:tooltip_display")
         {
+            let mut seen = std::collections::HashSet::new();
             let hidden = match display.get("hidden_components") {
                 Some(sunrise_core::nbt::Tag::List(entries)) => entries
                     .iter()
                     .filter_map(|tag| {
                         let name = crate::save::text(Some(tag))?;
-                        synced_id("minecraft:data_component_type", &name)
+                        let name = sunrise_core::identifier::Identifier::parse(&name).ok()?;
+                        synced_id("minecraft:data_component_type", &name.to_string())
                     })
+                    .filter(|id| seen.insert(*id))
                     .collect(),
                 _ => Vec::new(),
             };
