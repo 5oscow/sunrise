@@ -180,9 +180,9 @@ def sync_stage(source: Path, destination: Path) -> None:
                 dest.write_bytes(data)
 
 
-def stage(target_dir: Path, stage_tool: Path | None = None) -> Path:
-    """Prepare the dylib-ready stage from HEAD's tracked bytes, never the working tree's. Run the staging
-    pass (#589) on a fresh copy so it can edit the source and emit build data as usual, then sync the result."""
+def stage(target_dir: Path, stage_tool: Path | None = None, *, sdk_dylibs: bool = False) -> Path:
+    """Stage HEAD's tracked bytes, never the working tree's. Run the staging pass (#589) on a fresh copy so
+    it can edit the source and emit build data, then sync the result. SDK builds also stage dylib manifests."""
     setup_started = time.monotonic()
     target_dir.mkdir(parents=True, exist_ok=True)
     staged = target_dir / "stage"
@@ -212,26 +212,31 @@ def stage(target_dir: Path, stage_tool: Path | None = None) -> Path:
         print(run(command + arguments, cwd=source, env=env), end="")
         print(f"{label}: {time.monotonic() - started:.3f}s (source copy/setup excluded)", flush=True)
 
-        # Only the prebuilt game splits API libraries and the wasm runtime out: with prefer-dynamic, rustc
-        # picks the dylibs rather than folding them into the game. Finish these edits before comparing bytes.
-        metadata = json.loads(run(["cargo", "metadata", "--format-version", "1"], cwd=scratch))
-        closure = api_closure(metadata)
-        for package in metadata["packages"]:
-            if package["id"] not in closure and package["name"] != "sunrise-mod-wasm":
-                continue
-            if not any(target["kind"] == ["lib"] for target in package["targets"]):
-                continue
-            manifest = Path(package["manifest_path"])
-            if not manifest.is_relative_to(scratch):
-                continue  # Registry dependencies are owned by Cargo, not rewritten.
-            text = manifest.read_text()
-            if "[lib]" in text:
-                text = text.replace("[lib]", '[lib]\ncrate-type = ["rlib", "dylib"]', 1)
-            else:
-                text += '\n[lib]\ncrate-type = ["rlib", "dylib"]\n'
-            manifest.write_text(text)
+        if sdk_dylibs:
+            prepare_sdk_manifests(scratch)
         sync_stage(scratch, staged)
     return staged
+
+
+def prepare_sdk_manifests(staged: Path) -> None:
+    """Split the API libraries and the wasm runtime out of the prebuilt game: with prefer-dynamic, rustc
+    picks the dylibs rather than folding them into the game."""
+    metadata = json.loads(run(["cargo", "metadata", "--format-version", "1"], cwd=staged))
+    closure = api_closure(metadata)
+    for package in metadata["packages"]:
+        if package["id"] not in closure and package["name"] != "sunrise-mod-wasm":
+            continue
+        if not any(target["kind"] == ["lib"] for target in package["targets"]):
+            continue
+        manifest = Path(package["manifest_path"])
+        if not manifest.is_relative_to(staged):
+            continue  # Registry dependencies are owned by Cargo, not rewritten.
+        text = manifest.read_text()
+        if "[lib]" in text:
+            text = text.replace("[lib]", '[lib]\ncrate-type = ["rlib", "dylib"]', 1)
+        else:
+            text += '\n[lib]\ncrate-type = ["rlib", "dylib"]\n'
+        manifest.write_text(text)
 
 
 def cargo_features(server: bool, platform: str) -> list[str]:
@@ -438,7 +443,7 @@ def build(out: Path, server: bool) -> None:
     layout = package_format(ROOT)
     # Resolved here: the staging and build steps run from the staged copy.
     target_dir = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")).resolve() / "prebuilt"
-    staged = stage(target_dir)
+    staged = stage(target_dir, sdk_dylibs=True)
     host = rustc_host()
 
     # One std for the game, every mod and the executable: the game links std dynamically, as mods will.

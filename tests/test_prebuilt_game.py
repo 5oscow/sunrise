@@ -86,6 +86,7 @@ class StageToolTests(unittest.TestCase):
             target = root / "output"
             tool = root / "unused" / ".." / "sunrise-stage"
             calls = []
+            metadata_calls = []
             real_run = prebuilt_game.run
 
             def capture(command, **kwargs):
@@ -95,9 +96,11 @@ class StageToolTests(unittest.TestCase):
                 self.assertEqual(scratch.parent, target)
                 self.assertNotEqual(scratch, target / "stage")
                 if command[:2] == ["cargo", "metadata"]:
-                    return json.dumps({"packages": [{"id": "wasm", "name": "sunrise-mod-wasm",
-                        "manifest_path": str(scratch / manifest.relative_to(source)), "targets": [{"kind": ["lib"]}]}],
-                        "resolve": {"nodes": []}})
+                    metadata_calls.append(scratch)
+                    package = {"id": "wasm", "name": "sunrise-mod-wasm",
+                               "manifest_path": str(scratch / manifest.relative_to(source)),
+                               "targets": [{"kind": ["lib"]}]}
+                    return json.dumps({"packages": [package], "resolve": {"nodes": []}})
                 calls.append(scratch)
                 self.assertEqual(command, [str(tool.resolve()), str(scratch), str(scratch / "points.json"),
                                           str(scratch / "internals.json"), commit])
@@ -112,6 +115,10 @@ class StageToolTests(unittest.TestCase):
                 staged = prebuilt_game.stage(target, stage_tool=tool)
                 self.assertEqual(staged, target / "stage")
                 staged_manifest = staged / manifest.relative_to(source)
+                self.assertEqual(staged_manifest.read_bytes(), manifest.read_bytes())
+                self.assertEqual(metadata_calls, [])
+
+                self.assertEqual(prebuilt_game.stage(target, stage_tool=tool, sdk_dylibs=True), staged)
                 self.assertEqual(staged_manifest.read_text(),
                                  "[package]\nname = 'fixture'\n\n[lib]\ncrate-type = [\"rlib\", \"dylib\"]\n")
                 # Both the stage tool and the manifest rewrite start over, but their output stays in place.
@@ -119,9 +126,10 @@ class StageToolTests(unittest.TestCase):
                 for file in (staged / "tracked.rs", staged_manifest):
                     os.utime(file, (1000, 1000))
                     mtimes[file] = file.stat().st_mtime_ns
-                self.assertEqual(prebuilt_game.stage(target, stage_tool=tool), staged)
+                self.assertEqual(prebuilt_game.stage(target, stage_tool=tool, sdk_dylibs=True), staged)
                 self.assertEqual({file: file.stat().st_mtime_ns for file in mtimes}, mtimes)
-            self.assertEqual(len(calls), 2)
+            self.assertEqual(len(calls), 3)
+            self.assertEqual(metadata_calls, calls[1:])
             self.assertTrue(all(not scratch.exists() for scratch in calls))
             self.assertTrue((source / "tracked.rs").read_bytes().endswith(b"fn edited() {}\r\n"))
 
