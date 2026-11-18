@@ -8327,7 +8327,7 @@ mod tests {
             ..Level::default()
         };
         level.write_without_player(&dir).unwrap();
-        let legacy = Tag::compound([("Health", Tag::Float(7.0))]);
+        let legacy = Tag::compound([("Health", Tag::Float(7.0_f32.to_bits()))]);
         let mut root = read_dat(&dir.join("level.dat")).unwrap();
         let Tag::Compound(root_map) = &mut root else {
             panic!("level.dat is a compound");
