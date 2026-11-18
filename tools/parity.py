@@ -24,8 +24,11 @@ toolchains change; otherwise its last pass stands.
 Vanilla oracles are reused too: tools/parity_shim.py stands in for java and
 javac and replays an oracle run whose inputs are unchanged, so a Rust-only
 change costs only the Rust side. A harness that fails while reusing oracle
-results is rerun fresh, and stops reusing them if it then passes. --all and
---fresh never reuse them.
+results is rerun fresh, and stops reusing them if it then passes. --fresh
+never reuses them, and --all only when PARITY_ORACLE_KEEP names a folder
+that outlives the checkout (the daily's CI keep): the shim keeps runs there
+and replays one only for the same command on byte-identical files, and a
+harness that passed only fresh is remembered there for FRESH_ONLY_DAYS.
 
 A harness listed in parity_hosts.json's "known_flaky" (each with its reason)
 that fails runs once more from scratch instead, and a pass then counts. Every
@@ -80,6 +83,9 @@ PROFILE = {
     "CARGO_PROFILE_DEV_OPT_LEVEL": "3",
 }
 SHIM = STATE_DIR / "shim"
+ORACLE_KEEP = Path(os.environ["PARITY_ORACLE_KEEP"]) if os.environ.get("PARITY_ORACLE_KEEP") else None
+# The CI keep holds 20 GiB and is emptied whole when over: kept oracle runs stay well under it.
+ORACLE_KEEP_BUDGET, ORACLE_KEEP_DAYS, FRESH_ONLY_DAYS = 12 << 30, 14, 30
 # Results shared by every worktree using the same vanilla data (.local/minecraft
 # links to a shared directory in parallel worktrees): passes keyed by content,
 # so a harness whose inputs match one that passed elsewhere doesn't run again.
@@ -1100,11 +1106,48 @@ def keep_first_log(label):
     return kept
 
 
-def run(selected, state, hasher, environment_digest, executors, reuse_oracles, rounds=None, known_flaky=None):
+def prune_oracle_keep(keep):
+    """Drop kept oracle runs unused for ORACLE_KEEP_DAYS and the folders a killed writer left, then the least
+    recently used runs until the keep fits ORACLE_KEEP_BUDGET (tools/parity_shim.py touches a run it replays)."""
+    now, kept = time.time(), []
+    for entry in keep.glob("??/*"):
+        age = now - entry.stat().st_mtime
+        if age > ORACLE_KEEP_DAYS * 86400 or (entry.name.startswith(".") and age > 86400):
+            shutil.rmtree(entry, ignore_errors=True)
+        elif not entry.name.startswith("."):
+            kept.append((entry.stat().st_mtime, sum(file.stat().st_size for file in entry.rglob("*") if file.is_file()),
+                         entry))
+    total = sum(size for _, size, _ in kept)
+    for _, size, entry in sorted(kept):
+        if total <= ORACLE_KEEP_BUDGET:
+            break
+        shutil.rmtree(entry, ignore_errors=True)
+        total -= size
+
+
+def fresh_only(keep):
+    """{harness: date} of the harnesses that passed only without kept oracle runs, within FRESH_ONLY_DAYS."""
+    listing = keep / "fresh-only.json"
+    names = json.loads(listing.read_text(encoding="utf-8")) if listing.exists() else {}
+    oldest = time.strftime("%Y-%m-%d", time.gmtime(time.time() - FRESH_ONLY_DAYS * 86400))
+    return {name: day for name, day in names.items() if day >= oldest}
+
+
+def remember_fresh_only(keep, names, results):
+    today = time.strftime("%Y-%m-%d", time.gmtime())
+    names = dict(names, **{name: today for name, record in results.items() if record.get("oracle_reuse") is False})
+    temporary = keep / f".fresh-only.{os.getpid()}.json"
+    temporary.write_text(json.dumps(names, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+    temporary.replace(keep / "fresh-only.json")
+
+
+def run(selected, state, hasher, environment_digest, executors, reuse_oracles, rounds=None, known_flaky=None,
+        no_reuse=()):
     """Run the selected harnesses on the executors. rounds: how many times each must run (default once); its runs
     must agree, and a harness that both passes and fails is reported as flaky and recorded as failing.
     known_flaky ({name: reason}, tools/parity_hosts.json): a harness listed there that fails its single round runs
-    once more, from scratch; its record keeps `retried` (the first run's log is kept beside its own)."""
+    once more, from scratch; its record keeps `retried` (the first run's log is kept beside its own).
+    no_reuse: harnesses that never reuse oracle results in this run."""
     records = state["harnesses"]
     rounds = rounds or {}
     known_flaky = known_flaky or {}
@@ -1133,7 +1176,7 @@ def run(selected, state, hasher, environment_digest, executors, reuse_oracles, r
                 name = harness_of(pick)
                 # A retry runs the oracle again too: it may be the side that failed (mob_ai's heap).
                 reuse = reuse_oracles and records.get(name, {}).get("oracle_reuse", True) and pick not in retried \
-                    and name not in second_chance
+                    and name not in second_chance and name not in no_reuse
                 if not executor.start(pick, selected[name], reuse, records.get(name, {}).get("peak_bytes", DEFAULT_MEMORY),
                                       SHARDS.get(name)):
                     break
@@ -1801,7 +1844,12 @@ def main():
             print(f"Probes built in {time.monotonic() - started:.0f}s.", flush=True)
         where = "".join(f", plus {host}" for host in hosts)
         print(f"Running {len(selected)} harnesses, {jobs} at a time here{where}...", flush=True)
-        reuse_oracles = not (args.fresh or args.all)
+        reuse_oracles = not args.fresh and (not args.all or ORACLE_KEEP is not None)
+        kept_fresh_only = {}
+        if reuse_oracles and ORACLE_KEEP:
+            ORACLE_KEEP.mkdir(parents=True, exist_ok=True)
+            prune_oracle_keep(ORACLE_KEEP)
+            kept_fresh_only = fresh_only(ORACLE_KEEP)
         local = LocalExecutor(jobs, int(memory_available() * 0.75), args.timeout,
                               REMOTE_LOCAL_PEAK if remotes and args.jobs is None else None)
         local.solo = solo_harnesses(config)
@@ -1812,7 +1860,9 @@ def main():
             print(f"Alone on this machine ({SOLO_CPUS} CPUs or fewer), after the others: "
                   f"{', '.join(sorted(local.solo & {harness_of(name) for name in selected}))}", flush=True)
         results, elapsed = run(selected, state, hasher, environment_key(hasher), [*remotes, local], reuse_oracles,
-                               rounds, known_flaky(config))
+                               rounds, known_flaky(config), set(kept_fresh_only))
+        if reuse_oracles and ORACLE_KEEP:
+            remember_fresh_only(ORACLE_KEEP, kept_fresh_only, results)
     finally:
         for executor in [*remotes, *([local] if local else [])]:
             executor.stop()

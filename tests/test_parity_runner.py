@@ -570,6 +570,25 @@ class OracleReuseTests(unittest.TestCase):
         self.assertEqual(self.oracle(), 3)
         self.assertEqual(self.output.read_text(), "b")
 
+    def test_a_new_checkout_replays_a_run_from_the_keep(self):
+        import shutil
+        keep = self.bin.parent / "keep"
+        self.env["PARITY_ORACLE_KEEP"] = str(keep)
+        self.assertEqual(self.oracle(), 1)
+        # A new checkout: no record of its own, no outputs.
+        shutil.rmtree(self.env["PARITY_SHIM_CACHE"])
+        self.output.unlink()
+        self.input.write_text("a")
+        self.assertEqual(self.oracle(), 1)  # replayed from the keep, stdout included
+        self.assertEqual(self.output.read_text(), "a")
+        self.assertEqual(self.oracle(), 1)  # and then from its own record
+        shutil.rmtree(self.env["PARITY_SHIM_CACHE"])
+        self.output.unlink()
+        self.input.write_text("b")
+        self.assertEqual(self.oracle(), 2)
+        self.assertEqual(self.output.read_text(), "b")
+        self.assertEqual(len([entry for entry in keep.glob("??/*") if not entry.name.startswith(".")]), 2)
+
     def wrapper(self, folder, put_the_shim_back=False):
         """A `java` that runs the first other `java` on PATH, as JDK selectors and build wrappers do. It stops
         itself after a few rounds, so a shim that loops fails this test instead of filling the machine."""
@@ -608,6 +627,33 @@ class OracleReuseTests(unittest.TestCase):
         from tools import parity_shim
         with mock.patch.dict(os.environ, PARITY_SHIM_REAL_PATH=f"{self.shim}:{self.bin}"):
             self.assertEqual(Path(parity_shim.real("java")), self.bin / "java")
+
+
+class OracleKeepTests(unittest.TestCase):
+    def test_pruning_drops_old_runs_then_the_least_recently_used(self):
+        import os, time
+        with tempfile.TemporaryDirectory() as tmp:
+            keep, now = Path(tmp), time.time()
+            def entry(name, age, size):
+                (keep / "ab" / name).mkdir(parents=True)
+                (keep / "ab" / name / "stdout").write_bytes(b"x" * size)
+                os.utime(keep / "ab" / name, (now - age, now - age))
+            entry("old", 15 * 86400, 1)
+            entry(".killed-writer.tmp", 2 * 86400, 1)
+            entry("used-long-ago", 3600, 8)
+            entry("used-lately", 60, 8)
+            with mock.patch.object(parity, "ORACLE_KEEP_BUDGET", 10):
+                parity.prune_oracle_keep(keep)
+            self.assertEqual(sorted(path.name for path in (keep / "ab").iterdir()), ["used-lately"])
+
+    def test_harnesses_that_pass_only_fresh_are_remembered_for_a_while(self):
+        import time
+        with tempfile.TemporaryDirectory() as tmp:
+            keep = Path(tmp)
+            long_ago = time.strftime("%Y-%m-%d", time.gmtime(time.time() - 40 * 86400))
+            parity.remember_fresh_only(keep, {"expired": long_ago},
+                                       {"loot": {"oracle_reuse": False}, "light": {"oracle_reuse": True}})
+            self.assertEqual(set(parity.fresh_only(keep)), {"loot"})
 
 
 

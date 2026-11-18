@@ -18,6 +18,15 @@ stops reusing its oracle results.
 
 A run that reads stdin from a pipe, or fails, is never cached.
 PARITY_JAVA_CACHE=0 disables reuse (tools/parity.py --fresh).
+
+PARITY_ORACLE_KEEP names a folder that outlives the checkout (the daily's
+per-repository CI keep). There a run is also kept by content: its command
+and the hash of every file under its named paths before it ran, with its
+stdout, stderr and the content of its outputs. A checkout with no record of
+its own replays a kept run whose command and files match exactly, writing
+its outputs back. Entries are written under a temporary name in the keep
+and moved into place, so a reader never sees half of one; a run whose
+outputs are larger than KEPT_FILE or KEPT_RUN is not kept.
 """
 
 import hashlib
@@ -31,6 +40,10 @@ import sys
 import threading
 
 CACHE = Path(os.environ.get("PARITY_SHIM_CACHE", ".local/parity-runner/oracle-cache"))
+KEEP = Path(os.environ["PARITY_ORACLE_KEEP"]) if os.environ.get("PARITY_ORACLE_KEEP") else None
+KEEP_FORMAT = 1
+# Larger oracle outputs (chunk dumps) run again instead: the keep holds 20 GiB for every kept run.
+KEPT_FILE, KEPT_RUN = 64 << 20, 256 << 20
 PATH_OPTIONS = {"-cp", "-classpath", "--class-path", "-sourcepath", "--source-path", "-p", "--module-path"}
 
 
@@ -186,6 +199,55 @@ def reusable(saved, paths, hashes):
     return all(hashes.file(path) == sha for path, sha in saved["inputs"].items())
 
 
+def keep_entry(command, inputs):
+    """The keep's folder for this command run on exactly these files."""
+    digest = hashlib.sha256(json.dumps({"format": KEEP_FORMAT, "command": command, "inputs": inputs},
+                                       sort_keys=True).encode()).hexdigest()
+    return KEEP / digest[:2] / digest
+
+
+def restore(entry):
+    """Write a kept run's outputs back; returns their paths, its stdout and its stderr."""
+    kept = json.loads((entry / "run.json").read_text())
+    for index, path in enumerate(kept["outputs"]):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        temporary = f"{path}.{os.getpid()}.restore"
+        shutil.copyfile(entry / "files" / str(index), temporary)
+        os.replace(temporary, path)
+    # Its mtime orders the keep's pruning (tools/parity.py): a replayed run stays.
+    os.utime(entry)
+    return kept["outputs"], (entry / "stdout").read_bytes(), (entry / "stderr").read_bytes()
+
+
+def keep(entry, outputs, captured):
+    """Keep a run for later checkouts, unless its outputs are too large. Best effort: a full or vanished keep
+    costs only the reuse."""
+    sizes = [os.path.getsize(path) for path in outputs]
+    if entry.exists() or any(size > KEPT_FILE for size in sizes) or sum(sizes) > KEPT_RUN:
+        return
+    temporary = entry.parent / f".{entry.name}.{os.getpid()}.tmp"
+    try:
+        (temporary / "files").mkdir(parents=True)
+        for index, path in enumerate(outputs):
+            shutil.copyfile(path, temporary / "files" / str(index))
+        (temporary / "stdout").write_bytes(captured["stdout"])
+        (temporary / "stderr").write_bytes(captured["stderr"])
+        (temporary / "run.json").write_text(json.dumps({"outputs": list(outputs)}))
+        os.rename(temporary, entry)
+    except OSError:
+        # Another harness kept the same run first, or the keep is full.
+        shutil.rmtree(temporary, ignore_errors=True)
+
+
+def record_run(record, key, command, inputs, outputs, stdout, stderr):
+    (CACHE / f"{key}.stdout").write_bytes(stdout)
+    (CACHE / f"{key}.stderr").write_bytes(stderr)
+    temporary = record.with_suffix(f".{os.getpid()}.tmp")
+    temporary.write_text(json.dumps({"command": command, "inputs": inputs, "outputs": outputs}))
+    temporary.replace(record)
+    note_outputs(outputs)
+
+
 def main():
     name = os.path.basename(sys.argv[0])
     arguments = sys.argv[1:]
@@ -209,19 +271,24 @@ def main():
         return 0
     before = snapshot(paths)
     inputs = {path: hashes.file(path) for path in files_under(paths)}
+    entry = keep_entry(command, inputs) if KEEP else None
+    if entry and (entry / "run.json").exists():
+        restored, stdout, stderr = restore(entry)
+        outputs = {path: snapshot([path])[path] for path in restored}
+        record_run(record, key, command, {path: sha for path, sha in inputs.items() if path not in outputs}, outputs,
+                   stdout, stderr)
+        sys.stdout.buffer.write(stdout)
+        sys.stderr.buffer.write(stderr)
+        return 0
     status, captured = run_and_tee([program, *arguments])
     if status != 0:
         return status
     after = snapshot(paths)
     outputs = {path: stamp for path, stamp in after.items() if stamp is not None and before.get(path) != stamp}
-    for path in outputs:
-        inputs.pop(path, None)
-    (CACHE / f"{key}.stdout").write_bytes(captured["stdout"])
-    (CACHE / f"{key}.stderr").write_bytes(captured["stderr"])
-    temporary = record.with_suffix(f".{os.getpid()}.tmp")
-    temporary.write_text(json.dumps({"command": command, "inputs": inputs, "outputs": outputs}))
-    temporary.replace(record)
-    note_outputs(outputs)
+    if entry:
+        keep(entry, outputs, captured)
+    record_run(record, key, command, {path: sha for path, sha in inputs.items() if path not in outputs}, outputs,
+               captured["stdout"], captured["stderr"])
     return 0
 
 
