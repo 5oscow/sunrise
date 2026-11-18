@@ -11,14 +11,16 @@ and every launcher and `sunrise-server update` install it ([Nightly only](#night
 Rollups, syncs and main's pushes are checked by one gate, `dyna-checks` (`.github/workflows/dyna-ci.yml`: `lint`,
 `verify`, `verify-static`); a plain pull request gets its cheap checks there (`format`, `verify-static`)
 ([CONTRIBUTING.md](../CONTRIBUTING.md#ci-tiers)), forks' included. The `checks` workflow (`.github/workflows/ci.yml`)
-runs a full `verify` of main on GitHub's runners every 6 hours, and on any ref by hand
-(`gh workflow run checks --ref <ref> -f verify=true`); no pull request starts it. Until 2026-11-18 every push to a
-fork's pull request ran it, which held the organisation's GitHub-hosted runners ahead of the release jobs. A dispatch
-without `verify` runs only its by-hand jobs (Windows ARM64 and JFR analysis):
+runs a full `verify` of main on GitHub's runners every 6 hours, on any ref by hand
+(`gh workflow run checks --ref <ref> -f verify=true`), and on a pull request, a fork's included, when a maintainer adds
+the label `ci:verify`. Pushes never start it: until 2026-11-18 every push to a fork's pull request ran it, which held
+the organisation's GitHub-hosted runners ahead of the release jobs. The label stays after the run (a fork's run has a
+read-only token, and no fork code ever gets a writing one); remove it and add it again to run `verify` on a newer
+head. A dispatch without `verify` runs only its by-hand jobs (Windows ARM64 and JFR analysis):
 
 | Job | Runs on | What | Time |
 | --- | --- | --- | --- |
-| `verify` | Scheduled runs on main and dispatches with `verify`, on GitHub's `ubuntu-24.04` | Three jobs side by side: the public-tree check and Python tests (`verify (tree and tools)`), rustfmt and clippy with warnings denied (`verify (format and lint)`), the Rust tests of the whole workspace (`verify (Rust tests)`); `verify` waits for them and passes when each passed. Dependencies and the workspace build come from a cache saved by scheduled runs on main | ~8 min |
+| `verify` | Scheduled runs on main, dispatches with `verify` and pull requests labelled `ci:verify`, on GitHub's `ubuntu-24.04` | Three jobs side by side: the public-tree check and Python tests (`verify (tree and tools)`), rustfmt and clippy with warnings denied (`verify (format and lint)`), the Rust tests of the whole workspace (`verify (Rust tests)`); `verify` waits for them and passes when each passed. Dependencies and the workspace build come from a cache saved by scheduled runs on main | ~8 min |
 
 `verify` runs even in a cancelled run of `checks`, so it fails there instead of being skipped. Its public-tree check
 reads every ref's history.

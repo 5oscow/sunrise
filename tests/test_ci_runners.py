@@ -171,12 +171,16 @@ class OwnRunnerTests(unittest.TestCase):
 
     def test_checks_verify_runs_on_main_not_on_pull_requests(self):
         text = (WORKFLOWS / "ci.yml").read_text()
-        # Pull requests get dyna-checks; a fork's push held GitHub's runners ahead of the release jobs (2026-11-18).
-        self.assertEqual(triggers(text), {"schedule", "workflow_dispatch"})
+        # A push gets dyna-checks; a fork's push held GitHub's runners ahead of the release jobs (2026-11-18). A pull
+        # request runs verify only when a maintainer labels it, and never with a token that writes.
+        self.assertEqual(triggers(text), {"pull_request", "schedule", "workflow_dispatch"})
+        self.assertIn("  pull_request:\n    types: [labeled]\n", text)
+        self.assertNotRegex(text, r":\s*write")
         ci = dict(jobs(text))
         for part in ("verify-tree", "verify-lint", "verify-test"):
             with self.subTest(part=part):
-                self.assertIn("if: github.event_name == 'schedule' || inputs.verify", ci[part])
+                self.assertIn("if: github.event_name == 'schedule' || inputs.verify || "
+                              "github.event.label.name == 'ci:verify'", ci[part])
         self.assertIn("needs: [verify-tree, verify-lint, verify-test]", ci["verify"])
         # Never skipped where its parts ran: GitHub counts a skipped required check as passed.
         self.assertIn("if: always()", ci["verify"])

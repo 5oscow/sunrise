@@ -1,11 +1,16 @@
 name: checks
-# verify: a full check of main on GitHub's runners, every 6 hours and by hand (`gh workflow run checks -f verify=true`).
-# Pull requests get dyna-checks' cheap checks (format, verify-static), and rollups, syncs and main's pushes its heavy gate
-# on Dyna's runners (.github/workflows/dyna-ci.yml, tools/ci/pr_gate.py), so no pull request waits on GitHub's runners
-# for it: a fork's pull requests ran it there on every push and held the organisation's hosted runners ahead of the
-# release jobs (2026-11-18). The scheduled run also tries main on the newest stable Rust and saves the Rust caches it
-# reads. A dispatch without `verify` runs only the by-hand jobs at the end. See docs/release-flow.md.
+# verify: a full check on GitHub's runners of main every 6 hours, of a ref by hand (`gh workflow run checks -f
+# verify=true`), and of a pull request when a maintainer adds the label `ci:verify`. A push to a pull request gets
+# dyna-checks' cheap checks only (format, verify-static), and rollups, syncs and main's pushes its heavy gate on Dyna's
+# runners (.github/workflows/dyna-ci.yml, tools/ci/pr_gate.py): a fork's pull requests ran verify on every push and held
+# the organisation's hosted runners ahead of the release jobs (2026-11-18). The label stays on the pull request: a
+# fork's run gets a read-only token, so nothing here can remove it, and no write token is ever given to a fork's code
+# (no pull_request_target). To run it again, remove the label and add it again. The scheduled run also tries main on the
+# newest stable Rust and saves the Rust caches it reads. A dispatch without `verify` runs only the by-hand jobs at the
+# end. See docs/release-flow.md.
 on:
+  pull_request:
+    types: [labeled]
   schedule:
     - cron: '41 */6 * * *'
   workflow_dispatch:
@@ -29,7 +34,7 @@ jobs:
   #
   verify-tree:
     name: verify (tree and tools)
-    if: github.event_name == 'schedule' || inputs.verify
+    if: github.event_name == 'schedule' || inputs.verify || github.event.label.name == 'ci:verify'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -57,7 +62,7 @@ jobs:
         run: python -m unittest discover -s tests -v
   verify-lint:
     name: verify (format and lint)
-    if: github.event_name == 'schedule' || inputs.verify
+    if: github.event_name == 'schedule' || inputs.verify || github.event.label.name == 'ci:verify'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -87,7 +92,7 @@ jobs:
         run: python3 tools/ci/check_api_boundary.py
   verify-test:
     name: verify (Rust tests)
-    if: github.event_name == 'schedule' || inputs.verify
+    if: github.event_name == 'schedule' || inputs.verify || github.event.label.name == 'ci:verify'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -119,7 +124,8 @@ jobs:
           cargo +stable test --locked --workspace --doc
   verify:
     needs: [verify-tree, verify-lint, verify-test]
-    # Skipped with its parts on a dispatch of the by-hand jobs; otherwise it runs even in a cancelled run.
+    # Skipped with its parts on a dispatch of the by-hand jobs and on another label; otherwise it runs even in a
+    # cancelled run.
     if: always() && needs.verify-tree.result != 'skipped'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
