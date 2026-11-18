@@ -17,6 +17,70 @@ impl HookParts {
     ) -> &[Attached<dyn MenuPart>] {
         attached(&self.menus, id)
     }
+    /// The screen hooks' lookup: the part that owns the screen of menu type `menu` opened as
+    /// mod block `block`'s menu, alone. A mod menu type has one such part (registration refuses
+    /// a second); one of vanilla's has one per mod, and a mod's block gets its own mod's.
+    pub(crate) fn menu_screen(&self, menu: &str, block: Option<&str>) -> &[Attached<dyn MenuPart>] {
+        let parts = attached(&self.menus, || Some(menu));
+        if !vanilla_menu(menu) {
+            return parts;
+        }
+        let Some((namespace, _)) = block.and_then(|b| b.split_once(':')) else {
+            return &[];
+        };
+        match parts
+            .iter()
+            .position(|p| owns_namespace(p.mod_id, namespace))
+        {
+            Some(i) => std::slice::from_ref(&parts[i]),
+            None => &[],
+        }
+    }
+}
+
+/// The hooks a menu type's screen is made of, one part per screen answering them all.
+const SCREEN_HOOKS: [HookId; 4] = [
+    HookId::Screen,
+    HookId::ScreenDraw,
+    HookId::ScreenClick,
+    HookId::ScreenTooltip,
+];
+
+/// Whether `part` answers a screen hook: then it owns the screens it is asked for.
+pub fn lays_out_screen(part: &dyn MenuPart) -> bool {
+    let mut subscribed = part.menu_subscribed().iter().flatten();
+    subscribed.any(|&hook| {
+        SCREEN_HOOKS
+            .iter()
+            .any(|&screen| screen as usize == hook as usize)
+    })
+}
+
+/// Whether screen parts of mods `a` and `b` on menu type `menu` would own the same screens,
+/// which registration refuses: always on a mod's menu type, and on one of vanilla's only for
+/// one mod, as each mod's blocks get their own mod's part (`HookParts::menu_screen`).
+pub fn screens_shared(menu: &str, a: &str, b: &str) -> bool {
+    !vanilla_menu(menu) || a == b
+}
+
+fn vanilla_menu(menu: &str) -> bool {
+    menu.starts_with("minecraft:")
+}
+
+/// The mod whose part owns the screen of menu type `menu` opened as `block`'s menu, the one
+/// mod its screen hooks reach; None when no part lays one out.
+pub fn menu_screen_owner(menu: &str, block: Option<&str>) -> Option<&'static str> {
+    SCREEN_HOOKS
+        .into_iter()
+        .filter(|&hook| has_part_hook(hook))
+        .find_map(|hook| {
+            let parts = parts(hook, "screen owner");
+            parts
+                .for_hook(hook)?
+                .menu_screen(menu, block)
+                .first()
+                .map(|p| p.mod_id)
+        })
 }
 
 /// Whether the Parts attached to the menu type `menu` subscribe to `hook`; the game

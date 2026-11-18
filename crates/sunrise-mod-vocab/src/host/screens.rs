@@ -48,7 +48,7 @@ pub trait ScreensClientHost {
     /// Where the open screen of mod menu type `menu` puts container slot `slot` from the next
     /// frame (`Slot.x`, `Slot.y` in GUI pixels from the screen's top left, the item's top left
     /// corner): where `set_screen_slot` last put it, else where the screen declared it. None
-    /// for a hidden slot, another menu type's screen, or none open.
+    /// for a hidden slot, another menu type's or another mod's screen, or none open.
     #[access(ClientSetup)]
     fn screen_slot(&self, menu: &str, slot: usize) -> Option<[f32; 2]>;
     /// Side: client.
@@ -59,7 +59,8 @@ pub trait ScreensClientHost {
     /// box around it), its highlight, its contents, its empty-slot icon and the recipe book's
     /// ghost items; a hidden one is none of these. A position outside the image is allowed.
     /// The change lasts until the screen closes, and the next open starts from the declared
-    /// layout. Nothing is sent: the server's menu keeps every slot, so a hidden slot keeps its
+    /// layout. Only the mod whose part owns the open screen moves its slots. Nothing is sent:
+    /// the server's menu keeps every slot, so a hidden slot keeps its
     /// item and a shift-click may still fill it, as a deactivated Java slot does, and a slot
     /// the screen hid when it opened stays hidden. It takes `&self`, so a screen hook may call
     /// it every frame; repeating a slot's current place changes nothing and costs no layout

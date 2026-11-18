@@ -7,13 +7,14 @@ pub trait Hooks {
     /// (a block, an item's use, an entity, a command). `block` is the mod
     /// block at the menu's position whose container opens this menu type,
     /// and `None` when there is none (`player_open_mod_menu` without such a
-    /// position): blocks that share a menu type branch on it. A mod menu type
-    /// with no answer has no screen, and its window closes again. For a
-    /// block's menu the server asks it too: a slot it hides is not in the
-    /// menu there either, so shift-clicks never fill it. A menu opened with
-    /// `player_open_mod_menu` keeps every slot on the server, as a
-    /// `set_screen_slot` hide does. A recipe-book menu's registered screen opens only for its
-    /// block's menu.
+    /// position): blocks that share a menu type branch on it. One part owns a
+    /// screen and alone hears its four hooks: a mod menu type takes one part
+    /// answering them, and a vanilla one takes one per mod, asked only for
+    /// that mod's blocks; a second is refused at load. A mod menu type
+    /// with no answer has no screen, and its window closes again. The server
+    /// asks it too, whatever opened the menu: a slot it hides takes no
+    /// shift-click there. A recipe-book menu's registered screen opens only
+    /// for its block's menu.
     #[hook(
         version = 2,
         side = "both",

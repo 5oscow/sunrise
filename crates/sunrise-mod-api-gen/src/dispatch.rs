@@ -314,6 +314,16 @@ pub(super) fn emit<'a>(
                         .collect::<String>()
                         == "Option<BlockEntityRef>"
             });
+        // A menu hook told the mod block whose menu it is reaches only the part
+        // that owns that open screen (`HookParts::menu_screen`).
+        let screen_routed = hook
+            .scope
+            .as_ref()
+            .is_some_and(|scope| scope.kind == PartKind::Menu)
+            && args.iter().any(|(arg, ty)| {
+                arg == "block"
+                    && ty.to_token_stream().to_string().replace(' ', "") == "Option<&str>"
+            });
         // A scoped hook's parts: the trait its method goes on, and the lookup
         // of the parts attached to the thing its `key` argument names.
         let scoped = match &hook.scope {
@@ -358,6 +368,7 @@ pub(super) fn emit<'a>(
                     "BlockEntityTypeKey" if table == "block_entity" => format!(
                         "block_entity_kind(|| super::content::registry_keys::block_entity_type_name({key}))"
                     ),
+                    "& str" if screen_routed => format!("menu_screen({key}, block)"),
                     "& str" => format!("{table}(|| Some({key}))"),
                     "BlockEntityRef" if table == "block_entity" => {
                         let host = &host.as_ref().ok_or("block entity handle needs a Host")?.0;

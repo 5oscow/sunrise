@@ -3119,8 +3119,17 @@ impl Game<'_> {
     /// `slot` from the next frame: the mod's last move, else the screen's
     /// declaration; None for a hidden slot, another menu type's screen or none.
     pub(in crate::game) fn screen_slot(&self, menu: &str, slot: usize) -> Option<[f32; 2]> {
-        let s = self.shown_native_screen().filter(|s| s.menu == menu)?;
+        let s = self.owned_native_screen(menu)?;
         s.slot_moves.latest(&s.screen.slots, slot)
+    }
+    /// The open screen of menu type `menu`, when the mod calling (if one is)
+    /// owns it: another mod's part on a shared vanilla type moves no slot of it.
+    fn owned_native_screen(&self, menu: &str) -> Option<&OpenNativeScreen> {
+        let s = self.shown_native_screen().filter(|s| s.menu == menu)?;
+        let owner = || mod_api::__private::menu_screen_owner(&s.menu, s.block.as_deref());
+        mod_api::content::crash::current_native_mod()
+            .is_none_or(|calling| owner() == Some(calling))
+            .then_some(s)
     }
     /// Moves container slot `slot` of the open screen of menu type `menu` to `pos`
     /// (relative to the screen's origin), or hides it with None, from the
@@ -3132,8 +3141,7 @@ impl Game<'_> {
         pos: Option<[f32; 2]>,
     ) -> Result<(), mod_api::ScreenSlotRefusal> {
         let s = self
-            .shown_native_screen()
-            .filter(|s| s.menu == menu)
+            .owned_native_screen(menu)
             .ok_or(mod_api::ScreenSlotRefusal::NoScreen)?;
         s.slot_moves.set(&s.screen.slots, slot, pos)
     }

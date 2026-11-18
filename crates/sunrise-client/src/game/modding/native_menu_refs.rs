@@ -167,7 +167,10 @@ impl Game<'_> {
         (host.hub.holder_guest(guest.uuid, self.dim.id())?.conn == guest.conn).then_some(())?;
         (guest.menu_generation == menu.fields().generation).then_some(())?;
         if let Some(open) = &guest.menu {
-            (open.window == menu.fields().window && open.hidden.is_empty()).then_some(guest)
+            // A native menu's slots are the mods' own: its hidden ones only
+            // keep the game's shift-clicks out (`place_menu_click`).
+            let hidden_ok = open.hidden.is_empty() || open.slots == Slots::Native;
+            (open.window == menu.fields().window && hidden_ok).then_some(guest)
         } else {
             let play = host.play.get(&guest.conn);
             let menus = host.menus.get(&guest.conn);

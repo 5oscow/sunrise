@@ -113,7 +113,8 @@ impl Game<'_> {
     /// `ServerPlayer.openMenu(provider, extraDataWriter)` for a content mod menu type and no
     /// block: the type's container slots show empty and their clicks reach the mods, as
     /// `open_menu`'s do; `extra` and `pos` go first in its `sunrise:menu_extra` payload, and
-    /// `replace` is the provider's choice of the client's close, as for `open_menu`.
+    /// `replace` is the provider's choice of the client's close, as for `open_menu`. The slots
+    /// its screen hides at open (`native_hidden_slots`) take no shift-click there.
     pub(super) fn player_open_mod_menu(
         &mut self,
         player: mod_api::PlayerRef,
@@ -150,17 +151,22 @@ impl Game<'_> {
             return Ok(None);
         }
         self.close_for_open(conn, replace);
+        let pos = pos.map(|[x, y, z]| (x, y, z));
+        let hidden = self.native_hidden_slots(&id, pos, kind.slots);
         let host = self.lan.as_mut().ok_or(OpenMenuError::PlayerUnavailable)?;
         let window = host.hub.open_menu_window(
             conn,
             &id,
             component_nbt(&title.component()),
-            pos.map(|[x, y, z]| (x, y, z)),
+            pos,
             sunrise_client::lan::menu::Slots::Native,
             vec![None; kind.slots],
             Some(extra),
         );
         if window.is_some() {
+            if !hidden.is_empty() {
+                host.hub.hide_menu_slots(conn, hidden);
+            }
             self.player_menu_opening(conn);
         }
         Ok(window)

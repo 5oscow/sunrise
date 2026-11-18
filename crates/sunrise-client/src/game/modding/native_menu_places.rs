@@ -354,11 +354,10 @@ impl Game<'_> {
         let Some((backed_window, count, locked)) = self.menu_places_of(conn) else {
             return false;
         };
-        let Some(size) = self
-            .lan
-            .as_ref()
-            .and_then(|lan| Some(lan.hub.guest(conn)?.menu.as_ref()?.size))
-        else {
+        let Some((size, hidden)) = self.lan.as_ref().and_then(|lan| {
+            let open = lan.hub.guest(conn)?.menu.as_ref()?;
+            Some((open.size, open.hidden.clone()))
+        }) else {
             return false;
         };
         if backed_window != window {
@@ -386,7 +385,7 @@ impl Game<'_> {
             if pickup {
                 click_pickup(host, menu, at, button == 1);
             } else {
-                click_quick_move(host, menu, at, size, count);
+                click_quick_move(host, menu, at, size, count, &hidden);
             }
         }
         if self.refresh_menu_places(conn, uuid, menu)
@@ -441,14 +440,16 @@ fn click_pickup(host: &mut dyn ServerHost, menu: MenuRef, at: usize, right: bool
 
 /// `QUICK_MOVE` on menu slot `at` of a menu of `size` container slots, `count` of them backed
 /// (`ChestMenu.quickMoveStack`): a container slot's stack goes to the inventory, hotbar end
-/// first; an inventory slot's into the backed slots in order. Onto matching stacks first, then
-/// into empty slots (`moveItemStackTo`), all or nothing.
+/// first; an inventory slot's into the backed slots in order, past the `hidden` ones its screen
+/// does not show. Onto matching stacks first, then into empty slots (`moveItemStackTo`), all or
+/// nothing.
 fn click_quick_move(
     host: &mut dyn ServerHost,
     menu: MenuRef,
     at: usize,
     size: usize,
     count: usize,
+    hidden: &[usize],
 ) {
     let from = ItemPlace::MenuSlot { menu, slot: at };
     let Some(resource) = from.resource(host) else {
@@ -470,6 +471,9 @@ fn click_quick_move(
                 } else {
                     first + i
                 };
+                if hidden.contains(&slot) {
+                    continue;
+                }
                 let to = ItemPlace::MenuSlot { menu, slot };
                 match to.resource(host) {
                     Some(here) if merge && here == resource => {}
@@ -798,5 +802,135 @@ mod tests {
             g.inventory[1] = Some(ItemStack::new("minecraft:shulker_box", 1));
             g.selected = 1;
         });
+    }
+
+    /// A held box's menu, opened from code at the mod block whose container opens its type:
+    /// the type's screen hides slot 0 there.
+    struct SatchelScreen;
+    #[mod_api::sunrise_part]
+    impl mod_api::MenuPart for SatchelScreen {
+        fn screen(
+            &self,
+            _: &dyn mod_api::Host,
+            _: &mut mod_api::ScreenEvent<'_>,
+        ) -> Option<mod_api::Screen> {
+            Some(mod_api::Screen {
+                slots: (0..9)
+                    .map(|i| (i != 0).then(mod_api::ScreenSlot::default))
+                    .collect(),
+                ..Default::default()
+            })
+        }
+    }
+    struct Satchel;
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Satchel {
+        fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+            let item = r.item_key("minecraft:shulker_box");
+            r.item_container(&item, |_: &dyn mod_api::Host| Some(27));
+            let block = r.block_key("satchel:stand");
+            r.block_container(
+                &block,
+                mod_api::ModContainer {
+                    slots: 9,
+                    menu: Some(SATCHEL_MENU.into()),
+                    ..Default::default()
+                },
+            );
+            r.menu_part(SATCHEL_MENU, SatchelScreen);
+        }
+        fn blocks(&self, _: &mod_api::RegistrationContext, event: &mut mod_api::BlocksEvent<'_>) {
+            event
+                .blocks
+                .push(mod_api::Block::new("satchel:stand", "minecraft:barrel").with_item(false));
+        }
+    }
+    /// The content mod menu type the satchel opens: a prepared registry slot for a synthetic
+    /// definition, as `native_menus`' tests use.
+    const SATCHEL_MENU: &str = "minecraft:generic_9x1";
+
+    /// #1172: a menu `player_open_mod_menu` opens keeps its handle and backing, and a
+    /// shift-click on the server passes over the slot its screen hid at open.
+    #[test]
+    #[ignore = "daily"]
+    fn a_code_opened_menus_shift_click_skips_the_slots_its_screen_hides() {
+        // Content registries are process-global.
+        if super::super::native_entity_refs::tests::run_fresh_cases(
+            "game::native_menu_places::tests::a_code_opened_menus_shift_click_skips_the_slots_its_screen_hides",
+            "SUNRISE_MENU_PLACES_HIDDEN_CHILD",
+            &["hidden"],
+        ) {
+            return;
+        }
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new("satchel", Box::new(Satchel))].into();
+        mod_platform::testing::with_mods(mods.clone(), || {
+            crate::game::api_values::install_parts(&mods).unwrap();
+            mod_api::__private::mark_game_thread();
+            let base =
+                std::path::PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap());
+            let root = crate::game::mods::content_root(&base, &Default::default()).unwrap();
+            sunrise_client::containers::with_mod_menu_types(
+                [(SATCHEL_MENU.into(), 9, 0, Vec::new(), None, None)],
+                || {
+                    super::super::native_entity_refs::tests::with_game_role(
+                        root.prepared().to_owned(),
+                        crate::game::execution_role::ExecutionRole::IntegratedServer,
+                        open_back_and_shift_click,
+                    )
+                },
+            );
+        });
+    }
+
+    fn open_back_and_shift_click(game: &mut Game<'_>) {
+        let pos = [1, 64, 2];
+        game.world.chunks.insert(
+            (0, 0),
+            std::sync::Arc::new(sunrise_client::chunk::Chunk::empty(0, 0)),
+        );
+        let stand = game
+            .pack
+            .assets
+            .registry
+            .default_state("satchel:stand")
+            .unwrap();
+        game.world.set(pos[0], pos[1], pos[2], stand).unwrap();
+        open_to_lan(game);
+        let mut player = guest(1);
+        player.selected = 0;
+        player.brand = "sunrise".into();
+        player.sender.menu_extra_rev = 1;
+        player.inventory[0] = Some(ItemStack::new("minecraft:shulker_box", 1));
+        player.inventory[9] = Some(ItemStack::new("minecraft:stone", 64));
+        game.lan.as_mut().unwrap().hub.guests.push(player);
+        let key = mod_api::__private::menu_keys()
+            .into_iter()
+            .find(|key| mod_api::__private::menu_key_id(*key).as_deref() == Some(SATCHEL_MENU))
+            .unwrap();
+        let player = game.player(123).unwrap();
+        let window = game
+            .player_open_mod_menu(
+                player,
+                key,
+                sunrise_client::text::Text::literal("satchel"),
+                Vec::new(),
+                Some(pos),
+                MenuReplace::CloseFirst,
+            )
+            .unwrap()
+            .unwrap();
+        // The handle and the backing stay usable.
+        let host: &mut dyn ServerHost = game;
+        let menu = host.menu(123, window).expect("the menu's handle");
+        assert_eq!(
+            game.player_back_mod_menu_slots(player, window, held_places(Hand::Main, 0..9)),
+            Ok(())
+        );
+        // Inventory slot 9 is menu slot 9: the stone passes over hidden slot 0.
+        assert!(game.place_menu_click(123, window, 9, 0, 1));
+        let host: &mut dyn ServerHost = game;
+        assert_eq!(held_slot(0).amount(host), 0);
+        assert_eq!(held_slot(1).amount(host), 64);
+        assert_eq!(ItemPlace::MenuSlot { menu, slot: 1 }.amount(host), 64);
     }
 }

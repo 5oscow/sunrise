@@ -2878,8 +2878,8 @@ registration path.
   `level.set_block` uses the level's normal update path.
 
 - Screens a mod draws for its menu types: a `MenuPart` attached to the menu type (`r.menu_part("mymod:backpack", Backpack)`) answers `screen`, which lays one out (its height, where each container slot is,
-  where the inventory starts; for a block's menu a slot it leaves out is not in the menu, so shift-clicks skip it) and `screen_draw` draws it with the mod's own GUI textures (`assets/<namespace>/textures/gui`, drawn with `native_sprite`).
-  The screen goes with the menu type, as a `RegisterMenuScreensEvent` screen does, whatever opened the menu: a block's use or `player_open_mod_menu` from an item's use, an entity or a command. Each hook names the mod block whose menu it is (`block`, `None` without one), for blocks that share a menu type.
+  where the inventory starts; a slot it leaves out is skipped by the server's shift-clicks) and `screen_draw` draws it with the mod's own GUI textures (`assets/<namespace>/textures/gui`, drawn with `native_sprite`).
+  The screen goes with the menu type, as a `RegisterMenuScreensEvent` screen does, whatever opened the menu: a block's use or `player_open_mod_menu` from an item's use, an entity or a command. Each hook names the mod block whose menu it is (`block`, `None` without one); on a vanilla type only that block's mod's part hears them.
 
 - Buttons, tooltips and item icons on mod screens: `screen_click` and `screen_tooltip` (the client), `menu_button`
   (a button press on the server, on the mod block entity) and the helpers `native_item`, `native_screen_title`, `LevelRef::block`,

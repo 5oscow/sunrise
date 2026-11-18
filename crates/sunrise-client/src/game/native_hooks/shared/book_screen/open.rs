@@ -13,19 +13,33 @@ impl Game<'_> {
         self.native_screen(menu, block, &mut screen);
         screen
     }
-    /// The container slots (of `size`) that the mod's screen for the block at
-    /// `pos` does not show: the server's menu does not have them either, so a
-    /// shift-click never moves an item where the player cannot see it.
-    pub(in crate::game) fn native_hidden_slots(&self, pos: Pos, size: usize) -> Vec<usize> {
-        let Some(menu) = self.mod_menu_at(pos) else {
-            return Vec::new();
-        };
-        let block = &self
-            .res
-            .facts()
-            .get(self.world.block(pos.0, pos.1, pos.2))
-            .name;
-        let Some(screen) = self.menu_screen(menu, Some(block)) else {
+    /// The mod screen of a menu of type `menu` opened at `target`, with the
+    /// mod block whose menu it is: a mod menu type's screen is its type's
+    /// (`menu_screen`) whatever opened it, and a vanilla type gets a mod's
+    /// screen only as the menu of the mod block at `target` that opens it.
+    fn opened_screen(
+        &self,
+        menu: &str,
+        target: Option<Pos>,
+    ) -> Option<(Option<String>, mod_api::Screen)> {
+        let block = target.and_then(|t| self.menu_opener_block(t, menu));
+        if block.is_none() && sunrise_client::containers::mod_menu_type(menu).is_none() {
+            return None;
+        }
+        let screen = self.menu_screen(menu, block.as_deref())?;
+        Some((block, screen))
+    }
+    /// The container slots (of `size`) that the mod's screen for a menu of
+    /// type `menu` opened at `target` does not show: the server's menu does
+    /// not have them either, so a shift-click never moves an item where the
+    /// player cannot see it.
+    pub(in crate::game) fn native_hidden_slots(
+        &self,
+        menu: &str,
+        target: Option<Pos>,
+        size: usize,
+    ) -> Vec<usize> {
+        let Some((_, screen)) = self.opened_screen(menu, target) else {
             return Vec::new();
         };
         (0..size)
@@ -52,11 +66,9 @@ impl Game<'_> {
         let opens = container.and_then(|c| mod_menu(c.menu.as_deref()?).map(|(m, _)| m));
         (opens == Some(menu)).then(|| block.to_string())
     }
-    /// A menu opened on this client with its slots under `key`: a mod menu
-    /// type's screen is its type's (`menu_screen`) whatever opened it, and a
-    /// vanilla type gets a mod's screen only as the menu of the mod block
-    /// `target` that opens it. `extra` is what the server sent for this
-    /// window first.
+    /// A menu opened on this client with its slots under `key`, at `target`:
+    /// its screen is `opened_screen`'s. `extra` is what the server sent for
+    /// this window first.
     pub(in crate::game) fn open_native_screen(
         &mut self,
         key: Pos,
@@ -67,11 +79,7 @@ impl Game<'_> {
     ) {
         self.clear_mod_book_placement_screen();
         self.mod_screen = None;
-        let block = target.and_then(|t| self.menu_opener_block(t, menu));
-        if block.is_none() && sunrise_client::containers::mod_menu_type(menu).is_none() {
-            return;
-        }
-        if let Some(mut screen) = self.menu_screen(menu, block.as_deref()) {
+        if let Some((block, mut screen)) = self.opened_screen(menu, target) {
             // Resolve sprite identifiers once at the client declaration boundary.
             for slot in screen.slots.iter_mut().flatten() {
                 if let Some(icon) = &mut slot.no_item_icon {

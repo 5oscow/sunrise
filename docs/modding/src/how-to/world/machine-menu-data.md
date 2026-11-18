@@ -305,17 +305,15 @@ is (`event.block`: the mod block at the menu's position whose container opens th
 `None` for a menu opened without one), so blocks that share a menu type
 can lay out or draw differently. A mod block whose container names one of vanilla's menus
 gets a mod screen the same way, from a part attached to that vanilla menu type; it is asked
-only for mod blocks that open the menu, never for vanilla's own, and since several mods can
-attach to one vanilla type, answer only for your own `event.block`. Nothing keeps the mods
-apart on a vanilla type: `screen` is a replace hook, so a part that answers without checking
-`event.block` lays out other mods' blocks' screens too, and on the server hides their menus'
-slots as well.
+only for your own mod's blocks that open the menu, never for another mod's or vanilla's own,
+so several mods' machines can share one vanilla type. One part owns each screen and alone
+hears its four hooks: a mod menu type takes one part answering them, a vanilla type one per
+mod, and a second is refused at load. The server asks `screen` too, whatever opened the
+menu, so a slot it hides takes no shift-click there either.
 
-Three things stay with a block's menu, the one `event.block` names: the menu a block's use
+Two things stay with a block's menu, the one `event.block` names: the menu a block's use
 opens, or one `player_open_mod_menu` opens at the block's position with the menu type the
-block's container opens. For the menu a block's use opens the server asks `screen` too, so a
-slot it hides takes no shift-click there either; a menu opened with `player_open_mod_menu` keeps every
-slot on the server, as a `set_screen_slot` hide does. A button `screen_click` names reaches the server's
+block's container opens. A button `screen_click` names reaches the server's
 `menu_button`, a `BlockEntityPart` method, only for a block's menu: on any other menu it reaches
 no mod. A recipe-book menu's registered screen opens only for a block's menu.
 

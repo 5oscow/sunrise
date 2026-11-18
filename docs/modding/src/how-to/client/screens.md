@@ -77,8 +77,9 @@ host.set_screen_slot(MENU, 4, None)?;
 assert_eq!(host.screen_slot(MENU, 3), Some([62.0, 18.0]));
 ```
 
-`menu` is the menu type whose screen is open, so a call made for another screen refuses. Several mods' blocks can open one vanilla menu type, so on a vanilla type call it only while
-your own block's screen is open (as told to your `screen_draw`). `slot` is the index into
+`menu` is the menu type whose screen is open, so a call made for another screen refuses, as does one from a mod
+whose part does not own the open screen (several mods' blocks can open one vanilla menu type, each with its own
+mod's screen). `slot` is the index into
 `Screen::slots`. A position is GUI pixels from the screen's top-left corner and names the item's top-left
 corner, as in `Screen::slots`; `None` hides the slot. The call takes `&self`, so a screen hook such as
 `screen_render_post` can move slots every frame; a call that repeats a slot's current place changes nothing and

@@ -1115,8 +1115,9 @@ impl Game<'_> {
     /// lay its screen out (`native_screen_draw` draws it), whatever opened
     /// the menu. `block` is the mod block at the menu's position whose
     /// container opens this menu type (`menu_opener_block`), none without
-    /// one. For a block's menu the server asks it too: a slot it hides is not
-    /// in the menu there either, so shift-clicks never fill it.
+    /// one. Only the part that owns the screen hears its hooks (on a vanilla
+    /// type, the part of the block's mod). The server asks it too, whatever
+    /// opened the menu: a slot it hides takes no shift-click there.
     pub(in crate::game) fn native_screen(
         &self,
         menu: &str,

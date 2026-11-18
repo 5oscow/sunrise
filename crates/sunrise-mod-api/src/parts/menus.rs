@@ -3,6 +3,9 @@ use super::*;
 #[cfg(test)]
 #[path = "menus/book_tests.rs"]
 mod book_tests;
+#[cfg(test)]
+#[path = "menus/screen_tests.rs"]
+mod screen_tests;
 
 impl MenusRegistrar for PartRegistrar {
     fn menu_recipe_book(
@@ -59,6 +62,22 @@ impl MenusRegistrar for PartRegistrar {
         })
     }
     fn attach_menu_part(&mut self, menu: &str, kind: &'static str, part: Arc<dyn MenuPart>) {
+        // One part owns a screen: a second would split its layout, drawing and clicks.
+        let rival = lays_out_screen(&*part)
+            .then(|| self.parts.menus.get(menu))
+            .flatten()
+            .and_then(|list| {
+                list.iter().find(|other| {
+                    lays_out_screen(&*other.part) && screens_shared(menu, other.mod_id, self.mod_id)
+                })
+            });
+        if let Some(other) = rival {
+            self.refused.push(format!(
+                "{kind} of {} and {} of {} both lay out menu type {menu}'s screen",
+                self.mod_id, other.type_name, other.mod_id
+            ));
+            return;
+        }
         self.attach(|p| &mut p.menus, kind, menu, part);
     }
 }
