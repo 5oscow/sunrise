@@ -46,6 +46,18 @@ pub struct Findings {
 /// The most declared ids a message lists.
 const LISTED: usize = 8;
 
+// Only check these built-in tag folders. A mod-declared registry's folder is
+// `<namespace>/<path>`, and a tag's own id may contain slashes, so the file path alone
+// does not say where the registry folder ends.
+const CHECKED_TAG_FOLDERS: [&str; 6] = [
+    "block",
+    "item",
+    "fluid",
+    "entity_type",
+    "worldgen/biome",
+    "worldgen/structure",
+];
+
 struct Model {
     file: String,
     definition: CuboidModel,
@@ -478,21 +490,13 @@ impl References<'_> {
         Ok(())
     }
 
-    /// Resolve nested tags only where the full registry folder is known. For a registry
-    /// declared in code, the folder is `<registry namespace>/<registry path>`, and the tag's
-    /// own id can also contain slashes. The file path alone cannot tell where the folder ends.
     fn tag(&mut self, name: &str, tag: &str) -> Result<(), String> {
-        let registry = [
-            "block/",
-            "item/",
-            "fluid/",
-            "entity_type/",
-            "worldgen/biome/",
-            "worldgen/structure/",
-        ]
-        .into_iter()
-        .find(|folder| tag.starts_with(folder))
-        .map(|folder| folder.trim_end_matches('/'));
+        let Some(registry) = CHECKED_TAG_FOLDERS.into_iter().find(|&folder| {
+            tag.strip_prefix(folder)
+                .is_some_and(|rest| rest.starts_with('/'))
+        }) else {
+            return Ok(());
+        };
         let Some(value) = self.data(name)? else {
             return Ok(());
         };
@@ -517,7 +521,7 @@ impl References<'_> {
             };
             if let Some(tag) = id.strip_prefix('#') {
                 self.tag_reference(name, &field, id, tag, registry);
-            } else if let Some(registry) = registry {
+            } else {
                 self.id_in_registry(
                     name,
                     id,
@@ -530,21 +534,8 @@ impl References<'_> {
         Ok(())
     }
 
-    fn tag_reference(
-        &mut self,
-        name: &str,
-        field: &str,
-        id: &str,
-        tag: &str,
-        registry: Option<&str>,
-    ) {
+    fn tag_reference(&mut self, name: &str, field: &str, id: &str, tag: &str, registry: &str) {
         let Some((namespace, path)) = self.own(tag) else {
-            return;
-        };
-        let Some(registry) = registry else {
-            self.findings.warnings.push(format!(
-                "{name}: cannot verify the tag {id} at {field} offline because its registry folder is unknown. Check that the tag file is in the registered folder."
-            ));
             return;
         };
         let file = format!("data/{namespace}/tags/{registry}/{path}.json");
@@ -1289,20 +1280,15 @@ mod tests {
     }
 
     #[test]
-    fn tags_of_an_offline_unknown_registry_do_not_fail_on_a_guessed_folder() {
+    fn nested_tags_outside_the_checked_folders_produce_no_findings() {
         // A code mod can declare the registry `magic:spells/elemental`.
         let containing = "data/gb/tags/magic/spells/elemental/strong/fire.json";
         let member = "data/gb/tags/magic/spells/elemental/common/fire.json";
         let value = r##"{"values":[{"id":"#gb:common/fire"}]}"##;
-        let f = findings(
+        clean(
             MANIFEST,
             &[(containing, value), (member, r#"{"values":[]}"#)],
         );
-        assert!(f.errors.is_empty(), "{f:?}");
-        assert_eq!(f.warnings.len(), 1, "{f:?}");
-        assert!(f.warnings[0].starts_with(containing));
-        assert!(f.warnings[0].contains("unknown"));
-        assert!(f.warnings[0].contains("values[0].id"));
 
         let known = "data/gb/tags/worldgen/structure/strong/fire.json";
         let e = errors(&[(known, value)]);

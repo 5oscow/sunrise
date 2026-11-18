@@ -47,16 +47,17 @@ cargo sunrise-mod check target/sunrise-mod/my_mod.smod   # the registry's checks
     item definitions. The game's model decoder reads one model and ignores trailing input.
   - Ingredients and results in built-in shaped, shapeless, cooking, stonecutting, smithing and transmute recipes.
     Recipe `#tag` ingredients, custom recipe types, components and other opaque data are not checked.
-  - Direct item, block, fluid (including its `flowing_` form) and entity type IDs in tag `values`, and required
-    nested `#tag` references. Tag files can be in any namespace, including `minecraft`; optional entries and removals
-    are not checked. Nested references require the full registry folder, such as `worldgen/biome`.
+  - Tag `values` are checked for direct IDs under `tags/block`, `tags/item`, `tags/fluid` (including
+    `flowing_` forms) and `tags/entity_type`. Required nested `#tag` references are checked in those folders
+    plus `tags/worldgen/biome` and `tags/worldgen/structure`. Tag files can be in any namespace, including
+    `minecraft`; other tag folders, optional entries and removals are not checked.
   - Loot item entries' `name` and block-state conditions' `block` fields. Recipes, tags, loot tables and loot pools
     that `neoforge:conditions` may disable are left alone.
 
   A missing reference is an **error** (exit 1) only when the tool has enough information to confirm it. Otherwise,
   it can **warn** without failing: a `[[jar]]` layer, dependency or atlas source may supply the resource, an inline
-  composite child may override a texture, the registry folder may be unknown, or a local recipe filter may remove
-  the recipe or swap the reference. The tool does not fetch dependencies or check registry entries declared in code.
+  composite child may override a texture, or a local recipe filter may remove the recipe or swap the reference.
+  The tool does not fetch dependencies or check registry entries declared in code.
   It also checks for blockstates on blocks with `render_shape` set to `MODEL` and warns about missing local loot
   tables, item definitions or English names, or registry content on a client-only package. Reference diagnostics name
   the source file, the relevant field or member index, and the ID.
