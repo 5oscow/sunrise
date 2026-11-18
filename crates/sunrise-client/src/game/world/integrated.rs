@@ -1613,6 +1613,70 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "daily"]
+    fn block_state_weathering_reverts_after_integrated_session_stops() {
+        use mod_api::HostBlockStates;
+        use sunrise_world::level::BlockMaps;
+
+        super::super::native_entity_refs::tests::with_client_game(|window| {
+            window.join_world_rest().unwrap();
+            let state = |name| BlockStatesHost::block_state_id(window, name).unwrap();
+            let copper = state("minecraft:copper_block");
+            let exposed = state("minecraft:exposed_copper");
+            let oxidized = state("minecraft:oxidized_copper");
+            let next = || window.block_states().next_weathering_stage(copper);
+            assert_eq!(next(), Some(exposed));
+
+            for failed_open in [false, true] {
+                let mut options = window.options.clone();
+                options.dedicated = Some(Vec::new());
+                options.execution_role = ExecutionRole::IntegratedServer;
+                let mut server = server_game(
+                    &window.res,
+                    window.pack.clone(),
+                    options,
+                    window.settings.clone(),
+                )
+                .unwrap();
+                server.save = window.save.clone();
+                let result = server.run_server_lifecycle(false, |server, began| {
+                    *began = true;
+                    // Model publication at open_world_tables, before later steps can fail.
+                    let maps = BlockMaps::from_values(
+                        [],
+                        [(
+                            "minecraft:copper_block",
+                            &serde_json::json!({
+                                "next_oxidation_stage": "minecraft:oxidized_copper"
+                            }),
+                        )],
+                        [],
+                        |_| 0,
+                    );
+                    server.res.behaviours().set_block_maps(Some(Arc::new(maps)));
+                    assert_eq!(next(), Some(oxidized));
+                    if failed_open {
+                        Err("open failed after map publication".into())
+                    } else {
+                        server.world_adopted = true;
+                        Ok(())
+                    }
+                });
+                if failed_open {
+                    assert_eq!(
+                        result.unwrap_err().to_string(),
+                        "open failed after map publication"
+                    );
+                } else {
+                    result.unwrap();
+                }
+                // The window and its resource tables outlive both kinds of session.
+                assert_eq!(next(), Some(exposed), "failed_open = {failed_open}");
+            }
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
     fn client_session_identifies_only_its_own_integrated_server() {
         super::super::native_entity_refs::tests::with_client_game(|game| {
             let _pipe = super::super::native_client_session::tests::logged_client(game);
