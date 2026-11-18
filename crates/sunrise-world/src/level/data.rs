@@ -1297,8 +1297,8 @@ pub(super) fn inert_support_fixture() -> Behaviours {
                 classes: ClassSet::default(),
                 interfaces: 0,
                 set_type: None,
-                gate_open: None,
-                gate_close: None,
+                gate_open: [None, None, None],
+                gate_close: [None, None, None],
                 open_sound: None,
                 close_sound: None,
                 ticks_to_stay_pressed: 0,
@@ -1311,6 +1311,7 @@ pub(super) fn inert_support_fixture() -> Behaviours {
                 grow_probability: 0.0,
                 growth_direction: Direction::Up,
                 schedule_fluid_ticks: false,
+                declared_waterlogged: false,
                 weather: 0,
                 ignite_odds: 0,
                 burn_odds: 0,
@@ -1323,6 +1324,7 @@ pub(super) fn inert_support_fixture() -> Behaviours {
                 }),
                 item: "".into(),
                 dynamic_shape: false,
+                declared_vegetation: false,
             }
         })
         .collect();
