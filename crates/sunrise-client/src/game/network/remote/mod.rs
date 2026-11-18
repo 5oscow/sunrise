@@ -1577,6 +1577,8 @@ impl Game<'_> {
         if let Some(mut r) = self.remote.take() {
             r.session.disconnect();
         }
+        // Minecraft.disconnect's updateLevelInEngines: the title changes with the screen, not a frame later.
+        self.update_window_title();
         super::lan::sync::forget_sync_data();
         self.gui.atlas.clear_object_skins();
         self.server_packs_disconnect();
