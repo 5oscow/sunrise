@@ -329,7 +329,7 @@ index bca7938..2f2eb44 100644
 +    assert!(e.message.contains("selected site contains `?`"), "{e}");
 +}
 diff --git a/crates/horizon-mixins-cli/tests/integration.rs b/crates/horizon-mixins-cli/tests/integration.rs
-index fcf5a46..c5fadd1 100644
+index fcf5a46..dd234c2 100644
 --- a/crates/horizon-mixins-cli/tests/integration.rs
 +++ b/crates/horizon-mixins-cli/tests/integration.rs
 @@ -697,14 +697,14 @@ fn cfg_attributes_shared_module_sources_and_shadowing_fail_closed() {
@@ -351,7 +351,7 @@ index fcf5a46..c5fadd1 100644
              "E_UNSUPPORTED_CONTROL_FLOW",
          ),
          (
-@@ -890,3 +890,794 @@ fn production_test_cfg_modules_are_indexed_and_applied() {
+@@ -890,3 +890,813 @@ fn production_test_cfg_modules_are_indexed_and_applied() {
      let error = build_plan(&f.root, &f.mods).unwrap_err();
      assert!(format!("{error:?}").contains("E_TARGET_NOT_FOUND"));
  }
@@ -601,26 +601,45 @@ index fcf5a46..c5fadd1 100644
 +    }
 +
 +    #[test]
-+    fn an_owned_binding_that_could_unsize_the_receiver_is_refused() {
++    fn an_owned_binding_that_could_unsize_the_receiver_fails_to_build() {
 +        // The source calls `Item::read(&self)` on a `Box<Item>`; bound as `Box<dyn Marker>`, the
-+        // receiver would be unsized at the call and the dot call could pick another method.
-+        // Also through a type alias, which the tool cannot see through.
++        // receiver would be unsized at the call and the dot call could pick another method. The
++        // receiver keeps its own type, which must be the declared one, so every spelling fails to
++        // build, also an alias a dependency crate defines.
 +        for ty in [
 +            "Box<dyn crate::Marker>",
 +            "Box<[i32]>",
 +            "Box<str>",
 +            "crate::Erased",
++            "shapes::Erased",
 +        ] {
 +            let f = res_fixture("Ok(boxed(ok)?.read())", ty, "boxed(ok)?.read");
-+            let output = f.command("apply").output().unwrap();
-+            assert!(!output.status.success(), "{ty}");
-+            let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
-+            assert_eq!(error["code"], "E_OPERATION_SIGNATURE", "{ty}: {error}");
-+            assert_eq!(error["injection_id"], "wrap", "{ty}: {error}");
-+            assert!(
-+                error["message"].as_str().unwrap().contains("own type"),
-+                "{ty}: {error}"
-+            );
++            if ty.starts_with("shapes") {
++                fs::create_dir_all(f.root.join("shapes/src")).unwrap();
++                fs::write(
++                    f.root.join("shapes/Cargo.toml"),
++                    "[package]\nname = \"shapes\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
++                )
++                .unwrap();
++                fs::write(
++                    f.root.join("shapes/src/lib.rs"),
++                    "pub trait Dep {}\npub type Erased = Box<dyn Dep>;\n",
++                )
++                .unwrap();
++                f.replace("Cargo.toml", "\"driver\"]", "\"driver\", \"shapes\"]");
++                f.replace(
++                    "Cargo.lock",
++                    "name = \"fixture-game\"\nversion = \"0.1.0\"",
++                    "name = \"fixture-game\"\nversion = \"0.1.0\"\ndependencies = [\n \"shapes\",\n]\n\n[[package]]\nname = \"shapes\"\nversion = \"0.1.0\"",
++                );
++                f.append(
++                    "engine/Cargo.toml",
++                    "\n[dependencies]\nshapes = { path = \"../shapes\" }\n",
++                );
++                f.append("engine/src/lib.rs", "impl shapes::Dep for Item {}\n");
++            }
++            let message = build_error(&f);
++            assert!(message.contains("mismatched types"), "{ty}: {message}");
 +        }
 +    }
 +
@@ -1912,7 +1931,7 @@ index 5bac667..ce8b959 100644
  pub mod modules;
  
 diff --git a/crates/horizon-mixins-core/src/plan.rs b/crates/horizon-mixins-core/src/plan.rs
-index 848dcc0..083cc54 100644
+index 848dcc0..c8020cc 100644
 --- a/crates/horizon-mixins-core/src/plan.rs
 +++ b/crates/horizon-mixins-core/src/plan.rs
 @@ -1,5 +1,6 @@
@@ -2038,25 +2057,7 @@ index 848dcc0..083cc54 100644
                  if (injection.kind == Kind::BeforeCall
                      || (injection.kind == Kind::AfterCall && injection.cancellable))
                      && !site.whole_expression
-@@ -769,6 +838,7 @@ pub fn build_staged(workspace: &Path, mods: &Path) -> Result<(Plan, crate::nativ
-                     inputs.insert(0, receiver.clone());
-                 }
-                 validate_operation_site(
-+                    &index,
-                     f,
-                     &selected.unwrap().expr,
-                     &helpers::Operation {
-@@ -780,7 +850,8 @@ pub fn build_staged(workspace: &Path, mods: &Path) -> Result<(Plan, crate::nativ
-                 .map_err(context)?;
-             }
-             if let Some(operation) = &contract.operation {
--                validate_operation_site(f, &selected.unwrap().expr, operation).map_err(context)?;
-+                validate_operation_site(&index, f, &selected.unwrap().expr, operation)
-+                    .map_err(context)?;
-             }
-             let call_site = selected
-                 .filter(|_| injection.kind.selects_call())
-@@ -924,6 +995,11 @@ pub fn build_staged(workspace: &Path, mods: &Path) -> Result<(Plan, crate::nativ
+@@ -924,6 +993,11 @@ pub fn build_staged(workspace: &Path, mods: &Path) -> Result<(Plan, crate::nativ
          schema: SCHEMA,
          transformer: env!("CARGO_PKG_VERSION").into(),
          rustc: rustc(&root)?,
@@ -2068,7 +2069,7 @@ index 848dcc0..083cc54 100644
          inputs,
          injections,
          bridges: planned_bridges,
-@@ -979,6 +1055,9 @@ pub(crate) fn validate_target_with(
+@@ -979,6 +1053,9 @@ pub(crate) fn validate_target_with(
          // are checked in those values only ([`exit_value_error`]). MODIFY_VARIABLE likewise
          // replaces only the value it selects ([`modified_value_error`]).
          rewrites_body: !matches!(kind, Kind::Return | Kind::ModifyVariable),
@@ -2078,7 +2079,7 @@ index 848dcc0..083cc54 100644
          // A `?` is an exit RETURN would miss; MODIFY_VARIABLE leaves one outside its value alone.
          try_outside_value: kind == Kind::ModifyVariable,
          body_macros: false,
-@@ -1005,7 +1084,10 @@ pub(crate) fn validate_target_with(
+@@ -1005,7 +1082,10 @@ pub(crate) fn validate_target_with(
      // any exit or expression inside a macro, just like ordinary HEAD.
      safety.body_macros = safety.boundary;
      safety.in_body = true;
@@ -2090,7 +2091,7 @@ index 848dcc0..083cc54 100644
      if safety.error.is_none() && kind == Kind::Return {
          safety.error = exit_value_error(&f.block);
      }
-@@ -1173,6 +1255,7 @@ struct Safety {
+@@ -1173,6 +1253,7 @@ struct Safety {
      error: Option<(&'static str, &'static str)>,
      boundary: bool,
      rewrites_body: bool,
@@ -2098,7 +2099,7 @@ index 848dcc0..083cc54 100644
      try_outside_value: bool,
      body_macros: bool,
      relaxed: bool,
-@@ -1237,6 +1320,9 @@ impl<'ast> Visit<'ast> for Safety {
+@@ -1237,6 +1318,9 @@ impl<'ast> Visit<'ast> for Safety {
              // RETURN never rewrites inside a closure; what is inside is still checked.
              Expr::Closure(c) if (!self.rewrites_body || self.relaxed) && c.asyncness.is_none() => {}
              Expr::Try(_) if self.try_outside_value => {}
@@ -2108,7 +2109,7 @@ index 848dcc0..083cc54 100644
              Expr::Closure(_)
              | Expr::Async(_)
              | Expr::Await(_)
-@@ -1247,7 +1333,10 @@ impl<'ast> Visit<'ast> for Safety {
+@@ -1247,7 +1331,10 @@ impl<'ast> Visit<'ast> for Safety {
              | Expr::Const(_) => self.error = Some(CLOSURES_ETC),
              // Calls under a reference can depend on temporary lifetime extension.
              Expr::Reference(r)
@@ -2120,7 +2121,7 @@ index 848dcc0..083cc54 100644
              {
                  self.error = Some(REFERENCED_CALL)
              }
-@@ -1346,6 +1435,23 @@ impl<'ast> Visit<'ast> for Safety {
+@@ -1346,6 +1433,23 @@ impl<'ast> Visit<'ast> for Safety {
          }
      }
  }
@@ -2144,63 +2145,13 @@ index 848dcc0..083cc54 100644
  fn contains_call(expr: &Expr) -> bool {
      struct Find(bool);
      impl<'ast> Visit<'ast> for Find {
-@@ -1363,7 +1469,37 @@ fn contains_call(expr: &Expr) -> bool {
- pub use crate::helpers::{parse_helper, validate_helper};
- pub use crate::sites::{call_key, is_call};
- 
-+/// Whether the declared receiver type of an owned computed receiver might hide an unsized type
-+/// behind a name the tool cannot see through: a type alias of the workspace, an associated type,
-+/// or a qualified path. The receiver would be coerced to it on the way in.
-+fn may_hide_alias(index: &Index, ty: &syn::Type) -> bool {
-+    struct Aliases(BTreeSet<String>);
-+    impl<'ast> Visit<'ast> for Aliases {
-+        fn visit_item_type(&mut self, item: &'ast syn::ItemType) {
-+            self.0.insert(item.ident.to_string());
-+        }
-+    }
-+    struct Paths<'a>(&'a BTreeSet<String>, bool);
-+    impl<'ast> Visit<'ast> for Paths<'_> {
-+        fn visit_type_path(&mut self, path: &'ast syn::TypePath) {
-+            self.1 |= path.qself.is_some()
-+                || path.path.segments.iter().enumerate().any(|(i, seg)| {
-+                    self.0.contains(&seg.ident.to_string()) || (i == 0 && seg.ident == "Self")
-+                });
-+            visit::visit_type_path(self, path);
-+        }
-+    }
-+    let mut aliases = Aliases(BTreeSet::new());
-+    for file in index.files.values() {
-+        aliases.visit_file(file);
-+    }
-+    let mut paths = Paths(&aliases.0, false);
-+    paths.visit_type(ty);
-+    paths.1
-+}
-+
- fn validate_operation_site(
-+    index: &Index,
-     f: &Function,
-     expr: &Expr,
-     operation: &helpers::Operation,
-@@ -1395,11 +1531,26 @@ fn validate_operation_site(
+@@ -1395,11 +1499,14 @@ fn validate_operation_site(
                  }
              }
          }
 +        // A receiver that is a value (a call, with or without `?`) is evaluated at the call site
 +        // and moves into the operation as the binding's declared type.
-+        Expr::MethodCall(call) if !sites::is_place(&call.receiver) => {
-+            let declared: syn::Type = syn::parse_str(&operation.inputs[0])
-+                .map_err(|e| Diagnostic::new("E_OPERATION_SIGNATURE", e.to_string()))?;
-+            if !matches!(declared, syn::Type::Reference(_)) && may_hide_alias(index, &declared) {
-+                return Err(Diagnostic::new(
-+                    "E_OPERATION_SIGNATURE",
-+                    format!(
-+                        "a computed receiver bound by value must be declared as its own type, written out: `{}` names a type alias or an associated type the tool cannot see through, and the receiver could be unsized to it on the way in",
-+                        tokens(&declared).replace(' ', "")
-+                    ),
-+                ));
-+            }
-+        }
++        Expr::MethodCall(call) if !sites::is_place(&call.receiver) => {}
          Expr::MethodCall(call) => {
              let Expr::Path(receiver) = &*call.receiver else {
                  return Err(Diagnostic::new(
@@ -2349,7 +2300,7 @@ index 47fee7d..1d3220c 100644
  }
  
 diff --git a/crates/horizon-mixins-transform/src/lib.rs b/crates/horizon-mixins-transform/src/lib.rs
-index f4edd3d..1db86d6 100644
+index f4edd3d..38c597b 100644
 --- a/crates/horizon-mixins-transform/src/lib.rs
 +++ b/crates/horizon-mixins-transform/src/lib.rs
 @@ -1,5 +1,6 @@
@@ -2422,34 +2373,7 @@ index f4edd3d..1db86d6 100644
          }
          let tree = &trees[&module.file];
          if source::fingerprint(tokens(tree)) != module.fingerprint {
-@@ -343,6 +362,26 @@ pub fn transform(root: &Path, plan: &Plan) -> Result<BTreeMap<String, Vec<u8>>>
-     }
-     Ok(files)
- }
-+/// Whether `ty` names an unsized type (`dyn Trait`, `[T]`, `str`) that a smart pointer to a sized
-+/// one could be coerced to.
-+fn may_unsize(ty: &Type) -> bool {
-+    struct Unsized(bool);
-+    impl<'ast> syn::visit::Visit<'ast> for Unsized {
-+        fn visit_type_trait_object(&mut self, _: &'ast syn::TypeTraitObject) {
-+            self.0 = true;
-+        }
-+        fn visit_type_slice(&mut self, _: &'ast syn::TypeSlice) {
-+            self.0 = true;
-+        }
-+        fn visit_type_path(&mut self, path: &'ast syn::TypePath) {
-+            self.0 |= path.qself.is_none() && path.path.is_ident("str");
-+            syn::visit::visit_type_path(self, path);
-+        }
-+    }
-+    let mut found = Unsized(false);
-+    syn::visit::Visit::visit_type(&mut found, ty);
-+    found.0
-+}
- fn syntax(e: syn::Error) -> Diagnostic {
-     Diagnostic::new("E_TRANSFORM", e.to_string())
- }
-@@ -516,6 +555,7 @@ fn wrap_operation(call: &Expr, wrappers: &[&PlannedInjection]) -> Result<Expr> {
+@@ -516,6 +535,7 @@ fn wrap_operation(call: &Expr, wrappers: &[&PlannedInjection]) -> Result<Expr> {
  
      let mut original = call.clone();
      let mut arguments: Vec<Expr>;
@@ -2457,7 +2381,7 @@ index f4edd3d..1db86d6 100644
      match &mut original {
          Expr::Call(c) => {
              arguments = c.args.iter().cloned().collect();
-@@ -523,16 +563,52 @@ fn wrap_operation(call: &Expr, wrappers: &[&PlannedInjection]) -> Result<Expr> {
+@@ -523,16 +543,45 @@ fn wrap_operation(call: &Expr, wrappers: &[&PlannedInjection]) -> Result<Expr> {
          }
          Expr::MethodCall(c) => {
              let receiver = &c.receiver;
@@ -2494,22 +2418,15 @@ index f4edd3d..1db86d6 100644
 +                        "a computed receiver needs a named type, or a reference to one, to check that the method takes `self`",
 +                    ));
 +                }
-+                ty if !place && may_unsize(ty) => {
-+                    return Err(Diagnostic {
-+                        mod_id: Some(wrappers[0].mod_id.clone().into()),
-+                        injection_id: Some(wrappers[0].injection_id.clone().into()),
-+                        ..Diagnostic::new(
-+                            "E_OPERATION_SIGNATURE",
-+                            format!(
-+                                "a computed receiver bound by value must be bound at its own type: `{}` holds a `dyn`, slice or `str` type, so the receiver could be unsized on the way in and the method the call picks could change; declare the receiver's own type",
-+                                tokens(ty).replace(' ', "")
-+                            ),
-+                        )
-+                    });
-+                }
 +                _ if !place => {
 +                    owned_receiver = Some((c.method.clone(), c.turbofish.clone()));
-+                    (**receiver).clone()
++                    // The receiver keeps its own type: `Some(x).or(None::<T>)` compiles only
++                    // when the two are the same type, which no coercion can arrange (a
++                    // `Box<Resource>` does not become a `Box<dyn Marker>` here, whatever `T` is
++                    // spelled as), where passing it straight to a `T` parameter would unsize it.
++                    // A receiver whose type only inference knows fails to infer: refused.
++                    let ty = &types[0];
++                    syn::parse_quote!(::core::option::Option::Some(#receiver).or(::core::option::Option::<#ty>::None).unwrap())
 +                }
 +                _ => {
 +                    return Err(Diagnostic::new(
@@ -2520,7 +2437,7 @@ index f4edd3d..1db86d6 100644
              };
              arguments = vec![receiver_arg];
              arguments.extend(c.args.iter().cloned());
-@@ -541,6 +617,36 @@ fn wrap_operation(call: &Expr, wrappers: &[&PlannedInjection]) -> Result<Expr> {
+@@ -541,6 +590,36 @@ fn wrap_operation(call: &Expr, wrappers: &[&PlannedInjection]) -> Result<Expr> {
          }
          _ => return Err(Diagnostic::new("E_PLAN_SITE", "wrapper site is not a call")),
      }
