@@ -43,7 +43,7 @@ Every preset also turns on the optimizations that leave the picture as it is: as
 | Page | Setting | Stored in |
 | --- | --- | --- |
 | General | vanilla's graphics preset, render distance, simulation distance, brightness, GUI scale, fullscreen, exclusive fullscreen and its mode, VSync, max framerate, inactivity framerate, menu background blur, attack indicator, autosave indicator | `options.txt` (vanilla keys) |
-| | preset, LOD distance, far detail, BlueMap finding and radius (on servers, at the next join) | `sunrise-graphics.txt` |
+| | preset, LOD distance, far detail, BlueMap radius (on servers whose map you named, at the next join) | `sunrise-graphics.txt` |
 | Quality | clouds, cloud distance, weather radius, particles, smooth lighting, biome blend, entity distance, entity shadows, vignette, chunk fade, mipmap levels, texture filtering, max anisotropy, cutout leaves, improved transparency | `options.txt` |
 | | hide block-break particles, dynamic lights, fullbright ([extras.md](extras.md)) | `sunrise-extras.txt` |
 | | sky, fog, weather, animated textures, distant plant dither (`ditherCutoutMips`, off by default: cutouts from 64 texels up), resolution scale, dynamic resolution and its target FPS, anti-aliasing (FXAA or TAA), TAA upscaling, screenshot quality, frame generation | `sunrise-graphics.txt` |
