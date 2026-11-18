@@ -40,8 +40,9 @@ permissions:
   contents: read
 concurrency:
   # One at a time: a newer push waits behind the one running (and replaces an older waiting one: its commit holds the
-  # older one's changes). A dry run has a group of its own, as release.yml's.
-  group: mod-tool${{ ((github.event_name == 'workflow_dispatch' && inputs.dry_run) || github.ref != 'refs/heads/main') && '-dry-run' || '' }}
+  # older one's changes). A dry run has a group of its own, as release.yml's: a dispatched one, a run off main, and a
+  # push while MOD_TOOL_AUTOPUBLISH is off, so none of them holds up or cancels a publishing dispatch.
+  group: mod-tool${{ ((github.event_name == 'workflow_dispatch' && inputs.dry_run) || (github.event_name == 'push' && vars.MOD_TOOL_AUTOPUBLISH != 'true') || github.ref != 'refs/heads/main') && '-dry-run' || '' }}
   cancel-in-progress: false
 defaults:
   run:
