@@ -1,7 +1,7 @@
 # Using an AI agent
 
 This page is written for a coding agent, and for a person who points one at it: "Read
-https://sunrise-org.github.io/sunrise/for-agents.html and make me a Sunrise native mod". It holds the exact
+https://playsunrise.net/docs/modding/for-agents and make me a Sunrise native mod". It holds the exact
 commands and the rules that decide whether the code compiles. The same material, with the explanations, is in
 [Install the mod tool](start/install-tool.md) and [Your first native mod](start/first-mod.md).
 
@@ -72,7 +72,7 @@ folder and never download Mojang's files. Run `cargo test` for the logic the hoo
 - `cargo sunrise-mod hooks <words>` searches the pinned build's hooks offline, by id, doc and counterpart name; every
   word must match.
 - [The mod API reference](reference/api.md) is the rustdoc of `mod_api`: start at `Hooks`, `Host`, `ServerHost` and
-  `ClientHost`. Open it at https://sunrise-org.github.io/sunrise/api/mod_api/.
+  `ClientHost`. Build it from a Sunrise checkout with `cargo doc -p sunrise-mod-api --no-deps --open`.
 - [Writing hooks](start/writing-hooks.md) gives the crate's shape, [Hooks and the Host](concepts/hooks-and-the-host.md)
   the model, [Parts](concepts/parts.md) per-object behaviour and [Attachments](concepts/attachments.md) per-object
   data.
