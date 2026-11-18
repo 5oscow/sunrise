@@ -3,6 +3,7 @@
 //! sides and "Not on wasm" from the wire index; everything else from a walk of the public items
 //! of `sunrise-mod-api` and the vocabulary it re-exports.
 pub mod behaviours;
+pub(crate) mod calls;
 mod expand;
 pub mod notes;
 mod rust;
@@ -13,16 +14,17 @@ mod wire_forms;
 
 use crate::catalog::{self, Catalog};
 use crate::index::{Found, Index, ItemId};
+use mod_source::layouts::Layouts;
+use mod_source::layouts::{WireForm, derives, param_names};
 use mod_surface::shape::{ShapeError, Shapes};
 use mod_surface::*;
 use quote::ToTokens;
-use rust::{Layouts, Paths, param_names, print};
+use rust::{GameWires, Paths, print};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 use syn::visit_mut::VisitMut;
 use syn::{Item, Visibility};
 use walk::{attrs, compiled, hidden};
-use wire_forms::WireForm;
 
 /// The crates whose own `macro_rules!` calls the export expands: the API and the crates its
 /// public items come from.
@@ -235,10 +237,36 @@ fn export_here(root: &Path) -> Result<Export, String> {
     let mut with_providers = included.to_vec();
     with_providers.push(("capability_providers_generated.rs", providers.as_str()));
     // A listed boundary trait an older tree lacks is noted by `Roles::resolve`, not refused.
-    let wire = crate::wire::surface_reading(root, &with_providers, Some(&mut Vec::new()))?;
+    let mut wire = crate::wire::surface_reading(root, &with_providers, Some(&mut Vec::new()))?;
     let boundary = Boundary::from_wire(&wire);
+    let calls = crate::wire::exported_calls(&mut wire, &catalog.hooks)?;
     let mut index = wire.types.index;
-    build(root, &mut index, &catalog.hooks, &boundary)
+    let mut export = build(root, &mut index, &catalog.hooks, &boundary)?;
+    name_calls(&mut export.surface, &calls);
+    Ok(export)
+}
+
+/// Writes each record's `call`: a hook's, and a trait method's when its trait has one name for
+/// it (a generic trait's instances are separate calls and carry none).
+fn name_calls(surface: &mut Surface, calls: &BTreeMap<(String, String), String>) {
+    for hook in &mut surface.hooks {
+        let name = hook.id.strip_prefix("hook:").unwrap_or(&hook.id);
+        hook.call = calls.get(&("Hooks".to_owned(), name.to_owned())).cloned();
+    }
+    for item in &mut surface.traits {
+        let path = item.id.strip_prefix("trait:").unwrap_or(&item.id);
+        let owner = path.rsplit("::").next().unwrap_or(path);
+        for method in &mut item.methods {
+            let name = method.id.rsplit("::").next().unwrap_or(&method.id);
+            let mut found = calls.iter().filter(|((o, m), _)| {
+                m == name && (o == owner || o.split('<').next() == Some(owner) && o.contains('<'))
+            });
+            method.call = match (found.next(), found.next()) {
+                (Some((_, call)), None) => Some(call.clone()),
+                _ => None,
+            };
+        }
+    }
 }
 
 /// The `///` text of `attrs`, one line each, a leading space dropped.
@@ -278,23 +306,6 @@ fn not_on_wasm(attrs: &[syn::Attribute]) -> Option<String> {
 
 fn has_attr(attrs: &[syn::Attribute], name: &str) -> bool {
     attrs.iter().any(|attr| attr.path().is_ident(name))
-}
-
-/// The traits of `attrs`' `#[derive(…)]` lists, by last path segment, sorted.
-pub(super) fn derives(attrs: &[syn::Attribute]) -> Vec<String> {
-    let mut out = BTreeSet::new();
-    for attr in attrs.iter().filter(|a| a.path().is_ident("derive")) {
-        if let Ok(paths) = attr.parse_args_with(
-            syn::punctuated::Punctuated::<syn::Path, syn::Token![,]>::parse_terminated,
-        ) {
-            for path in paths {
-                if let Some(last) = path.segments.last() {
-                    out.insert(last.ident.to_string());
-                }
-            }
-        }
-    }
-    out.into_iter().collect()
 }
 
 /// Normalises types and signatures written in one module.
@@ -769,7 +780,10 @@ pub(crate) fn build(
     let macros = macros(root, writer.index, &public.macros, &mut notes)?;
 
     // Shapes, over every type the crossing types contain.
-    let mut layouts = Layouts::new(&forms, &nameable);
+    let mut layouts = Layouts::new(GameWires {
+        forms: &forms,
+        ids: &nameable,
+    });
     let keys: Vec<Option<String>> = pending
         .iter()
         .map(|record| {

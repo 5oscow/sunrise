@@ -29,25 +29,26 @@ pub use resources::{ResourceAccess, Unsupported, install_resource_access};
 /// The guest's start-up call: its input is the package list.
 // hidden: transport plumbing used by generated boundary code.
 #[doc(hidden)]
-pub const INIT: u32 = 0xFFFF_FF00;
+pub const INIT: u64 = 0xFFFF_FF00;
 /// The guest's call to drop the handlers the game let go of: its input is their ids.
 // hidden: transport plumbing used by generated boundary code.
 #[doc(hidden)]
-pub const RELEASE: u32 = 0xFFFF_FF01;
-/// The game's import freeing an object the mod held: its input is the id.
+pub const RELEASE: u64 = 0xFFFF_FF01;
+/// The lowest id no export has: the ids below it are the transport's own (`INIT`, `RELEASE`,
+/// the prepared-equipment entries), the generator refuses an export whose id falls there.
 // hidden: transport plumbing used by generated boundary code.
 #[doc(hidden)]
-pub const HOST_RELEASE: u32 = 0xFFFF_FF02;
-/// The game's import taking a message from the mod (a panic's text): its input is a string.
-// hidden: transport plumbing used by generated boundary code.
-#[doc(hidden)]
-pub const HOST_LOG: u32 = 0xFFFF_FF03;
+pub const RESERVED_IDS: u64 = 0x1_0000;
 
-/// The layout of every value and call that crosses, a hash the generator writes: a mod built
-/// for another one is refused when it loads.
-// hidden: transport plumbing used by generated boundary code.
-#[doc(hidden)]
-pub use crate::WIRE_LAYOUT as LAYOUT;
+// The crate's own tests implement hooks with `#[mod_api::__subscriptions]`, which marks each
+// through `__sunrise_mark!`, a macro the guest transport defines in `mod_api`: a test build has
+// this no-op in its place, re-exported at the crate root by `exports/test_marks.rs`.
+#[cfg(test)]
+macro_rules! __sunrise_mark {
+    ($owner:literal $method:ident) => {};
+}
+#[cfg(test)]
+pub(crate) use __sunrise_mark;
 
 /// Maximum static strings retained by either transport string table.
 // hidden: transport plumbing used by generated boundary code.
