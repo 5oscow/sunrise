@@ -30,6 +30,26 @@ use registry::Registry;
 use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+/// How the client presents itself to the server it joins: its brand and the custom payloads it
+/// sends in the configuration phase, after the brand, in order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClientIdentity {
+    /// The `minecraft:brand` (`ClientBrandRetriever.getClientModName`).
+    pub brand: String,
+    /// Configuration-phase custom payloads: channel and data.
+    pub payloads: Vec<(String, Vec<u8>)>,
+}
+
+impl ClientIdentity {
+    /// Vanilla's: the brand `vanilla`, no payloads.
+    pub fn vanilla() -> Self {
+        Self {
+            brand: "vanilla".to_owned(),
+            payloads: Vec::new(),
+        }
+    }
+}
+
 /// What a crate above the engine hears from the game. Every method has an empty default:
 /// implement only those you need. Hooks run on the game's thread (the render thread) unless a
 /// method says otherwise; they must return quickly and must not panic.
@@ -67,6 +87,16 @@ pub trait Hooks: Sync {
     /// The mark before the name of the player `uuid` in the player list, each frame it shows.
     /// The first hook that answers is used.
     fn player_mark(&self, _uuid: u128) -> Option<players::Mark> {
+        None
+    }
+
+    /// How this client presents itself to the server it is joining: the brand it reports
+    /// (`ClientBrandRetriever.getClientModName`, the `minecraft:brand` payload) and the custom
+    /// payloads it sends in the configuration phase after it. `server` is the address the player
+    /// joined as typed (host or host:port), before SRV or DNS resolution. The first hook that
+    /// answers is used; none answering is [`ClientIdentity::vanilla`]. Unlike the other methods
+    /// this runs on the network thread, once per join (a transfer is a new join).
+    fn client_identity(&self, _server: &str) -> Option<ClientIdentity> {
         None
     }
 
@@ -331,6 +361,14 @@ pub mod engine {
         all().iter().find_map(|h| h.player_mark(uuid))
     }
 
+    /// [`Hooks::client_identity`]: the first answer, or vanilla's.
+    pub fn client_identity(server: &str) -> ClientIdentity {
+        all()
+            .iter()
+            .find_map(|h| h.client_identity(server))
+            .unwrap_or_else(ClientIdentity::vanilla)
+    }
+
     /// [`Hooks::player_layers`].
     pub fn player_layers(model: &players::PlayerModel, draw: &mut dyn players::PlayerDraw) {
         for hooks in all() {
@@ -427,6 +465,12 @@ mod tests {
         }
         fn player_mark(&self, uuid: u128) -> Option<players::Mark> {
             (uuid == 9).then_some(MARK)
+        }
+        fn client_identity(&self, server: &str) -> Option<ClientIdentity> {
+            (server == "first.example").then(|| ClientIdentity {
+                brand: "first".to_owned(),
+                payloads: vec![("recorder:hello".to_owned(), vec![1, 2])],
+            })
         }
         fn camera(&self, own: &players::CameraView) -> Option<players::CameraOverride> {
             Some(players::CameraOverride::new(own.age / 10.0))
@@ -576,12 +620,24 @@ mod tests {
     struct Silent;
     impl Hooks for Silent {}
 
+    /// Registered after the recorder: answers for two servers, one the recorder answers too.
+    struct Later;
+    impl Hooks for Later {
+        fn client_identity(&self, server: &str) -> Option<ClientIdentity> {
+            matches!(server, "first.example" | "second.example").then(|| ClientIdentity {
+                brand: "later".to_owned(),
+                payloads: Vec::new(),
+            })
+        }
+    }
+
     static RECORDER: Recorder = Recorder(StdMutex::new(Vec::new()));
 
     #[test]
     fn registered_hooks_hear_the_game_and_late_ones_are_refused() {
         register(&RECORDER).unwrap();
         register(&Silent).unwrap();
+        register(&Later).unwrap();
         engine::started(&Started::new("0.2.31", std::path::Path::new("game")));
         // Changes only: the same state every frame is said once.
         for open in [false, true, true, true, false, false] {
@@ -618,6 +674,15 @@ mod tests {
         assert_eq!(engine::player_mark(8), None);
         let camera = engine::camera(&players::CameraView::new(5.0));
         assert_eq!(camera.map(|c| c.distance), Some(0.5));
+        // The first answer wins, a later hook answers what the first leaves, none gives vanilla.
+        let first = engine::client_identity("first.example");
+        assert_eq!(first.brand, "first");
+        assert_eq!(first.payloads, [("recorder:hello".to_owned(), vec![1, 2])]);
+        assert_eq!(engine::client_identity("second.example").brand, "later");
+        assert_eq!(
+            engine::client_identity("other.example"),
+            ClientIdentity::vanilla()
+        );
         let mut canvas = Canvas::default();
         engine::player_layers(&model(players::Kind::Player), &mut canvas);
         assert_eq!(
