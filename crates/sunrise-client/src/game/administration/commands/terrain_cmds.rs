@@ -742,16 +742,9 @@ impl Game<'_> {
                 let tool = self.tool_stack(ctx)?;
                 let mut pending = crate::game::spill::Pending::default();
                 let key = (p[0], p[1], p[2]);
-                if let Some(entity) = self.world.block_entities.get(&key) {
-                    pending.record(
-                        p,
-                        entity,
-                        &name,
-                        self.world.block_names.get(&key).cloned(),
-                        self.world.block_lock(key),
-                        self.res.items(),
-                    );
-                } else if let Some(saved) = self.block_entity_nbt(p) {
+                if !self.world.block_entities.contains_key(&key)
+                    && let Some(saved) = self.block_entity_nbt(p)
+                {
                     pending.record_saved(p, &saved);
                 }
                 // LootCommand: the source's entity is `this`, if it has one.

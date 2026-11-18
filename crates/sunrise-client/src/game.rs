@@ -2737,12 +2737,9 @@ impl Game<'_> {
     fn loot_block_entity(&self, pos: [i32; 3], block: &str) -> Option<sunrise_core::nbt::Tag> {
         let key = (pos[0], pos[1], pos[2]);
         match self.world.block_entities.get(&key) {
-            Some(entity) => Some(sunrise_client::save::block_entity_encode::encode(
-                key,
-                entity,
-                block,
-                self.res.items(),
-            )),
+            Some(entity) => {
+                Some(self.encode_live_block_entity(key, entity, block, self.res.items()))
+            }
             None => spill::saved_entity(&self.world, pos),
         }
     }
@@ -4216,10 +4213,18 @@ impl Game<'_> {
         } else {
             self.loot_block_entity(pos, &facts.name)
         };
-        let live = self.live_block_entity(key, &facts.name);
+        let live = self.live_block_entity(key, &facts.name, loot_entity.as_ref());
         if let Some((entity, _)) = &live {
-            self.pending
-                .record_from(&self.world, pos, entity, &facts.name, self.res.items());
+            let saved = match (&loot_entity, entity) {
+                (Some(tag), BlockEntity::Mod(_)) => tag.clone(),
+                _ => sunrise_client::save::block_entity_encode::encode(
+                    key,
+                    entity,
+                    &facts.name,
+                    self.res.items(),
+                ),
+            };
+            self.pending.record_from(&self.world, pos, saved);
         } else if let Some(tag) = spill::saved_entity(&self.world, pos) {
             self.pending.record_saved(pos, &tag);
         }
@@ -6284,6 +6289,15 @@ impl Game<'_> {
         )
         .into_iter()
         .map(|mut c| {
+            if mod_api::__private::has_part_hook(mod_api::HookId::BlockEntitySaveAdditional) {
+                for (pos, entity) in &mut c.block_entities {
+                    if let BlockEntity::Mod(entity) = entity
+                        && let Some(BlockEntity::Mod(live)) = self.world.block_entities.get(pos)
+                    {
+                        self.capture_block_entity_payload(*pos, live.id(), &mut entity.nbt);
+                    }
+                }
+            }
             self.attach_save_data(&mut c);
             Arc::new(c)
         })

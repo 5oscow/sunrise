@@ -71,24 +71,29 @@ impl Game<'_> {
         }
         let entity = loaded_block_entity(&self.world, pos)?;
         let block = &self.pack.assets.registry.state(state)?.name;
-        save_without_metadata(
-            &self.world,
-            (pos[0], pos[1], pos[2]),
-            entity,
-            block,
-            self.res.items(),
-        )
+        self.saved_block_entity_data((pos[0], pos[1], pos[2]), entity, block, None)
     }
 
-    /// The saved data of `entity` at `key` without identity or position metadata, with its
-    /// `CustomName`, for a block `block`: what a handle to it reads.
+    /// Saved data for the read-only view of a removed entity. The same captured
+    /// mod payload is used for loot and `block_drops` on a player's break.
     pub(in crate::game) fn saved_block_entity_data(
         &self,
         key: (i32, i32, i32),
         entity: &BlockEntity,
         block: &str,
+        serialized: Option<&Tag>,
     ) -> Option<Compound> {
-        save_without_metadata(&self.world, key, entity, block, self.res.items())
+        if !matches!(entity, BlockEntity::Mod(_)) {
+            return save_without_metadata(&self.world, key, entity, block, self.res.items());
+        }
+        let tag = serialized
+            .cloned()
+            .unwrap_or_else(|| self.encode_live_block_entity(key, entity, block, self.res.items()));
+        without_metadata(with_custom_name(
+            &self.world,
+            key,
+            save::command_block_entity_data(tag, self.world.block_lock(key)),
+        )?)
     }
 
     /// Opens a block entity's menu for a connected player (`ServerPlayer.openMenu`).
@@ -745,7 +750,11 @@ fn save_with_metadata(
     block: &str,
     items: &crate::items::Items,
 ) -> Option<Compound> {
-    let mut tag = save::block_entity_data(pos, entity, block, world.block_lock(pos), items);
+    let tag = save::block_entity_data(pos, entity, block, world.block_lock(pos), items);
+    with_custom_name(world, pos, tag)
+}
+
+fn with_custom_name(world: &World, pos: (i32, i32, i32), mut tag: Tag) -> Option<Compound> {
     Game::write_pending_loot(world, pos, &mut tag);
     let Tag::Compound(mut data) = tag else {
         return None;
@@ -763,7 +772,10 @@ pub(super) fn save_without_metadata(
     block: &str,
     items: &crate::items::Items,
 ) -> Option<Compound> {
-    let mut data = save_with_metadata(world, pos, entity, block, items)?;
+    without_metadata(save_with_metadata(world, pos, entity, block, items)?)
+}
+
+fn without_metadata(mut data: Compound) -> Option<Compound> {
     for key in ["id", "x", "y", "z"] {
         data.remove(&key.into());
     }

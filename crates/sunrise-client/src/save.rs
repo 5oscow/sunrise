@@ -687,7 +687,12 @@ pub fn block_entity_data(
     lock: Option<&Tag>,
     items: &crate::items::Items,
 ) -> Tag {
-    let mut tag = block_entity_encode::encode(p, e, block, items);
+    let tag = block_entity_encode::encode(p, e, block, items);
+    command_block_entity_data(tag, lock)
+}
+
+/// Apply the command data view to an encoded block entity.
+pub fn command_block_entity_data(mut tag: Tag, lock: Option<&Tag>) -> Tag {
     if let Tag::Compound(map) = &mut tag {
         map.remove(&"keepPacked".into());
         if let Some(lock) = lock {

@@ -1899,16 +1899,13 @@ impl Game<'_> {
                 sunrise_client::beehive::Release::Emergency,
             );
         }
-        if let Some(entity) = self.world.block_entities.get(&key).cloned() {
-            let custom = self.world.block_names.get(&key).cloned();
-            self.pending.record(
-                pos,
-                &entity,
-                &name,
-                custom,
-                self.world.block_lock(key),
-                self.res.items(),
-            );
+        let mut captured_mod_payload = None;
+        if let Some(entity) = self.world.block_entities.get(&key) {
+            let saved = self.encode_live_block_entity(key, entity, &name, self.res.items());
+            if matches!(entity, sunrise_client::containers::BlockEntity::Mod(_)) {
+                captured_mod_payload = Some(saved.clone());
+            }
+            self.pending.record_from(&self.world, pos, saved);
         } else if let Some(tag) = super::spill::saved_entity(&self.world, pos) {
             self.pending.record_saved(pos, &tag);
         }
@@ -1944,7 +1941,7 @@ impl Game<'_> {
             let decay = (interaction == BlockInteraction::DestroyWithDecay).then_some(radius);
             let place = self.loot_place_at(
                 pos.map(|v| f64::from(v) + 0.5),
-                self.loot_block_entity(pos, &name),
+                captured_mod_payload.or_else(|| self.loot_block_entity(pos, &name)),
             );
             // `Explosion.getDirectSourceEntity`.
             let entity = self

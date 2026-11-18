@@ -12,6 +12,18 @@ pub fn encode(
     block: &str,
     items: &crate::items::Items,
 ) -> Tag {
+    encode_with(p, e, block, items, |_, _| {})
+}
+
+/// Encode a live block entity, allowing its owner to supply the mod payload
+/// before the engine adds identity, position, item slots and published shapes.
+pub fn encode_with(
+    p: (i32, i32, i32),
+    e: &crate::containers::BlockEntity,
+    block: &str,
+    items: &crate::items::Items,
+    save_additional: impl FnOnce(&str, &mut Compound),
+) -> Tag {
     let item_to_nbt =
         |stack: &crate::items::ItemStack| sunrise_items::item_nbt::item_to_nbt(stack, items);
     use crate::containers::BlockEntity;
@@ -20,6 +32,7 @@ pub fn encode(
     };
     if let BlockEntity::Mod(m) = e {
         let mut map = m.nbt.clone();
+        save_additional(m.id(), &mut map);
         if let Some((key, shapes)) = m.shapes_tag() {
             map.insert(key.into(), shapes);
         }

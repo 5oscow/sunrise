@@ -157,12 +157,13 @@ impl Game<'_> {
         &self,
         key: (i32, i32, i32),
         block: &str,
+        serialized: Option<&sunrise_core::nbt::Tag>,
     ) -> Option<LiveBlockEntity> {
         let entity = self.world.block_entities.get(&key)?.clone();
         let view = (self.native_authoritative()
             && mod_api::__private::listened(mod_api::HookId::BlockDrops))
         .then(|| {
-            let data = self.saved_block_entity_data(key, &entity, block)?;
+            let data = self.saved_block_entity_data(key, &entity, block, serialized)?;
             Some((data, self.world.block_entities.generation(&key)?))
         })
         .flatten();
