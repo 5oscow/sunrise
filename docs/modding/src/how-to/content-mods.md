@@ -35,12 +35,25 @@ cargo sunrise-mod check target/sunrise-mod/my_mod.smod   # the registry's checks
   `#[mod_api::sunrise_mod]`. Compile it with `sunrise-launcher native-build <path> --trust-native-code`
   ([writing hooks](../start/writing-hooks.md)). Any other `--template` is refused.
 - `build` packs the checked project into `target/sunrise-mod/<id>.smod`: `sunrise-mod.toml`, `assets/`,
-  `data/`, optional `icon.png` and, for code, the root Cargo project. It validates content with the same
-  checks as the game; without `--wasm`, it does not compile code. Native code requires both `Cargo.toml` and `[native]`; inconsistent
+  `data/`, optional `icon.png` and, for code, the root Cargo project. It reads content with the game's own package
+  rules and runs the reference checks of `check` below; an error stops the build and removes the earlier
+  `<id>.smod`, so a stale file never looks current. Without `--wasm`, it does not compile code. Native code requires both `Cargo.toml` and `[native]`; inconsistent
   declarations and a manifest without capability `registries` are refused.
 - `run` builds, then starts `sunrise-client` (on `PATH`, or `--game PATH`, or `SUNRISE_CLIENT`) with
   `--dev-mod target/sunrise-mod/<id>.smod`, always on. Arguments after `--` go to the game. The game reads content once
   at start, so rebuild and run again after an edit.
+- `check` in a project folder runs the package rules, the render pipeline shaders and the reference checks, in
+  well under a second for a content mod. An **error** (exit 1) is something the game would draw broken or drop:
+  a blockstate, model parent or item definition naming a model file the mod lacks; a model naming a texture file it
+  lacks; a block with no blockstate (declare `render_shape` `INVISIBLE` for one that draws nothing); a recipe, a tag
+  or a loot entry naming an item, block, fluid or entity type of the mod's own namespaces that it does not declare;
+  a `#tag` of the mod that has no file; a JSON file that does not parse. A **warning** (printed, exit 0) is legal
+  but almost certainly a mistake: a block with no loot table, a block or item with no name in `en_us.json` or no
+  item definition, and registry content in a package whose `side` is `client` (the default when the line is
+  missing), which breaks joining a server. Each message names the file, the id and what to do, with a near
+  miss from the declared ids. Ids in vanilla's namespace (items, blocks, block templates, loot function names) are
+  not checked: the tool has no list of them, and a wrong one is met when the game loads the mod. A mod with
+  code, or with `[[jar]]` layers, skips the checks that need every declared id or every asset in the files.
 - `check <file>` runs what the registry runs: the file's size and SHA-256, its manifest and content, and a signature
   with `--key <public key> --signature <file>.minisig`. It reads `.smod`, `.spack`, resource pack `.zip`
   and `.sshader` files.

@@ -55,7 +55,8 @@ types to a world.
 cargo sunrise-mod build
 ```
 
-This validates the content with the same checks the game uses and writes `target/sunrise-mod/glowing_blocks.smod`,
+This reads the content with the game's own package rules, checks that the files of your mod agree with each other
+(see [`check`](../how-to/content-mods.md#create-and-package-your-mod)) and writes `target/sunrise-mod/glowing_blocks.smod`,
 the file you share.
 
 ## 4. Play it

@@ -130,6 +130,21 @@ pub fn check(
     })
 }
 
+/// The references among a project's content files ([`sunrise_mod_package::content::check_references`]):
+/// warnings are printed, errors fail with one line each.
+pub fn references(root: &Path, manifest: &sunrise_mod_package::Manifest) -> Result<(), String> {
+    let content = sunrise_mod_package::Content::read(root, manifest)?;
+    let findings = sunrise_mod_package::content::check_references(&content, manifest)?;
+    for warning in &findings.warnings {
+        eprintln!("warning: {warning}");
+    }
+    if findings.errors.is_empty() {
+        Ok(())
+    } else {
+        Err(findings.errors.join("\nerror: "))
+    }
+}
+
 /// Composes and validates every render pipeline fragment file in a mod's `files`
 /// (`assets/<namespace>/shaders/pipeline/<path>.wgsl`) with the game's own code
 /// (`sunrise_shader_api::mod_pipeline`), returning how many there are and each refusal as

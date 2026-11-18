@@ -459,12 +459,20 @@ fn pack_into(
     api: Option<&mod_surface::Surface>,
 ) -> Result<PathBuf, String> {
     let package = Package::read(root)?;
+    // A failed build leaves no earlier package that a later `check <file>` would report as good.
+    let path = dir.join(format!("{}.smod", package.manifest.id));
+    match std::fs::remove_file(&path) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+            return Err(format!("{}: {e}", path.display()));
+        }
+        _ => {}
+    }
+    check::references(root, &package.manifest)?;
     if package.manifest.native.is_some() || package.manifest.wasm.is_some() {
         layouts::build(root, api)?;
     }
     let bytes = Package::pack_directory_with(root, uses)?;
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    let path = dir.join(format!("{}.smod", package.manifest.id));
     // Write then rename, so a running game never reads half a file.
     let partial = path.with_extension("smod.partial");
     std::fs::write(&partial, bytes).map_err(|e| e.to_string())?;
@@ -581,6 +589,18 @@ mod tests {
             "{}",
             report.text()
         );
+        // A build that fails its reference checks leaves no earlier package behind.
+        let model = path.join("assets/gems/models/block/glowing_amethyst.json");
+        let original = std::fs::read(&model).unwrap();
+        std::fs::write(
+            &model,
+            r#"{"parent":"minecraft:block/cube_all","textures":{"all":"gems:block/gone"}}"#,
+        )
+        .unwrap();
+        let error = build_in(&path).unwrap_err();
+        assert!(error.contains("the texture gems:block/gone"), "{error}");
+        assert!(!smod.exists());
+        std::fs::write(&model, original).unwrap();
         let executable = path.join("assets/gems/mod.wasm");
         std::fs::write(&executable, b"\0asm").unwrap();
         assert!(
