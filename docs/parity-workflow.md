@@ -60,9 +60,10 @@ Each harness runs unmodified under a tracer that records the files it depended o
 
 Vanilla oracle runs are reused as well. `tools/parity_shim.py` stands in for `java` and `javac`: it records each oracle run's outputs and the content of every file under the paths its arguments name, and replays the run while those are unchanged. After a Rust-only change a harness pays only for its Rust side (`block_update`: 53 s to 5 s). Files an oracle writes outside its named paths aren't tracked, so a harness that fails while reusing oracle results is rerun fresh, and stops reusing them if it then passes. `--fresh` never reuses them; `--all` allows reuse only when
 `PARITY_ORACLE_KEEP` is set, naming a folder that outlives the checkout, which the shim keeps runs in besides the
-checkout's own cache. The daily names its CI host's keep (`$DYNA_CI_KEEP/oracles`): there a run is replayed only for the
-same command, JVM option variables, oracle variables (and the files their paths name) and JDK content on byte-identical
-input files, while every harness's Rust side runs. A harness that failed with reuse enabled and then passed fresh runs
+checkout's own cache. The daily names its CI host's keep (`$DYNA_CI_KEEP/oracles`). Replay applies only to the launches the
+shim supports (`java` and `javac` found on PATH, stdin not a pipe) and to the input files it tracks: those under the
+paths the arguments and the oracle variables name. A run is replayed only for the same command, JVM option and oracle
+variables and JDK content on byte-identical tracked inputs, while every harness's Rust side runs. A harness that failed with reuse enabled and then passed fresh runs
 fresh for 30 days.
 
 Probes build into `.local/parity-target/` with release optimisation but no LTO and 16 codegen units. On ludodesktop that rebuilds every `sunrise-world` probe in 3 seconds after a one-line change, against 122 seconds with the release profile. Rust gives these settings identical results (no fast-math; overflow checks as in release), and the full harness suite passes under them. Probes that harnesses build in the dev profile get `opt-level = 3` too, keeping their overflow checks and debug assertions. Harnesses must locate binaries through `cargo metadata` or `lab.cargo_target()`, never a hard-coded `target/`.

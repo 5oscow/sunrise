@@ -51,8 +51,9 @@ CACHE = Path(os.environ.get("PARITY_SHIM_CACHE", ".local/parity-runner/oracle-ca
 KEEP = Path(os.environ["PARITY_ORACLE_KEEP"]) if os.environ.get("PARITY_ORACLE_KEEP") else None
 KEEP_FORMAT = 2
 # Read by the JVM itself: the same command line runs differently under each.
-JVM_ENVIRONMENT = ("JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS", "_JAVA_OPTIONS", "CLASSPATH")
-# Read by the oracles (System.getenv in mods/sunrise/src/test/java): harnesses pass files and choices through them.
+JVM_ENVIRONMENT = ("JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS", "JDK_JAVAC_OPTIONS", "_JAVA_OPTIONS", "CLASSPATH")
+# Read by the oracles (System.getenv in mods/sunrise/src/test/java): harnesses pass files and choices through them. A
+# variable an oracle starts reading belongs here.
 ORACLE_ENVIRONMENT = ("AI_TRACE", "CAULDRON_TRACE", "DUMP_TOOLTIPS", "MENU_TRACE", "ORACLE_TRACE", "SCULK_TRACE",
                       "SUNRISE_CATALOG_TRACE", "SUNRISE_CHUNKS", "SUNRISE_DATAPACKS", "SUNRISE_DIMENSION", "SUNRISE_FLAT",
                       "SUNRISE_HEIGHTS", "SUNRISE_ISOLATED", "SUNRISE_OLD_CHUNKS", "SUNRISE_ORDER", "SUNRISE_PHASE",
@@ -237,12 +238,23 @@ def keep_entry(command, jdk, inputs):
     return KEEP / digest[:2] / digest
 
 
+def discard(paths):
+    for path in paths:
+        try:
+            Path(path).unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 def restore(entry):
     """Put a kept run's outputs in place; returns their paths, its stdout and its stderr. None, with no output
     touched, when the entry is missing or can't be read whole (pruned meanwhile, a damaged keep)."""
     staged = []
     try:
         kept = json.loads((entry / "run.json").read_text())
+        if not isinstance(kept["outputs"], list) or not all(isinstance(path, str) and os.path.isabs(path)
+                                                             for path in kept["outputs"]):
+            return None
         stdout, stderr = (entry / "stdout").read_bytes(), (entry / "stderr").read_bytes()
         for index, path in enumerate(kept["outputs"]):
             os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -250,8 +262,7 @@ def restore(entry):
             staged.append((temporary, path))
             shutil.copyfile(entry / "files" / str(index), temporary)
     except (OSError, ValueError, KeyError, TypeError):
-        for temporary, _ in staged:
-            Path(temporary).unlink(missing_ok=True)
+        discard(temporary for temporary, _ in staged)
         return None
     published = []
     try:
@@ -259,11 +270,8 @@ def restore(entry):
             os.replace(temporary, path)
             published.append(path)
     except OSError:
-        # Half a replay is worse than none: the oracle runs and writes them all.
-        for temporary, path in staged:
-            Path(temporary).unlink(missing_ok=True)
-        for path in published:
-            Path(path).unlink(missing_ok=True)
+        # Half a replay is worse than none: what it published goes, and the oracle runs and writes every output.
+        discard([temporary for temporary, _ in staged] + published)
         return None
     # Its mtime orders the keep's pruning (tools/parity.py): a replayed run stays. Pruned meanwhile, it was still read.
     try:

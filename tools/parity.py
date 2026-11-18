@@ -1664,13 +1664,14 @@ def share_of(path, found, parser):
 
 def report_retries(results, flaky):
     """Say loudly which harnesses needed their one retry (a known flaky one, or one that failed with reused oracle
-    results), here and in the CI job's summary: a pass on the retry counts, so this is where flakes stay visible."""
+    results enabled), here and in the CI job's summary: a pass on the retry counts, so this is where flakes stay
+    visible. A first run with reuse enabled may have replayed nothing."""
     def why(name, record):
         if record["retried"] == "known flaky":
             return (f"known flaky: {flaky.get(base_name(name), '?')}; first run's log: "
                     f"{STATE_DIR / 'logs' / (name + '.first-run.log')}")
-        return "its first run reused oracle results; it no longer reuses them" if record["status"] == "pass" else \
-            "its first run reused oracle results"
+        return "its first run ran with oracle reuse enabled; it no longer reuses them" if record["status"] == "pass" \
+            else "its first run ran with oracle reuse enabled"
     lines = [f"RETRIED {name}: failed, then {'passed' if record['status'] == 'pass' else 'failed again'} on its one "
              f"retry ({why(name, record)})" for name, record in sorted(results.items()) if record.get("retried")]
     for line in lines:

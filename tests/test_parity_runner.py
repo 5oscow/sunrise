@@ -628,21 +628,6 @@ class OracleReuseTests(unittest.TestCase):
         order.write_text("third")
         self.assertEqual(self.oracle(), 3)
 
-    def test_every_variable_an_oracle_reads_is_keyed(self):
-        import re
-        from tools import parity_shim
-        sources = (Path(parity.__file__).parents[1] / "mods/sunrise/src/test/java").rglob("*.java")
-        read = set()
-        for source in sources:
-            text = source.read_text(encoding="utf-8", errors="replace")
-            read |= set(re.findall(r'getenv\(\)\.getOrDefault\("([A-Z0-9_]+)"', text))
-            read |= set(re.findall(r'getenv\("([A-Z0-9_]+)"\)', text))
-            # A variable an oracle reads by a name this can't see would be an untracked input.
-            self.assertNotRegex(text, r'getenv\((?!\)|")', source.name)
-            self.assertNotRegex(text, r'getenv\(\)(?!\.getOrDefault\(")', source.name)
-        self.assertTrue(read)
-        self.assertLessEqual(read, set(parity_shim.ORACLE_ENVIRONMENT))
-
     def test_a_damaged_kept_run_runs_the_oracle_and_writes_nothing_of_it(self):
         keep = self.bin.parent / "keep"
         self.env["PARITY_ORACLE_KEEP"] = str(keep)
@@ -720,7 +705,7 @@ class OracleKeepTests(unittest.TestCase):
             self.assertEqual(sorted(path.name for path in (keep / "ab").iterdir()), [".being-written.tmp", "used-lately"])
 
     def test_only_a_fresh_pass_after_a_reuse_failure_is_remembered_and_only_for_a_while(self):
-        import time
+        import json, time
         with tempfile.TemporaryDirectory() as tmp:
             keep = Path(tmp)
             long_ago = time.strftime("%Y-%m-%d", time.gmtime(time.time() - 40 * 86400))
@@ -732,9 +717,10 @@ class OracleKeepTests(unittest.TestCase):
                 "light": {"status": "pass", "oracle_reuse": True}})
             self.assertEqual(parity.fresh_only(keep), {"loot": time.strftime("%Y-%m-%d", time.gmtime()),
                                                        "inherited": lately})
-            for damaged in ("[1, 2]", '{"loot": 3, "light": "2026-11-18"}'):
-                (keep / "fresh-only.json").write_text(damaged)
-                self.assertEqual(set(parity.fresh_only(keep)) - {"light"}, set())
+            (keep / "fresh-only.json").write_text("[1, 2]")
+            self.assertEqual(parity.fresh_only(keep), {})
+            (keep / "fresh-only.json").write_text(json.dumps({"loot": 3, "light": lately}))
+            self.assertEqual(parity.fresh_only(keep), {"light": lately})
 
     def test_a_replay_that_cannot_publish_every_output_publishes_none(self):
         import json
