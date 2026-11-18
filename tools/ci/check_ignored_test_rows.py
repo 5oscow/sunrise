@@ -7,8 +7,8 @@ and `needs-plain` fixture rows; neither is a known failure. Every `daily` row mu
 one of its test targets, and some leg of the daily run's matrix must run it: its package's shard, or the `daily-rows`
 leg (tools/ci/ignored_shards.py), so no moved test runs nowhere. A row whose reason names an input only one job
 builds (ignored_tests.DAILY_INPUTS: `wasm-fixture`) runs in that job instead, which a workflow must call with
-`--needs VARIABLE`. A `windows` row (its target compiles only on Windows) runs in the Windows job instead, which a
-workflow must call with `--windows-rows`. Builds only the source-inventory helper,
+`--needs VARIABLE`. A `windows` row must name a Windows-only integration test in the game workspace and runs
+in the Windows job instead. Builds only the source-inventory helper,
 not the game or SDK.
 
 Every `#[ignore]`d test that no daily shard runs (rowless_problems) has a row of some mark: `daily`, a known
@@ -27,6 +27,7 @@ attribute and a row per target; both rows find it. The limit: rows carry no file
 name. Two marked functions of one name in one package are satisfied by one row naming either; the daily run, which
 runs each row by its exact path, still fails a row whose test does not run.
 """
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -62,6 +63,35 @@ def daily_problems(rows, targets, matrix):
         elif (leg := ignored_shards.daily_rows_leg(row.package)) not in matrix or \
                 row.test not in groups.get((row.package, row.reference), ()):
             problems.append(f"{where}: no leg runs it (the {leg} leg is missing)")
+    return problems
+
+
+def windows_target_problems(rows, root=ROOT):
+    """Only an actual game-workspace tests/NAME.rs crate root gated by Windows can leave the Linux legs."""
+    windows = [row for row in rows if row.reason == ignored_tests.WINDOWS_REASON]
+    if not windows:
+        return []
+    members = ignored_shards.workspace_members()
+    roots = {(package, target): path for package, target, path, _ in ignored_inventory.target_roots(root)}
+    problems = []
+    for row in windows:
+        where = f"{row.file}: {row.package} {row.test}"
+        if row.package not in members:
+            continue  # daily_problems already diagnoses unknown packages
+        member, workspace = members[row.package]
+        if workspace != ".":
+            problems.append(f"{where}: `windows` is only supported in the game workspace, not {workspace}")
+        elif not row.reference.startswith("test:"):
+            problems.append(f"{where}: `windows` requires a Cargo integration test target (test:NAME)")
+        else:
+            expected = (Path(member) / "tests" / f"{row.reference.removeprefix('test:')}.rs").as_posix()
+            path = root / expected
+            if roots.get((row.package, row.reference)) != expected or not path.is_file():
+                problems.append(f"{where}: `windows` requires the Cargo target root to be {expected}")
+            elif not re.match(r"\s*#!\s*\[\s*cfg\s*\(\s*windows\s*\)\s*\]",
+                              rust_tests.blank(path.read_text(encoding="utf-8-sig"))):
+                problems.append(f"{where}: `windows` requires {expected} to start with #![cfg(windows)] "
+                                "after any comments")
     return problems
 
 
@@ -151,6 +181,7 @@ if __name__ == "__main__":
     daily = [row for row in rows if row.mark == "daily"]
     problems = daily_problems(daily, ignored_shards.workspace_targets(),
                               [*ignored_shards.expand(ignored_shards.SHARDS), *ignored_shards.DAILY_ROWS_LEGS.values()])
+    problems += windows_target_problems(daily)
     ignored = ignored_functions()
     functions = [(path, line, name, packages) for path, line, name, packages, _, daily in ignored if daily]
     problems += source_problems(daily, functions)
