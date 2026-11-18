@@ -1,8 +1,8 @@
 # Your first native mod
 
 A native mod is a Rust crate that implements hooks from the mod API. `cargo sunrise-mod` compiles it on your
-machine against the exact Sunrise build it is pinned to and starts the game with it; no launcher is involved. In this
-page you make a mod that greets every player who joins, compile it, run it, and test it.
+machine against the exact Sunrise build it is pinned to and starts the game with it: the tool is all you install. In
+this page you make a mod that greets every player who joins, compile it, run it, and test it.
 
 You need [rustup](https://rustup.rs) (the tool installs the Rust the SDK was built with, and says so when it does),
 and, to run the game, resources prepared from your own Minecraft: Java Edition 26.3 (step 6).
@@ -61,13 +61,15 @@ After a fresh clone, run `cargo sunrise-mod check` once before opening the proje
 
 ## 4. Check that it compiles
 
+`check` compiles for wasm32 as well as for this computer, so install that target for the project's toolchain once:
+
 ```sh
+rustup target add wasm32-unknown-unknown
 cargo sunrise-mod check
 ```
 
 `check` applies the package rules, then compiles the crate with `cargo check` against the pinned SDK's API source,
-for the project's own target (this computer for a native mod; a wasm mod's is wasm32), and lists what the mod uses
-of its build. `check --wasm` or `check --native` asks for the other target instead. The expected end of the output:
+for this computer and for wasm32, and lists what the mod uses of its build. The expected end of the output (the compile runs twice, once for each target):
 
 ```text
     Checking mod-greeter v0.1.0 (…/greeter)
@@ -114,7 +116,7 @@ cargo sunrise-mod run --resources <folder> -- --world Greeter --creative
 
 `run` builds, stages the game with your mod in `target/sunrise-mod/run/` and starts it, with its game folder and its
 logs inside that folder, so nothing of a player's is touched. Everything after `--` goes to the game. The game needs
-resources prepared from your own Minecraft: play 26.3 once in Minecraft's own launcher, then make them with
+resources prepared from your own Minecraft: play 26.3 once from the Minecraft Launcher, then make them with
 `sunrise-prepare --prepare --output <folder>` (`sunrise-prepare` is in the game's download; `--help` lists where it
 reads your copy). The tool never downloads or bundles Mojang's files. Join a world; the greeting appears in chat, and
 the mod is listed on the game's **Mods** screen. On Linux without a display, start `run` under `xvfb-run`.
@@ -132,8 +134,7 @@ without the game.
 
 A build server can run the compile itself: `native-build` takes the plan as one line of JSON on standard input and
 prints one JSON event per line. That contract ([`native-build`](../reference/sdk/08-native-build.md)) is what `build`
-and the launcher call; the launcher also installs the result into an instance, and its **Mods** page does the same
-from the window ([Installing and using mods](installing.md)).
+itself calls.
 
 ## Next
 
@@ -141,6 +142,6 @@ from the window ([Installing and using mods](installing.md)).
 - [Hooks and the Host](../concepts/hooks-and-the-host.md) and [Parts](../concepts/parts.md): how a mod reaches
   the game.
 - [Your first WebAssembly mod](first-wasm-mod.md): the same code, sandboxed.
-- [Native mods: building and shipping](../how-to/native-mods.md): what the launcher does, trust, multiplayer and
-  servers.
+- [Native mods: building and shipping](../how-to/native-mods.md): how a native mod reaches players, trust,
+  multiplayer and servers.
 - [Using an AI agent](../for-agents.md): the same steps on one page for a coding agent.

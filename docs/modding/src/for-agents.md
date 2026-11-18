@@ -18,7 +18,8 @@ commands and the rules that decide whether the code compiles. The same material,
 
 Take the page [Install the mod tool](start/install-tool.md) and run the block for the user's computer. It reads the
 current Nightly's build, downloads that SDK release's tool, checks Sunrise's signature and the tool's hash, and puts `cargo-sunrise-mod` on the
-`PATH`. On NixOS the prebuilt binary needs `steam-run` or `nix-ld`; the fallback is
+`PATH`. For a fix to the tool that merged after the Nightly, change the block's `RELEASE` line to `mod-tool`, the
+newest tool from main; that page says when to take which. On NixOS the prebuilt binary needs `steam-run` or `nix-ld`; the fallback is
 `cargo install --locked --git https://github.com/sunrise-org/sunrise cargo-sunrise-mod`.
 
 ## 2. Make and check a native mod
