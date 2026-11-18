@@ -36,6 +36,19 @@ pub const API: &str = "0.2";
 /// Namespaces no mod may claim: vanilla's, the convention tags' (mods add
 /// to those, docs/modding/src/how-to/content-mods.md) and the game's own.
 const RESERVED_NAMESPACES: [&str; 3] = ["minecraft", "c", "sunrise"];
+/// Ids no mod or pack may take: the mod site's own pages under `/mods/` (a project's page is
+/// `/mods/<id>`), and the names of the pages below an id. The site's routes are checked against
+/// this list on its side.
+pub const RESERVED_IDS: [&str; 7] = [
+    "account",
+    "edit",
+    "index",
+    "mine",
+    "policy",
+    "registry-page",
+    "submit",
+];
+
 /// A mod's saved settings, shared by native mods and modpack overrides.
 pub const STORAGE_DIR: &str = ".sunrise-mod-data";
 /// wasm32's whole address space in MiB (4 GiB): the most a mod may declare in `wasm_memory_mib`,
@@ -446,6 +459,12 @@ impl Manifest {
         if m.runtime.is_some() && m.native.is_none() && m.wasm.is_none() {
             return Err(format!(
                 "{MANIFEST}: a content mod has no code, so no [runtime]"
+            ));
+        }
+        if RESERVED_IDS.contains(&m.id.as_str()) {
+            return Err(format!(
+                "{MANIFEST}: id {:?} is a page of the mod site, so no mod can be published under it: pick another id",
+                m.id
             ));
         }
         if reserved_mod_id(&m.id) {
@@ -1970,6 +1989,18 @@ capabilities = ["registries"]
                 error.contains(MANIFEST)
                     && error.contains(id)
                     && error.contains("reserved namespace"),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_page_of_the_mod_site_cannot_be_the_mod_id() {
+        for id in ["mine", "account", "policy", "submit", "index", "edit"] {
+            let manifest = EXAMPLE.replace("id = \"ruby\"", &format!("id = {id:?}"));
+            let error = Manifest::parse(&manifest).unwrap_err();
+            assert!(
+                error.contains(MANIFEST) && error.contains(id) && error.contains("mod site"),
                 "{error}"
             );
         }
