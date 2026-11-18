@@ -133,6 +133,10 @@ pub trait Hooks: Sync {
         None
     }
 
+    /// Once a frame the window rendered, after it was shown: how long it took
+    /// ([`perf::FrameTimes`]), with the [`seat`] of the `Game` that drew it.
+    fn frame_timed(&self, _times: &perf::FrameTimes) {}
+
     /// A game window opened: once, before the first frame, for every run that has a window,
     /// automated ones included ([`Client::automated`]); never for a dedicated server.
     fn client_started(&self, _client: &Client) {}
@@ -409,6 +413,13 @@ pub mod engine {
     /// [`Hooks::captures`]: the first registered hook's.
     pub fn captures() -> Option<&'static dyn perf::Captures> {
         all().iter().find_map(|hooks| hooks.captures())
+    }
+
+    /// [`Hooks::frame_timed`].
+    pub fn frame_timed(times: &perf::FrameTimes) {
+        for hooks in all() {
+            hooks.frame_timed(times);
+        }
     }
 
     /// [`Hooks::tunnel`]: the first registered hook's resolver.

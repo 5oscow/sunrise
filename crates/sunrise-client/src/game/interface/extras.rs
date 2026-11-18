@@ -218,6 +218,12 @@ impl Game<'_> {
         }
         self.draw_pvp_hud(batch, &mut corners);
         self.native_render_gui_post(batch, &mut corners);
+        // The layers crates registered (`sunrise_hooks::hud`): none, no canvas.
+        let layers = sunrise_hooks::hud::engine::all();
+        if !layers.is_empty() {
+            let shown = Corner::ALL.map(|corner| !(self.debug && corner == Corner::TopLeft));
+            extras_hud::draw_layers(layers, batch, &self.gui.atlas, &mut corners, shown);
+        }
     }
     /// The height the status effect icons take at the top right
     /// (`Hud.extractEffects`: beneficial at y 1, harmful at y 26).

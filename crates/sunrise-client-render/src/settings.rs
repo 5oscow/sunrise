@@ -348,6 +348,20 @@ impl Settings {
         sunrise_hooks::settings::engine::load(&mut |file| fs::read_to_string(dir?.join(file)).ok());
     }
     pub fn load(path: &Path) -> Self {
+        let (extras_text, keep_extras) = path
+            .parent()
+            .map_or((String::new(), false), crate::extras::Extras::read_text);
+        // The settings stores of the crates above the engine: their lines of `sunrise-extras.txt`
+        // and `sunrise-graphics.txt`, or of their own files (docs/layers.md, "Platform
+        // registries"). First, as the graphics settings below may be saved again with them.
+        sunrise_hooks::settings::engine::load(&mut |file| match path.parent() {
+            _ if file == crate::extras::FILE => Some(extras_text.clone()),
+            Some(dir) => sunrise_hooks::settings::engine::read(&dir.join(file))
+                .ok()
+                .flatten()
+                .map(|read| read.text),
+            None => None,
+        });
         let mut sunrise = path
             .parent()
             .map(crate::graphics::Graphics::load)
@@ -367,20 +381,7 @@ impl Settings {
             .parent()
             .map(crate::gamepad::PadSettings::load)
             .unwrap_or_default();
-        let (extras_text, keep_extras) = path
-            .parent()
-            .map_or((String::new(), false), crate::extras::Extras::read_text);
         let extras = crate::extras::Extras::from_text(&extras_text, keep_extras);
-        // The settings stores of the crates above the engine: their lines of this file, or of
-        // their own (docs/layers.md, "Platform registries").
-        sunrise_hooks::settings::engine::load(&mut |file| match path.parent() {
-            _ if file == crate::extras::FILE => Some(extras_text.clone()),
-            Some(dir) => sunrise_hooks::settings::engine::read(&dir.join(file))
-                .ok()
-                .flatten()
-                .map(|read| read.text),
-            None => None,
-        });
         // The enabled mods are the game folder's, shared by its players (`--player-dir`).
         let mods = path
             .parent()
@@ -703,8 +704,10 @@ impl Settings {
             self.sunrise.save(dir);
             self.controller.save(dir);
             self.extras.save(dir);
-            for (file, e) in sunrise_hooks::settings::engine::save_own(dir, &[crate::extras::FILE])
-            {
+            for (file, e) in sunrise_hooks::settings::engine::save_own(
+                dir,
+                &[crate::extras::FILE, crate::graphics::FILE],
+            ) {
                 log::warn!("Sunrise: {file} is not saved: {e}");
             }
             self.mods.save(&crate::logging::shared_dir(dir));

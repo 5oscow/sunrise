@@ -151,8 +151,9 @@ Sunrise's own extras and its product, and every built-in address of an outside s
   music page, keystrokes, auto-reconnect...), Play with Friends and its relay, Discord, the "I'm playing" ping,
   telemetry and benchmark uploads, releases and updates, the hosting supervisor, the launcher.
 - **Examples:** `sunrise-addresses`, `sunrise-friends`, `sunrise-relay`, `sunrise-telemetry`,
-  `sunrise-perf-share`, `sunrise-release-sign`, `sunrise-server`, `sunrise-mod-registry`, `sunrise-heartbeat`,
-  `sunrise-official`, `sunrise-discord`, `https://github.com/sunrise-org/sunrise-launcher`. Still in engine crates today:
+  `sunrise-perf-share`, `sunrise-perf-overlay`, `sunrise-release-sign`, `sunrise-server`, `sunrise-mod-registry`,
+  `sunrise-heartbeat`, `sunrise-official`, `sunrise-discord`, `https://github.com/sunrise-org/sunrise-launcher`. Still in
+  engine crates today:
   `game/extras.rs` and `game/extras/`, `extras_ui.rs`, `pvp.rs`.
 - **Rules:**
   - It uses the platform's public API only, never the engine.
@@ -293,7 +294,7 @@ build pays nothing.
 
 The hooks today: `started` (once, when someone plays: not a dedicated server, a benchmark or an automated run),
 `published` (the world opened to or closed from LAN or friends, on change), `shutdown` (the window closed, the
-world saved) and `tunnel` (the resolver of `friend:` addresses, Play with Friends') and `captures` (Open and Share for saved performance captures, `sunrise-perf-share`: with none registered the game offers neither) and `client_identity` (how the client presents itself to the server it joins: the brand of vanilla's `ClientBrandRetriever.getClientModName`, and the custom payloads it sends in the configuration phase after it. It gets the address as typed, before SRV or DNS resolution; the first answer wins, and none gives `vanilla` with no payloads. It runs on the network thread, once per join, so it must not touch game state. `sunrise-official` answers for the official Horizon server, which requires its brand and an empty payload offer). **A hook you need and don't find:** add a method with an empty default to `Hooks` and a function in
+world saved) and `tunnel` (the resolver of `friend:` addresses, Play with Friends') and `captures` (Open and Share for saved performance captures, `sunrise-perf-share`: with none registered the game offers neither), `client_identity` (how the client presents itself to the server it joins: the brand of vanilla's `ClientBrandRetriever.getClientModName`, and the custom payloads it sends in the configuration phase after it. It gets the address as typed, before SRV or DNS resolution; the first answer wins, and none gives `vanilla` with no payloads. It runs on the network thread, once per join, so it must not touch game state. `sunrise-official` answers for the official Horizon server, which requires its brand and an empty payload offer) and `frame_timed` (once a frame the window rendered, after it is shown: its frame, CPU and GPU times and Dynamic Resolution's scale, `perf::FrameTimes`; the performance overlay, `sunrise-perf-overlay`, keeps its graph from it). **A hook you need and don't find:** add a method with an empty default to `Hooks` and a function in
 `sunrise_hooks::engine` that the engine calls where vanilla does the matching thing; give it plain data or a type
 the engine owns, never one from above. A hook that needs engine types the platform doesn't expose yet (a draw
 context for HUD and chat overlays, a settings page) comes with that type's platform API (M6). An extension point
@@ -341,8 +342,8 @@ exactly vanilla's.
 
 ```rust
 pub trait Store: Sync {
-    /// Its file in the game folder: `sunrise-extras.txt` (shared with the engine's extras until they all
-    /// move) or its own `sunrise-<name>.txt`.
+    /// Its file in the game folder: `sunrise-extras.txt` or `sunrise-graphics.txt` (shared with the engine's
+    /// extras and video settings until they all move) or its own `sunrise-<name>.txt`.
     fn file(&self) -> &'static str;
     /// Whether a `key:value` line of that file is this store's (a fixed list, or a `<name>.` prefix).
     fn owns(&self, key: &str) -> bool;
@@ -358,8 +359,8 @@ pub trait Store: Sync {
 - The engine routes lines in `Settings::load` and `Settings::save`: once per load or save, never per frame.
   Each file is read once. A store's lines come after the engine's own in a shared file. A line nobody owns
   is kept as it was.
-- A setting that moves out of `extras.rs` keeps its key and file, so players keep their choice. The engine's
-  `Extras` stops reading and writing the key in the same PR.
+- A setting that moves out of `extras.rs` or `graphics.rs` keeps its key and file, so players keep their
+  choice. The engine's `Extras` or `Graphics` stops reading and writing the key in the same PR.
 - A page that changes a store's setting (below) needs nothing else: the options screen saves on close, as
   it does for every setting.
 
@@ -433,14 +434,18 @@ pub trait Canvas {
     /// `None` while the debug screen covers that corner.
     fn place(&mut self, corner: Corner, w: f32, h: f32) -> Option<(f32, f32)>;
 }
+pub enum Stage { Hud, Top }
 pub trait Layer: Sync {
     fn draw(&self, canvas: &mut dyn Canvas);
+    fn stage(&self) -> Stage { Stage::Hud }
 }
 ```
 
-- Layers draw in the HUD pass where the extras do (`game/extras.rs`, `draw_extras`, beside the native mods' HUD
-  boxes), in the order they registered. They are hidden with F1, and a corner the debug screen covers is
-  `None`, as for mods' boxes.
+- `Stage::Hud` layers draw in the HUD pass where the extras do (`game/interface/extras.rs`, `draw_extras`,
+  beside the native mods' HUD boxes), in the order they registered. They are hidden with F1, and a corner the
+  debug screen covers is `None`, as for mods' boxes.
+- `Stage::Top` layers draw last, over everything: after the debug screen, over menus and the title screen, F1
+  included. Nothing is stacked there: `place` is always `None`. The performance overlay is one.
 - With no layer registered the engine builds no canvas.
 - A layer reads its own state, which its crate keeps up to date through `Hooks` or its own threads. It never
   reads the engine's.

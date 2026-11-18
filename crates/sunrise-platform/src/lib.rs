@@ -127,7 +127,7 @@ pub mod containers {
 
 /// Drawing on the HUD (docs/layers.md, "Platform registries").
 pub mod hud {
-    pub use sunrise_hooks::hud::{Canvas, Corner, Layer, register};
+    pub use sunrise_hooks::hud::{Canvas, Corner, Layer, Stage, register};
 }
 
 /// The multiplayer server list as vanilla stores it (`servers.dat`): read, write, add, remove,

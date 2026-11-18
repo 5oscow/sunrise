@@ -340,17 +340,6 @@ pub enum Pacing {
     Precise,
 }
 
-/// The performance overlay drawn over the HUD.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum Overlay {
-    #[default]
-    Off,
-    /// Frames per second and frame time.
-    Fps,
-    /// The numbers and a graph of recent frame times.
-    Graph,
-}
-
 /// How finely far terrain is drawn (`FarDetail` in the LOD options).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum FarDetail {
@@ -868,7 +857,6 @@ pub struct Graphics {
     /// Parallel Tick (Performance graphics, beside Worker Threads): applies from the next tick,
     /// and no preset sets it.
     pub parallel_tick: ParallelTickMode,
-    pub overlay: Overlay,
     /// World resolution as a percentage of the window's (50..=200).
     pub resolution_scale: u32,
     /// Dynamic Resolution: below 100%, `resolution_scale` is the floor, and the scale rises
@@ -972,7 +960,6 @@ impl Default for Graphics {
             pacing: Pacing::Efficient,
             workers: 0,
             parallel_tick: ParallelTickMode::Off,
-            overlay: Overlay::Off,
             resolution_scale: 100,
             dynamic_resolution: false,
             target_fps: 60,
@@ -1171,13 +1158,6 @@ impl Graphics {
                 "hdrSmoothGradients" => g.hdr_smooth_gradients = flag(g.hdr_smooth_gradients),
                 "graphicsApi" => g.api = GraphicsApi::from_name(value).unwrap_or_default(),
                 "pickedShaderPack" => g.shader_pack = value.to_owned(),
-                "overlay" => {
-                    g.overlay = match value {
-                        "fps" => Overlay::Fps,
-                        "graph" => Overlay::Graph,
-                        _ => Overlay::Off,
-                    }
-                }
                 _ => {}
             }
         }
@@ -1194,7 +1174,7 @@ impl Graphics {
     }
     pub fn serialize(&self) -> String {
         let mut text = format!(
-            "preset:{}\nlodDistance:{}\nfarDetail:{}\ncaveCulling:{}\nentityCulling:{}\nentityCullingPrecheck:{}\nparticleCulling:{}\nleafCulling:{}\nopaqueIce:{}\nblockEntityCacheShulkerBoxes:{}\nblockEntityCacheSigns:{}\nblockEntityCacheDecoratedPots:{}\nblockEntityCacheBells:{}\nblockEntityCacheChests:{}\nblockEntityCacheBanners:{}\nblockEntityCacheCopperGolemStatues:{}\nchunkUpdates:{}\nuploadBudgetKiB:{}\ntextureBudgetMiB:{}\nsky:{}\nfog:{}\nweather:{}\nanimatedTextures:{}\nditherCutoutMips:{}\npresentMode:{}\nframePacing:{}\nworkers:{}\noverlay:{}\nresolutionScale:{}\ndynamicResolution:{}\ntargetFps:{}\nfxaa:{}\ntaa:{}\nupscaling:{}\nupscalingSharpness:{}\nscreenshotQuality:{}\nframeGeneration:{}\nhdr:{}\nhdrPaperWhite:{}\nhdrPeak:{}\nhdrBlackLevel:{}\nhdrUiNits:{}\nhdrLighting:{}\nbatteryMode:{}\nshadowCache:{}\ngraphicsApi:{}\npickedShaderPack:{}\nbatchTranslucent:{}\nhdrSmoothGradients:{}\ngpuCulling:{}\nparallelTick:{}\n",
+            "preset:{}\nlodDistance:{}\nfarDetail:{}\ncaveCulling:{}\nentityCulling:{}\nentityCullingPrecheck:{}\nparticleCulling:{}\nleafCulling:{}\nopaqueIce:{}\nblockEntityCacheShulkerBoxes:{}\nblockEntityCacheSigns:{}\nblockEntityCacheDecoratedPots:{}\nblockEntityCacheBells:{}\nblockEntityCacheChests:{}\nblockEntityCacheBanners:{}\nblockEntityCacheCopperGolemStatues:{}\nchunkUpdates:{}\nuploadBudgetKiB:{}\ntextureBudgetMiB:{}\nsky:{}\nfog:{}\nweather:{}\nanimatedTextures:{}\nditherCutoutMips:{}\npresentMode:{}\nframePacing:{}\nworkers:{}\nresolutionScale:{}\ndynamicResolution:{}\ntargetFps:{}\nfxaa:{}\ntaa:{}\nupscaling:{}\nupscalingSharpness:{}\nscreenshotQuality:{}\nframeGeneration:{}\nhdr:{}\nhdrPaperWhite:{}\nhdrPeak:{}\nhdrBlackLevel:{}\nhdrUiNits:{}\nhdrLighting:{}\nbatteryMode:{}\nshadowCache:{}\ngraphicsApi:{}\npickedShaderPack:{}\nbatchTranslucent:{}\nhdrSmoothGradients:{}\ngpuCulling:{}\nparallelTick:{}\n",
             self.preset.name(),
             self.lod_distance,
             self.far_detail.name(),
@@ -1225,11 +1205,6 @@ impl Graphics {
                 Pacing::Precise => "precise",
             },
             self.workers,
-            match self.overlay {
-                Overlay::Off => "off",
-                Overlay::Fps => "fps",
-                Overlay::Graph => "graph",
-            },
             self.resolution_scale,
             bool_text(self.dynamic_resolution),
             self.target_fps,
@@ -1260,8 +1235,11 @@ impl Graphics {
         text += &self.blue_map.serialize();
         text
     }
+    /// The settings stores of this file follow these lines (`sunrise_hooks::settings`).
     pub fn save(&self, dir: &Path) {
-        let _ = fs::write(dir.join(FILE), self.serialize());
+        let mut text = self.serialize();
+        sunrise_hooks::settings::engine::append(FILE, &mut text);
+        let _ = fs::write(dir.join(FILE), text);
     }
     /// Paper white, in nits: the player's, or on Auto the desktop's SDR white as the
     /// system `reported` it for the renderer's display, else 203 (BT.2408's reference white).
@@ -1570,7 +1548,6 @@ mod tests {
             pacing: Pacing::Precise,
             workers: 6,
             parallel_tick: ParallelTickMode::Auto,
-            overlay: Overlay::Graph,
             resolution_scale: 75,
             dynamic_resolution: false,
             target_fps: 60,

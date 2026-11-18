@@ -1688,8 +1688,6 @@ struct Game<'a> {
     /// `render-capture DIR`: replied once the renderer wrote the scene.
     pending_render_capture: Option<std::sync::mpsc::Sender<String>>,
     pending_bench: Option<(Instant, std::sync::mpsc::Sender<String>, bool)>,
-    /// Recent frame times for the performance overlay.
-    frame_graph: sunrise_client::perf_overlay::FrameGraph,
     /// Sunrise's extras (minimap, auto-reconnect; mods' counters): `game/interface/extras.rs`.
     extras: extras::ExtrasState,
     /// The PvP & HUD options' state (`game/entities/pvp.rs`).
@@ -4723,8 +4721,12 @@ impl Game<'_> {
         // Gui.extractRenderState: the debug overlay comes after the screen
         // and the toasts, so it is over everything, menus included.
         self.draw_debug_overlay(&mut batch, size);
-        self.frame_graph
-            .draw(self.settings.sunrise.overlay, &mut batch, &self.gui.atlas);
+        // The layers crates registered to draw over everything (`sunrise_hooks::hud`).
+        sunrise_client::extras_hud::draw_top_layers(
+            sunrise_hooks::hud::engine::all(),
+            &mut batch,
+            &self.gui.atlas,
+        );
         self.draw_pad_over_hud(&mut batch);
         if let Some(pointer) = pointer {
             debug_assert_eq!(
@@ -10271,11 +10273,18 @@ impl Game<'_> {
                         if rendered {
                             let ms = |d: Duration| d.as_secs_f32() * 1000.0;
                             perf_times = Some((ms(cpu), r.gpu_times.last().copied()));
-                            self.frame_graph.record(
+                            let g = &self.settings.sunrise;
+                            // The scale while Dynamic Resolution moves it on its own.
+                            let dynamic_scale = g
+                                .dynamic_resolution
+                                .then(|| self.dynamic_resolution.scale(g.resolution_scale));
+                            let times = sunrise_hooks::perf::FrameTimes::new(
                                 ms(elapsed),
                                 ms(cpu),
                                 r.gpu_times.last().copied(),
+                                dynamic_scale,
                             );
+                            sunrise_hooks::engine::frame_timed(&times);
                             if let Some(&gpu) = r.gpu_times.last() {
                                 self.gpu_utilization =
                                     f64::from(gpu) * 100.0 / f64::from(ms(cpu).max(0.001));
@@ -10286,7 +10295,6 @@ impl Game<'_> {
                                 &self.settings.sunrise,
                                 settled,
                                 (&mut self.gpu_culling_auto, &mut self.dynamic_resolution),
-                                &mut self.frame_graph,
                                 r,
                                 (ms(cpu), ms(elapsed)),
                             );
@@ -10987,7 +10995,6 @@ impl<'a> Game<'a> {
             pack_shadow_casters: (false, false),
             pending_uploads: Vec::new(),
             upload_pace: Default::default(),
-            frame_graph: Default::default(),
             extras: Default::default(),
             pvp: Default::default(),
             mods: mod_sources,

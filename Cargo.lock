@@ -5223,6 +5223,7 @@ dependencies = [
  "sunrise-friends",
  "sunrise-game",
  "sunrise-heartbeat",
+ "sunrise-perf-overlay",
  "sunrise-perf-share",
  "sunrise-platform",
  "winresource",
@@ -5263,6 +5264,13 @@ dependencies = [
  "prost-build",
  "prost-types",
  "protox",
+]
+
+[[package]]
+name = "sunrise-perf-overlay"
+version = "0.1.0"
+dependencies = [
+ "sunrise-platform",
 ]
 
 [[package]]
