@@ -67,13 +67,11 @@ pub fn any_mod_disabled() -> bool {
 /// The scheduler uses the same pre-indexed table as dispatch, before consuming a tick.
 pub fn block_hook_inert(hook: HookId, state: BlockState) -> bool {
     let table = crate::parts(hook, "block_hook_inert");
-    table.for_hook(hook).is_some_and(|table| {
-        crate::disabled_owner_part(
-            table.block_value(state),
-            crate::content::registry_keys::block_id(state.block()),
-        )
+    table
+        .for_hook(hook)
+        .and_then(|table| table.block_entry(state))
+        .and_then(|entry| entry.disabled_owner_slot())
         .is_some()
-    })
 }
 
 /// Resolve a listener's owner once at load, for dispatch through [`mod_index_on`].

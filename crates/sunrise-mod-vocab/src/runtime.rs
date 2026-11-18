@@ -291,28 +291,12 @@ pub(crate) fn mod_index_on(index: usize) -> bool {
 
 /// Content ownership is resolved at installation, not by scanning mods on a tick.
 pub(crate) fn content_owner_disabled(id: &str) -> bool {
-    if !any_mod_disabled() {
-        return false;
-    }
-    let Some((namespace, _)) = id.split_once(':') else {
-        return false;
-    };
-    installed()
-        .and_then(|installed| installed.namespace_owners.get(namespace))
-        .is_some_and(|index| !mod_index_on(*index))
+    any_mod_disabled() && content_owner_index(id).is_some_and(|index| !mod_index_on(index))
 }
 
-/// Find the disabled content owner's first subscribed Part, in dispatch order.
-pub(crate) fn disabled_owner_part<P: ?Sized>(
-    parts: &[Attached<P>],
-    id: Option<&str>,
-) -> Option<usize> {
-    let (namespace, _) = id?.split_once(':')?;
-    let owner = *installed()?.namespace_owners.get(namespace)?;
-    if mod_index_on(owner) {
-        return None;
-    }
-    parts.iter().position(|part| part.mod_index == owner)
+pub(crate) fn content_owner_index(id: &str) -> Option<usize> {
+    let (namespace, _) = id.split_once(':')?;
+    installed()?.namespace_owners.get(namespace).copied()
 }
 
 /// `mods` in order, each marked as running `hook` until the next one is (or the loop ends), so a
