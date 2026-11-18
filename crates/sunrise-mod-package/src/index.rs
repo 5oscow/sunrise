@@ -233,6 +233,10 @@ pub struct NativeBinary {
 pub struct NativeBinaryAbsent;
 
 impl Version {
+    fn fits_game(&self, game: &str) -> bool {
+        self.game == game && self.capabilities.unknown().is_empty()
+    }
+
     /// Exact lookup only. Absence lets the caller prepare from source.
     pub fn native_binary(
         &self,
@@ -533,11 +537,10 @@ impl Index {
     /// A project's newest version for Minecraft `game` that wasn't taken down and asks for no
     /// capability this build doesn't know.
     pub fn installable<'a>(&self, project: &'a Project, game: &str) -> Option<&'a Version> {
-        project.versions.iter().find(|v| {
-            v.game == game
-                && v.capabilities.unknown().is_empty()
-                && self.revoked(&project.id, &v.file.sha256).is_none()
-        })
+        project
+            .versions
+            .iter()
+            .find(|v| v.fits_game(game) && self.revoked(&project.id, &v.file.sha256).is_none())
     }
     pub fn project(&self, id: &str) -> Option<&Project> {
         self.projects.iter().find(|p| p.id == id)
@@ -1087,5 +1090,6 @@ mod dependencies;
 pub mod native;
 pub mod page;
 pub mod registry;
+pub mod resolve;
 #[cfg(test)]
 mod tests;
