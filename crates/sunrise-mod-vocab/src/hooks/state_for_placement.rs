@@ -29,8 +29,8 @@ pub trait Hooks {
     /// never answer from those as if they were the server's. A client refusal
     /// keeps its stack unspent until the server answers. Answer `None` on a
     /// client where only a server can decide: the template's rule then
-    /// predicts, and the server still decides. Named injections request
-    /// `hook_version = 2`.
+    /// predicts, and the server still decides.
+    /// Version 2 is catalog metadata; rebuild for the `LevelSide` signature.
     #[hook(
         side = "both",
         version = 2,

@@ -17,8 +17,8 @@ pub trait Hooks {
     /// among them, are `None` there, and `BlockEntityPartState::state_in` gives
     /// its default: never answer from those as if they were the server's.
     /// Answer `None` on a client where only a server can decide: the template's
-    /// rule then predicts, and the server still decides. Named injections
-    /// request `hook_version = 2`.
+    /// rule then predicts, and the server still decides.
+    /// Version 2 is catalog metadata; rebuild for the `LevelSide` signature.
     /// A disabled owner's subscribed rule keeps that block type where it is already present
     /// or settling after a piston move or fall, but refuses a new placement.
     #[hook(

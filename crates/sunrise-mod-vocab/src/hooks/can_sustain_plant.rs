@@ -14,7 +14,8 @@ pub trait Hooks {
     /// can't answer, tag tests among them, are `None` there, and `BlockEntityPartState::state_in`
     /// gives its default: never answer from those as if they were the server's. Answer `None` on a
     /// client where only a server can decide: the template's rule then predicts, and the server
-    /// still decides. Named injections request `hook_version = 2`.
+    /// still decides.
+    /// Version 2 is catalog metadata; rebuild for the `LevelSide` signature.
     /// A disabled owner's subscribed soil rule supports plants
     /// of this type already above it or settling there, but does not authorize a new planting.
     #[hook(
