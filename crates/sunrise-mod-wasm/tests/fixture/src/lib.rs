@@ -272,7 +272,7 @@ impl Hooks for Mod {
 
     fn entity_tick_listened(
         &self,
-        _: &mut dyn mod_api::ServerHost,
+        _: mod_api::HostSide<'_>,
         event: &mut mod_api::EntityTickListenedEvent,
     ) {
         event.listened = true;
@@ -280,18 +280,18 @@ impl Hooks for Mod {
 
     fn entity_tick_pre(
         &self,
-        _: &mut dyn mod_api::ServerHost,
-        _: &mut mod_api::EntityTickPreEvent<'_>,
-    ) -> mod_api::Flow {
+        _: mod_api::HostSide<'_>,
+        event: &mut mod_api::EntityTickPreEvent<'_>,
+    ) {
         ENTITY_PRE_CALLS.fetch_add(1, Ordering::Relaxed);
-        mod_api::Flow::Continue
+        for (&entity, &kind) in event.entities.iter().zip(event.kinds) {
+            if kind == "minecraft:tnt" {
+                event.canceled.push(entity);
+            }
+        }
     }
 
-    fn entity_tick_post(
-        &self,
-        _: &mut dyn mod_api::ServerHost,
-        _: &mut mod_api::EntityTickPostEvent<'_>,
-    ) {
+    fn entity_tick_post(&self, _: mod_api::HostSide<'_>, _: &mut mod_api::EntityTickPostEvent<'_>) {
         ENTITY_POST_CALLS.fetch_add(1, Ordering::Relaxed);
     }
 
@@ -359,6 +359,8 @@ impl Hooks for Mod {
         // provider through the nested handle (tests/fixture/src/suggestion_provider.rs).
         registrar.register_command_argument("warps", suggestion_provider::WarpsArgument);
         registrar.register_custom_stat("steps").unwrap();
+        // Its tick Pre cancels primed TNT, so it hears each one alone.
+        registrar.entity_tick_each("minecraft:tnt");
         if cx.mods().get("wasm_storage_attempt_observer").is_some() {
             storage_attempts::register(registrar);
         }

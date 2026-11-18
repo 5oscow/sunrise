@@ -7,8 +7,8 @@ use super::*;
 use crate::game::native_entity_refs::tests::with_game;
 use mod_api::{
     AttachmentCodec, AttachmentError, AttachmentType, EntityPart, EntityTickListenedEvent,
-    EntityTickPreEvent, Flow, GeneralEntityCategory, GeneralEntityTickEvent, GeneralSavePolicy,
-    Holder, Hooks, Registrar, ServerHost,
+    EntityTickPreEvent, GeneralEntityCategory, GeneralEntityTickEvent, GeneralSavePolicy, Holder,
+    Hooks, HostSide, Registrar, ServerHost,
 };
 use std::sync::{Arc, Mutex};
 use sunrise_core::nbt::{Compound, Tag};
@@ -154,33 +154,30 @@ impl Hooks for Declare {
             },
         );
     }
-    fn entity_tick_listened(&self, _: &mut dyn ServerHost, event: &mut EntityTickListenedEvent) {
+    fn entity_tick_listened(&self, _: HostSide<'_>, event: &mut EntityTickListenedEvent) {
         event.listened = true;
     }
-    fn entity_tick_pre(
-        &self,
-        host: &mut dyn ServerHost,
-        event: &mut EntityTickPreEvent<'_>,
-    ) -> Flow {
-        self.events.lock().unwrap().push((event.entity, "pre"));
-        if self.pre_on.load(std::sync::atomic::Ordering::Relaxed) == event.entity {
-            let victim = self.pre_victim.load(std::sync::atomic::Ordering::Relaxed);
-            let victim = host
-                .entity(victim)
-                .expect("the victim is a live row at the remover's Pre");
-            assert!(victim.discard(host));
+    fn entity_tick_pre(&self, host: HostSide<'_>, event: &mut EntityTickPreEvent<'_>) {
+        let HostSide::Server(host) = host else {
+            panic!("server fixture");
+        };
+        for &entity in event.entities {
+            self.events.lock().unwrap().push((entity, "pre"));
+            if self.pre_on.load(std::sync::atomic::Ordering::Relaxed) == entity {
+                let victim = self.pre_victim.load(std::sync::atomic::Ordering::Relaxed);
+                let victim = host
+                    .entity(victim)
+                    .expect("the victim is a live row at the remover's Pre");
+                assert!(victim.discard(host));
+            }
+            if self.cancel_on.load(std::sync::atomic::Ordering::Relaxed) == entity {
+                event.canceled.push(entity);
+            }
         }
-        if self.cancel_on.load(std::sync::atomic::Ordering::Relaxed) == event.entity {
-            return Flow::Cancel;
-        }
-        Flow::Continue
     }
-    fn entity_tick_post(
-        &self,
-        _: &mut dyn ServerHost,
-        event: &mut mod_api::EntityTickPostEvent<'_>,
-    ) {
-        self.events.lock().unwrap().push((event.entity, "post"));
+    fn entity_tick_post(&self, _: HostSide<'_>, event: &mut mod_api::EntityTickPostEvent<'_>) {
+        let mut events = self.events.lock().unwrap();
+        events.extend(event.entities.iter().map(|&entity| (entity, "post")));
     }
 }
 

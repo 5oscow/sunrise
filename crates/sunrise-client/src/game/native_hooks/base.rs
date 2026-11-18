@@ -3863,40 +3863,42 @@ impl Game<'_> {
     /// Whether a mod listens to `native_entity_tick_pre` and `native_entity_tick_post`: a mod
     /// that hooks them hooks this one too and sets `listened` (HEAD, `*listened = true`).
     /// Without it the game tells no entity's tick, and keeps no list of them. Asked once for
-    /// each family (mobs, items, minecarts, boats) each tick. Server-side.
+    /// each family each tick, on the server and on a client.
     pub(in crate::game) fn native_entity_tick_listened(&mut self, listened: &mut bool) {
         self.fire_entity_tick_listened(listened);
     }
-    /// An entity of type `kind` (`minecraft:zombie`, `minecraft:item`) with ID `entity` is
-    /// about to tick in the server level `dimension` (NeoForge's `EntityTickEvent.Pre`, posted
-    /// around `Entity.commonTick` and `tick` in `ServerLevel.tickNonPassenger`). Set `canceled`
-    /// and it does not tick this tick: a mob has no AI, physics or effects, an item no movement,
-    /// ageing or merging, a minecart or boat no motion, and `native_entity_tick_post` is not told.
-    /// Sunrise ticks a family of entities together, so mobs and items hear every Pre before the
-    /// first of them ticks; minecarts and boats hear theirs one by one. Told for the mobs, item
-    /// entities, minecarts and boats that tick: those in an entity-ticking chunk, not a player's
-    /// boat or cart (it ticks with the player). Check `kind`; this runs for every ticking entity
-    /// each tick, so keep it cheap. Server-side.
+    /// The entities `entities` are about to tick in the level `dimension`, and `kinds` holds
+    /// the type of each, in the same order (NeoForge's `EntityTickEvent.Pre`, right before each
+    /// entity's tick in `tickNonPassenger`). Told on the server for the mobs, item entities,
+    /// minecarts, boats, general rows and projectiles that tick, and on a client for the mobs,
+    /// other players, projectiles and tridents it ticks. Minecarts, boats and general rows are
+    /// told alone, right before their own tick, and so are the server's mobs and item entities
+    /// of a type a mod named (`Registrar::entity_tick_each`, or every type after
+    /// `entity_tick_each_entity`); the others once for the family, before its first tick. Push an
+    /// entity of `entities` onto `canceled` and it does not tick this tick and
+    /// `native_entity_tick_post` is not told; IDs not in `entities` are ignored, and an ID pushed
+    /// twice counts once. Never told with no entity.
     pub(in crate::game) fn native_entity_tick_pre(
         &mut self,
         dimension: &str,
-        entity: u32,
-        kind: &str,
-        canceled: &mut bool,
+        entities: &[u32],
+        kinds: &[&str],
+        canceled: &mut Vec<u32>,
     ) {
-        self.fire_entity_tick_pre(dimension, entity, kind, canceled);
+        self.fire_entity_tick_pre(dimension, entities, kinds, canceled);
     }
-    /// The entity `entity` of type `kind` ticked in the server level `dimension` (NeoForge's
-    /// `EntityTickEvent.Post`): for each entity `native_entity_tick_pre` let through, after it
-    /// ticked, also one that died or was removed in its tick. Mobs and items hear their Posts
-    /// once the whole family has ticked; minecarts and boats right after their own tick. Server-side.
+    /// The entities `entities` ticked in the level `dimension`, and `kinds` holds the type of
+    /// each, in the same order (NeoForge's `EntityTickEvent.Post`): those
+    /// `native_entity_tick_pre` was told and did not cancel, also one that died or was removed in
+    /// its tick. An entity told alone in its Pre is told alone here, right after its own tick; a
+    /// family once, after its last tick. On the server and on a client.
     pub(in crate::game) fn native_entity_tick_post(
         &mut self,
         dimension: &str,
-        entity: u32,
-        kind: &str,
+        entities: &[u32],
+        kinds: &[&str],
     ) {
-        self.fire_entity_tick_post(dimension, entity, kind);
+        self.fire_entity_tick_post(dimension, entities, kinds);
     }
     /// Whether the experience orb `into` takes the orb `from` in (vanilla's
     /// `ExperienceOrb.canMerge`): the same value, and ids a multiple of 40 apart. Asked

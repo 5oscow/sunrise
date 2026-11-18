@@ -6780,6 +6780,21 @@ impl Game<'_> {
             self.tick_text_displays();
             self.tick_remote_ominous_item_spawners();
         }
+        // EntityTickEvent.Pre for the mobs and players this client ticks, once for the family
+        // before their tick, and the Post after it (below). A canceled one keeps its state.
+        let mut round = self.native_tick_round();
+        if round.listening() {
+            let driven = self.driven_mount().map(|m| m.id);
+            let players = self.remote.as_ref().map(|r| &r.level_players);
+            for m in self.mobs.iter() {
+                let player = players.is_some_and(|p| p.contains_key(&(m.id as i32)));
+                if (running || player) && driven != Some(m.id) {
+                    let kind = crate::game::native_ticks::TickKind::Mob(m.kind.clone());
+                    round.add(m.id, kind);
+                }
+            }
+            self.native_tick_pre_batch(&mut round);
+        }
         // EntityFluidInteraction.update for the entities this window only displays: the
         // server never sends the fluid contact, and the renderers read it (cod, salmon and
         // tropical fish lie on their side without `in_water`, #1591).
@@ -6829,6 +6844,9 @@ impl Game<'_> {
         // The window's own player already splashes from its motion tick.
         let own = self.remote.as_ref().map(|r| r.entity_id);
         for i in 0..self.mobs.len() {
+            if round.canceled(self.mobs[i].id) {
+                continue;
+            }
             let m = &mut self.mobs[i];
             let fluids = fluids[i].take();
             let standing = standings[i].take();
@@ -6963,7 +6981,7 @@ impl Game<'_> {
                 .unwrap()
                 .level_players
                 .contains_key(&(id as i32));
-            if (!running && !player) || driven == Some(id) {
+            if (!running && !player) || driven == Some(id) || round.canceled(id) {
                 continue;
             }
             let animation = if player && self.mobs[i].extra.using_item > 0 {
@@ -7215,6 +7233,7 @@ impl Game<'_> {
                 self.remote_entity_section_step(section_id, section_from, section_to);
             }
         }
+        self.native_tick_post_batch(round);
         // ExperienceOrb.tick runs on a client too (all but the merges and the
         // push out of a block, which are the server's): gravity, buoyancy,
         // collisions and the pull of the nearest player between the server's
