@@ -2094,15 +2094,9 @@ impl Game<'_> {
         // ServerPlayer.getLastClientMoveIntent: getInputVector((left, 0, forward), 1, yRot).
         let left = f64::from(i8::from(keys.left) - i8::from(keys.right));
         let forward = f64::from(i8::from(keys.forward) - i8::from(keys.backward));
-        let len = left.hypot(forward);
-        let (left, forward) = if len > 1.0 {
-            (left / len, forward / len)
-        } else {
-            (left, forward)
-        };
-        let r = self.yaw.to_radians();
-        let (s, co) = (f64::from(r.sin()), f64::from(r.cos()));
-        let intent = [left * co - forward * s, forward * co + left * s];
+        let input = sunrise_core::geometry::Vec3::new(left, 0.0, forward);
+        let v = sunrise_world::living_air::input_vector(input, 1.0, self.yaw);
+        let intent = [v.x, v.z];
         let id = self.carts[i].id;
         let result =
             self.with_entity_held_out(id, |game| section_steps::tick_riding(game, id, i, intent));

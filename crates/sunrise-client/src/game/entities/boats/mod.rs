@@ -1619,19 +1619,19 @@ impl Game<'_> {
     }
     /// Where the boat at `i` lets a player facing `yaw` off.
     pub(super) fn boat_player_dismount_target(&self, i: usize, yaw: f32) -> Vec3 {
-        self.boat_dismount_target(&self.boats[i], 0.6, yaw)
+        // The player's bbWidth, a float.
+        self.boat_dismount_target(&self.boats[i], f64::from(0.6_f32), yaw)
     }
-    /// `getDismountLocationForPassenger` for a passenger `width` wide
-    /// facing `yaw`.
+    /// `AbstractBoat.getDismountLocationForPassenger` for a passenger `width` wide (its float `getBbWidth()`,
+    /// widened) facing `yaw`: the escape vector from a box `getBbWidth() * Mth.SQRT_OF_TWO` wide, in float.
     pub(super) fn boat_dismount_target(&self, b: &Boat, width: f64, yaw: f32) -> Vec3 {
-        let r = yaw.to_radians();
-        let distance = (WIDTH * std::f64::consts::SQRT_2 + width + 1.0e-5) / 2.0;
-        let (s, c) = (-(r.sin()) as f64, r.cos() as f64);
-        let m = s.abs().max(c.abs());
-        let (x, z) = (
-            b.position.x + s * distance / m,
-            b.position.z + c * distance / m,
+        let sqrt_of_two = 2.0_f64.sqrt() as f32;
+        let escape = sunrise_world::living_air::escape_vector(
+            f64::from(WIDTH as f32 * sqrt_of_two),
+            width,
+            yaw,
         );
+        let (x, z) = (b.position.x + escape.x, b.position.z + escape.z);
         let top = b.bounds().max_position().y;
         let (bx, by, bz) = (x.floor() as i32, top.floor() as i32, z.floor() as i32);
         let below = self.res.facts().get(self.world.block(bx, by - 1, bz));
