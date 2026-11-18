@@ -82,12 +82,16 @@ def main():
                            cwd=scratch, env=env, stdout=output, stderr=subprocess.STDOUT,
                            check=True, timeout=900)
         text = (build / 'rust.log').read_text()
-        assert re.search(r'^test result: ok\. 5 passed;', text, re.MULTILINE), text
+        # Every test of the group passed, the one against vanilla's vectors among them.
+        result = re.search(r'^test result: ok\. ([1-9][0-9]*) passed; 0 failed;', text, re.MULTILINE)
+        assert result and re.search(
+            r'^test \S+::level_environment_reads_match_vanilla_vectors \.\.\. ok$', text, re.MULTILINE), text
+        resource_tests = int(result.group(1))
     base.ensure_sources_unchanged(source_paths, hashes)
     assert lab.digest(inputs, 'sha256') == input_hash, 'Inputs changed during validation'
     lab.write_json(report, dict(schema=1, minecraft=lock['minecraft']['version'],
         sources_sha256=hashes, input_sha256=input_hash, cases=len(rows),
-        fixed_cases=len(fixed), resource_tests=5,
+        fixed_cases=len(fixed), resource_tests=resource_tests,
         jars_sha256={side: lab.digest(jars[side], 'sha256') for side in ('server', 'client')},
         expected_sha256=lab.digest(build / 'server-expected.jsonl', 'sha256'),
         rust_test_executable_sha256=lab.digest(Path(executable), 'sha256'),
