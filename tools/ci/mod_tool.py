@@ -3,7 +3,7 @@
 the newest `cargo-sunrise-mod` built from main, for the three hosts, with a signed `tool.json` naming its commit.
 
     mod_tool.py crates                       the folders whose change changes the tool, one per line (from cargo metadata)
-    mod_tool.py decide [--force]             what mod-tool.yml's `decide` job writes to GITHUB_OUTPUT (reads COMMIT, GATE_RERUN)
+    mod_tool.py decide [--force]             what mod-tool.yml's `decide` job writes to GITHUB_OUTPUT (reads COMMIT)
     mod_tool.py tool-json COMMIT OUT         OUT = tool.json for COMMIT
     mod_tool.py newer COMMIT                 fails when the published tool is a commit that COMMIT does not contain
 
@@ -11,6 +11,7 @@ The folders are the workspace packages `cargo-sunrise-mod` depends on (normal an
 by `cargo metadata`, so a crate the tool starts to use is watched without anyone editing a list here.
 """
 import argparse
+import importlib.util
 import datetime as dt
 import json
 import os
@@ -20,7 +21,6 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "tools"))
 
 TAG = "mod-tool"
 TOOL = "cargo-sunrise-mod"
@@ -89,7 +89,10 @@ def changed(since: str, head: str) -> list[str]:
 
 
 def decide(force: bool) -> None:
-    import release_train as train
+    # By its path: putting tools/ on sys.path would shadow the tests' modules of the same names.
+    spec = importlib.util.spec_from_file_location("release_train", ROOT / "tools/release_train.py")
+    train = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(train)
     head = run("git", "rev-parse", "--verify", os.environ["COMMIT"] + "^{commit}").strip()
     if not is_ancestor(head, "refs/remotes/origin/main"):
         sys.exit(f"::error::refused: {head} is not on main; {TAG} holds only a commit of main")
@@ -100,7 +103,7 @@ def decide(force: bool) -> None:
     build = bool(touched) or force
     reason = (f"{len(touched)} file(s) of the tool changed since {held[:9] or 'nothing'}" if touched else
               f"the tool is unchanged since {held[:9]}" + (", rebuilt by force" if force else ""))
-    if build and not train.fork_gate_passed(head) and not (os.environ.get("GATE_RERUN") == "1" and train.gate_again(head)):
+    if build and not train.fork_gate_passed(head):
         sys.exit(f"::error::refused: dyna-checks' gate jobs ({', '.join(sorted(train.GATE))}) did not all pass on a "
                  f"main push of {head}; {TAG} follows a green gate")
     print(f"{'build' if build else 'skip'}: {reason}")

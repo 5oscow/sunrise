@@ -9,14 +9,17 @@ name: mod tool
 # Runs on a push to main and by dispatch, never on a pull request, and builds only when the tool changed: the folders
 # are the workspace crates cargo-sunrise-mod depends on, from `cargo metadata` (tools/ci/mod_tool.py), plus the files
 # that build and sign it. Like release.yml's snapshot, it needs dyna-checks' gate green on the commit.
-# - `decide` (no secrets) refuses a commit not on main or not containing what `mod-tool` holds, finds whether the tool
-#   changed since, and waits for the gate (re-running it when the next push cancelled it, as release.yml does).
+# - `decide` (no secrets, a read-only token) refuses a commit that is not on main in a step of this file, before any
+#   code of that commit runs; then refuses one not containing what `mod-tool` holds, finds whether the tool changed
+#   since, and needs the gate green on the commit (a cancelled gate is run again by hand, or the next push covers it).
 # - `build` compiles the tool on each host's hosted runner (the SDK's legs' runners); no secrets, `contents: read`.
 # - `assemble` (no secrets) writes tool.json beside the three archives.
 # - `sign` is the only job with the release key, only for a publishing run on main (the `release` environment): it
 #   checks out nothing but tools/ci/sign_release.sh. Any other run signs with a throwaway key.
-# - `publish` checks the signature as users' install blocks do (sunrise-release-sign verify) and that the published
-#   tool is not newer, then replaces the assets. Only on main with publishing on.
+# - `verify` (a read-only token) checks the signature as users' install blocks do (sunrise-release-sign verify) and the
+#   asset set; a dry run ends here.
+# - `publish` exists only for a publishing run on main and is the only job with a write token: it checks that the
+#   published tool is not newer, then replaces the assets. It compiles nothing.
 # A push run publishes only when the repository variable MOD_TOOL_AUTOPUBLISH is `true`; without it a push run is a dry
 # run (throwaway key, nothing published). A dispatch publishes with `-f dry_run=false` on main.
 on:
@@ -52,11 +55,10 @@ env:
 jobs:
   decide:
     runs-on: ubuntu-latest
-    # May wait for the commit's gate, as release.yml's decide.
-    timeout-minutes: 170
+    timeout-minutes: 30
     permissions:
       contents: read
-      actions: write  # dyna-checks' gate jobs, and running a cancelled one again (tools/release_train.py gate_again)
+      actions: read  # dyna-checks' gate jobs on the commit
     outputs:
       build: ${{ steps.decide.outputs.build }}
       commit: ${{ steps.decide.outputs.commit }}
@@ -67,6 +69,18 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
           ref: ${{ inputs.commit }}
+      # Before anything of the checkout runs: the commit, as a full id, is on main. Every later job builds this id.
+      - name: The commit is on main
+        id: commit
+        env:
+          COMMIT: ${{ inputs.commit || github.sha }}
+        run: |
+          sha=$(git rev-parse --verify "$COMMIT^{commit}")
+          git fetch -q --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$sha" refs/remotes/origin/main \
+            || { echo "::error::refused: $sha is not on main; $TAG holds only a commit of main"; exit 1; }
+          [ "$(git rev-parse HEAD)" = "$sha" ] || { echo "::error::the checkout is not $sha"; exit 1; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
       - name: The Rust that reads the workspace
         id: rust
         run: echo "version=$(cat tools/ci/rust-version)" >> "$GITHUB_OUTPUT"
@@ -90,12 +104,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          COMMIT: ${{ inputs.commit || github.sha }}
+          COMMIT: ${{ steps.commit.outputs.sha }}
           FORCE: ${{ inputs.force && 'yes' || '' }}
-          # A publishing run runs its commit's gate again if the next push cancelled it.
-          GATE_RERUN: ${{ steps.mode.outputs.publish == 'true' && '1' || '' }}
         run: |
-          git fetch -q --no-tags origin +refs/heads/main:refs/remotes/origin/main
           python3 tools/ci/mod_tool.py decide ${FORCE:+--force} | tee -a "$GITHUB_STEP_SUMMARY"
 
   build:
@@ -243,21 +254,18 @@ jobs:
           retention-days: 7
           overwrite: true
 
-  publish:
+  verify:
     needs: [decide, assemble, sign]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
-      contents: write  # the mod-tool release
+      contents: read
     env:
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
       COMMIT: ${{ needs.decide.outputs.commit }}
       PUBLISH: ${{ needs.decide.outputs.publish == 'true' && github.ref == 'refs/heads/main' }}
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
           persist-credentials: false
           ref: ${{ needs.decide.outputs.commit }}
       - uses: actions/download-artifact@v4
@@ -287,8 +295,40 @@ jobs:
             echo "::error::not releasing $TAG: the assets are not exactly $(echo $expected) (found: $(echo $actual))"
             exit 1
           fi
+      - name: Dry run, the tool that would be published
+        if: env.PUBLISH != 'true'
+        run: |
+          echo "### Would publish $TAG at $COMMIT (a branch or dry run: signed with a throwaway key)" >> "$GITHUB_STEP_SUMMARY"
+          ls -l dist | tee -a "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    needs: [decide, verify]
+    # The only job with a write token, and only for a publishing run on main. It runs no code but
+    # tools/ci/mod_tool.py of a commit `decide` found on main, and compiles nothing.
+    if: needs.decide.outputs.publish == 'true' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write  # the mod-tool release
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      COMMIT: ${{ needs.decide.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ needs.decide.outputs.commit }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: mod-tool-release
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: mod-tool-signature
+          path: dist
       - name: Release mod-tool
-        if: env.PUBLISH == 'true'
         run: |
           set -euo pipefail
           # Never replace a newer tool with an older one (a rerun, or a dispatch for an old commit).
@@ -305,8 +345,3 @@ jobs:
           gh release upload "$TAG" dist/SHA256SUMS dist/SHA256SUMS.sig --clobber
           gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$TAG" -f sha="$COMMIT" -F force=true > /dev/null
           gh release edit "$TAG" --prerelease --latest=false --title "Mod tool ${COMMIT::10}" --notes "$notes"
-      - name: Dry run, the tool that would be published
-        if: env.PUBLISH != 'true'
-        run: |
-          echo "### Would publish $TAG at $COMMIT (a branch or dry run: signed with a throwaway key)" >> "$GITHUB_STEP_SUMMARY"
-          ls -l dist | tee -a "$GITHUB_STEP_SUMMARY"
