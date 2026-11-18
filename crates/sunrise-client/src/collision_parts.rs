@@ -59,7 +59,8 @@ struct AnswerKey {
     /// The standing height the query is above or below blocks by, as bits.
     bottom: Option<u64>,
     kind: EntityContextKind,
-    living: bool,
+    /// The fluids a living entity can stand on, `None` for one that is not living.
+    standable: Option<&'static [&'static str]>,
     descending: bool,
     placement: bool,
     always_collide_with_fluid: bool,
@@ -116,7 +117,7 @@ impl ModParts {
         context: &CollisionContext<'_>,
         entity: u32,
         held_item: Option<Arc<str>>,
-        standable: &mut dyn FnMut() -> &'static [&'static str],
+        standable: Option<&'static [&'static str]>,
     ) -> CollisionQuery {
         let kind = match context.entity_kind() {
             EntityContextKind::Item => CollisionEntityKind::Item,
@@ -132,8 +133,7 @@ impl ModParts {
         if let Some(item) = held_item {
             query = query.with_held_item(item);
         }
-        if context.living_entity().is_some() {
-            let names = standable();
+        if let Some(names) = standable {
             let mut fluids = self.fluids.borrow_mut();
             let shared = match fluids.iter().find(|(known, _)| *known == names) {
                 Some((_, shared)) => Arc::clone(shared),
@@ -163,13 +163,14 @@ impl PartShapes for ModParts {
         }
         let entity = entity_of(context);
         let held_item = context.held_item().map(|item| self.shared_item(item));
+        let standable = context.living_entity().is_some().then(standable);
         let key = AnswerKey {
             state,
             position: [position.x, position.y, position.z],
             entity,
             bottom: context.bottom().map(f64::to_bits),
             kind: context.entity_kind(),
-            living: context.living_entity().is_some(),
+            standable,
             descending: context.is_descending(),
             placement: context.is_placement(),
             always_collide_with_fluid: context.always_collide_with_fluid(),
@@ -317,7 +318,7 @@ mod tests {
             }));
         });
         let at = BlockPos::new(1, 64, 1);
-        let mut ask = |context: &CollisionContext<'_>, state: u32| {
+        let ask = |context: &CollisionContext<'_>, state: u32| {
             parts.shape(BlockStateId(state), at, context, &mut || &[])
         };
         // Unnamed position queries that differ in height, descending or held item.
@@ -350,6 +351,24 @@ mod tests {
         ask(&holding("minecraft:stick"), 1);
         ask(&holding("minecraft:bone"), 1);
         assert_eq!(COLLISION_ASKS.get(), 6);
+        // The same living query with other standable fluids is another question.
+        let living = CollisionContext::for_entity(
+            CollisionEntity {
+                identity: EntityIdentity(7),
+                kind: EntityContextKind::Living,
+                y: 65.0,
+                descending: false,
+                main_hand: Some(sunrise_world::collision_context::CollisionItem::EMPTY),
+            },
+            false,
+        );
+        let on = |fluids: &'static [&'static str]| {
+            parts.shape(BlockStateId(1), at, &living, &mut || fluids)
+        };
+        on(&[]);
+        on(&[]);
+        on(&["minecraft:lava"]);
+        assert_eq!(COLLISION_ASKS.get(), 8);
     }
 
     #[test]
