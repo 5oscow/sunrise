@@ -101,6 +101,20 @@ fn scenario(nested: bool) {
             )
         };
         let (before_12, before_13) = (read(12), read(13));
+        // Guest 12 rides a boat alone; a save would move it into the player file.
+        let boat = 700;
+        game.boats.push(crate::game::boats::Boat::new(
+            boat,
+            "oak".into(),
+            sunrise_core::geometry::Vec3::ZERO,
+            0.0,
+        ));
+        game.lan
+            .as_mut()
+            .unwrap()
+            .hub
+            .update_guest(12, |guest| guest.vehicle = Some(boat))
+            .unwrap();
 
         let panic = catch_unwind(AssertUnwindSafe(|| {
             if nested {
@@ -145,6 +159,10 @@ fn scenario(nested: bool) {
             read(12),
             before_12,
             "the interrupted player keeps the last saved files"
+        );
+        assert!(
+            game.boats.iter().any(|b| b.id == boat),
+            "the interrupted player's boat stays in the world, not in a file nobody writes"
         );
         if nested {
             assert_eq!(
