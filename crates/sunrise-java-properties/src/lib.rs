@@ -34,27 +34,34 @@ impl Properties {
 
     /// Properties.load(Reader) over already decoded characters.
     pub fn load(text: &[char]) -> Result<Self, Malformed> {
-        let mut out = Self::default();
-        let mut reader = LineReader {
-            chars: text,
-            pos: 0,
+        Self::load_str(&text.iter().collect::<String>())
+    }
+
+    fn load_str(text: &str) -> Result<Self, Malformed> {
+        // Typical settings files have dozens of short rows. Avoid repeatedly
+        // rehashing the keys while bounding the guess for long comments/values.
+        let mut out = Self {
+            map: HashMap::with_capacity((text.len() / 24).min(64)),
         };
-        while let Some(line) = reader.read_line() {
+        let mut reader = LineReader(text);
+        let mut scratch = String::new();
+        while let Some(line) = reader.read_line(&mut scratch) {
+            let bytes = line.as_bytes();
             let mut key_len = 0;
             let mut value_start = line.len();
             let mut has_sep = false;
             let mut preceding_backslash = false;
             while key_len < line.len() {
-                let c = line[key_len];
-                if (c == '=' || c == ':') && !preceding_backslash {
+                let c = bytes[key_len];
+                if (c == b'=' || c == b':') && !preceding_backslash {
                     value_start = key_len + 1;
                     has_sep = true;
                     break;
-                } else if (c == ' ' || c == '\t' || c == '\u{c}') && !preceding_backslash {
+                } else if (c == b' ' || c == b'\t' || c == b'\x0c') && !preceding_backslash {
                     value_start = key_len + 1;
                     break;
                 }
-                if c == '\\' {
+                if c == b'\\' {
                     preceding_backslash = !preceding_backslash;
                 } else {
                     preceding_backslash = false;
@@ -62,9 +69,9 @@ impl Properties {
                 key_len += 1;
             }
             while value_start < line.len() {
-                let c = line[value_start];
-                if c != ' ' && c != '\t' && c != '\u{c}' {
-                    if !has_sep && (c == '=' || c == ':') {
+                let c = bytes[value_start];
+                if c != b' ' && c != b'\t' && c != b'\x0c' {
+                    if !has_sep && (c == b'=' || c == b':') {
                         has_sep = true;
                     } else {
                         break;
@@ -83,14 +90,14 @@ impl Properties {
     /// ISO-8859-1 for the whole file. A missing file is an empty set.
     pub fn load_file(bytes: &[u8]) -> Result<Self, Malformed> {
         match std::str::from_utf8(bytes) {
-            Ok(s) => Self::load(&s.chars().collect::<Vec<_>>()),
-            Err(_) => Self::load(&bytes.iter().map(|&b| char::from(b)).collect::<Vec<_>>()),
+            Ok(s) => Self::load_str(s),
+            Err(_) => Self::load_latin1(bytes),
         }
     }
 
     /// Properties.load(InputStream): ISO-8859-1.
     pub fn load_latin1(bytes: &[u8]) -> Result<Self, Malformed> {
-        Self::load(&bytes.iter().map(|&b| char::from(b)).collect::<Vec<_>>())
+        Self::load_str(&bytes.iter().copied().map(char::from).collect::<String>())
     }
 
     /// Properties.store(Writer, comments): comment, date, then the entries
@@ -122,83 +129,65 @@ pub fn line_separator() -> &'static str {
     if cfg!(windows) { "\r\n" } else { "\n" }
 }
 
-struct LineReader<'a> {
-    chars: &'a [char],
-    pos: usize,
-}
-impl LineReader<'_> {
-    /// LineReader.readLine: one logical line, leading whitespace skipped,
-    /// comments and blank lines dropped, backslash-newline continuations joined.
-    fn read_line(&mut self) -> Option<Vec<char>> {
-        let mut line: Vec<char> = Vec::new();
-        let mut skip_white = true;
-        let mut appended = false;
-        let mut backslash = false;
-        let chars = self.chars;
-        loop {
-            if self.pos >= chars.len() {
-                if line.is_empty() {
-                    return None;
-                }
-                if backslash {
-                    line.pop();
-                }
-                return Some(line);
+struct LineReader<'a>(&'a str);
+
+impl<'a> LineReader<'a> {
+    /// Return an ordinary logical line without copying it. Continued lines
+    /// join physical lines into the reused scratch buffer.
+    fn read_line<'b>(&mut self, scratch: &'b mut String) -> Option<&'b str>
+    where
+        'a: 'b,
+    {
+        'seek: loop {
+            self.0 = self.0.trim_start_matches([' ', '\t', '\u{c}', '\r', '\n']);
+            if self.0.is_empty() {
+                return None;
             }
-            let c = chars[self.pos];
-            self.pos += 1;
-            if skip_white {
-                if c == ' ' || c == '\t' || c == '\u{c}' {
-                    continue;
+            scratch.clear();
+            loop {
+                let end = self
+                    .0
+                    .as_bytes()
+                    .iter()
+                    .position(|&b| matches!(b, b'\r' | b'\n'))
+                    .unwrap_or(self.0.len());
+                let (line, ending) = self.0.split_at(end);
+                // An ending, if present, starts with an ASCII CR or LF.
+                self.0 = ending.get(1..).unwrap_or_default();
+                if scratch.is_empty() && (line.is_empty() || line.starts_with(['#', '!'])) {
+                    continue 'seek;
                 }
-                if !appended && (c == '\r' || c == '\n') {
-                    continue;
-                }
-                skip_white = false;
-                appended = false;
-            }
-            if line.is_empty() && (c == '#' || c == '!') {
-                loop {
-                    let &d = chars.get(self.pos)?;
-                    self.pos += 1;
-                    if d == '\r' || d == '\n' {
-                        break;
+                let slashes = line
+                    .as_bytes()
+                    .iter()
+                    .rev()
+                    .take_while(|&&b| b == b'\\')
+                    .count();
+                if slashes % 2 == 0 {
+                    if scratch.is_empty() {
+                        return Some(line);
                     }
+                    scratch.push_str(line);
+                    return Some(scratch);
                 }
-                skip_white = true;
-                continue;
-            }
-            if c != '\n' && c != '\r' {
-                line.push(c);
-                backslash = if c == '\\' { !backslash } else { false };
-                continue;
-            }
-            if line.is_empty() {
-                skip_white = true;
-                continue;
-            }
-            if self.pos >= chars.len() {
-                if backslash {
-                    line.pop();
+                scratch.push_str(&line[..line.len() - 1]);
+                if self.0.is_empty() {
+                    return Some(scratch);
                 }
-                return Some(line);
-            }
-            if backslash {
-                line.pop();
-                skip_white = true;
-                appended = true;
-                backslash = false;
-                if c == '\r' && chars[self.pos] == '\n' {
-                    self.pos += 1;
+                if ending.starts_with('\r') {
+                    self.0 = self.0.strip_prefix('\n').unwrap_or(self.0);
                 }
-            } else {
-                return Some(line);
+                self.0 = self.0.trim_start_matches([' ', '\t', '\u{c}']);
             }
         }
     }
 }
 
-fn load_convert(input: &[char]) -> Result<String, Malformed> {
+fn load_convert(input: &str) -> Result<String, Malformed> {
+    if !input.contains('\\') {
+        return Ok(input.to_owned());
+    }
+    let input: Vec<_> = input.chars().collect();
     let mut out = String::with_capacity(input.len());
     let mut units: Vec<u16> = Vec::new();
     let flush = |units: &mut Vec<u16>, out: &mut String| {
