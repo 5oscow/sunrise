@@ -183,3 +183,91 @@ fn a_restored_wind_charge_with_an_infinite_rotation_turns_as_from_zero() {
         ]
     );
 }
+
+/// `Projectile.shoot(DDDFF)` sets the rotation from the new motion as
+/// `(float)(Mth.atan2(x, z) * 57.2957763671875D)` and
+/// `(float)(Mth.atan2(y, horizontalDistance) * 57.2957763671875D)`: one
+/// multiply by the folded `180.0F / (float)Math.PI` (offsets 43-50, 62-69).
+/// The motions and rotations are vanilla 26.3's own, read right after a
+/// dispenser shot them (`tools/parity_fuzz.py spawn`, #920).
+#[test]
+fn a_shot_faces_its_motion_with_the_folded_float_degree_constant() {
+    for (kind, motion, rotation) in [
+        (
+            ProjectileKind::Egg,
+            [1.0921503583127599, 0.07908806208644255, 0.05642147364871476],
+            [87.04267_f32, 4.1363444],
+        ),
+        (
+            ProjectileKind::SmallFireball,
+            [
+                0.958190841689071,
+                0.060279224934985304,
+                -0.017876257827707385,
+            ],
+            [91.068855, 3.5990546],
+        ),
+        (
+            ProjectileKind::SmallFireball,
+            [
+                0.010748615966384488,
+                1.0573762104847477,
+                -0.09487713089403285,
+            ],
+            [173.53645, 84.84002],
+        ),
+        (
+            ProjectileKind::Snowball,
+            [
+                -1.1570431167174582,
+                -0.04080260176556583,
+                0.08084624878829741,
+            ],
+            [-86.00303, -2.0147643],
+        ),
+        (
+            ProjectileKind::ExperienceBottle,
+            [
+                1.388066520989399,
+                -0.010784563767071194,
+                0.05055930210554001,
+            ],
+            [87.914, -0.44485638],
+        ),
+    ] {
+        let mut p = Projectile::new(kind.clone(), Vec3::ZERO, None);
+        p.velocity = Vec3::new(motion[0], motion[1], motion[2]);
+        p.update_rotation();
+        assert_eq!([p.yaw, p.pitch], rotation, "{kind:?}");
+        assert_eq!([p.previous_yaw, p.previous_pitch], rotation, "{kind:?}");
+    }
+}
+
+/// Through `shoot`: no spread, so the motion is the normalised direction
+/// times the speed (`getMovementToShoot`), and the rotation follows it.
+/// Expected values from the 26.3 jar's own `Vec3.normalize().scale(1.1F)`
+/// and `Mth.atan2(..) * 57.2957763671875D`; main's multiply by 180 and
+/// divide by the float pi gave `[87.04268f, 4.136343f]`.
+#[test]
+fn shoot_sets_the_vanilla_rotation_of_its_motion() {
+    let mut p = Projectile::new(ProjectileKind::Egg, Vec3::ZERO, None);
+    p.shoot(
+        &mut LegacyRandom::new(1),
+        [1.0921503583127599, 0.07908806208644255, 0.05642147364871476],
+        1.1,
+        0.0,
+    );
+    assert_eq!(
+        p.velocity,
+        Vec3::new(
+            1.0956736529323259,
+            0.07934320144660496,
+            0.056603490230059485
+        )
+    );
+    assert_eq!([p.yaw, p.pitch], [87.04267_f32, 4.1363425]);
+    assert_eq!(
+        [p.previous_yaw, p.previous_pitch],
+        [87.04267_f32, 4.1363425]
+    );
+}

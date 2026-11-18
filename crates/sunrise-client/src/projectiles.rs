@@ -1123,11 +1123,11 @@ impl Projectile {
     }
     fn update_rotation(&mut self) {
         let v = self.velocity;
-        let sd = (v.x * v.x + v.z * v.z).sqrt();
-        use sunrise_core::geometry::trig::atan2;
-        // Projectile.shoot uses Mth.atan2 and widened float degree constants.
-        self.yaw = (atan2(v.x, v.z) * 180.0 / f64::from(std::f32::consts::PI)) as f32;
-        self.pitch = (atan2(v.y, sd) * 180.0 / f64::from(std::f32::consts::PI)) as f32;
+        use sunrise_core::geometry::trig::atan2_degrees;
+        // `Projectile.shoot`: `(float)(Mth.atan2(..) * 57.2957763671875D)`,
+        // one multiply by the folded `180.0F / (float)Math.PI`.
+        self.yaw = atan2_degrees(v.x, v.z);
+        self.pitch = atan2_degrees(v.y, v.horizontal_distance());
         // `Projectile.shoot` ends with `yRotO = getYRot(); xRotO = getXRot()`:
         // a freshly shot projectile interpolates from the rotation it was
         // aimed along, not from where it was created.
