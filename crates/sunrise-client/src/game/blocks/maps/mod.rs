@@ -671,16 +671,18 @@ impl Default for Maps {
     }
 }
 /// `MapColor.getColorFromPackedId` as RGBA bytes (NONE is transparent).
-fn packed_rgba(packed: u8) -> [u8; 4] {
-    let id = usize::from(packed >> 2);
-    if id == 0 || id >= MAP_COLORS.len() {
-        return [0; 4];
+/// Unlike vanilla's transparent fallback, a missing palette entry returns `None`.
+pub(in crate::game) fn packed_rgba(packed: u8) -> Option<[u8; 4]> {
+    let id = packed >> 2;
+    if id == 0 {
+        return Some([0; 4]);
     }
+    let col = *MAP_COLORS.get(usize::from(id))?;
     let modifier = [180u32, 220, 255, 135][usize::from(packed & 3)];
-    let col = MAP_COLORS[id];
     let ch = |s: u32| ((col >> s & 255) * modifier / 255) as u8;
-    [ch(16), ch(8), ch(0), 255]
+    Some([ch(16), ch(8), ch(0), 255])
 }
+
 /// `get(DataComponents.MAP_ID)`: the map id any stack carries. Filled maps
 /// (explorer maps included) carry one; a command can give it to any item.
 pub(super) fn map_id(stack: &ItemStack) -> Option<i32> {
@@ -1706,7 +1708,11 @@ impl Game<'_> {
         let m = self.maps.data.get_mut(&id)?;
         if m.texture_dirty {
             m.texture_dirty = false;
-            let rgba: Vec<u8> = m.colors.iter().flat_map(|&c| packed_rgba(c)).collect();
+            let rgba: Vec<u8> = m
+                .colors
+                .iter()
+                .flat_map(|&c| packed_rgba(c).unwrap_or([0; 4]))
+                .collect();
             let (w, h) = (self.gui.atlas.width as f32, self.gui.atlas.height as f32);
             self.map_patches.push(sunrise_client::font::Patch {
                 x: (rect.u0 * w).round() as u32,
@@ -1951,6 +1957,20 @@ mod save_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn packed_map_color_decodes_palette_and_shade() {
+        // Grass at each brightness, water at NORMAL, and glow lichen (last ID) at HIGH.
+        assert_eq!(packed_rgba(4), Some([89, 125, 39, 255]));
+        assert_eq!(packed_rgba(5), Some([109, 153, 48, 255]));
+        assert_eq!(packed_rgba(6), Some([127, 178, 56, 255]));
+        assert_eq!(packed_rgba(7), Some([67, 94, 29, 255]));
+        assert_eq!(packed_rgba(49), Some([55, 55, 220, 255]));
+        assert_eq!(packed_rgba(246), Some([127, 167, 150, 255]));
+        assert_eq!(packed_rgba(3), Some([0; 4]));
+        assert_eq!(packed_rgba(248), None);
+        assert_eq!(packed_rgba(u8::MAX), None);
+    }
 
     #[test]
     fn painting_a_map_marks_only_what_changed_and_refuses_another_size() {
