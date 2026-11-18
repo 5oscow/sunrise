@@ -58,16 +58,19 @@ the file you share.
 ## 4. Play it
 
 ```sh
-cargo sunrise-mod run --game <path to sunrise-client> -- --resources <folder>
+cargo sunrise-mod run --game <path to sunrise-client> -- --resources <resources folder> \
+  --game-dir target/sunrise-mod/game --home target/sunrise-mod/home
 ```
 
 `run` builds the mod and starts that game with it always on. Everything after `--` goes to the game.
 
 - `sunrise-client` is the game, from the download for your computer in the
   [Nightly release](https://github.com/sunrise-org/sunrise/releases/tag/nightly), or one you built yourself.
-- `--resources` names resources prepared from your own Minecraft: play 26.3 once from the Minecraft Launcher, then
-  make them with `sunrise-prepare --prepare --output <folder>` (`sunrise-prepare` is in the game's download). The tool
-  never downloads or bundles Mojang's files.
+- `--resources` names [resources prepared from your own Minecraft](first-mod.md#prepared-resources). Write the
+  folder's full path: only `--game-dir`, `--home` and the mod's own path are read from the folder you start in.
+- `--game-dir` and `--home` keep the game's saves, `options.txt` and logs under the project's `target/`. Without
+  them the saves and settings land in the project folder itself and the logs in your own Sunrise data folder.
+- Quote a path that has spaces.
 
 Open a world and craft the block from an amethyst block and glowstone dust. The game reads content once, at
 start-up: after you edit a file, run the command again.
