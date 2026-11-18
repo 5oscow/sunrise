@@ -55,9 +55,16 @@ class GateTests(unittest.TestCase):
         import yaml
 
         jobs = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())["jobs"]
-        conditions = {" ".join(job["if"].split()) for job in jobs.values() if "'pull_request'" in job.get("if", "")}
-        self.assertEqual(conditions, {"github.event_name == 'schedule' || github.event_name == 'pull_request' && "
-                                      "github.event.pull_request.head.repo.full_name != github.repository"})
+        conditions = {name: " ".join(job["if"].split()) for name, job in jobs.items()
+                      if "'pull_request'" in job.get("if", "")}
+        fork = ("github.event_name == 'pull_request' && "
+                "github.event.pull_request.head.repo.full_name != github.repository")
+        # The selection (`changes`) runs for a fork's pull request; each job it gates for that and the schedule.
+        self.assertEqual(conditions.pop("changes"), fork)
+        self.assertEqual(set(conditions), {"verify-tree", "verify-lint", "verify-test", "launcher"})
+        for name, condition in conditions.items():
+            with self.subTest(job=name):
+                self.assertTrue(condition.startswith(f"!cancelled() && (github.event_name == 'schedule' || {fork} && "))
 
     def test_a_dispatch_with_pr_runs_that_head_and_keeps_a_fork_off_our_runners(self):
         fork = pr_gate.outputs("workflow_dispatch", True, "3665", lambda n: {"sha": SHA, "same_repository": False})

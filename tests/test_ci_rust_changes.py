@@ -15,7 +15,8 @@ from tools.ci.rust_changes import (
 @contextlib.contextmanager
 def fixture_repository(files):
     """The selector reading a small committed repository of `files` instead of this checkout."""
-    caches = [getattr(rust_changes, name) for name in ("rust_literals", "rust_includes", "gated_helpers")
+    caches = [getattr(rust_changes, name) for name in ("rust_literals", "rust_includes", "gated_helpers",
+                                                         "python_literals")
               if hasattr(rust_changes, name)]
     with tempfile.TemporaryDirectory() as directory:
         for path, text in files.items():
@@ -133,6 +134,30 @@ class RustChangesTests(unittest.TestCase):
                 self.assertTrue(needs_tooling([("M", "docs/setup.md"), ("M", path)]))
         self.assertFalse(needs_tooling([("M", "docs/setup.md")]))
         self.assertFalse(needs_tooling([]))
+
+    def test_documentation_the_python_suite_reads_keeps_it(self):
+        # The status page's gap count and badge (tests/test_parity_gaps.py), the launcher's copy of a game image
+        # (tests/test_launcher_copies.py): an edit to either alone still runs the Python tests.
+        for path in ["docs/status.md", "docs/media/village.webp"]:
+            with self.subTest(path=path):
+                self.assertTrue(selections([("M", path)])["tooling_required"])
+        self.assertFalse(selections([("M", "docs/setup.md")])["tooling_required"])
+
+    def test_python_reads_follow_joins_folders_and_globs(self):
+        with fixture_repository({
+            "tests/test_pages.py": (
+                'PAGE = ROOT / "docs" / "status.md"\n'
+                'IMAGES = "docs/media/"\n'
+                'BOOK = sorted(ROOT.glob("docs/book/*.md"))\n'
+                'NAME = "notes.md"\n'
+            ),
+            "docs/status.md": "x\n", "docs/media/a.webp": "x\n", "docs/book/a.md": "x\n",
+            "docs/book/deep/b.md": "x\n", "docs/notes.md": "x\n", "docs/other.md": "x\n",
+        }):
+            # A glob's `*` stays within its folder; a bare name is the source folder's own file.
+            self.assertEqual(rust_changes.python_reads([
+                "docs/status.md", "docs/media/a.webp", "docs/book/a.md", "docs/book/deep/b.md", "docs/notes.md",
+                "docs/other.md"]), {"docs/status.md", "docs/media/a.webp", "docs/book/a.md"})
 
     def test_documentation_membership_changes_keep_link_checks(self):
         for status in ["A", "D", "T", "R100", "?"]:

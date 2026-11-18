@@ -22,6 +22,33 @@ env:
   # Test runs never reach the telemetry server: no live-count ping, no uploads (docs/telemetry.md).
   SUNRISE_TELEMETRY_URL: "off"
 jobs:
+  # Which of the jobs below a fork's pull request needs, from the complete diff of its base and head
+  # (tools/ci/rust_changes.py, the selection dyna-checks makes): a job whose inputs it didn't change skips at once
+  # instead of cloning the history. The trigger itself has no path filter: GitHub matches one against only the
+  # first 300 changed files. A selection that fails or can't diff leaves its outputs empty, and every job runs.
+  changes:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      rust_required: ${{ steps.selection.outputs.rust_required }}
+      launcher_required: ${{ steps.selection.outputs.launcher_required }}
+      tooling_required: ${{ steps.selection.outputs.tooling_required }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Fetch this commit's history for selection
+        timeout-minutes: 11
+        env:
+          FETCH_STEP: Fetch this commit's history for selection
+          # The diff reads commits and two trees, which Git fetches when it first reads them (tools/ci/history_fetch.sh).
+          HISTORY_FILTER: tree:0
+        run: bash tools/ci/history_fetch.sh
+      - name: Select the jobs this pull request needs
+        id: selection
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 tools/ci/rust_changes.py --all "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
   # verify runs as three jobs side by side, so a run takes as long as its slowest part (the Rust tests), not the sum:
   # one job doing them in turn took 14-21 minutes on GitHub's runners (main's run 43595807302: 859 s). `verify` waits
   # for the three and passes only when each passed or had nothing to do. It runs even in a cancelled run
@@ -35,9 +62,13 @@ jobs:
   # (CARGO_TARGET_DIR, outside the checkout), so the apt packages, Python and the Rust cache steps are GitHub's only.
   verify-tree:
     name: verify (tree and tools)
+    needs: changes
+    # Runs when its selection didn't rule it out; `!cancelled()` because a skipped or failed `changes` would
+    # otherwise skip it too.
     if: >-
-      github.event_name == 'schedule' || github.event_name == 'pull_request' &&
-      github.event.pull_request.head.repo.full_name != github.repository
+      !cancelled() && (github.event_name == 'schedule' || github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name != github.repository &&
+      (needs.changes.outputs.tooling_required != 'false' || needs.changes.outputs.rust_required != 'false'))
     runs-on: >-
       ${{ vars.SELF_HOSTED_CI != 'off' && vars.SELF_HOSTED_CI != 'light' && (vars.SELF_HOSTED_CI == 'all' ||
       github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository &&
@@ -93,9 +124,13 @@ jobs:
         run: python -m unittest discover -s tests -v
   verify-lint:
     name: verify (format and lint)
+    needs: changes
+    # Runs when its selection didn't rule it out; `!cancelled()` because a skipped or failed `changes` would
+    # otherwise skip it too.
     if: >-
-      github.event_name == 'schedule' || github.event_name == 'pull_request' &&
-      github.event.pull_request.head.repo.full_name != github.repository
+      !cancelled() && (github.event_name == 'schedule' || github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name != github.repository &&
+      needs.changes.outputs.rust_required != 'false')
     runs-on: >-
       ${{ vars.SELF_HOSTED_CI != 'off' && vars.SELF_HOSTED_CI != 'light' && (vars.SELF_HOSTED_CI == 'all' ||
       github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository &&
@@ -152,9 +187,13 @@ jobs:
         run: python3 tools/ci/check_api_boundary.py
   verify-test:
     name: verify (Rust tests)
+    needs: changes
+    # Runs when its selection didn't rule it out; `!cancelled()` because a skipped or failed `changes` would
+    # otherwise skip it too.
     if: >-
-      github.event_name == 'schedule' || github.event_name == 'pull_request' &&
-      github.event.pull_request.head.repo.full_name != github.repository
+      !cancelled() && (github.event_name == 'schedule' || github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name != github.repository &&
+      needs.changes.outputs.rust_required != 'false')
     runs-on: >-
       ${{ vars.SELF_HOSTED_CI != 'off' && vars.SELF_HOSTED_CI != 'light' && (vars.SELF_HOSTED_CI == 'all' ||
       github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository &&
@@ -244,9 +283,13 @@ jobs:
   # The launcher is its own workspace (launcher/Cargo.toml), so verify's cargo runs never build it. A pull request that
   # changes it or a crate it builds is checked here; main's pushes get dyna-checks' launcher job.
   launcher:
+    needs: changes
+    # Runs when its selection didn't rule it out; `!cancelled()` because a skipped or failed `changes` would
+    # otherwise skip it too.
     if: >-
-      github.event_name == 'schedule' || github.event_name == 'pull_request' &&
-      github.event.pull_request.head.repo.full_name != github.repository
+      !cancelled() && (github.event_name == 'schedule' || github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name != github.repository &&
+      needs.changes.outputs.launcher_required != 'false')
     runs-on: >-
       ${{ vars.SELF_HOSTED_CI != 'off' && vars.SELF_HOSTED_CI != 'light' && (vars.SELF_HOSTED_CI == 'all' ||
       github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository &&

@@ -421,6 +421,69 @@ def needs_sample(paths):
                                    "crates/sunrise-game-discovery/")) for path in paths)
 
 
+# Python whose path literals are examples of what selection decides, not files it reads: the selectors and their tests.
+PATH_EXAMPLES = RUST_DECIDES | {"tests/test_ci_rust_changes.py", "tests/test_ci_pr_files.py",
+                                "tests/test_ci_test_scope.py"}
+# A Python string literal on one line, or a chain of them joined with pathlib's `/`: `ROOT / "docs" / "status.md"`.
+PY_PATH = r"""("[^"\\]+"|'[^'\\]+')([[:space:]]*/[[:space:]]*("[^"\\]+"|'[^'\\]+'))*"""
+
+
+@functools.lru_cache(maxsize=None)
+def python_literals():
+    """[(source, path)] for each one-line string literal, or `/`-joined chain of them, in this checkout's tracked
+    Python; None if it can't be read."""
+    found = git("grep", "-I", "-z", "-o", "-E", PY_PATH, "--", "*.py")
+    if found.returncode not in (0, 1):
+        return None
+    out = []
+    for line in found.stdout.decode("utf-8", "replace").splitlines():
+        source, _, chain = line.partition("\0")
+        if source in PATH_EXAMPLES:
+            continue
+        pieces = re.findall(r"""["']([^"']+)["']""", chain)
+        out += [(source, piece) for piece in pieces]
+        if len(pieces) > 1:
+            out.append((source, "/".join(pieces)))
+    return out
+
+
+def glob_pattern(glob):
+    """A compiled glob with pathlib's rules: `*` and `?` stay within a folder, `**` crosses folders."""
+    regex = ""
+    for token in re.findall(r"\*\*/|\*\*|\*|\?|[^*?]+", glob):
+        regex += {"**/": "(?:.*/)?", "**": ".*", "*": "[^/]*", "?": "[^/]"}.get(token) or re.escape(token)
+    return re.compile(regex + r"\Z")
+
+
+def python_reads(paths):
+    """The paths among `paths` that the repository's Python (the tools, their tests, the Python suite) names: a
+    literal or a `/`-joined chain of literals naming the file, a folder holding it below the top level, or a glob
+    matching it. A literal with a folder resolves from the source's folder or any folder above it, a bare name only
+    from the source's folder. If the sources can't be read, every path counts."""
+    paths = set(paths)
+    literals = python_literals()
+    if literals is None:
+        return paths
+    names = {part for path in paths for part in path.split("/")}
+    read = set()
+    for source, literal in literals:
+        if literal.rstrip("/").rsplit("/", 1)[-1] not in names and "*" not in literal:
+            continue
+        bases = [posixpath.dirname(source)]
+        while "/" in literal.strip("/") and bases[-1]:
+            bases.append(posixpath.dirname(bases[-1]))
+        for base in bases:
+            target = posixpath.normpath(posixpath.join(base, literal.lstrip("/")))
+            if "*" in target or "?" in target:
+                pattern = glob_pattern(target)
+                read |= {path for path in paths if pattern.match(path)}
+            elif target in paths:
+                read.add(target)
+            elif "/" in target:
+                read |= {path for path in paths if path.startswith(target + "/")}
+    return read
+
+
 def needs_tooling(changes):
     paths = [path for _, path in changes]
     return needs_rust(paths) or any(
@@ -429,7 +492,7 @@ def needs_tooling(changes):
         # Tests check linked target existence, even when they do not read its contents.
         or status != "M"
         for status, path in changes
-    )
+    ) or bool(python_reads(paths))
 
 
 def selections(changes):
