@@ -21,14 +21,19 @@ def sums_in(text: str) -> dict[str, str]:
 
 
 def check(results: list, tag: str, commit: str, files: dict[str, str], sums: dict[str, str]) -> None:
-    """Raises SystemExit unless exactly one attested release record for `tag` matches `files` and `sums`."""
+    """Raises SystemExit unless every attested release record for `tag` (one, or a re-run's identical ones) matches `files` and `sums`."""
     records = [r for r in results
                if r["verificationResult"]["statement"].get("predicateType") == PREDICATE
                and r["verificationResult"]["statement"].get("predicate", {}).get("tag") == tag]
-    if len(records) != 1:
-        raise SystemExit(f"{len(records)} attested release records name {tag}, not exactly one")
-    statement = records[0]["verificationResult"]["statement"]
-    certificate = records[0]["verificationResult"]["signature"]["certificate"]
+    if not records:
+        raise SystemExit(f"no attested release record names {tag}")
+    for found in records:
+        check_one(found, tag, commit, files, sums)
+
+
+def check_one(found: dict, tag: str, commit: str, files: dict[str, str], sums: dict[str, str]) -> None:
+    statement = found["verificationResult"]["statement"]
+    certificate = found["verificationResult"]["signature"]["certificate"]
     predicate = statement["predicate"]
     wanted = {"tag": tag, "version": tag[1:], "commit": commit}
     if {key: predicate.get(key) for key in wanted} != wanted:

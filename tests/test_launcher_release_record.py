@@ -50,8 +50,12 @@ class LauncherReleaseRecord(unittest.TestCase):
     def test_sha256sums_must_list_the_same_files(self):
         self.assertFalse(self.passes([attested()], sums={**FILES, "sunrise-launcher-extra.zip": "3" * 64}))
 
-    def test_two_records_for_one_tag_are_refused(self):
-        self.assertFalse(self.passes([attested(), attested()]))
+    def test_a_reruns_identical_records_pass_and_disagreeing_ones_are_refused(self):
+        self.assertTrue(self.passes([attested(), attested()]))
+        other = {**FILES, "sunrise-launcher-setup.exe": "3" * 64}
+        self.assertFalse(self.passes([attested(), attested(files=other)]))
+        self.assertFalse(self.passes([attested(), attested(commit="b" * 40)]))
+        self.assertFalse(self.passes([]))
 
 
 if __name__ == "__main__":
