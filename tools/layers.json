@@ -28,6 +28,7 @@
     "sunrise-client-lib": "engine",
     "sunrise-client-gameplay": "engine",
     "sunrise-client-render": "engine",
+    "sunrise-render-core": "engine",
     "sunrise-command": "engine",
     "sunrise-core": "engine",
     "sunrise-gameplay": "engine",

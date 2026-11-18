@@ -33,6 +33,7 @@ members = [
     "crates/sunrise-client-core",
     "crates/sunrise-client-input",
     "crates/sunrise-client-render",
+    "crates/sunrise-render-core",
     "crates/sunrise-command",
     "crates/sunrise-items",
     "crates/sunrise-server-files",

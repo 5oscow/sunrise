@@ -4685,6 +4685,7 @@ dependencies = [
  "sunrise-perf-format",
  "sunrise-polytone",
  "sunrise-protocol",
+ "sunrise-render-core",
  "sunrise-shader-api",
  "sunrise-shaders",
  "sunrise-system",
@@ -5374,6 +5375,14 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "ring",
+]
+
+[[package]]
+name = "sunrise-render-core"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "glam",
 ]
 
 [[package]]
