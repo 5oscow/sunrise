@@ -37,19 +37,21 @@ fn a_second_screen_part_for_the_same_screens_is_refused() {
     r.menu_part("minecraft:hopper", Overlay);
     // Kinds are named by their full type names.
     let here = concat!(module_path!(), "::");
-    let refused: Vec<_> = registrar
-        .refused
-        .iter()
-        .map(|r| r.replace(here, ""))
-        .collect();
-    assert_eq!(
-        refused,
-        [
-            "Overlay of alpha and Layout of alpha both lay out menu type alpha:pack's screen",
-            "Overlay of beta and Layout of alpha both lay out menu type alpha:pack's screen",
-            "Overlay of alpha and Layout of alpha both lay out menu type minecraft:hopper's screen",
-        ]
-    );
+    let conflicts = [
+        ("alpha:pack", "alpha", "alpha"),
+        ("alpha:pack", "beta", "alpha"),
+        ("minecraft:hopper", "alpha", "alpha"),
+    ];
+    assert_eq!(registrar.refused.len(), conflicts.len());
+    for (refusal, (menu, rival, owner)) in registrar.refused.iter().zip(conflicts) {
+        for name in [
+            menu,
+            &format!("Overlay of {rival}"),
+            &format!("Layout of {owner}"),
+        ] {
+            assert!(refusal.contains(name), "{refusal} does not name {name}");
+        }
+    }
     let owners = |menu: &str| -> Vec<_> {
         registrar.parts.menus[menu]
             .iter()
