@@ -781,18 +781,22 @@ fn upgrade_regions_with_threads(
     // A staged `.mcc` with no live copy may be the only one of its chunk (an
     // older upgrader replaced the region first): put it in place. A region
     // never reads a `.mcc` its chunk does not flag, so one it does not need
-    // there is harmless. One is dropped only when its region was never put in
-    // place (the live region is the old one, with its own payloads) or its
-    // live copy holds the same bytes. Otherwise the live path holds a folder
-    // or a stale or later payload: which one the live region needs cannot be
-    // told, so both stay and the region is not rewritten.
+    // there is harmless. One is dropped only when its live path is a regular
+    // file and either its region was never put in place (the live region is
+    // the old one, with its own payloads) or the live copy holds the same
+    // bytes. A folder there reads as a missing chunk, so a staged region may
+    // omit the chunk and does not make the payload redundant. Otherwise the
+    // live path holds a folder or a stale or later payload: which one the live
+    // region needs cannot be told, so both stay and the region is not
+    // rewritten.
     for staged in files_with_suffix(&staging, ".mcc") {
         let name = staged.file_name().unwrap_or_default();
         let live = folder.join(name);
         if !live.try_exists()? {
             fs::rename(staged, live)?;
-        } else if staged_region_of(&staging, &name.to_string_lossy()).is_some_and(|r| r.is_file())
-            || (live.is_file() && fs::read(&live)? == fs::read(&staged)?)
+        } else if live.is_file()
+            && (staged_region_of(&staging, &name.to_string_lossy()).is_some_and(|r| r.is_file())
+                || fs::read(&live)? == fs::read(&staged)?)
         {
             fs::remove_file(staged)?;
         } else {
@@ -1559,6 +1563,40 @@ mod upgrade_tests {
             }
             let _ = fs::remove_dir_all(&dir);
         }
+    }
+
+    /// A folder at the live path reads as a missing chunk, so a valid staged
+    /// region can omit the chunk: the staged region does not make the staged
+    /// `.mcc` redundant. Both payload and live region stay as they are.
+    #[test]
+    fn region_upgrade_keeps_a_staged_mcc_when_a_staged_region_omits_the_chunk() {
+        let dir = std::env::temp_dir().join(format!("sunrise-mcc-omit-{}", std::process::id()));
+        published_stub_with_staged_mcc(&dir);
+        fs::create_dir_all(dir.join("c.0.0.mcc")).unwrap();
+        let other = NamedTag {
+            name: "".into(),
+            tag: old_chunk(1, 0),
+        };
+        let record =
+            ChunkRecord::from_nbt(&other, Compression::None, 7, Limits::default()).unwrap();
+        let mut writer = RegionWriter::create(dir.join(".datafix/r.0.0.mca")).unwrap();
+        writer
+            .write(sunrise_core::position::ChunkPos::new(1, 0), &record)
+            .unwrap();
+        writer.finish().unwrap();
+        let staged = fs::read(dir.join(".datafix/c.0.0.mcc")).unwrap();
+        let region = fs::read(dir.join("r.0.0.mca")).unwrap();
+
+        let progress = UpgradeProgress::new();
+        let run = Progress {
+            progress: &progress,
+            cancelable: true,
+        };
+        upgrade_regions_with_threads(&dir, &run, fix_overworld_chunk, 1).unwrap_err();
+        assert_eq!(fs::read(dir.join(".datafix/c.0.0.mcc")).unwrap(), staged);
+        assert_eq!(fs::read(dir.join("r.0.0.mca")).unwrap(), region);
+        assert!(dir.join("c.0.0.mcc").is_dir());
+        let _ = fs::remove_dir_all(&dir);
     }
 
     /// A staged `.mcc` whose live copy holds the same bytes was moved in by a
