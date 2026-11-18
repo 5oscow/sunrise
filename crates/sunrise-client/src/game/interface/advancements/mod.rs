@@ -459,7 +459,11 @@ impl Game<'_> {
         }
     }
     pub(super) fn save_advancements(&self) {
-        if !self.adv.loaded || self.remote.is_some() || self.no_player_here() {
+        if !self.adv.loaded
+            || self.remote.is_some()
+            || self.no_player_here()
+            || self.crash_save.holds_interrupted(self.lan_acting)
+        {
             return;
         }
         let Some(path) = self.adv_path() else {

@@ -337,7 +337,11 @@ impl Game<'_> {
     }
     /// `ServerStatsCounter.save`.
     pub(super) fn save_stats(&self) {
-        if !self.stats.loaded || self.remote.is_some() || self.no_player_here() {
+        if !self.stats.loaded
+            || self.remote.is_some()
+            || self.no_player_here()
+            || self.crash_save.holds_interrupted(self.lan_acting)
+        {
             return;
         }
         if let Some(path) = self.stats_path() {

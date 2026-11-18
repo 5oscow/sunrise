@@ -68,6 +68,7 @@ impl Game<'_> {
             &self.world_root,
             self.options.execution_role,
             self.res.items(),
+            self.crash_save.keep_owner_file,
         )?;
         // PlayerEvent.SaveToFile for the owner, once level.dat is written.
         if let Some((uuid, name)) = stored_owner {

@@ -233,3 +233,10 @@ inventory and movement writes still require a server host.
 
 The local player's `abilities` read takes `flying` from current client prediction;
 the other flags and speeds stay as supplied by the last abilities packet.
+
+## A panic in a player's turn
+
+A hook runs inside the turn of the player whose action fired it. When a hook panics, the panic still ends the
+server, but the crash save writes nothing for that player: their `players/data/<uuid>.dat`, stats and
+advancements stay as last saved, so an item taken but not yet placed is never duplicated or lost on disk. The log
+names the turn with a warning. A panic your code caught does not count: the record ends with the server tick.

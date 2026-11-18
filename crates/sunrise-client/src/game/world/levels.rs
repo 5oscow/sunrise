@@ -1173,6 +1173,8 @@ impl Game<'_> {
     }
 
     fn tick_server_body(&mut self, paused: bool) -> Result<()> {
+        // A panic something caught left a game that carried on: its record ends with the tick.
+        self.interrupted_turns.clear();
         // `tickRateManager.tick()` once per server tick, before any level
         // (each `ServerLevel.tick` only reads `runsNormally`), and the native
         // `ServerTickStart` before that level work (NeoForge's

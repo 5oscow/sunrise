@@ -1944,6 +1944,13 @@ struct Game<'a> {
     save_after_guest_turn: bool,
     /// Guests whose records are displaced by nested player swaps, outer first.
     lan_guest_swaps: Vec<u32>,
+    /// Connections whose turn a panic interrupted this tick: the turn helpers record the
+    /// player before re-raising, the end-of-turn path records it before its callbacks run and
+    /// clears it after a clean put-back. Cleared at the start of every server tick; the crash
+    /// save leaves these players' files as last saved (`server_lifecycle`).
+    interrupted_turns: Vec<u32>,
+    /// What teardown decided about the interrupted turns, for the writes after it.
+    crash_save: server_lifecycle::CrashSave,
     /// Ender chests a mod opened for a guest inside that guest's turn
     /// (`player_open_ender_chest`), by connection, with their titles: opened as the turn
     /// ends, once the guest's own ender chest is back in their record.
@@ -11175,6 +11182,8 @@ impl<'a> Game<'a> {
             lan_building_boxes: Default::default(),
             save_after_guest_turn: false,
             lan_guest_swaps: Vec::new(),
+            interrupted_turns: Vec::new(),
+            crash_save: Default::default(),
             lan_ender_menus: Vec::new(),
             player_state: Default::default(),
             lan_break_pos: None,
@@ -11657,11 +11666,13 @@ fn write_level_for_role(
     dir: &std::path::Path,
     role: execution_role::ExecutionRole,
     items: &crate::items::Items,
+    keep_owner_file: bool,
 ) -> Result<()> {
-    if role.writes_singleplayer_player() {
-        level.write(dir, items)
-    } else {
-        level.write_without_player(dir)
+    match (role.writes_singleplayer_player(), keep_owner_file) {
+        (true, false) => level.write(dir, items),
+        // A crash save keeps the owner's file as last saved, and a legacy `Data.Player`.
+        (true, true) => level.write_keeping_player(dir),
+        (false, _) => level.write_without_player(dir),
     }
 }
 

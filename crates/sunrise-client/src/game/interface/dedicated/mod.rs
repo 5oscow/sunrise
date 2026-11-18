@@ -2626,18 +2626,7 @@ impl Game<'_> {
         } else {
             log("ERROR", &format!("The server thread panicked: {message}"));
         }
-        let acting = self.lan_acting;
-        let hub_lost = self.lan.is_none();
-        if let (Some(conn), Some(host)) = (acting, self.lan.as_mut()) {
-            host.hub
-                .guests
-                .update_connection(conn, |guest| guest.placed = false);
-        }
-        if hub_lost {
-            warn("The panic interrupted the network tick: players are not saved, only the world");
-        } else if acting.is_some() {
-            warn("The panic interrupted a player's turn: that player keeps the last saved file");
-        }
+        self.exclude_interrupted_players(true, warn);
         if integrated {
             // `IntegratedServer.stopServer`'s steps; `save_guest` skips the guest unplaced above.
             return self.stop_integrated(true);

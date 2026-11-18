@@ -429,6 +429,11 @@ A running server takes the difficulty, the default game mode, the whitelist, the
 player limit and the backup settings at once; the rest applies at its next start, and `config set` says which. `--json` prints that as `saved`, `applied`
 and `restart`.
 
+A crash save keeps the last saved files (`players/data/<uuid>.dat`, stats and advancements) of a player whose turn
+the panic interrupted, such as a mod's hook panicking while it handled that player's action: the half-done turn can
+hold an item taken but not yet placed. The log says so with a `player's turn` warning, and the panic still
+ends the server. Single player keeps the owner's file the same way.
+
 The server restarts the game by itself if it crashes: after 5 s, then waiting longer each time, up to 5
 minutes. It keeps the crash report and gives up after 5 crashes in 10 minutes, and `status` says why.
 
