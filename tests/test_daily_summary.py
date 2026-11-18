@@ -856,18 +856,19 @@ class DailyWorkflowTests(unittest.TestCase):
                 self.assertEqual(expression_value(toolchain["with"]["components"][3:-2], {}, matrix=leg),
                                  "clippy" if wants_probe else "")
                 self.assertEqual(bool(expression_value(api["if"], {}, matrix=leg)), leg["name"] == "linux")
-        self.assertEqual(shlex.split(probe["run"]), ["python", "tools/native_dylib_probe.py", "--sdk", "prebuilt",
-                                                     "--output", "target/native-dylib-probe"])
+        self.assertEqual(shlex.split(probe["run"]),
+                         ["$SDK_PYTHON", "tools/native_dylib_probe.py", "--sdk", "$SDK_WORK/prebuilt",
+                          "--output", "$SDK_WORK/target/native-dylib-probe"])
         commands = {step["run"].split()[2]: i for i, step in enumerate(steps)
-                    if step.get("run", "").startswith("python tools/prebuilt_game.py ")}
+                    if step.get("run", "").startswith('"$SDK_PYTHON" tools/prebuilt_game.py ')}
         self.assertLess(max(commands[command] for command in ("build", "smoke", "start", "exports")), steps.index(probe))
         self.assertLess(steps.index(probe), steps.index(api))
         self.assertLess(steps.index(api), commands["pack"])
         api_commands = api["run"].splitlines()
-        self.assertLess(api_commands.index("rustup target add wasm32-unknown-unknown"),
-                        api_commands.index("python tools/sdk_api_source.py build target/api-source"))
-        self.assertLess(api_commands.index("python tools/sdk_api_source.py build target/api-source"),
-                        api_commands.index("python tools/sdk_api_source.py check target/api-source"))
+        build_api = '"$SDK_PYTHON" tools/sdk_api_source.py build "$SDK_WORK/target/api-source"'
+        check_api = '"$SDK_PYTHON" tools/sdk_api_source.py check "$SDK_WORK/target/api-source"'
+        self.assertLess(api_commands.index("rustup target add wasm32-unknown-unknown"), api_commands.index(build_api))
+        self.assertLess(api_commands.index(build_api), api_commands.index(check_api))
 
     def test_the_sdk_build_packs_exactly_the_archives_a_release_needs(self):
         from tests.test_ci_concurrency import ROOT, yaml
@@ -885,8 +886,9 @@ class DailyWorkflowTests(unittest.TestCase):
         self.assertEqual(len(nightly.SDK_ARCHIVES), len(set(nightly.SDK_ARCHIVES)))
         steps = {step.get("name") or step.get("uses"): step for step in build["steps"]}
         self.assertEqual(steps["Pack the SDK's assets"]["run"],
-                         "python tools/prebuilt_game.py pack prebuilt dist --stage-tool "
-                         "target/prebuilt/tools/release/sunrise-stage${{ runner.os == 'Windows' && '.exe' || '' }}")
+                         '"$SDK_PYTHON" tools/prebuilt_game.py pack "$SDK_WORK/prebuilt" "$SDK_WORK/dist" --stage-tool '
+                         '\"${CARGO_TARGET_DIR:-target}/prebuilt/tools/release/sunrise-stage'
+                         "${{ runner.os == 'Windows' && '.exe' || '' }}\"")
         self.assertEqual(steps["actions/upload-artifact@v4"]["with"]["name"], "sdk-leg-${{ matrix.name }}")
         self.assertNotIn("env", build, "no hand-set archive name")
 
