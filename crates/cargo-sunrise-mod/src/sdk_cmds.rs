@@ -519,7 +519,20 @@ fn report(
 pub(crate) fn check_mod(entry: ChildEntry, args: &[String]) -> Result<(), String> {
     let root = Path::new(".");
     let package = Package::read(root)?;
-    package.directory_files(root)?;
+    let files = package.directory_files(root)?;
+    let (pipelines, refused) = crate::check::pipeline_shaders(&files);
+    if !refused.is_empty() {
+        return Err(format!(
+            "render pipeline shaders refused:\n{}",
+            refused.join("\n")
+        ));
+    }
+    if pipelines > 0 {
+        println!(
+            "{pipelines} render pipeline shader(s) compose and validate as the game does \
+             (a file that calls pipeline_texture is checked as textured, any other as untextured)."
+        );
+    }
     let code = package.manifest.native.is_some() || package.manifest.wasm.is_some();
     if !code {
         println!("{}: the package rules hold.", package.manifest.name);

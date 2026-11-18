@@ -124,58 +124,6 @@ with `menu_quick_move` is asked the pickup rule before that hook. A click asks o
 take, the all-or-nothing check and a shift-click the parts leave to the game reuse that answer, so the server and
 the client's prediction ask the same number of times.
 
-## Rewards and effects when a slot is taken
-
-`MenuPart::menu_slot_take` is the server-side take notice for a mod-owned slot of a registered
-mod menu type (vanilla `Slot.onTake` / `Slot.onQuickCraft`; NeoForge counterpart: none).
-The source has already lost the transferred items. The notice runs before the rest of the
-click: before a throw drops them, before pick-all grows the cursor, and before a quick move
-checks whether to repeat. A pickup has already assigned or grown the cursor; a number-key
-swap has already installed its new source stack, but has not yet inserted or dropped overflow.
-
-`event.slot` is the backing index in `event.container`, as in `menu_slot_rules`.
-`event.stack` is a read-only copy of the positive transferred portion, never the source
-remainder. A shift-click sets `event.quick_craft_amount` to that transferred count;
-other takes set it to zero. It is unrelated to the QUICK_CRAFT drag input. The two vanilla
-quick-move callbacks become one notice, including when only part of the stack fitted.
-`event.context` identifies the player and optional block and snapshots the menu containers
-at this take boundary, rather than sharing the earlier slot-rule snapshot.
-
-```rust,ignore
-struct ResultRewards;
-#[mod_api::sunrise_part]
-impl mod_api::MenuPart for ResultRewards {
-    fn menu_slot_take(
-        &self,
-        host: &mut dyn mod_api::ServerHost,
-        event: &mut mod_api::MenuSlotTakeEvent<'_>,
-    ) {
-        if event.slot == 2 {
-            if let Some(player) = host.players().acting_player() {
-                player.give_experience_points(host, event.stack.count());
-            }
-        }
-    }
-}
-// In Hooks::register: registrar.menu_part("mymod:machine", ResultRewards);
-```
-
-The listener's writes, the transfer and its continuation share a transaction. It may consume
-inputs or refill the mod's result storage; the continuation reads that updated storage, so a
-shift-click can take the next result. If the listener fails, replaces or closes the menu, or
-invalidates the continuation's player inventory/cursor preconditions, the click and its writes
-are rolled back rather than recomputed. Slot-rule answers are retained across suspension.
-There is no notice for refused or empty takes, placement, creative cloning, ordinary pickup
-exchange, player-inventory slots, vanilla menu types or the built-in crafting-grid result
-(which keeps `item_crafted`). Client prediction never fires it or grants rewards; the server
-sends the resulting slots, cursor and effects.
-
-Use existing Host operations for experience, recipe unlocks, crafted statistics, sounds and
-particles. The notice grants nothing automatically and cannot change the delivered stack.
-It does **not** perform `RecipeCraftingHolder.awardUsedRecipes`'s `recipe_crafted` criterion
-([tracking](https://github.com/sunrise-org/sunrise/issues/1977)) or `onCraftedBy` item
-post-processing ([tracking](https://github.com/sunrise-org/sunrise/issues/1976)).
-
 ## Keeping a block menu open
 
 The server closes a player's block menu when `AbstractContainerMenu.stillValid` says no: by default when the
@@ -217,6 +165,11 @@ read on either side; `slot` and `carried` return an outer `None` when the handle
 unavailable and `Some(None)` for an empty slot. Each read checks the world epoch and menu generation,
 so a handle cannot read a replacement, reopened or respawned menu. These methods do not click or
 change slots.
+
+Server hooks can also read the acting player's supported menu through
+`player.container_menu(host)`. Inventory, equipment, cursor and ender contents come from
+that player's current turn state, not the temporarily swapped-out record. The unsupported
+menu kinds, hidden-slot refusal and stale-generation checks still apply.
 
 Mutable client hooks can submit a vanilla click with
 `menu.click(host, &[mod_api::MenuClick::QuickMove { slot }])`. The slot is the same menu-order

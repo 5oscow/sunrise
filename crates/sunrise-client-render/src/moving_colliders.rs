@@ -255,6 +255,11 @@ fn visit_scene(area: Aabb, mover: u64, mut f: impl FnMut(&OrientedCollider) -> b
     PLACED.with(|cell| visit(&cell.borrow(), area, mover, |p| f(&p.collider)));
 }
 
+/// The entity whose move [`as_mover`] names, or 0 outside one.
+pub fn mover() -> u64 {
+    MOVER.with(Cell::get)
+}
+
 /// Appends to `out` the colliders meeting `bounds` that `entity` collides with. An identity of
 /// 0 is the move [`as_mover`] names; with none named (a ray, a projectile's path) it is exempt
 /// from nothing and meets every collider.

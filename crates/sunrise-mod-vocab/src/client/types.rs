@@ -635,9 +635,7 @@ impl SoundPlay {
 /// Dropping or overwriting the handle doesn't stop the sound: keep a looping sound's handle while
 /// it plays (stop it before starting another in its place), or nothing can stop it until the
 /// player leaves the level.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its field is private, so mods cannot build or destructure it
 pub struct SoundRef {
     pub(crate) id: u64,
@@ -881,6 +879,13 @@ pub struct Screen {
     pub inventory_y: f32,
     /// The inventory's left column (vanilla's is 8).
     pub inventory_x: f32,
+    /// Title label position in GUI pixels from the screen's top-left corner.
+    /// `None` uses vanilla's `[8, 6]`. Ignored when `own_labels` is true.
+    pub title_label: Option<[f32; 2]>,
+    /// Inventory label position in GUI pixels from the screen's top-left corner.
+    /// `None` uses `[8, height - 94]`, independently of inventory slot positions.
+    /// Ignored when `own_labels` is true.
+    pub inventory_label: Option<[f32; 2]>,
     /// The mod draws the title and the "Inventory" label itself
     /// (`screen_draw`); Sunrise leaves them out.
     pub own_labels: bool,
@@ -1066,9 +1071,7 @@ pub enum CrosshairTarget {
 /// that was removed (even if its id was added again) or a handle from an
 /// earlier open reads as `None` and changes nothing. Mob and raid bars are not
 /// custom boss events and have no handle.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct BossBarRef {
     pub(crate) epoch: WorldEpoch,
@@ -1211,9 +1214,7 @@ pub struct ClientBossBar {
 ///     menu.click(host, &[]);
 /// }
 /// ```
-#[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct MenuRef {
     pub(crate) player: PlayerRef,

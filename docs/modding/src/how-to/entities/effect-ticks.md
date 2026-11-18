@@ -1,20 +1,39 @@
 # Ticking a registered mob effect
 
-A content mod's effects can run server-side behaviour through two hooks on `Hooks`:
+Attach server-side behaviour to a content-declared effect with a `MobEffectPart`:
+
+```rust,ignore
+let effect = r.effect_key("meals:comfort");
+r.mob_effect_part(&effect, Comfort).expect("attach Comfort to its effect");
+```
+
+Implement the Part with `#[mod_api::sunrise_part]`. Its two methods are:
 
 - `should_apply_effect_tick_this_tick` receives the resolved `effect` key, remaining
   duration (`tick_count`, or the holder's tick count for an infinite effect), and
   amplifier. Set `event.apply = true` to run the effect now; it starts false.
-- `apply_effect_tick` runs only when the first hook says to apply. It receives the
+- `apply_effect_tick` runs only when this Part's own cadence method says to apply. It receives the
   holder's `LivingRef`, dimension, health, maximum health and optional `PlayerFood`.
   Queue `heal`, `hurt`, `eat` or `add_exhaustion` changes through the event. These
-  apply after the listener returns. Clear `event.keep` to end the effect immediately,
-  before its duration counts down.
+  apply after every Part returns, in Part order. Clear `event.keep` to end the effect
+  immediately, before its duration counts down, and skip later Parts.
 
-Both hooks are version 2. Only the mod that declared the effect's registry entry
-receives them. Another mod requesting that effect's `EffectKey` does not acquire
-its tick behaviour. A mod declaring several effects selects between them using
-`event.effect`; resolve its keys during registration with `r.effect_key(id)`.
+These are version 3 methods in the `effect` scope, keyed by `effect`; there are no
+corresponding global `Hooks` methods. Each Part has its own `apply`, starting false,
+so one package's cadence never drives another package's action. Parts run by mod
+dispatch order, then registration order, sharing the same holder snapshots.
+
+A Part may attach to an effect declared by its own package or by a package listed in
+its `[dependencies]` (required or optional). Dependencies dispatch first. An attachment
+without that dependency refuses loading, naming the effect, its declaring package and
+the dependency to add. An absent optional package skips its Parts and key requests;
+a present optional package must declare the requested effect. Unknown effects keep
+the normal unknown-key refusal. An override dropping the dependency also drops permission.
+
+Vanilla effects refuse immediately with `MobEffectPartError::VanillaEffect`; attaching
+the same concrete Part type twice returns `Duplicate`. A Part attached to several
+effects distinguishes them with `event.effect`. `on_effect_added` stays global;
+`mob_effect_added`, the NeoForge event, also stays global.
 
 ## Reading the holder
 
@@ -43,7 +62,9 @@ changes have no effect on a mob without food data.
 
 ## Native and wasm
 
-The same hooks, resolved keys, snapshots and queued changes cross the shared Wire
-boundary for both targets. No engine-owned holder storage crosses it. A wasm
+The same Part methods, resolved keys, snapshots and queued changes cross the shared
+Wire boundary for both targets. Content-only owners can have native or wasm dependents;
+code dependencies still obey the existing same-target linking rule. A `side = "server"`
+package can attach because both methods are server-only. No engine-owned holder storage crosses it. A wasm
 module requiring an unavailable import is refused while linking, naming the
 module and missing symbol; it is not loaded with a silently disabled capability.

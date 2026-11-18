@@ -369,6 +369,11 @@ mod tests {
     #[ignore = "daily"]
     fn a_staged_save_ejects_a_mob_riding_a_player() {
         ejected(|game, _| {
+            // The entity stage runs once per loaded chunk, as the unload save's fixture has one.
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(sunrise_client::chunk::Chunk::empty(0, 0)),
+            );
             let (reply, _answer) = std::sync::mpsc::channel();
             game.begin_control_save(true, reply).unwrap();
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);

@@ -1,7 +1,7 @@
 //! The output each renderer owns (docs/design/hdr-linear-light.md): what its destination
 //! offers and its display reports, resolved with the settings and the pack into one snapshot
 //! that the settings screens, calibration, F3 and the frame read. Nothing here is shared
-//! between renderers. A split view or an offscreen renderer never changes what a window
+//! between renderers. An offscreen renderer never changes what a window
 //! offers or reports.
 use super::hdr::Output;
 use crate::graphics::{Graphics, HdrMode, Reported};

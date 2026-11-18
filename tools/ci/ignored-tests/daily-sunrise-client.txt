@@ -2,7 +2,7 @@
 # where it must pass (README.md). Rows: PACKAGE TEST TARGET daily REASON, sorted; tools/ci/move_to_daily.py writes them.
 sunrise-client game::advancements::icons::tests::advancement_icons_reach_local_and_remote_ui_surfaces lib daily game-boot
 sunrise-client game::api_values::loot_values::query_tests::queried_ability_parts_grant_and_deny lib daily game-boot
-sunrise-client game::api_values::read_stack_tests::read_consumers_forward_nonresident_stacks_and_mutants lib daily slow
+sunrise-client game::api_values::read_stack_tests::draw_consumers_render_nonresident_stacks lib daily game-boot
 sunrise-client game::commands::modprofile::tests::modprofile_state_and_report_side_effects lib daily child-process
 sunrise-client game::commands::selector_bounds_tests::actual_selector_uses_body_overlap_but_distance_stays_at_the_origin lib daily game-boot
 sunrise-client game::commands::world_cmds::allay_owner_damage_tests::allay_owner_adapters_compare_the_actual_player_uuid lib daily game-boot
@@ -189,7 +189,6 @@ sunrise-client game::server_travel::changed_dimension_tests::a_command_teleport_
 sunrise-client game::server_travel::changed_dimension_tests::a_nether_portal_trip_is_heard_once_on_every_server lib daily resources
 sunrise-client game::server_travel::changed_dimension_tests::an_end_gateway_jump_within_the_level_is_not_heard_on_any_server lib daily resources
 sunrise-client game::server_travel::credits_respawn_tests::the_credits_respawn_waits_for_the_client_to_load lib daily resources
-sunrise-client game::split::players::tests::offline_guests_join_only_local_servers lib daily network
 sunrise-client game::stats::phantom_spawn_tests::no_phantoms_under_a_roof_the_sky_light_does_not_reach lib daily game-boot
 sunrise-client game::stats::phantom_spawn_tests::phantoms_spawn_under_a_glass_roof lib daily game-boot
 sunrise-client game::tnt::tests::h13201_a_dispensed_potion_is_a_level_entity lib daily game-boot

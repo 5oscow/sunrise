@@ -634,68 +634,23 @@ impl Game<'_> {
             }
         };
         let click = super::lan_pickup::click_of(p);
-        let take_listened = Self::menu_take_listened(&menu);
-        let changed = if take_listened {
-            self.guest_menu_click_taken(
-                gi,
-                &mut menu,
-                click,
-                asked,
-                &prepare,
-                write_back,
-                |game, menu| {
-                    let Some(entity) = game.world.block_entities.get(&pos) else {
-                        return false;
-                    };
-                    let Some((kind, mut after)) = machine_menu(entity, mod_type) else {
-                        return false;
-                    };
-                    if kind != menu.kind() {
-                        return false;
-                    }
-                    if let Some((l, links)) = &linked {
-                        for (k, stack) in l.slots().zip(
-                            read_links(&game.world, links, l.count)
-                                .into_iter()
-                                .chain(std::iter::repeat(None)),
-                        ) {
-                            after[k] = stack;
-                        }
-                    }
-                    let result = menu.mod_crafting().map(|crafting| crafting.result);
-                    // Install listener-owned storage, not a recomputed recipe or another click.
-                    for k in 0..menu.slot_count() - 36 {
-                        if Some(k) != result {
-                            menu.load_slot(k, after.get(k).cloned().flatten());
-                        }
-                    }
-                    true
-                },
-            )
-        } else {
-            self.guest_menu_op_settled(
-                gi,
-                &mut menu,
-                Some(click),
-                Some(&prepare),
-                |menu, env| {
-                    prepare(menu, env);
-                    let before: Vec<_> = (0..menu.slot_count())
-                        .map(|s| menu.slot(s).cloned())
-                        .collect();
-                    let _ = menu.click_asked(env, click.0, click.1, click.2, asked);
-                    (0..menu.slot_count())
-                        .filter(|&s| menu.slot(s) != before[s].as_ref())
-                        .collect::<Vec<_>>()
-                },
-                write_back,
-            )
-        };
-        let Some(mut changed) = changed else {
-            if take_listened && let Some(host) = self.lan.as_mut() {
-                *host.menus.entry(conn).or_default().crafting.machine = Some((p.container, menu));
-                host.hub.resend_menu(conn, p.container, &self.world);
-            }
+        let Some(mut changed) = self.guest_menu_op_settled(
+            gi,
+            &mut menu,
+            Some(click),
+            Some(&prepare),
+            |menu, env| {
+                prepare(menu, env);
+                let before: Vec<_> = (0..menu.slot_count())
+                    .map(|s| menu.slot(s).cloned())
+                    .collect();
+                let _ = menu.click_asked(env, click.0, click.1, click.2, asked);
+                (0..menu.slot_count())
+                    .filter(|&s| menu.slot(s) != before[s].as_ref())
+                    .collect::<Vec<_>>()
+            },
+            write_back,
+        ) else {
             return true;
         };
         if let Some(slot) = self.lan_mod_craft_settle(gi, pos, &mut menu)
@@ -2341,6 +2296,27 @@ mod empty_ingredient_placement_tests {
                         &[],
                         &[],
                     );
+                    // Malformed recipes abort registry loading; keep each refusal isolated
+                    // from the valid recipes whose empty ingredients we test over the wire.
+                    let invalid = ["direct", "missing", "a_invalid"].map(|id| {
+                        let path = pack.join(format!("data/empty_fixture/recipe/{id}.json"));
+                        let json = std::fs::read(&path).unwrap();
+                        std::fs::remove_file(&path).unwrap();
+                        (id, path, json)
+                    });
+                    for (id, path, json) in invalid {
+                        std::fs::write(&path, json).unwrap();
+                        let error = game
+                            .stage_world_tables(&stack, false, &resources)
+                            .err()
+                            .expect("malformed recipe must refuse the load")
+                            .to_string();
+                        assert!(
+                            error.contains(&format!("data/empty_fixture/recipe/{id}.json")),
+                            "{error}"
+                        );
+                        std::fs::remove_file(path).unwrap();
+                    }
                     game.world_tables = game
                         .stage_world_tables(&stack, false, &resources)
                         .unwrap()

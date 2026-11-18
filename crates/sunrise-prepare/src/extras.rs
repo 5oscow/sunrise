@@ -91,6 +91,27 @@ pub fn missing(root: &Path, output: Option<&Path>) -> Result<Missing, Error> {
     })
 }
 
+/// Writes the prepared resources' `sunrise-data.bin` when they have none, so the game's first start reads one file: whether it wrote one.
+pub fn data_file(root: &Path, output: Option<&Path>) -> Result<bool, Error> {
+    let found = missing(root, output)?;
+    if !found.prepared {
+        return Err(Error::Unprepared(found.resources));
+    }
+    let data = found.resources.join(DATA_FILE);
+    if data.exists() {
+        return Ok(false);
+    }
+    let readers = std::thread::available_parallelism().map_or(1, |n| n.get().min(8));
+    sunrise_core::prepared_files::write_with_readers(&found.resources, readers)
+        .map_err(|e| Error::Io(format!("{}: {e}", data.display())))?;
+    Ok(true)
+}
+
+/// `data-file --json`'s reply.
+pub fn data_file_json(written: bool) -> String {
+    reply(vec![("written", Value::Bool(written))])
+}
+
 /// What `extras` did.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Added {
@@ -294,6 +315,31 @@ mod tests {
         ] {
             assert_eq!(error.kind(), "lock", "{error}");
         }
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn the_data_file_is_written_once_for_prepared_resources_only() {
+        let root = std::env::temp_dir().join(format!("sunrise-extras-data-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let resources = root.join(".local/sunrise-client/9.9");
+        std::fs::create_dir_all(resources.join("data/minecraft")).unwrap();
+        std::fs::write(
+            root.join("research-lock.json"),
+            r#"{"minecraft": {"version": "9.9", "java_major": 25}}"#,
+        )
+        .unwrap();
+        assert!(matches!(data_file(&root, None), Err(Error::Unprepared(_))));
+        std::fs::write(resources.join("sunrise-resources.json"), "{}").unwrap();
+        std::fs::write(resources.join("data/minecraft/a.json"), "{}").unwrap();
+        assert_eq!(data_file(&root, None), Ok(true));
+        assert!(resources.join(DATA_FILE).is_file());
+        assert_eq!(
+            data_file(&root, None),
+            Ok(false),
+            "one already there is kept"
+        );
+        assert_eq!(data_file_json(true), r#"{"format": 1, "written": true}"#);
         std::fs::remove_dir_all(&root).unwrap();
     }
 

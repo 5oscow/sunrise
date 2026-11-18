@@ -481,6 +481,12 @@ impl Levels {
         self.runtime.clear();
     }
 
+    pub(super) fn abort_parked_generation(&mut self) {
+        for level in self.parked.values_mut() {
+            level.streaming.abort_generation();
+        }
+    }
+
     /// A parked level, without opening or loading it.
     pub(super) fn parked_world(&self, dim: Dim) -> Option<&World> {
         self.parked.get(&dim).map(|level| &level.world)
@@ -1245,6 +1251,7 @@ impl Game<'_> {
             let tick_span = sunrise_client::spans::guard("level_tick");
             // This level's moving colliders, solid to its movers for this tick only.
             let colliders = self.placed_moving_colliders();
+            let parts = self.collision_parts();
             let history = self
                 .collider_history(&colliders)
                 .map(sunrise_client_render::moving_colliders::HistoryScope::enter);
@@ -1278,6 +1285,7 @@ impl Game<'_> {
                     || self.carry_pass(&colliders),
                 );
             }
+            drop(parts);
             drop(tick_span);
             self.drain_entity_inside();
             if result.is_err() {
@@ -1286,6 +1294,8 @@ impl Game<'_> {
             if observe_level && let Some(level) = self.level(dim.id()) {
                 self.native_level_tick_post(level);
             }
+            #[cfg(feature = "state-digest")]
+            self.state_digest_tick(dim, running);
             sunrise_client::spans::time("server_debug", || self.publish_server_debug(dim));
             // An entity that crossed into a level that already ticked this
             // server tick is in it when the tick ends (`addDuringTeleport`).
@@ -1700,7 +1710,9 @@ mod tests {
 
     /// A game on the prepared resources in `SUNRISE_TEST_RESOURCES`, with no
     /// world opened and commands allowed.
-    fn prepared_game() -> Game<'static> {
+    fn prepared_game<'a>(
+        resources: &'a mut Option<std::sync::Arc<crate::game::Resources>>,
+    ) -> Game<'a> {
         use crate::game::{Audio, Options, Progress, Settings, load_resources};
         let root = std::path::PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
@@ -1721,7 +1733,7 @@ mod tests {
         options.resources = root.clone();
         options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
         // The game keeps its resources for the whole test.
-        let resources: &'static _ = Box::leak(Box::new(loaded.resources));
+        let resources = &*resources.insert(loaded.resources);
         let mut game = Game::new(
             resources,
             loaded.pack,
@@ -1745,7 +1757,8 @@ mod tests {
     #[test]
     #[ignore = "daily"]
     fn worldborder_add_extends_a_change_in_flight() {
-        let mut game = prepared_game();
+        let mut resources = None;
+        let mut game = prepared_game(&mut resources);
         assert!(game.run_command("worldborder set 100 1000"));
         assert_eq!(game.border.remaining_ticks(), 1000);
         // Part way through the change, where the size is between its ends.
@@ -1770,7 +1783,8 @@ mod tests {
     #[test]
     #[ignore = "daily"]
     fn each_level_keeps_its_own_world_border() {
-        let mut game = prepared_game();
+        let mut resources = None;
+        let mut game = prepared_game(&mut resources);
         assert!(game.run_command("worldborder set 1000"));
         assert!(game.run_command("execute in minecraft:the_nether run worldborder set 100"));
         assert_eq!(game.dim, Dim::Overworld);

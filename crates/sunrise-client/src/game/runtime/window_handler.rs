@@ -247,8 +247,7 @@ impl Game<'_> {
         }
         self.finish_profile();
         // The client's last moment: its world is left and saved, its options and
-        // resources are still held. A dedicated server and a splitscreen guest skip
-        // it, as `client_setup` does.
+        // resources are still held. A dedicated server skips it, as `client_setup` does.
         if self.options.is_client_start() {
             self.native_client_stopping();
         }
@@ -257,9 +256,7 @@ impl Game<'_> {
     /// winit's `about_to_wait`: what happens between frames (stop requests, the closing
     /// save, world entry, the control socket, pads), then the next frame.
     pub(super) fn idle(&mut self, event_loop: &dyn EventLoopCtl) {
-        // A splitscreen player's game has nothing to save: P1's shuts the process down.
         if sunrise_threads::stop_requests() > 0
-            && !self.options.split_guest
             && self.pending_save.as_ref().is_none_or(|save| !save.quit)
         {
             // SIGTERM, SIGINT or SIGHUP: the shutdown hook's server halt, as a window close.
@@ -283,7 +280,7 @@ impl Game<'_> {
                 }
                 Err(error) => {
                     self.error = Some(error);
-                    self.exit_on_error(event_loop);
+                    event_loop.exit();
                 }
             }
             return;
@@ -291,7 +288,7 @@ impl Game<'_> {
         if let Err(error) = sunrise_client::spans::time("world_entry", || self.resume_world_entry())
         {
             self.error = Some(error);
-            self.exit_on_error(event_loop);
+            event_loop.exit();
             return;
         }
         // The world a backup made before its upgrade opens (EditWorldScreen's callback).
@@ -376,7 +373,7 @@ impl ApplicationHandler for Game<'_> {
         let attributes = winit::platform::wayland::WindowAttributesExtWayland::with_name(
             attributes, "sunrise", "sunrise",
         );
-        // A game an agent started opens without the focus, as splitscreen's windows do, and
+        // A game an agent started opens without the focus and
         // the person keeps their keyboard and pointer until they click it (`unclaimed_window`).
         // X11 activates it anyway, and Windows can too: the focus claims nothing.
         let agent_started = self.options.control.is_some();
@@ -459,15 +456,13 @@ impl ApplicationHandler for Game<'_> {
         }
     }
     fn device_event(&mut self, event_loop: &ActiveEventLoop, _: DeviceId, event: DeviceEvent) {
-        // A composited view renders offscreen but its keyboard/mouse owner still
-        // controls a visible native window. A headless offscreen run never does.
+        // Offscreen runs do not use native pointer motion.
         if self.pending_save.is_none()
             && !self.scripted_run()
             && !self.unclaimed_window
             && self.captured
             && self.focused
-            && self.keyboard_mouse
-            && (!self.options.offscreen || self.split_window)
+            && !self.options.offscreen
             && self.screen == Screen::Playing
             && let DeviceEvent::MouseMotion { delta: (x, y) } = event
         {
