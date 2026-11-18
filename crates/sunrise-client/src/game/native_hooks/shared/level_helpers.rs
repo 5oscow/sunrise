@@ -217,7 +217,7 @@ impl GameLevel<'_> {
 /// `EntityBlock.newBlockEntity` of block `name`: a declared mod type starting
 /// with `initial` data, a mod's sign, else Sunrise's own. Shared by the
 /// Host's and a level hook's whole-block writes.
-fn block_entity_for_block(
+pub(super) fn block_entity_for_block(
     registry: &BlockRegistry,
     facts: &sunrise_client::blocks::BlockFacts,
     name: &str,
