@@ -671,9 +671,9 @@ const BLUE_MAP_RADII: [u32; 5] = [16, 32, 64, 128, 256];
 const UPLOAD_STEPS: [u32; 8] = [0, 256, 512, 1024, 2048, 4096, 8192, 16384];
 /// What the LOD Distance slider stops at, in chunks: off, fine steps up to 256
 /// for a short ring of far terrain past a small render distance (a phone or an
-/// integrated GPU at 8 chunks wants LOD to 12 or 16, not 64), then each doubling
-/// up to the whole world.
-const LOD_STEPS: [u32; 24] = [
+/// integrated GPU at 8 chunks wants LOD to 12 or 16, not 64), then 512 and the
+/// farthest far terrain plans.
+const LOD_STEPS: [u32; 12] = [
     0,
     16,
     24,
@@ -685,18 +685,6 @@ const LOD_STEPS: [u32; 24] = [
     192,
     256,
     512,
-    1024,
-    2048,
-    4096,
-    8192,
-    16384,
-    32768,
-    65536,
-    131072,
-    262144,
-    524288,
-    1048576,
-    2097152,
     crate::lod::MAX_CHUNKS,
 ];
 
@@ -2164,7 +2152,7 @@ mod tests {
             assert_eq!(item.slider(&s), Some(at));
             assert_eq!(s.render_distance, near);
         }
-        // The ends are off and the whole world, which the far terrain plans.
+        // The ends are off and the farthest far terrain plans.
         item.set_slider(&mut s, 0.0, &NONE);
         assert_eq!(s.sunrise.lod_distance, 0);
         item.set_slider(&mut s, 1.0, &NONE);
@@ -2173,21 +2161,18 @@ mod tests {
             item.label(&s, &NONE).plain(),
             format!("LOD Distance: {} chunks", crate::lod::MAX_CHUNKS)
         );
-        item.set_slider(&mut s, 11.0 / 23.0, &NONE);
-        assert_eq!(s.sunrise.lod_distance, 1024);
-        assert_eq!(item.label(&s, &NONE).plain(), "LOD Distance: 1024 chunks");
         // The fine stops: a ring of far terrain just past a small render
         // distance, which the doubling steps skipped (#9694).
-        item.set_slider(&mut s, 1.0 / 23.0, &NONE);
+        item.set_slider(&mut s, 1.0 / 11.0, &NONE);
         assert_eq!(s.sunrise.lod_distance, 16);
         assert_eq!(item.label(&s, &NONE).plain(), "LOD Distance: 16 chunks");
-        item.set_slider(&mut s, 2.0 / 23.0, &NONE);
+        item.set_slider(&mut s, 2.0 / 11.0, &NONE);
         assert_eq!(s.sunrise.lod_distance, 24);
         // A distance between stops (from the file) sits on the next one.
-        s.sunrise.lod_distance = 3000;
-        assert_eq!(item.slider(&s), Some(13.0 / 23.0));
+        s.sunrise.lod_distance = 300;
+        assert_eq!(item.slider(&s), Some(10.0 / 11.0));
         s.sunrise.lod_distance = 12;
-        assert_eq!(item.slider(&s), Some(1.0 / 23.0));
+        assert_eq!(item.slider(&s), Some(1.0 / 11.0));
     }
 
     /// With far terrain on, Render Distance reads "Full Detail Distance" but keeps vanilla's

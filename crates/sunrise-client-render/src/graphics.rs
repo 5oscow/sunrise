@@ -1883,15 +1883,15 @@ mod tests {
     #[test]
     fn lod_distance_is_opt_in_and_bounded() {
         assert_eq!(Graphics::default().lod_distance, 0);
-        for distance in [0, 64, 128, 256, 512, 1024, 65_536, crate::lod::MAX_CHUNKS] {
+        for distance in [0, 64, 128, 256, 512, 1024] {
             let g = Graphics::parse(&format!("lodDistance:{distance}\n"));
             assert_eq!(g.lod_distance, distance);
             assert_eq!(Graphics::parse(&g.serialize()), g);
         }
-        assert_eq!(
-            Graphics::parse("lodDistance:99999999\n").lod_distance,
-            crate::lod::MAX_CHUNKS
-        );
+        for old in ["4194304", "99999999"] {
+            let g = Graphics::parse(&format!("lodDistance:{old}\n"));
+            assert_eq!(g.lod_distance, 1024);
+        }
         assert_eq!(Graphics::parse("lodDistance:-1\n").lod_distance, 0);
         assert_eq!(Graphics::parse("lodDistance:invalid\n").lod_distance, 0);
     }
