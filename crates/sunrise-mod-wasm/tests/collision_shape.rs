@@ -26,6 +26,15 @@ impl LoopContext for Context {
     fn mod_recipe_property_contains(&self, _: &str, _: mod_api::ItemKey) -> bool {
         false
     }
+    fn is_in_tag(&self, _: mod_api::ItemKey, _: mod_api::TagKey) -> Option<bool> {
+        None
+    }
+    fn item_count(&self, _: mod_api::TagKey) -> Option<usize> {
+        None
+    }
+    fn item_at(&self, _: mod_api::TagKey, _: usize) -> Option<mod_api::ItemKey> {
+        None
+    }
 }
 
 struct Native;
