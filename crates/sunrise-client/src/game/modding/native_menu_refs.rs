@@ -187,8 +187,9 @@ impl Game<'_> {
     }
 
     /// A player's current supported menu. Refuses crafting tables, merchants,
-    /// workstations, lecterns, mounts and menus with hidden slots; also refuses
-    /// stale players and players whose state is swapped out by another active turn.
+    /// workstations, lecterns, mounts and block-backed menus with slots hidden at open.
+    /// Hidden slots do not refuse code-opened native windows. Also refuses stale
+    /// players and players whose state is swapped out by another active turn.
     /// The acting player's inventory, equipment, cursor and ender reads use Game's state.
     /// On a client, only the local player's supported menu is available.
     pub(super) fn player_container_menu(&self, player: PlayerRef) -> Option<MenuRef> {

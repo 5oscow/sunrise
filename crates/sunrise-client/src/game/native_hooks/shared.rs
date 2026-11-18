@@ -3291,30 +3291,30 @@ impl Game<'_> {
         self.api_menu_button(&context, &mut taken, carried);
         self.put_back_mod_block_entity(pos, taken, &items);
     }
-    /// The cursor from the open mod screen's top left, with its menu type,
-    /// block and data, for its press and tooltip hooks.
-    fn native_screen_at(&self) -> Option<(String, Option<String>, Vec<i32>, [f32; 2])> {
-        let s = self.shown_native_screen()?;
-        let r = self.renderer.as_ref()?;
-        let batch = HudBatch::new(
-            [r.config.width, r.config.height],
-            self.settings.gui_scale_inputs(),
-        );
-        let (ox, oy) = self.inventory_origin(&batch);
-        let at = [self.cursor.0 - ox, self.cursor.1 - oy];
-        Some((s.menu.clone(), s.block.clone(), s.data.clone(), at))
-    }
     /// A press on the open mod screen's own button (`native_screen_click`)
     /// goes to the server as a menu button click (true).
     pub(super) fn native_screen_press(&mut self, right: bool) -> bool {
         if self.inventory_target().0.is_some() {
             return false;
         }
-        let Some((menu, block, data, at)) = self.native_screen_at() else {
+        let (Some(screen), Some(r)) = (self.shown_native_screen(), self.renderer.as_ref()) else {
             return false;
         };
+        let batch = HudBatch::new(
+            [r.config.width, r.config.height],
+            self.settings.gui_scale_inputs(),
+        );
+        let (ox, oy) = self.inventory_origin(&batch);
+        let at = [self.cursor.0 - ox, self.cursor.1 - oy];
         let mut button = None;
-        self.native_screen_click(&menu, block.as_deref(), &data, at, right, &mut button);
+        self.native_screen_click(
+            &screen.menu,
+            screen.block.as_deref(),
+            &screen.data,
+            at,
+            right,
+            &mut button,
+        );
         let Some(button) = button else {
             return false;
         };

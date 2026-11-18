@@ -22,7 +22,7 @@ pub enum ScreenSlotRefusal {
 impl std::fmt::Display for ScreenSlotRefusal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            Self::NoScreen => "no screen of the calling mod's of that menu type is open",
+            Self::NoScreen => "no screen owned by the calling mod is open for that menu type",
             Self::NoSuchSlot => "the screen declared no such slot",
             Self::HiddenAtOpen => "the slot was hidden when the screen opened",
             Self::BadPosition => "the position is not finite",
