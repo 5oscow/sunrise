@@ -2373,7 +2373,7 @@ mod tests {
             fs::write(
                 folder.join(format!("{file}.json")),
                 serde_json::to_vec(&serde_json::json!({
-                    "type":kind, "neoforge:conditions":[{"type":"neoforge:false"}]
+                    "type":kind, "neoforge:conditions":[{"type":"neoforge:never"}]
                 }))
                 .unwrap(),
             )
@@ -3226,7 +3226,7 @@ mod tests {
             // A pack's gated file answers the same gate.
             let packs = [(
                 "recipe/minecraft:pack_yes".to_owned(),
-                vec![file(r#"[{"type":"neoforge:true"}]"#, "pack_yes")],
+                vec![file(r#"[{"type":"neoforge:always"}]"#, "pack_yes")],
             )];
             let recipes = Recipes::load(
                 &root,
