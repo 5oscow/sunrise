@@ -643,7 +643,7 @@ pub(super) fn emit<'a>(
         };
         if is_render {
             render_dispatch.push_str(&format!(
-                "#[allow(missing_docs)]\n{wire_form}\n{non_exhaustive}pub struct {event_type}{generics} {{\n{fields}}}\n"
+                "{non_exhaustive}#[allow(missing_docs)]\n{wire_form}\npub struct {event_type}{generics} {{\n{fields}}}\n"
             ));
             continue;
         }
@@ -918,7 +918,7 @@ pub(super) fn emit<'a>(
             .as_ref()
             .map_or(trait_name, |(part_trait, _)| part_trait);
         dispatch.push_str(&format!(
-            "/// What [`{trait_name}::{name}`] is told. Each field is that hook's argument of the same name, described in the hook's doc.\n#[allow(missing_docs)]\n{wire_form}\n{non_exhaustive}pub struct {event_type}{generics} {{\n{fields}}}\n"
+            "/// What [`{trait_name}::{name}`] is told. Each field is that hook's argument of the same name, described in the hook's doc.\n{non_exhaustive}#[allow(missing_docs)]\n{wire_form}\npub struct {event_type}{generics} {{\n{fields}}}\n"
         ));
         if declaration_only {
             continue;
