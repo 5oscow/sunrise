@@ -331,7 +331,7 @@ index bca7938..2f2eb44 100644
 +    assert!(e.message.contains("selected site contains `?`"), "{e}");
 +}
 diff --git a/crates/horizon-mixins-cli/tests/integration.rs b/crates/horizon-mixins-cli/tests/integration.rs
-index fcf5a46..2790baf 100644
+index fcf5a46..41ccb83 100644
 --- a/crates/horizon-mixins-cli/tests/integration.rs
 +++ b/crates/horizon-mixins-cli/tests/integration.rs
 @@ -697,14 +697,14 @@ fn cfg_attributes_shared_module_sources_and_shadowing_fail_closed() {
@@ -353,7 +353,7 @@ index fcf5a46..2790baf 100644
              "E_UNSUPPORTED_CONTROL_FLOW",
          ),
          (
-@@ -890,3 +890,809 @@ fn production_test_cfg_modules_are_indexed_and_applied() {
+@@ -890,3 +890,827 @@ fn production_test_cfg_modules_are_indexed_and_applied() {
      let error = build_plan(&f.root, &f.mods).unwrap_err();
      assert!(format!("{error:?}").contains("E_TARGET_NOT_FOUND"));
  }
@@ -664,27 +664,27 @@ index fcf5a46..2790baf 100644
 +        assert!(!e.message.contains("use `"), "{e}");
 +    }
 +
-+    /// A wrap of the function `scale`, whose argument is bound as `ty`.
-+    fn scale_row(ty: &str) -> String {
++    /// A wrap of the function `callee`, whose argument is bound as `ty` and whose result is `out`.
++    fn scale_row(callee: &str, ty: &str, out: &str) -> String {
 +        format!(
 +            r#"
 +    [[injection]]
 +    id="wrap"
 +    target="fixture_game::run"
 +    kind="WRAP_OPERATION"
-+    selector="scale"
++    selector="{callee}"
 +    require=1
 +    ordinal=0
 +    helper="wrap_scale.rs"
-+    bindings=[{{name="x",ty="{ty}",value="$arg0"}},{{name="original",ty="impl FnOnce({ty}) -> f64",value="$operation"}}]
++    bindings=[{{name="x",ty="{ty}",value="$arg0"}},{{name="original",ty="impl FnOnce({ty}) -> {out}",value="$operation"}}]
 +    "#
 +        )
 +    }
-+    fn scale_fixture(body: &str, ty: &str) -> Fixture {
-+        let f = fixture(body, &scale_row(ty));
++    fn scale_fixture(body: &str, callee: &str, ty: &str, out: &str) -> Fixture {
++        let f = fixture(body, &scale_row(callee, ty, out));
 +        fs::write(
 +            f.mods.join("alpha/wrap_scale.rs"),
-+            format!("fn wrap_scale(x: {ty}, original: impl FnOnce({ty}) -> f64) -> f64 {{ original(x) }}"),
++            format!("fn wrap_scale(x: {ty}, original: impl FnOnce({ty}) -> {out}) -> {out} {{ original(x) }}"),
 +        )
 +        .unwrap();
 +        f
@@ -696,17 +696,35 @@ index fcf5a46..2790baf 100644
 +        // `scale(default_value(0.1)?)` converts `0.1` through `f32` (0.1 becomes
 +        // 0.10000000149011612), and the never-type fallback of `fail()?` in a 2024 diverging
 +        // `if` changes with a declared `i64`. A `?` (or a block) in an argument is refused.
-+        for (body, ty) in [
-+            ("Ok(scale(default_value(0.1)?) as i32)", "f32"),
-+            ("Ok(scale(default_value(0.1)?) as i32)", "f64"),
++        for (body, callee, ty, out) in [
 +            (
-+                "Ok(scale(if ok { return Ok(7) } else { fail()? }) as i32)",
-+                "i64",
++                "Ok(scale(default_value(0.1)?) as i32)",
++                "scale",
++                "f32",
++                "f64",
 +            ),
-+            ("Ok(scale(unsafe { 1i32 }) as i32)", "i32"),
-+            ("Ok(scale(const { 1i32 }) as i32)", "i32"),
++            (
++                "Ok(scale(default_value(0.1)?) as i32)",
++                "scale",
++                "f64",
++                "f64",
++            ),
++            (
++                "Ok(width(if ok { return Ok(7) } else { fail()? }) as i32)",
++                "width",
++                "i64",
++                "usize",
++            ),
++            ("Ok(scale(unsafe { 1i32 }) as i32)", "scale", "i32", "f64"),
++            ("Ok(scale(const { 1i32 }) as i32)", "scale", "i32", "f64"),
++            (
++                "Ok(scale(try { 1i32 }.unwrap()) as i32)",
++                "scale",
++                "i32",
++                "f64",
++            ),
 +        ] {
-+            let f = scale_fixture(body, ty);
++            let f = scale_fixture(body, callee, ty, out);
 +            let e = plan_error(&f);
 +            assert_eq!(e.code, "E_UNSUPPORTED_CONTROL_FLOW", "{body} {ty}: {e}");
 +        }
@@ -715,9 +733,9 @@ index fcf5a46..2790baf 100644
 +    #[test]
 +    fn arguments_without_a_try_or_a_block_are_still_wrapped() {
 +        // The forms the tool accepted before: any other expression, typed by the declaration.
-+        let f = scale_fixture("Ok(scale(observe(2) as i32) as i32)", "i32");
++        let f = scale_fixture("Ok(scale(observe(2) as i32) as i32)", "scale", "i32", "f64");
 +        f.run("plan");
-+        let f = scale_fixture("Ok(scale(1.5f32) as i32)", "f32");
++        let f = scale_fixture("Ok(scale(1.5f32) as i32)", "scale", "f32", "f64");
 +        f.run("plan");
 +    }
 +
