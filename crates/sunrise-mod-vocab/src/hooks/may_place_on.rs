@@ -16,12 +16,15 @@ pub trait Hooks {
     /// Answer `None` on a client where only a server can decide: the template's
     /// rule then predicts, and the server still decides. Named injections
     /// request `hook_version = 2`.
+    /// A disabled owner's subscribed rule preserves a plant of this
+    /// type already at the position or settling there, but does not authorize a new planting.
     #[hook(
         side = "both",
         version = 2,
         contract = "replace",
         out = "may",
         scope = "block",
+        inert = "signal",
         key = "state",
         target = "sunrise_client::game::native_hooks::base::LevelView<'_>::native_may_place_on",
         neoforge = "IBlockExtension.canSustainPlant"

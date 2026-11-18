@@ -696,6 +696,15 @@ pub trait LevelAccess: BlockEntityNeighbors {
         _handled: &mut bool,
     ) {
     }
+    /// Whether this phase can contain held mod ticks. False keeps the ordinary scheduler path.
+    fn has_held_block_ticks(&self) -> bool {
+        false
+    }
+    /// Hold a due block tick without running its body or changing its deadline/order.
+    /// Used while the owner of a subscribed block behaviour is switched off.
+    fn hold_block_tick(&self, _state: BlockStateId) -> bool {
+        false
+    }
     /// `BlockState.tick` from `ServerLevel.tickBlock` (a due scheduled tick
     /// whose block is still there), before the block handles it. The level
     /// may change the block (`Behaviours::set_block` with `ticks`); setting
@@ -793,8 +802,10 @@ pub trait LevelAccess: BlockEntityNeighbors {
     /// block answers it: placing it (`BlockItem.canPlace`), a plant's or an
     /// attached block's shape update, and every other rule that asks. `state`
     /// may not be in the level yet (it is being placed). An answer put in
-    /// `survives` is the result, and the block's own rule doesn't run. `ticks` and `preview`
-    /// are as for `before_state_for_placement`. The default does nothing.
+    /// `survives` is the result, and the block's own rule doesn't run. `ticks` and `preview` are as for
+    /// `before_state_for_placement`. Return true only if the disabled owner's
+    /// rule should keep an existing block in place instead of running vanilla's rule.
+    /// The default leaves the answer unset and returns false.
     fn before_can_survive(
         &self,
         _ticks: &Ticks,
@@ -802,12 +813,19 @@ pub trait LevelAccess: BlockEntityNeighbors {
         _pos: BlockPos,
         _state: BlockStateId,
         _survives: &mut Option<bool>,
-    ) {
+    ) -> bool {
+        false
+    }
+    /// A neighbour's `FenceGateBlock.isWall` answer. `None` keeps the walls tag.
+    /// Asked on both logical sides; only the neighbour's state determines it.
+    fn fence_gate_in_wall(&self, _state: BlockStateId) -> Option<bool> {
+        None
     }
     /// `IBlockExtension.canSustainPlant` for the soil `ground` at `ground_pos`
     /// and the plant `state` above it, before the plant answers `mayPlaceOn`.
     /// An answer put in `sustains` is the result. `ticks` and `preview` are as for
-    /// `before_state_for_placement`. The default does nothing.
+    /// `before_state_for_placement`. Returns the same inert signal as
+    /// `before_can_survive` (false by default).
     fn before_can_sustain_plant(
         &self,
         _ticks: &Ticks,
@@ -816,7 +834,8 @@ pub trait LevelAccess: BlockEntityNeighbors {
         _ground: BlockStateId,
         _ground_pos: BlockPos,
         _sustains: &mut Option<bool>,
-    ) {
+    ) -> bool {
+        false
     }
     /// Whether a part may answer `IBlockExtension.isFertile`: asked once per
     /// `CropBlock.getGrowthSpeed`, so with none the speed is vanilla's loop.
@@ -834,6 +853,12 @@ pub trait LevelAccess: BlockEntityNeighbors {
     fn asks_can_be_hydrated(&self, _state: BlockStateId) -> bool {
         false
     }
+    /// Whether the farmland's subscribed hydration rule belongs to its disabled owner.
+    /// Asked only when a Part subscribes. If held, the random tick leaves the
+    /// farmland alone unless a session water ticket or an earlier Part waters it.
+    fn hold_farmland_hydration(&self, _state: BlockStateId) -> bool {
+        false
+    }
     /// `IBlockExtension.canBeHydrated` for the farmland `state` at `pos` and
     /// the non-empty `fluid` at `fluid_pos`: an answer put in `hydrates`
     /// decides, left `None` the `#water` rule does. The default does nothing.
@@ -849,7 +874,8 @@ pub trait LevelAccess: BlockEntityNeighbors {
     /// `VegetationBlock.mayPlaceOn(ground, level, groundPos)` for the plant
     /// `state`, before the plant answers it: the blocks a plant can stand on,
     /// which its `canSurvive` asks. An answer put in `may` is the result. `ticks`
-    /// and `preview` are as for `before_state_for_placement`. The default does nothing.
+    /// and `preview` are as for `before_state_for_placement`. Returns the same
+    /// inert signal as `before_can_survive` (false by default).
     fn before_may_place_on(
         &self,
         _ticks: &Ticks,
@@ -858,7 +884,8 @@ pub trait LevelAccess: BlockEntityNeighbors {
         _ground: BlockStateId,
         _ground_pos: BlockPos,
         _may: &mut Option<bool>,
-    ) {
+    ) -> bool {
+        false
     }
     /// `Level.isClientSide`: this level is a client's copy (false on a
     /// server, a host or the test harness).
@@ -1998,6 +2025,8 @@ pub(crate) struct Sim<'a, L: LevelAccess + ?Sized> {
     pub b: &'a Behaviours,
     pub level: &'a mut L,
     pub ticks: &'a mut Ticks,
+    /// The carried block being settled, before it is written into the cell.
+    landing_block: Option<(BlockPos, BlockStateId)>,
     /// `RedstoneWireBlock.shouldSignal` is false while a wire samples its
     /// neighbours (`getBlockSignal`).
     pub wire_signal_off: std::cell::Cell<bool>,
@@ -2052,6 +2081,7 @@ impl Behaviours {
             b: self,
             level,
             ticks,
+            landing_block: None,
             wire_signal_off: std::cell::Cell::new(false),
         }
     }

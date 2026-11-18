@@ -397,12 +397,15 @@ fn a_prediction_asks_the_live_level_over_its_writes() {
             pos: BlockPos,
             _: BlockStateId,
             survives: &mut Option<bool>,
-        ) {
+        ) -> bool {
             assert_eq!(ticks.random_tick_value, 7, "asked with the live ticks");
             let below = BlockPos::new(pos.x, pos.y - 1, pos.z);
             *survives = Some(preview.is_some_and(|p| p.contains_key(&below)));
+            false
         }
     }
+
+    impl super::dry_level::PredictionBase for Live {}
 
     let live = Live;
     let live_ticks = Ticks::new(7);

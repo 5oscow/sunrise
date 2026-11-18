@@ -517,6 +517,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "sunrise-addresses",
+ "sunrise-mod-api-gen",
  "sunrise-mod-package",
  "sunrise-mod-point-emit",
  "sunrise-mod-source",
@@ -4463,17 +4464,19 @@ dependencies = [
  "cap-fs-ext",
  "cap-std",
  "chrono",
+ "cipher",
  "crc32fast",
+ "crypto-common",
+ "digest",
  "flate2",
+ "fnv",
  "fs4",
  "gilrs",
  "glam",
+ "libc",
  "log",
  "miniz_oxide 0.8.9",
  "naga",
- "objc2 0.6.5",
- "objc2-app-kit 0.3.2",
- "objc2-foundation 0.3.2",
  "png",
  "pollster",
  "rustix 1.1.5",
@@ -4481,11 +4484,13 @@ dependencies = [
  "serde_json",
  "sha1",
  "sha2",
+ "socket2 0.6.5",
  "sunrise-anticheat",
  "sunrise-assets",
  "sunrise-bench",
  "sunrise-chat-filter",
  "sunrise-client-core",
+ "sunrise-client-gameplay",
  "sunrise-client-input",
  "sunrise-client-lib",
  "sunrise-client-render",
@@ -4495,6 +4500,7 @@ dependencies = [
  "sunrise-engine-slots",
  "sunrise-friends",
  "sunrise-game-discovery",
+ "sunrise-gameplay",
  "sunrise-guest-stack",
  "sunrise-hdr",
  "sunrise-hooks",
@@ -4542,6 +4548,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "sunrise-client-gameplay"
+version = "0.1.0"
+dependencies = [
+ "sunrise-client-lib",
+]
+
+[[package]]
 name = "sunrise-client-input"
 version = "0.1.0"
 dependencies = [
@@ -4573,9 +4586,6 @@ dependencies = [
  "miniz_oxide 0.8.9",
  "mio",
  "naga",
- "objc2 0.6.5",
- "objc2-app-kit 0.3.2",
- "objc2-foundation 0.3.2",
  "open",
  "png",
  "pollster",
@@ -4707,6 +4717,7 @@ name = "sunrise-core"
 version = "0.1.0"
 dependencies = [
  "libm",
+ "rustc-hash 2.1.3",
  "serde",
  "serde_json",
  "unicode_names2",
@@ -4779,6 +4790,13 @@ dependencies = [
  "serde_json",
  "sunrise-mod-source",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "sunrise-gameplay"
+version = "0.1.0"
+dependencies = [
+ "sunrise-client-lib",
 ]
 
 [[package]]
@@ -4880,6 +4898,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "sunrise-game-discovery",
+ "sunrise-mod-call",
  "sunrise-mod-point-shape",
  "sunrise-mod-source",
  "sunrise-mod-surface",
@@ -4910,6 +4929,13 @@ dependencies = [
  "quote",
  "sunrise-mod-point-shape",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "sunrise-mod-call"
+version = "0.1.0"
+dependencies = [
+ "sha2",
 ]
 
 [[package]]
@@ -4982,6 +5008,7 @@ dependencies = [
  "sunrise-core",
  "sunrise-mod-api",
  "sunrise-mod-api-macros",
+ "sunrise-mod-call",
  "sunrise-mod-point-shape",
  "sunrise-mod-surface",
  "sunrise-mod-vocab",
@@ -5025,6 +5052,7 @@ dependencies = [
  "sunrise-mod-api",
  "sunrise-mod-api-gen",
  "sunrise-mod-api-macros",
+ "sunrise-mod-call",
  "sunrise-mod-point-shape",
  "syn 2.0.119",
 ]
@@ -5071,6 +5099,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "sunrise-mod-call",
  "syn 2.0.119",
 ]
 
@@ -5109,6 +5138,7 @@ dependencies = [
  "sunrise-mod-api",
  "sunrise-mod-api-gen",
  "sunrise-mod-api-macros",
+ "sunrise-mod-call",
  "sunrise-mod-package",
  "sunrise-mod-point-emit",
  "sunrise-mod-points",

@@ -19,12 +19,15 @@ pub trait Hooks {
     /// Answer `None` on a client where only a server can decide: the template's
     /// rule then predicts, and the server still decides. Named injections
     /// request `hook_version = 2`.
+    /// A disabled owner's subscribed rule keeps that block type where it is already present
+    /// or settling after a piston move or fall, but refuses a new placement.
     #[hook(
         side = "both",
         version = 2,
         contract = "replace",
         out = "survives",
         scope = "block",
+        inert = "signal",
         key = "state",
         target = "sunrise_client::game::native_hooks::base::LevelView<'_>::native_can_survive",
         neoforge = "none (vanilla BlockBehaviour.canSurvive; NeoForge adds no event or extension for it)"

@@ -47,7 +47,7 @@ fn a_soils_answer_comes_before_the_plants_may_place_on() {
             ground: BlockStateId,
             ground_pos: BlockPos,
             sustains: &mut Option<bool>,
-        ) {
+        ) -> bool {
             self.asked
                 .borrow_mut()
                 .push((self.b.block(state), self.b.block(ground), ground_pos));
@@ -56,6 +56,7 @@ fn a_soils_answer_comes_before_the_plants_may_place_on() {
             {
                 *sustains = Some(answer);
             }
+            false
         }
         fn before_may_place_on(
             &self,
@@ -65,12 +66,13 @@ fn a_soils_answer_comes_before_the_plants_may_place_on() {
             ground: BlockStateId,
             _ground_pos: BlockPos,
             may: &mut Option<bool>,
-        ) {
+        ) -> bool {
             if let Some((plant, on)) = self.plant
                 && self.b.block(state) == plant
             {
                 *may = Some(self.b.block(ground) == on);
             }
+            false
         }
     }
     let Some(f) = fixture() else { return };

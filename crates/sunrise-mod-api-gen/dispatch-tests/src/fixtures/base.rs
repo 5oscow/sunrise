@@ -643,20 +643,13 @@ fn dispatch_contracts() {
         ..Parts::default()
     });
     let mut lines = Vec::new();
-    dispatch_tooltip(&host, &ItemStack::default(), &mut lines);
-    assert_eq!(lines.iter().map(|line| line.1).collect::<Vec<_>>(), [1, 2]);
-    let mut apply = false;
-    calls.lock().unwrap().clear();
-    dispatch_should_apply_effect_tick_this_tick(
+    dispatch_tooltip(
         &host,
-        "effect-owner",
-        EffectKey(7),
-        19,
-        2,
-        &mut apply,
+        &ItemStack::default(),
+        &mod_api::mod_api::TooltipAppendContext,
+        &mut lines,
     );
-    assert!(apply);
-    assert_eq!(*calls.lock().unwrap(), [1]);
+    assert_eq!(lines.iter().map(|line| line.1).collect::<Vec<_>>(), [1, 2]);
     let source = HurtSource {
         damage_type: "damage",
         position: None,

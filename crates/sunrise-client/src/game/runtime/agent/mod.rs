@@ -7,6 +7,7 @@
 mod navigation;
 
 use super::event_loop::EventLoopCtl;
+use super::owner_link::{ControlRequest, OwnerRequest};
 use super::{Game, Screen};
 use navigation::{Cell, Node, Plan, Progress};
 use serde_json::{Value, json};
@@ -485,7 +486,6 @@ impl Game<'_> {
             Screen::DebugOptions => "debug-options",
             Screen::Mod => "mod",
             Screen::HudEditor => "hud-editor",
-            Screen::Studio => "studio",
         }
     }
     pub(super) fn inventory_counts(&self) -> BTreeMap<String, i64> {
@@ -563,7 +563,7 @@ impl Game<'_> {
         let mut state = json!({
             "dialog": self.dialog_status(),
             "screen": self.screen_label(),
-            "menu": (self.title.is_some() || self.split_profiles_open() || self.split_setup_open()).then(|| self.title_value()),
+            "menu": self.title.is_some().then(|| self.title_value()),
             "world": (self.title.is_none()).then(|| match &self.integrated {
                 Some(server) => server.world_name.clone(),
                 None => self.level.name.clone(),
@@ -599,23 +599,8 @@ impl Game<'_> {
         state
     }
 
-    /// Splitscreen's profile page, a joining player's (`split_profiles`).
-    fn split_profiles_open(&self) -> bool {
-        self.screen == Screen::Options
-            && self.ui.options.page() == sunrise_client::options_ui::Page::SplitProfiles
-    }
-    fn split_setup_open(&self) -> bool {
-        self.screen == Screen::Options
-            && self.ui.options.page() == sunrise_client::options_ui::Page::SplitSetup
-    }
     fn title_value(&self) -> Value {
         use sunrise_client::title::Mode;
-        if self.split_profiles_open() {
-            return self.ui.options.split_profiles.state();
-        }
-        if self.split_setup_open() {
-            return json!({ "mode": "splitscreen-setup", "status": self.ui.options.split_setup.status() });
-        }
         let Some(title) = &self.title else {
             return Value::Null;
         };
@@ -845,7 +830,7 @@ impl Game<'_> {
             v["chat_input"] = json!(chat.input.value);
             v["chat_suggestions"] = json!(chat.suggestions_visible());
         }
-        if self.title.is_some() || self.split_profiles_open() || self.split_setup_open() {
+        if self.title.is_some() {
             v["menu"] = self.title_value();
         }
         if self.screen == Screen::Inventory && self.title.is_none() {
@@ -1706,22 +1691,6 @@ impl Game<'_> {
                 self.synth_click(event_loop, x, y, button)?;
                 ok(json!({ "ok": true, "screen": self.screen_label() }))
             }
-            // Splitscreen's profile page, over a joining player's title screen.
-            "type" if self.split_profiles_open() => {
-                let text = line
-                    .trim_start()
-                    .strip_prefix("type")
-                    .unwrap_or("")
-                    .strip_prefix(' ')
-                    .unwrap_or("");
-                let page = &mut self.ui.options.split_profiles;
-                if text == "\\b" {
-                    page.key(winit::keyboard::KeyCode::Backspace, None);
-                } else {
-                    page.type_text(text);
-                }
-                ok(json!({ "ok": true, "menu": self.title_value() }))
-            }
             "type" if self.title.is_some() => {
                 // type [--field name|seed] [--replace] TEXT on the title screens.
                 let mut text = line
@@ -1809,7 +1778,9 @@ impl Game<'_> {
                 // Single player's console is its server thread's.
                 if let Some(server) = &self.integrated {
                     let (chat, outcome) = server
-                        .call(move |g| g.owner_console_command(&command))
+                        .ask(|reply| {
+                            OwnerRequest::Control(ControlRequest::ConsoleCommand { command, reply })
+                        })
                         .ok_or(super::integrated::NO_ANSWER)?;
                     return ok(command_reply(chat, outcome));
                 }
