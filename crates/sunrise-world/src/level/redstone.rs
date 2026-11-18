@@ -277,7 +277,16 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             self.experimental_wire_update(pos, orientation, update_shape);
             return;
         }
-        let node = self.ticks.wire_graph.active().then(|| self.wire_node(pos));
+        // A signal part can read the wire's own state, so a wire's neighbour
+        // signal is not fixed while a run is propagating and must not be
+        // cached across it. A block templated from redstone wire has its own
+        // id, so `wire_power_of` cannot read its power and the cached
+        // comparison would be against zero: keep it on the uncached path too.
+        let cacheable = self.ticks.wire_graph.active()
+            && !self.level.has_signal_hook()
+            && !self.level.has_weak_power_hook()
+            && self.b.is_block(state, self.b.named.redstone_wire);
+        let node = cacheable.then(|| self.wire_node(pos));
         let (block_signal, incoming, power) = match node {
             Some(node) => (
                 i32::from(node.block_signal),

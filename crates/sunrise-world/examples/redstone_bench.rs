@@ -241,22 +241,29 @@ fn run(behaviours: &Behaviours, level: &mut Cells, ticks: &mut Ticks) -> u32 {
     t
 }
 
-/// What one scenario cost.
+/// What one scenario cost. The fastest round's time is per round, so the
+/// timing divides by one round's steps; the traffic is summed over every
+/// round, so it divides by all of them.
 #[derive(Clone, Copy, Default)]
 struct Reading {
+    /// The fastest round.
     best: std::time::Duration,
+    /// Steps in one round, summed over the scenarios merged into this reading.
+    steps: u64,
+    /// Rounds the traffic was summed over.
+    rounds: u64,
     reads: u64,
     writes: u64,
-    steps: u64,
 }
 
 impl Reading {
     fn merge(self, other: Self) -> Self {
         Self {
             best: self.best + other.best,
+            steps: self.steps + other.steps,
+            rounds: self.rounds.max(other.rounds),
             reads: self.reads + other.reads,
             writes: self.writes + other.writes,
-            steps: self.steps + other.steps,
         }
     }
 
@@ -265,11 +272,11 @@ impl Reading {
     }
 
     fn reads_per_step(&self) -> f64 {
-        self.reads as f64 / self.steps as f64
+        self.reads as f64 / (self.steps * self.rounds) as f64
     }
 
     fn writes_per_step(&self) -> f64 {
-        self.writes as f64 / self.steps as f64
+        self.writes as f64 / (self.steps * self.rounds) as f64
     }
 }
 
@@ -298,7 +305,8 @@ fn measure(behaviours: &Behaviours, scenario: &mut Scenario) -> Reading {
             panic!("{} never changed a block", scenario.name);
         }
     }
-    reading.steps = TOGGLES as u64 * scenario.levers.len() as u64 * ROUNDS as u64;
+    reading.steps = TOGGLES as u64 * scenario.levers.len() as u64;
+    reading.rounds = ROUNDS as u64;
     reading.best = rounds.iter().min().copied().unwrap_or_default();
     println!(
         "{:44} {:>9.1} us/step {:>8.0} reads {:>6.1} writes   rounds {rounds:.3?}",

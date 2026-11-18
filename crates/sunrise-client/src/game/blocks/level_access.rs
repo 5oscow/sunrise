@@ -403,6 +403,11 @@ impl LevelAccess for GameLevel<'_> {
         self.native_authoritative
             && mod_api::__private::has_scoped_hook(mod_api::HookId::ShouldCheckWeakPower)
     }
+    fn has_signal_hook(&self) -> bool {
+        self.native_authoritative
+            && (mod_api::__private::has_scoped_hook(mod_api::HookId::BlockSignal)
+                || mod_api::__private::has_scoped_hook(mod_api::HookId::IsSignalSource))
+    }
     fn adjust_should_check_weak_power(
         &self,
         pos: BlockPos,

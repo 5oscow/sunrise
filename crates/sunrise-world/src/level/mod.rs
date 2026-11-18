@@ -1047,6 +1047,14 @@ pub trait LevelAccess: BlockEntityNeighbors {
     fn has_weak_power_hook(&self) -> bool {
         false
     }
+    /// Whether a block's signal can come from a mod part
+    /// (`BlockSignal` or `IsSignalSource`) rather than from its state alone.
+    /// Such a part can read the wire's own state, so a wire's neighbour signal
+    /// is not fixed while a run is propagating and must not be cached across
+    /// it. The default is vanilla-only.
+    fn has_signal_hook(&self) -> bool {
+        false
+    }
     /// Override `SignalGetter.getSignal`'s conductor check for a block.
     fn adjust_should_check_weak_power(
         &self,
