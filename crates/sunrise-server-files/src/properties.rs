@@ -8,7 +8,6 @@ use super::{
 };
 use sunrise_core::text::{parse_java_integer, parse_java_long};
 use sunrise_java_properties::{Properties, date_string, now_millis};
-use sunrise_protocol::crypto::md5;
 
 /// MinecraftServer.ServerResourcePackInfo.
 #[derive(Clone, Debug, PartialEq)]
@@ -179,14 +178,6 @@ pub fn generate_secret_key(entropy: &mut dyn Entropy) -> String {
     (0..40)
         .map(|_| char::from(ALPHABET[entropy.next_int(ALPHABET.len() as u32) as usize]))
         .collect()
-}
-
-/// UUID.nameUUIDFromBytes.
-pub fn name_uuid(bytes: &[u8]) -> u128 {
-    let mut h = md5(bytes);
-    h[6] = (h[6] & 0x0f) | 0x30;
-    h[8] = (h[8] & 0x3f) | 0x80;
-    u128::from_be_bytes(h)
 }
 
 /// UUID.fromString (the lenient JDK parser: five dash-separated hex groups).
@@ -568,7 +559,7 @@ fn server_pack_info(
     }
     let prompt = parse_prompt(prompt, warnings);
     let id = if id.is_empty() {
-        let uuid = name_uuid(url.as_bytes());
+        let uuid = sunrise_core::md5::name_uuid(url.as_bytes());
         warnings.push(format!(
             "resource-pack-id missing, using default of {}",
             sunrise_protocol::crypto::uuid_string(uuid)
