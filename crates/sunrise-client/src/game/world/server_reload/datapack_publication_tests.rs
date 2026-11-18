@@ -15,11 +15,11 @@ impl Hooks for RegistryMod {
         event.files.extend([
             (
                 "predicate/registry_test:native".into(),
-                br#"{"condition":"minecraft:random_chance","chance":1}"#.to_vec(),
+                br#"{"type":"minecraft:random_chance","chance":1}"#.to_vec(),
             ),
             (
                 "item_modifier/registry_test:native".into(),
-                br#"{"function":"minecraft:set_count","count":3}"#.to_vec(),
+                br#"{"type":"minecraft:set_count","count":3}"#.to_vec(),
             ),
         ]);
     }
