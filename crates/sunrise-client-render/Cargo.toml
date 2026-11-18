@@ -31,6 +31,7 @@ sunrise-narrator = { path = "../sunrise-narrator" }
 sunrise-optifine = { path = "../sunrise-optifine" }
 sunrise-perf-format = { path = "../sunrise-perf-format" }
 sunrise-polytone = { path = "../sunrise-polytone" }
+sunrise-border = { path = "../sunrise-border" }
 sunrise-protocol = { path = "../sunrise-protocol" }
 sunrise-render-core = { path = "../sunrise-render-core" }
 sunrise-shader-api = { path = "../sunrise-shader-api" }

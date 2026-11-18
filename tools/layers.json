@@ -25,6 +25,7 @@
     "sunrise-client": "engine",
     "sunrise-client-core": "engine",
     "sunrise-client-input": "engine",
+    "sunrise-border": "engine",
     "sunrise-client-lib": "engine",
     "sunrise-client-gameplay": "engine",
     "sunrise-client-render": "engine",
