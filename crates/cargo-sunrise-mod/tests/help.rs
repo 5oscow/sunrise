@@ -9,6 +9,7 @@ fn run(args: &[&str]) -> std::process::Output {
 }
 
 #[test]
+#[ignore = "daily"]
 fn help_prints_the_usage_to_standard_output_and_succeeds() {
     for args in [&[][..], &["--help"], &["-h"], &["sunrise-mod", "--help"]] {
         let output = run(args);
@@ -23,6 +24,7 @@ fn help_prints_the_usage_to_standard_output_and_succeeds() {
 }
 
 #[test]
+#[ignore = "daily"]
 fn an_unknown_command_is_an_error() {
     let output = run(&["frobnicate"]);
     assert!(!output.status.success());

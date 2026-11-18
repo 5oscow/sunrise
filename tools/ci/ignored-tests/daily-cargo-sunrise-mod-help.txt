@@ -1,0 +1,4 @@
+# The daily tests of cargo-sunrise-mod's help output: each is #[ignore = "daily"] in its source and runs once a day in the daily run,
+# where it must pass (README.md). Rows: PACKAGE TEST TARGET daily REASON, sorted; tools/ci/move_to_daily.py writes them.
+cargo-sunrise-mod an_unknown_command_is_an_error test:help daily child-process
+cargo-sunrise-mod help_prints_the_usage_to_standard_output_and_succeeds test:help daily child-process
