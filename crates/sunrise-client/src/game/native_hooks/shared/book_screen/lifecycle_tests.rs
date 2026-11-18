@@ -602,12 +602,21 @@ fn a_bound_books_catalogue_survives_slot_moves_and_hides() {
             };
             assert!(kept(game));
 
-            // A move and a hide, built, and the retry check that clears a stale window.
-            assert_eq!(
-                game.set_screen_slot("bound:menu", 0, Some([30.0, 40.0])),
-                Ok(())
-            );
-            assert_eq!(game.set_screen_slot("bound:menu", 1, None), Ok(()));
+            // The book declaration, not a screen part, gives the mod its slot controls.
+            {
+                let _call =
+                    mod_api::content::crash::enter_native_mod(mod_api::content::crash::ModCall {
+                        id: "bound",
+                        hook: "render_gui_post",
+                        part: None,
+                    });
+                assert_eq!(game.screen_slot("bound:menu", 0), Some([8.0, 18.0]));
+                assert_eq!(
+                    game.set_screen_slot("bound:menu", 0, Some([30.0, 40.0])),
+                    Ok(())
+                );
+                assert_eq!(game.set_screen_slot("bound:menu", 1, None), Ok(()));
+            }
             game.build_screen();
             game.check_mod_book_placement_timeout();
             game.ensure_mod_book_catalog();

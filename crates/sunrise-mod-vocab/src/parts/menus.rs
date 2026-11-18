@@ -20,6 +20,8 @@ impl HookParts {
     /// The screen hooks' lookup: the part that owns the screen of menu type `menu` opened as
     /// mod block `block`'s menu, alone. A mod menu type has one such part (registration refuses
     /// a second); one of vanilla's has one per mod, and a mod's block gets its own mod's.
+    /// For a registered recipe-book screen, registration allows screen Parts only from
+    /// the declaring mod, so these same lookups cannot dispatch to a foreign part.
     pub(crate) fn menu_screen(&self, menu: &str, block: Option<&str>) -> &[Attached<dyn MenuPart>] {
         let parts = attached(&self.menus, || Some(menu));
         if !vanilla_menu(menu) {
@@ -67,9 +69,12 @@ fn vanilla_menu(menu: &str) -> bool {
     menu.starts_with("minecraft:")
 }
 
-/// The mod whose part owns the screen of menu type `menu` opened as `block`'s menu, the one
-/// mod its screen hooks reach; None when no part lays one out.
+/// The mod that declared the recipe-book screen or owns the dynamic screen of `menu`
+/// opened as `block`'s menu. A registered book needs no screen part to have an owner.
 pub fn menu_screen_owner(menu: &str, block: Option<&str>) -> Option<&'static str> {
+    if let Some(owner) = crate::RecipeBookLayout::declaring_mod(menu) {
+        return Some(owner);
+    }
     SCREEN_HOOKS
         .into_iter()
         .filter(|&hook| has_part_hook(hook))
@@ -109,6 +114,8 @@ pub trait MenusRegistrar {
     /// typed screen value, frozen here: mapped slots need finite coordinates and
     /// its book must equal `book`. This screen owns client geometry and server
     /// hidden-slot policy; these menus do not call the dynamic screen hook.
+    /// The declaring mod owns the screen's callbacks and slot controls, even
+    /// without a screen part. A foreign screen part on this menu is refused.
     /// This does not turn display candidates into ingredient predicates.
     /// Invalid ownership, unknown books, duplicate menus or malformed screen
     /// geometry refuse installation, even when the caller ignores the error.
