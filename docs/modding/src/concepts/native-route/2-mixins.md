@@ -128,13 +128,15 @@ These functions are refused:
 - generic over types or consts, or inside an `impl` block that is;
 - taking `impl Trait`, returning `!`, or taking `self` by value;
 - `const`, `async`, `unsafe` or `#[inline(always)]`;
-- existing only under a `cfg`;
+- existing only under a `cfg` the signed build does not compile in (the function is then absent from the build);
 - a body that declares a `static`, thread-local, `macro_rules!` or `impl`;
 - a body that uses a location-dependent macro such as `file!`, `line!`, `module_path!`, `include!` or `env!`;
 - a body that uses a non-exported crate-local macro defined outside its module path. Macros defined
   in the target module or its ancestors are copied with the function.
 
 The one generic function you can target is a [published loop's body](3-loops.md#mixins-on-the-loop).
+
+The tool plans against what the signed game compiles. The launcher gives it the build's cfg set (the target's options and the features the prebuilt game was built with), and it drops the items, statements, fields, variants, parameters and match arms under an inactive `cfg` and expands `cfg_attr`. A function with an inner `#[cfg(test)] fn helper()` or a `#[cfg(feature = "x")]` statement takes its mixins like any other. A `cfg` the set cannot decide (`version(..)`, `accessible(..)`, an expression-level attribute) is refused with `E_UNSUPPORTED_CFG`.
 
 ## With other mods
 

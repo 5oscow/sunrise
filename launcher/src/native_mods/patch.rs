@@ -544,11 +544,23 @@ pub(super) fn prepare<'a>(
     // With no rows (only modules or bridges), the crate compiles as generated.
     let patched = if let Some(tool) = &tool {
         let patched = out.join("patch-applied");
-        super::run(
-            super::apply(rust, tool, &workspace, &mods, &patched),
-            "Applying the mixins to their functions",
-            |_| {},
-        )?;
+        // The tool plans against what the signed game compiles: this computer's cfg set under the
+        // flags the patch library is compiled with (the prebuilt game's target is this computer's,
+        // `check_identity`), and the features the game was built with.
+        let mut print = super::prebuilt::rustc_with(rust, &[], "2024");
+        print.args(["--print", "cfg"]);
+        let printed = print.output().map_err(|e| e.to_string())?;
+        if !printed.status.success() {
+            return Err(String::from_utf8_lossy(&printed.stderr).into_owned());
+        }
+        let mut cmd = super::apply(rust, tool, &workspace, &mods, &patched);
+        for option in build_cfg(
+            &String::from_utf8_lossy(&printed.stdout),
+            sdk.game_features(),
+        ) {
+            cmd.arg("--cfg").arg(option);
+        }
+        super::run(cmd, "Applying the mixins to their functions", |_| {})?;
         patched
     } else {
         workspace.clone()
@@ -595,8 +607,40 @@ pub(super) fn prepare<'a>(
     }))
 }
 
+/// The cfg options of the build the patch library is compiled into, in rustc's `--cfg` spelling:
+/// what `rustc --print cfg` printed and the game's features.
+fn build_cfg(printed: &str, features: &[String]) -> Vec<String> {
+    printed
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_owned)
+        .chain(
+            features
+                .iter()
+                .map(|feature| format!("feature=\"{feature}\"")),
+        )
+        .collect()
+}
+
 #[cfg(test)]
 mod refusal_tests {
+    #[test]
+    fn the_build_cfg_is_the_printed_set_and_the_games_features() {
+        assert_eq!(
+            super::build_cfg(
+                "unix\ntarget_os=\"linux\"\n\n",
+                &["audio".into(), "friends".into()]
+            ),
+            [
+                "unix",
+                "target_os=\"linux\"",
+                "feature=\"audio\"",
+                "feature=\"friends\""
+            ]
+        );
+    }
+
     #[test]
     fn a_missing_or_foreign_function_index_is_refused_by_name() {
         let game = tempfile::tempdir().unwrap();
