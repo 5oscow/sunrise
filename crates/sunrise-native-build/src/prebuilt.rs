@@ -616,21 +616,27 @@ fn registry_dependency(project: &api::Project<'_>) -> bool {
     })
 }
 
-/// Creates `out`, a build folder directly under `builds`, refusing one that is a link (a symlink
-/// or a Windows junction) or that resolves outside `builds`: the build clears folders inside it,
-/// and must never reach a folder elsewhere through it.
+/// Creates `out`, a build folder directly under `builds`, itself directly under the native work
+/// folder, refusing either when it is a link (a symlink or a Windows junction) or resolves outside
+/// its parent: the build clears folders inside `out`, and must never reach a folder elsewhere
+/// through it.
 fn own_folder(builds: &Path, out: &Path) -> Result<(), String> {
-    fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
-    let meta = fs::symlink_metadata(out).map_err(|e| format!("{}: {e}", out.display()))?;
-    let inside = || -> std::io::Result<bool> {
-        Ok(fs::canonicalize(out)?.parent() == Some(fs::canonicalize(builds)?.as_path()))
-    };
-    if meta.file_type().is_symlink() || !meta.is_dir() || !inside().unwrap_or(false) {
-        return Err(format!(
-            "{}: not a folder of its own under {}; remove it and build again",
-            out.display(),
-            builds.display()
-        ));
+    let work = builds
+        .parent()
+        .ok_or_else(|| format!("{}: no work folder above it", builds.display()))?;
+    for (parent, dir) in [(work, builds), (builds, out)] {
+        fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        let meta = fs::symlink_metadata(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        let inside = || -> std::io::Result<bool> {
+            Ok(fs::canonicalize(dir)?.parent() == Some(fs::canonicalize(parent)?.as_path()))
+        };
+        if meta.file_type().is_symlink() || !meta.is_dir() || !inside().unwrap_or(false) {
+            return Err(format!(
+                "{}: not a folder of its own under {}; remove it and build again",
+                dir.display(),
+                parent.display()
+            ));
+        }
     }
     Ok(())
 }
@@ -1199,30 +1205,61 @@ pub fn runtime_libraries(
 
 #[cfg(test)]
 mod tests {
-    /// A build folder that is a link to a folder elsewhere is refused before anything inside it is
-    /// cleared, so the build never deletes the other folder's `patch-applied`.
+    /// A build folder, or the builds folder above it, that is a link to a folder elsewhere is
+    /// refused before anything inside it is cleared, so the build never deletes the other
+    /// folder's `patch-applied`.
     #[test]
     fn a_build_folder_linked_elsewhere_is_refused_and_the_other_folder_kept() {
-        let builds = tempfile::tempdir().unwrap();
-        let outside = tempfile::tempdir().unwrap();
-        let out = builds.path().join("rustc-key");
-        super::own_folder(builds.path(), &out).unwrap();
-        super::own_folder(builds.path(), &out).unwrap();
-        fs::remove_dir(&out).unwrap();
-
-        let stale = outside.path().join("patch-applied");
-        fs::create_dir_all(&stale).unwrap();
-        fs::write(stale.join("keep"), "kept").unwrap();
         #[cfg(unix)]
-        let linked = std::os::unix::fs::symlink(outside.path(), &out);
-        #[cfg(windows)]
-        let linked = std::os::windows::fs::symlink_dir(outside.path(), &out);
-        // Windows grants symlinks only to developer mode or an administrator.
-        if linked.is_ok() {
-            let refused = super::own_folder(builds.path(), &out).unwrap_err();
-            assert!(refused.contains("not a folder of its own"), "{refused}");
+        fn link(to: &Path, at: &Path) -> std::io::Result<()> {
+            std::os::unix::fs::symlink(to, at)
         }
-        assert_eq!(fs::read_to_string(stale.join("keep")).unwrap(), "kept");
+        #[cfg(windows)]
+        fn link(to: &Path, at: &Path) -> std::io::Result<()> {
+            std::os::windows::fs::symlink_dir(to, at)
+        }
+        let work = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let builds = work.path().join("prebuilt-build");
+        let out = builds.join("rustc-key");
+        super::own_folder(&builds, &out).unwrap();
+        super::own_folder(&builds, &out).unwrap();
+        for stale in [
+            outside.path().join("patch-applied"),
+            outside.path().join("rustc-key/patch-applied"),
+        ] {
+            fs::create_dir_all(&stale).unwrap();
+            fs::write(stale.join("keep"), "kept").unwrap();
+        }
+        // Windows grants symlinks only to developer mode or an administrator: a link it refuses
+        // for that is skipped, and any other failure fails the test.
+        let made = |link: std::io::Result<()>| match link {
+            Ok(()) => true,
+            Err(e) if cfg!(windows) && e.raw_os_error() == Some(1314) => false,
+            Err(e) => panic!("{e}"),
+        };
+        fs::remove_dir(&out).unwrap();
+        if made(link(outside.path(), &out)) {
+            let refused = super::own_folder(&builds, &out).unwrap_err();
+            assert!(refused.contains("not a folder of its own"), "{refused}");
+            fs::remove_file(&out)
+                .or_else(|_| fs::remove_dir(&out))
+                .unwrap();
+        }
+        fs::remove_dir(&builds).unwrap();
+        if made(link(outside.path(), &builds)) {
+            let refused = super::own_folder(&builds, &out).unwrap_err();
+            assert!(
+                refused.contains("prebuilt-build: not a folder of its own"),
+                "{refused}"
+            );
+        }
+        for kept in ["patch-applied/keep", "rustc-key/patch-applied/keep"] {
+            assert_eq!(
+                fs::read_to_string(outside.path().join(kept)).unwrap(),
+                "kept"
+            );
+        }
     }
 
     #[test]

@@ -625,15 +625,24 @@ pub fn prepare<'a>(
 /// there), so nothing outside the build is reached through it.
 fn remove_previous_output(path: &Path) -> Result<(), String> {
     let removed = match fs::symlink_metadata(path) {
-        Ok(meta) if meta.file_type().is_symlink() => {
-            fs::remove_file(path).or_else(|_| fs::remove_dir(path))
-        }
+        Ok(meta) if meta.file_type().is_symlink() => unlink(path, meta.file_type()),
         Ok(meta) if meta.is_file() => fs::remove_file(path),
         Ok(_) => fs::remove_dir_all(path),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e),
     };
     removed.map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// Unlinks the link at `path`: on Windows a directory symlink or junction with `remove_dir` and a
+/// file symlink with `remove_file`; elsewhere every link with `remove_file`.
+fn unlink(path: &Path, kind: fs::FileType) -> std::io::Result<()> {
+    #[cfg(windows)]
+    if std::os::windows::fs::FileTypeExt::is_symlink_dir(&kind) {
+        return fs::remove_dir(path);
+    }
+    let _ = kind;
+    fs::remove_file(path)
 }
 
 /// The game's features as the `--cfg` flags the patch library is compiled with. The compile and
@@ -694,12 +703,17 @@ mod refusal_tests {
             |to: &Path, at: &Path| std::os::windows::fs::symlink_file(to, at),
         );
         // Windows grants symlinks only to developer mode or an administrator: a link it refuses
-        // is skipped.
-        if link_dir(&target, &applied).is_ok() {
+        // for that is skipped, and any other failure fails the test.
+        let made = |link: std::io::Result<()>| match link {
+            Ok(()) => true,
+            Err(e) if cfg!(windows) && e.raw_os_error() == Some(1314) => false,
+            Err(e) => panic!("{e}"),
+        };
+        if made(link_dir(&target, &applied)) {
             remove_previous_output(&applied).unwrap();
             assert!(fs::symlink_metadata(&applied).is_err());
         }
-        if link_file(&file, &applied).is_ok() {
+        if made(link_file(&file, &applied)) {
             remove_previous_output(&applied).unwrap();
             assert!(fs::symlink_metadata(&applied).is_err());
         }
