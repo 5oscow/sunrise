@@ -8316,25 +8316,31 @@ fn bucketable(species: Species) -> Option<(&'static str, &'static str)> {
     })
 }
 pub(super) use sunrise_client::health::{damage_type, melee, source_damage_type};
-/// A Sunrise item stack as a loot stack (id, count, damage, enchantments,
-/// and its custom data as SNBT for `minecraft:custom_data` predicates).
+/// A live item as a loot stack: ordinary enchantments and the complete saved
+/// component patch, including removals. The TOOL getter resolves its prototype.
 pub(in crate::game) fn to_loot(stack: &ItemStack) -> sunrise_world::loot::LootStack {
-    let components = stack
-        .custom_data()
-        .map(|data| {
-            (
-                "minecraft:custom_data".to_owned(),
-                Some(sunrise_core::nbt::Tag::Compound(data.clone())),
-            )
-        })
-        .into_iter()
-        .collect();
+    let components = match sunrise_client::item_data::component_snapshot(stack) {
+        Some(sunrise_core::nbt::Tag::Compound(patch)) => patch
+            .into_iter()
+            .map(|(id, value)| {
+                let id = id.to_string_lossy();
+                if let Some(base) = id.strip_prefix('!') {
+                    (base.to_owned(), None)
+                } else {
+                    (id, Some(value))
+                }
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
     sunrise_world::loot::LootStack {
         item: stack.item.to_string(),
         count: stack.count as i32,
         damage: stack.damage as i32,
         enchantments: stack
-            .all_enchantments()
+            .data()
+            .map(|data| data.enchantments.as_slice())
+            .unwrap_or_default()
             .iter()
             .map(|(e, l)| (e.to_string(), *l as i32))
             .collect(),

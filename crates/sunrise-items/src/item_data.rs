@@ -7,8 +7,7 @@ pub mod brewing_fuel;
 pub mod component_values;
 #[path = "item_data/cooking_fuel.rs"]
 pub mod cooking_fuel;
-#[path = "item_data/custom_data.rs"]
-pub mod custom_data;
+pub use sunrise_world::custom_data;
 #[path = "item_data/custom_model_data.rs"]
 pub mod custom_model_data;
 #[path = "item_data/ingredient_components.rs"]
@@ -72,7 +71,7 @@ pub use trim::Trim;
 /// A stack's modelled and preserved components. Start with `Default` (or
 /// `ItemStack::data_mut`) and use the fields and setters; component storage may
 /// gain private decoded data alongside its saved form.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default)]
 #[non_exhaustive]
 pub struct StackData {
     /// An explicit zero damage component overriding a damaged prototype.
@@ -149,6 +148,183 @@ pub struct StackData {
     /// What the server sent for this stack, for sending it back unchanged.
     pub wire: Wire,
 }
+impl PartialEq for StackData {
+    fn eq(&self, other: &Self) -> bool {
+        // Exhaustive: adding a component must also choose its equality here.
+        // The two ItemEnchantments fields use map equality; all other fields
+        // retain their existing equality, including ordered list components.
+        let Self {
+            damage_set,
+            banner_patterns_set,
+            enchantments,
+            stored_enchantments,
+            repair_cost,
+            explicit_zero_damage,
+            custom_name,
+            kinetic_weapon,
+            consumable,
+            death_protection,
+            villager_food,
+            potion,
+            potion_extra,
+            trim,
+            container,
+            charged,
+            fireworks,
+            map_id,
+            writable_pages,
+            written,
+            banner_patterns,
+            base_color,
+            ominous_banner,
+            ominous_amplifier,
+            dyed_color,
+            firework_explosion,
+            pot_decorations,
+            bundle_contents,
+            bundle_selected,
+            stew_effects,
+            map_post_processing,
+            other: preserved,
+            wire,
+        } = self;
+        damage_set == &other.damage_set
+            && banner_patterns_set == &other.banner_patterns_set
+            && enchantments_equal(enchantments, &other.enchantments)
+            && enchantments_equal(stored_enchantments, &other.stored_enchantments)
+            && repair_cost == &other.repair_cost
+            && explicit_zero_damage == &other.explicit_zero_damage
+            && custom_name == &other.custom_name
+            && kinetic_weapon == &other.kinetic_weapon
+            && consumable == &other.consumable
+            && death_protection == &other.death_protection
+            && villager_food == &other.villager_food
+            && potion == &other.potion
+            && potion_extra == &other.potion_extra
+            && trim == &other.trim
+            && container == &other.container
+            && charged == &other.charged
+            && fireworks == &other.fireworks
+            && map_id == &other.map_id
+            && writable_pages == &other.writable_pages
+            && written == &other.written
+            && banner_patterns == &other.banner_patterns
+            && base_color == &other.base_color
+            && ominous_banner == &other.ominous_banner
+            && ominous_amplifier == &other.ominous_amplifier
+            && dyed_color == &other.dyed_color
+            && firework_explosion == &other.firework_explosion
+            && pot_decorations == &other.pot_decorations
+            && bundle_contents == &other.bundle_contents
+            && bundle_selected == &other.bundle_selected
+            && stew_effects == &other.stew_effects
+            && map_post_processing == &other.map_post_processing
+            && preserved == &other.other
+            && wire == &other.wire
+    }
+}
+impl std::hash::Hash for StackData {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        // Exhaustive like `eq`: whatever `eq` ignores or compares loosely is hashed to match.
+        let Self {
+            damage_set,
+            banner_patterns_set,
+            enchantments,
+            stored_enchantments,
+            repair_cost,
+            explicit_zero_damage,
+            custom_name,
+            kinetic_weapon,
+            consumable,
+            death_protection,
+            villager_food,
+            potion,
+            potion_extra,
+            trim,
+            container,
+            charged,
+            fireworks,
+            map_id,
+            writable_pages,
+            written,
+            banner_patterns,
+            base_color,
+            ominous_banner,
+            ominous_amplifier,
+            dyed_color,
+            firework_explosion,
+            pot_decorations,
+            bundle_contents,
+            bundle_selected: _,
+            stew_effects,
+            map_post_processing,
+            other: preserved,
+            wire: _,
+        } = self;
+        damage_set.hash(state);
+        banner_patterns_set.hash(state);
+        hash_enchantments(enchantments, state);
+        hash_enchantments(stored_enchantments, state);
+        repair_cost.hash(state);
+        explicit_zero_damage.hash(state);
+        custom_name.hash(state);
+        kinetic_weapon.as_ref().map(|k| k.raw()).hash(state);
+        consumable.as_ref().map(|c| &c.raw).hash(state);
+        // ConsumeEffect holds floats, so only the effects' kinds are hashed.
+        death_protection
+            .as_ref()
+            .map(|effects| effects.len())
+            .hash(state);
+        for effect in death_protection.iter().flat_map(|effects| effects.iter()) {
+            std::mem::discriminant(effect).hash(state);
+        }
+        villager_food.hash(state);
+        potion.hash(state);
+        potion_extra.hash(state);
+        trim.hash(state);
+        container.hash(state);
+        charged.hash(state);
+        fireworks.hash(state);
+        map_id.hash(state);
+        writable_pages.hash(state);
+        written.hash(state);
+        banner_patterns.hash(state);
+        base_color.hash(state);
+        ominous_banner.hash(state);
+        ominous_amplifier.hash(state);
+        dyed_color.hash(state);
+        firework_explosion.hash(state);
+        pot_decorations.hash(state);
+        bundle_contents.hash(state);
+        stew_effects.hash(state);
+        map_post_processing.hash(state);
+        preserved.hash(state);
+    }
+}
+
+/// Hashes enchantments as `enchantments_equal` compares them: as a multiset.
+fn hash_enchantments<H: std::hash::Hasher>(levels: &Levels, state: &mut H) {
+    use std::hash::Hash;
+    if levels.len() < 2 {
+        return levels.hash(state);
+    }
+    let mut sorted: Vec<_> = levels.iter().collect();
+    sorted.sort();
+    sorted.hash(state);
+}
+
+/// ItemEnchantments is a map, but keeps its written order for display. Compare
+/// without allocating or reordering either component. The usual same-order
+/// case uses slice equality; only reordered entries need the quadratic scan.
+fn enchantments_equal(first: &Levels, second: &Levels) -> bool {
+    first == second
+        || (first.len() == second.len()
+            && first.iter().all(|entry| {
+                first.iter().filter(|value| *value == entry).count()
+                    == second.iter().filter(|value| *value == entry).count()
+            }))
+}
+
 /// A saved consumable decoded once for use animation, countdown and completion.
 #[derive(Clone, Debug, PartialEq)]
 struct ConsumableComponent {
@@ -482,7 +658,7 @@ fn ominous_tooltip_display() -> Tag {
 }
 
 /// `WrittenBookContent` with the pages as plain text.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Hash)]
 pub struct WrittenBook {
     pub title: String,
     pub author: String,
@@ -1991,6 +2167,77 @@ fn prototype_items() -> &'static crate::items::Items {
 mod tests {
     use super::*;
     use crate::banner_layer::BannerLayer;
+
+    #[test]
+    fn stack_data_that_compares_equal_hashes_equal() {
+        use std::hash::{BuildHasher, RandomState};
+        let rocket = |count: u32, patch: &[u8], selected: i32, order: [&str; 2]| {
+            let mut sword = ItemStack::new("minecraft:diamond_sword", 1);
+            sword.data_mut().enchantments = order.iter().map(|id| ((*id).into(), 1)).collect();
+            let mut stack = ItemStack::new("minecraft:firework_rocket", count);
+            let data = stack.data_mut();
+            data.fireworks = Some((2, Vec::new()));
+            data.container = vec![(0, sword)];
+            data.bundle_selected = BundleSelected(selected);
+            let decoded = stack.clone();
+            stack.data_mut().wire = Wire::new(decoded, patch.into());
+            stack
+        };
+        let full = rocket(
+            64,
+            &[1, 64],
+            0,
+            ["minecraft:sharpness", "minecraft:mending"],
+        );
+        let half = rocket(
+            32,
+            &[1, 32],
+            -1,
+            ["minecraft:mending", "minecraft:sharpness"],
+        );
+        let (full, half) = (full.data().unwrap(), half.data().unwrap());
+        assert_eq!(full, half);
+        let hasher = RandomState::new();
+        assert_eq!(hasher.hash_one(full), hasher.hash_one(half));
+        let mut other = half.clone();
+        other.fireworks = Some((3, Vec::new()));
+        assert_ne!(hasher.hash_one(full), hasher.hash_one(&other));
+    }
+
+    #[test]
+    fn enchantment_component_equality_ignores_entry_order_but_not_levels() {
+        for item in ["minecraft:diamond_sword", "minecraft:enchanted_book"] {
+            let mut first = ItemStack::new(item, 1);
+            first.enchant("minecraft:unbreaking", 3);
+            first.enchant("minecraft:sharpness", 4);
+            let mut second = ItemStack::new(item, 1);
+            second.enchant("minecraft:sharpness", 4);
+            second.enchant("minecraft:unbreaking", 3);
+            assert!(first.same_item_same_components(&second));
+            assert_eq!(&*first.crafting_enchantments()[0].0, "minecraft:unbreaking");
+            assert_eq!(&*second.crafting_enchantments()[0].0, "minecraft:sharpness");
+            second.enchant("minecraft:sharpness", 5);
+            assert!(!first.same_item_same_components(&second));
+        }
+        // List-shaped components keep their vanilla order-sensitive equality.
+        let mut first = ItemStack::new("minecraft:paper", 1);
+        first.data_mut().set_other(
+            "minecraft:lore",
+            Some(Tag::List(vec![
+                Tag::String("first".into()),
+                Tag::String("second".into()),
+            ])),
+        );
+        let mut second = first.clone();
+        second.data_mut().set_other(
+            "minecraft:lore",
+            Some(Tag::List(vec![
+                Tag::String("second".into()),
+                Tag::String("first".into()),
+            ])),
+        );
+        assert!(!first.same_item_same_components(&second));
+    }
 
     /// `set_banner_pattern` (and `set_components`) hand a banner's layers over
     /// as a component; the renderer and the tooltip read `banner_patterns`, so

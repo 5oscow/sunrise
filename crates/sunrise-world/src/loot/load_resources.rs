@@ -10,33 +10,14 @@ pub(super) fn load_kind(
     kind: &str,
     out: &mut HashMap<String, Value>,
 ) -> io::Result<()> {
-    load_kind_with(data, kind, out, |bytes, path| {
-        if kind == "enchantment" {
-            Ok(crate::json_folder::enchantment_definition(bytes, path))
-        } else {
-            Ok(Some(serde_json::from_slice(bytes)?))
-        }
-    })
-}
-
-fn load_kind_with(
-    data: &Path,
-    kind: &str,
-    out: &mut HashMap<String, Value>,
-    read: impl Fn(&[u8], &Path) -> io::Result<Option<Value>>,
-) -> io::Result<()> {
     for ns in crate::json_folder::namespaces(data) {
-        let dir = data.join(&ns).join(kind);
-        // The immutable folder is shared with the other resource readers.
-        let Ok(folder) = crate::json_folder::read(&dir) else {
-            continue;
-        };
-        for file in &folder.files {
-            let path = dir.join(format!("{}.json", file.name));
-            if let Some(value) = read(file.bytes()?, &path)? {
-                out.insert(format!("{ns}:{}", file.name), value);
-            }
-        }
+        load_dir(
+            &data.join(&ns).join(kind),
+            &ns,
+            "",
+            out,
+            kind == "enchantment",
+        )?;
     }
     Ok(())
 }
@@ -52,23 +33,7 @@ pub(super) fn load_ordered_kind(
         Err(error) => return Err(error),
     };
     let reader = LootJson(registry["minecraft:data_component_type"]["entries"].as_object());
-    let mut out = HashMap::new();
-    load_kind_with(&root.join("data"), kind, &mut out, |bytes, path| {
-        reader.read(bytes).map(Some).map_err(|error| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("{}: {error}", path.display()),
-            )
-        })
-    })?;
-    for (id, files) in overlay.kind(kind) {
-        let value = reader.read(PackOverlay::top(files)).map_err(|error| {
-            io::Error::new(io::ErrorKind::InvalidData, format!("{kind} {id}: {error}"))
-        })?;
-        out.insert(id.to_owned(), value);
-    }
-    loot_conditions::retain_admitted(overlay, kind, &mut out);
-    Ok(out)
+    types::load_files(root, overlay, kind, |bytes| reader.read(bytes))
 }
 
 /// Read loot JSON normally except for the component patch of `set_components`.
@@ -215,4 +180,35 @@ pub(super) fn hash_files(dir: &Path, hasher: &mut impl std::hash::Hasher) {
             meta.modified().ok().hash(hasher);
         }
     }
+}
+
+pub(super) fn load_dir(
+    dir: &Path,
+    namespace: &str,
+    prefix: &str,
+    out: &mut HashMap<String, Value>,
+    enchantment: bool,
+) -> io::Result<()> {
+    // Through `json_folder`: a load holding the folder (the recipes, read by
+    // the item tables, the recipe book and the server's sync too) shares one
+    // read of it.
+    let Ok(folder) = crate::json_folder::read(dir) else {
+        return Ok(());
+    };
+    for file in &folder.files {
+        let bytes = file.bytes()?;
+        let value = if enchantment {
+            let Some(value) = crate::json_folder::enchantment_definition(
+                bytes,
+                &dir.join(format!("{}.json", file.name)),
+            ) else {
+                continue;
+            };
+            value
+        } else {
+            serde_json::from_slice(bytes)?
+        };
+        out.insert(format!("{namespace}:{prefix}{}", file.name), value);
+    }
+    Ok(())
 }

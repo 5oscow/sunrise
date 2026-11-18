@@ -93,7 +93,6 @@ pub mod seen_grid;
 pub mod sheep_dye;
 pub mod shulker;
 pub mod skin;
-pub mod skin_layers;
 pub mod sniffer;
 pub mod spawn_rules;
 pub mod spawn_selection;
@@ -1155,6 +1154,10 @@ pub struct Extra {
     pub stand_sliding: bool,
     /// Species scratch values (the wither's head targets and clocks, a ghast's power).
     pub ints: [i32; 6],
+    /// `PhantomMoveControl.speed`: the phantom's own flight speed (0.1 at
+    /// first), apart from the movement speed attribute, which an effect's
+    /// modifier changes.
+    pub phantom_move_speed: f32,
     pub counter: i32,
     /// Nautilus ATTACK_TARGET_COOLDOWN saved slot: None is absent,
     /// Some(MAX) is permanent, otherwise the remaining lifetime. The value is `counter`.
@@ -1586,6 +1589,9 @@ pub struct Mob {
     /// `Entity.isInPowderSnow` as of the last mob tick, for the skeleton's
     /// freezing tracker read at save time.
     pub in_powder_snow: bool,
+    /// `Entity.wasInPowderSnow`: `in_powder_snow` as the last tick left it,
+    /// kept by `Entity.baseTick` for `Mob.isSunBurnTick`.
+    pub was_in_powder_snow: bool,
     pub glowing: bool,
     pub air: i32,
     pub last_hurt: f32,
@@ -1621,9 +1627,6 @@ pub struct Mob {
     pub skin: Option<String>,
     /// `PlayerSkin.model` is `SLIM`: the player model with 3-pixel arms.
     pub slim: bool,
-    /// The 3D skin layers feature's model for this player: its outer layer
-    /// with every painted texel extruded (`skin_layers`, off by default).
-    pub skin_3d: Option<Arc<Part>>,
     /// `PlayerSkin.cape`: a player's cape texture, once every download of
     /// its skin is ready.
     pub cape: Option<String>,
@@ -2770,6 +2773,7 @@ impl Mob {
             hostile: m.is_enemy(),
             target: m.ai.target,
             health: m.health,
+            max_health: m.attrs.max_health,
             variant: m.extra.variant,
             size: m.extra.size,
             color: m.extra.color,
@@ -2802,10 +2806,11 @@ impl Mob {
             secondary_variant: m.extra.variant2,
             xp: villager::xp(m),
             villager: villager.then(|| Arc::new(villager::seen(m, items))),
+            // The bases a partner's `setOffspringAttribute` reads.
             stats: [
-                f64::from(m.attrs.max_health),
+                finalize::base_value(m, finalize::Attr::MaxHealth),
                 m.extra.vector[0],
-                m.attrs.speed,
+                finalize::base_value(m, finalize::Attr::MovementSpeed),
             ],
             sitting: m.extra.sitting,
             silent: m.silent,
@@ -3274,6 +3279,11 @@ pub struct MobWorld<'a> {
     pub thundering: bool,
     pub level: sunrise_core::LevelKey,
     pub block_tags: &'a HashMap<String, std::collections::HashSet<String>>,
+    /// [`crate::items::BlockTagFlags`] bits by block state id: the tags the
+    /// mob code asks about by name (`minecraft:climbable`, `minecraft:fire`
+    /// and the rest), so a tick tests a bit instead of hashing two strings.
+    /// Empty in a view built without a catalog: every flag reads false.
+    pub block_tag_flags: &'a [u16],
     /// Each block's `fallOn` rule (the player's landing registry).
     pub landing: &'a sunrise_world::block_landing::BlockLandingRegistry,
     pub biomes: &'a crate::biome::Biomes,
@@ -3639,6 +3649,7 @@ impl Mob {
             fire_ticks: 0,
             ticks_frozen: 0,
             in_powder_snow: false,
+            was_in_powder_snow: false,
             glowing: false,
             air: 300,
             last_hurt: 0.0,
@@ -3661,7 +3672,6 @@ impl Mob {
             outbox: Vec::new(),
             skin: None,
             slim: false,
-            skin_3d: None,
             cape: None,
             profile: None,
             random_textures: Default::default(),
@@ -4416,22 +4426,32 @@ impl Mob {
             + (p.y - self.position.y).powi(2)
             + (p.z - self.position.z).powi(2)
     }
-    /// Movement speed attribute bonus (baby zombies, sprinting modifiers).
-    /// MOVEMENT_SPEED including effects (speed +20%/level, slowness -15%/level).
+    /// `getAttributeValue(MOVEMENT_SPEED)`: the stored attribute (an
+    /// effect's modifier among its permanent ones, see
+    /// [`Mob::set_effect_modifiers`]) with the state's own modifiers, all in
+    /// `AttributeInstance.calculateValue`'s order: the witch's drinking
+    /// (`ADD_VALUE`), the baby bonus and the strider's suffocation
+    /// (`ADD_MULTIPLIED_BASE`) sum before an effect's `ADD_MULTIPLIED_TOTAL`
+    /// multiplies; then sprinting. A mob with none of them reads the
+    /// refreshed attribute.
     pub fn movement_speed(&self) -> f64 {
-        let mut v = strider::movement_speed(self, witch::speed(self, self.attrs.speed))
-            * self.speed_bonus();
+        let state = [
+            witch::drinking_modifier(self),
+            strider::suffocating_modifier(self),
+        ];
+        let baby = finalize::transient(self, finalize::Attr::MovementSpeed);
+        let mut v = if baby.is_none() && state.iter().all(Option::is_none) {
+            self.attrs.speed
+        } else {
+            finalize::value_with(
+                self,
+                finalize::Attr::MovementSpeed,
+                state.into_iter().flatten(),
+            )
+        };
         // LivingEntity.SPEED_MODIFIER_SPRINTING: 0.3F, ADD_MULTIPLIED_TOTAL.
         if self.extra.sprinting {
             v *= 1.0 + f64::from(0.3f32);
-        }
-        for effect in &self.extra.effects {
-            let amp = effect.amplifier;
-            match effect.id {
-                "minecraft:speed" => v *= 1.0 + 0.2 * f64::from(amp + 1),
-                "minecraft:slowness" => v *= (1.0 - 0.15 * f64::from(amp + 1)).max(0.0),
-                _ => {}
-            }
         }
         v
     }
@@ -4447,17 +4467,25 @@ impl Mob {
     pub fn is_invisible(&self) -> bool {
         self.invisible
     }
-    /// Removes effects and schedules the effect-status update when needed.
+    /// Removes effects and schedules the effect-status update when needed:
+    /// `LivingEntity.onEffectsRemoved` for what goes, which takes each
+    /// removed effect's attribute modifiers off ([`Mob::set_effect_modifiers`]).
     pub fn retain_effects(&mut self, mut keep: impl FnMut(&StoredEffect) -> bool) -> bool {
         let before = self.extra.effects.len();
-        let mut boost_removed = false;
+        // Empty, so no allocation, on the ticks nothing is removed.
+        let mut removed = Vec::new();
         let mut absorption_removed = false;
         self.extra.effects.retain(|e| {
             let keep = keep(e);
-            boost_removed |= !keep && e.id == "minecraft:health_boost";
+            if !keep {
+                removed.push(e.id);
+            }
             absorption_removed |= !keep && e.id == "minecraft:absorption";
             keep
         });
+        for effect in removed {
+            self.set_effect_modifiers(effect, None);
+        }
         if absorption_removed {
             // LivingEntity.onAttributeUpdated clamps to the remaining maximum;
             // removing Absorption does not subtract the hearts it granted.
@@ -4476,13 +4504,12 @@ impl Mob {
                 .ambient_effects
                 .retain(|e| effects.iter().any(|x| x.id == *e));
         }
-        if boost_removed {
-            finalize::health_boost_changed(self);
-        }
         self.effects_dirty |= changed;
         changed
     }
-    /// Loads an effect without applying its attribute modifiers a second time.
+    /// Loads an effect as `LivingEntity.readAdditionalSaveData` does: straight
+    /// into the list, with no `onEffectAdded`, so it adds no attribute
+    /// modifier (the saved `attributes` hold one the effect was given with).
     pub fn load_effect(&mut self, effect: StoredEffect) {
         self.extra.effects.retain(|e| e.id != effect.id);
         self.extra.effects.push(effect);
@@ -4565,8 +4592,10 @@ impl Mob {
                 .max(4.0 * (incoming.amplifier + 1) as f32)
                 .clamp(0.0, armor::max_absorption(self));
         }
-        if changed && effect == "minecraft:health_boost" {
-            finalize::health_boost_changed(self);
+        // `onEffectAdded` for a new effect, `onEffectUpdated(_, true, _)` for a
+        // changed one: the modifiers follow the active amplifier.
+        if changed {
+            self.set_effect_modifiers(effect, Some(active.amplifier));
         }
         self.effects_dirty |= changed;
         changed
@@ -4680,34 +4709,16 @@ impl Mob {
             // `refreshDirtyAttributes` -> `onAttributeUpdated(MAX_ABSORPTION)`:
             // the absorption amount is clamped to the remaining maximum.
             ConsumeEffect::ClearAllEffects => {
-                let had_absorption = self.has_effect("minecraft:absorption");
-                let had_boost = self.has_effect("minecraft:health_boost");
-                self.extra.effect_chains.clear();
-                self.extra.effects.clear();
-                if had_absorption {
-                    self.absorption = self.absorption.min(armor::max_absorption(self));
-                }
-                if had_boost {
-                    finalize::health_boost_changed(self);
-                }
+                self.retain_effects(|_| false);
             }
+            // `RemoveStatusEffectsConsumeEffect.apply`: `removeEffect` for each,
+            // `onEffectsRemoved` for what the mob had.
             ConsumeEffect::RemoveEffects(ids) => {
-                let had_absorption = self.has_effect("minecraft:absorption");
-                let had_boost = self.has_effect("minecraft:health_boost");
-                self.extra.effects.retain(|e| {
+                self.retain_effects(|e| {
                     let held = e.id.trim_start_matches("minecraft:");
                     !ids.iter()
                         .any(|id| id.trim_start_matches("minecraft:") == held)
                 });
-                self.extra
-                    .effect_chains
-                    .retain(|h| self.extra.effects.iter().any(|e| e.id == h.id));
-                if had_absorption && !self.has_effect("minecraft:absorption") {
-                    self.absorption = self.absorption.min(armor::max_absorption(self));
-                }
-                if had_boost && !self.has_effect("minecraft:health_boost") {
-                    finalize::health_boost_changed(self);
-                }
             }
             // `ApplyStatusEffectsConsumeEffect.apply`: one random draw, even at
             // probability 1.
@@ -4840,9 +4851,6 @@ impl Mob {
                 self.extra.hidden_effects.push(effect);
             }
         }
-    }
-    pub fn speed_bonus(&self) -> f64 {
-        ai::speed_bonus(self)
     }
     pub fn center(&self) -> [f64; 3] {
         [
@@ -7323,6 +7331,11 @@ mod hidden_speed_mob_tick_tests {
         let mut kind = (*sensor_scan_tests::kind()).clone();
         kind.id = "minecraft:pig".into();
         kind.species = Species::Pig;
+        // A pig has a max health instance for Health Boost's modifier.
+        kind.attributes = Arc::new(std::collections::HashMap::from([(
+            "minecraft:max_health".to_owned(),
+            10.0,
+        )]));
         let mut m = Mob::new(202, Arc::new(kind), Vec3::ZERO, 0.0);
         finalize::set_base(&mut m, finalize::Attr::MaxHealth, 10.0);
         m.add_effect("health_boost", 200, 1);

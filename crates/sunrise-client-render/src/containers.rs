@@ -2,15 +2,30 @@
 //! kinds, ticking as `AbstractFurnaceBlockEntity.serverTick` with fuel times
 //! from the data-driven `context_int_provider`/`context_float_provider` files.
 
-pub use crate::chunk::block_entity::published_shapes::{PublishedShapes, SHAPES_KEY};
+pub use crate::chunk::block_entity::published_shapes::{CheckedShape, PublishedShapes, SHAPES_KEY};
 pub use crate::chunk::block_entity::{
     Banner, Beacon, BlockEntity, Brushable, Campfire, ChiseledBookshelf, Crafter, CreakingHeart,
     EndGateway, Furnace, FurnaceKind, Jukebox, Lectern, MOD_MENUS, ModBlockEntity,
-    ModBlockEntityFields, ModContainer, ModEnergyBuffer, ModFluidTanks, ModRevision, PotentSulfur,
-    Shelf, Skull, SkullSkin,
+    ModBlockEntityFields, ModContainer, ModContainerInsertRule, ModEnergyBuffer, ModFluidTanks,
+    ModRevision, PotentSulfur, Shelf, Skull, SkullSkin,
 };
 use crate::items::ItemStack;
 use std::collections::HashMap;
+
+/// Apply a mod container's typed insertion rule to the engine's item-stack representation.
+pub fn mod_container_insert_allowed(
+    rule: ModContainerInsertRule,
+    current: Option<&ItemStack>,
+    offered: &ItemStack,
+) -> bool {
+    match rule {
+        ModContainerInsertRule::Any => true,
+        ModContainerInsertRule::OnlyWhenEmpty => current.is_none(),
+        ModContainerInsertRule::SameKind => {
+            current.is_none_or(|held| held.same_item_same_components(offered))
+        }
+    }
+}
 
 /// a content mod's menu type (`data/<id>/sunrise/menu/`, vanilla's
 /// `MenuType`): its container slots, its data slots (`ContainerData`) and the

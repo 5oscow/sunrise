@@ -147,8 +147,6 @@ pub fn map_slot_sprite(slot: usize) -> Option<&'static str> {
         std::sync::LazyLock::new(|| (0..MAP_SLOTS).map(|i| format!("sunrise/map{i}")).collect());
     NAMES.get(slot).map(String::as_str)
 }
-/// The atlas slot the minimap extra draws into.
-pub const MINIMAP_SPRITE: &str = "sunrise/minimap";
 /// Atlas slots for downloaded player skins (`skins/<sha1>`), 64x64 each.
 /// Vanilla registers a texture per skin. Here the slots are shared
 /// (`skins::SkinSlots`): skins drawn in the last frame keep theirs, and a
@@ -890,8 +888,8 @@ impl HudAtlas {
         ));
         Ok(atlas)
     }
-    /// Empty slots written at run time: map textures (game/blocks/maps/mod.rs), the
-    /// minimap, client mods' dynamic textures (only with `pool`), downloaded skins, world
+    /// Empty slots written at run time: map textures (game/blocks/maps/mod.rs),
+    /// client mods' dynamic textures (only with `pool`), downloaded skins, world
     /// and pack icons and the on-screen keyboard's text. Their pixels are already zero in
     /// the destination atlas, so keep the source buffers empty and avoid duplicating the
     /// atlas-sized allocation during packing.
@@ -900,13 +898,6 @@ impl HudAtlas {
             let name = map_slot_sprite(i).unwrap_or_default();
             images.push((name.into(), 128, 128, Vec::new()));
         }
-        // The minimap extra's image (game/interface/extras.rs).
-        images.push((
-            MINIMAP_SPRITE.into(),
-            crate::minimap::SIZE as u32,
-            crate::minimap::SIZE as u32,
-            Vec::new(),
-        ));
         // The pool of client mods' dynamic textures, only when a client mod is loaded.
         if pool {
             let classes = mod_api::DYNAMIC_TEXTURE_CLASSES;
@@ -1353,15 +1344,6 @@ impl HudAtlas {
                 }
                 images.push(image);
             }
-        }
-        // The title screen's "JAVA EDITION" banner reads "RUST EDITION".
-        if let Some(edition) = images
-            .iter_mut()
-            .find(|i| i.0 == crate::title_edition::SPRITE)
-            && let Some(pixels) =
-                crate::title_edition::rust_edition(edition.1, edition.2, &edition.3)
-        {
-            edition.3 = pixels;
         }
         images.push(("sunrise/white".into(), 4, 4, vec![255; 64]));
         // The main menu's Mods button, unless a pack brought its own icon.

@@ -2,12 +2,16 @@
 //! guest's collision exclusions (#3717): a mod's boxes in which the level's blocks don't stop the
 //! player are the same boxes its client moves it through.
 use super::{Guest, Hub, TickCtx};
-use crate::collisions::SceneCollisions;
+use crate::{
+    collisions::{EntityCollisions, SceneCollisions},
+    world::World,
+};
 use std::io;
 use sunrise_core::geometry::{Aabb, ShapeOp, Vec3, VoxelShape};
 use sunrise_world::{
+    block_collision::BlockCollisionRegistry,
     block_collision_scan::{BlockCollisionScan, BlockCollisionWorld},
-    collision_context::CollisionContext,
+    collision_context::{CollisionContext, CollisionEntity, CollisionItem, EntityContextKind},
     collision_exclusions::Excluding,
     entity_obstruction::EntityIdentity,
     world_movement::{
@@ -20,10 +24,47 @@ impl Hub {
     /// Where the guest ends moving from `from` towards `to` through the level as it stands now:
     /// where a carried player is committed. Nowhere to collide (no collision data) it is `to`.
     pub(super) fn settle(&self, i: usize, from: [f64; 3], to: [f64; 3], ctx: &TickCtx) -> [f64; 3] {
-        let g = &self.guests[i];
         let Some(binding) = ctx.collision else {
             return to;
         };
+        self.settle_in(i, from, to, ctx.world, binding, &[])
+            .unwrap_or(to)
+    }
+
+    /// [`Self::settle_in`] for the guest of connection `conn`; `None` for one the hub has no more.
+    /// `entities` are the boxes of the solid entities it may meet.
+    pub fn settle_conn(
+        &self,
+        conn: u32,
+        from: [f64; 3],
+        to: [f64; 3],
+        world: &World,
+        binding: &BlockCollisionRegistry<'_>,
+        entities: &[Aabb],
+    ) -> Option<[f64; 3]> {
+        self.settle_in(
+            self.guests.connection_index(conn)?,
+            from,
+            to,
+            world,
+            binding,
+            entities,
+        )
+    }
+
+    /// [`Self::settle`] through `world` and its collision data, `None` when the level cannot
+    /// answer (a move too long for the collision query's budget): a caller that must not pass
+    /// a wall on failure moves nothing.
+    fn settle_in(
+        &self,
+        i: usize,
+        from: [f64; 3],
+        to: [f64; 3],
+        world: &World,
+        binding: &BlockCollisionRegistry<'_>,
+        entities: &[Aabb],
+    ) -> Option<[f64; 3]> {
+        let g = &self.guests[i];
         let movement = Vec3::new(to[0] - from[0], to[1] - from[1], to[2] - from[2]);
         let d = g.dimensions();
         let half = f64::from(d.width) / 2.0;
@@ -35,11 +76,15 @@ impl Hub {
                 from[2] + half,
             ),
         );
-        let context = CollisionContext::position(from[1]).with_descending(g.sneaking);
-        let mut scene = SceneCollisions {
-            world: ctx.world,
-            binding,
-            subject: None,
+        let context = guest_context(g, from[1], g.sneaking);
+        let mut scene = EntityCollisions {
+            blocks: SceneCollisions {
+                world,
+                binding,
+                subject: None,
+            },
+            entities,
+            border: None,
         };
         let done = if g.collision_exclusions.is_empty() {
             settled(g, bounds, movement, context, &mut scene)
@@ -55,9 +100,7 @@ impl Hub {
                 },
             )
         };
-        done.map_or(to, |done| {
-            [from[0] + done.x, from[1] + done.y, from[2] + done.z]
-        })
+        done.map(|done| [from[0] + done.x, from[1] + done.y, from[2] + done.z])
     }
 
     /// The collision part of handlePlayerPositionChange: whether the move
@@ -105,24 +148,54 @@ impl Hub {
         // step is below «moved wrongly»'s threshold, and its cancel must
         // correct the guest all the same.
         let overridden = gate.overridden();
-        // A move with no exclusions pays this one check.
-        if g.collision_exclusions.is_empty() {
-            return check_move(g, from, to, requested, movement, overridden, &mut scene);
-        }
-        let boxes = g.collision_exclusions.boxes();
-        check_move(
-            g,
-            from,
-            to,
-            requested,
-            movement,
-            overridden,
-            &mut Excluding {
-                world: &mut scene,
-                boxes,
-            },
-        )
+        // The guest's move, as the entity a block's parts are asked about (the gate names it
+        // for its own moves): the server asks the same question the guest's client did.
+        sunrise_client_render::moving_colliders::as_mover(g.entity_id as u32, || {
+            // A move with no exclusions pays this one check.
+            if g.collision_exclusions.is_empty() {
+                return check_move(g, from, to, requested, movement, overridden, &mut scene);
+            }
+            let boxes = g.collision_exclusions.boxes();
+            check_move(
+                g,
+                from,
+                to,
+                requested,
+                movement,
+                overridden,
+                &mut Excluding {
+                    world: &mut scene,
+                    boxes,
+                },
+            )
+        })
     }
+}
+
+/// The context the guest's own client moves through (`MotionWorld::context`): a player at `y`
+/// holding the item in its selected slot, so a part is asked the same query on both sides. The
+/// identity is the guest's own, whoever the move's collider exemption names (a carried guest's
+/// carrier, say), so a part is asked about the guest in every scan of its moves.
+fn guest_context(g: &Guest, y: f64, descending: bool) -> CollisionContext<'_> {
+    let held = g
+        .inventory
+        .get(g.selected)
+        .and_then(Option::as_ref)
+        .filter(|stack| stack.count > 0)
+        .map_or(CollisionItem::EMPTY, |stack| CollisionItem {
+            item: &stack.item,
+            count: 1,
+        });
+    CollisionContext::for_entity(
+        CollisionEntity {
+            identity: EntityIdentity(u64::from(g.entity_id as u32)),
+            kind: EntityContextKind::Player,
+            y,
+            descending,
+            main_hand: Some(held),
+        },
+        false,
+    )
 }
 
 /// How far the guest's box `bounds` gets by `movement` in `world`, as `Entity.move` resolves it.
@@ -179,7 +252,7 @@ where
     // the vertical part: `yDist > -0.5 || yDist < 0.5` always holds).
     // The mover's own sneaking, as CollisionContext.of(player): a sneaking
     // player descends through scaffolding.
-    let context = CollisionContext::position(from[1]).with_descending(g.sneaking);
+    let context = guest_context(g, from[1], g.sneaking);
     let done = settled(g, old, movement, context, world);
     // The gate decides what actually moves: the requested delta, a listener's
     // replacement, or nothing (a cancel). «Moved wrongly» still measures the
@@ -205,7 +278,7 @@ where
             world,
             CollisionCheckRequest {
                 entity: EntityIdentity(0),
-                context: CollisionContext::position(old.min_position().y),
+                context: guest_context(g, old.min_position().y, false),
                 bounds: old,
                 candidate_budget: 1_000_000,
             },
