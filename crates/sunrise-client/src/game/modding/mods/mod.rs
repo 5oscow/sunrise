@@ -697,11 +697,11 @@ pub(super) struct ContentOverlay {
 fn refuse_primary_namespace_claims(
     manifests: &[&sunrise_mod_package::Manifest],
 ) -> sunrise_client::Result<()> {
-    let primary: std::collections::HashSet<_> = manifests
+    let mut primary: std::collections::HashSet<&str> = manifests
         .iter()
         .map(|manifest| manifest.id.as_str())
-        .chain(mod_api::__private::installed_code_ids())
         .collect();
+    primary.extend(mod_api::__private::installed_code_ids());
     for manifest in manifests {
         if let Some(namespace) = manifest
             .namespaces
