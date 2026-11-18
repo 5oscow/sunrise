@@ -25,7 +25,7 @@ Vanilla oracles are reused too: tools/parity_shim.py stands in for java and
 javac and replays an oracle run whose inputs are unchanged, so a Rust-only
 change costs only the Rust side. A harness that fails while reusing oracle
 results is rerun fresh, and stops reusing them if it then passes. --fresh
-never reuses them, and --all only when PARITY_ORACLE_KEEP names a folder
+never reuses them, and --all reuses them only when PARITY_ORACLE_KEEP names a folder
 that outlives the checkout (the daily's CI keep): the shim keeps runs there
 and replays one only for the same command on byte-identical files, and a
 harness that passed only fresh is remembered there for FRESH_ONLY_DAYS.
@@ -1131,8 +1131,10 @@ def fresh_only(keep):
     """{harness: date} of the harnesses that passed only without kept oracle runs, within FRESH_ONLY_DAYS."""
     listing = keep / "fresh-only.json"
     names = json.loads(listing.read_text(encoding="utf-8")) if listing.exists() else {}
+    if not isinstance(names, dict):
+        return {}
     oldest = time.strftime("%Y-%m-%d", time.gmtime(time.time() - FRESH_ONLY_DAYS * 86400))
-    return {name: day for name, day in names.items() if day >= oldest}
+    return {name: day for name, day in names.items() if isinstance(name, str) and isinstance(day, str) and day >= oldest}
 
 
 def remember_fresh_only(keep, names, results):
@@ -1693,7 +1695,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("names", nargs="*", help="harness names, e.g. food or block_update")
     parser.add_argument("--all", action="store_true", help="run every harness, ignoring earlier passes; oracle runs are "
-                        "reused only from PARITY_ORACLE_KEEP")
+                        "reused only when PARITY_ORACLE_KEEP is set")
     parser.add_argument("--skip-named-only", action="store_true", help="omit named-only harnesses from --all (the daily set)")
     parser.add_argument("--exclude", action="append", default=[], help="exclude a harness and its shards")
     parser.add_argument("--fresh", action="store_true", help="run the vanilla oracles even if their inputs are unchanged")

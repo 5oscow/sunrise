@@ -20,7 +20,10 @@ A run that reads stdin from a pipe, or fails, is never cached.
 PARITY_JAVA_CACHE=0 disables reuse (tools/parity.py --fresh).
 
 A run's identity includes the JVM option variables (JVM_ENVIRONMENT), which
-change what java does without changing its command line.
+change what java does without changing its command line, and the variables the
+oracles read (ORACLE_ENVIRONMENT; tests/test_parity_runner.py checks the list
+against every System.getenv in the oracles): their values, and the files under
+any path a value names as inputs, as for a path in the arguments.
 
 PARITY_ORACLE_KEEP names a folder that outlives the checkout (the daily's
 per-repository CI keep). There a run is also kept by content: its command,
@@ -49,6 +52,11 @@ KEEP = Path(os.environ["PARITY_ORACLE_KEEP"]) if os.environ.get("PARITY_ORACLE_K
 KEEP_FORMAT = 2
 # Read by the JVM itself: the same command line runs differently under each.
 JVM_ENVIRONMENT = ("JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS", "_JAVA_OPTIONS", "CLASSPATH")
+# Read by the oracles (System.getenv in mods/sunrise/src/test/java): harnesses pass files and choices through them.
+ORACLE_ENVIRONMENT = ("AI_TRACE", "CAULDRON_TRACE", "DUMP_TOOLTIPS", "MENU_TRACE", "ORACLE_TRACE", "SCULK_TRACE",
+                      "SUNRISE_CATALOG_TRACE", "SUNRISE_CHUNKS", "SUNRISE_DATAPACKS", "SUNRISE_DIMENSION", "SUNRISE_FLAT",
+                      "SUNRISE_HEIGHTS", "SUNRISE_ISOLATED", "SUNRISE_OLD_CHUNKS", "SUNRISE_ORDER", "SUNRISE_PHASE",
+                      "SUNRISE_PIECES", "SUNRISE_PLACED", "SUNRISE_RINGS", "SUNRISE_START_NBT")
 # The files of a JDK that decide what its programs do, relative to its home (the launcher's folder's parent): an
 # update in place changes at least these.
 JDK_FILES = ("release", "lib/modules", "lib/server/libjvm.so", "lib/server/libjvm.dylib")
@@ -109,6 +117,12 @@ def tree(root):
     for directory, _, files in os.walk(root):
         for name in files:
             yield os.path.join(directory, name)
+
+
+def environment_paths(environment):
+    """Every existing filesystem path a keyed variable names, a path list split as a classpath is."""
+    return [os.path.abspath(entry) for value in environment.values() for entry in value.split(os.pathsep)
+            if entry and os.path.exists(entry)]
 
 
 def named_paths(arguments):
@@ -239,8 +253,18 @@ def restore(entry):
         for temporary, _ in staged:
             Path(temporary).unlink(missing_ok=True)
         return None
-    for temporary, path in staged:
-        os.replace(temporary, path)
+    published = []
+    try:
+        for temporary, path in staged:
+            os.replace(temporary, path)
+            published.append(path)
+    except OSError:
+        # Half a replay is worse than none: the oracle runs and writes them all.
+        for temporary, path in staged:
+            Path(temporary).unlink(missing_ok=True)
+        for path in published:
+            Path(path).unlink(missing_ok=True)
+        return None
     # Its mtime orders the keep's pruning (tools/parity.py): a replayed run stays. Pruned meanwhile, it was still read.
     try:
         os.utime(entry)
@@ -289,9 +313,10 @@ def main():
     stdin = stdin_identity(hashes)
     if stdin is None:
         os.execv(program, [program, *arguments])
-    paths = named_paths(arguments)
+    environment = {name: os.environ[name] for name in (*JVM_ENVIRONMENT, *ORACLE_ENVIRONMENT) if name in os.environ}
+    paths = named_paths(arguments) + environment_paths(environment)
     command = {"program": os.path.realpath(program), "arguments": arguments, "cwd": os.getcwd(), "stdin": stdin,
-               "environment": {name: os.environ[name] for name in JVM_ENVIRONMENT if name in os.environ}}
+               "environment": environment}
     key = hashlib.sha256(json.dumps(command, sort_keys=True).encode()).hexdigest()
     record = CACHE / f"{key}.json"
     saved = json.loads(record.read_text()) if record.exists() else None

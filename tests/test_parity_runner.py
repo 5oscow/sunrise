@@ -610,6 +610,39 @@ class OracleReuseTests(unittest.TestCase):
         self.new_checkout()
         self.assertEqual(self.oracle(), 3)  # the same JDK and options as the last run: replayed
 
+    def test_a_file_named_through_an_oracle_variable_is_an_input(self):
+        keep = self.bin.parent / "keep"
+        self.env["PARITY_ORACLE_KEEP"] = str(keep)
+        order = self.bin.parent / "order.txt"
+        order.write_text("first")
+        self.env["SUNRISE_ORDER"] = str(order)
+        self.assertEqual(self.oracle(), 1)
+        self.assertEqual(self.oracle(), 1)
+        # The same argv, other bytes behind the variable: neither tier replays.
+        order.write_text("second")
+        self.assertEqual(self.oracle(), 2)
+        self.new_checkout()
+        order.write_text("first")
+        self.assertEqual(self.oracle(), 2)  # the first run's bytes again: replayed from the keep
+        self.new_checkout()
+        order.write_text("third")
+        self.assertEqual(self.oracle(), 3)
+
+    def test_every_variable_an_oracle_reads_is_keyed(self):
+        import re
+        from tools import parity_shim
+        sources = (Path(parity.__file__).parents[1] / "mods/sunrise/src/test/java").rglob("*.java")
+        read = set()
+        for source in sources:
+            text = source.read_text(encoding="utf-8", errors="replace")
+            read |= set(re.findall(r'getenv\(\)\.getOrDefault\("([A-Z0-9_]+)"', text))
+            read |= set(re.findall(r'getenv\("([A-Z0-9_]+)"\)', text))
+            # A variable an oracle reads by a name this can't see would be an untracked input.
+            self.assertNotRegex(text, r'getenv\((?!\)|")', source.name)
+            self.assertNotRegex(text, r'getenv\(\)(?!\.getOrDefault\(")', source.name)
+        self.assertTrue(read)
+        self.assertLessEqual(read, set(parity_shim.ORACLE_ENVIRONMENT))
+
     def test_a_damaged_kept_run_runs_the_oracle_and_writes_nothing_of_it(self):
         keep = self.bin.parent / "keep"
         self.env["PARITY_ORACLE_KEEP"] = str(keep)
@@ -699,6 +732,26 @@ class OracleKeepTests(unittest.TestCase):
                 "light": {"status": "pass", "oracle_reuse": True}})
             self.assertEqual(parity.fresh_only(keep), {"loot": time.strftime("%Y-%m-%d", time.gmtime()),
                                                        "inherited": lately})
+            for damaged in ("[1, 2]", '{"loot": 3, "light": "2026-11-18"}'):
+                (keep / "fresh-only.json").write_text(damaged)
+                self.assertEqual(set(parity.fresh_only(keep)) - {"light"}, set())
+
+    def test_a_replay_that_cannot_publish_every_output_publishes_none(self):
+        import json
+        from tools import parity_shim
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            entry = root / "keep" / "ab" / "abcd"
+            (entry / "files").mkdir(parents=True)
+            first, blocked = root / "out" / "a.txt", root / "out" / "b"
+            (entry / "files" / "0").write_text("a")
+            (entry / "files" / "1").write_text("b")
+            (entry / "stdout").write_bytes(b"done")
+            (entry / "stderr").write_bytes(b"")
+            (entry / "run.json").write_text(json.dumps({"outputs": [str(first), str(blocked)]}))
+            (blocked / "in-the-way").mkdir(parents=True)  # a folder where a file must go: its replacement fails
+            self.assertIsNone(parity_shim.restore(entry))
+            self.assertEqual(sorted(path.name for path in (root / "out").iterdir()), ["b"])
 
     def test_a_run_whose_streams_are_too_large_or_whose_keep_is_unwritable_is_not_kept(self):
         from tools import parity_shim
