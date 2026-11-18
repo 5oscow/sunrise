@@ -485,6 +485,17 @@ pub struct Capability {
     pub contract: CapabilityContract,
 }
 
+/// An engine-owned tag that a package may extend. Documentation is outside the contract hash.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExtensionTag {
+    /// Tag registry directory (for example `block`).
+    pub registry: String,
+    /// Namespaced tag identifier.
+    pub id: String,
+    /// The engine reader's contract.
+    pub doc: String,
+}
+
 /// A behaviour's contract: only its `version`, which is compared on its own and stays out of the
 /// hash, as a hook's does.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

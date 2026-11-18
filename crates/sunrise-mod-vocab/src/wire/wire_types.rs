@@ -412,7 +412,7 @@ macro_rules! slot_keys {
                 if self.registry.namespace() != "minecraft" || self.registry.path() != $registry {
                     return None;
                 }
-                host.registry_entry_key_slot(self).map($key)
+                crate::backend_of(host)?.registry_entry_key_slot(self).map($key)
             }
             )+
         }
@@ -431,9 +431,15 @@ macro_rules! slot_keys {
         #[cfg(test)]
         mod registry_entry_narrowing_tests {
             struct Host(std::cell::Cell<usize>);
-            impl crate::Host for Host {}
-            crate::impl_host_areas!(Host, except(keys));
-            impl crate::prelude::KeysHost for Host {
+            impl crate::Host for Host {
+                fn backend(&self) -> Option<crate::BackendRef<'_>> {
+                    Some(crate::BackendRef::of(self))
+                }
+            }
+            impl crate::Backend for Host {}
+            crate::impl_host_areas!(Host);
+            crate::impl_backend_areas!(Host, except(keys));
+            impl crate::prelude::KeysBackend for Host {
                 fn registry_entry_key_slot(&self, entry: &crate::RegistryEntry) -> Option<u32> {
                     self.0.set(self.0.get() + 1);
                     (entry.id.path() == "known").then_some(9123)
@@ -522,7 +528,7 @@ slot_keys!(registries;
         crate::content::registry_keys::resolved_items().get()?.identifiers.get(id).copied()
     };
     MenuKey => as_menu_key, "menu", |id: &crate::Identifier| {
-        crate::content::registry_keys::MENUS.read().ok()?.as_ref()?.identifiers.get(id).copied()
+        crate::content::registry_keys::resolved_menus().read().ok()?.as_ref()?.identifiers.get(id).copied()
     };
     crate::client::particle_keys::ParticleKey => as_particle_key, "particle_type", |id: &crate::Identifier| {
         crate::client::particle_keys::particle_key(id).map(|key| key.0)

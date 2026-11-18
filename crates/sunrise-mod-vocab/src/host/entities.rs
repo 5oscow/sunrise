@@ -249,7 +249,7 @@ pub trait EntitiesBackend {
     /// Side: both.
     /// The entity's box (`Entity.getBoundingBox`): its lowest and highest
     /// corner. Displays and markers have zero-sized physical boxes; interactions use
-    /// their saved dimensions. None for End crystals and the dragon; a dragon part's is its own. On a client, reads
+    /// their saved dimensions. End crystals have their 2 x 2 box. None for the dragon; a dragon part's is its own. On a client, reads
     /// its own copy of a tracked entity, or the local player's predicted box.
     #[access(WorldOnly)]
     fn entity_bounding_box(&self, entity: EntityRef) -> Option<[[f64; 3]; 2]>;
@@ -320,6 +320,13 @@ pub trait EntitiesBackend {
     /// player's own, zero for the kinds without a head.
     #[access(WorldOnly)]
     fn entity_head_yaw(&self, entity: EntityRef) -> Option<f32>;
+    /// Side: server.
+    /// The yaw of the entity's body (`LivingEntity.yBodyRot`) in degrees as
+    /// vanilla keeps it, not normalized: the direction its drawn body faces,
+    /// which its head turns against. Mobs only: None for players and every
+    /// other kind, and for a stale handle.
+    #[access(WorldOnly)]
+    fn entity_body_yaw(&self, entity: EntityRef) -> Option<f32>;
     /// Side: server.
     /// The horizontal direction the entity faces (`Entity.getDirection`):
     /// `north`, `south`, `east` or `west`.
@@ -489,6 +496,21 @@ pub trait EntitiesBackend {
     /// Whether the entity is in lava (`Entity.isInLava`): players and mobs.
     #[access(WorldOnly)]
     fn entity_is_in_lava(&self, entity: EntityRef) -> Option<bool>;
+    /// Side: both.
+    /// `Entity.isUnderWater`: the previous eye-in-water sample AND current water contact,
+    /// not just the current eye fluid. The local client player instead follows
+    /// `LocalPlayer.isUnderWater`: the saved eye sample alone, even without current water contact.
+    /// Players and mobs, using the client's own cached state on a client.
+    /// None for other kinds or stale handles.
+    #[access(WorldOnly)]
+    fn entity_is_under_water(&self, entity: EntityRef) -> Option<bool>;
+    /// Side: both.
+    /// `Entity.isOnFire`: not fire immune, and positive remaining fire ticks OR the
+    /// client's synced shared flag 0. Players, mobs, armor stands and items, as
+    /// `entity_fire_ticks` covers. Reads the client's own copy on a client;
+    /// None for other kinds or stale handles.
+    #[access(WorldOnly)]
+    fn entity_is_on_fire(&self, entity: EntityRef) -> Option<bool>;
     /// Side: server.
     /// Whether the entity's type never burns (`EntityType.fireImmune`):
     /// players and mobs.

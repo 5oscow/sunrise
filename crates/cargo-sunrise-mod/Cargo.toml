@@ -25,6 +25,7 @@ sunrise-mod-point-emit = { path = "../sunrise-mod-point-emit" }
 sunrise-native-build = { path = "../sunrise-native-build" }
 # The uses scan, the fit test, the surface search and its diff, over the fetched SDK's `surface.json`.
 sunrise-mod-surface = { path = "../sunrise-mod-surface" }
+sunrise-shader-api = { path = "../sunrise-shader-api" }
 sunrise-release-sign = { path = "../sunrise-release-sign" }
 sunrise-port-pack = { path = "../sunrise-port-pack" }
 rustc-demangle = "0.1"
@@ -45,7 +46,7 @@ base64 = "0.22"
 ring = "0.17"
 tempfile = "3.27.0"
 sunrise-mod-wasm = { path = "../sunrise-mod-wasm" }
-wasmtime = { version = "50", default-features = false, features = ["cranelift", "runtime", "std"] }
+wasmtime = { package = "sunrise-wasmtime", path = "../sunrise-wasmtime" }
 zip = { version = "9.1.3", default-features = false, features = ["deflate"] }
 
 [lints]

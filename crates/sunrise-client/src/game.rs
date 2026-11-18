@@ -8,7 +8,11 @@ use loading_screen::{
     App, Loading, leave_fullscreen_after, missing_resources, run_event_loop, unclean_start_recovery,
 };
 use motion_ids::{motion_at, motion_block_entity};
-use resource_load::{Progress, launch_world, load_resources, named_scope, synchronous_startup};
+#[cfg(test)]
+use resource_load::load_resources;
+use resource_load::{
+    Progress, launch_world, load_resources_for_mods, named_scope, synchronous_startup,
+};
 /// The content tables the world plays with, as field-level borrows: the
 /// world's data packs' over the game's own. The `Game::items`/`recipes`/
 /// `stations` methods read the same tables, but taking `&self` blocks a
@@ -264,9 +268,6 @@ enum Screen {
     Mod,
     /// PvP & HUD's widget editor (game/interface/hud_editor.rs).
     HudEditor,
-    /// Sunrise Studio script screen (`studio_screen_open`): canvas draws
-    /// itself, takes input through the screen hooks, does not draw chat.
-    Studio,
 }
 impl Screen {
     /// The id native mods see for this screen (`ScreenView.id`, the
@@ -296,7 +297,6 @@ impl Screen {
             Screen::DebugOptions => "debug_options",
             Screen::Mod => "mod",
             Screen::HudEditor => "hud_editor",
-            Screen::Studio => "studio",
         }
     }
 }
@@ -387,6 +387,13 @@ struct GameLevel<'w> {
     cake_requested: std::cell::Cell<bool>,
     cake_answer: Option<bool>,
     api_level: Option<mod_api::LevelRef>,
+    part_state_index: Option<
+        &'w std::sync::Arc<
+            std::sync::Mutex<
+                sunrise_mod_runtime::attachments::index::AttachmentIndex<mod_api::AttachmentHolder>,
+            >,
+        >,
+    >,
     positions: piston_carry_state::PositionState<'w>,
     border: &'w sunrise_core::geometry::border::BorderGeometry,
     world: &'w mut World,
@@ -438,6 +445,7 @@ struct GameLevel<'w> {
     recipes: &'w sunrise_client::crafting::Recipes,
     /// Container loot tables (`unpackLootTable`).
     loot: Option<std::sync::Arc<sunrise_world::loot::LootData>>,
+    loot_storage: std::sync::Arc<sunrise_world::loot::copy::StorageData>,
     registry: &'static sunrise_world::registry::BlockRegistry,
     block_registries: &'w sunrise_client::command::args::Registries,
     rules: sunrise_world::level::GameRules,
@@ -1644,7 +1652,8 @@ struct Game<'a> {
     /// The screen of a mod block's menu open on this client (`native_screen`).
     mod_screen: Option<native_hooks::OpenNativeScreen>,
     /// The players with each mod container open, by level (`tick_mod_container_viewers`).
-    mod_container_viewers: HashMap<(&'static str, (i32, i32, i32)), u32>,
+    mod_container_viewers:
+        HashMap<(&'static str, (i32, i32, i32)), mod_container_openers::ModContainerOpeners>,
     /// Where item entities are, while the block entities tick (hoppers).
     item_columns: Option<machines::ItemColumns>,
     /// The item columns for one pass of the players' pickups
@@ -1875,9 +1884,9 @@ struct Game<'a> {
     tick_hit: std::cell::Cell<Option<Option<Hit>>>,
     /// Non-window simulation's tick-local mob ray, including the held attack range.
     tick_mob: Option<Option<(usize, f64, [f64; 3])>>,
-    /// Number keys since the last tick (`keyHotbarSlots[i].consumeClick`):
+    /// Each number key's clicks since it was last consumed (`keyHotbarSlots[i].clickCount`):
     /// `Minecraft.handleKeybinds` selects them before the tick's inputs.
-    hotbar_presses: sunrise_client::input_queue::InputQueue<usize>,
+    hotbar_presses: [sunrise_client::input_queue::ClickQueue; 9],
     /// `Player.entityInteractionRange` and `blockInteractionRange`, refreshed
     /// each tick from the attribute (a server's reach modifier, creative's
     /// +2): the pick helpers' `&self` reach.
@@ -2436,35 +2445,34 @@ impl Game<'_> {
         use sunrise_core::geometry::{Aabb, Vec3};
         let facts = self.res.facts().get(state);
         let cached = self.collision.cached_shapes();
-        let shape =
-            sunrise_client::collisions::published_outline(&self.world, self.collision, state, pos)
-                .or_else(|| cached.context_outline_shape(state, self.outline_context_kind()));
-        let boxes: Cow<'_, [Aabb]> = if let Some(shape) = shape {
-            Cow::Borrowed(shape.boxes())
-        } else if let Some(b) = self.context_outline(pos, state, true, &self.be_anims) {
-            Cow::Owned(vec![Aabb::new(
+        use native_state_shapes::Outline;
+        let (outline, offset) =
+            self.selected_outline(&self.world, state, &self.be_anims, pos, true);
+        let boxes: Cow<'_, [Aabb]> = match outline {
+            Outline::Published(shape) | Outline::Declared(shape, _) => Cow::Borrowed(shape.boxes()),
+            Outline::Dynamic(b) => Cow::Owned(vec![Aabb::new(
                 Vec3::new(b[0], b[1], b[2]),
                 Vec3::new(b[3], b[4], b[5]),
-            )])
-        } else {
-            Cow::Owned(
+            )]),
+            Outline::Default(facts) => Cow::Owned(
                 facts
                     .outline
                     .iter()
                     .map(|b| Aabb::new(Vec3::new(b[0], b[1], b[2]), Vec3::new(b[3], b[4], b[5])))
                     .collect(),
-            )
-        };
-        let offset = if facts.outline_offset {
-            self.pack
-                .context
-                .tables
-                .offset(state, pos[0], pos[2])
-                .unwrap_or([0.; 3])
-        } else {
-            [0.; 3]
+            ),
         };
         let offset = Vec3::new(offset[0], offset[1], offset[2]);
+        let interaction_offset = cached.shape_offset(
+            state,
+            sunrise_world::collision::ShapeChannel::Interaction,
+            pos,
+        );
+        let interaction_offset = Vec3::new(
+            interaction_offset[0],
+            interaction_offset[1],
+            interaction_offset[2],
+        );
         let interaction: Cow<'_, [Aabb]> = if let Some(shape) = cached.interaction_shape(state) {
             Cow::Borrowed(shape.boxes())
         } else {
@@ -2490,7 +2498,7 @@ impl Game<'_> {
         );
         let hit = sunrise_world::interaction_shapes::clip_with_interaction_override(
             boxes.iter().map(|b| b.move_by(offset)),
-            interaction.iter().copied(),
+            interaction.iter().map(|b| b.move_by(interaction_offset)),
             start,
             end,
             BlockPos::new(pos[0], pos[1], pos[2]),
@@ -2555,12 +2563,11 @@ impl Game<'_> {
     /// (aiStep, unless a spectator or a passenger): a corner inside a
     /// suffocating block sets a 0.1 speed towards the nearest side that is
     /// free, on that side's axis; a later corner overwrites an earlier one.
-    /// Suffocating is a full collision cube that is also a full render cube,
-    /// as `in_wall` has it.
+    /// Suffocating is `LocalPlayer.suffocatesAt` (`closest_space_nudge`).
     fn closest_space_nudge(&self) -> [Option<f64>; 2] {
         match self.player.as_ref() {
             Some(p) if !p.spectator && self.riding.is_none() => {
-                closest_space_nudge(p, &self.world, self.res.facts())
+                closest_space_nudge(p, &self.world, self.collision, self.level_suffocation())
             }
             _ => [None; 2],
         }
@@ -2657,6 +2664,13 @@ impl Game<'_> {
         origin: [f64; 3],
         block_entity: Option<sunrise_core::nbt::Tag>,
     ) -> sunrise_world::loot::LootPlace {
+        let (block_entity, block_components) = match block_entity {
+            Some(saved) => {
+                let source = spill::source_snapshot(saved, None, None);
+                (Some(source.nbt), Some(source.components))
+            }
+            None => (None, None),
+        };
         let (rain, thunder) = self.world.weather.levels(1.0);
         // Level.canHaveWeather: sky light, no ceiling and not the End.
         let weather =
@@ -2664,6 +2678,8 @@ impl Game<'_> {
         sunrise_world::loot::LootPlace {
             origin: Some(origin),
             block_entity,
+            block_components,
+            storage: Some(self.score.storage.snapshot()),
             level: Some(sunrise_world::loot::LootLevel {
                 dimension: self.dim.id().to_owned(),
                 game_time: self.world.game_time,
@@ -2939,6 +2955,7 @@ impl Game<'_> {
             cake_requested: std::cell::Cell::new(false),
             cake_answer: None,
             api_level: self.level(self.dim.id()),
+            part_state_index: self.attachment_indexes.get(&self.dim),
             command_block_transition: None,
             positions: piston_carry_state::PositionState {
                 gateways: &mut self.be_anims.gateway_servers,
@@ -2987,6 +3004,7 @@ impl Game<'_> {
             } else {
                 self.server_loot.get()
             },
+            loot_storage: self.score.storage.snapshot(),
             registry: self.pack.assets.registry,
             block_registries: &self.pack.block_registries,
             rules,
@@ -4004,6 +4022,9 @@ impl Game<'_> {
         } else if self.open_mod_menu(key) {
             // A mod block's container (`native_block_entity_container`).
             self.container = Some(key);
+            if self.lan_acting.is_none() {
+                self.mod_container_player_opener(key, true);
+            }
         } else if self.open_station(pos, &name) {
             // Workstation menus: game/blocks/stations.rs.
         } else {
@@ -5326,16 +5347,6 @@ impl Game<'_> {
             Screen::BlockEditor => self.draw_block_editor(&mut batch),
             Screen::DebugOptions => self.draw_debug_options(&mut batch),
             Screen::HudEditor => self.draw_hud_editor(&mut batch),
-            Screen::Studio => {
-                self.draw_screen_phase(
-                    &mut batch,
-                    sunrise_client::screen_draw::RenderPhase::Background,
-                );
-                self.draw_screen_phase(
-                    &mut batch,
-                    sunrise_client::screen_draw::RenderPhase::Foreground,
-                );
-            }
             Screen::Inventory => {
                 let from = batch.vertices.len();
                 self.draw_inventory(&mut batch);
@@ -5395,6 +5406,9 @@ impl Game<'_> {
         self.craft_table = None;
         self.open_container_slots = None;
         if let Some(key) = self.container.take() {
+            if self.lan_acting.is_none() {
+                self.mod_container_player_opener(key, false);
+            }
             // A cart's or chest boat's items go back to it.
             self.close_cart_container(key);
             let last = self.container_opener_event(key, false);
@@ -6503,6 +6517,7 @@ impl Game<'_> {
         self.structure_spawns = sunrise_client::mobs::spawn_selection::StructureSpawns::load(&root);
         // Native tag reads use the lock to tell that the tag tables are ready.
         self.session_lock = Some(session_lock);
+        self.refresh_recipe_property_context();
         // Keep the no-pack preload; a world's packs replace it atomically.
         // A later /reload keeps this session's synchronized registries.
         lan::sync::open_world_sync_data(
@@ -8523,7 +8538,6 @@ impl Game<'_> {
                 })
                 .map(|h| {
                     let state = self.world.block(h.pos[0], h.pos[1], h.pos[2]);
-                    let f = self.res.facts().get(state);
                     outline_after_terrain = self
                         .pack
                         .render
@@ -8534,41 +8548,7 @@ impl Game<'_> {
                                 .iter()
                                 .any(|(_, model)| model.faces.iter().any(|f| f.translucent))
                         });
-                    let o = if f.outline_offset {
-                        self.pack
-                            .context
-                            .tables
-                            .offset(state, h.pos[0], h.pos[2])
-                            .unwrap_or([0.0; 3])
-                    } else {
-                        [0.0; 3]
-                    };
-                    let p = h.pos.map(f64::from);
-                    if let Some(edges) = self
-                        .collision
-                        .cached_shapes()
-                        .context_outline_edges(state, self.outline_context_kind())
-                    {
-                        return edges
-                            .iter()
-                            .map(|e| std::array::from_fn(|i| p[i % 3] + o[i % 3] + e[i]))
-                            .collect();
-                    }
-                    if let Some(b) = self.context_outline(h.pos, state, true, &self.be_anims) {
-                        return sunrise_client::blocks::cube_edges()
-                            .iter()
-                            .map(|e| {
-                                std::array::from_fn(|i| {
-                                    let k = i % 3;
-                                    p[k] + b[k] + e[i] * (b[k + 3] - b[k])
-                                })
-                            })
-                            .collect();
-                    }
-                    f.outline_edges
-                        .iter()
-                        .map(|e| std::array::from_fn(|i| p[i % 3] + o[i % 3] + e[i]))
-                        .collect()
+                    self.outline_edges_iter(state, h.pos).collect()
                 })
                 .unwrap_or_default()
         } else {
@@ -10373,6 +10353,12 @@ impl Game<'_> {
                     self.report_activity();
                     let target = self.tick_target_millis();
                     let steps = self.clock.advance(elapsed, target);
+                    if steps > 0
+                        && self.title.is_none()
+                        && let Err(e) = self.poll_remote_before_tick()
+                    {
+                        log::warn!("Sunrise: {e}");
+                    }
                     self.client_tick_steps(steps, Some(event_loop))?;
                     self.extras_frame(elapsed);
                     self.extras_retry()?;
@@ -11197,7 +11183,7 @@ impl<'a> Game<'a> {
             forced_hit: None,
             tick_hit: Default::default(),
             tick_mob: None,
-            hotbar_presses: sunrise_client::input_queue::InputQueue::new(hand::HOTBAR_PRESSES),
+            hotbar_presses: [hand::HOTBAR_CLICKS; 9],
             entity_reach: 3.0,
             block_reach: 4.5,
             client_pick: Default::default(),
@@ -11501,7 +11487,7 @@ pub(crate) fn run_with(
         pack_error = Some(e.to_string());
         mods::content_root(&vanilla_root, &options.mods)
     })?;
-    let mut loaded = load_resources(
+    let mut loaded = load_resources_for_mods(
         selected_root,
         pack_finders::data_packs(&options.mods),
         launch_world(&options),
@@ -11512,6 +11498,7 @@ pub(crate) fn run_with(
         mods::LoadRole::startup(options.execution_role),
         &Progress::new(),
         &mut |_, _| {},
+        &options.mods,
     )?;
     let gui = loaded.gui.ok_or("missing menu bundle")?;
     options.resources = loaded.root.clone();

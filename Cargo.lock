@@ -525,13 +525,14 @@ dependencies = [
  "sunrise-native-build",
  "sunrise-port-pack",
  "sunrise-release-sign",
+ "sunrise-shader-api",
+ "sunrise-wasmtime",
  "tempfile",
  "toml",
  "toml_edit",
  "ureq",
  "wasm-encoder 0.261.0",
  "wasmparser 0.261.0",
- "wasmtime",
  "zip",
 ]
 
@@ -4485,6 +4486,7 @@ dependencies = [
  "sunrise-bench",
  "sunrise-chat-filter",
  "sunrise-client-core",
+ "sunrise-client-gameplay",
  "sunrise-client-input",
  "sunrise-client-lib",
  "sunrise-client-render",
@@ -4494,6 +4496,7 @@ dependencies = [
  "sunrise-engine-slots",
  "sunrise-friends",
  "sunrise-game-discovery",
+ "sunrise-gameplay",
  "sunrise-guest-stack",
  "sunrise-hdr",
  "sunrise-hooks",
@@ -4538,6 +4541,13 @@ dependencies = [
  "sunrise-assets",
  "sunrise-core",
  "sunrise-world",
+]
+
+[[package]]
+name = "sunrise-client-gameplay"
+version = "0.1.0"
+dependencies = [
+ "sunrise-client-lib",
 ]
 
 [[package]]
@@ -4778,6 +4788,13 @@ dependencies = [
  "serde_json",
  "sunrise-mod-source",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "sunrise-gameplay"
+version = "0.1.0"
+dependencies = [
+ "sunrise-client-lib",
 ]
 
 [[package]]
@@ -5113,11 +5130,11 @@ dependencies = [
  "sunrise-mod-points",
  "sunrise-mod-runtime",
  "sunrise-threads",
+ "sunrise-wasmtime",
  "sunrise-world",
  "syn 2.0.119",
  "tempfile",
  "wasmparser 0.261.0",
- "wasmtime",
  "wat",
 ]
 
@@ -5465,6 +5482,13 @@ dependencies = [
  "rustc-demangle",
  "sunrise-guest-stack",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "sunrise-wasmtime"
+version = "0.1.0"
+dependencies = [
+ "wasmtime",
 ]
 
 [[package]]

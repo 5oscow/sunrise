@@ -1327,6 +1327,60 @@ impl TriState {
 /// }
 /// ```
 pub trait LevelHost {
+    /// `BlockState.isFaceSturdy`, through the same engine read as `LevelRef::block_face_sturdy`.
+    /// `canSupportRigidBlock` is `(pos, Up, Rigid)`. `canSupportCenter` is `(pos, face, Center)`
+    /// except that vanilla also refuses `Down` on blocks tagged `minecraft:unstable_bottom_center`.
+    /// Returns None for unloaded or out-of-height positions, on clients, or without a support
+    /// view. Never loads chunks or opens loot containers. Available only on the owning game
+    /// thread, never in worker-thread hook bodies.
+    fn block_face_sturdy(
+        &self,
+        _pos: [i32; 3],
+        _face: crate::BlockFace,
+        _support: crate::SupportType,
+    ) -> Option<bool> {
+        None
+    }
+    /// `LevelReader.canSeeSky`: full stored sky light, as `LevelRef::can_see_sky` reads it.
+    /// Returns None for unloaded or out-of-height positions, on clients, or without a light
+    /// view. Never loads chunks or opens loot containers. Available only on the owning game
+    /// thread, never in worker-thread hook bodies.
+    fn can_see_sky(&self, _pos: [i32; 3]) -> Option<bool> {
+        None
+    }
+    /// `BlockGetter.getBlockEntity` in this level. None if absent, unloaded or out for its
+    /// own tick. Never loads chunks or opens loot containers. Clients return their local
+    /// block entity handle, not unsynced server contents. Owning game thread only, never
+    /// reachable from a worker-thread hook body.
+    fn block_entity(&self, _pos: [i32; 3]) -> Option<crate::BlockEntityRef> {
+        None
+    }
+    /// The slots on this side, as `ItemsHost::container_size` reads them.
+    /// Snapshot only: never generates loot or loads chunks. None for unloaded positions,
+    /// clients or unsupported storage. Owning game thread only, never in worker hook bodies.
+    fn container_size(&self, _at: crate::BlockSide) -> Option<usize> {
+        None
+    }
+    /// A side-local slot snapshot, as `ItemsHost::container_stack` reads it.
+    /// Never generates unopened container loot or loads chunks; unopened slots remain empty.
+    /// None for unloaded positions, clients, empty slots or unsupported storage.
+    /// Owning game thread only, never reachable from a worker-thread hook body.
+    fn container_stack(&self, _at: crate::BlockSide, _slot: usize) -> Option<crate::ItemStack> {
+        None
+    }
+    /// Capture Part state using the same attachment snapshot as `Host::query`.
+    /// No chunk loading or loot generation. Refuses unloaded or stale holders; clients
+    /// have no server Part state. Owning game thread only, never in worker hook bodies.
+    // hidden: typed BlockEntityPartState read implementation.
+    #[doc(hidden)]
+    fn block_entity_part_snapshot(
+        &self,
+        _entity: crate::BlockEntityRef,
+        _namespace: &str,
+        _name: &str,
+    ) -> Result<crate::AttachmentBatch, crate::PartStateError> {
+        Err(crate::PartStateError::Stale)
+    }
     /// Read a block entity's saved data without identity metadata from this level.
     /// Stale generations and handles from another level or world return None.
     fn block_entity_data(&self, _entity: crate::BlockEntityRef) -> Option<crate::Compound> {
@@ -1469,6 +1523,15 @@ pub trait LevelHost {
 
 /// Access vanilla's `Level.random`, so draws come in vanilla's order.
 pub trait LevelRandomHost: LevelHost {
+    /// Vanilla comparator container signal, 0 to 15, through the engine comparator path.
+    /// Generates unopened container loot once before reading, as vanilla getItem does;
+    /// stack maxima are honoured. `Some(0)` at a loaded position without a usable container view.
+    /// None on clients, for unloaded or out-of-height positions.
+    /// Never loads chunks. Owning game thread only, never
+    /// reachable from a worker-thread hook body.
+    fn container_signal(&mut self, _pos: [i32; 3]) -> Option<i32> {
+        None
+    }
     /// The holders' server-owned attachments; `TYPE.get(host, holder)` reads one through it.
     fn attachments(&mut self) -> &mut dyn AttachmentStore {
         unimplemented!("LevelRandomHost::attachments")

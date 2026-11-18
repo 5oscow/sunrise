@@ -345,6 +345,7 @@ impl Game<'_> {
 
     pub(in crate::game) fn craft_grid_remainders(&self, recipe: &str) -> Vec<Option<ItemStack>> {
         self.recipes().remainders(
+            &self.loop_context,
             recipe,
             &self.craft_grid[..self.craft_size * self.craft_size],
             self.craft_size,
@@ -394,7 +395,8 @@ pub(super) fn match_state_properties(
 /// the parser checks properties against, whether a world is open or not.
 pub(super) fn block_registries(registry: &'static BlockRegistry) -> Arc<Registries> {
     static CACHE: Mutex<Vec<(usize, Arc<Registries>)>> = Mutex::new(Vec::new());
-    let key = std::ptr::from_ref(registry) as usize;
+    // Derived from the registry's data alone, so equal data across installations shares one.
+    let key = registry.payload_identity();
     let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((_, reg)) = cache.iter().find(|(cached, _)| *cached == key) {
         return reg.clone();
@@ -1200,9 +1202,11 @@ mod crafting_remainder_tests {
                     Some(ItemStack::new("minecraft:stone", 1)),
                     None,
                 ];
-                let remaining = game
-                    .recipes()
-                    .remainders("missing", &grid, 2, &|s| game.crafting_remainder(s));
+                let remaining =
+                    game.recipes()
+                        .remainders(&game.loop_context, "missing", &grid, 2, &|s| {
+                            game.crafting_remainder(s)
+                        });
                 assert_eq!(
                     remaining,
                     vec![
@@ -1288,9 +1292,11 @@ mod crafting_remainder_tests {
                     &|s| game.crafting_remainder(s),
                 );
                 let grid = [Some(fuel), None, None, None];
-                let crafted = game
-                    .recipes()
-                    .remainders("missing", &grid, 2, &|s| game.crafting_remainder(s));
+                let crafted =
+                    game.recipes()
+                        .remainders(&game.loop_context, "missing", &grid, 2, &|s| {
+                            game.crafting_remainder(s)
+                        });
                 assert_eq!(furnace.items[1], crafted[0]);
                 assert_eq!(
                     furnace.items[1].as_ref().map(|s| (s.damage, s.count)),
