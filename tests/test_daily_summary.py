@@ -345,6 +345,21 @@ class DailySummaryTests(unittest.TestCase):
         self.assertFalse(any(path.startswith("issues/6") for _, path, _ in api.writes),
                          "a blocked fn-replace-check neither comments on nor closes its own issue")
 
+    def test_a_failed_linux_fresh_check_with_no_published_sdk_files_one_issue(self):
+        # The Linux call's `fresh` failed, so no Linux build job ran and fn-replace-check found no input.
+        linux = GREEN_JOBS.index(job("sdk / fresh"))
+        jobs = [j for at, j in enumerate(GREEN_JOBS) if at != linux and j["name"] not in (
+            "sdk / build linux", "sdk / build linux-server", summary.FN_REPLACE_JOB)] + [
+            job("sdk / fresh", "failure", ["Is sdk-<sha> published?"]), job("sdk / build linux", "skipped"),
+            job("sdk / build linux-server", "skipped"), job(summary.FN_REPLACE_JOB, "failure", ["The Linux legs are here"])]
+        api = Api(jobs)
+        _, out = self.run_summary(api, [shard_report()], results=dict(
+            LEGS, sdk={"result": "failure"}, **{"fn-replace-check": {"result": "failure"}}))
+        self.assertEqual(out.splitlines(), ["green=false", "sdk_green=false"])
+        created = [body for _, path, body in api.writes if path == "issues"]
+        self.assertEqual([body["title"] for body in created], ["Daily: sdk did not complete"])
+        self.assertIn("`fn-replace-check` could not run: it needs this leg's SDK", created[0]["body"])
+
     def test_fn_replace_check_missing_its_input_from_a_green_linux_sdk_is_its_own_red(self):
         jobs = [j for j in GREEN_JOBS if j["name"] != summary.FN_REPLACE_JOB] + [
             job(summary.FN_REPLACE_JOB, "failure", ["The Linux legs are here"])]

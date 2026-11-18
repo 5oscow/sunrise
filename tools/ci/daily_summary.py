@@ -92,6 +92,9 @@ SDK_CHECK = "sdk-check"
 # fn-replace-check reads the Linux legs' SDK: when one of those failed, its only failures are the missing input, which
 # the Linux leg's own issue already accounts for.
 LINUX_SDK_JOBS = ("sdk / build linux", "sdk / build linux-server")
+# The Linux legs' call's own result, kept apart from the sdk leg's (PART_OF): its `fresh` can fail with no published
+# SDK to reuse, and then no Linux build job runs at all.
+LINUX_SDK_CALL = "sdk (Linux legs)"
 FN_REPLACE_JOB = "fn-replace-check / fn-replace-check"
 FN_REPLACE_INPUT_STEPS = ("Run actions/download-artifact@v4", "The Linux legs are here")
 # A pull request merged on its own (`Merge pull request #N from`) or as a rollup's member (`Merge #N at <sha>`).
@@ -154,6 +157,7 @@ def leg_results(needs):
     """Each leg's call result from RESULTS (toJSON(needs)), a leg made of several calls (PART_OF) taking the first that
     did not succeed."""
     results = dict(needs)
+    results[LINUX_SDK_CALL] = needs.get("sdk", {})
     for part, leg in PART_OF.items():
         if part in results and results.get(leg, {}).get("result") == "success":
             results[leg] = results[part]
@@ -292,6 +296,8 @@ def verdicts(jobs, reports, results, legs, parity_report):
     helpers = failed_helpers(jobs)
     unstarted = unstarted_legs(jobs, results)
     linux_sdk_red = {job["name"] for job in jobs if job["name"] in LINUX_SDK_JOBS and not job_green(job, fresh_ok)}
+    if results.get(LINUX_SDK_CALL, {}).get("result", "success") != "success":
+        linux_sdk_red.add("sdk")  # the leg's own item (its failed `fresh`, say) is the Linux legs' too
     fn_replace_blocked = False
     for job in leg_jobs(jobs):
         if never_started(job) or job["name"].startswith(f"{PARITY} / "):
@@ -351,13 +357,6 @@ def verdicts(jobs, reports, results, legs, parity_report):
             if expected not in names:
                 unfinished.append((expected, "missing", [], "did not report: the daily matrix has this shard, but "
                                    "no job of that name ran"))
-    if fn_replace_blocked:
-        blocked = "`fn-replace-check` could not run: it needs this leg's SDK"
-        for item in tests:
-            if item["leg"] in linux_sdk_red:
-                item["blocks"] = blocked
-        unfinished = [(leg, conclusion, steps, f"{reason}. {blocked}" if leg in linux_sdk_red else reason)
-                      for leg, conclusion, steps, reason in unfinished]
     seen = {job["name"].split(" / ", 1)[0] for job in leg_jobs(jobs)}
     for leg in legs:
         result = results.get(leg, {}).get("result", "missing")
@@ -392,6 +391,13 @@ def verdicts(jobs, reports, results, legs, parity_report):
             unfinished.append((leg, result, [], "did not complete, and no job or test of it says why"))
         elif result == "success" and not accounted:
             green_legs.add(leg)  # a whole leg that reported and passed closes its leg-level issue
+    if fn_replace_blocked:
+        blocked = "`fn-replace-check` could not run: it needs this leg's SDK"
+        for item in tests:
+            if item["leg"] in linux_sdk_red:
+                item["blocks"] = blocked
+        unfinished = [(leg, conclusion, steps, f"{reason}. {blocked}" if leg in linux_sdk_red else reason)
+                      for leg, conclusion, steps, reason in unfinished]
     green = legs_green(legs, jobs, results, tests, unfinished) and not tests and not unfinished
     failing = {(item["package"], item["test"]) for item in tests}
     return tests, unfinished, passed - failing, green_legs, green
