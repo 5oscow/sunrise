@@ -498,62 +498,133 @@ impl BuiltinCondition {
 }
 
 enum Condition<'a> {
-    ModLoaded(Option<&'a str>),
+    ModLoaded(&'a str),
     Literal(bool),
-    FeatureFlags(&'a Value),
-    Registered(&'a Value),
-    TagEmpty(&'a Value),
+    FeatureFlags(Vec<String>),
+    Registered { registry: String, value: String },
+    TagEmpty { registry: String, tag: String },
     Not(Box<Self>),
     Combinator { and: bool, children: Vec<Self> },
     Custom(&'a ConditionHandler, &'a Value),
-    MissingType,
+}
+
+#[derive(Default)]
+struct DecodeErrors<'a> {
+    unknown: BTreeSet<&'a str>,
+    invalid: BTreeSet<String>,
 }
 
 impl<'a> Condition<'a> {
     fn decode(
         node: &'a Value,
         handlers: Option<&'a Handlers>,
-        unknown: &mut BTreeSet<&'a str>,
-    ) -> Self {
+        errors: &mut DecodeErrors<'a>,
+    ) -> Option<Self> {
         let Some(name) = node["type"].as_str() else {
-            return Self::MissingType;
+            errors
+                .invalid
+                .insert("load condition: missing or invalid type".into());
+            return None;
         };
-        let builtin = name
+        if let Some(kind) = name
             .split_once(':')
-            .and_then(|(ns, path)| BuiltinCondition::from_parts(ns, path));
+            .and_then(|(ns, path)| BuiltinCondition::from_parts(ns, path))
+        {
+            return match Self::decode_builtin(kind, node, handlers, errors) {
+                Ok(condition) => condition,
+                Err(field) => {
+                    errors.invalid.insert(format!("{name}: invalid {field}"));
+                    None
+                }
+            };
+        }
+        let handler = handlers.and_then(|handlers| match name.split_once(':') {
+            Some((ns, _)) if !ns.is_empty() => handlers.get(name),
+            _ => handlers.get(&format!(
+                "minecraft:{}",
+                name.strip_prefix(':').unwrap_or(name)
+            )),
+        });
+        if let Some(handler) = handler {
+            Some(Self::Custom(handler.as_ref(), node))
+        } else {
+            errors.unknown.insert(name);
+            None
+        }
+    }
+
+    fn decode_builtin(
+        kind: BuiltinCondition,
+        node: &'a Value,
+        handlers: Option<&'a Handlers>,
+        errors: &mut DecodeErrors<'a>,
+    ) -> Result<Option<Self>, &'static str> {
+        let identifier = |value: &Value, field| {
+            value
+                .as_str()
+                .and_then(|id| sunrise_core::identifier::Identifier::parse(id).ok())
+                .map(|id| id.to_string())
+                .ok_or(field)
+        };
+        let registry = || {
+            node.get("registry").map_or_else(
+                || Ok("minecraft:item".into()),
+                |value| identifier(value, "registry"),
+            )
+        };
         use BuiltinCondition::*;
-        match builtin {
-            Some(Always) => Self::Literal(true),
-            Some(Never) => Self::Literal(false),
-            Some(ModLoaded) => Self::ModLoaded(node["modid"].as_str()),
-            Some(FeatureFlags) => Self::FeatureFlags(&node["flags"]),
-            Some(Registered) => Self::Registered(node),
-            Some(TagEmpty) => Self::TagEmpty(node),
-            Some(Not) => Self::Not(Box::new(Self::decode(&node["value"], handlers, unknown))),
-            Some(kind @ (And | Or)) => Self::Combinator {
+        Ok(Some(match kind {
+            Always => Self::Literal(true),
+            Never => Self::Literal(false),
+            ModLoaded => Self::ModLoaded(node["modid"].as_str().ok_or("modid")?),
+            FeatureFlags => Self::FeatureFlags(
+                node["flags"]
+                    .as_array()
+                    .filter(|flags| !flags.is_empty())
+                    .ok_or("flags")?
+                    .iter()
+                    .map(|value| identifier(value, "flags"))
+                    .collect::<Result<_, _>>()?,
+            ),
+            Registered => Self::Registered {
+                registry: registry()?,
+                value: identifier(&node["value"], "value")?,
+            },
+            TagEmpty => Self::TagEmpty {
+                registry: registry()?,
+                tag: identifier(&node["tag"], "tag")?,
+            },
+            Not => {
+                let child = node.get("value").ok_or("value")?;
+                return Ok(
+                    Self::decode(child, handlers, errors).map(|child| Self::Not(Box::new(child)))
+                );
+            }
+            kind @ (And | Or) => Self::Combinator {
                 and: matches!(kind, And),
                 children: node["values"]
                     .as_array()
-                    .into_iter()
-                    .flatten()
-                    .map(|child| Self::decode(child, handlers, unknown))
+                    .ok_or("values")?
+                    .iter()
+                    .filter_map(|child| Self::decode(child, handlers, errors))
                     .collect(),
             },
-            None => {
-                let handler = handlers.and_then(|handlers| match name.split_once(':') {
-                    Some((ns, _)) if !ns.is_empty() => handlers.get(name),
-                    _ => handlers.get(&format!(
-                        "minecraft:{}",
-                        name.strip_prefix(':').unwrap_or(name)
-                    )),
-                });
-                if let Some(handler) = handler {
-                    Self::Custom(handler.as_ref(), node)
-                } else {
-                    unknown.insert(name);
-                    Self::MissingType
-                }
+        }))
+    }
+
+    // Only pure tests with available inputs can be skipped after the result
+    // is decided. Decode has already checked even the branches we skip.
+    fn must_test(&self, context: &Context) -> bool {
+        match self {
+            Self::ModLoaded(_) | Self::Literal(_) => false,
+            Self::FeatureFlags(_) => context.features.is_none(),
+            Self::Registered { .. } => context.registries.is_none(),
+            Self::TagEmpty { .. } => context.tags.is_none(),
+            Self::Not(child) => child.must_test(context),
+            Self::Combinator { children, .. } => {
+                children.iter().any(|child| child.must_test(context))
             }
+            Self::Custom(..) => true,
         }
     }
 
@@ -562,66 +633,61 @@ impl<'a> Condition<'a> {
         loaded: &dyn Fn(&str) -> bool,
         context: &Context,
         missing_context: &mut Option<&'static str>,
-    ) -> Result<Option<bool>, ConditionError> {
-        // Both NeoForge codecs default `registry` to `minecraft:item`.
-        let registry =
-            |node: &Value| qualified(node["registry"].as_str().unwrap_or("minecraft:item"));
-        use ConditionError::Invalid;
+    ) -> Verdict {
         let mut unavailable = |reason| {
             missing_context.get_or_insert(reason);
-            Ok(None)
+            Ok(false)
         };
         Ok(match self {
-            Self::ModLoaded(id) => Some(id.is_some_and(loaded)),
-            Self::Literal(value) => Some(*value),
+            Self::ModLoaded(id) => loaded(id),
+            Self::Literal(value) => *value,
             Self::FeatureFlags(flags) => {
                 let Some(enabled) = &context.features else {
                     return unavailable(
                         "neoforge:feature_flags_enabled: no feature flags in this load",
                     );
                 };
-                let invalid = || Invalid("neoforge:feature_flags_enabled: invalid flags".into());
-                let mut answer = true;
-                for flag in flags.as_array().ok_or_else(invalid)? {
-                    answer &= enabled.contains(&qualified(flag.as_str().ok_or_else(invalid)?));
-                }
-                Some(answer)
+                flags.iter().all(|flag| enabled.contains(flag))
             }
-            Self::Registered(node) => {
+            Self::Registered { registry, value } => {
                 let Some(registries) = &context.registries else {
                     return unavailable("neoforge:registered: no registries in this load");
                 };
-                Some(
-                    node["value"]
-                        .as_str()
-                        .is_some_and(|id| registries.contains(&registry(node), &qualified(id))),
-                )
+                registries.contains(registry, value)
             }
-            Self::TagEmpty(node) => {
+            Self::TagEmpty { registry, tag } => {
                 let Some(tags) = &context.tags else {
                     return unavailable("neoforge:tag_empty: tags not loaded yet");
                 };
-                let tag = node["tag"]
-                    .as_str()
-                    .ok_or_else(|| Invalid("neoforge:tag_empty: invalid tag".into()))?;
-                Some(!tags.contains(&registry(node), &qualified(tag)))
+                !tags.contains(registry, tag)
             }
-            Self::Not(child) => child
-                .test(loaded, context, missing_context)?
-                .map(|value| !value),
+            Self::Not(child) => !child.test(loaded, context, missing_context)?,
             Self::Combinator { and, children } => {
-                let mut answer = Some(*and);
-                for child in children {
-                    let value = child.test(loaded, context, missing_context)?;
-                    answer = answer
-                        .zip(value)
-                        .map(|(a, b)| if *and { a && b } else { a || b });
-                }
-                answer
+                Self::combine(*and, children, loaded, context, missing_context)?
             }
-            Self::Custom(handler, args) => Some(handler(args).map_err(Invalid)?),
-            Self::MissingType => None,
+            Self::Custom(handler, args) => handler(args).map_err(ConditionError::Invalid)?,
         })
+    }
+
+    fn combine(
+        and: bool,
+        children: &[Self],
+        loaded: &dyn Fn(&str) -> bool,
+        context: &Context,
+        missing_context: &mut Option<&'static str>,
+    ) -> Verdict {
+        let mut answer = and;
+        for child in children {
+            if answer == and || child.must_test(context) {
+                let value = child.test(loaded, context, missing_context)?;
+                answer = if and {
+                    answer && value
+                } else {
+                    answer || value
+                };
+            }
+        }
+        Ok(answer)
     }
 }
 
@@ -631,29 +697,28 @@ fn evaluate(
     handlers: Option<&Handlers>,
     context: &Context,
 ) -> Verdict {
-    // Resolve the entire tree before invoking any test, including branches that
+    // Decode the entire tree before invoking any test, including branches that
     // cannot affect the boolean answer.
-    let mut unknown = BTreeSet::new();
+    let mut errors = DecodeErrors::default();
     let conditions: Vec<_> = payload
         .as_array()
         .into_iter()
         .flatten()
-        .map(|node| Condition::decode(node, handlers, &mut unknown))
+        .filter_map(|node| Condition::decode(node, handlers, &mut errors))
         .collect();
-    if !unknown.is_empty() {
-        return Err(ConditionError::Invalid(format!(
+    if !errors.unknown.is_empty() {
+        errors.invalid.insert(format!(
             "unknown load conditions [{}]",
-            unknown.into_iter().collect::<Vec<_>>().join(", ")
-        )));
+            errors.unknown.into_iter().collect::<Vec<_>>().join(", ")
+        ));
     }
-    let mut allowed = true;
+    if !errors.invalid.is_empty() {
+        return Err(ConditionError::Invalid(
+            errors.invalid.into_iter().collect::<Vec<_>>().join("; "),
+        ));
+    }
     let mut missing_context = None;
-    for condition in conditions {
-        // Unavailable context omits the file but does not hide a handler error.
-        allowed &= condition
-            .test(loaded, context, &mut missing_context)?
-            .unwrap_or(false);
-    }
+    let allowed = Condition::combine(true, &conditions, loaded, context, &mut missing_context)?;
     missing_context.map_or(Ok(allowed), |reason| {
         Err(ConditionError::MissingContext(reason))
     })
@@ -874,7 +939,7 @@ mod tests {
     }
 
     #[test]
-    fn malformed_flags_and_tags_stay_unsupported_under_not() {
+    fn malformed_builtin_operands_are_errors_before_testing() {
         for malformed in [
             json!({"type": "neoforge:feature_flags_enabled"}),
             json!({"type": "neoforge:feature_flags_enabled", "flags": null}),
@@ -885,16 +950,55 @@ mod tests {
             json!({"type": "neoforge:tag_empty", "tag": null}),
             json!({"type": "neoforge:tag_empty", "tag": []}),
             json!({"type": "neoforge:tag_empty", "tag": 1}),
+            json!({"type": "neoforge:feature_flags_enabled", "flags": []}),
+            json!({"type": "neoforge:mod_loaded", "modid": false}),
+            json!({"type": "neoforge:registered", "value": true}),
+            json!({"type": "neoforge:registered", "registry": null, "value": "stone"}),
+            json!({"type": "neoforge:tag_empty", "tag": "bad tag"}),
+            json!({"type": "neoforge:not"}),
+            json!({"type": "neoforge:and", "values": {}}),
+            json!({"type": "neoforge:or", "values": [null]}),
         ] {
             let not = json!({"type": "neoforge:not", "value": malformed.clone()});
             let twice = json!({"type": "neoforge:not", "value": not.clone()});
             for condition in [malformed, not, twice] {
-                let conditions = LoadConditions::new([])
-                    .with_features(["vanilla"])
-                    .with_tags([("item", Vec::<&str>::new())]);
-                assert!(!conditions.allows_file(&file(condition), "data/test/recipe/bad.json"));
-                assert!(conditions.check_errors().is_err());
+                let payload = json!([
+                    {"type":"neoforge:mod_loaded","modid":"should_not_test"},
+                    {"type":"neoforge:or","values":[{"type":"neoforge:always"},condition]}
+                ]);
+                assert!(
+                    matches!(
+                        evaluate(
+                            &payload,
+                            &|_| panic!("tested before decode"),
+                            None,
+                            &Context::default()
+                        ),
+                        Err(ConditionError::Invalid(_))
+                    ),
+                    "{payload}"
+                );
             }
+        }
+    }
+
+    #[test]
+    fn decided_combinators_skip_pure_tests_but_not_missing_context() {
+        for (op, deciding, answer) in [("and", "never", false), ("or", "always", true)] {
+            let decisive = json!({ "type": format!("neoforge:{deciding}") });
+            let pure = json!({"type":"neoforge:mod_loaded","modid":"create"});
+            let payload = json!([{"type":format!("neoforge:{op}"),"values":[decisive,pure]}]);
+            let loaded = |_: &str| panic!("tested an already decided pure branch");
+            let context = Context::default();
+            assert_eq!(evaluate(&payload, &loaded, None, &context).unwrap(), answer);
+            let missing = json!([{"type":format!("neoforge:{op}"),"values":[decisive,
+                {"type":"neoforge:not","value":{"type":"neoforge:tag_empty","tag":"test:x"}}]}]);
+            assert!(matches!(
+                evaluate(&missing, &loaded, None, &context),
+                Err(ConditionError::MissingContext(
+                    "neoforge:tag_empty: tags not loaded yet"
+                ))
+            ));
         }
     }
 

@@ -86,6 +86,7 @@ fn unavailable_context_does_not_hide_a_registered_handler_error() {
     let conditions = registered(Arc::new(AtomicUsize::new(0)));
     assert!(!conditions.allows_file(
         &json!({"neoforge:conditions":[{"type":"neoforge:or","values":[
+            {"type":"neoforge:always"},
             {"type":"neoforge:tag_empty","tag":"testmod:empty"},
             {"type":"testmod:flag","value":"bad"}
         ]}]}),
