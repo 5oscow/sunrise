@@ -259,7 +259,7 @@ impl Game<'_> {
         let health = base.with_packs(root, &overlay, reload)?;
         // With no pack, `res` holds the tables, unless content mods switched
         // live since it was loaded: their data is in the new root.
-        let mut items = Items::load(
+        let mut items = Items::load_registry(
             root,
             self.pack.assets.registry,
             self.res.facts(),
@@ -309,17 +309,21 @@ impl Game<'_> {
                 &overlay,
             )
         };
-        if let Err(errors) = conditions.check_errors() {
-            // Recipe source discovery aggregates its condition errors with its
-            // JSON errors instead of adding them to the overlay diagnostics.
-            return Err(match sources {
-                Ok(_) => errors,
-                Err(recipe_error) => format!("{errors}; {recipe_error}"),
+        if let Err(mut errors) = conditions.check_errors() {
+            // Report a broken loot reference alongside the conditions that may
+            // have removed its target. Recipe discovery reports its own errors.
+            for error in [loot.as_ref().err(), sources.as_ref().err()]
+                .into_iter()
+                .flatten()
+            {
+                use std::fmt::Write;
+                let _ = write!(errors, "; {error}");
             }
-            .into());
+            return Err(errors.into());
         }
         let sources = sources?;
         let mut loot = loot?;
+        items.component_defaults = loot.component_defaults().clone();
         let recipes = Recipes::from_resolved(root, &items, &overlay, &sources)?;
         let mut stations = sunrise_client::stations::StationData::from_sources(
             root,

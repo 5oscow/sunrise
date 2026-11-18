@@ -147,6 +147,12 @@ fn datapack_game_open_reload_and_exhaustion_are_atomic() {
                     );
                     (path, id, file)
                 });
+                let referencing_loot =
+                    root.join("datapacks/override/data/registry_test/loot_table/reference.json");
+                write(
+                    &referencing_loot,
+                    r#"{"pools":[{"rolls":1,"condition":"registry_test:bad","entries":[{"type":"minecraft:item","name":"minecraft:stick"}]}]}"#,
+                );
                 let features = game.level.enabled_features.clone();
                 let error = game
                     .reload_datapacks(true, &features)
@@ -158,6 +164,11 @@ fn datapack_game_open_reload_and_exhaustion_are_atomic() {
                     "{error}"
                 );
                 assert!(error.contains("absent:spell_enabled"), "{error}");
+                assert!(
+                    error.contains("unknown reference") && error.contains("registry_test:bad"),
+                    "{error}"
+                );
+                std::fs::remove_file(referencing_loot).unwrap();
                 for (path, id, file) in bad_entries {
                     assert!(error.contains(&path) && error.contains(&id), "{error}");
                     std::fs::remove_file(file).unwrap();
