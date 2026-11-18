@@ -1,10 +1,7 @@
 """The name lists CI compares between hosts: read from a module built byte by byte."""
-import sys
 import unittest
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-import wasm_names
+from tools import wasm_names
 
 
 def string(text):
