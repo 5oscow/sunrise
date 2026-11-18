@@ -97,7 +97,7 @@ fn a_horizon_player_and_their_mount_keep_their_attachments() {
         player_extra: Some(player),
         ..Level::default()
     }
-    .write(&dir)
+    .write(&dir, &Default::default())
     .unwrap();
     let back = Level::read(&dir).unwrap().player_extra.unwrap();
     let _ = fs::remove_dir_all(&dir);
@@ -113,7 +113,7 @@ fn a_horizon_player_and_their_mount_keep_their_attachments() {
 #[test]
 fn a_horizon_dimension_keeps_its_attachments_and_saves_them_under_sunrise() {
     let dir = scratch("level");
-    let save = SaveDir::new(dir.clone(), LevelShape::OVERWORLD);
+    let save = SaveDir::new(dir.clone(), LevelShape::OVERWORLD, None);
     let horizon = dir.join("data").join("horizon").join("attachments.dat");
     fs::create_dir_all(horizon.parent().unwrap()).unwrap();
     write_dat(
