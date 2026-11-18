@@ -295,7 +295,8 @@ impl Game<'_> {
                 .set(Some((container, "minecraft:merchant".to_owned())));
             r.set_menu_title(Some(text.clone()));
         }
-        let session = sunrise_client::merchant::Session::new(Vec::new(), true);
+        let mut session = sunrise_client::merchant::Session::new(Vec::new(), true);
+        session.client_side = true;
         self.open_remote_merchant(session, (!title.is_empty()).then_some(text));
     }
     /// ClientboundMerchantOffersPacket.
