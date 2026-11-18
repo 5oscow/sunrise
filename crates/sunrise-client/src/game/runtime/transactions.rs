@@ -1021,7 +1021,9 @@ impl Game<'_> {
                     key,
                     amount,
                 } => {
-                    self.native_as_player(player, |g| g.award_custom_stat(key, amount));
+                    self.native_as_player_in_their_level(player, |g| {
+                        g.award_custom_stat(key, amount)
+                    });
                 }
                 DeferredEffect::ItemStat {
                     player,
@@ -1029,7 +1031,9 @@ impl Game<'_> {
                     item,
                     amount,
                 } => {
-                    self.native_as_player(player, |g| g.award_stat(stat, &item, amount));
+                    self.native_as_player_in_their_level(player, |g| {
+                        g.award_stat(stat, &item, amount)
+                    });
                 }
                 DeferredEffect::Sound {
                     sound,
@@ -1044,25 +1048,25 @@ impl Game<'_> {
                 self.spawn_item(stack, pos.map(|p| f64::from(p) + 0.5), [0.0; 3], 10);
             }
             After::GivePickup(uuid) => {
-                self.native_as_player(uuid, |g| g.give_pickup());
+                self.native_as_player_in_their_level(uuid, |g| g.give_pickup());
             }
             After::InventoryTrigger(uuid) => {
-                self.native_as_player(uuid, |g| {
+                self.native_as_player_in_their_level(uuid, |g| {
                     g.check_inventory_trigger();
                 });
             }
             After::GiveRest(uuid, stack, owner) => {
-                self.native_as_player(uuid, |g| g.give_remainder(stack, owner));
+                self.native_as_player_in_their_level(uuid, |g| g.give_remainder(stack, owner));
             }
             After::PlayerEquip(uuid, slot, stack) => {
-                self.native_as_player(uuid, |g| {
+                self.native_as_player_in_their_level(uuid, |g| {
                     g.player_equipped(&slot, stack.as_ref());
                     g.apply_equipment();
                 });
             }
             After::PlayerDrop(uuid, stack) => {
                 // A player who left meanwhile drops nothing; their inventory had changed for good.
-                self.native_as_player(uuid, |g| {
+                self.native_as_player_in_their_level(uuid, |g| {
                     g.drop_plain(stack);
                 });
             }

@@ -21,7 +21,19 @@ impl Game<'_> {
         conn: u32,
         f: impl FnOnce(&mut Self) -> R,
     ) -> Result<R, TurnRefused> {
-        let swap = self.enter_guest_at(gi, conn, self.dim)?;
+        self.as_guest_from(gi, conn, self.dim, f)
+    }
+
+    /// `as_guest_at` with the outer player in `outer`'s level, which is not the one in place
+    /// when the turn runs in another level: the outer player is no building blocker there.
+    fn as_guest_from<R>(
+        &mut self,
+        gi: usize,
+        conn: u32,
+        outer: Dim,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> Result<R, TurnRefused> {
+        let swap = self.enter_guest_at(gi, conn, outer)?;
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             crate::game::dedicated::crash_fixture("guest", || {
                 self.lan
@@ -42,12 +54,13 @@ impl Game<'_> {
         }
     }
 
-    /// `as_guest` in the level the guest is in (`Player.level()`), `there`: a level other than
-    /// the one in place is put in place for the turn and the one in place put back after, so
-    /// what the turn drops, plays or tells lands where the guest is. Inside a transaction no
-    /// level moves (its journal is the level's in place): the turn writes only the guest's own
-    /// state, and what reaches their level waits for the commit, which runs it there. False when
-    /// the turn didn't run, or their level isn't open: it is never opened for this.
+    /// `as_guest` in the level the guest is in (`Player.level()`), `there`, for what reaches
+    /// the player's surroundings (a stack thrown from their eyes, a sound at them): a level
+    /// other than the one in place is put in place for the turn, with its moving colliders, and
+    /// the one in place put back after, a panic included. Inside a transaction no level moves
+    /// (its journal is the level's in place): the turn writes only the guest's own state, and
+    /// what reaches their level waits for the commit, which runs it there. False when the turn
+    /// didn't run, or their level isn't open: it is never opened for this.
     pub(in crate::game) fn as_guest_in_their_level(
         &mut self,
         conn: u32,
@@ -58,11 +71,14 @@ impl Game<'_> {
         if there == here || !self.transactions.is_empty() {
             return self.as_guest(conn, f).is_some();
         }
+        let Some(gi) = self.guest_index(conn) else {
+            return false;
+        };
         if !self.levels.parked.contains_key(&there) || self.enter_level(there).is_err() {
             return false;
         }
         let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            self.as_guest(conn, f).is_some()
+            self.in_this_levels_colliders(|game| game.as_guest_from(gi, conn, here, f).is_ok())
         }));
         // `here` was parked by the swap above, so entering it again only swaps back.
         let back = self.enter_level(here);

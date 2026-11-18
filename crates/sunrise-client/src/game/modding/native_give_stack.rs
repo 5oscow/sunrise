@@ -17,7 +17,7 @@ impl Game<'_> {
     ) -> Result<(), PlayerDataRefusal> {
         self.player_write_gate(player)?;
         let owner = Some(playerdata::uuid_ints(player.uuid()));
-        let ran = self.native_as_player_handle(player, |game| {
+        let ran = self.native_as_player_handle_in_their_level(player, |game| {
             game.give_acting_stack(stack, owner);
             // containerMenu.broadcastChanges: InventoryChangeTrigger.
             if game.player.is_some() {

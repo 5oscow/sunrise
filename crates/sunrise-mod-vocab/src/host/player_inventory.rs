@@ -56,9 +56,11 @@ pub trait PlayerInventoryBackendMut {
     /// the item places first, which is what separates it from giving or dropping into the
     /// inventory. `thrown_by_player` names the player as the item's thrower, as the drop key
     /// does. `Ok(None)` when the stack is in the world; otherwise `Ok(Some(stack))` comes back, untouched, for
-    /// the caller to put back: an empty stack, a stale or dead player, or a toss a mod canceled
-    /// (`item_toss`), so a refused drop never loses items. Invalid API stack conversion returns
-    /// `StackWriteError`, as other checked stack writes do.
+    /// the caller to put back: an empty stack, a stale or dead player, a toss a mod canceled
+    /// (`item_toss`), or, inside a transaction, a player in another level than the caller's,
+    /// so a refused drop never loses items. The stack lands in the player's level, whichever
+    /// level's hook drops it. Invalid API stack conversion returns `StackWriteError`, as other
+    /// checked stack writes do.
     #[access(WorldOnly)]
     fn player_drop_stack(
         &mut self,
@@ -106,7 +108,8 @@ pub trait PlayerInventoryBackendMut {
     /// in whole plays the pickup sound. Refuses, with nothing given, with `Stale`, `Client`,
     /// `Dead` or `Stack`, as `player_set_inventory_slot` does.
     /// An open transaction journals this write; an abort restores the previous value.
-    /// Overflow drops and pickup sounds wait for the outermost commit.
+    /// Overflow drops and pickup sounds wait for the outermost commit. Both land in the
+    /// player's level at the player, whichever level's hook gives the stack.
     #[access(WorldOnly)]
     fn player_give_stack(
         &mut self,
