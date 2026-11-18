@@ -82,6 +82,7 @@ pub struct LoadConditionDeclarations {
 }
 impl LoadConditionDeclarations {
     /// Start collecting declarations with the game evaluator's built-in ID check.
+    // hidden: the engine creates this collector; mods receive only the registrar.
     #[doc(hidden)]
     pub fn new(is_reserved: fn(&Identifier) -> bool) -> Self {
         Self {
