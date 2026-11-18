@@ -455,6 +455,49 @@ fn a_players_move_by_stops_at_a_boat() {
     });
 }
 
+/// `entity_move_by` names the player as the mover of its move, so a moving collider whose
+/// vehicle stack holds the player does not stop it, and one that does not hold it does.
+#[test]
+#[ignore = "daily"]
+fn a_players_move_by_is_the_mover_a_colliders_stack_exempts() {
+    use sunrise_client_render::moving_colliders::{Placed, Prepared, in_level};
+    use sunrise_core::geometry::{
+        Aabb,
+        oriented::{ColliderBoxes, Frame, OrientedCollider},
+    };
+    with_guests(|game| {
+        game.as_guest(13, |_| {}).unwrap();
+        let b = game.player(13).unwrap();
+        let [x, y, z] = b.entity().position(game).unwrap();
+        let player = game.lan.as_ref().unwrap().hub.guest(13).unwrap().entity_id as u32;
+        let block = |id: u32, at: f64, exempt: Vec<u32>| Placed {
+            id,
+            collider: OrientedCollider::new(
+                Frame::translation(Vec3::new(at, y, z - 0.5)),
+                std::sync::Arc::new(ColliderBoxes::new(vec![Aabb::new(
+                    Vec3::new(0.0, 0.0, 0.0),
+                    Vec3::new(1.0, 1.0, 1.0),
+                )])),
+            ),
+            exempt,
+        };
+        // One collider 1 block along whose stack holds the player, another 3 blocks along
+        // whose stack does not.
+        let placed = Prepared::new(vec![
+            block(900, x + 1.0, vec![900, player]),
+            block(901, x + 3.0, vec![901]),
+        ]);
+        let by = in_level(placed, || {
+            game.entity_move_by(b.entity(), [4.0, 0.0, 0.0], MoveCause::SelfMovement)
+        })
+        .unwrap();
+        assert!(
+            by[0] > 1.5 && by[0] < 2.8,
+            "passed the collider it rides with and stopped at the other, moved {by:?}"
+        );
+    });
+}
+
 /// The server has no predictive landing on a happy ghast: a player over a ghast that is not held
 /// still falls through it (`HappyGhast.canBeCollidedWith`, `isClientSide` branch), so a mod's
 /// move down is not stopped at its top the way the client's own walk is.
