@@ -64,6 +64,9 @@ SAME_CODE = (
             }
         }"""),
     )),
+    ("crates/sunrise-mod-package/src/modpack.rs", "launcher/crates/smod/src/modpack.rs", (
+        ('#[cfg(feature = "index")] impl PackMod', "impl PackMod"),
+    )),
 )
 
 

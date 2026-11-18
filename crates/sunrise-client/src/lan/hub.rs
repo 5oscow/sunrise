@@ -5291,6 +5291,7 @@ mod tests {
     mod carried_check_tests;
     mod cave_air_tests;
     mod collision_exclusion_tests;
+    mod collision_part_tests;
     mod effect_meta_tests;
     #[path = "../far_tests.rs"]
     mod far_tests;
