@@ -1731,6 +1731,13 @@ impl Game<'_> {
         Some(boat)
     }
     pub(super) fn boat_hit(&self) -> Option<(usize, f64)> {
+        let mut pick = crate::game::pick_accumulator::PickAccumulator::new(self.entity_reach);
+        self.boat_hit_with_pick(&mut pick)
+    }
+    pub(super) fn boat_hit_with_pick(
+        &self,
+        pick: &mut crate::game::pick_accumulator::PickAccumulator,
+    ) -> Option<(usize, f64)> {
         if let Some(hit) = self.cached_entity_pick() {
             let (entity, distance, _) = hit?;
             let index = self.boats.iter().position(|f| f.id == entity.id())?;
@@ -1740,9 +1747,6 @@ impl Game<'_> {
         let reach: f64 = self.entity_reach;
         let mut best: Option<(usize, f64)> = None;
         for (i, b) in self.boats.iter().enumerate() {
-            if Some(b.id) == self.riding {
-                continue;
-            }
             let bb = b.bounds();
             let (lo, hi) = (bb.min_position(), bb.max_position());
             let (lo, hi) = ([lo.x, lo.y, lo.z], [hi.x, hi.y, hi.z]);
@@ -1760,7 +1764,7 @@ impl Game<'_> {
                 t0 = t0.max(ta);
                 t1 = t1.min(tb);
             }
-            if hit && t0 <= t1 && best.is_none_or(|b| t0 < b.1) {
+            if hit && t0 <= t1 && pick.consider(self, b.id, t0) {
                 best = Some((i, t0));
             }
         }
