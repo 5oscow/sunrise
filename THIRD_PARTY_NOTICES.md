@@ -186,7 +186,7 @@ trademarks; Sunrise is not affiliated with AMD.
 The launcher shows the logo of the mod loader an instance plays with, and offers the logos as
 instance icons.
 
-- `launcher/assets/logos/{fabric,quilt,neoforge,forge}.png` are the loaders' logos as the launcher
+- `assets/logos/{fabric,quilt,neoforge,forge}.png` in [sunrise-launcher](https://github.com/sunrise-org/sunrise-launcher) are the loaders' logos as the launcher
   mockup on [playsunrise.net/launcher](https://playsunrise.net/launcher) shows them (sunrise-site
   `public/media/launcher/*.webp`, converted to PNG), each its project's own mark:
   [Fabric](https://fabricmc.net/), [Quilt](https://quiltmc.org/) (its art is
@@ -203,7 +203,7 @@ the project endorses Sunrise.
 The launcher's sign-in buttons follow Microsoft's published branding guidelines for apps that sign in
 with Microsoft accounts
 ([Sign in with Microsoft branding](https://learn.microsoft.com/en-us/entra/identity-platform/howto-add-branding-in-apps)).
-The four-square Microsoft symbol in `launcher/src/microsoft.rs` reproduces the squares, positions and
+The four-square Microsoft symbol in `https://github.com/sunrise-org/sunrise-launcher/blob/main/src/microsoft.rs` reproduces the squares, positions and
 colours of Microsoft's official `ms-symbollockup_mssymbol_19.svg` from that page, unmodified. Microsoft
 and its logo are trademarks of the Microsoft group of companies; Sunrise is not endorsed by Microsoft.
 
