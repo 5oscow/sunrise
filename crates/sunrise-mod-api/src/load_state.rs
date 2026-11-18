@@ -409,6 +409,7 @@ mod tests {
 
     #[test]
     fn admitted_owners_protect_primary_ids_in_either_install_order() {
+        crate::__private::initialize().unwrap();
         use mod_vocab::__private::{
             content_owner_disabled, install_content_owners, set_mod_enabled,
         };
