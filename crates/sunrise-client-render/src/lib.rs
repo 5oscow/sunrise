@@ -34,6 +34,7 @@ pub mod cit_glint;
 pub mod client_resources;
 pub mod clouds;
 pub mod collisions;
+pub mod columns;
 pub mod command_block;
 pub mod connected;
 pub mod containers;
