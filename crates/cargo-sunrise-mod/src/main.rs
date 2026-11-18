@@ -11,10 +11,10 @@
 //! - `inject add <at> --kind <kind> [--call <callee>] [--nth N] [--with <fn>]`: pin an inject.
 //! - `internals sync [--repo <path>]`: sync declarations for native or wasm mods.
 //! - `internals add <path>… [--kind <kind>]`: declare internals from the prebuilt catalog.
-//! - `build`: the `.smod` in `target/sunrise-mod/`, with the mod's `assets/`
-//!   and `data/`; with `--wasm`, a Rust mod built to `mod.wasm` first (`wasm.rs`).
+//! - `build [--update-lock]`: the `.smod` in `target/sunrise-mod/`, with the mod's `assets/`
+//!   and `data/`; a native mod is then compiled too (`dev.rs`); with `--wasm`, a Rust mod built to `mod.wasm` first (`wasm.rs`).
 //! - `wasm-std <out.wasm>`: the standard library member the game ships for wasm mods.
-//! - `run [--game <sunrise-client>] [-- <game args>]`: build, then play with
+//! - `run [--game <sunrise-client>] [--resources <folder>] [-- <game args>]`: build, then play with
 //!   the mod.
 //! - `check [--uses]` in a mod folder: the package rules, its render pipeline shaders composed
 //!   and validated as the game does, `cargo check` for the host and wasm32, and what the mod
@@ -35,6 +35,7 @@
 use sunrise_mod_package::{Content, Manifest, Package, manifest::MANIFEST};
 mod bounded;
 mod check;
+mod dev;
 mod inject;
 mod inject_sync;
 mod internals;
@@ -53,7 +54,7 @@ use std::{
 };
 
 /// What `cargo sunrise-mod` prints with no command or `--help`, and after an unknown command.
-const USAGE: &str = "cargo sunrise-mod new <path> [--name \"Name\"] [--template content|native|wasm [--sunrise <build>]] | update [--sunrise <build>] | inject update [--accept <id>]… | inject sync --repo <game checkout> | inject add <at> --kind <kind> [--call <canonical callee>] [--nth N] [--with <fn>] | internals sync [--repo <path>] | internals add <path>… [--kind <kind>] | build [--wasm] | wasm-std <out.wasm> | run [--game <sunrise-client>] [-- <game args>] | check [--uses] | check <file> [--kind <kind>] [--key <public key> --signature <file.minisig>] [--json] | hooks <text> [--all] | sdk diff <build> <build> | fits [<file.smod>] [--build <name>]… | registry build|review|check|list | use-jar <path> | native-build < plan.json | native-check < plan.json | native-discover < plan.json | native-lock < plan.json | native-layout < plan.json";
+const USAGE: &str = "cargo sunrise-mod new <path> [--name \"Name\"] [--template content|native|wasm [--sunrise <build>]] | update [--sunrise <build>] | inject update [--accept <id>]… | inject sync --repo <game checkout> | inject add <at> --kind <kind> [--call <canonical callee>] [--nth N] [--with <fn>] | internals sync [--repo <path>] | internals add <path>… [--kind <kind>] | build [--wasm] [--update-lock] | wasm-std <out.wasm> | run [--game <sunrise-client>] [--resources <folder>] [-- <game args>] | check [--uses] | check <file> [--kind <kind>] [--key <public key> --signature <file.minisig>] [--json] | hooks <text> [--all] | sdk diff <build> <build> | fits [<file.smod>] [--build <name>]… | registry build|review|check|list | use-jar <path> | native-build < plan.json | native-check < plan.json | native-discover < plan.json | native-lock < plan.json | native-layout < plan.json";
 
 fn is_compiler_wrapper(name: &str) -> bool {
     name.strip_suffix(".exe").unwrap_or(name).ends_with("rustc")
@@ -128,6 +129,15 @@ fn main() -> ExitCode {
             };
             sdk.and_then(|()| build(entry))
                 .map(|p| println!("Built {}", p.display()))
+                .and_then(|()| match dev::is_native(Path::new(".")) {
+                    Ok(true) => dev::build(
+                        Path::new("."),
+                        args[1..].iter().any(|a| a == "--update-lock"),
+                    )
+                    .map(drop),
+                    Ok(false) => Ok(()),
+                    Err(e) => Err(e),
+                })
         }
         Some("run") => run(&args[1..]).map_err(|e| e.to_string()),
         Some("check") if args.get(1).is_none_or(|a| a.starts_with("--")) => {
@@ -449,14 +459,11 @@ fn new_code(
     for folder in ["assets", "data"] {
         std::fs::create_dir_all(dir.join(folder)).map_err(|e| e.to_string())?;
     }
-    let next = if native {
-        format!(
-            "sunrise-launcher native-build {} --instance <instance> --trust-native-code",
-            dir.display()
-        )
-    } else {
-        format!("cd {} && cargo sunrise-mod build --wasm", dir.display())
-    };
+    let next = format!(
+        "cd {} && cargo sunrise-mod build{}",
+        dir.display(),
+        if native { "" } else { " --wasm" }
+    );
     println!(
         "Created {} ({} mod id {id}). Your editor resolves sunrise-mod-api once the SDK is in .sunrise/sdk/: \
          `cargo sunrise-mod check` fetches it in a fresh clone. Next: {next}",
@@ -559,7 +566,6 @@ fn check(args: &[String]) -> Result<(), String> {
 
 #[derive(Debug)]
 enum RunError {
-    CodeMod,
     Build(String),
     Launch { game: String, error: std::io::Error },
     Exit(std::process::ExitStatus),
@@ -568,9 +574,6 @@ enum RunError {
 impl std::fmt::Display for RunError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::CodeMod => f.write_str(
-                "code mods run through the launcher's native build: sunrise-launcher native-build . --trust-native-code (docs/modding/src/how-to/native-mods.md)",
-            ),
             Self::Build(error) => f.write_str(error),
             Self::Launch { game, error } => write!(
                 f,
@@ -584,16 +587,28 @@ impl std::fmt::Display for RunError {
 impl std::error::Error for RunError {}
 
 fn run(args: &[String]) -> Result<(), RunError> {
+    let extra: Vec<String> = args
+        .iter()
+        .skip_while(|a| *a != "--")
+        .skip(1)
+        .cloned()
+        .collect();
     if Path::new("Cargo.toml").is_file() {
-        return Err(RunError::CodeMod);
+        // Only a native mod starts here; a wasm mod is a package the game loads.
+        if !dev::is_native(Path::new(".")).map_err(RunError::Build)? {
+            return Err(RunError::Build(
+                "a wasm mod is started with its package: `cargo sunrise-mod build --wasm`, then `sunrise-client --dev-mod target/sunrise-mod/<id>.smod`".into(),
+            ));
+        }
+        return dev::run(Path::new("."), flag(args, "--resources"), &extra)
+            .map_err(RunError::Build);
     }
-    // `run` packs content mods only (a code mod goes through the launcher), which carry no table.
+    // A content mod carries no uses table.
     let path = build_in(Path::new(".")).map_err(RunError::Build)?;
     let game = flag(args, "--game")
         .map(str::to_string)
         .or_else(|| std::env::var("SUNRISE_CLIENT").ok())
         .unwrap_or_else(|| "sunrise-client".into());
-    let extra = args.iter().skip_while(|a| *a != "--").skip(1);
     println!("Starting {game} with {}", path.display());
     let status = Command::new(&game)
         .arg("--dev-mod")

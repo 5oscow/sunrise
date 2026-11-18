@@ -24,7 +24,7 @@ cargo-sunrise-mod layouts::tests::a_library_types_identity_follows_its_fields_an
 cargo-sunrise-mod layouts::tests::removing_the_last_public_type_must_be_reviewed bin:cargo-sunrise-mod daily child-process
 cargo-sunrise-mod module_free_add_commands_keep_prebuilt_output_and_never_run_launcher test:module_discovery daily child-process
 cargo-sunrise-mod native_sync_refuses_repo test:internals daily child-process
-cargo-sunrise-mod run_refuses_code_mods_without_building test:run daily child-process
+cargo-sunrise-mod run_of_a_native_mod_without_resources_says_how_to_make_them_before_building test:run daily child-process
 cargo-sunrise-mod table_declarations_keep_their_format_when_adding_and_refreshing test:internals daily child-process
 cargo-sunrise-mod unreadable_new_catalog_does_not_move_either_pin_or_hashes test:internals daily child-process
 cargo-sunrise-mod update_diffs_signatures_refreshes_present_hashes_and_keeps_missing_declarations test:internals daily child-process

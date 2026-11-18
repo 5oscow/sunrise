@@ -34,10 +34,12 @@ cargo sunrise-mod check
 line like `greeter uses 34 items of the API (…). Made for 2d81263.` Run `check` after every edit, and fix what it
 reports before going on. Use another mod id by changing the folder name: `new` turns it into the id.
 
-To compile it against the prebuilt game without the launcher, use the block under "Without the launcher" in
-[Your first native mod](start/first-mod.md#without-the-launcher). To play it, the user runs
-`sunrise-launcher native-build . --instance "<instance>" --trust-native-code` in the project's folder; that is the
-user's step, because it allows native code on their install.
+To compile it against the prebuilt game, run `cargo sunrise-mod build`: it fetches the pinned SDK's compiled slices
+into a per-user cache and installs the Rust the SDK names with rustup, so it needs the network the first time. To
+play it, run `cargo sunrise-mod run --resources <folder> -- <game args>`; the user has to make those prepared
+resources from their own Minecraft (`sunrise-prepare --prepare --output <folder>`), so ask for the folder and never
+download Mojang's files. Run `cargo test` for the logic the hooks use. A build server uses the plan contract in
+[Your first native mod](start/first-mod.md#without-the-tools-commands).
 
 ## Rules that matter
 

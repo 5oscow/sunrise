@@ -1,12 +1,11 @@
 # Your first native mod
 
-A native mod is a Rust crate that implements hooks from the mod API. The launcher compiles it on your machine
-against the exact Sunrise build an instance plays, then runs that instance with your mod in it. In this page you
-make a mod that greets every player who joins, compile it, and see how it reaches the game.
+A native mod is a Rust crate that implements hooks from the mod API. `cargo sunrise-mod` compiles it on your
+machine against the exact Sunrise build it is pinned to and starts the game with it; no launcher is involved. In this
+page you make a mod that greets every player who joins, compile it, run it, and test it.
 
-You need Rust 1.95 or newer ([rustup.rs](https://rustup.rs)) and, to play the result, the Sunrise launcher
-(`sunrise-launcher`) with an instance. The native build itself uses the launcher's own pinned Rust toolchain, not
-yours.
+You need [rustup](https://rustup.rs) (the tool installs the Rust the SDK was built with, and says so when it does),
+and, to run the game, resources prepared from your own Minecraft: Java Edition 26.3 (step 6).
 
 ## 1. Install the mod tool
 
@@ -21,7 +20,7 @@ cd greeter
 ```
 
 ```text
-Created greeter (native mod id greeter). Your editor resolves sunrise-mod-api once the SDK is in .sunrise/sdk/: `cargo sunrise-mod check` fetches it in a fresh clone. Next: sunrise-launcher native-build greeter --instance <instance> --trust-native-code
+Created greeter (native mod id greeter). Your editor resolves sunrise-mod-api once the SDK is in .sunrise/sdk/: `cargo sunrise-mod check` fetches it in a fresh clone. Next: cd greeter && cargo sunrise-mod build
 SDK 2d81263 (build 2d8126336e579777eabf9b2fd8b3d476236a04f2) in greeter/.sunrise/sdk
 ```
 
@@ -82,98 +81,61 @@ Run it after every edit. It is the quick loop; it does not link against the game
 
 ## 5. Build against the prebuilt game
 
-The real build compiles the crate against the prebuilt game of the pinned build and links it, as the launcher does.
-The launcher's command makes that build the one an instance plays:
-
 ```sh
-sunrise-launcher native-build . --instance "My Instance" --trust-native-code
+cargo sunrise-mod build
 ```
 
-The launcher downloads the prebuilt game for the pinned Sunrise build, compiles your crate against it, installs the
-result as a game version of its own beside the base and selects that version for the instance. `--trust-native-code`
-records that you allow native code on this install: a native mod runs with your rights, outside any sandbox. Start the
-instance and join a world; the greeting appears in chat, and the mod is listed on the game's **Mods** screen. The
-launcher's **Mods** page does the same from the window: put the project in the instance's `sunrise-native-mods/`
-folder and choose **Build** ([Installing and using mods](installing.md)).
-
-### Without the launcher
-
-The same compile is a command of the tool, so it runs where there is no launcher: in a build server, or while you
-check that a project builds. It takes a plan, one line of JSON on standard input ([the
-contract](../reference/sdk/08-native-build.md)), and the SDK's `runtime`, `api` and `engine` slices, which you download once. `native-lock` runs first: it pins the
-mod's registry dependencies against the game's, with a plan of its own.
-This block is for Linux x86_64 and, from the project's folder, downloads the slices of the pinned build, checks
-Sunrise's signature on their checksums and then each slice, installs the Rust the SDK was built with, and builds. It
-needs `openssl` (3.0 or newer, for `pkeyutl -rawin`) and `python3`, and it stops at the first step that fails:
-
-```sh
-(
-  set -eu
-  BASE=https://github.com/sunrise-org/sunrise/releases/download
-  KEY=r53xb3cuafGxZSicLz06KC+xXp9NJdPH8snNmXo5pAc=
-  COMMIT=$(sed -n 's/^sunrise = "\(.*\)"/\1/p' sunrise-mod.toml)
-  TARGET=x86_64-unknown-linux-gnu
-  RUST=$(sed -n 's/.*"rust": *"\([^"]*\)".*/\1/p' .sunrise/sdk/sdk.json)
-  rustup toolchain install "$RUST" --profile minimal
-  B="${TMPDIR:-/tmp}/sunrise-native-build/$COMMIT"
-  mkdir -p "$B/runtime" "$B/api" "$B/engine" "$B/work"
-  curl -fsSL -o "$B/SHA256SUMS" "$BASE/sdk-$COMMIT/SHA256SUMS"
-  curl -fsSL -o "$B/SHA256SUMS.sig" "$BASE/sdk-$COMMIT/SHA256SUMS.sig"
-  (
-    cd "$B"
-    printf 'horizon release sdk-%s\n' "$COMMIT" | cat - SHA256SUMS > message
-    { printf '\060\052\060\005\006\003\053\145\160\003\041\000'; printf '%s' "$KEY" | openssl base64 -d -A; } > key.der
-    signed=
-    while read -r line || [ -n "$line" ]; do
-      printf '%s' "$line" | openssl base64 -d -A > signature
-      openssl pkeyutl -verify -rawin -pubin -keyform DER -inkey key.der -in message -sigfile signature > /dev/null 2>&1 && signed=1
-    done < SHA256SUMS.sig
-    [ -n "$signed" ] || { echo "SHA256SUMS is not signed by Sunrise" >&2; exit 1; }
-  )
-  for slice in runtime api engine; do
-    curl -fsSL -o "$B/$slice-$TARGET.tar.xz" "$BASE/sdk-$COMMIT/$slice-$TARGET.tar.xz"
-    (cd "$B" && grep " $slice-$TARGET.tar.xz\$" SHA256SUMS | sha256sum -c -)
-    tar -xJf "$B/$slice-$TARGET.tar.xz" -C "$B/$slice"
-  done
-  python3 - "$B" "$TARGET" "$RUST" "$PWD" <<'PY'
-import json, subprocess, sys
-b, target, rust, mods = sys.argv[1:]
-sysroot = subprocess.check_output(["rustc", f"+{rust}", "--print", "sysroot"], text=True).strip()
-plan = {
-    "contract": 2,
-    "work": f"{b}/work",
-    "toolchain": {"dir": sysroot, "target": target, "cargo_home": f"{b}/cargo-home"},
-    "mods": mods,
-}
-json.dump(plan, open(f"{b}/lock-plan.json", "w"))
-plan["package"] = {"runtime": f"{b}/runtime", "api": f"{b}/api", "engine": f"{b}/engine"}
-plan["target"] = "client"
-# True agrees to compile the mod's crates.io dependencies, whose build scripts and proc macros run on this computer.
-plan["registry"] = True
-json.dump(plan, open(f"{b}/plan.json", "w"))
-PY
-  cargo sunrise-mod native-lock < "$B/lock-plan.json"
-  cargo sunrise-mod native-build < "$B/plan.json"
-)
-```
-
-The tool prints one JSON event per line. A build that worked prints these two, the second cut short here:
+`build` packs the `.smod` and then compiles the crate against the prebuilt game of the pinned build, and ends with
+the library it made and the build log's path:
 
 ```text
-{"event":"mod","id":"greeter","done":1,"total":1}
-{"event":"built","route":"prebuilt-api","binary":"…/runtime/bin/sunrise-client","libraries":["…/libmod_api.so", …, "…/libmod_greeter.so"], …}
+Downloading runtime-x86_64-unknown-linux-gnu.tar.xz (71 MB), once for every project
+…
+Compiling greeter (1/1)
+Built …/sunrise-mod/work/greeter/prebuilt-build/…/libmod_greeter.so
+Build log: …/sunrise-mod/work/greeter/build.log
 ```
 
-`"registry": true` in the plan is your agreement to compile the mod's own crates.io dependencies, whose build
-scripts and proc macros run on your computer; the greeter has none, and a mod with any stops without it. The compiled
-mod is the last of `libraries`. The tool only compiles: installing the result into an instance, and
-selecting it, is the launcher's step, so a mod built this way does not appear in the launcher until you run the
-launcher's `native-build` on it. A build for another
-computer needs that computer's target triple in `TARGET` (macOS arm64 is `aarch64-apple-darwin`, Windows x64 is
-`x86_64-pc-windows-gnu`).
+The first build downloads the pinned build's compiled slices, checks Sunrise's signature on their checksums and
+unpacks them into the tool's cache, shared by every project: `~/.cache/sunrise-mod` on Linux (`$XDG_CACHE_HOME`),
+`~/Library/Caches/sunrise-mod` on macOS, `%LOCALAPPDATA%\sunrise-mod` on Windows, or the folder
+`SUNRISE_MOD_CACHE` names. Delete that folder to clear it; the next build fetches again. It also finds the Rust the SDK
+names: through `rustup` (installing it with `--profile minimal` when missing), or the `rustc` on `PATH` when that is
+exactly the version; it never builds with another compiler.
 
-After an edit, build again. The [build log](../how-to/native-mods/05-build-log.md) shows the compiler's output when
-a build fails.
+A mod with crates.io dependencies is compiled with them, as `cargo build` would, and `build` pins them in
+`Cargo.lock` the first time. After you change `Cargo.toml`, `cargo sunrise-mod build --update-lock` resolves again.
+When a build stops on a package the lock doesn't pin, its error ends with that command. The
+[build log](../how-to/native-mods/05-build-log.md) shows the compiler's output when a build fails.
+
+## 6. Run it
+
+```sh
+cargo sunrise-mod run --resources <folder> -- --world Greeter --creative
+```
+
+`run` builds, stages the game with your mod in `target/sunrise-mod/run/` and starts it, with its game folder and its
+logs inside that folder, so nothing of a player's is touched. Everything after `--` goes to the game. The game needs
+resources prepared from your own Minecraft: play 26.3 once in your launcher, then make them with
+`sunrise-prepare --prepare --output <folder>` (`sunrise-prepare` is in the game's download; `--help` lists where it
+reads your copy). The tool never downloads or bundles Mojang's files. Join a world; the greeting appears in chat, and
+the mod is listed on the game's **Mods** screen. On Linux without a display, start `run` under `xvfb-run`.
+
+## 7. Test it
+
+```sh
+cargo test
+```
+
+Keep what a hook decides in plain functions and test those: the template's `greeting` has one test, which runs
+without the game.
+
+### Without the tool's commands
+
+A build server can run the compile itself: `native-build` takes the plan as one line of JSON on standard input and
+prints one JSON event per line. That contract ([`native-build`](../reference/sdk/08-native-build.md)) is what `build`
+and the launcher call; the launcher also installs the result into an instance, and its **Mods** page does the same
+from the window ([Installing and using mods](installing.md)).
 
 ## Next
 
