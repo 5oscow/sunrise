@@ -2507,8 +2507,7 @@ where
                         _ => spans.push((min, band_min, fill)),
                     }
                 }
-                // Void cells still need a biome: the End's small islands are
-                // features over the void, and their biome is 2D there.
+                // A void cell has no surface to tint: a placeholder biome.
                 let biome = if let Some((height, _)) = top {
                     memo_biome(
                         &self.data,
