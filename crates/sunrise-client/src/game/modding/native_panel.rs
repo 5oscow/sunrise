@@ -1122,7 +1122,10 @@ mod tests {
         // Not heard yet: the mod hears it when its panel next draws.
         assert_eq!(panel.sent, "");
 
-        assert!(!panel.set_search("jei", "iron"), "the same text changes nothing");
+        assert!(
+            !panel.set_search("jei", "iron"),
+            "the same text changes nothing"
+        );
         assert!(!panel.set_search("ae2", ""), "another mod can't rewrite it");
         assert_eq!(panel.search.as_ref().unwrap().value, "iron");
 
