@@ -1,0 +1,1 @@
+sunrise-client game::native_level_placement_tests::a_wither_placement_refused_in_a_transaction_keeps_the_pattern lib daily resources

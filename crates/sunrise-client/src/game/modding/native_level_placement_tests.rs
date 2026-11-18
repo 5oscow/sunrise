@@ -71,7 +71,9 @@ fn a_post_write_placement_reads_the_stack_without_loading_its_data() {
         )
         .unwrap();
         stack.data_mut().set_other(BLOCK_ENTITY_DATA, Some(data));
-        let stack = stack.try_into_api().unwrap();
+        let mut stack = stack.try_into_api().unwrap();
+        stack.set_count(100).unwrap();
+        stack.set_damage(12);
         assert_eq!(
             level.set_placed_by(game, [128, 70, 2], Some(&stack)),
             Ok(false)
@@ -93,6 +95,86 @@ fn a_post_write_placement_reads_the_stack_without_loading_its_data() {
                 .get("RecordItem")
                 .is_none()
         );
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn placement_does_not_write_a_fenced_companion() {
+    with_game(|game| {
+        let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+        loaded(game);
+        let level = game.level(game.dim.id()).unwrap();
+        let foot = [2, 70, 2];
+        let head = [2, 70, 1];
+        let bed = state(game, "minecraft:red_bed");
+        let stone = state(game, "minecraft:stone");
+        assert_eq!(
+            game.level_set_block(level, head, stone, BlockUpdateFlags::NONE),
+            Ok(true)
+        );
+        game.world.carrier_fences.lock_cell(head);
+        assert_eq!(game.level_place_block(level, foot, bed, false), Ok(false));
+        assert_eq!(game.world.block(2, 70, 2), game.world.air);
+        assert_eq!(
+            game.level_set_block(level, foot, bed, BlockUpdateFlags::NONE),
+            Ok(true)
+        );
+        assert_eq!(level.set_placed_by(game, foot, None), Ok(false));
+        assert_eq!(game.world.block(2, 70, 1), stone);
+        assert_eq!(game.world.block(2, 70, 2), bed);
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn a_wither_placement_refused_in_a_transaction_keeps_the_pattern() {
+    use mod_api::{HostTransaction, LevelWriteError, ServerHost};
+
+    with_game(|game| {
+        let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+        loaded(game);
+        game.ui.difficulty = 2;
+        let level = game.level(game.dim.id()).unwrap();
+        let skull = state(game, "minecraft:wither_skeleton_skull");
+        let soul = state(game, "minecraft:soul_sand");
+        let air = game.world.air;
+        let cells = [
+            ([4, 72, 4], skull),
+            ([5, 72, 4], skull),
+            ([6, 72, 4], skull),
+            ([4, 71, 4], soul),
+            ([5, 71, 4], soul),
+            ([6, 71, 4], soul),
+            ([4, 70, 4], air),
+            ([5, 70, 4], soul),
+            ([6, 70, 4], air),
+        ];
+        for (pos, state) in cells.into_iter().filter(|(_, state)| *state != air) {
+            assert_eq!(
+                game.level_set_block(level, pos, state, BlockUpdateFlags::NONE),
+                Ok(true)
+            );
+        }
+        let at = [5, 72, 4];
+        let before = game.mobs.len();
+        let aborted: Result<(), ()> = (game as &mut dyn ServerHost).transaction(|host, _| {
+            assert_eq!(
+                level.set_placed_by(host, at, None),
+                Err(LevelWriteError::InTransaction)
+            );
+            Err(())
+        });
+        assert_eq!(aborted, Err(()));
+        for ([x, y, z], state) in cells {
+            assert_eq!(game.world.block(x, y, z), state);
+        }
+        assert_eq!(game.mobs.len(), before);
+        assert_eq!(level.set_placed_by(game, at, None), Ok(true));
+        assert_eq!(game.mobs.len(), before + 1);
+        for ([x, y, z], _) in cells {
+            assert_eq!(game.world.block(x, y, z), air);
+        }
     });
 }
 

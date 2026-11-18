@@ -1,0 +1,1 @@
+sunrise-client game::native_level_placement_tests::placement_does_not_write_a_fenced_companion lib daily resources

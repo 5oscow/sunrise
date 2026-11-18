@@ -69,13 +69,14 @@ impl Game<'_> {
         self.spawn_item_own(ItemStack::new("minecraft:wither_rose", 1), position, 0);
     }
     fn is_wither_skull(&self, p: [i32; 3]) -> bool {
-        let name = &*self
-            .res
-            .facts()
-            .get(self.world.block(p[0], p[1], p[2]))
-            .name;
+        self.is_wither_skull_state(self.world.block(p[0], p[1], p[2]))
+    }
+    pub(super) fn is_wither_skull_state(
+        &self,
+        state: sunrise_world::registry::BlockStateId,
+    ) -> bool {
         matches!(
-            name,
+            &*self.res.facts().get(state).name,
             "minecraft:wither_skeleton_skull" | "minecraft:wither_skeleton_wall_skull"
         )
     }
@@ -119,6 +120,12 @@ impl Game<'_> {
         // Clear the pattern, the wither appears on the middle of the bottom
         // row facing along the pattern's forwards axis, then neighbours update.
         let cells = found.front_cells();
+        if cells
+            .iter()
+            .any(|pos| self.world.carrier_fences.locks_cell(pos))
+        {
+            return Ok(());
+        }
         self.clear_pattern_blocks(&cells)?;
         let base = found.block(1, 2, 0);
         let at = [

@@ -16,6 +16,8 @@ pub enum LevelWriteError {
     InvalidState(BlockStateError),
     /// The supplied detached item value cannot be converted for placement.
     InvalidStack(StackWriteError),
+    /// This placement can summon a wither and cannot run inside a Host transaction.
+    InTransaction,
 }
 impl From<LevelReadError> for LevelWriteError {
     fn from(error: LevelReadError) -> Self {

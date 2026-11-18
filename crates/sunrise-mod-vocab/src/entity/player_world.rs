@@ -44,6 +44,10 @@ pub enum PlayerWorldRefusal {
     },
     /// `place_block` of the state already standing there: `setBlock` writes nothing.
     Unchanged,
+    /// The origin or its companion cell is fenced by a carrier transfer.
+    Fenced,
+    /// This placement can summon a wither and cannot run inside a Host transaction.
+    InTransaction,
 }
 
 impl crate::NoBackend for PlayerWorldRefusal {

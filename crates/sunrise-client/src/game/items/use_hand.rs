@@ -649,20 +649,9 @@ impl Game<'_> {
         }
         if self.world.block_entities.get(&key).is_some() {
             self.apply_placed_item(target, &stack, game_master);
-            // Block.setPlacedBy.
-            match self.world.block_entities.get(&key) {
-                Some(BlockEntity::CommandBlock(_)) => self.command_block_placed(key, Some(&stack)),
-                Some(BlockEntity::StructureBlock(_)) => self.structure_block_placed(key),
-                Some(BlockEntity::JigsawBlock(_)) => self.jigsaw_block_placed(key),
-                Some(BlockEntity::TestBlock(_)) => self.test_block_placed(key),
-                Some(BlockEntity::Jukebox(_)) => self.jukebox_placed(target, &stack),
-                Some(BlockEntity::Sign(sign)) if !sign.waxed && sign.front.has_editable_text() => {
-                    self.open_text_edit(key, true)
-                }
-                _ => {}
-            }
         }
         let placer = self.native_acting_player();
+        self.set_placed_by(target, placer, Some(&stack))?;
         self.block_item_placed(&stack, placer, &resolved);
         // BlockItem.place's SUCCESS: the client swings with its own prediction.
         self.swing_arm_predicted();
@@ -682,7 +671,6 @@ impl Game<'_> {
         // BlockItem.place: the used statistic and the placed_block trigger.
         self.award_stat("used", &stack.item, 1);
         self.trigger_block("minecraft:placed_block", target, &stack);
-        self.check_wither_spawn(target)?;
         self.check_golem_spawn(target)?;
         self.consume_placed(&stack);
         // ItemStack.useOn applies the pre-use stack's component side effects

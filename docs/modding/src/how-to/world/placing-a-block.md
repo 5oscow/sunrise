@@ -7,16 +7,17 @@ These are all server operations on the level in place.
   the state fitted to the blocks around `pos` (a fence gets its connections, a stair its corner). Nothing
   is written; pass the result to `set_block`. Neighbours that are not loaded read as air.
 - `level.set_placed_by(host, pos, stack)` runs `Block.setPlacedBy` on the block already at `pos`, with
-  no placer. Pass `Some(&stack)` for a detached item value or `None` for an empty stack. A block can
-  inspect the stack's components — for example a jukebox sets `has_record` when the stack's
-  `minecraft:block_entity_data` contains `RecordItem` — but this call does not load that data or
-  consume the item. It returns `Ok(false)` if the position is not writable, or a `LevelWriteError`
-  for a stale or unavailable level or an invalid stack.
-- `level.place_block(host, pos, state, update_neighbour_shapes)` writes `state` with a placement's flags
-  (neighbours and clients told, and unless `update_neighbour_shapes` is false their shapes updated) and
-  then runs `Block.setPlacedBy`, so a bed gets its head, a door its upper half and a tall plant its top.
-  It returns `Ok(true)` when the block was written, and `Ok(false)` when vanilla refused the write
-  (an unchanged state, an unloaded or out-of-height position).
+  no placer. First write the state and load the block-entity data. The callback can write companion
+  cells and produce block-specific effects; it does not place the initial block or copy the stack's
+  data into it. `stack` is read only (`None` supplies an empty stack); it need not fit an inventory
+  slot. A carrier transfer fence at the origin or companion refuses the operation. A wither skull
+  refuses with `LevelWriteError::InTransaction` inside an open Host transaction.
+- `level.place_block(host, pos, state, update_neighbour_shapes)` writes `state` with a placement's
+  flags (neighbours and clients told, and unless `update_neighbour_shapes` is false their shapes
+  updated) and then runs `Block.setPlacedBy`, so a bed gets its head, a door its upper half and a
+  tall plant its top. It returns `Ok(true)` when the block was written and `Ok(false)` for an
+  unchanged state, an unloaded or out-of-height position, or a fenced origin or companion. It
+  has the same wither skull transaction refusal.
 
 ```rust,ignore
 let fitted = level.update_from_neighbour_shapes(host, pos, door)?;
