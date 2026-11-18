@@ -8,12 +8,12 @@ sunrise-mod-api = { path = ".sunrise/sdk/api/crates/sunrise-mod-api" }
 ```
 
 `sunrise-mod-points`, `sunrise-internals` and `sunrise-wasmtime` (native mods only; [the game's wasmtime](../../concepts/native-route/8-wasmtime.md)) are named the same way, by `.sunrise/sdk/api/crates/<package>`. The
-SDK carries no `sunrise-internals` crate yet: a mod that names game internals builds through the launcher, which
-puts the mod's own generated facade in its place, and not with a plain `cargo check`. Features
+SDK does not carry a `sunrise-internals` crate: `cargo sunrise-mod build` and `internals sync` generate the
+mod's own facade in its place. A plain `cargo check` cannot resolve it. Features
 (`features = ["testing"]` on a dev-dependency) are kept.
 
-`cargo sunrise-mod new` writes that path, and it is the only form the launcher takes: when it builds a mod, it
-refuses every other form under `E_SDK_SOURCE`, with the line to write instead:
+`cargo sunrise-mod new` writes that path. A native build refuses every other form under `E_SDK_SOURCE`,
+with the line to write instead:
 
 | Written | Why it is refused |
 |---|---|
@@ -81,7 +81,8 @@ launcher or sent to a registry.
 Every SDK base is checked the same way, against Sunrise's signature. The launcher's own copies are described in
 [Cache and disk](../../how-to/native-mods/10-cache-and-disk.md).
 
-The internals commands (`internals add`, `inject add`, `inject update`, and `update` on a mod with an `internals`
-list or `[[inject]]` rows) read `internals.json` and `points.json` from the pinned build's signed SDK, through the
-same fetch and `SUNRISE_SDK_BASE`: its `build-data.tar.xz` is unpacked once into
-`.sunrise/cache/<build id>/build-data/`. A build with no SDK release is refused by name.
+`internals add`, `inject add`, `inject update`, and pin changes that need catalogs read `internals.json` and
+`points.json` from the pinned build's signed SDK. The tool unpacks `build-data.tar.xz` into
+`.sunrise/cache/<build id>/build-data/`. `internals sync` checks pinned game source instead, as do the add and
+inject update commands when the mod adds `[[native.module]]` rows. Source discovery uses the Rust named by the
+signed SDK, but does not need its compiled game slices. See [Native dependency tools](../registry-index.md#native-dependency-tools).

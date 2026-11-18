@@ -1,7 +1,7 @@
 //! Transactional freshness updates; never changes the game pin.
 use super::*;
 
-pub(super) fn run(dir: &Path, args: &[String]) -> Result<(), String> {
+pub(crate) fn run(dir: &Path, args: &[String], discover: CatalogDiscovery) -> Result<(), String> {
     let mut accept = Vec::new();
     for pair in args.chunks(2) {
         match pair {
@@ -22,8 +22,9 @@ pub(super) fn run(dir: &Path, args: &[String]) -> Result<(), String> {
         );
         return Ok(());
     }
-    let internals = crate::internals::load(dir, &native.sunrise)?;
-    let points = crate::sdk_fetch::build_data(dir, &native.sunrise)?.join("points.json");
+    let directory = crate::internals::catalog_directory(dir, native, discover)?;
+    let internals = crate::internals::read_catalog(&directory)?;
+    let points = directory.join("points.json");
     let (_, catalog): (_, Catalog) = sunrise_mod_package::build_data::read(
         sunrise_mod_package::build_data::POINTS,
         &crate::bounded::read(&points, crate::bounded::MAX_CATALOG)?,
@@ -31,7 +32,12 @@ pub(super) fn run(dir: &Path, args: &[String]) -> Result<(), String> {
     // Other builds' cached build data provides the signature behind a declaration's old hash.
     let mut old = Vec::new();
     let cache = dir.join(crate::sdk_fetch::CACHE);
-    for entry in fs::read_dir(&cache).map_err(|e| format!("{}: {e}", cache.display()))? {
+    let cached = match fs::read_dir(&cache) {
+        Ok(entries) => Some(entries),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(format!("{}: {e}", cache.display())),
+    };
+    for entry in cached.into_iter().flatten() {
         let path = entry
             .map_err(|e| e.to_string())?
             .path()
@@ -57,6 +63,11 @@ pub(super) fn run(dir: &Path, args: &[String]) -> Result<(), String> {
         return Err("inject update refused; no files changed".into());
     }
     if candidate != original {
+        if crate::bounded::read(&path, crate::bounded::MAX_MANIFEST)? != original {
+            return Err(format!(
+                "{MANIFEST} changed during discovery; run cargo sunrise-mod inject update again."
+            ));
+        }
         crate::internals::atomic_write_manifest(&path, candidate)?;
     }
     Ok(())

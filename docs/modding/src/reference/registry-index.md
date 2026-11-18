@@ -187,29 +187,29 @@ Run these commands in your native mod’s project folder.
 
 | Command | Behaviour |
 | --- | --- |
-| `cargo sunrise-mod internals sync` | Explicitly checks a native mod's library through the launcher against an isolated copy of its pinned game source, then replaces top-level `internals` with compiler-discovered paths, kinds and hashes. Handles globs and macros, removes unused declarations, preserves retained entries and prints additions/removals. Requires a trusted mod and `sunrise-launcher` on `PATH` (or `SUNRISE_LAUNCHER` set to its executable). Never runs automatically on build. |
-| `cargo sunrise-mod internals add <path>…` | Adds each declared internal and its tool-written hash to top-level `internals` in your mod's `sunrise-mod.toml`. Without support modules, reads `internals.json` from the build data of the native mod's pinned SDK; with `[[native.module]]` tables it asks the launcher for a discovery catalog of the pinned source with those modules applied (trusted native code required). Unknown paths, shape-only entries and paths available only under a `cfg` are refused before the manifest is changed. Existing declarations are refreshed, not duplicated. |
+| `cargo sunrise-mod internals sync` | Checks a trusted native mod's library against an isolated copy of its pinned game source with the Rust version named by its signed SDK. Replaces top-level `internals` with compiler-discovered paths, kinds and hashes, including uses inside globs and macros. Removes unused declarations, preserves retained entries and prints additions/removals. Skips discovery when the mod neither depends on `sunrise-internals` nor declares `internals`. Never runs automatically on build. |
+| `cargo sunrise-mod internals add <path>…` | Adds each declared internal and its tool-written hash to top-level `internals` in your mod's `sunrise-mod.toml`. Reads `internals.json` from the pinned SDK, or discovers a catalog with the mod's `[[native.module]]` tables applied. Unknown paths, shape-only entries and paths available only under a `cfg` are refused before the manifest is changed. Existing declarations are refreshed, not duplicated. |
 | `cargo sunrise-mod update [--sunrise <build>]` | Moves the mod's pin to the current Nightly's build (or the build given: `nightly-<date>` or a sha); the next command fetches its SDK into `.sunrise/sdk/`. A native mod's pins are `[native] sunrise` and `[native] mixins`: `update` fetches the destination SDK's `sdk.json` (into `.sunrise/cache/<build>/`), writes its `mixins.rev` beside the new build, and changes nothing when that file is refused; `Cargo.toml` names the SDK by path, so it does not change. A wasm mod's pin is `sdk` under `[package.metadata.sunrise]` in `Cargo.toml`: only its value changes, and the native steps below are skipped. For a native mod's every declared internal, prints `missing`, `changed` (old signature → new signature), or `unchanged`, then refreshes the available hashes. Missing or gated declarations keep their old hash and must be removed or replaced before building. Build names: [the pin](sdk/03-in-a-project.md#the-pin). |
 
 The native-mod commands run in the mod's project folder and preserve the manifest's comments and
 layout. `sync` performs a metadata-only `cargo check` on the current host, using default features;
 Rust build scripts and procedural macros run with your rights, but the game does not run. It keeps
-a separate per-pin source and check cache in the launcher's `native/internals-sync/<commit>/` folder,
-never in the normal game or prebuilt target directories. The pin's source must be cached or
+a separate source and check cache under `discovery/` in the tool's per-user cache (`SUNRISE_MOD_CACHE` can
+set its root), never in the normal game or prebuilt target directories. The pin's source must be cached or
 downloadable; an unavailable source is `E_INTERNAL_SOURCE_UNAVAILABLE`, not a fallback to another
 pin. Compiler or catalog errors leave the manifest untouched. Discovery may prepare source and
 metadata-check game dependencies; it does not compile or link a game executable. This separate
 check cache is not a native mod build route. `[[native.state]]` is refused with
 `E_MIXIN_STATE_LAYOUT`; use attachments for per-object mod data.
 
-Without support modules, `internals add`, `inject add`, `inject update` and `update` read `internals.json` and
-`points.json` from the build data (`build-data.tar.xz`) of each pin's SDK release, `sdk-<build id>`, fetched and
-checked against its signed `SHA256SUMS` as every SDK is, from `SUNRISE_SDK_BASE` when it is set. A build with no
-SDK release is refused by name; there is no other source. No game or mod code is run. With support modules, they run
-`sunrise-launcher native-build --catalog` (which needs trusted native code), stage the pinned source with the
-modules, and keep the discovery catalog under `target/sunrise-mod/catalog-snapshots/`; the game and the mod do not
-run. Each build's data is kept in
-`.sunrise/cache/<build id>/build-data/`, so `update` can show the old signatures after that release expires.
+Without support modules, `internals add`, `inject add` and `inject update` read `internals.json` and
+`points.json` from the pinned SDK's build data (`build-data.tar.xz`). The tool verifies the SDK release,
+`sdk-<build id>`, against its signed `SHA256SUMS`, using `SUNRISE_SDK_BASE` when set. No game or mod code is run.
+With `[[native.module]]` tables, these commands use the Rust named by the signed SDK to stage the pinned source
+with the mod's modules applied and save the catalog under `target/sunrise-mod/catalog-snapshots/`. Only use
+source discovery on mods you trust. It does not run the game.
+The separate `update` command compares the SDKs' build data for the old and new pins. Each build's data is kept
+in `.sunrise/cache/<build id>/build-data/`, so `update` can show old signatures after that release expires.
 If a needed catalog is neither cached nor downloadable, the command fails without changing the pin
 or declarations. A mod with no declared internals needs no catalogs to update. Quote paths containing
 Rust lifetimes or other shell metacharacters, for example:
