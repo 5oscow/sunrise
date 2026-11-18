@@ -1833,8 +1833,18 @@ impl Game<'_> {
         self.console_broadcast = Some(inform);
         self.console_command(state, line);
         self.console_broadcast = None;
-        if let Some(host) = self.lan.as_ref() {
-            crash_fixture("hub", || host.hub.guests.iter().any(|g| g.placed));
+        // The fixture panics with the hub out of the game, as a panic in the network tick does.
+        crash_fixture("hub", || {
+            let placed = self
+                .lan
+                .as_ref()
+                .is_some_and(|host| host.hub.guests.iter().any(|g| g.placed));
+            if placed {
+                self.lan = None;
+            }
+            placed
+        });
+        if self.lan.is_some() {
             self.run_level_teleports();
             self.send_admin_feedback(None);
         }
