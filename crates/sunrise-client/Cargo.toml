@@ -67,6 +67,11 @@ bytemuck = { version = "1.24", features = ["derive"] }
 glam = "0.30"
 png = "0.18"
 sha2 = "0.10.9"
+# Match shared feature sets across Extras variants so CI builds the second incrementally; verify-static checks this.
+cipher = { version = "0.4", default-features = false, features = ["zeroize"] }
+crypto-common = { version = "0.1", default-features = false, features = ["getrandom"] }
+digest = { version = "0.10", default-features = false, features = ["mac"] }
+socket2 = { version = "0.6", default-features = false, features = ["all"] }
 # Server resource packs are checked and cached by their SHA-1, as vanilla does.
 sha1 = "0.10"
 serde = { version = "1", features = ["derive"] }
