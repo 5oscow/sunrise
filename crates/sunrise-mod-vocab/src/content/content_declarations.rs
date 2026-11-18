@@ -33,12 +33,21 @@ pub struct BlockProperties {
     /// Vanilla's piston push reaction, or the template's when unset.
     pub push_reaction: Option<PushReaction>,
     /// `false`: the block occludes nothing, so its neighbours' faces are drawn and light passes
-    /// it (`BlockBehaviour.Properties.noOcclusion`); unset or `true`: as its template.
+    /// it (`BlockBehaviour.Properties.noOcclusion`); `true`: occludes whatever the template
+    /// does, using the declared outline or the template's published occlusion shape. Unset
+    /// inherits the template.
     pub occludes: Option<bool>,
     /// `false`: the breaking crack (`destroy_stage_0..9`) is not drawn on the block, as for a
     /// block broken by use; unset or `true`, it is drawn. Only the overlay: the break and the
     /// destroy-progress packets are vanilla's.
     pub destroy_overlay: Option<bool>,
+    /// Per-column model offset and translation of declared outline, collision and interaction shapes.
+    /// Block-entity published shapes remain as published. Unset inherits the template.
+    pub offset: Option<OffsetType>,
+    /// Maximum horizontal displacement, 0 to 0.25 (default 0.25 for an explicit offset mode).
+    pub max_horizontal_offset: Option<f32>,
+    /// Maximum downward displacement, 0 to 0.2 (default 0.2 for XYZ; XZ has no vertical offset).
+    pub max_vertical_offset: Option<f32>,
     /// Vanilla's note-block instrument; unset inherits the template.
     pub instrument: Option<crate::NoteInstrument>,
     /// Lava ignition flag. The per-position `ignited_by_lava` hook still answers first.
@@ -48,6 +57,19 @@ pub struct BlockProperties {
     /// Skip faces against any state of this same block; false disables the template's render rule.
     /// Leaf and ice graphics culling still follows the template class.
     pub skip_same_block_faces: Option<bool>,
+}
+
+/// Vanilla's per-column offset mode (`BlockBehaviour.OffsetType`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// exhaustive: these are the closed declaration modes.
+#[derive(sunrise_mod_api_macros::Wire)]
+pub enum OffsetType {
+    /// Disable the offset, even on a template that has one.
+    None,
+    /// Horizontal offset only.
+    Xz,
+    /// Horizontal and downward vertical offset.
+    Xyz,
 }
 
 /// PushReaction in a load-time content declaration.
@@ -137,6 +159,19 @@ pub enum ShapeEntityKind {
     Other,
 }
 
+/// A vanilla block's context-dependent collision a declared block takes ([`Block::context_collision`]),
+/// whatever its template.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// exhaustive: these variants are the closed content declaration vocabulary.
+#[derive(sunrise_mod_api_macros::Wire)]
+pub enum ContextCollision {
+    /// Scaffolding's (`ScaffoldingBlock.getCollisionShape`): solid on top unless the entity is
+    /// descending, open below, and the bottom row's floor. The block's states need scaffolding's
+    /// `distance` (0 to 7) and `bottom` properties, from the template or declared; loading
+    /// refuses the block, by name, otherwise.
+    Scaffolding,
+}
+
 /// BlockStateProperty in a load-time content declaration.
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: these variants are the closed content declaration vocabulary.
@@ -183,6 +218,9 @@ pub struct Block {
     /// (`BlockEntityRef::set_shapes`), which then replace the declared ones until cleared.
     /// Refused at load, by name, on a block that no block entity type owns. False when unset.
     pub shapes_from_block_entity: bool,
+    /// A vanilla block's context collision it takes, over its shapes for entities that have no
+    /// `collision_context_shapes` of their own. `None` when unset.
+    pub context_collision: Option<ContextCollision>,
     /// State properties of its own, which its template does not have.
     pub state_properties: BTreeMap<String, BlockStateProperty>,
     /// State properties overlaid on the template default.
@@ -289,6 +327,7 @@ impl Default for Block {
             collision_context_shapes: BTreeMap::new(),
             interaction_shapes: None,
             shapes_from_block_entity: false,
+            context_collision: None,
             state_properties: BTreeMap::new(),
             default_state: BTreeMap::new(),
             item: true,

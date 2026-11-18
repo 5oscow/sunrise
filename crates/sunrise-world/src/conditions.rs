@@ -309,11 +309,26 @@ impl LoadConditions {
             .0
             .as_ref()
             .expect("owning candidate diagnostics");
+        // The context only matters to the conditions that read it: any other verdict is kept
+        // across the views of one load (the candidate registry view, then the loaders'), so a
+        // file's conditions run once per load.
+        let payload = payload.to_string();
+        let reads_context = [
+            "neoforge:registered",
+            "neoforge:tag_empty",
+            "neoforge:feature_flags_enabled",
+        ]
+        .iter()
+        .any(|name| payload.contains(name));
         let cell = state
             .lock()
             .unwrap()
             .cache
-            .entry((path.to_owned(), payload.to_string(), context.key()))
+            .entry((
+                path.to_owned(),
+                payload,
+                if reads_context { context.key() } else { 0 },
+            ))
             .or_default()
             .clone();
         *cell.get_or_init(|| {
