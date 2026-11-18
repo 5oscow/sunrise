@@ -104,7 +104,7 @@ contract](../reference/sdk/08-native-build.md)), and the SDK's `runtime`, `api` 
 mod's registry dependencies against the game's, with a plan of its own.
 This block is for Linux x86_64 and, from the project's folder, downloads the slices of the pinned build, checks
 Sunrise's signature on their checksums and then each slice, installs the Rust the SDK was built with, and builds. It
-needs `openssl` (1.1.1 or newer) and `python3`, and it stops at the first step that fails:
+needs `openssl` (3.0 or newer, for `pkeyutl -rawin`) and `python3`, and it stops at the first step that fails:
 
 ```sh
 (
