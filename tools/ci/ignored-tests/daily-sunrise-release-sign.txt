@@ -5,8 +5,6 @@ sunrise-release-sign cli::a_signature_made_like_openssls_checks_and_tampering_fa
 sunrise-release-sign cli::keygen_writes_the_secret_to_a_pipe_and_the_public_key_to_a_file test:it daily child-process
 sunrise-release-sign cli::publishing_never_bypasses_signatures_for_fork_or_unknown_repositories test:it daily child-process
 sunrise-release-sign cli::the_openssl_script_signs_what_the_launcher_checks test:it daily child-process
-sunrise-release-sign cli::the_verifier_runs_only_verify_with_the_built_in_keys test:it daily child-process
-sunrise-release-sign cli::the_verifier_takes_no_option_that_changes_who_is_trusted test:it daily child-process
 sunrise-release-sign cli::unsigned_releases_go_out_only_until_a_key_is_listed test:it daily child-process
 sunrise-release-sign native_build::a_key_launchers_would_refuse_or_a_misnamed_archive_signs_nothing test:it daily child-process
 sunrise-release-sign native_build::the_workflows_signature_is_what_the_launcher_checks test:it daily child-process

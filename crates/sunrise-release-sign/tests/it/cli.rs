@@ -278,66 +278,146 @@ fn publishing_never_bypasses_signatures_for_fork_or_unknown_repositories() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
-fn verifier(args: &[&str], paths: &[&Path]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_sunrise-verify"))
-        .args(args)
+/// The test-key build of `sunrise-verify`, with the key in the environment (or none).
+fn verifier(args: &[&str], paths: &[&Path], key: Option<&str>) -> Output {
+    let mut cmd = Command::new(crate::common::test_key_verifier());
+    cmd.args(args)
         .args(paths)
-        .output()
-        .unwrap()
+        .env_remove("SUNRISE_VERIFY_TEST_KEY");
+    if let Some(key) = key {
+        cmd.env("SUNRISE_VERIFY_TEST_KEY", key);
+    }
+    cmd.output().unwrap()
+}
+
+fn stderr(out: &Output) -> String {
+    String::from_utf8_lossy(&out.stderr).into_owned()
+}
+
+/// A folder signed with a throwaway key (its public half returned), the signature also saved as `alt.sig`.
+fn signed_folder(name: &str) -> (PathBuf, String) {
+    let dir = folder(name);
+    let (key, _) = SigningKey::generate().unwrap();
+    let sums = std::fs::read(dir.join(SUMS)).unwrap();
+    let signature = key.sign(TAG, &sums) + "\n";
+    std::fs::write(dir.join(SIGNATURE), &signature).unwrap();
+    std::fs::write(dir.join("alt.sig"), signature).unwrap();
+    (dir, key.public_base64())
 }
 
 #[test]
 #[ignore = "daily"]
 fn the_verifier_takes_no_option_that_changes_who_is_trusted() {
-    // With the `test-key` feature (the install tests' build) `--key` is how the test key arrives.
-    if cfg!(feature = "test-key") {
-        return;
-    }
-    let dir = folder("verifier-options");
-    let (key, _) = SigningKey::generate().unwrap();
-    let sums = std::fs::read(dir.join(SUMS)).unwrap();
-    std::fs::write(dir.join(SIGNATURE), key.sign(TAG, &sums) + "\n").unwrap();
-    let public = key.public_base64();
-    // The same call `sunrise-release-sign` accepts is refused here, naming the option.
-    assert!(verify(&dir, &["--key", &public]).status.success());
-    for extra in [
-        &["--key", public.as_str()][..],
-        &["--repository", "someone/else"],
-        &["--publishing"],
+    let (dir, public) = signed_folder("verifier-options");
+    let ok = ["verify", "--tag", TAG];
+    // The fixture passes through the same call; every refusal below is the grammar's, naming the option.
+    let o = verifier(&ok, &[&dir], Some(&public));
+    assert!(o.status.success(), "{}", stderr(&o));
+    for (extra, named) in [
+        (vec!["--key", public.as_str()], "--key"),
+        (vec!["--repository", "someone/else"], "--repository"),
+        (vec!["--publishing"], "--publishing"),
+        (vec!["--bogus"], "--bogus"),
+        (vec!["--only"], "needs the release's folder"),
+        (vec!["--tag", TAG], "--tag is given twice"),
     ] {
-        let mut args = vec!["verify", "--tag", TAG];
-        args.extend(extra);
-        let out = verifier(&args, &[&dir]);
-        assert!(!out.status.success());
-        assert!(
-            String::from_utf8_lossy(&out.stderr).contains(extra[0]),
-            "{extra:?}"
-        );
+        let mut args = ok.to_vec();
+        args.extend(&extra);
+        let out = verifier(&args, &[&dir], Some(&public));
+        assert!(!out.status.success(), "{extra:?}");
+        assert!(stderr(&out).contains(named), "{extra:?}: {}", stderr(&out));
     }
+    let out = verifier(&ok, &[&dir, &dir], Some(&public));
+    assert!(!out.status.success() && stderr(&out).contains("one folder"));
+    let out = verifier(&["verify", "--only", "x"], &[&dir], Some(&public));
+    assert!(stderr(&out).contains("--tag"));
+    // A trailing --only after the folder used to be dropped and read as "check everything".
+    let out = Command::new(crate::common::test_key_verifier())
+        .args(ok)
+        .arg(&dir)
+        .arg("--only")
+        .env("SUNRISE_VERIFY_TEST_KEY", &public)
+        .output()
+        .unwrap();
+    assert!(!out.status.success() && stderr(&out).contains("--only needs a value"));
     std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
 #[ignore = "daily"]
-fn the_verifier_runs_only_verify_with_the_built_in_keys() {
-    let dir = folder("verifier-only");
+fn the_verifier_checks_the_selected_file_and_signature_with_exactly_one_test_key() {
+    let (dir, public) = signed_folder("verifier-select");
+    let (other, _) = SigningKey::generate().unwrap();
+    let base = ["verify", "--tag", TAG];
+    let run = |extra: &[&str], key: Option<&str>| {
+        let mut args = base.to_vec();
+        args.extend(extra);
+        verifier(&args, &[&dir], key)
+    };
+    // The selected file, from the alternate signature file.
     assert!(
-        String::from_utf8_lossy(&verifier(&["keygen", "--public-out"], &[&dir.join("k")]).stderr)
-            .contains("usage: sunrise-verify")
+        run(
+            &[
+                "--only",
+                "sunrise-linux-x86_64.tar.gz",
+                "--signature",
+                "alt.sig"
+            ],
+            Some(&public)
+        )
+        .status
+        .success()
     );
-    // Signed by a key that is not release-keys.txt's, a folder is refused; and so is one with no signature.
-    let (key, _) = SigningKey::generate().unwrap();
-    let sums = std::fs::read(dir.join(SUMS)).unwrap();
-    std::fs::write(dir.join(SIGNATURE), key.sign(TAG, &sums) + "\n").unwrap();
-    if !cfg!(feature = "test-key") {
-        assert!(
-            !verifier(&["verify", "--tag", TAG], &[&dir])
-                .status
-                .success()
-        );
-    }
+    let out = run(&["--only", "missing.zip"], Some(&public));
+    assert!(stderr(&out).contains("missing.zip is not in"));
+    let out = run(&["--signature", "../alt.sig"], Some(&public));
+    assert!(stderr(&out).contains("names a file of the folder"));
+    // Not the signed bytes: refused naming the file, for the selected one only.
+    std::fs::write(dir.join("sunrise-windows-x64.zip"), b"tampered").unwrap();
+    assert!(
+        run(&["--only", "sunrise-linux-x86_64.tar.gz"], Some(&public))
+            .status
+            .success()
+    );
+    assert!(!run(&[], Some(&public)).status.success());
+    // The key: another one, none of the built-in ones, and not exactly one.
+    let other = other.public_base64();
+    assert!(stderr(&run(&[], Some(&other))).contains("signature doesn't match"));
+    assert!(stderr(&run(&[], None)).contains("signature doesn't match"));
+    let two = format!("{public}\n{other}");
+    assert!(stderr(&run(&[], Some(&two))).contains("exactly one key"));
+    assert!(stderr(&run(&[], Some("not a key"))).contains("not base64"));
+    // No signature file at all.
     std::fs::remove_file(dir.join(SIGNATURE)).unwrap();
-    let out = verifier(&["verify", "--tag", TAG], &[&dir]);
+    let out = run(&[], Some(&public));
+    assert!(stderr(&out).contains("has no SHA256SUMS.sig"));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+#[ignore = "daily"]
+fn the_verifier_has_no_keygen_and_writes_no_key() {
+    let dir = folder("verifier-keygen");
+    let public = dir.join("k");
+    let out = verifier(&["keygen", "--public-out"], &[&public], None);
+    assert!(!out.status.success() && stderr(&out).contains("usage: sunrise-verify"));
+    assert!(out.stdout.is_empty() && !public.exists());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+#[ignore = "daily"]
+fn a_release_verifier_ignores_the_test_key() {
+    // The binary cargo builds for release has no `test-key` feature: the variable is never read, so the key that
+    // signed the fixture is not trusted.
+    let (dir, public) = signed_folder("verifier-release-build");
+    let out = Command::new(env!("CARGO_BIN_EXE_sunrise-verify"))
+        .args(["verify", "--tag", TAG])
+        .arg(&dir)
+        .env("SUNRISE_VERIFY_TEST_KEY", &public)
+        .output()
+        .unwrap();
     assert!(!out.status.success());
+    assert!(stderr(&out).contains("signature doesn't match"));
     std::fs::remove_dir_all(dir).unwrap();
 }

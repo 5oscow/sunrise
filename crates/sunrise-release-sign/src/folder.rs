@@ -1,7 +1,7 @@
 //! `verify`: checks a folder holding a release's assets as the launcher does. Shared by the
 //! `sunrise-release-sign` and `sunrise-verify` binaries, so there is one implementation.
 
-use crate::{SIGNATURE, SUMS, Sha256, parse_keys, verify};
+use crate::{PublicKey, SIGNATURE, SUMS, Sha256, parse_keys, verify};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
@@ -95,6 +95,38 @@ pub fn check_folder(args: &[String]) -> Result<(), String> {
             ));
         }
     };
+    check_listed(&tag, &listed, &only, &folder)
+}
+
+/// What `sunrise-verify` checks: the folder's `SUMS` is signed for `tag` in `signature_file` by one of `keys`
+/// (a missing or unreadable signature, or no key, refuses), and each file `only` names (all of them when empty) is
+/// listed and has the signed hash.
+pub fn verify_release(
+    tag: &str,
+    keys: &[PublicKey],
+    signature_file: &str,
+    only: &[String],
+    folder: &Path,
+) -> Result<(), String> {
+    if signature_file.contains(['/', '\\']) {
+        return Err(format!(
+            "--signature names a file of the folder, not {signature_file:?}"
+        ));
+    }
+    let sums = std::fs::read(folder.join(SUMS)).map_err(|e| format!("{SUMS}: {e}"))?;
+    let signature = std::fs::read_to_string(folder.join(signature_file)).map_err(|_| {
+        format!("{tag} has no {signature_file}: launchers would refuse it, so it was not installed")
+    })?;
+    let listed = verify(tag, &sums, &signature, keys)?;
+    check_listed(tag, &listed, only, folder)
+}
+
+fn check_listed(
+    tag: &str,
+    listed: &[(String, String)],
+    only: &[String],
+    folder: &Path,
+) -> Result<(), String> {
     if let Some(name) = only
         .iter()
         .find(|name| !listed.iter().any(|(n, _)| n == *name))
