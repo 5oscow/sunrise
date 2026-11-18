@@ -1663,10 +1663,15 @@ impl Game<'_> {
         self.uuid_for(id)
     }
     pub(super) fn uuid_for(&mut self, id: u32) -> [i32; 4] {
-        if let Some(uuid) = self.known_resident_entity_uuid_at(self.dim.key(), id) {
+        if let Some(uuid) = self.known_entity_uuid(id) {
             return uuid;
         }
         self.persist.uuids.get_or_insert_with(id, random_uuid)
+    }
+    /// The UUID entity `id` in the level in place has, without making one up.
+    pub(super) fn known_entity_uuid(&self, id: u32) -> Option<[i32; 4]> {
+        self.known_resident_entity_uuid_at(self.dim.key(), id)
+            .or_else(|| self.persist.uuids.get(&id).copied())
     }
     /// `BlockState.CODEC`: a block name or `{id, properties}` (or legacy `{Name, Properties}`).
     pub(super) fn state_from_nbt(&self, tag: &Tag) -> Option<BlockStateId> {

@@ -676,6 +676,10 @@ impl mobs::part_goals::GoalHost for Game<'_> {
         self.native_mob_is_climbing(mob)
     }
 
+    fn mob_attacker_elsewhere(&self, mob: &Mob, attacker: u32) -> Option<EntityRef> {
+        self.credited_elsewhere(attacker, mob.ai.last_hurt_by_uuid)
+    }
+
     fn mob_player_credit(&self, mob: &Mob) -> Option<Option<u32>> {
         let credit = *self.last_hurt_by_player.get(&mob.id)?;
         Some(

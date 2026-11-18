@@ -300,7 +300,11 @@ impl GoalCx<'_, '_> {
             .last_hurt_by
             .filter(|_| mob.age as i32 - mob.ai.last_hurt_by_time <= 100)?;
         let id = match who {
-            crate::mobs::Who::Mob(id) => id,
+            crate::mobs::Who::Mob(id) => {
+                return self
+                    .lookup_entity(id)
+                    .or_else(|| self.w.goal_host?.mob_attacker_elsewhere(mob, id));
+            }
             crate::mobs::Who::Player => self.w.goal_host?.mob_player_credit(mob)??,
         };
         self.lookup_entity(id)

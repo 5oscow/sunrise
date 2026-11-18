@@ -492,6 +492,10 @@ pub struct Ai {
     pub target: Option<Who>,
     pub last_hurt_by: Option<Who>,
     pub last_hurt_by_time: i32,
+    /// The UUID of `last_hurt_by`'s mob, recorded with the hurt
+    /// (`EntityReference`): it names the mob after a dimension change gives
+    /// it a new id. None for the player or an attacker of unknown UUID.
+    pub last_hurt_by_uuid: Option<[i32; 4]>,
     /// The bare UUID of an unresolved `lastHurtByMob` (see `hurt_by`).
     pub last_hurt_by_ref: Option<[i32; 4]>,
     /// Ticks left during which kills count as player kills.

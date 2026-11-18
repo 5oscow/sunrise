@@ -536,6 +536,7 @@ impl Game<'_> {
             .guest_combat
             .get(&victim)
             .and_then(|c| c.kill_credit(self.world.game_time))
+            .map(|(id, _)| id)
         else {
             return;
         };

@@ -55,15 +55,19 @@ impl Game<'_> {
     /// reference to the mob itself resolves like any other (`getEntity` looks
     /// up the UUID and does not exclude the holder).
     pub(in crate::game) fn resolve_last_hurt_by_refs(&mut self) {
-        let resolved: Vec<(usize, Who)> = self
+        let resolved: Vec<(usize, Who, [i32; 4])> = self
             .mobs
             .iter()
             .enumerate()
-            .filter_map(|(i, m)| Some((i, self.who_by_uuid(m.ai.last_hurt_by_ref?)?)))
+            .filter_map(|(i, m)| {
+                let uuid = m.ai.last_hurt_by_ref?;
+                Some((i, self.who_by_uuid(uuid)?, uuid))
+            })
             .collect();
-        for (i, who) in resolved {
+        for (i, who, uuid) in resolved {
             let ai = &mut self.mobs[i].ai;
             ai.last_hurt_by = Some(who);
+            ai.last_hurt_by_uuid = Some(uuid);
             ai.last_hurt_by_ref = None;
         }
     }

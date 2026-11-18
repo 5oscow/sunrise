@@ -710,17 +710,19 @@ impl Game<'_> {
             Target::Player => self
                 .combat
                 .kill_credit(self.world.game_time)
-                .and_then(|id| self.credited_entity(id)),
+                .and_then(|(id, uuid)| self.credited_entity(id, uuid)),
             Target::Guest(conn) => self
                 .guest_combat
                 .get(&conn)?
                 .kill_credit(self.world.game_time)
-                .and_then(|id| self.credited_entity(id)),
+                .and_then(|(id, uuid)| self.credited_entity(id, uuid)),
             Target::Mob(id) => {
                 let m = self.mobs.iter().find(|m| m.id == id && !m.removed)?;
                 let who = m.recent_hurt_by()?;
                 let attacker = match who {
-                    Who::Mob(id) => Some(id),
+                    Who::Mob(attacker) => {
+                        return self.credited_entity(attacker, m.ai.last_hurt_by_uuid);
+                    }
                     // A player's hurt carries no id in `Who`: the hit's
                     // record names the player (`last_hurt_by_player`), the
                     // hub the guest's entity. The acting guest is resolved
@@ -748,35 +750,35 @@ impl Game<'_> {
                         }
                     }
                 }?;
-                self.credited_entity(attacker)
+                self.entity(attacker)
             }
             _ => None,
         }
     }
 
-    /// `EntityReference.getEntity` for a credit held by runtime id, which looks
-    /// through every level (`getEntityInAnyDimension`): the entity `id` in the
-    /// level in place; else, for a mob that changed dimension, the copy that
-    /// arrived, by its UUID (`departed_attackers`), or the vehicle that kept
-    /// its id in another level. None for anything else: an old id is never
-    /// handed to another entity.
-    fn credited_entity(&self, id: u32) -> Option<EntityRef> {
-        use sunrise_client::join_seq::residency::table::EntityLookup;
-        if let Some(entity) = self.entity(id) {
-            return Some(entity);
-        }
+    /// `EntityReference.getEntity` for a kill credit, which looks through
+    /// every level (`getEntityInAnyDimension`): the entity `id` in the level
+    /// in place, else [`Self::credited_elsewhere`].
+    fn credited_entity(&self, id: u32, uuid: Option<[i32; 4]>) -> Option<EntityRef> {
+        self.entity(id)
+            .or_else(|| self.credited_elsewhere(id, uuid))
+    }
+
+    /// A credited mob that is not in the level in place under `id`: the same
+    /// id in another loaded level (a vehicle keeps it), or the mob holding the
+    /// UUID recorded with the hurt in any loaded level, under the id a
+    /// dimension change gave it. Never the old id handed to another entity.
+    pub(in crate::game) fn credited_elsewhere(
+        &self,
+        id: u32,
+        uuid: Option<[i32; 4]>,
+    ) -> Option<EntityRef> {
         let epoch = self.native_lifecycle.epoch()?;
-        let elsewhere = |id: u32| match self.server_resident_entity(id) {
-            EntityLookup::Found {
-                location,
-                value: Target::Mob(_),
-            } => (location.owner.dimension != self.dim.key()).then(|| EntityRef::new(epoch, id)),
-            _ => None,
-        };
-        let Some(&(uuid, _)) = self.departed_attackers.get(&id) else {
-            return elsewhere(id);
-        };
-        for dim in std::iter::once(self.dim).chain(self.levels.parked_dims()) {
+        if self.mob_in_other_level(id).is_some() {
+            return Some(EntityRef::new(epoch, id));
+        }
+        let uuid = uuid?;
+        for dim in std::iter::once(self.dim).chain(self.levels.parked.keys().copied()) {
             let mut after = None;
             loop {
                 let next = self
@@ -785,9 +787,15 @@ impl Game<'_> {
                     .borrow_mut()
                     .level_uuid_candidate(dim.key(), uuid, after);
                 let Some(candidate) = next else { break };
-                let found = self
-                    .entity(candidate.get())
-                    .or_else(|| elsewhere(candidate.get()));
+                let candidate_id = candidate.get();
+                let found = if candidate_id == id {
+                    None
+                } else if dim == self.dim {
+                    self.entity(candidate_id)
+                } else {
+                    self.mob_in_other_level(candidate_id)
+                        .map(|_| EntityRef::new(epoch, candidate_id))
+                };
                 if found.is_some() {
                     return found;
                 }
@@ -1773,10 +1781,9 @@ mod tests {
         super::super::native_entity_refs::tests::with_game(|game| {
             game.world_root = game.save.root.clone();
             game.enter_level(Dim::Nether).unwrap();
-            game.world.chunks.insert(
-                (0, 0),
-                Arc::new(sunrise_client::chunk::Chunk::empty(0, 0)),
-            );
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(sunrise_client::chunk::Chunk::empty(0, 0)));
             game.block_ticks
                 .add_empty_chunk(sunrise_core::position::ChunkPos::new(0, 0))
                 .unwrap();
@@ -1796,8 +1803,8 @@ mod tests {
                 summon("minecraft:zombie"),
             );
             let uuid = game.uuid_for(zombie);
-            let victim = game.mobs.iter_mut().find(|m| m.id == pig).unwrap();
-            victim.ai.hurt_by(Who::Mob(zombie), victim.age as i32);
+            let hit = sunrise_client::mobs::Damage::mob(zombie, [0.5, 70.0, 0.5]);
+            assert!(game.mob_hits_mob(pig, 1.0, hit));
             let living = game.living(game.entity(pig).unwrap()).unwrap();
             assert_eq!(living.kill_credit(game).map(|e| e.id()), Some(zombie));
 
@@ -1813,10 +1820,19 @@ mod tests {
                 .unwrap()
             );
             assert_eq!(game.dim, Dim::Overworld);
-            let credit = living.kill_credit(game).expect("credit kept").id();
-            assert!(![zombie, bystander, pig].contains(&credit));
-            game.enter_level(Dim::Nether).unwrap();
-            assert_eq!(game.uuid_for(credit), uuid);
+            // What a mod reads from the pig's level, the Nether still parked.
+            let credit = living.kill_credit(game).expect("credit kept");
+            assert!(![zombie, bystander, pig].contains(&credit.id()));
+            assert_eq!(living.last_attacker(game), Some(credit));
+            assert_eq!(
+                credit.kind(game),
+                mod_api::__private::resolved_entity_type_key("minecraft:zombie")
+            );
+            assert_eq!(
+                credit.uuid(game),
+                Some(sunrise_client::lan::playerdata::ints_uuid(uuid))
+            );
+            assert_eq!(credit.level(game), game.level("minecraft:the_nether"));
         });
     }
 

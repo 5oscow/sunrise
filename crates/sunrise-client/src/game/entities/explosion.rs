@@ -3232,7 +3232,9 @@ mod explicit_source_tests {
                     ))
                 );
                 assert_eq!(
-                    game.combat.kill_credit(game.world.game_time),
+                    game.combat
+                        .kill_credit(game.world.game_time)
+                        .map(|(id, _)| id),
                     (mode == 2).then_some(43)
                 );
                 if mode == 1 || mode == 3 || nested {

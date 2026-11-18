@@ -848,9 +848,27 @@ impl Game<'_> {
         match self.native_entity_read_target(entity) {
             Some(target) => self.native_entity_kind_key(target),
             None => {
+                if self.native_lifecycle.epoch() == Some(entity.epoch())
+                    && let Some(dim) = self.mob_in_other_level(entity.id())
+                {
+                    let parked = self.levels.parked.get(&dim)?;
+                    let mob = parked.mobs.iter().find(|m| m.id == entity.id())?;
+                    return mod_api::__private::resolved_entity_type_key(&mob.kind.id);
+                }
                 mod_api::__private::resolved_entity_type_key(self.native_client_tracked(entity)?.0)
             }
         }
+    }
+    /// A mob of this game that is resident in a loaded level other than the
+    /// one in place, as a kill credit can name one (`getEntityInAnyDimension`):
+    /// its identity reads (`entity_kind`, `entity_uuid`, `entity_level`)
+    /// answer from there. None on a client or for anything else.
+    pub(super) fn mob_in_other_level(&self, id: u32) -> Option<super::Dim> {
+        if !self.is_logical_server() {
+            return None;
+        }
+        let dim = self.resident_target_dimension(Target::Mob(id))?;
+        (dim != self.dim).then_some(dim)
     }
     /// The entity's UUID (`Entity.getUUID`), the one it is saved with; an
     /// entity that has none yet gets it now, as a new vanilla entity does.
@@ -879,6 +897,13 @@ impl Game<'_> {
                 .copied()
                 .map(uuid_from_words);
         }
+        if self.native_lifecycle.epoch() == Some(entity.epoch())
+            && let Some(dim) = self.mob_in_other_level(entity.id())
+        {
+            return self
+                .known_resident_entity_uuid_at(dim.key(), entity.id())
+                .map(uuid_from_words);
+        }
         let words = match self.native_entity_target(entity)? {
             Target::Player => {
                 let dimension = self.current_player_resident_location()?.owner.dimension;
@@ -897,9 +922,15 @@ impl Game<'_> {
         let key = match self.native_entity_read_target(entity) {
             Some(t) if self.is_logical_server() => self.target_level(t).key(),
             Some(_) => self.native_level_key(),
-            None => self
-                .native_client_tracked(entity)
-                .map(|_| self.native_level_key())?,
+            None if self.native_lifecycle.epoch() == Some(entity.epoch()) => {
+                match self.mob_in_other_level(entity.id()) {
+                    Some(dim) => dim.key(),
+                    None => self
+                        .native_client_tracked(entity)
+                        .map(|_| self.native_level_key())?,
+                }
+            }
+            None => return None,
         };
         Some(self.level_ref(entity.epoch(), key))
     }

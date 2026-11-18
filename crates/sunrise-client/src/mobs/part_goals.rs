@@ -52,6 +52,10 @@ pub trait GoalHost {
     fn mob_is_climbing(&self, mob: &Mob) -> bool;
     /// Player credit for a mob, distinguishing absent credit from an unresolved player.
     fn mob_player_credit(&self, mob: &Mob) -> Option<Option<u32>>;
+    /// The mob `attacker` that hurt a lent mob, when it is not in this level
+    /// under that id: in another loaded level, or under the id a dimension
+    /// change gave it, by the UUID recorded with the hurt.
+    fn mob_attacker_elsewhere(&self, mob: &Mob, attacker: u32) -> Option<mod_api::EntityRef>;
     /// Read a lent mob's current target with the game's target validation.
     fn mob_target(
         &self,

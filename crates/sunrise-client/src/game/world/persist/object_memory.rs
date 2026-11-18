@@ -693,7 +693,6 @@ impl Game<'_> {
             .into_iter()
             .map(|id| self.capture_vehicle_tree_state(id))
             .collect::<Option<Vec<_>>>()?;
-        self.note_departed_attacker(root);
         Some(TransferredVehicleTree {
             source_id: root,
             kind,
