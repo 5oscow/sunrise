@@ -17,8 +17,8 @@ impl Hooks for Mod {
     }
 }
 
-fn greeting(name: &str) -> String {
-    format!("{id} says hello, {name}!")
+fn greeting(player: &str) -> String {
+    format!("{id} says hello, {player}!")
 }
 
 // `cargo test` runs this without the game: keep the logic a hook uses in plain functions.
