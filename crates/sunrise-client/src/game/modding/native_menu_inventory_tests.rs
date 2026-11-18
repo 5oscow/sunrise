@@ -327,4 +327,58 @@ mod owner {
             assert_eq!(game.dropped.len(), dropped);
         });
     }
+
+    /// Only the owner is refused in another level: a guest who isn't the owner is reached
+    /// through `as_guest` as before. A transaction that clears a stack of such a guest in the
+    /// Nether and aborts restores it, and a stack given to them with a full inventory is
+    /// delivered, not discarded at commit.
+    #[test]
+    #[ignore = "daily"]
+    fn a_non_owner_guest_in_another_level_keeps_their_stack_through_an_abort() {
+        use mod_api::prelude::*;
+        with_guests(|game| {
+            game.level.player_uuid = Some(playerdata::uuid_ints(12));
+            assert_ne!(game.dim.id(), "minecraft:the_nether");
+            let stack = |game: &super::super::Game<'_>, snbt: &str| {
+                let host: &dyn mod_api::Host = game;
+                host.item_from_snbt(snbt).unwrap()
+            };
+            let stone = stack(game, r#"{id:"minecraft:stone",count:64}"#);
+            let diamond = stack(game, r#"{id:"minecraft:diamond",count:1}"#);
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .update_guest(13, |g| {
+                    g.dimension = "minecraft:the_nether".to_owned();
+                    g.inventory[0] = Some(ItemStack::new("minecraft:stone", 64));
+                })
+                .unwrap();
+            let player = game.players().server_players()[1];
+            assert_eq!(player.uuid(), 13);
+            let aborted: Result<(), ()> = (game as &mut dyn ServerHost).transaction(|host, _| {
+                player.set_inventory_slot(host, 0, None).unwrap();
+                Err(())
+            });
+            assert!(aborted.is_err());
+            assert_eq!(player.inventory_slots(game), Some(vec![(0, stone)]));
+
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .update_guest(13, |g| {
+                    g.inventory
+                        .fill(Some(ItemStack::new("minecraft:stone", 64)));
+                })
+                .unwrap();
+            let dropped = game.dropped.len();
+            let given: Result<(), ()> = (game as &mut dyn ServerHost).transaction(|host, _| {
+                player.give_stack(host, diamond).unwrap();
+                Ok(())
+            });
+            assert!(given.is_ok());
+            assert_eq!(game.dropped.len(), dropped + 1);
+        });
+    }
 }
