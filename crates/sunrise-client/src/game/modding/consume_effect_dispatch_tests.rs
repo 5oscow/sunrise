@@ -13,9 +13,9 @@ struct First(Arc<Mutex<Vec<&'static str>>>);
 #[mod_api::__subscriptions]
 impl Hooks for First {
     fn consume_effect(&self, host: &mut dyn ServerHost, event: &mut ConsumeEffectEvent<'_>) {
-        if event.kind != "first:effect" {
-            return;
-        }
+        // Both listeners subscribe to all custom consume entries. The engine,
+        // not a guard in the listener, must keep other kinds out of this callback.
+        assert_eq!(event.kind, "first:effect");
         self.0.lock().unwrap().push("first");
         let source = host.entity(21).unwrap();
         assert_eq!(event.user, source);
@@ -41,9 +41,8 @@ struct Second(Arc<Mutex<Vec<&'static str>>>);
 #[mod_api::__subscriptions]
 impl Hooks for Second {
     fn consume_effect(&self, _: &mut dyn ServerHost, event: &mut ConsumeEffectEvent<'_>) {
-        if event.kind == "second:effect" {
-            self.0.lock().unwrap().push("second");
-        }
+        assert_eq!(event.kind, "second:effect");
+        self.0.lock().unwrap().push("second");
     }
 }
 
@@ -61,6 +60,7 @@ fn a_living_handle_dispatches_custom_kinds_with_same_kind_recursion_refused() {
             for (item, kind) in [
                 ("minecraft:pufferfish", "first:effect"),
                 ("minecraft:honey_bottle", "second:effect"),
+                ("minecraft:apple", "unclaimed:effect"),
             ] {
                 items
                     .items
@@ -83,6 +83,9 @@ fn a_living_handle_dispatches_custom_kinds_with_same_kind_recursion_refused() {
                 .try_into_api()
                 .unwrap();
             assert_eq!(living.apply_consume_effect(game, &stack, 0), Ok(Some(true)));
+            assert_eq!(*trace.lock().unwrap(), ["first", "second", "first_after"]);
+            let unclaimed = ItemStack::new("minecraft:apple", 1).try_into_api().unwrap();
+            living.apply_consume_effect(game, &unclaimed, 0).unwrap();
             assert_eq!(*trace.lock().unwrap(), ["first", "second", "first_after"]);
             assert_eq!(living.apply_consume_effect(game, &stack, 0), Ok(Some(true)));
             assert_eq!(

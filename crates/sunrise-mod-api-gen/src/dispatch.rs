@@ -971,6 +971,15 @@ pub(super) fn emit<'a>(
                     call(&mod_item, "break"),
                 ),
             ),
+            None if name == "consume_effect" => (
+                format!(
+                    "let Some(owner) = super::runtime::listening_kind_owner(HookId::{hook_id}, kind) else {{ return; }};"
+                ),
+                format!(
+                    "let mut {entered} = super::runtime::ListenerScope::new(); let {mod_item} = {entered}.enter(owner, \"{name}\"); {}",
+                    call(&mod_item, ""),
+                ),
+            ),
             None if hook.owner.is_some() => (
                 String::new(),
                 format!(
