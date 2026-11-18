@@ -1266,7 +1266,7 @@ impl Game<'_> {
                             self.tick_lan(true);
                             Ok(())
                         } else if k == 0 {
-                            self.tick()
+                            self.tick_server_first()
                         } else {
                             let running = running.unwrap_or_else(|| self.clock.world_runs());
                             // ClientLevel.tick: the sky flash fades in a frozen level too.
@@ -2309,6 +2309,17 @@ mod request_save_tests {
 }
 
 impl Game<'_> {
+    /// `Game::tick` as a server runs it for its first level: no window lead, which only the window's `Game` has.
+    pub(super) fn tick_server_first(&mut self) -> Result<()> {
+        self.expire_client_cracks();
+        if self.agent.hold_server {
+            return Ok(());
+        }
+        self.abort_open_transactions();
+        self.update_interaction_ranges();
+        self.tick_first_level()
+    }
+
     /// A server's tick of its first level: the clock, functions, autosave and weather it owns, then the level.
     pub(super) fn tick_first_level(&mut self) -> Result<()> {
         // Only a server ticks its own world from here: its players are guests, swapped in for
