@@ -4438,6 +4438,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "sunrise-border"
+version = "0.1.0"
+dependencies = [
+ "sunrise-core",
+]
+
+[[package]]
 name = "sunrise-bots"
 version = "0.1.0"
 dependencies = [
@@ -4665,6 +4672,7 @@ dependencies = [
  "sha2",
  "smallvec",
  "sunrise-assets",
+ "sunrise-border",
  "sunrise-client-core",
  "sunrise-client-input",
  "sunrise-command",
