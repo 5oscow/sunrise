@@ -393,14 +393,16 @@ fn a_placement_part_reads_comparator_outputs_the_client_holds() {
             !reads.is_empty() && reads.iter().all(Option::is_none),
             "{reads:?}"
         );
-        game.block_ticks
-            .comparator_outputs
-            .insert(sunrise_core::position::BlockPos::new(x, y, z), 9);
-        let reads = read(game);
-        assert!(
-            !reads.is_empty() && reads.iter().all(|r| *r == Some(9)),
-            "{reads:?}"
-        );
+        for output in [0, 9] {
+            game.block_ticks
+                .comparator_outputs
+                .insert(sunrise_core::position::BlockPos::new(x, y, z), output);
+            let reads = read(game);
+            assert!(
+                !reads.is_empty() && reads.iter().all(|r| *r == Some(output)),
+                "stored {output}, read {reads:?}"
+            );
+        }
     });
 }
 
