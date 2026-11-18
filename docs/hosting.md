@@ -802,12 +802,6 @@ environment variable `SUNRISE_PARALLEL_TICK=1`, for a host that gives you no way
 with a fixed startup command). With the setting off, a `SUNRISE_PARALLEL_TICK` already in the server's
 environment still applies.
 
-Natural mob spawning is one of those phases: the spawn attempts of the chunks around your players run on the helper
-threads, and the server thread then takes what they found, in order, if the mob caps still allow it. It has vanilla's odds
-and caps but not the random draws of one vanilla level, so a world does not spawn the same mobs with the setting on as off.
-It stays on one thread while a native mod listens to spawns, with fewer than 512 chunks to try (about two players' worth) and
-on a machine with one core ([how it works](parallel-natural-spawning.md)).
-
 ## When something goes wrong
 
 - **"no prepared game files"**: `init` and `run` list the folders they looked in. Prepare (step 2), or set

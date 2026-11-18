@@ -376,29 +376,6 @@ impl<'a> DamageLevel<'a> {
             effects: self.effects.as_mut().map(HitEffects::reborrow),
         }
     }
-    /// The same level with a task-local random, retaining its typed hook and attachment context.
-    pub fn reborrow_with_random<'b>(
-        &'b mut self,
-        random: &'b mut sunrise_core::random::LegacyRandom,
-    ) -> DamageLevel<'b> {
-        DamageLevel {
-            shape: self.shape,
-            chunks: self.chunks,
-            air: self.air,
-            registry: self.registry,
-            tags: self.tags,
-            block_registries: self.block_registries,
-            random,
-            attachments: self.attachments,
-            attachment_syncs: self.attachment_syncs,
-            hooks: self.hooks,
-            attack: self.attack,
-            client_side: self.client_side,
-            knock_entry: self.knock_entry,
-            credit: self.credit.reborrow(),
-            effects: self.effects.as_mut().map(HitEffects::reborrow),
-        }
-    }
     /// The same level whose hit lends `effects`.
     pub fn with_effects(self, effects: HitEffects<'a>) -> Self {
         Self {
