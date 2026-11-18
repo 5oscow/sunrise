@@ -11255,11 +11255,15 @@ def check_projectile_land(host, guest, out):
     seen = {}
     try:
         for label, (item, mode, how) in cases.items():
+            # Wandering mobs step, flap and get hurt next to the sensor and power it themselves.
+            # Entity.kill raises ENTITY_DIE, so killing them (or the last case's trident) powers it
+            # too: kill first, then let that vibration arrive (up to 8 ticks of travel) and the
+            # sensor settle before the throw.
+            host('command', command='kill @e[type=!minecraft:player,distance=..40]')
+            host.wait(20)
             assert wait_state(host, sensor, 'sculk_sensor_phase', 'inactive', 200) == 'inactive', seen
             host('command', command=f'gamemode {mode}')
             host('command', command='clear @s')
-            # Wandering mobs step, flap and get hurt next to the sensor and power it themselves.
-            host('command', command='kill @e[type=!minecraft:player,distance=..40]')
             host('command', command=f'item replace entity @s weapon.mainhand with {item}')
             host('command', command=f'tp @s {x + 0.5} {y} {z + 0.5} -90 0')
             host.wait(10)
