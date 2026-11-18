@@ -832,9 +832,9 @@ impl Title {
             "multiplayer" => self.set_mode(Mode::Multiplayer(crate::multiplayer::Screen::list(
                 &self.saves,
             ))),
-            "add_server" => self.set_mode(Mode::Multiplayer(
-                crate::multiplayer::Screen::add_server(),
-            )),
+            "add_server" => {
+                self.set_mode(Mode::Multiplayer(crate::multiplayer::Screen::add_server()))
+            }
             "direct_connect" => self.open_multiplayer(crate::multiplayer::Screen::direct()),
             _ => {}
         }
