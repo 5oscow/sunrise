@@ -99,7 +99,6 @@ screen.
 - `hud_overlays` tests pin `boss_bars_bottom` to vanilla's numbers and to `boss_overlay`'s own
   sprites.
 - `hud_kit::room` tests cover an empty room and when an overlay moves.
-- `game/split/hud.rs` tests place the join strip and the notice with 0 to 3 bars.
 
 ## Shapes
 
