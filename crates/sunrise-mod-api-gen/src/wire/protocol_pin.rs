@@ -112,6 +112,6 @@ fn the_shared_protocols_items_are_pinned_to_its_number() {
     );
     assert_eq!(
         hash, PINNED.1,
-        "an item that defines the shared protocol changed (now {hash}): bump SHARED_PROTOCOL in sunrise-mod-surface/src/call.rs and update PINNED"
+        "an item that defines the shared protocol changed (now {hash}): bump SHARED_PROTOCOL in sunrise-mod-call/src/lib.rs and update PINNED"
     );
 }
