@@ -44,14 +44,20 @@ pub trait LevelSpawningBackendMut {
     ///   `Projectile.setOwner` (hit credit, `Owner`, and the shot keeps clear
     ///   of its owner until it leaves the owner's box); `projectile_launch`
     ///   fires. It carries `item` (`ThrowableItemProjectile.setItem`), checked
-    ///   as `ServerHost::spawn_projectile_from_rotation` checks its stack.
+    ///   as `ServerHost::spawn_projectile_from_rotation` checks its stack. The
+    ///   owner is a player, a mob, a boat or a minecart: the shot needs its
+    ///   collision identity to keep clear of it, and any other owner refuses
+    ///   the spawn.
     /// - [`SpawnBody::Living`]: `EntityType.spawn` with `reason`, the route
     ///   `/summon` takes: the entity type creates it (its Parts and
     ///   attachments with it, and `entity_constructing`), with a random yaw
     ///   from the level random unless `spawn.rotation` names one, then
     ///   `finalize_spawn` and `finalizeSpawn` with that reason (equipment,
     ///   variants, jockeys), and it joins the level (`entity_join_level`), not
-    ///   persistent. A mob takes no owner.
+    ///   persistent. A mob takes no owner. `kind` resolves as `/summon`'s
+    ///   (`cow` is `minecraft:cow`); the ender dragon takes its own creation,
+    ///   facing `spawn.rotation`'s yaw, and is refused with a velocity or a
+    ///   pitch, which it has no state for.
     /// - [`SpawnBody::General`]: a new row of the general type, with a fresh
     ///   UUID and the type's declared payload version, through the insertion
     ///   `/summon` and chunk loading share. The owner is kept on the row and
@@ -68,7 +74,8 @@ pub trait LevelSpawningBackendMut {
     /// of `spawn.body`'s family, a position, velocity or rotation that isn't
     /// finite, a position outside the spawnable bounds
     /// (`Level.isInSpawnableBounds`), an unloaded chunk, an owner that is
-    /// stale, in another level or given for a mob, an invalid thrown item, a
+    /// stale, in another level, given for a mob or without a collision identity
+    /// for a thrown spawn, an invalid thrown item, a
     /// stale handle, a level not in place, a client, or exhausted entity ids;
     /// and, with nothing left in the level, a `finalize_spawn` that cancelled
     /// the spawn or an entity a mod kept out. Inside a transaction its join

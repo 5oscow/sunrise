@@ -59,7 +59,8 @@ impl Game<'_> {
                 self.spawn_thrown_entity(kind, pos, velocity, spawn.rotation, owner, &stack)?
             }
             SpawnBody::Living { reason } => {
-                if owner.is_some() || !self.res.mob_types().contains_key(kind) {
+                // A mob takes no owner; a kind that isn't a mob makes nothing.
+                if owner.is_some() {
                     return None;
                 }
                 let site = SpawnSite::Finalizing(*reason);
@@ -95,6 +96,23 @@ impl Game<'_> {
         if !self.projectile_spawned_effects_applied(stack) {
             return None;
         }
+        // The owner must have a collision identity the shot's hit filter
+        // knows (`Who`, or the vehicle it leaves): a player, a mob, a boat or
+        // a minecart. Any other owner would get damage credit but no
+        // identity, so the shot could hit it before it left; it is refused.
+        if !matches!(
+            owner,
+            None | Some((
+                _,
+                Target::Player
+                    | Target::Guest(_)
+                    | Target::Mob(_)
+                    | Target::Boat(_)
+                    | Target::Cart(_)
+            ))
+        ) {
+            return None;
+        }
         let mut carried = stack.clone();
         carried.count = 1;
         let kind = thrown_projectile_kind(kind, &carried)?;
@@ -111,7 +129,10 @@ impl Game<'_> {
             None => shot.update_rotation(),
         }
         shot.item = Some(carried);
-        self.spawn_owned_projectile(owner.map(|(_, target)| target), shot, stack)
+        let id = self.spawn_owned_projectile(owner.map(|(_, target)| target), shot, stack)?;
+        // The join as any fresh spawn's: told now, so a mod's veto refuses
+        // the call, or at the root commit inside a transaction.
+        self.native_joins_flush(false, id).then_some(id)
     }
     /// A new row of the general type `kind` at `pos`: a fresh UUID, the type's
     /// declared payload version and no payload bytes, through the insertion
@@ -141,18 +162,12 @@ impl Game<'_> {
             },
             passengers: Vec::new(),
         };
-        let from = self.mobs.len();
-        let Some(Target::General(id)) = self.spawn_entity_from_nbt(record.to_tag()) else {
-            return None;
-        };
-        // Told as `summon` tells its entities: a mod may keep the row out.
-        self.native_mobs_joined(from, false);
-        self.resident_entities
-            .general
-            .rows
-            .iter()
-            .any(|row| row.id == id)
-            .then_some(id)
+        // The single-record admission chunk loading uses, without its
+        // `entities_load` (nothing was read from a save), then the join as a
+        // fresh spawn's: told now, or at the root commit inside a transaction.
+        let tag = record.to_tag();
+        let id = self.admit_general_record(record, &tag, None).ok()??;
+        self.native_joins_flush(false, id).then_some(id)
     }
     /// The level's natural spawning limits. None for a stale handle or on a client.
     pub(super) fn level_spawn_limits(&self, level: LevelRef) -> Option<SpawnLimits> {
@@ -347,6 +362,35 @@ mod tests {
             let mob = game.mobs.iter().find(|m| m.id == cow.id()).unwrap();
             assert_eq!(mob.velocity, Vec3::new(0.25, 0.5, -0.125));
             assert_eq!((mob.yaw, mob.head_pitch), (45.0, -10.0));
+            // The kind resolves as `/summon`'s.
+            let bare = game
+                .level_spawn_entity(level, "cow", [9.5, 64.0, 8.5], &living())
+                .unwrap();
+            assert_eq!(
+                game.entity_kind(bare).map(|kind| kind.id(game)).as_deref(),
+                Some("minecraft:cow")
+            );
+            // The ender dragon takes its own creation, facing the given yaw;
+            // a velocity or a pitch, which it has no state for, refuses it.
+            let mut rising = living();
+            rising.velocity = [0.0, 0.5, 0.0];
+            let mut pitched = living();
+            pitched.rotation = Some([30.0, 10.0]);
+            for refused in [rising, pitched] {
+                let at = [8.5, 80.0, 8.5];
+                assert_eq!(
+                    game.level_spawn_entity(level, "minecraft:ender_dragon", at, &refused),
+                    None
+                );
+            }
+            assert!(game.dragon.is_none());
+            let mut facing = living();
+            facing.rotation = Some([30.0, 0.0]);
+            let dragon = game
+                .level_spawn_entity(level, "ender_dragon", [8.5, 80.0, 8.5], &facing)
+                .unwrap();
+            let d = game.dragon.as_ref().unwrap();
+            assert_eq!((d.id, d.yaw), (dragon.id(), 30.0));
         });
     }
 
@@ -396,6 +440,25 @@ mod tests {
                 game.level_spawn_entity(level, "minecraft:snowball", [8.5, 65.5, 8.5], &spawn),
                 None
             );
+            // An owner the shot has no collision identity for refuses.
+            game.options.dedicated = Some(Vec::new());
+            let dimension = game.dim.id();
+            let stand = game
+                .summon(
+                    dimension,
+                    "minecraft:armor_stand",
+                    [9.5, 64.0, 8.5],
+                    Default::default(),
+                )
+                .unwrap();
+            spawn.owner = game.entity(stand);
+            assert!(spawn.owner.is_some());
+            let projectiles = game.creatures.projectiles.len();
+            assert_eq!(
+                game.level_spawn_entity(level, "minecraft:snowball", [8.5, 65.5, 8.5], &spawn),
+                None
+            );
+            assert_eq!(game.creatures.projectiles.len(), projectiles);
         });
     }
 

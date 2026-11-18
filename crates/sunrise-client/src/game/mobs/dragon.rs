@@ -4769,6 +4769,16 @@ impl Game<'_> {
     /// so it can be spawned in any dimension. Sunrise keeps one dragon per level, as `/summon`
     /// and loading do: with one already there, nothing spawns and the egg stays.
     pub(super) fn spawn_dragon_spawned(&mut self, at: [f64; 3], site: SpawnSite) -> Option<u32> {
+        self.spawn_dragon_facing(at, site, None)
+    }
+    /// [`spawn_dragon_spawned`](Self::spawn_dragon_spawned) snapped to `fixed_yaw` when
+    /// given (`snapTo(pos, yaw, 0)`), which takes no draw from the level.
+    pub(super) fn spawn_dragon_facing(
+        &mut self,
+        at: [f64; 3],
+        site: SpawnSite,
+        fixed_yaw: Option<f32>,
+    ) -> Option<u32> {
         if self.dragon.is_some() {
             return None;
         }
@@ -4776,8 +4786,11 @@ impl Game<'_> {
         // SummonCommand loads absent Rotation as zero before finalization. Only
         // EntityType.create's egg placement draws a random snapTo yaw.
         // Diverges from upstream: shared mod finalization also admits command dragons.
-        let yaw = match site {
-            SpawnSite::Finalizing(sunrise_client::mobs::spawn_rules::Reason::Command) => 0.0,
+        let yaw = match (fixed_yaw, site) {
+            (Some(yaw), _) => yaw,
+            (None, SpawnSite::Finalizing(sunrise_client::mobs::spawn_rules::Reason::Command)) => {
+                0.0
+            }
             _ => sunrise_client::camera::wrap_degrees(self.world.random.next_float() * 360.0),
         };
         let finalized = match site {

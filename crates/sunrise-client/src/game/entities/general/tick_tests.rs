@@ -182,7 +182,33 @@ impl Hooks for Declare {
     ) {
         self.events.lock().unwrap().push((event.entity, "post"));
     }
+    fn entity_join_level(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &mut mod_api::EntityJoinLevelEvent<'_>,
+    ) -> Flow {
+        SPAWN_HEARD.lock().unwrap().push((event.entity, "join"));
+        let answer = SPAWN_ON_JOIN.swap(false, std::sync::atomic::Ordering::SeqCst);
+        if answer && event.kind == "mymod:robot" {
+            let level = host.level("minecraft:overworld").unwrap();
+            let general = mod_api::EntitySpawn::new(mod_api::SpawnBody::General);
+            let other = level.spawn_entity(host, "mymod:robot", [6.5, 65.5, 2.5], &general);
+            SPAWN_HEARD
+                .lock()
+                .unwrap()
+                .extend(other.map(|entity| (entity.id(), "summoned")));
+        }
+        Flow::Continue
+    }
+    fn entities_load(&self, _: &mut dyn ServerHost, _: &mut mod_api::EntitiesLoadEvent<'_>) {
+        SPAWN_HEARD.lock().unwrap().push((0, "load"));
+    }
 }
+
+/// The joins and chunk loads the fixture mod heard, and what it summoned from a join.
+static SPAWN_HEARD: Mutex<Vec<(u32, &'static str)>> = Mutex::new(Vec::new());
+/// Armed: the next robot's join summons another robot.
+static SPAWN_ON_JOIN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// A counter fixture game. The registration phase is scoped around the whole
 /// fixture: the harness re-runs the mods' `register` while the game builds,
@@ -932,6 +958,51 @@ fn summon_answers_a_target_with_a_network_id() {
             game.target_position(crate::game::commands::Target::General(id)),
             Some([0.5, 64.0, 0.5])
         );
+    });
+}
+
+/// A general row spawned by `LevelRef::spawn_entity` is admitted as one
+/// record and joins as a fresh spawn: no `entities_load` (no save was read),
+/// its join told at the call, and the handle names its own row even when a
+/// join listener spawns another row of the type before the call returns.
+#[test]
+#[ignore = "daily"]
+fn spawn_entity_returns_its_own_row_when_a_join_spawns_another() {
+    use mod_api::{EntitySpawn, SpawnBody};
+    with_counter(|game, _| {
+        game.world.chunks.insert(
+            (0, 0),
+            std::sync::Arc::new(sunrise_client::chunk::Chunk::empty(0, 0)),
+        );
+        let level = game.level(game.dim.id()).unwrap();
+        SPAWN_HEARD.lock().unwrap().clear();
+        SPAWN_ON_JOIN.store(true, std::sync::atomic::Ordering::SeqCst);
+        let missile = game
+            .level_spawn_entity(
+                level,
+                "mymod:robot",
+                [2.5, 65.5, 2.5],
+                &EntitySpawn::new(SpawnBody::General),
+            )
+            .unwrap();
+        let heard = std::mem::take(&mut *SPAWN_HEARD.lock().unwrap());
+        let other = heard
+            .iter()
+            .find_map(|&(id, what)| (what == "summoned").then_some(id))
+            .unwrap_or_else(|| panic!("the listener summoned no second robot: {heard:?}"));
+        assert_ne!(other, missile.id());
+        assert!(heard.contains(&(missile.id(), "join")));
+        assert!(!heard.iter().any(|&(_, what)| what == "load"), "{heard:?}");
+        let row = |id: u32| {
+            game.resident_entities
+                .general
+                .rows
+                .iter()
+                .find(|row| row.id == id)
+                .map(|row| row.position)
+        };
+        assert_eq!(row(missile.id()), Some(Vec3::new(2.5, 65.5, 2.5)));
+        assert_eq!(row(other), Some(Vec3::new(6.5, 65.5, 2.5)));
     });
 }
 

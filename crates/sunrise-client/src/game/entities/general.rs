@@ -935,16 +935,33 @@ impl Game<'_> {
                 return Ok(());
             }
         };
+        match self.admit_general_record(record, &tag, transferred) {
+            Err(()) => Err(tag),
+            Ok(_) => Ok(()),
+        }
+    }
+
+    /// Admit one general record tree: every check, then its rows inserted
+    /// unjoined, the join left to the caller's flush. The root row's runtime
+    /// id; `Ok(None)` for a tree refused with a warning (a structural fault,
+    /// a UUID a live level entity already owns), `Err` for a sound tree of
+    /// types the frozen registry doesn't hold.
+    pub(in crate::game) fn admit_general_record(
+        &mut self,
+        record: GeneralEntityRecord,
+        tag: &Tag,
+        transferred: Option<TransferredEntityState>,
+    ) -> Result<Option<u32>, ()> {
         let catalog = general_type_catalog();
         match check_general_record(&record, |key| catalog.slot(key).is_some()) {
             Ok(GeneralRecordCheck::Ready) => {}
-            Ok(GeneralRecordCheck::UnknownType) => return Err(tag),
+            Ok(GeneralRecordCheck::UnknownType) => return Err(()),
             Err(error) => {
                 log::warn!(
                     "Sunrise: refusing general entity record: {}",
                     error.message()
                 );
-                return Ok(());
+                return Ok(None);
             }
         }
         // A UUID a live entity of the level already owns refuses the whole
@@ -955,10 +972,14 @@ impl Game<'_> {
                 "Sunrise: refusing general entity record: a live entity owns its uuid {:?}",
                 record.uuid
             );
-            return Ok(());
+            return Ok(None);
         }
-        self.insert_general_record(record, &tag, None, transferred);
-        Ok(())
+        Ok(Some(self.insert_general_record(
+            record,
+            tag,
+            None,
+            transferred,
+        )))
     }
 
     /// Insert one record as a row (and, recursively, its riders as rows of
@@ -971,7 +992,7 @@ impl Game<'_> {
         tag: &Tag,
         mount: Option<u32>,
         transferred: Option<TransferredEntityState>,
-    ) {
+    ) -> u32 {
         let slot = general_type_catalog()
             .slot(&record.envelope.type_key)
             .expect("check_general_record resolved every type of the tree");
@@ -1012,6 +1033,7 @@ impl Game<'_> {
         for (rider, rider_tag) in riders {
             self.insert_general_record(rider.clone(), rider_tag, Some(id), None);
         }
+        id
     }
 }
 
