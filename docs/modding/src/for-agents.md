@@ -26,11 +26,10 @@ current Nightly's build, downloads that SDK release's tool, checks Sunrise's sig
 ```sh
 cargo sunrise-mod new greeter --template native
 cd greeter
-rustup target add wasm32-unknown-unknown
 cargo sunrise-mod check
 ```
 
-`new` writes a complete project and fetches its SDK into `.sunrise/sdk/`. `check` compiles it for this computer and for wasm32, which is why the target is added first. It must end with a
+`new` writes a complete project and fetches its SDK into `.sunrise/sdk/`. `check` compiles it for the project's own target (this computer for a native mod). It must end with a
 line like `greeter uses 34 items of the API (…). Made for 2d81263.` Run `check` after every edit, and fix what it
 reports before going on. Use another mod id by changing the folder name: `new` turns it into the id.
 

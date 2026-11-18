@@ -2,7 +2,7 @@
 
 In a mod folder, `cargo sunrise-mod` does this for you from the SDK it fetched into `.sunrise/sdk/`:
 
-- `cargo sunrise-mod check` runs `cargo check` for this computer and for wasm32, checks the package rules,
+- `cargo sunrise-mod check` runs `cargo check` for the project's own target (this computer for a native mod, wasm32 for a wasm mod; `--wasm` or `--native` asks for the other), checks the package rules,
   and prints what the mod uses: `Greeter uses 14 items of the API (6 hooks, 5 methods, 3 types). Made for
   nightly-2026-11-13 (afe471c).` With `--uses` it lists each item with the line that brought it in.
 - `cargo sunrise-mod build` packs the list into the package as `uses.json`, with each item's fingerprint at the

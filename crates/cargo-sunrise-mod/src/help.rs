@@ -31,8 +31,8 @@ const COMMANDS: &[Command] = &[
     Command {
         name: "check",
         everyday: true,
-        usage: "check [--uses] | check <file> [--kind <kind>] [--key <public key> --signature <file.minisig>] [--json]",
-        summary: "Checks the mod in this folder, or a file as the registry would; --uses lists what the mod uses of its pinned build.",
+        usage: "check [--uses] [--wasm] [--native] | check <file> [--kind <kind>] [--key <public key> --signature <file.minisig>] [--json]",
+        summary: "Checks the mod in this folder, or a file as the registry would; --uses lists what the mod uses of its pinned build, and the Rust code is checked for the project's own target (--wasm or --native asks for the other).",
     },
     Command {
         name: "update",

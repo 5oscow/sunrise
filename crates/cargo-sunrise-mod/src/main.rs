@@ -16,9 +16,10 @@
 //! - `wasm-std <out.wasm>`: the standard library member the game ships for wasm mods.
 //! - `run [--game <sunrise-client>] [--resources <folder>] [-- <game args>]`: build, then play with
 //!   the mod.
-//! - `check [--uses]` in a mod folder: the package rules, its render pipeline shaders composed
-//!   and validated as the game does, `cargo check` for the host and wasm32, and what the mod
-//!   uses of its pinned build (`sdk_cmds.rs`).
+//! - `check [--uses] [--wasm] [--native]` in a mod folder: the package rules, its render pipeline
+//!   shaders composed and validated as the game does, `cargo check` for the project's own target
+//!   (`--wasm` or `--native` asks for the other), and what the mod uses of its pinned build
+//!   (`sdk_cmds.rs`).
 //! - `check <file> [--json]`: what the registry checks of a submission
 //!   (`.smod`, `.spack`, resource pack `.zip`, `.sshader`).
 //! - `hooks <text> [--all]`: search the pinned build's hooks (or every item) offline.

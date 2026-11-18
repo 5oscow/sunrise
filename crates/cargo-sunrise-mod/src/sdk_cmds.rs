@@ -518,9 +518,24 @@ fn report(
     text
 }
 
-/// `check [--uses]` in a mod folder: `cargo check` for the host and for wasm32, the package
-/// rules, then what the mod uses of its pinned build (with `--uses`, each item and the line that
-/// brought it in).
+/// The targets `cargo check` runs for (`None` is this computer): a project checks the target it
+/// ships for, a native mod's own and a wasm mod's wasm32; `--wasm` and `--native` ask for those
+/// targets instead.
+fn check_targets(native_project: bool, wasm: bool, native: bool) -> Vec<Option<&'static str>> {
+    let mut targets = Vec::new();
+    if native || (!wasm && native_project) {
+        targets.push(None);
+    }
+    if wasm || (!native && !native_project) {
+        targets.push(Some("wasm32-unknown-unknown"));
+    }
+    targets
+}
+
+/// `check [--uses] [--wasm] [--native]` in a mod folder: the package rules, `cargo check` for the
+/// project's own target (this computer for a native mod, wasm32 for a wasm mod; `--wasm` or
+/// `--native` asks for that target instead, both flags for both), then what the mod uses of its
+/// pinned build (with `--uses`, each item and the line that brought it in).
 pub(crate) fn check_mod(entry: ChildEntry, args: &[String]) -> Result<(), String> {
     let root = Path::new(".");
     let package = Package::read(root)?;
@@ -547,7 +562,12 @@ pub(crate) fn check_mod(entry: ChildEntry, args: &[String]) -> Result<(), String
     let sdk = ensure_sdk(root)?;
     let surface = surface_of(&sdk)?;
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    for target in [None, Some("wasm32-unknown-unknown")] {
+    let targets = check_targets(
+        package.manifest.native.is_some(),
+        args.iter().any(|a| a == "--wasm"),
+        args.iter().any(|a| a == "--native"),
+    );
+    for target in targets {
         let mut command = Command::new(&cargo);
         command.arg("check").current_dir(root);
         if let Some(target) = target {
@@ -620,6 +640,16 @@ mod tests {
             vec![],
             vec![],
         )
+    }
+
+    #[test]
+    fn check_runs_the_projects_own_target_unless_a_flag_asks_for_another() {
+        const WASM: Option<&str> = Some("wasm32-unknown-unknown");
+        assert_eq!(check_targets(true, false, false), [None]);
+        assert_eq!(check_targets(false, false, false), [WASM]);
+        assert_eq!(check_targets(true, true, false), [WASM]);
+        assert_eq!(check_targets(false, false, true), [None]);
+        assert_eq!(check_targets(true, true, true), [None, WASM]);
     }
 
     #[test]
