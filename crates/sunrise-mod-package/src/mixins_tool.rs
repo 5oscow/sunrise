@@ -1,9 +1,9 @@
 //! The horizon-mixins tool the launcher runs for `[[native.mixin]]` builds: the pinned source
 //! ([`REV`]), the changes carried on it until upstream takes them ([`PATCH`]: it narrows the
 //! tool's "calls beneath a reference" rule from the whole function to the site a hook rewrites,
-//! and compares binding types as parsed types, so `Vec<T,>` and `Vec<T>` match, and lets a
-//! `WRAP_OPERATION` call carry `?` in its receiver or arguments, which are evaluated at the call
-//! site; a wrapped call's receiver is a reference parameter (a computed receiver is refused) and its arguments carry no `?` or block; and plans against the cfg set of the patch library it builds, given as `--cfg` options and the one package their `feature`s belong to (`--features-of`), dropping items and statements under an inactive `cfg`; and reads a `WRAP_OPERATION` on a call whose callee declares no return type as returning `()`; and a cancellation `ControlFlow` written other than in its documented paths), and the names of its prebuilt release.
+//! and compares binding types as parsed types, so `Vec<T,>` and `Vec<T>` match, and wraps a
+//! `WRAP_OPERATION` call only where a declared type cannot change it (the receiver is a reference
+//! parameter, a computed receiver is refused, and no argument carries a `?` or a block); and plans against the cfg set of the patch library it builds, given as `--cfg` options and the one package their `feature`s belong to (`--features-of`), dropping items and statements under an inactive `cfg`; and reads a `WRAP_OPERATION` on a call whose callee declares no return type as returning `()`; and a cancellation `ControlFlow` written other than in its documented paths), and the names of its prebuilt release.
 //! `.github/workflows/prebuilt-mixins-tool.yml` builds and
 //! publishes it through `xtask mixins-tool`; the launcher downloads it, or builds the same
 //! patched source where no prebuilt exists.
