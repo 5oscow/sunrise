@@ -68,8 +68,8 @@ impl Game<'_> {
     /// `player_back_mod_menu_slots`: backs `window`'s first container slots with `places`. An
     /// empty list takes the backing away; a slot no longer backed is emptied, so the copy it
     /// showed never becomes the menu's own storage. In the player's own turn (an item's use
-    /// that opened the menu) no menu handle resolves and their record holds the outer player's
-    /// inventory, so the slots are mirrored at a change notice, taken after the turn.
+    /// that opened the menu), the record holds the outer player's inventory, so mirroring
+    /// and resending wait until after the turn.
     pub(super) fn player_back_mod_menu_slots(
         &mut self,
         player: mod_api::PlayerRef,
@@ -105,13 +105,9 @@ impl Game<'_> {
         if slots != Slots::Native {
             return Err(MenuSlotBackRefusal::UnsupportedMenu);
         }
-        let menu = match acting {
-            true => None,
-            false => Some(
-                self.menu(uuid, window)
-                    .ok_or(MenuSlotBackRefusal::NoPlayerOrWindow)?,
-            ),
-        };
+        let menu = self
+            .menu(uuid, window)
+            .ok_or(MenuSlotBackRefusal::NoPlayerOrWindow)?;
         if places.len() > size {
             return Err(MenuSlotBackRefusal::TooManyPlaces);
         }
@@ -158,11 +154,11 @@ impl Game<'_> {
                 *slot = None;
             }
         }
-        let Some(menu) = menu else {
+        if acting {
             // Slots cleared above reach the client through the container sync after the turn.
             self.queue_menu_places_notice(conn, uuid);
             return Ok(());
-        };
+        }
         if count > 0 {
             self.refresh_menu_places(conn, uuid, menu);
         }
@@ -730,6 +726,14 @@ mod tests {
             assert_eq!(
                 back(game, places),
                 Err(MenuSlotBackRefusal::PlaceUnresolved { index: 1 })
+            );
+            // A native window with hidden slots has no live menu handle, even in its own turn.
+            edit_guest(game, |g| g.menu.as_mut().unwrap().hidden.push(0));
+            let refused = Err(MenuSlotBackRefusal::NoPlayerOrWindow);
+            assert_eq!(back(game, held_places(Hand::Main, 0..1)), refused);
+            assert_eq!(
+                game.as_guest(1, |game| back(game, held_places(Hand::Main, 0..1))),
+                Some(refused)
             );
             // A block's menu shows its block's slots: no backing is stored for it.
             edit_guest(game, |g| {
