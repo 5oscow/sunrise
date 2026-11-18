@@ -11,6 +11,7 @@ mod tests {
     };
     use sunrise_client::{chunk::Chunk, containers::BlockEntity};
     type Log = Arc<Mutex<Vec<(&'static str, i32)>>>;
+    type Payloads = Arc<Mutex<Vec<(BlockEntityRef, i32)>>>;
     struct Listener {
         air: BlockKey,
         replacement: BlockKey,
@@ -48,6 +49,9 @@ mod tests {
                     panic!("save count is an int")
                 };
                 self.log.lock().unwrap().push(("payload", *count));
+                // This Part's event view is local. A later Part still sees the installed compound.
+                static OTHER: std::sync::OnceLock<Compound> = std::sync::OnceLock::new();
+                event.tag = OTHER.get_or_init(Compound::new);
             }
         }
         fn block_entity_on_load(&self, host: HostSide, event: &mut BlockEntityOnLoadEvent) {
@@ -78,10 +82,27 @@ mod tests {
             }
         }
     }
+    struct PayloadPeer(Payloads);
+    #[mod_api::sunrise_part]
+    impl BlockPart for PayloadPeer {}
+    #[mod_api::sunrise_part]
+    impl BlockEntityPart for PayloadPeer {
+        fn block_entity_load_additional(
+            &self,
+            _: &dyn LevelHost,
+            event: &mut BlockEntityLoadAdditionalEvent<'_>,
+        ) {
+            let Some(Tag::Int(count)) = event.tag.get(&"count".into()) else {
+                panic!("the second Part did not read the applied payload");
+            };
+            self.0.lock().unwrap().push((event.entity, *count));
+        }
+    }
+
     struct User {
         log: Log,
         replace: Arc<AtomicBool>,
-        report_payload: bool,
+        payloads: Option<Payloads>,
     }
     #[mod_api::__subscriptions]
     impl Hooks for User {
@@ -99,10 +120,14 @@ mod tests {
                     replacement,
                     log: self.log.clone(),
                     replace: self.replace.clone(),
-                    report_payload: self.report_payload,
+                    report_payload: self.payloads.is_some(),
                 },
             )
             .unwrap();
+            if let Some(payloads) = &self.payloads {
+                r.block_entity_part(&key, PayloadPeer(payloads.clone()))
+                    .unwrap();
+            }
         }
         fn items(&self, _: &RegistrationContext, e: &mut ItemsEvent<'_>) {
             let mut item = Item::new("test:box_shulker_box", "minecraft:purple_shulker_box");
@@ -129,22 +154,25 @@ mod tests {
         role: crate::game::execution_role::ExecutionRole,
         f: impl FnOnce(&mut Game<'_>, Log, Arc<AtomicBool>),
     ) {
-        with_fixture_options(replace, role, false, f);
+        with_fixture_options(replace, role, false, |game, log, replace, _| {
+            f(game, log, replace)
+        });
     }
     fn with_fixture_options(
         replace: bool,
         role: crate::game::execution_role::ExecutionRole,
         report_payload: bool,
-        f: impl FnOnce(&mut Game<'_>, Log, Arc<AtomicBool>),
+        f: impl FnOnce(&mut Game<'_>, Log, Arc<AtomicBool>, Payloads),
     ) {
         let log = Log::default();
+        let payloads = Payloads::default();
         let replace = Arc::new(AtomicBool::new(replace));
         let mods: Mods = vec![ModEntry::new(
             "test",
             Box::new(User {
                 log: log.clone(),
                 replace: replace.clone(),
-                report_payload,
+                payloads: report_payload.then(|| payloads.clone()),
             }),
         )]
         .into();
@@ -168,7 +196,7 @@ mod tests {
                 game.level_set_block(level, [1, 63, 1], stone, BlockUpdateFlags::NONE)
                     .unwrap();
             }
-            f(game, log, replace);
+            f(game, log, replace, payloads);
         });
     }
     fn place(game: &mut Game<'_>) {
@@ -265,7 +293,7 @@ mod tests {
             false,
             crate::game::execution_role::ExecutionRole::IntegratedServer,
             true,
-            |game, log, _| {
+            |game, log, _, payloads| {
                 game.build_registries();
                 game.set_allow_commands(true);
                 place(game);
@@ -278,6 +306,24 @@ mod tests {
                     Ok(true)
                 );
                 assert_eq!(*log.lock().unwrap(), [("load", 7), ("payload", 19)]);
+                assert_eq!(*payloads.lock().unwrap(), [(entity, 19)]);
+
+                let stone = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:stone")
+                    .unwrap();
+                game.world.set(2, 63, 1, stone).unwrap();
+                assert!(game.run_command("clone 1 64 1 1 64 1 2 64 1"));
+                let clone = game.block_entity(level, [2, 64, 1]).unwrap();
+                assert_ne!(clone, entity);
+                assert_eq!(*payloads.lock().unwrap(), [(entity, 19), (clone, 29)]);
+                game.fire_pending_block_entity_loads();
+                assert_eq!(
+                    *log.lock().unwrap(),
+                    [("load", 7), ("payload", 19), ("payload", 29), ("load", 29),]
+                );
 
                 let key = (1, 64, 1);
                 let saved = game.world.block_entities.remove(&key).unwrap();
@@ -287,7 +333,14 @@ mod tests {
                 game.fire_pending_block_entity_loads();
                 assert_eq!(
                     *log.lock().unwrap(),
-                    [("load", 7), ("payload", 19), ("payload", 29), ("load", 29)]
+                    [
+                        ("load", 7),
+                        ("payload", 19),
+                        ("payload", 29),
+                        ("load", 29),
+                        ("payload", 29),
+                        ("load", 29),
+                    ]
                 );
             },
         );

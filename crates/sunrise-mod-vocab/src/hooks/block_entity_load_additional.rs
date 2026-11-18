@@ -16,6 +16,8 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
+        non_exhaustive = true,
+        event_per_listener = true,
         scope = "block_entity",
         key = "id",
         target = "sunrise_client::game::native_hooks::block_entity_load_additional::GameLevel<'_>::native_block_entity_load_additional",

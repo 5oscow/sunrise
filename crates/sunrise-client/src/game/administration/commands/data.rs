@@ -942,6 +942,8 @@ impl Game<'_> {
             false
         };
         if after == before && !rolled && !lock_changed && !name_changed && !cooldown_changed {
+            // BlockInput.place calls loadWithComponents even when its before/after
+            // saves are equal. DataCommands instead rejects a no-op before setData.
             self.notify_block_entity_load_additional(key);
             return false;
         }
