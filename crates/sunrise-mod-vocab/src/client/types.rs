@@ -976,7 +976,9 @@ pub enum PanelEvent {
         /// Whether it was a right click.
         right: bool,
     },
-    /// The search box's text, each time the player changes it.
+    /// The search box's text, each time it changes: the player's edit, or
+    /// the owner's own `panel_search` once its box draws. The same event for
+    /// both, so the filter changes in one place.
     Search(String),
     /// A physical key (`key.keyboard.r`) went down
     /// while the pointer was on an item: a slot of the screen's, or the
