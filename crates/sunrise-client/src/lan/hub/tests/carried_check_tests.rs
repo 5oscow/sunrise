@@ -1264,7 +1264,8 @@ fn a_carried_guests_settle_asks_a_part_about_the_guest() {
         .registry
         .default_state("minecraft:glass")
         .unwrap();
-    fixture.collision.set_part_states([glass]);
+    let collision = fixture.own_collision();
+    collision.set_part_states([glass]);
     let asked = Rc::new(RefCell::new(Vec::new()));
     let seen = Rc::clone(&asked);
     crate::native_client_hooks::test_hooks::COLLISION_ANSWER.with_borrow_mut(|answer| {
@@ -1291,7 +1292,7 @@ fn a_carried_guests_settle_asks_a_part_about_the_guest() {
         tick_rate: 20.0,
         tick_frozen: false,
         tick_steps: Default::default(),
-        collision: Some(&fixture.collision),
+        collision: Some(&collision),
         border: &side.border,
         streaming: None,
     };
@@ -1307,7 +1308,6 @@ fn a_carried_guests_settle_asks_a_part_about_the_guest() {
                 .settle(0, [20.5, 9.0, 12.5], [22.0, 9.0, 12.5], &ctx)
         });
     });
-    fixture.collision.set_part_states([]);
     let asked = asked.borrow();
     assert_eq!(asked.len(), 2, "the wall's part was asked: {asked:?}");
     assert!(

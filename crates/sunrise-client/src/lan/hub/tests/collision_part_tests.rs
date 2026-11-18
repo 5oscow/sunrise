@@ -65,7 +65,8 @@ fn a_client_and_a_server_that_disagree_about_a_parts_state_get_a_correction() {
         .registry
         .default_state("minecraft:glass")
         .unwrap();
-    fixture.collision.set_part_states([glass]);
+    let collision = fixture.own_collision();
+    collision.set_part_states([glass]);
     let mut walled = scene(fixture);
     // The mod's state on the client says the wall is open to this guest: its part answers empty.
     let client_asked = Rc::new(std::cell::RefCell::new(Vec::new()));
@@ -97,7 +98,7 @@ fn a_client_and_a_server_that_disagree_about_a_parts_state_get_a_correction() {
                     player: &mut client,
                     scene: &mut walled,
                     assets: &fixture.assets,
-                    collision_binding: &fixture.collision,
+                    collision_binding: &collision,
                     resources,
                     health: &resources.health,
                     tag_items: None,
@@ -142,7 +143,7 @@ fn a_client_and_a_server_that_disagree_about_a_parts_state_get_a_correction() {
         tick_rate: 20.0,
         tick_frozen: false,
         tick_steps: Default::default(),
-        collision: Some(&fixture.collision),
+        collision: Some(&collision),
         border: &border,
         streaming: None,
     };
@@ -190,5 +191,4 @@ fn a_client_and_a_server_that_disagree_about_a_parts_state_get_a_correction() {
         hub.collide(0, walk[into], &ctx),
     );
     assert_eq!((accepted.0, accepted.1), (false, false));
-    fixture.collision.set_part_states([]);
 }
