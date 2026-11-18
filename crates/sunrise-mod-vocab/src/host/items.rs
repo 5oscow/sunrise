@@ -160,6 +160,19 @@ pub trait ItemsClientHost {
     #[access(ClientSetup)]
     fn creative_search_items(&self) -> Vec<ItemStack>;
     /// Side: client.
+    /// The creative inventory's item tabs, each with the stacks it shows
+    /// (`CreativeModeTabs.tabs()`, `CreativeModeTab.getDisplayItems`), in tab order, and the
+    /// build's `hasPermissions` they were last built with. A tab's stacks keep their
+    /// components, are the ones the creative inventory shows (the operator items tab's only
+    /// when `has_permissions`), and include what mods add in `build_creative_mode_tab_contents`
+    /// once the tabs are built (the first time the creative inventory opens). Not the search,
+    /// saved toolbars or survival inventory tabs; [`creative_search_items`](Self::creative_search_items)
+    /// is the search tab's. The contents come from the game's prepared tab export, which is built
+    /// with vanilla's default feature flags: the build's feature set is not a world's. No tabs
+    /// before the game's resources load.
+    #[access(ClientSetup)]
+    fn creative_tabs(&self) -> CreativeModeTabs;
+    /// Side: client.
     /// Registered enchantments, in registry order.
     #[access(ClientSetup)]
     fn enchantments(&self) -> Vec<EnchantmentInfo>;
@@ -472,6 +485,16 @@ pub trait ItemsBackendMut {
     /// (`ItemPlace::stack` reads those), and on a client.
     #[access(WorldOnly)]
     fn game_stack(&mut self, place: &ItemPlace) -> Option<ItemStack>;
+    /// Side: server. Runs `ItemStack.onCraftedBy` for a stack held by a menu slot or its cursor,
+    /// including the item's post-processing and the player's crafted statistic, in transaction
+    /// `tx`.
+    #[access(WorldOnly)]
+    fn game_on_crafted_by(
+        &mut self,
+        place: &ItemPlace,
+        tx: &Transaction,
+        amount: i32,
+    ) -> Result<(), CraftedByError>;
     /// Side: server.
     /// `ItemAccess.insert` at a player's place, an item entity's or an entity's slot: up to
     /// `amount` of `resource`, into the place where it's empty or holds the same item and

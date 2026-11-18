@@ -24,6 +24,31 @@ its id then returns `Unknown`. Starting without a joined physical play connectio
 Network-thread keep-alives, configuration packets, cookies and resource-pack answers bypass holds.
 No packet inspection or editing beyond the existing `ClientPacket` view is provided.
 
+## Configuration tasks before play
+
+The server's `register_configuration_tasks` hook runs once per connecting client,
+after the built-in registry, tag and resource-pack steps. Append
+`ConfigurationTask::new(type_id)` to its task list. Every peer gets these tasks,
+including vanilla clients.
+
+`configuration_task_start` runs once for the active type. Use the event's
+`ConfigurationConnection` to check `has_channel`, send a registered configuration
+payload with `send_payload`, and `finish(host, task_type)`. Keep the connection
+capability if a payload reply handler will finish the task later. In a main-thread
+payload handler, obtain the server host from `IPayloadContext::server_host`.
+Alternatively, `configuration_task_tick` checks the task each server tick and
+sets `finished` when it is complete. The next task starts only after completion.
+
+A wrong task type, refused payload send, explicit `fail`, or callback panic closes
+that client with the configuration-error reason. Check the channel before sending
+to an optional or vanilla peer, then finish immediately or explain why it cannot
+join. Sends use the existing negotiated payload transport and publish on transaction
+commit. A callback panic aborts its transaction.
+
+There is **no per-task timeout**. A client answering keep-alives can remain in
+configuration indefinitely while its task waits. The connection's ordinary idle
+and keep-alive checks still apply.
+
 ## Typed payloads
 
 A typed payload sends a value of your own type on a registered channel. Its body is the value's
@@ -85,6 +110,19 @@ fn register(r: &mut dyn Registrar) {
   `sendToPlayersNear` and `sendToPlayersTrackingChunk`. A player whose send is refused (no
   channel, gone since the list was read, backpressure) is skipped and not counted; only a
   stale token or an encode failure is an `Err`, before anything is sent.
+- **To the players tracking an entity.** `send_tracking_entity(host, entity, and_self, &value)`
+  sends to the entity's trackers (`ChunkMap.TrackedEntity.seenBy`, NeoForge's
+  `sendToPlayersTrackingEntity`; `EntityRef::trackers(host)` is the same list), and
+  also to the entity itself when it is a player and `and_self` is set
+  (`sendToPlayersTrackingEntityAndSelf`), each player once. A stale or absent entity has no
+  trackers, so nothing is sent and the count is 0.
+- **The one-call send underneath.** `PayloadsServerHost::players_send_payload(players, id, bytes)`
+  queues the same bytes on each listed player's connection with one boundary call, where
+  `player_send_payload` crosses once per player; the group sends above use it. Each connection's
+  queue owns its own copy of the bytes. Every player is judged by `player_send_payload`'s rules on
+  its own: a player whose send is refused is skipped and not counted, and the result is how many
+  were accepted (0 for an empty list). A player listed twice is sent to twice. Like every send,
+  it is published when the root transaction commits, and an abort publishes nothing.
 - **Schema negotiation.** The derive gives the value type a schema fingerprint (field types in
   order, variant positions; not names), and it is part of the negotiated version. A peer whose
   type has another shape is refused at join when the payload is required; when both sides

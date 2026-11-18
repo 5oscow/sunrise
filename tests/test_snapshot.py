@@ -110,8 +110,18 @@ class NightlyBuildSnapshotTests(unittest.TestCase):
                 macs = {"macos", "macos-x64"} if repo == "sunrise-org/sunrise" else ({"macos-x64"} if kind == "snapshot" else set())
                 self.assertEqual(optional, {"windows-arm64", "linux-musl"} | macs)
         self.assertEqual(game["jobs"]["linux-smoke"]["needs"], ["runner-configuration", "legs"])
-        self.assertEqual(self.workflow["jobs"]["sign"]["needs"], ["pick", "build"])
-        self.assertEqual(self.workflow["jobs"]["publish"]["needs"], ["pick", "build", "sign"])
+        # A reusable workflow that ends failed or cancelled (an optional leg) passes back no outputs: signing and
+        # publishing follow the legs job's build-complete marker, read by an ordinary job.
+        self.assertNotIn("outputs", game["on"]["workflow_call"])
+        marker = [step for step in game["jobs"]["legs"]["steps"] if step.get("with", {}).get("name") == "build-complete"]
+        self.assertEqual([step["if"] for step in marker], ["steps.decide.outputs.complete == 'true'"])
+        complete = self.workflow["jobs"]["complete"]
+        self.assertEqual(complete["steps"][0]["with"]["name"], "build-complete")
+        self.assertEqual(complete["outputs"]["complete"], "${{ steps.marker.outcome == 'success' }}")
+        self.assertEqual(self.workflow["jobs"]["sign"]["needs"], ["pick", "build", "complete"])
+        self.assertEqual(self.workflow["jobs"]["publish"]["needs"], ["pick", "build", "complete", "sign"])
+        for job in ("sign", "publish"):
+            self.assertIn("needs.complete.outputs.complete == 'true'", self.workflow["jobs"][job]["if"])
 
     @unittest.skipIf(os.name == "nt", "executes the POSIX signing step")
     def test_missing_intel_mac_is_signed_only_for_snapshot_and_notes_name_missing_assets(self):
@@ -123,7 +133,7 @@ class NightlyBuildSnapshotTests(unittest.TestCase):
             (root / "tools/ci/sign_release.sh").write_text(
                 'for file in "${@:2}"; do test -f "$file" || exit 9; done\nprintf "%s\\n" "$@" > signed\n')
             for name in ("sunrise-linux-x86_64.tar.gz", "sunrise-windows-x64.zip", "sunrise-macos-arm64.zip",
-                         "sunrise-server-linux-x86_64.tar.gz", "sunrise-source.tar.gz"):
+                         "sunrise-server-linux-x86_64.tar.gz", "sunrise-source.tar.gz", "sunrise-release.json"):
                 (root / "dist" / name).touch()
             for kind, code in (("snapshot", 0), ("nightly", 1)):
                 result = subprocess.run(["bash", "-e", "-o", "pipefail", "-c", sign], cwd=root,

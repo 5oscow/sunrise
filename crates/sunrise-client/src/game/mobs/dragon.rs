@@ -1428,10 +1428,11 @@ impl Game<'_> {
             {
                 continue;
             }
-            let drawn = self.world.random.next_int_bound(100_000).unwrap_or(0);
+            let (drawn, uuid) = Crystal::own_draws();
             let time = Crystal::start_time(at, drawn, self.clock.still());
             // EndCrystal's constructor takes an id from the entity counter.
             self.next_entity += 1;
+            self.persist.uuids.insert(self.next_entity, uuid);
             self.crystals.push(Crystal {
                 attachment_lifetime: Default::default(),
                 join: Default::default(),
@@ -2025,6 +2026,21 @@ impl Game<'_> {
     /// Player melee on the dragon's parts or a crystal under the crosshair.
     /// The dragon part under the crosshair within reach: its id and distance.
     pub(super) fn dragon_hit(&self) -> Option<(u32, f64)> {
+        let mut pick = crate::game::pick_accumulator::PickAccumulator::new(self.entity_reach);
+        self.dragon_hit_with_pick(&mut pick)
+    }
+    pub(super) fn dragon_hit_with_pick(
+        &self,
+        pick: &mut crate::game::pick_accumulator::PickAccumulator,
+    ) -> Option<(u32, f64)> {
+        if let Some(hit) = self.cached_entity_pick() {
+            let (entity, distance, _) = hit?;
+            return self
+                .special_targets()
+                .into_iter()
+                .any(|(id, _)| id == entity.id())
+                .then_some((entity.id(), distance));
+        }
         let (eye, dir) = self.aim()?;
         let reach: f64 = self.entity_reach;
         let mut best: Option<(u32, f64)> = None;
@@ -2045,7 +2061,7 @@ impl Game<'_> {
                 t0 = t0.max(ta);
                 t1 = t1.min(tb);
             }
-            if hit && t0 <= t1 && best.is_none_or(|b| t0 < b.1) {
+            if hit && t0 <= t1 && pick.consider(self, id, t0) {
                 best = Some((id, t0));
             }
         }
@@ -2222,7 +2238,7 @@ impl Game<'_> {
         let current = self.closest_node(dp.x, dp.y, dp.z);
         let target = self.closest_node(p.x, p.y, p.z);
         let (fx, fz) = (p.x.floor() as i32, p.z.floor() as i32);
-        let sd = (f64::from(fx) - dp.x).hypot(f64::from(fz) - dp.z);
+        let sd = sunrise_core::geometry::length(f64::from(fx) - dp.x, f64::from(fz) - dp.z);
         let ho = (f64::from(0.4_f32) + sd / 80.0 - 1.0).min(10.0);
         let last = [fx, (p.y + ho).floor() as i32, fz];
         let mut path = self.dragon_path(current, target, Some(last));
@@ -2353,7 +2369,7 @@ impl Game<'_> {
                     return;
                 };
                 if path.as_ref().is_some_and(|p| p.0.done()) {
-                    let dist = (pp.x - pos.x).hypot(pp.z - pos.z);
+                    let dist = sunrise_core::geometry::length(pp.x - pos.x, pp.z - pos.z);
                     let ho = (f64::from(0.4_f32) + dist / 80.0 - 1.0).min(10.0);
                     *target = Some(Vec3::new(pp.x, pp.y + ho, pp.z));
                 }
@@ -3816,9 +3832,8 @@ impl Game<'_> {
         else {
             return;
         };
-        let forward = glam::DVec3::from_array(super::view_vector(self.yaw, self.pitch));
-        let right = forward.cross(glam::DVec3::Y).normalize_or_zero();
-        let up = right.cross(forward).normalize_or_zero();
+        // DragonFireballRenderer.submit: turned by the camera's orientation.
+        let [right, up] = super::billboard_axes(self.camera_orientation());
         for b in self
             .creatures
             .projectiles
@@ -3878,7 +3893,12 @@ impl Dragon {
     pub(super) fn first_tick(&self) -> bool {
         self.ticks == 0
     }
-    pub(super) fn to_nbt(&self, uuid: [i32; 4], raw: Option<&Tag>) -> Tag {
+    pub(super) fn to_nbt(
+        &self,
+        uuid: [i32; 4],
+        raw: Option<&Tag>,
+        items: &sunrise_client::items::Items,
+    ) -> Tag {
         let mut tag = sunrise_client::entity_nbt::vehicle_to_nbt(
             "minecraft:ender_dragon",
             self.position,
@@ -3903,7 +3923,7 @@ impl Dragon {
                 "sitting_damage_received".into(),
                 Tag::Float(self.sitting_damage.to_bits()),
             );
-            self.equipment.store(map);
+            self.equipment.store(map, items);
             sunrise_client::entity_nbt::put_live_attributes(map, &self.live);
         }
         tag
@@ -4180,25 +4200,18 @@ impl Game<'_> {
 /// Respawning the dragon with end crystals on the exit portal
 /// (`EndCrystalItem.useOn`, `EnderDragonFight.tryRespawn`, `DragonRespawnStage`).
 impl Game<'_> {
-    /// `EndCrystalItem.useOn`: on obsidian or bedrock with room above.
-    pub(super) fn place_end_crystal(
-        &mut self,
-        hit: &super::Hit,
-        stack: &sunrise_client::items::ItemStack,
-    ) -> bool {
-        if &*stack.item != "minecraft:end_crystal" {
-            return false;
-        }
-        let name = self
+    /// `EndCrystalItem.useOn`'s checks: obsidian or bedrock at `pos`, air
+    /// above it and no entity in the two blocks above (else FAIL).
+    pub(in crate::game) fn end_crystal_fits(&self, pos: [i32; 3]) -> bool {
+        let name = &self
             .res
             .facts()
-            .get(self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]))
-            .name
-            .clone();
-        if !matches!(&*name, "minecraft:obsidian" | "minecraft:bedrock") {
+            .get(self.world.block(pos[0], pos[1], pos[2]))
+            .name;
+        if !matches!(&**name, "minecraft:obsidian" | "minecraft:bedrock") {
             return false;
         }
-        let above = [hit.pos[0], hit.pos[1] + 1, hit.pos[2]];
+        let above = [pos[0], pos[1] + 1, pos[2]];
         if !self
             .res
             .facts()
@@ -4211,10 +4224,27 @@ impl Game<'_> {
             f64::from(above[1]),
             f64::from(above[2]),
         );
-        let room = Aabb::new(Vec3::new(x, y, z), Vec3::new(x + 1.0, y + 2.0, z + 1.0));
-        if self.entity_in(room) {
+        !self.entity_in(Aabb::new(
+            Vec3::new(x, y, z),
+            Vec3::new(x + 1.0, y + 2.0, z + 1.0),
+        ))
+    }
+
+    /// `EndCrystalItem.useOn`: on obsidian or bedrock with room above.
+    pub(super) fn place_end_crystal(
+        &mut self,
+        hit: &super::Hit,
+        stack: &sunrise_client::items::ItemStack,
+    ) -> bool {
+        if &*stack.item != "minecraft:end_crystal" || !self.end_crystal_fits(hit.pos) {
             return false;
         }
+        let above = [hit.pos[0], hit.pos[1] + 1, hit.pos[2]];
+        let (x, y, z) = (
+            f64::from(above[0]),
+            f64::from(above[1]),
+            f64::from(above[2]),
+        );
         // EndCrystal's constructor: `this.random.nextInt(100000)`, the crystal's own random.
         let drawn = random_source::entity().next_int_bound(100_000).unwrap_or(0);
         let at = Vec3::new(x + 0.5, y, z + 0.5);
@@ -4507,7 +4537,7 @@ impl Game<'_> {
         let at = Vec3::new(f64::from(cx) + 0.5, f64::from(h + 1), f64::from(cz) + 0.5);
         self.crystals
             .retain(|c| c.position.distance_squared(at) > 0.01);
-        let drawn = self.world.random.next_int_bound(100_000).unwrap_or(0);
+        let (drawn, _) = Crystal::own_draws();
         let time = Crystal::start_time(at, drawn, self.clock.still());
         self.crystals.push(Crystal {
             beam: Some([0, 128, 0]),
@@ -5059,11 +5089,12 @@ impl Game<'_> {
     }
     /// The dragon's parts as a server's client attacks them: the server's
     /// ids for `EnderDragonPart`s follow the dragon's.
-    pub(super) fn remote_dragon_part_hit(
+    pub(super) fn remote_dragon_part_hit_with_pick(
         &self,
         eye: [f64; 3],
         dir: [f64; 3],
         reach: f64,
+        pick: &mut crate::game::pick_accumulator::PickAccumulator,
     ) -> Option<(i32, f64, [f64; 3])> {
         let d = self.dragon.as_ref().filter(|d| d.alive() && d.id != 0)?;
         (0..8)
@@ -5071,9 +5102,10 @@ impl Game<'_> {
                 let b = d.part_box(i);
                 let p = d.parts[i].0;
                 super::ray_box(eye, dir, reach, b)
+                    .filter(|&t| pick.consider(self, d.id + 1 + i as u32, t))
                     .map(|t| ((d.id + 1 + i as u32) as i32, t, [p.x, p.y, p.z]))
             })
-            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .last()
     }
 }
 
@@ -5365,7 +5397,7 @@ mod tests {
         use sunrise_items::equipment::{BODY, SADDLE};
         let mut d = Dragon::new(Vec3::ZERO, 0.0, 0);
         // An old save has no `equipment` key: the dragon loads empty and saves none.
-        let old = d.to_nbt([0; 4], None);
+        let old = d.to_nbt([0; 4], None, &Default::default());
         assert!(old.get("equipment").is_none());
         assert!(Dragon::from_nbt(&old, 0).unwrap().equipment.is_empty());
         // Body and saddle round-trip with their name and damage.
@@ -5374,11 +5406,15 @@ mod tests {
         body.data_mut().custom_name = Some(Tag::String("Plate".into()));
         d.equipment[BODY] = Some(body);
         d.equipment[SADDLE] = Some(ItemStack::new("minecraft:saddle", 1));
-        let saved = d.to_nbt([0; 4], None);
+        let saved = d.to_nbt([0; 4], None, &Default::default());
         assert_eq!(Dragon::from_nbt(&saved, 0).unwrap().equipment, d.equipment);
         // Saving over a raw save that holds a stale key removes it once emptied.
         d.equipment.take_all().for_each(drop);
-        assert!(d.to_nbt([0; 4], Some(&saved)).get("equipment").is_none());
+        assert!(
+            d.to_nbt([0; 4], Some(&saved), &Default::default())
+                .get("equipment")
+                .is_none()
+        );
     }
 
     fn player_box(feet: [f64; 3]) -> (Aabb, Vec3) {
@@ -5648,7 +5684,7 @@ mod tests {
     fn a_perched_dragons_damage_survives_the_chunk_save() {
         let mut d = dragon(Phase::Flaming { ticks: 0 });
         d.sitting_damage = 12.5;
-        let tag = d.to_nbt([1, 2, 3, 4], None);
+        let tag = d.to_nbt([1, 2, 3, 4], None, &Default::default());
         let back = Dragon::from_nbt(&tag, 0).unwrap();
         assert_eq!(back.sitting_damage, 12.5);
         // No key at all reads as no damage accumulated.

@@ -170,8 +170,7 @@ fn item_row(item: Item, s: &Settings) -> Row<ExtraRow> {
         .live(live)
 }
 
-/// Zoom, the FPS counter, Keystrokes and the Minimap are official mods now; Extras keeps a way to
-/// the one players look for here.
+/// Zoom is an official mod now; Extras keeps a way to it, as players look for it here.
 fn zoom_rows(s: &Settings) -> Vec<Row<ExtraRow>> {
     let installed = &s.mods.installed;
     let found = installed

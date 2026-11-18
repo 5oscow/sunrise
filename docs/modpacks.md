@@ -312,7 +312,8 @@ inspected:
 │   ├── port/                 the agent's Rust crate (tiers logic and up)
 │   ├── harness/              per-mod harness results and logs
 │   └── <id>.smod
-└── coverage.json, coverage.md
+├── coverage.json, coverage.md
+└── launcher-status.json      the launcher's copy of the porter's last status reply (docs/api/port-pack.md)
 ```
 
 **Status.** `import`, `inventory`, `fetch`, `carry` and `report` run today, and `port` runs
@@ -329,6 +330,9 @@ cargo run -p sunrise-port-pack -- carry ~/.sunrise/ports/pack         # content 
 cargo run -p sunrise-port-pack -- report ~/.sunrise/ports/pack        # coverage.json and coverage.md
 cargo run -p sunrise-port-pack -- events ~/.sunrise/ports/pack/jars   # NeoForge events the mods listen to, and their hooks
 cargo run -p sunrise-port-pack -- port ~/Downloads/pack.zip ~/.sunrise/ports/pack [--from <folder>] [--resources <root>]
+cargo run -p sunrise-port-pack -- port-work ~/.sunrise/ports/pack      # the port step alone, on an imported folder
+cargo run -p sunrise-port-pack -- status ~/.sunrise/ports/pack         # what the folder holds, as the launcher shows it
+cargo run -p sunrise-port-pack -- profile ~/.sunrise/ports/pack        # the staged resource packs into the profile's home
 ```
 
 ### Data packs in mod jars
@@ -364,7 +368,8 @@ conflicting and unsupported entries; they also appear in `coverage.json` and `co
 reported as partial, not as a rendering-verified port. Shader packs are reported as pending conversion.
 Old import folders without this report still open.
 
-The launcher copies staged packs into `<work>/home/resourcepacks/` on import, port and launch. It preserves any
+`sunrise-port-pack profile <work>` copies staged packs into `<work>/home/resourcepacks/`; the launcher runs it on
+import, port and launch. It preserves any
 existing profile pack as a whole, including edits inside a directory pack, and lists name/content conflicts.
 `<work>/profile-resourcepacks.json` records those results. A profile with resource packs and no carried mods can
 play. Enable packs in the game's Resource Packs screen; importing never changes the enabled-pack list.
@@ -969,9 +974,9 @@ for libraries, performance mods, pack tooling and what Sunrise has built in. Unc
 not read) is carried with its data files moved to 1.21's folder names (`recipe/`, `loot_table/`,
 `tags/block/`..., counted as `folders_renamed`); a file the jar also holds under the new name
 keeps that copy. Their JSON stays 1.20's: a recipe result naming its item as `item` (before
-1.20.5), which 26.3 skips, is kept as it is and counted as `recipes_old_result`, and NBT in loot
+1.20.5), which 26.3 can't decode (one such recipe fails the whole data load), is moved to `outside/` as it is and counted as `recipes_old_result`, and NBT in loot
 functions, ingredients and predicates is not upgraded yet (#10262). In the game each such file
-fails alone and the rest load: those recipes are skipped, `set_nbt` and `copy_nbt` drop their item
+fails alone and the rest load: `set_nbt` and `copy_nbt` drop their item
 without the NBT, an advancement's NBT predicate matches any item, a template's block renamed since
 1.20 is air, and a 1.20 command in a function fails. Such a mod is partial whatever its harness
 says, with that in its reason. `check` still says it doesn't run.

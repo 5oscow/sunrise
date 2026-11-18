@@ -89,20 +89,39 @@ impl CommandError {
         e.key = key.to_owned();
         e
     }
-    /// CommandSyntaxException.getContext: up to ten characters before the
-    /// cursor followed by "<--[HERE]".
-    pub fn context(&self) -> Option<String> {
+    /// The cursor as Java counts it (`CommandSyntaxException.getCursor`): UTF-16 code units
+    /// before it, where `cursor` is a byte offset into `input`. Without an input, the byte
+    /// offset itself.
+    pub fn java_cursor(&self) -> usize {
+        match &self.input {
+            Some(input) => utf16_units(input, self.cursor),
+            None => self.cursor,
+        }
+    }
+    /// The parts of CommandSyntaxException.getContext: up to ten characters before the
+    /// cursor, whether more precede them (the leading "..."), and the rest of the input.
+    /// Java's characters are UTF-16 code units, so a character outside the Basic
+    /// Multilingual Plane counts two, and a pair the ten-unit window cuts in half shows
+    /// its kept half as U+FFFD.
+    pub fn context_window(&self) -> Option<ContextWindow<'_>> {
         let input = self.input.as_ref()?;
-        let cursor = self.cursor.min(input.len());
-        let start = (0..=cursor.saturating_sub(10))
-            .rev()
-            .find(|&i| input.is_char_boundary(i))
-            .unwrap_or(0);
+        let cursor = floor_char_boundary(input, self.cursor);
+        let before: Vec<u16> = input[..cursor].encode_utf16().collect();
+        Some(ContextWindow {
+            ellipsis: before.len() > 10,
+            before: String::from_utf16_lossy(&before[before.len().saturating_sub(10)..]),
+            after: &input[cursor..],
+        })
+    }
+    /// CommandSyntaxException.getContext: the window before the cursor followed by
+    /// "<--[HERE]".
+    pub fn context(&self) -> Option<String> {
+        let window = self.context_window()?;
         let mut out = String::new();
-        if cursor > 10 {
+        if window.ellipsis {
             out.push_str("...");
         }
-        out.push_str(&input[start..cursor]);
+        out.push_str(&window.before);
         out.push_str("<--[HERE]");
         Some(out)
     }
@@ -113,7 +132,7 @@ impl CommandError {
                 "command.context.parse_error",
                 &[
                     self.message.clone(),
-                    Text::literal(self.cursor.to_string()),
+                    Text::literal(self.java_cursor().to_string()),
                     Text::literal(context),
                 ],
             ),
@@ -121,7 +140,33 @@ impl CommandError {
         }
     }
 }
+/// The input around a [`CommandError`]'s cursor, as `CommandSyntaxException.getContext` cuts it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContextWindow<'a> {
+    /// More than ten UTF-16 units precede the cursor, so the window starts with "...".
+    pub ellipsis: bool,
+    /// The last ten UTF-16 units before the cursor (fewer near the start).
+    pub before: String,
+    /// The input from the cursor on.
+    pub after: &'a str,
+}
 pub type CmdResult<T> = Result<T, CommandError>;
+
+/// The largest char boundary of `text` at or before byte `byte`.
+fn floor_char_boundary(text: &str, byte: usize) -> usize {
+    let byte = byte.min(text.len());
+    (0..=byte)
+        .rev()
+        .find(|&i| text.is_char_boundary(i))
+        .unwrap_or(0)
+}
+
+/// UTF-16 code units in `text` before byte `byte`: a byte cursor as a Java string index.
+pub fn utf16_units(text: &str, byte: usize) -> usize {
+    text[..floor_char_boundary(text, byte)]
+        .encode_utf16()
+        .count()
+}
 
 /// Brigadier StringReader over a command line (byte cursor on char boundaries).
 #[derive(Clone, Debug)]

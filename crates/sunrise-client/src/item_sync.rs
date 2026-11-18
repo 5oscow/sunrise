@@ -2517,7 +2517,7 @@ mod tests {
         let mut back = from_network(&decoded, &builtin, &Dynamic::default());
         back.data_mut().wire = Default::default();
         assert_eq!(back, modeled);
-        assert_eq!(crate::save::item_to_nbt(&back), source);
+        assert_eq!(crate::save::item_to_nbt(&back, &Default::default()), source);
         let again = crate::lan::guest::stack_to_network(|_| 1, |_, _| None, &Some(back)).unwrap();
         assert!(matches!(
             again.component(component::TRIM),

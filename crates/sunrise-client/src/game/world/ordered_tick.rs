@@ -10,6 +10,7 @@
 //! ENDS-WHEN: every kind ticks from the join-order walk.
 
 use super::{Game, Result};
+use crate::game::collision_source::Mover;
 use sunrise_client::join_seq::{JoinSeq, Joined};
 use sunrise_client::random_source;
 use sunrise_core::geometry::Vec3;
@@ -163,7 +164,7 @@ impl Game<'_> {
                         obstacles
                             .get_or_insert_with(|| {
                                 sunrise_client::entities::ObstacleGrid::new(
-                                    self.item_entity_collisions(),
+                                    self.entity_collisions(Mover::Passive),
                                 )
                             })
                             .near(area.inflate(Vec3::new(1.0, 1.0, 1.0)), &mut nearby);
@@ -189,7 +190,7 @@ impl Game<'_> {
                         obstacles
                             .get_or_insert_with(|| {
                                 sunrise_client::entities::ObstacleGrid::new(
-                                    self.item_entity_collisions(),
+                                    self.entity_collisions(Mover::Passive),
                                 )
                             })
                             .near(area.inflate(Vec3::new(1.0, 1.0, 1.0)), &mut nearby);
@@ -227,7 +228,7 @@ impl Game<'_> {
                     obstacles
                         .get_or_insert_with(|| {
                             sunrise_client::entities::ObstacleGrid::new(
-                                self.item_entity_collisions(),
+                                self.entity_collisions(Mover::Passive),
                             )
                         })
                         .near(area.inflate(Vec3::new(1.0, 1.0, 1.0)), &mut nearby);

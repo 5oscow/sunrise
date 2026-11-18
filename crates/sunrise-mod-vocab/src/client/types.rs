@@ -635,9 +635,7 @@ impl SoundPlay {
 /// Dropping or overwriting the handle doesn't stop the sound: keep a looping sound's handle while
 /// it plays (stop it before starting another in its place), or nothing can stop it until the
 /// player leaves the level.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its field is private, so mods cannot build or destructure it
 pub struct SoundRef {
     pub(crate) id: u64,
@@ -842,25 +840,6 @@ impl ColoredLight {
     }
 }
 
-/// The minimap a native mod shows (`minimap`), drawn by Sunrise's
-/// minimap: its corner, its side in GUI pixels, blocks per map pixel,
-/// turning with the player or north up, round or square.
-#[derive(Clone, Copy, Debug, PartialEq)]
-// exhaustive: the game builds it with a literal; mods only read it
-#[derive(sunrise_mod_api_macros::Wire)]
-pub struct Minimap {
-    /// The screen corner the map sits in.
-    pub corner: Corner,
-    /// The map's side length in GUI pixels.
-    pub size: f32,
-    /// How many blocks one pixel covers; larger zooms out.
-    pub blocks_per_pixel: f32,
-    /// Turn the map with the player's facing instead of keeping north up.
-    pub rotate: bool,
-    /// Draw the map as a circle instead of a square.
-    pub round: bool,
-}
-
 /// A mod block's screen over its menu (`screen`): its size, where
 /// each of the container's slots is (`Slot.x`, `Slot.y`; none hides the
 /// slot, and so do slots past the list; the server's menu does not have a
@@ -876,11 +855,18 @@ pub struct Screen {
     /// The screen's height in GUI pixels; vanilla's is 166.
     pub height: f32,
     /// Each menu slot's top-left (x, y), or `None` to hide it.
-    pub slots: Vec<Option<[f32; 2]>>,
+    pub slots: Vec<Option<ScreenSlot>>,
     /// The y of the player inventory's first row; vanilla's is 84.
     pub inventory_y: f32,
     /// The inventory's left column (vanilla's is 8).
     pub inventory_x: f32,
+    /// Title label position in GUI pixels from the screen's top-left corner.
+    /// `None` uses vanilla's `[8, 6]`. Ignored when `own_labels` is true.
+    pub title_label: Option<[f32; 2]>,
+    /// Inventory label position in GUI pixels from the screen's top-left corner.
+    /// `None` uses `[8, height - 94]`, independently of inventory slot positions.
+    /// Ignored when `own_labels` is true.
+    pub inventory_label: Option<[f32; 2]>,
     /// The mod draws the title and the "Inventory" label itself
     /// (`screen_draw`); Sunrise leaves them out.
     pub own_labels: bool,
@@ -901,6 +887,19 @@ pub struct Screen {
     /// `AbstractRecipeBookScreen.isBiggerResultSlot` for a crafting-table-sized result. Off by
     /// default.
     pub recipe_book_big_result: bool,
+}
+
+/// One visible container slot, including vanilla's `Slot.getNoItemIcon`.
+#[derive(Clone, Debug, Default, PartialEq)]
+// exhaustive: mods declare both geometry and the optional empty-slot sprite
+#[derive(sunrise_mod_api_macros::Wire)]
+pub struct ScreenSlot {
+    /// Top-left in GUI pixels relative to the screen.
+    pub position: [f32; 2],
+    /// GUI sprite identifier, such as `minecraft:container/slot/ingot`.
+    /// Drawn at 16 × 16 only when the displayed stack is empty, including
+    /// quick-craft previews. Unknown sprites refuse the client screen at open.
+    pub no_item_icon: Option<String>,
 }
 
 /// An item the panel shows (`panel_items`): its id
@@ -1053,9 +1052,7 @@ pub enum CrosshairTarget {
 /// that was removed (even if its id was added again) or a handle from an
 /// earlier open reads as `None` and changes nothing. Mob and raid bars are not
 /// custom boss events and have no handle.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct BossBarRef {
     pub(crate) epoch: WorldEpoch,
@@ -1198,27 +1195,10 @@ pub struct ClientBossBar {
 ///     menu.click(host, &[]);
 /// }
 /// ```
-#[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct MenuRef {
     pub(crate) player: PlayerRef,
     pub(crate) window: i32,
     pub(crate) generation: u64,
-}
-
-/// Per-window targeting controls. Defaults preserve vanilla picking. Reach remains backed
-/// by `minecraft:block_interaction_range` and `minecraft:entity_interaction_range`; a server
-/// mod changes those through the player's living attribute handle, not these client controls.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
-#[non_exhaustive]
-pub struct ClientTargeting {
-    /// Include source and flowing fluid shapes in the ordinary outline pick.
-    pub pick_liquids: bool,
-    /// Let entity picks and mod-selected attacks pass block outlines on this client.
-    pub hit_through_walls: bool,
-    /// Prefer this client-level entity for the crosshair and attacks; None restores the ray.
-    /// Stale, self, unsupported, out-of-reach or occluded targets cannot be attacked.
-    pub entity: Option<EntityRef>,
 }

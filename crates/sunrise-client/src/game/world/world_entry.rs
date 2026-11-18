@@ -188,12 +188,11 @@ impl Game<'_> {
     pub(super) fn items(&self) -> &Items {
         world_items!(self)
     }
-    pub(super) fn mob_suffocation(
+    /// The level's suffocation rules, for its mobs and its players.
+    pub(super) fn level_suffocation(
         &self,
     ) -> &sunrise_world::suffocation::SuffocationRegistry<'static> {
-        self.world_tables
-            .as_ref()
-            .map_or_else(|| self.res.suffocation(), |t| &t.suffocation)
+        level_suffocation_of(&self.world_tables, &self.res)
     }
     pub(super) fn recipes(&self) -> &Recipes {
         match &self.world_tables {
@@ -545,6 +544,7 @@ impl Game<'_> {
             .as_ref()
             .map_or_else(Vec::new, |t| t.data_maps.registries());
         self.install_block_maps();
+        self.install_fluid_interactions()?;
         self.install_profession_save_snapshots();
         self.share_mob_maps();
         sunrise_client::datapack_net::serve(self.mods.datapack_registries.clone());
@@ -604,6 +604,9 @@ impl Game<'_> {
             .as_ref()
             .map_or_else(Vec::new, |t| t.data_maps.registries());
         self.install_block_maps();
+        if let Err(error) = self.install_fluid_interactions() {
+            log::error!("Sunrise: {error}");
+        }
         self.install_profession_save_snapshots();
         self.share_mob_maps();
         self.world.pois.clear();
@@ -726,6 +729,12 @@ impl Game<'_> {
     }
 
     pub(super) fn prepare_parts(&self, items: &Items) -> Result<PreparedParts> {
+        // Some unit fixtures construct the Part tables without loading game content.
+        #[cfg(not(test))]
+        debug_assert!(
+            mod_api::__private::content_owners_published(),
+            "admitted ownership must be published before caching the block Part owner slots"
+        );
         let registry = self.pack.assets.registry;
         let block_tags = &items.block_tags;
         let tags = self.block_tag_sets(items);
@@ -785,7 +794,13 @@ impl Game<'_> {
             {
                 Some(sources) => sources,
                 None => {
-                    lan::sync::prepare_server_sources(root, &self.res.core.item_data, &overlay)?
+                    let sources = lan::sync::prepare_server_sources(
+                        root,
+                        &self.res.core.item_data,
+                        &overlay,
+                    )?;
+                    sources.check()?;
+                    sources
                 }
             };
             Some(
@@ -841,6 +856,7 @@ impl Game<'_> {
         api_values::install_block_states(&self.tick, prepared.block_states);
         native_world_read::install_block_tags(prepared.tags);
         api_values::install_resolved_parts(&self.tick, prepared.parts);
+        self.mark_collision_shape_states();
         self.resolve_block_paths();
         self.resolve_piston_reactions();
         self.resolve_primary_items();
@@ -867,4 +883,15 @@ impl Game<'_> {
             },
         );
     }
+}
+
+/// [`Game::level_suffocation`] from the fields it reads, for a caller that holds other fields: the
+/// world's own tables (its datapacks' `causes_suffocation`), else the built-in ones.
+pub(super) fn level_suffocation_of<'a>(
+    world_tables: &'a Option<WorldTables>,
+    res: &'a Resources,
+) -> &'a sunrise_world::suffocation::SuffocationRegistry<'static> {
+    world_tables
+        .as_ref()
+        .map_or_else(|| res.suffocation(), |t| &t.suffocation)
 }

@@ -104,9 +104,12 @@ KNOWN_GAPS = {
 SUSPICIOUS = re.compile(
     r"(/ERROR\]|/WARN\]|login failed|Exception|Couldn't load|Failed to|Skipping|Invalid|Unknown|corrupt|"
     r'Recreating|upgrad|DataFix|out of bounds|missing|Mismatch|Discarding)', re.IGNORECASE)
+# The machine's, not the save's: a container without a network interface makes either server warn that it found no
+# hardware address, at random, so one side logs it and the other may not.
 BENIGN = re.compile(r'(Unpacking |OFFLINE/INSECURE|online-mode|authenticate usernames|hackers|'
                     r'Failed to load properties|Failed to load eula|Unknown or incomplete command|'
-                    r'Can.t keep up|Ignoring unknown|^WARNING: |No key layers|has the following|udev library)')
+                    r'Can.t keep up|Ignoring unknown|^WARNING: |No key layers|has the following|udev library|'
+                    r'usable hardware address)')
 
 
 # ---------------------------------------------------------------- vanilla server

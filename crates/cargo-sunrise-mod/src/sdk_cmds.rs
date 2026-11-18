@@ -407,8 +407,12 @@ pub(crate) fn update_report(
     let exact_line = || {
         println!("{name} is made for exactly one build; its declarations are checked as it moves.")
     };
-    // Known from the manifest: such a mod has no table to compare, so nothing is fetched for it.
     let table: toml::Table = toml::from_str(&manifest).map_err(|e| format!("{MANIFEST}: {e}"))?;
+    // A wasm mod links by interface: there is no API-use report and no compatibility check.
+    if !table.contains_key("native") {
+        return Ok(());
+    }
+    // Known from the manifest: such a mod has no table to compare, so nothing is fetched for it.
     if mod_source::mod_uses::exact(&table).is_some() {
         exact_line();
         return Ok(());
@@ -515,7 +519,20 @@ fn report(
 pub(crate) fn check_mod(entry: ChildEntry, args: &[String]) -> Result<(), String> {
     let root = Path::new(".");
     let package = Package::read(root)?;
-    package.directory_files(root)?;
+    let files = package.directory_files(root)?;
+    let (pipelines, refused) = crate::check::pipeline_shaders(&files);
+    if !refused.is_empty() {
+        return Err(format!(
+            "render pipeline shaders refused:\n{}",
+            refused.join("\n")
+        ));
+    }
+    if pipelines > 0 {
+        println!(
+            "{pipelines} render pipeline shader(s) compose and validate as the game does \
+             (a file that calls pipeline_texture is checked as textured, any other as untextured)."
+        );
+    }
     let code = package.manifest.native.is_some() || package.manifest.wasm.is_some();
     if !code {
         println!("{}: the package rules hold.", package.manifest.name);
@@ -636,6 +653,28 @@ mod tests {
             why: why.into(),
             migrate: migrate.map(str::to_owned),
         }
+    }
+
+    #[test]
+    fn a_wasm_mods_update_report_reads_neither_the_sdk_nor_the_source() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(
+            dir.path().join(MANIFEST),
+            "id = \"greeter\"\nname = \"Greeter\"\nversion = \"0.1.0\"\napi = \"0.2\"\ncapabilities = [\"registries\"]\n",
+        )
+        .unwrap();
+        // Source the scan cannot read, and no fetched SDK: a native mod would fail on either.
+        std::fs::write(
+            dir.path().join("src/lib.rs"),
+            "include!(concat!(env!(\"OUT_DIR\"), \"/b.rs\"));\n",
+        )
+        .unwrap();
+        assert_eq!(
+            update_report(mod_surface::child::child_entry(), dir.path(), None),
+            Ok(())
+        );
+        assert!(!dir.path().join(".sunrise").exists());
     }
 
     #[test]

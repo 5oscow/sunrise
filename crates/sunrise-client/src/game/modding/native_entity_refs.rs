@@ -83,7 +83,7 @@ fn entity_ray_hits(
 
 impl Game<'_> {
     /// An entity tracked by the remote client but absent from local entity lists.
-    fn native_client_tracked(&self, entity: EntityRef) -> Option<(&str, [f64; 3])> {
+    pub(super) fn native_client_tracked(&self, entity: EntityRef) -> Option<(&str, [f64; 3])> {
         let remote = self.remote.as_ref()?;
         if !remote.logged_in || self.native_lifecycle.epoch() != Some(entity.epoch()) {
             return None;
@@ -187,7 +187,7 @@ impl Game<'_> {
     /// the level it shows, whatever the server calls it, or one the server opened
     /// for viewing (`client_level_key`). None with no world open, or for a
     /// dimension the server hasn't loaded. API 373.
-    pub(super) fn level(&self, dimension: &str) -> Option<LevelRef> {
+    pub(in crate::game) fn level(&self, dimension: &str) -> Option<LevelRef> {
         let epoch = self.native_lifecycle.epoch()?;
         if !self.is_logical_server() {
             return Some(LevelRef::new(epoch, self.client_level_key(dimension)?));
@@ -199,7 +199,7 @@ impl Game<'_> {
     }
     /// The client level in place as a handle: the level this window shows and
     /// ticks. None before login, while reconfiguring, or with no world open.
-    pub(super) fn native_client_level(&self) -> Option<LevelRef> {
+    pub(in crate::game) fn native_client_level(&self) -> Option<LevelRef> {
         let epoch = self.native_lifecycle.epoch()?;
         let remote = self.remote.as_ref().filter(|r| r.has_level())?;
         Some(LevelRef::new(epoch, remote.level_key))
@@ -240,10 +240,10 @@ impl Game<'_> {
     /// finite (NaN or infinite). A minimum above its maximum is the same box
     /// with the two swapped, as vanilla's `AABB`. On a client, see
     /// `client_entities_in`. The walk
-    /// is in entity-list order followed by players; each overlap requires a
-    /// handle lookup, so cost grows with the box's contents. Tridents cannot
-    /// yet resolve; displays, markers and interactions follow the listed entities.
-    /// Frames, paintings and other special entities
+    /// is in entity-list order, then item frames and paintings, followed by
+    /// players; each overlap requires a handle lookup, so cost grows with the
+    /// box's contents. Tridents cannot yet resolve; displays, markers and
+    /// interactions follow the listed entities. Other special entities
     /// are not on the entity-list walk. The dragon follows ordinary entities;
     /// its eight intersecting parts follow players (`Level.getEntities`).
     /// During `hears_projectile_impacts`, the projectile list is taken out of
@@ -268,6 +268,7 @@ impl Game<'_> {
             return None;
         }
         let mut ids = self.listed_entities_in(bounds);
+        self.append_hanging_query_ids(bounds, &mut ids);
         self.append_dragon_query_ids(bounds, false, &mut ids);
         ids.extend(
             self.others
@@ -328,6 +329,31 @@ impl Game<'_> {
         });
         ids
     }
+    /// The item frames and paintings whose boxes meet `bounds` (`HangingEntity`s are entities
+    /// of the level's list in vanilla; here they are lists of their own), in join order.
+    fn append_hanging_query_ids(&self, bounds: Aabb, ids: &mut Vec<u32>) {
+        let meets = |(lo, hi): ([f64; 3], [f64; 3])| {
+            bounds.intersects(Aabb::new(
+                Vec3::new(lo[0], lo[1], lo[2]),
+                Vec3::new(hi[0], hi[1], hi[2]),
+            ))
+        };
+        let mut hanging: Vec<(_, u32)> = Vec::new();
+        hanging.extend(
+            self.item_frames
+                .iter()
+                .filter(|f| f.id != 0 && meets(f.bounds()))
+                .map(|f| (f.join, f.id)),
+        );
+        hanging.extend(
+            self.paintings
+                .iter()
+                .filter(|p| p.id != 0 && meets(p.bounds()))
+                .map(|p| (p.join, p.id)),
+        );
+        hanging.sort_by_key(|&(join, _)| join);
+        ids.extend(hanging.into_iter().map(|(_, id)| id));
+    }
     /// `ClientLevel.getEntities` for `level_entities_in`: the entities the server
     /// tracks to this client in entity-list order, other players among them (a
     /// tracked player has a client copy, so its handle resolves), the dragon and
@@ -339,6 +365,7 @@ impl Game<'_> {
             return None;
         }
         let mut ids = self.listed_entities_in(bounds);
+        self.append_hanging_query_ids(bounds, &mut ids);
         self.append_dragon_query_ids(bounds, false, &mut ids);
         if self.mode_id() != 3
             && let Some(player) = &self.player
@@ -708,41 +735,14 @@ impl Game<'_> {
         face: BlockFace,
         support: mod_api::SupportType,
     ) -> Option<bool> {
-        let state = self.level_block_state(level, pos)?;
-        let direction = block_face_direction(face);
-        let b = self.res.behaviours();
-        let binding = self.res.collision();
-        if !b.has_cached_support(state) || binding.publishes_shapes(state) {
-            use sunrise_client::collisions::SceneCollisions;
-            use sunrise_world::{block_support::SupportType, dynamic_support::DynamicSupport};
-            let world = self.native_level_world(level)?;
-            let mut scene = SceneCollisions {
-                world,
-                binding,
-                subject: None,
-            };
-            let support = match support {
-                mod_api::SupportType::Full => SupportType::Full,
-                mod_api::SupportType::Center => SupportType::Center,
-                mod_api::SupportType::Rigid => SupportType::Rigid,
-                _ => unreachable!("mod_api::SupportType: unhandled variant"),
-            };
-            // A state that may publish takes its block entity's shape, else its declared one.
-            if binding.publishes_shapes(state) {
-                let shape = binding.collision_shape(&mut scene, state, pos).ok()?;
-                return support.is_supporting(&shape, direction).ok();
-            }
-            let dynamic = DynamicSupport::from_state(binding.registry().state(state)?).ok()??;
-            return dynamic
-                .is_face_sturdy(&mut scene, pos, direction, support)
-                .ok();
-        }
-        Some(match support {
-            mod_api::SupportType::Full => b.is_face_sturdy(state, direction),
-            mod_api::SupportType::Center => b.is_face_sturdy_center(state, direction),
-            mod_api::SupportType::Rigid => b.is_face_sturdy_rigid(state, direction),
-            _ => unreachable!("mod_api::SupportType: unhandled variant"),
-        })
+        super::native_world_read::block_face_sturdy(
+            self.native_level_world(level)?,
+            self.res.behaviours(),
+            self.res.collision(),
+            pos,
+            face,
+            support,
+        )
     }
 
     /// Clip an empty-context ray against collider or outline shapes, without fluids, in the
@@ -999,10 +999,11 @@ pub(super) mod tests {
         if std::env::var_os(flag).is_some() {
             return false;
         }
-        let resources =
-            std::path::PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap())
-                .canonicalize()
-                .unwrap();
+        let resources = std::path::PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").expect(
+            "SUNRISE_TEST_RESOURCES must name the prepared resources (.local/sunrise-client/<version>)",
+        ))
+        .canonicalize()
+        .expect("SUNRISE_TEST_RESOURCES names a folder that does not exist");
         let scratch_owner = tempfile::tempdir().unwrap();
         let target = scratch_owner.path();
         let run = |case: &str| {
@@ -1259,8 +1260,25 @@ pub(super) mod tests {
     }
 
     pub(in crate::game) fn with_game(test: impl FnOnce(&mut super::Game<'_>)) {
-        let root = std::path::PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap());
-        with_game_at(root, test);
+        with_game_at(fixture_root(), test);
+    }
+
+    /// The root a plain fixture game is built over: the prepared resources, or, when the compiled wasm
+    /// fixture is installed, the content root its mods make. The fixture declares blocks, block entity
+    /// types and Parts of its own (its `part_state` counter), which a loaded game has registered and the
+    /// bare prepared resources lack.
+    pub(in crate::game) fn fixture_root() -> std::path::PathBuf {
+        use mod_api::__private::game::Fields;
+        let base = std::path::PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap());
+        let mods = mod_api::__private::mods();
+        if !mods.iter().any(|entry| entry.fields().id == "wasm_fixture") {
+            return base;
+        }
+        crate::game::api_values::install_parts(mods).unwrap();
+        crate::game::mods::content_root(&base, &Default::default())
+            .unwrap()
+            .prepared()
+            .to_owned()
     }
 
     pub(in crate::game) fn with_game_at(
@@ -1289,9 +1307,8 @@ pub(super) mod tests {
     }
 
     pub(in crate::game) fn with_client_game(test: impl FnOnce(&mut super::Game<'_>)) {
-        let root = std::path::PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap());
         with_game_role(
-            root,
+            fixture_root(),
             super::super::execution_role::ExecutionRole::Client,
             test,
         );
@@ -1370,6 +1387,7 @@ pub(super) mod tests {
         game.save = std::sync::Arc::new(sunrise_client::save::SaveDir::new(
             saves.path().to_path_buf(),
             sunrise_client::save::LevelShape::OVERWORLD,
+            Some(Default::default()),
         ));
         test(&mut game);
     }
@@ -1452,6 +1470,55 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "daily"]
+    fn a_placement_view_reads_redstone_and_collision_shapes() {
+        use mod_api::{Direction, LevelHost};
+        use std::sync::Arc;
+        use sunrise_client::chunk::Chunk;
+
+        with_game(|game| {
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let registry = game.pack.assets.registry;
+            let glass = registry.default_state("minecraft:glass").unwrap();
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            let lever = registry
+                .resolve(&sunrise_world::chunk::BlockState {
+                    name: "minecraft:lever".into(),
+                    properties: [("face", "wall"), ("facing", "east"), ("powered", "true")]
+                        .into_iter()
+                        .map(|(key, value)| (key.into(), value.into()))
+                        .collect(),
+                })
+                .unwrap();
+            game.world.set(5, 64, 5, glass).unwrap();
+            game.world.set(6, 64, 5, lever).unwrap();
+            game.world.set(9, 64, 5, stone).unwrap();
+            game.with_level(|_, level, ticks| {
+                let view = level.view(ticks);
+                // The glass has a powered lever on its east side; the stone nothing.
+                assert_eq!(view.has_neighbor_signal([5, 64, 5]), Some(true));
+                assert_eq!(view.best_neighbor_signal([5, 64, 5]), Some(15));
+                assert_eq!(view.signal([5, 64, 5], Direction::East), Some(0));
+                assert_eq!(view.direct_signal_to([5, 64, 5]), Some(15));
+                assert_eq!(view.has_neighbor_signal([9, 64, 5]), Some(false));
+                // The same reads from the level itself have no ticks to ask.
+                assert_eq!(LevelHost::has_neighbor_signal(&*level, [5, 64, 5]), None);
+                // A full block's collision box, none for air, nothing for an unloaded position.
+                for host in [&view as &dyn LevelHost, &*level] {
+                    assert_eq!(
+                        host.collision_shape([9, 64, 5]),
+                        Some(vec![[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]])
+                    );
+                    assert_eq!(host.collision_shape([9, 70, 5]), Some(Vec::new()));
+                    assert_eq!(host.collision_shape([160, 64, 5]), None);
+                }
+            });
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
     fn a_soil_part_answers_for_the_plants_above_it_in_a_real_game_level() {
         use std::sync::Arc;
         use sunrise_client::chunk::Chunk;
@@ -1480,10 +1547,12 @@ pub(super) mod tests {
             // Default: soils with no part answer as vanilla's plant rule does.
             assert!(survives(game, "minecraft:dirt"));
             assert!(!survives(game, "minecraft:stone"));
-            // A client's copy of the level does not ask the part.
+            // A non-authoritative copy of the level asks the part too (the client side itself is
+            // covered by `client_placement_prediction_asks_placement_and_survival_parts`).
+            game.options.execution_role = crate::game::execution_role::ExecutionRole::Client;
             game.options.dedicated = None;
-            assert!(!survives(game, "minecraft:glass"));
-            assert!(survives(game, "minecraft:grass_block"));
+            assert!(survives(game, "minecraft:glass"));
+            assert!(!survives(game, "minecraft:grass_block"));
         });
     }
 
@@ -2803,7 +2872,7 @@ pub(super) mod tests {
                     g.game_mode = 1;
                     g.abilities.update_for_mode(1);
                     assert!(g.abilities.may_fly && g.abilities.instabuild);
-                    sunrise_client::lan::playerdata::save(g, &root);
+                    sunrise_client::lan::playerdata::save(g, &root, &Default::default());
                 })
                 .unwrap();
             let joined = |game: &mut super::super::Game<'_>, force| {
@@ -2929,6 +2998,7 @@ pub(super) mod tests {
                 &sunrise_protocol::registry::Builtin::default(),
                 &[],
                 &[],
+                Default::default(),
             );
             let config = HubConfig {
                 default_game_mode: 0,
@@ -3589,6 +3659,34 @@ pub(super) mod tests {
             assert_eq!(game.player_is_fake(old), None);
             let fresh = game.fake_player(reopened, 6789, "reopen").unwrap();
             assert_ne!(fresh, old);
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn level_reads_whether_a_block_conducts_redstone() {
+        use std::sync::Arc;
+        use sunrise_client::chunk::Chunk;
+        with_game(|game| {
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.level(game.dim.id()).unwrap();
+            for (name, conducts) in [
+                ("minecraft:stone", true),
+                ("minecraft:glass", false),
+                ("minecraft:stone_slab", false),
+            ] {
+                let state = game.pack.assets.registry.default_state(name).unwrap();
+                game.world.set(0, 64, 0, state).unwrap();
+                assert_eq!(
+                    level.is_redstone_conductor(game, [0, 64, 0]),
+                    Some(conducts),
+                    "{name}"
+                );
+            }
+            // An unloaded position is unknown, not a guess.
+            assert_eq!(level.is_redstone_conductor(game, [160, 64, 0]), None);
         });
     }
 
@@ -4334,7 +4432,7 @@ pub(super) mod tests {
             assert_eq!(game.world.block(5, 64, 0), water);
             game.world.set(5, 64, 0, waterlogged).unwrap();
             let removed = game.with_level(|_, level, ticks| {
-                let mut host = super::super::mod_api_host::LevelTicks { level, ticks };
+                let mut host = super::super::mod_api_host::LevelTicks::new(level, ticks);
                 mod_api::LevelWriteHost::remove_block(&mut host, [5, 64, 0], moved)
             });
             assert!(removed);

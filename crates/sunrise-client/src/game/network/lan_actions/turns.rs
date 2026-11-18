@@ -47,6 +47,42 @@ impl Game<'_> {
         self.lan.as_ref()?.hub.guests.connection_index(conn)
     }
 
+    /// Runs `f` with guest `gi`'s own inventory, equipment and cursor in its hub record. In
+    /// its own turn the game holds them and the record holds the outer player's, so a packet
+    /// built from the record would show that player's stacks. Only the LAN host and the item
+    /// table are available to `f`: game callbacks must run after the acting player is restored.
+    pub(in crate::game) fn with_own_record<R>(
+        &mut self,
+        gi: usize,
+        f: impl FnOnce(&mut LanHost, &sunrise_client::items::Items) -> Option<R>,
+    ) -> Option<R> {
+        let own = self
+            .lan
+            .as_ref()
+            .is_some_and(|host| self.lan_acting == Some(host.hub.guests[gi].conn));
+        let swap = |game: &mut Self| {
+            if let Some(host) = game.lan.as_mut() {
+                host.hub.guests.update(gi, |g| {
+                    // The fields `enter_guest_at` swaps.
+                    std::mem::swap(&mut game.inventory, &mut g.inventory);
+                    std::mem::swap(&mut game.armor, &mut g.armor);
+                    std::mem::swap(&mut game.location_armor, &mut g.location_armor);
+                    std::mem::swap(&mut game.offhand, &mut g.offhand);
+                    std::mem::swap(&mut game.equipment, &mut g.equipment);
+                    std::mem::swap(&mut game.carried, &mut g.carried);
+                });
+            }
+        };
+        if own {
+            swap(self);
+        }
+        let result = f(self.lan.as_mut()?, world_items!(self));
+        if own {
+            swap(self);
+        }
+        result
+    }
+
     /// `as_guest`, with the system messages the guest's action earns (the
     /// `player::sendSystemMessage` of a packet handler) sent to that guest.
     pub(in crate::game) fn as_guest_messaged<R>(
@@ -238,6 +274,7 @@ impl Game<'_> {
         let (entity_reach, block_reach) = (self.entity_reach, self.block_reach);
         let (game_mode, guest_previous) = (g.game_mode, g.previous_game_mode);
         self.set_mode_raw(game_mode);
+        self.sync_main_hand();
         let previous_mode = std::mem::replace(
             &mut self.previous_mode,
             guest_previous.map(crate::game::game_mode::mode_from_id),
@@ -1031,6 +1068,8 @@ impl Game<'_> {
         if let Some(mob) = guest_mount {
             self.lan_open_mount(conn, mob);
         }
+        // An ender chest a mod opened for them in the turn (`player_open_ender_chest`).
+        self.open_turn_ender_menus(conn);
         // The turn's teleports are in the hub now: the mods hear them.
         self.flush_teleport_notes();
         if let Some(host) = self.lan.as_ref() {

@@ -42,7 +42,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 }
                 Class::HangingMoss => {
                     let above_state = self.above_state(pos);
-                    if !(b.multiface_can_attach(above_state, Direction::Up)
+                    if !(self.multiface_can_attach_at(above(pos), Direction::Up)
                         || b.is_block(above_state, block))
                     {
                         self.destroy_block(pos, true, 512);
@@ -379,9 +379,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                         {
                             let next = self.growing_plant_grow_into_state(state);
                             self.set_block_and_update(growth, next);
-                            // The hook gets the new head as the original state.
-                            let grown = self.state(growth);
-                            self.level.crop_grow_post(growth, grown);
+                            self.level.crop_grow_post(growth, state);
                         }
                     }
                 }
@@ -471,7 +469,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                             let age = b.table.int(state, p.age);
                             if age == 15 {
                                 self.set_block_and_update(above(pos), b.default_of(block));
-                                self.level.crop_grow_post(above(pos), b.default_of(block));
+                                self.level.crop_grow_post(above(pos), state);
                                 self.set_block(pos, b.table.set_int(state, p.age, 0), 260);
                             } else {
                                 self.set_block(pos, b.table.set_int(state, p.age, age + 1), 260);
@@ -1057,9 +1055,11 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     fn farmland_random_tick(&mut self, state: BlockStateId, pos: BlockPos) {
         let b = self.b;
         let moisture = b.table.int(state, b.props.moisture);
-        let mut near_water = self.level.has_water_ticket(pos);
         // IBlockExtension.canBeHydrated: the farmland's parts, looked up once.
-        let asks = !near_water && self.level.asks_can_be_hydrated(state);
+        let asks = self.level.asks_can_be_hydrated(state);
+        let held = asks && self.level.hold_farmland_hydration(state);
+        // Switching a mod off removes its tickets, so any remaining ticket can still water it.
+        let mut near_water = self.level.has_water_ticket(pos);
         if !near_water {
             'search: for x in -4..=4 {
                 for y in 0..=1 {
@@ -1071,13 +1071,18 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                             self.level
                                 .before_can_be_hydrated(state, pos, fluid, at, &mut hydrates);
                         }
-                        if hydrates.unwrap_or_else(|| b.is_water_fluid(fluid.kind())) {
+                        if hydrates.unwrap_or_else(|| !held && b.is_water_fluid(fluid.kind())) {
                             near_water = true;
                             break 'search;
                         }
                     }
                 }
             }
+        }
+        // Without a ticket or an explicit answer from an earlier Part, held farmland
+        // neither dries nor takes on moisture from the template's rain rule.
+        if held && !near_water {
+            return;
         }
         if !near_water && !self.level.is_raining_at(above(pos)) {
             if moisture > 0 {
@@ -1352,13 +1357,13 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 let ccw_face = b.table.bool(state, self.direction_prop(ccw));
                 let cw_test = rel(test, cw);
                 let ccw_test = rel(test, ccw);
-                if cw_face && b.multiface_can_attach(self.state(cw_test), cw) {
+                if cw_face && self.multiface_can_attach_at(cw_test, cw) {
                     self.set_block(
                         test,
                         b.table.set_bool(default, self.direction_prop(cw), true),
                         2,
                     );
-                } else if ccw_face && b.multiface_can_attach(self.state(ccw_test), ccw) {
+                } else if ccw_face && self.multiface_can_attach_at(ccw_test, ccw) {
                     self.set_block(
                         test,
                         b.table.set_bool(default, self.direction_prop(ccw), true),
@@ -1368,7 +1373,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     let opposite = direction.opposite();
                     if cw_face
                         && self.is_empty_block(cw_test)
-                        && b.multiface_can_attach(self.rel_state(pos, cw), opposite)
+                        && self.multiface_can_attach_at(rel(pos, cw), opposite)
                     {
                         self.set_block(
                             cw_test,
@@ -1378,7 +1383,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                         );
                     } else if ccw_face
                         && self.is_empty_block(ccw_test)
-                        && b.multiface_can_attach(self.rel_state(pos, ccw), opposite)
+                        && self.multiface_can_attach_at(rel(pos, ccw), opposite)
                     {
                         self.set_block(
                             ccw_test,
@@ -1387,12 +1392,12 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                             2,
                         );
                     } else if self.random().next_float() < 0.05
-                        && b.multiface_can_attach(self.state(above(test)), Direction::Up)
+                        && self.multiface_can_attach_at(above(test), Direction::Up)
                     {
                         self.set_block(test, b.table.set_bool(default, p.up, true), 2);
                     }
                 }
-            } else if b.multiface_can_attach(edge, direction) {
+            } else if self.multiface_can_attach_at(test, direction) {
                 self.set_block(
                     pos,
                     b.table
@@ -1403,7 +1408,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             return;
         }
         if direction == Direction::Up && pos.y < self.level.max_y() - 1 {
-            if b.multiface_can_attach(self.state(above_pos), Direction::Up) {
+            if self.multiface_can_attach_at(above_pos, Direction::Up) {
                 self.set_block(pos, b.table.set_bool(state, p.up, true), 2);
                 return;
             }
@@ -1414,7 +1419,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 let mut above_state = state;
                 for d in HORIZONTAL {
                     if self.random().next_boolean()
-                        || !b.multiface_can_attach(self.state(rel(above_pos, d)), d)
+                        || !self.multiface_can_attach_at(rel(above_pos, d), d)
                     {
                         above_state = b.table.set_bool(above_state, self.direction_prop(d), false);
                     }
@@ -1848,56 +1853,13 @@ impl Behaviours {
     /// Run due scheduled ticks for the level's current game time, in vanilla
     /// order: block ticks then fluid ticks (65536 each at most).
     pub fn tick_scheduled<L: LevelAccess + ?Sized>(&self, level: &mut L, ticks: &mut Ticks) {
-        let time = level.game_time();
-        ticks.handling_tick = true;
-        {
-            let level_ref: &L = level;
-            if ticks
-                .blocks
-                .begin_tick(time, 65536, |chunk: ChunkPos| {
-                    level_ref.is_ticking_chunk(chunk)
-                })
-                .is_err()
-            {
-                ticks.handling_tick = false;
+        for fluids in [false, true] {
+            if !self.scheduled_begin(level, ticks, fluids) {
                 return;
             }
+            while self.scheduled_step(level, ticks, fluids) {}
+            self.scheduled_finish(ticks, fluids);
         }
-        while let Ok(Some(tick)) = ticks.blocks.next_tick() {
-            let mut sim = self.sim(level, ticks);
-            let state = sim.state(tick.pos);
-            sunrise_threads::work::set_chunk(tick.pos.x >> 4, tick.pos.z >> 4);
-            sunrise_threads::work::set_block(self.block(state).0);
-            if u32::from(self.block(state).0) == tick.kind.0 {
-                sim.tick_due_block(state, tick.pos);
-            }
-        }
-        let _ = ticks.blocks.finish_tick();
-        {
-            let level_ref: &L = level;
-            if ticks
-                .fluids
-                .begin_tick(time, 65536, |chunk: ChunkPos| {
-                    level_ref.is_ticking_chunk(chunk)
-                })
-                .is_err()
-            {
-                ticks.handling_tick = false;
-                return;
-            }
-        }
-        while let Ok(Some(tick)) = ticks.fluids.next_tick() {
-            let mut sim = self.sim(level, ticks);
-            let state = sim.state(tick.pos);
-            sunrise_threads::work::set_chunk(tick.pos.x >> 4, tick.pos.z >> 4);
-            sunrise_threads::work::set_block(self.block(state).0);
-            let fluid = self.fluid(state).kind();
-            if TickTypeId(fluid.tick_id()) == tick.kind {
-                sim.fluid_tick(tick.pos);
-            }
-        }
-        let _ = ticks.fluids.finish_tick();
-        ticks.handling_tick = false;
     }
     /// `tick_scheduled` one tick at a time, for a caller that must act on
     /// each tick's side effects before the next runs (as vanilla runs them
@@ -1913,16 +1875,29 @@ impl Behaviours {
         let time = level.game_time();
         ticks.handling_tick = true;
         let level_ref: &L = level;
+        let hold_blocks = !fluids && level_ref.has_held_block_ticks();
         let queue = if fluids {
             &mut ticks.fluids
         } else {
             &mut ticks.blocks
         };
-        let ok = queue
-            .begin_tick(time, 65536, |chunk: ChunkPos| {
+        let ok = if hold_blocks {
+            queue.begin_tick_where(
+                time,
+                65536,
+                |chunk: ChunkPos| level_ref.is_ticking_chunk(chunk),
+                |tick| {
+                    let state = level_ref.block_state(tick.pos);
+                    u32::from(self.block(state).0) != tick.kind.0
+                        || !level_ref.hold_block_tick(state)
+                },
+            )
+        } else {
+            queue.begin_tick(time, 65536, |chunk: ChunkPos| {
                 level_ref.is_ticking_chunk(chunk)
             })
-            .is_ok();
+        }
+        .is_ok();
         if !ok {
             ticks.handling_tick = false;
         }
@@ -1948,15 +1923,25 @@ impl Behaviours {
                 sim.fluid_tick(tick.pos);
             }
         } else {
-            let Ok(Some(tick)) = ticks.blocks.next_tick() else {
+            let Some(tick) = ticks.blocks.peek_next_tick() else {
                 return false;
             };
-            let mut sim = self.sim(level, ticks);
-            let state = sim.state(tick.pos);
+            let state = level.block_state(tick.pos);
+            let block = self.block(state);
             sunrise_threads::work::set_chunk(tick.pos.x >> 4, tick.pos.z >> 4);
-            sunrise_threads::work::set_block(self.block(state).0);
-            if u32::from(self.block(state).0) == tick.kind.0 {
-                sim.tick_due_block(state, tick.pos);
+            sunrise_threads::work::set_block(block.0);
+            let matches = u32::from(block.0) == tick.kind.0;
+            if matches && level.has_held_block_ticks() && level.hold_block_tick(state) {
+                // Park it before marking it as run. A removed chunk has no queue
+                // in which to park it, but its block body must still not run.
+                if !ticks.blocks.hold_next_tick() {
+                    let _ = ticks.blocks.next_tick();
+                }
+            } else {
+                let _ = ticks.blocks.next_tick();
+                if matches {
+                    self.sim(level, ticks).tick_due_block(state, tick.pos);
+                }
             }
         }
         true

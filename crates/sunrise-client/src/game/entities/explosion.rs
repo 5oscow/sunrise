@@ -109,10 +109,6 @@ impl RayWorld for ColliderRays<'_, '_> {
             }
             if mode == RayBlockMode::Outline {
                 let facts = data.facts.get(state);
-                let shape = match published {
-                    Some(shape) => shape.clone(),
-                    None => super::perspective::ray_shape_from_boxes(&facts.outline)?,
-                };
                 let offset = super::perspective::outline_offset(
                     data.tables,
                     state,
@@ -120,7 +116,30 @@ impl RayWorld for ColliderRays<'_, '_> {
                     p.z,
                     facts.outline_offset,
                 );
-                return Ok(shape.moved(Vec3::new(offset[0], offset[1], offset[2])));
+                let offset = Vec3::new(offset[0], offset[1], offset[2]);
+                if let Some(shape) = published {
+                    return Ok(if offset == Vec3::ZERO {
+                        shape.clone()
+                    } else {
+                        shape.moved(offset)
+                    });
+                }
+                let cached = self.scene.binding.cached_shapes();
+                if let Some(shape) = cached.context_outline_shape(state, self.context.entity_kind())
+                {
+                    return Ok(cached.positioned_shape(
+                        state,
+                        sunrise_world::collision::ShapeChannel::ContextOutline,
+                        at,
+                        shape,
+                    ));
+                }
+                let shape = super::perspective::ray_shape_from_boxes(&facts.outline)?;
+                return Ok(if offset == Vec3::ZERO {
+                    shape
+                } else {
+                    shape.moved(offset)
+                });
             }
         }
         let binding = self.scene.binding;
@@ -128,7 +147,16 @@ impl RayWorld for ColliderRays<'_, '_> {
             .collision_shape_with_context(&mut self.scene, state, p, &self.context)
             .map_err(|e| io::Error::other(format!("{e:?}")))
     }
-    fn interaction_shape(&mut self, state: BlockStateId, _: BlockPos) -> io::Result<VoxelShape> {
+    fn interaction_shape(&mut self, state: BlockStateId, p: BlockPos) -> io::Result<VoxelShape> {
+        let cached = self.scene.binding.cached_shapes();
+        if let Some(shape) = cached.interaction_shape(state) {
+            return Ok(cached.positioned_shape(
+                state,
+                sunrise_world::collision::ShapeChannel::Interaction,
+                [p.x, p.y, p.z],
+                shape,
+            ));
+        }
         match &self.clip_data {
             Some(data) => super::perspective::ray_interaction_shape(data.registry, state),
             None => Ok(VoxelShape::empty()),
@@ -1873,8 +1901,14 @@ impl Game<'_> {
         }
         if let Some(entity) = self.world.block_entities.get(&key).cloned() {
             let custom = self.world.block_names.get(&key).cloned();
-            self.pending
-                .record(pos, &entity, &name, custom, self.world.block_lock(key));
+            self.pending.record(
+                pos,
+                &entity,
+                &name,
+                custom,
+                self.world.block_lock(key),
+                self.res.items(),
+            );
         } else if let Some(tag) = super::spill::saved_entity(&self.world, pos) {
             self.pending.record_saved(pos, &tag);
         }
@@ -1928,11 +1962,10 @@ impl Game<'_> {
             self.native_block_loot(pos, state, None, None, Some(radius), &mut drops);
             let mut pieces: Vec<ExplosionDropPiece> = Vec::new();
             let listened = mod_api::__private::listened(mod_api::HookId::BlockDrops);
-            for mut stack in drops {
+            for stack in drops {
                 if &*stack.item == "minecraft:air" || stack.count == 0 {
                     continue;
                 }
-                self.pending.attach(pos, &mut stack);
                 let items = self.res.items();
                 add_or_append_stack(
                     &mut dropped.stacks,
@@ -3004,9 +3037,14 @@ mod shulker_lock_drop_tests {
                 .get(&key)
                 .expect("actual command-created source");
             assert!(
-                save::block_entity_encode::encode(key, entity, &format!("minecraft:{kind}"))
-                    .get("lock")
-                    .is_none(),
+                save::block_entity_encode::encode(
+                    key,
+                    entity,
+                    &format!("minecraft:{kind}"),
+                    &Default::default()
+                )
+                .get("lock")
+                .is_none(),
                 "external lock must not be invented in modeled serializer"
             );
             if shulker {

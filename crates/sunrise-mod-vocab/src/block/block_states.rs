@@ -165,6 +165,32 @@ impl BlockStates<'_> {
     pub fn map_color(&self, state: BlockState) -> Option<u8> {
         self.backend?.block_state_map_color(state)
     }
+    /// Decode a packed map color (`MapColor.getColorFromPackedId`) to `[red, green, blue, alpha]`.
+    /// Pack a palette ID (such as one from [`Self::map_color`]) as `id * 4 + shade`, where
+    /// shades 0–3 scale each RGB channel by 180, 220, 255 or 135 out of 255, rounding down.
+    /// ID 0 and undefined palette IDs are transparent (`[0; 4]`); other colors have alpha 255.
+    /// Returns `None` only when the host has no game behind it.
+    pub fn map_color_rgba(&self, packed: u8) -> Option<[u8; 4]> {
+        self.backend?.block_state_map_color_rgba(packed)
+    }
+    /// `BlockState.getLightEmission()`: the light level the state gives off, 0 to 15 (a torch 14,
+    /// glowstone 15). A block that declares `dynamic_light` answers per cell through its parts,
+    /// which this does not ask. None as for `replaceable`.
+    pub fn light_emission(&self, state: BlockState) -> Option<u8> {
+        self.backend?.block_state_light_emission(state)
+    }
+    /// The friction of `state`'s block (`BlockBehaviour.getFriction`): 0.6 for most blocks, 0.98
+    /// for ice, 0.8 for slime. None as for `replaceable`.
+    pub fn friction(&self, state: BlockState) -> Option<f32> {
+        self.backend?.block_state_friction(state)
+    }
+    /// `BlockState.isSolidRender()`: whether the state is a full, occluding cube for rendering
+    /// and light (stone yes; glass, leaves and slabs no). Whether a block conducts redstone at a
+    /// position is [`LevelRef::is_redstone_conductor`](crate::LevelRef::is_redstone_conductor).
+    /// None as for `replaceable`.
+    pub fn is_solid_render(&self, state: BlockState) -> Option<bool> {
+        self.backend?.block_state_is_solid_render(state)
+    }
     /// The block's property names and legal serialized values. None without resolved tables.
     pub fn definition(&self, block: crate::BlockKey) -> Option<Vec<StateProperty>> {
         self.backend?.block_state_definition(block)
@@ -212,6 +238,7 @@ mod tests {
         assert_eq!(facts.sound(state), None);
         assert_eq!(facts.has_block_entity(state), None);
         assert_eq!(facts.map_color(state), None);
+        assert_eq!(facts.map_color_rgba(6), None);
         assert_eq!(facts.states_of(crate::BlockKey(0)), None);
     }
 }

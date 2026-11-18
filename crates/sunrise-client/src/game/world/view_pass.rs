@@ -820,7 +820,15 @@ pub(in crate::game) mod tests {
         let nether = game.level(Dim::Nether.id()).unwrap();
         let blocks = mod_api::SoundSource::Blocks;
         let at = [648.5, 70.0, 650.25];
-        assert!(game.level_play_sound(nether, "minecraft:block.bell.use", at, blocks, 1.0, 0.75));
+        assert!(game.level_play_sound(
+            nether,
+            "minecraft:block.bell.use",
+            at,
+            blocks,
+            1.0,
+            0.75,
+            None
+        ));
         game.tick_server(false).unwrap();
         let sounds = sent(&rx).sounds;
         assert_eq!(sounds.len(), 1, "{sounds:?}");
