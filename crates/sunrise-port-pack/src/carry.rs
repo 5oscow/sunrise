@@ -11,6 +11,7 @@ use std::{
     fs,
     path::Path,
 };
+use sunrise_mod_package::manifest::UNRESOLVED_BUILD;
 
 /// What `check` and the report say of a jar made for 1.20 or older that is not carried.
 pub const OLD_LAYOUT: &str =
@@ -145,8 +146,8 @@ pub struct Report {
     pub worldgen_types: crate::worldgen::Upgrade,
     /// The loader's convention biome tags the structures name, carried.
     pub convention_biome_tags: usize,
-    /// The jar's version when it couldn't be read as semver: the manifest holds `0.0.0+…`, which
-    /// no requirement can match, so it is set by hand before anything depends on the mod.
+    /// The jar's version when it couldn't be read as semver: the manifest holds `0.0.0+unresolved.…`,
+    /// which no dependency accepts, so it is set by hand before anything depends on the mod.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version_unreadable: Option<String>,
 }
@@ -166,9 +167,9 @@ pub struct Pack<'a> {
 }
 
 /// A jar's version as the semver the manifest holds: a leading `<minecraft>-` dropped, an
-/// omitted minor and patch padded. One that is still not semver becomes `0.0.0+<it>` with the
-/// characters outside `[0-9A-Za-z-.]` replaced by `-`, and the flag is false: such a version
-/// sorts below every real one, so no requirement like `^3.6` can match it.
+/// omitted minor and patch padded. One that is still not semver becomes `0.0.0+unresolved.<it>`
+/// with the characters outside `[0-9A-Za-z-.]` replaced by `-`, and the flag is false: dependency
+/// resolution refuses such a placeholder against every requirement (`manifest::is_unresolved`).
 fn manifest_version(jar: &str, minecraft: &str) -> (String, bool) {
     let trimmed = jar
         .strip_prefix(minecraft)
@@ -189,13 +190,13 @@ fn manifest_version(jar: &str, minecraft: &str) -> (String, bool) {
             }
         })
         .collect();
-    let fallback = format!("0.0.0+{}", build.join("."));
+    let fallback = format!("0.0.0+{UNRESOLVED_BUILD}.{}", build.join("."));
     let readable = sunrise_mod_package::manifest::parse_version(&fallback).is_ok();
     (
         if readable {
             fallback
         } else {
-            "0.0.0".to_owned()
+            format!("0.0.0+{UNRESOLVED_BUILD}")
         },
         false,
     )
@@ -1839,6 +1840,7 @@ mod tests {
         let verdict = out.join("harness/result.json");
         let info = crate::jar::JarInfo {
             mod_id: "example".into(),
+            version: "1.0.0".into(),
             ..Default::default()
         };
         let run = |source: &Path| {
@@ -2047,13 +2049,13 @@ mod tests {
         for (jar, minecraft, want) in [
             ("26.3-3.6.30+refabricated", "26.3", "3.6.30+refabricated"),
             ("1.2", "26.3", "1.2.0"),
-            ("2-rc1", "", "0.0.0+2-rc1"),
-            ("26.3-3.6.30", "", "0.0.0+26.3-3.6.30"),
-            ("v1 beta!", "26.3", "0.0.0+v1-beta-"),
+            ("2-rc1", "", "2.0.0-rc1"),
+            ("26.3-3.6.30", "", "26.3.0-3.6.30"),
+            ("v1 beta!", "26.3", "0.0.0+unresolved.v1-beta-"),
         ] {
             let (version, readable) = manifest_version(jar, minecraft);
             assert_eq!(version, want, "{jar}");
-            assert_eq!(readable, !want.starts_with("0.0.0+"), "{jar}");
+            assert_eq!(readable, !want.starts_with("0.0.0+unresolved"), "{jar}");
         }
     }
 
@@ -2092,7 +2094,10 @@ mod tests {
         let manifest = fs::read_to_string(out.join("carry/sunrise-mod.toml")).unwrap();
         let parsed = sunrise_mod_package::Manifest::parse(&manifest).unwrap();
         assert_eq!(parsed.id, "example");
-        assert_eq!(parsed.version.to_string(), "0.0.0+build-7-id----evil-");
+        assert_eq!(
+            parsed.version.to_string(),
+            "0.0.0+unresolved.build-7-id----evil-"
+        );
         assert!(manifest.contains("# Jar version: build 7 id = \"evil\"\n"));
         let records = [Record {
             key: "example".into(),

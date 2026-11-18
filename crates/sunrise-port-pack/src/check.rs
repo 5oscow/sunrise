@@ -74,8 +74,8 @@ fn loader(names: &[String]) -> &'static str {
 /// What the user is told of a jar version that isn't semver (see [`carry::manifest_version`]).
 pub(crate) fn version_note(version: &str) -> String {
     format!(
-        "version {version:?} couldn't be read as semver: the manifest says 0.0.0+…, which no \
-         requirement can match, so set the version by hand before anything depends on this mod"
+        "version {version:?} couldn't be read as semver: the manifest says 0.0.0+unresolved.…, which no \
+         dependency accepts, so set the version by hand before anything depends on this mod"
     )
 }
 

@@ -172,6 +172,21 @@ fn builds_the_sample_index() {
 }
 
 #[test]
+fn an_entry_with_a_short_version_label_takes_the_file_that_says_it_in_full() {
+    let s = Scratch::new("short");
+    s.write(
+        "mods/coords_hud.toml",
+        &hud_entry().replace("version = \"0.1.0\"", "version = \"0.1\""),
+    );
+    // The sample modpack still needs 0.1.0, which is the only problem left.
+    let errors = s.build().unwrap_err();
+    assert_eq!(
+        errors,
+        ["cozy 1.0.0: needs coords_hud 0.1.0, which is not in the index"]
+    );
+}
+
+#[test]
 fn downloads_and_stars_come_from_the_counts_and_a_zero_is_left_out() {
     let s = Scratch::new("counts");
     let mut index = s.build().unwrap();

@@ -64,6 +64,21 @@ pub fn parse_version(version: &str) -> Result<semver::Version, String> {
     })
 }
 
+/// The first build-metadata identifier of the placeholder a port gives a jar version it could not
+/// read as semver (`0.0.0+unresolved.<the jar's text>`).
+pub const UNRESOLVED_BUILD: &str = "unresolved";
+
+/// Whether `version` is such a placeholder. Dependency resolution never lets one satisfy a
+/// requirement, since semver matching ignores build metadata and `*` or `=0.0.0` would accept it;
+/// it stays refused until someone sets the real version by hand. Any other `0.0.0` is a real version.
+pub fn is_unresolved(version: &semver::Version) -> bool {
+    version.major == 0
+        && version.minor == 0
+        && version.patch == 0
+        && version.pre.is_empty()
+        && version.build.split('.').next() == Some(UNRESOLVED_BUILD)
+}
+
 fn version_from_str<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<semver::Version, D::Error> {
@@ -1532,10 +1547,10 @@ mod tests {
         let with = |v: &str| {
             Manifest::parse(&EXAMPLE.replace("version = \"0.1.0\"", &format!("version = '{v}'")))
         };
-        let error = with("26.3-3.6.30+refabricated").unwrap_err();
+        let error = with("v1 beta!").unwrap_err();
         assert!(
             error.contains(
-                "version \"26.3-3.6.30+refabricated\" is not a semver version (MAJOR.MINOR.PATCH, e.g. 3.6.30+refabricated)"
+                "version \"v1 beta!\" is not a semver version (MAJOR.MINOR.PATCH, e.g. 3.6.30+refabricated)"
             ),
             "{error}"
         );

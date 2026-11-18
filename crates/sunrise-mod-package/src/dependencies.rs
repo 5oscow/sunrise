@@ -408,7 +408,10 @@ fn resolve_all(
                     note,
                 });
             }
-            if !links && !dep.requirement.matches(other.version) {
+            if !links
+                && (crate::manifest::is_unresolved(other.version)
+                    || !dep.requirement.matches(other.version))
+            {
                 return Err(Error::Version {
                     owner: item.id.into(),
                     target: dep.id.clone(),
@@ -664,6 +667,24 @@ mod tests {
             dependencies,
         }
     }
+    #[test]
+    fn an_unresolved_version_satisfies_no_requirement_but_a_real_zero_version_does() {
+        for requirement in ["*", "=0.0.0", "<1", "^0.0.0"] {
+            let wanted = deps(&format!("[dependencies]\nbase={{version='{requirement}'}}"));
+            let user = item("user", "1", &wanted);
+            let placeholder = item("base", "0.0.0+unresolved.2-rc", &[]);
+            assert!(
+                matches!(
+                    resolve(&[user.clone(), placeholder]),
+                    Err(Error::Version { .. })
+                ),
+                "{requirement}"
+            );
+            let real = item("base", "0.0.0+nightly", &[]);
+            assert!(resolve(&[user, real]).is_ok(), "{requirement}");
+        }
+    }
+
     #[test]
     fn a_client_only_required_dependency_does_not_refuse_a_dedicated_installation() {
         let manifest = crate::Manifest::parse("id='server'\nname='Server'\nversion='1'\napi='0.2'\ncapabilities=['registries']\n[dependencies]\nclient={version='^1',side='client',order='none',reason='Client integration',url='https://example.test/client'}").unwrap();
