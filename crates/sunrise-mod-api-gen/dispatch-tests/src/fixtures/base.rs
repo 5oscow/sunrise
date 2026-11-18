@@ -257,7 +257,7 @@ fn slot_rules_mutate_and_item_tick_can_cancel() {
         menus: vec![part(1, &calls)],
         ..Parts::default()
     });
-    let (mut may_place, mut max_stack) = (true, 64);
+    let (mut may_place, mut may_pickup, mut max_stack) = (true, true, 64);
     dispatch_menu_slot_rules(
         &TestHost,
         calls::MenuSlotRulesCall {
@@ -271,10 +271,11 @@ fn slot_rules_mutate_and_item_tick_can_cancel() {
                 slots: vec![vec![None], vec![None, Some(ItemStack::default())]],
             },
             may_place: &mut may_place,
+            may_pickup: &mut may_pickup,
             max_stack: &mut max_stack,
         },
     );
-    assert_eq!((may_place, max_stack), (false, 1));
+    assert_eq!((may_place, may_pickup, max_stack), (false, true, 1));
     let (mut duration, mut canceled) = (10, false);
     dispatch_living_entity_use_item_tick(
         HostSide::Server(&mut TestHost),
@@ -360,7 +361,7 @@ fn placement_replacement_can_refuse_and_stops_later_mods() {
         }
         fn state_for_placement(
             &self,
-            _: &dyn LevelHost,
+            _: LevelSide<'_>,
             _: &mut StateForPlacementEvent<'_>,
         ) -> Option<Option<BlockState>> {
             self.0.lock().unwrap().push(self.1);
@@ -396,7 +397,7 @@ fn placement_replacement_can_refuse_and_stops_later_mods() {
         BlockState::new(BlockKey::Test, u16::MAX),
     ] {
         dispatch_state_for_placement(
-            &Level,
+            LevelSide::Server(&Level),
             LevelDimension,
             state,
             &PlacementContext,
@@ -412,7 +413,7 @@ fn placement_replacement_can_refuse_and_stops_later_mods() {
         assert!(calls.lock().unwrap().is_empty());
     }
     dispatch_state_for_placement(
-        &Level,
+        LevelSide::Server(&Level),
         LevelDimension,
         BlockState::new(BlockKey::Test, 0),
         &PlacementContext,
@@ -427,7 +428,7 @@ fn placement_replacement_can_refuse_and_stops_later_mods() {
     assert_eq!(answer, Some(None));
     assert_eq!(*calls.lock().unwrap(), vec![1]);
     dispatch_state_for_placement(
-        &Level,
+        LevelSide::Server(&Level),
         LevelDimension,
         BlockState::new(BlockKey::Test, 0),
         &PlacementContext,
@@ -449,10 +450,14 @@ fn incoming_damage_carries_the_attack_data() {
     impl Hooks for Backstab {
         fn living_incoming_damage(
             &self,
-            _: &mut dyn LevelRandomHost,
+            _: &mut dyn HitHost,
             event: &mut LivingIncomingDamageEvent<'_>,
         ) -> Flow {
             assert_eq!(event.source.damage_type, "minecraft:player_attack");
+            assert_eq!(event.causing_weapon.unwrap().item.as_ref(), "test:sword");
+            if let Some(weapon) = event.weapon {
+                assert_eq!(weapon.item.as_ref(), "test:crossbow");
+            }
             let (from, at, look) = (
                 event.source.position.unwrap(),
                 event.victim.position,
@@ -470,7 +475,14 @@ fn incoming_damage_carries_the_attack_data() {
     let mods: Vec<ModEntry> = vec![ModEntry::new("backstab-9", Box::new(Backstab))];
     let mods: Arc<[ModEntry]> = mods.into();
     install(mods.clone());
-    let held = ItemStack::default();
+    let held = ItemStack {
+        item: "test:crossbow".into(),
+        count: 1,
+    };
+    let causing = ItemStack {
+        item: "test:sword".into(),
+        count: 1,
+    };
     for (source_z, weapon, expected) in [
         (-1.0, Some(&held), 12.0),
         (1.0, Some(&held), 4.0),
@@ -493,6 +505,7 @@ fn incoming_damage_carries_the_attack_data() {
                 source: &source,
                 victim: &victim,
                 weapon,
+                causing_weapon: Some(&causing),
                 container: &mut container,
                 canceled: &mut canceled,
             },
@@ -557,6 +570,8 @@ fn dispatch_contracts() {
             );
             assert_eq!(event.source.damage_type, "minecraft:player_attack");
             assert!(event.attacker_main.is_none() && event.attacker_off.is_none());
+            assert_eq!(event.kill_credit, 19);
+            assert!(event.kill_credit_main.is_none());
             assert_eq!(event.entry, KnockbackEntry::Full);
             assert_eq!(event.strength, 0.4);
             event.strength *= 2.0;
@@ -581,6 +596,8 @@ fn dispatch_contracts() {
             attacker: 7,
             attacker_main: None,
             attacker_off: None,
+            kill_credit: 19,
+            kill_credit_main: None,
             entry: KnockbackEntry::Full,
             strength: &mut strength,
             x: &mut x,
@@ -594,7 +611,7 @@ fn dispatch_contracts() {
     let mods: Vec<ModEntry> = (1..=2)
         .map(|id| {
             ModEntry::new(
-                "mod-11",
+                if id == 1 { "effect-owner" } else { "other-mod" },
                 Box::new(Mod {
                     id,
                     calls: calls.clone(),
@@ -626,13 +643,13 @@ fn dispatch_contracts() {
         ..Parts::default()
     });
     let mut lines = Vec::new();
-    dispatch_tooltip(&host, &ItemStack::default(), &mut lines);
+    dispatch_tooltip(
+        &host,
+        &ItemStack::default(),
+        &mod_api::mod_api::TooltipAppendContext,
+        &mut lines,
+    );
     assert_eq!(lines.iter().map(|line| line.1).collect::<Vec<_>>(), [1, 2]);
-    let mut apply = false;
-    calls.lock().unwrap().clear();
-    dispatch_should_apply_effect_tick_this_tick(&host, EffectKey(7), 19, 2, &mut apply);
-    assert!(!apply);
-    assert_eq!(*calls.lock().unwrap(), [1, 2]);
     let source = HurtSource {
         damage_type: "damage",
         position: None,
@@ -651,6 +668,7 @@ fn dispatch_contracts() {
             source: &source,
             victim: &victim,
             weapon: None,
+            causing_weapon: None,
             container: &mut container,
             canceled: &mut canceled,
         },
@@ -681,6 +699,7 @@ fn dispatch_contracts() {
             source: &source,
             victim: &victim,
             weapon: None,
+            causing_weapon: None,
             container: &mut container,
             canceled: &mut canceled,
         },
@@ -754,7 +773,6 @@ mod stubs {
     pub(super) struct MusicLayer;
     pub(super) struct BlockRim;
     pub(super) struct ColoredLight;
-    pub(super) struct Minimap;
     pub(super) struct PanelEvent;
     pub(super) struct Screen;
     pub(super) struct ModContainer;

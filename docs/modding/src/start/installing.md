@@ -10,16 +10,16 @@ file by hand into the game folder (the folder that holds `options.txt`):
 
 | Mod | Goes in | What happens next |
 | --- | --- | --- |
-| Content mod (`.hmod`, or a folder holding `sunrise-mod.toml`) | `sunrise-mods/` | Read when the game starts |
-| WebAssembly mod (`.hmod` with `mod.wasm`) | `sunrise-mods/` | Loaded into the game's sandbox when the game starts |
-| Native mod (`.hmod` with Rust source) | `sunrise-native-mods/` | The launcher builds it for that instance ([Native mods](../how-to/native-mods.md)) |
+| Content mod (`.smod`, or a folder holding `sunrise-mod.toml`) | `sunrise-mods/` | Read when the game starts |
+| WebAssembly mod (`.smod` with `mod.wasm`) | `sunrise-mods/` | Loaded into the game's sandbox when the game starts |
+| Native mod (`.smod` with Rust source) | `sunrise-native-mods/` | The launcher builds it for that instance ([Native mods](../how-to/native-mods.md)) |
 
 **Browse Mods** in the game lists content mods only, checked against the same registry as the launcher. Native and
 WebAssembly mods install from the launcher or by hand.
 
 Fabric and NeoForge jars do not run in Sunrise: they target Minecraft's Java runtime, which Sunrise does not have.
 The data and assets inside a jar can be carried over; see
-[Porting Java modpacks](https://github.com/arismoko/horizon/blob/main/docs/modpacks.md).
+[Porting Java modpacks](https://github.com/sunrise-org/sunrise/blob/main/docs/modpacks.md).
 
 ## Turning mods on
 
@@ -41,7 +41,7 @@ Benchmarks (`--benchmark`) never load mods.
 
 ## The Mods screen
 
-The **Mods** button on the title screen (also **Options > Mods**) lists Minecraft and Sunrise first, then each
+The **Mods** button on the title screen (also **Options > Mods**) lists Minecraft first (and Sunrise, in the official game with its Sunrise layer on), then each
 installed mod with its icon, name and version. Search the list and sort it A–Z or Z–A. Select a mod to read its
 id, version, license, authors, credits and description:
 
@@ -61,8 +61,7 @@ Sunrise's optional extras are native mods in
 | FPS Counter | `native/fps-overlay` | The frame rate on screen |
 | Keystrokes | `native/keystrokes` | The movement and mouse keys you press |
 | Zoom | `native/zoom` | A zoom key |
-| Minimap | `native/minimap` | A minimap |
 | Recipes | `native/recipes` | An item panel and recipe pages |
 | Coordinates HUD | `native/coords-hud` | Position and facing, `/where` and `/coords`: a small example mod |
 
-The game keeps the parts that must be fast, such as drawing the minimap's map, and the mod chooses the options.
+The game keeps the parts that must be fast, such as applying the zoom to the view, and the mod chooses the options.

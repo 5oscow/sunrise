@@ -72,17 +72,65 @@ impl Game<'_> {
         // `ICondition.IContext`: the world's feature flags and every registry's
         // entries as this candidate holds them. Tags join later, once this load has bound them.
         let features = || stack.features.iter().map(String::as_str);
-        // Admission of a pack entry reads every condition but the registries this builds.
-        let admission = conditions_for_mods(&self.mods, inventory)?.with_features(features());
-        let registries = candidate_registries(root, files, &admission);
-        Ok(conditions_for_mods(&self.mods, inventory)?
-            .with_features(features())
-            .with_registries(
-                registries
-                    .iter()
-                    .map(|(registry, ids)| (registry.as_str(), ids.iter().map(String::as_str))),
-            ))
+        // Admission of a pack entry reads every condition but the registries this builds. It
+        // shares the load's verdicts, so a condition that reads no registry runs once per file.
+        let base = conditions_for_mods(&self.mods, inventory)?;
+        let admission = base.clone().with_features(features());
+        // DataStore's fixed content folders omit mod-declared registry folders.
+        // Include those entries from this candidate's packs before conditions read them.
+        let registry_files = candidate_registry_files(stack)?;
+        let registries =
+            candidate_registries(root, files.iter().chain(&registry_files), &admission);
+        Ok(base.with_features(features()).with_registries(
+            registries
+                .iter()
+                .map(|(registry, ids)| (registry.as_str(), ids.iter().map(String::as_str))),
+        ))
     }
+}
+
+/// Read declared registry folders with the same scanner as the live registry loader.
+/// Convert its resource paths to the content keys candidate_registries consumes.
+fn candidate_registry_files(
+    stack: &super::functions::PackStack,
+) -> Result<Vec<(String, Vec<Vec<u8>>)>, String> {
+    let declarations = mod_api::__private::datapack_registry_declarations();
+    if declarations.is_empty() {
+        return Ok(Vec::new());
+    }
+    let keys: Vec<_> = declarations
+        .iter()
+        .filter_map(|declaration| declaration.key.split_once(':'))
+        .collect();
+    let packs: Vec<_> = std::iter::once(&stack.content)
+        .chain(stack.enabled_packs())
+        .collect();
+    // Admission is evaluated below, against the load-scoped conditions; no fallback.
+    let files = sunrise_client::datapack::registry_files(&packs, &keys, false, |_, _, _| true)
+        .map_err(|error| format!("{error:?}"))?
+        .into_iter()
+        .flat_map(|(file, versions)| {
+            let bytes: Vec<Vec<u8>> = versions.into_iter().map(|(_, bytes)| bytes).collect();
+            // A file under nested declared folders is an entry of each, as the live loader reads it.
+            let entries: Vec<String> = file
+                .strip_prefix("data/")
+                .and_then(|rest| rest.split_once('/'))
+                .map(|(namespace, path)| {
+                    keys.iter()
+                        .filter_map(|(ns, key)| {
+                            let folder = format!("{ns}/{key}");
+                            path.strip_prefix(&folder)
+                                .and_then(|entry| entry.strip_prefix('/'))
+                                .and_then(|entry| entry.strip_suffix(".json"))
+                                .map(|entry| format!("{folder}/{namespace}:{entry}"))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            entries.into_iter().map(move |key| (key, bytes.clone()))
+        })
+        .collect();
+    Ok(files)
 }
 
 /// Every registry's entries as the candidate load holds them, which `neoforge:registered` reads:
@@ -90,9 +138,9 @@ impl Game<'_> {
 /// load added), and the entries the candidate's pack `files` add to a registry that takes them
 /// (vanilla's, or a datapack registry a mod declared). So an id a pack adds counts on its first
 /// load, and one a pack no longer has stops counting on the next.
-fn candidate_registries(
+fn candidate_registries<'a>(
     root: &std::path::Path,
-    files: &[(String, Vec<Vec<u8>>)],
+    files: impl IntoIterator<Item = &'a (String, Vec<Vec<u8>>)>,
     admission: &sunrise_world::conditions::LoadConditions,
 ) -> BTreeMap<String, std::collections::BTreeSet<String>> {
     let export: serde_json::Value = std::fs::read(root.join("command-registries.json"))
@@ -131,6 +179,11 @@ fn candidate_registries(
         // The winning file, if its own conditions hold: an entry they turn off is not there.
         // One whose conditions read registries or tags, which this view is still building,
         // counts, as it may load.
+        // The path the loaders test it under (`data/<namespace>/<folder>/<path>.json`).
+        let file_path = key[slash + 1..]
+            .split_once(':')
+            .map(|(namespace, path)| format!("data/{namespace}/{}/{path}.json", &key[..slash]))
+            .unwrap_or_else(|| key.clone());
         let admitted = versions.last().is_some_and(|bytes| {
             let Ok(file) = serde_json::from_slice::<serde_json::Value>(bytes) else {
                 return true;
@@ -139,7 +192,7 @@ fn candidate_registries(
             payload.is_none_or(|payload| {
                 payload.contains("\"neoforge:registered\"")
                     || payload.contains("\"neoforge:tag_empty\"")
-                    || admission.allows_file(&file, key)
+                    || admission.allows_file(&file, &file_path)
             })
         });
         if !admitted {
@@ -166,7 +219,9 @@ pub(super) fn conditions_for_mods(
     let table = sources
         .load_conditions
         .get_or_init(|| {
-            let mut registrar = mod_api::LoadConditionDeclarations::default();
+            let mut registrar = mod_api::LoadConditionDeclarations::new(
+                sunrise_world::conditions::is_builtin_condition,
+            );
             Game::native_register_load_conditions(
                 &mod_api::RegistrationContext::new(),
                 &mut registrar,
@@ -186,6 +241,7 @@ pub(super) fn conditions_for_mods(
     enabled.retain(|owner| sources.code_owner_enabled(owner));
     let owned = table
         .iter()
+        .filter(|(name, (owner, _))| name.namespace() == owner)
         .map(|(name, (owner, _))| (name.namespace().to_owned(), owner.clone()))
         .collect();
     Ok(conditions.with_lookup(owned, move |name, args| {
@@ -209,6 +265,10 @@ pub(super) fn conditions_for_mods(
 }
 
 #[cfg(test)]
+#[path = "load_conditions/startup_tests.rs"]
+mod startup_tests;
+
+#[cfg(test)]
 #[path = "load_conditions/tests.rs"]
 mod tests;
 
@@ -230,3 +290,7 @@ pub(super) fn content_root_with_conditions(
         &conditions,
     )
 }
+
+#[cfg(test)]
+#[path = "load_conditions/reload_tests.rs"]
+mod reload_tests;

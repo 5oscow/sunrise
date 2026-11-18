@@ -268,9 +268,7 @@ pub enum SupportType {
 /// Removal, replacement or chunk reload invalidates the handle, even at the same
 /// position. In-place data edits and temporary tick take/put preserve identity.
 /// Stale handles read as `None`; Result-returning methods report `Stale`.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct BlockEntityRef {
     pub(crate) level: LevelRef,
@@ -288,6 +286,22 @@ pub enum BlockEntityError {
 }
 
 impl NoBackend for BlockEntityError {
+    fn no_backend() -> Self {
+        Self::Stale
+    }
+}
+
+/// Why a contents watch could not be registered.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
+#[non_exhaustive]
+pub enum ContentsWatchError {
+    /// The observer is no longer live or its level cannot be written here.
+    Stale,
+    /// No BlockPart on this observer subscribes to contents_changed.
+    NotSubscribed,
+}
+
+impl NoBackend for ContentsWatchError {
     fn no_backend() -> Self {
         Self::Stale
     }

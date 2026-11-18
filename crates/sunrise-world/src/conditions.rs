@@ -152,47 +152,42 @@ impl LoadConditions {
         view
     }
 
-    /// `ConditionalOps.decodeListWithElementConditions`: in every list of an
-    /// admitted file, drop an element whose own `neoforge:conditions` fail and
-    /// strip the key from one whose conditions hold, before the file decodes.
-    pub fn filter_elements(&self, file: &mut Value, path: &str) {
-        self.filter_elements_context(file, &|| path.to_owned());
-    }
-
-    fn filter_elements_context(&self, file: &mut Value, path: &dyn Fn() -> String) {
-        match file {
-            Value::Array(elements) => elements.retain_mut(|element| {
-                if element.get("neoforge:conditions").is_some() {
-                    if !self.allows_context(element, path) {
-                        return false;
-                    }
-                    if let Some(fields) = element.as_object_mut() {
-                        fields.remove("neoforge:conditions");
-                    }
-                }
-                self.filter_elements_context(element, path);
-                true
-            }),
-            Value::Object(fields) => {
-                for (key, value) in fields.iter_mut() {
-                    if key != "neoforge:conditions" {
-                        self.filter_elements_context(value, path);
-                    }
-                }
+    /// `ConditionalOps.decodeListWithElementConditions` on one list: drop an
+    /// element whose own `neoforge:conditions` fail and strip the key from one
+    /// whose conditions hold. Only the lists NeoForge decodes that way carry
+    /// element conditions (a loot table's pools, data-map values, overlays and
+    /// atlas sources, each read by its own reader); anywhere else a nested
+    /// `neoforge:conditions` key is ordinary data and is never evaluated.
+    fn filter_list(&self, elements: &mut Vec<Value>, path: &dyn Fn() -> String) {
+        elements.retain_mut(|element| {
+            if element.get("neoforge:conditions").is_none() {
+                return true;
             }
-            _ => {}
-        }
+            if !self.allows_context(element, path) {
+                return false;
+            }
+            if let Some(fields) = element.as_object_mut() {
+                fields.remove("neoforge:conditions");
+            }
+            true
+        });
     }
 
-    /// `allows_id`, then `filter_elements` on an admitted file.
-    pub fn admit_id(&self, file: &mut Value, kind: &str, id: &str) -> bool {
-        if !self.allows_id(file, kind, id) {
+    /// `allows_id` for a loot table, then its `pools` filtered by their own
+    /// conditions: NeoForge decodes a table's pool list with element conditions
+    /// (a false pool is dropped, a passing one loses the key). A pool's
+    /// `entries` and `functions` and an entry's `children` are plain lists.
+    pub(crate) fn admit_loot_table(&self, file: &mut Value, id: &str) -> bool {
+        if !self.allows_id(file, "loot_table", id) {
             return false;
         }
-        self.filter_elements_context(file, &|| {
+        let path = || {
             let (namespace, path) = id.split_once(':').unwrap_or(("minecraft", id));
-            format!("data/{namespace}/{kind}/{path}.json")
-        });
+            format!("data/{namespace}/loot_table/{path}.json")
+        };
+        if let Some(pools) = file.get_mut("pools").and_then(Value::as_array_mut) {
+            self.filter_list(pools, &path);
+        }
         true
     }
 
@@ -251,6 +246,21 @@ impl LoadConditions {
         self.allows_context(file, || path.to_owned())
     }
 
+    /// Evaluate a per-file-skipping loader without poisoning the rest of its
+    /// owning data candidate. Registered lookups and bound inputs are shared,
+    /// but this file's cache and diagnostics belong only to this evaluation.
+    pub fn allows_file_isolated(&self, file: &Value, path: &str) -> Result<bool, String> {
+        let mut view = self.clone();
+        view.diagnostics = Diagnostics::default();
+        let allowed = view.allows_file(file, path);
+        view.check_errors()?;
+        let unknown = view.foreign_errors();
+        if !unknown.is_empty() {
+            return Err(unknown.join("; "));
+        }
+        Ok(allowed)
+    }
+
     fn allows_context(&self, file: &Value, path: impl FnOnce() -> String) -> bool {
         let Some(payload) = file.get("neoforge:conditions") else {
             return true;
@@ -299,11 +309,26 @@ impl LoadConditions {
             .0
             .as_ref()
             .expect("owning candidate diagnostics");
+        // The context only matters to the conditions that read it: any other verdict is kept
+        // across the views of one load (the candidate registry view, then the loaders'), so a
+        // file's conditions run once per load.
+        let payload = payload.to_string();
+        let reads_context = [
+            "neoforge:registered",
+            "neoforge:tag_empty",
+            "neoforge:feature_flags_enabled",
+        ]
+        .iter()
+        .any(|name| payload.contains(name));
         let cell = state
             .lock()
             .unwrap()
             .cache
-            .entry((path.to_owned(), payload.to_string(), context.key()))
+            .entry((
+                path.to_owned(),
+                payload,
+                if reads_context { context.key() } else { 0 },
+            ))
             .or_default()
             .clone();
         *cell.get_or_init(|| {
@@ -538,6 +563,44 @@ pub fn conditions_hold_with_lookup(
     evaluate(v, loaded, lookup, owned, &Context::default(), &mut |_| {})
 }
 
+/// Does the built-in evaluator already implement this condition ID?
+pub fn is_builtin_condition(id: &sunrise_core::identifier::Identifier) -> bool {
+    BuiltinCondition::from_parts(id.namespace(), id.path()).is_some()
+}
+
+#[derive(Clone, Copy)]
+enum BuiltinCondition {
+    ModLoaded,
+    Always,
+    Never,
+    FeatureFlags,
+    Registered,
+    TagEmpty,
+    Not,
+    And,
+    Or,
+}
+
+impl BuiltinCondition {
+    fn from_parts(namespace: &str, path: &str) -> Option<Self> {
+        if namespace != "neoforge" {
+            return None;
+        }
+        Some(match path {
+            "mod_loaded" => Self::ModLoaded,
+            "always" => Self::Always,
+            "never" => Self::Never,
+            "feature_flags_enabled" => Self::FeatureFlags,
+            "registered" => Self::Registered,
+            "tag_empty" => Self::TagEmpty,
+            "not" => Self::Not,
+            "and" => Self::And,
+            "or" => Self::Or,
+            _ => return None,
+        })
+    }
+}
+
 fn evaluate(
     v: &Value,
     loaded: &ModLoaded,
@@ -556,11 +619,18 @@ fn evaluate(
     ) -> Result<Option<bool>, String> {
         // Both NeoForge codecs default `registry` to `minecraft:item`.
         let registry = || qualified(c["registry"].as_str().unwrap_or("minecraft:item"));
-        Ok(match c["type"].as_str() {
-            Some("neoforge:mod_loaded") => Some(c["modid"].as_str().is_some_and(loaded)),
-            Some("neoforge:true") => Some(true),
-            Some("neoforge:false") => Some(false),
-            Some("neoforge:feature_flags_enabled") => match &context.features {
+        let Some(name) = c["type"].as_str() else {
+            return Ok(None);
+        };
+        let builtin = name
+            .split_once(':')
+            .and_then(|(namespace, path)| BuiltinCondition::from_parts(namespace, path));
+        use BuiltinCondition::*;
+        Ok(match builtin {
+            Some(ModLoaded) => Some(c["modid"].as_str().is_some_and(loaded)),
+            Some(Always) => Some(true),
+            Some(Never) => Some(false),
+            Some(FeatureFlags) => match &context.features {
                 Some(enabled) => {
                     let Some(flags) = c["flags"].as_array() else {
                         unknown("neoforge:feature_flags_enabled (invalid flags)");
@@ -581,7 +651,7 @@ fn evaluate(
                     None
                 }
             },
-            Some("neoforge:registered") => match &context.registries {
+            Some(Registered) => match &context.registries {
                 Some(registries) => Some(
                     c["value"]
                         .as_str()
@@ -592,7 +662,7 @@ fn evaluate(
                     None
                 }
             },
-            Some("neoforge:tag_empty") => match &context.tags {
+            Some(TagEmpty) => match &context.tags {
                 Some(tags) => match c["tag"].as_str() {
                     Some(tag) => Some(!tags.contains(&registry(), &qualified(tag))),
                     None => {
@@ -605,18 +675,16 @@ fn evaluate(
                     None
                 }
             },
-            Some("neoforge:not") => {
-                hold(&c["value"], loaded, lookup, owned, context, unknown)?.map(|v| !v)
-            }
-            Some(kind @ ("neoforge:and" | "neoforge:or")) => {
+            Some(Not) => hold(&c["value"], loaded, lookup, owned, context, unknown)?.map(|v| !v),
+            Some(kind @ (And | Or)) => {
                 // Visit every child: an unknown node invalidates the whole file,
                 // including after a sibling already determines its boolean result.
-                let mut answer = kind == "neoforge:and";
+                let mut answer = matches!(kind, And);
                 let mut known = true;
                 for child in c["values"].as_array().into_iter().flatten() {
                     match hold(child, loaded, lookup, owned, context, unknown)? {
                         Some(value) => {
-                            if kind == "neoforge:and" {
+                            if matches!(kind, And) {
                                 answer &= value;
                             } else {
                                 answer |= value;
@@ -627,7 +695,7 @@ fn evaluate(
                 }
                 known.then_some(answer)
             }
-            Some(name) => match lookup(name, c) {
+            None => match lookup(name, c) {
                 Some(answer) => Some(answer?),
                 None => {
                     if let Some(owner) = name
@@ -642,7 +710,6 @@ fn evaluate(
                     None
                 }
             },
-            None => None,
         })
     }
     let mut allowed = true;
@@ -734,14 +801,14 @@ mod tests {
             {"type": "neoforge:mod_loaded", "modid": "create"},
             {"type": "neoforge:or", "values": [
                 {"type": "neoforge:mod_loaded", "modid": "ic2"},
-                {"type": "neoforge:true"}
+                {"type": "neoforge:always"}
             ]}
         ]);
         c.insert("neoforge:conditions".to_owned(), both);
         assert!(conditions_hold(&Value::Object(c), &loaded));
         // One failing condition in the list fails the file.
         let failing = json!([
-            {"type": "neoforge:true"},
+            {"type": "neoforge:always"},
             {"type": "neoforge:mod_loaded", "modid": "ic2"}
         ]);
         let mut f = serde_json::Map::new();
@@ -760,12 +827,12 @@ mod tests {
             ]
         });
         assert!(!conditions_hold(&nested_not, &loaded));
-        // `or` with a `true` beside a `not` of an unknown: one child is
+        // `or` with `always` beside a `not` of an unknown: one child is
         // known-true, but the other's subtree holds an unknown.
         let nested_or = json!({
             "neoforge:conditions": [
                 {"type": "neoforge:or", "values": [
-                    {"type": "neoforge:true"},
+                    {"type": "neoforge:always"},
                     {"type": "neoforge:not", "value":
                         {"type": "example:unknown"}}
                 ]}
@@ -779,15 +846,18 @@ mod tests {
     }
 
     #[test]
-    fn false_omits_the_file_and_not_false_loads_it() {
-        let conditions = LoadConditions::vanilla();
-        assert!(!conditions.allows(&file(json!({"type": "neoforge:false"}))));
+    fn always_and_never_evaluate_without_a_registered_handler() {
+        let conditions = LoadConditions::new([]).with_lookup(BTreeMap::new(), |name, _| {
+            panic!("built-in condition {name} fell through to the mod lookup")
+        });
+        assert!(conditions.allows(&file(json!({"type": "neoforge:always"}))));
+        assert!(!conditions.allows(&file(json!({"type": "neoforge:never"}))));
         assert!(conditions.allows(&file(
-            json!({"type": "neoforge:not", "value": {"type": "neoforge:false"}})
+            json!({"type": "neoforge:not", "value": {"type": "neoforge:never"}})
         )));
         assert!(
             conditions.allows(&file(json!({"type": "neoforge:or", "values": [
-                {"type": "neoforge:false"}, {"type": "neoforge:true"}
+                {"type": "neoforge:never"}, {"type": "neoforge:always"}
             ]})))
         );
     }
@@ -892,32 +962,33 @@ mod tests {
 
     #[test]
     fn unconditioned_elements_never_build_a_diagnostic_path() {
-        let mut value = json!({"pools": [{"entries": [1, {"name": "test:entry"}]}]});
-        let expected = value.clone();
-        LoadConditions::vanilla().filter_elements_context(&mut value, &|| {
+        let mut entries = vec![json!(1), json!({"name": "test:entry"})];
+        let expected = entries.clone();
+        LoadConditions::vanilla().filter_list(&mut entries, &|| {
             panic!("an unconditioned element has no diagnostic path")
         });
+        assert_eq!(entries, expected);
+    }
+
+    #[test]
+    fn unconditioned_loot_pools_are_kept_as_written() {
+        let mut value = json!({"pools": [{"rolls": 1, "entries": [1, {"name": "test:entry"}]}]});
+        let expected = value.clone();
+        assert!(LoadConditions::vanilla().admit_loot_table(&mut value, "test:table"));
         assert_eq!(value, expected);
     }
 
     #[test]
-    fn element_conditions_drop_failing_elements_and_strip_passing_keys() {
-        let mut recipe = json!({
-            "type": "minecraft:crafting_shapeless",
-            "ingredients": [
-                "minecraft:stick",
-                {"item": "create:zinc", "neoforge:conditions": [
-                    {"type": "neoforge:mod_loaded", "modid": "create"}]},
-                {"item": "ic2:tin", "neoforge:conditions": [
-                    {"type": "neoforge:mod_loaded", "modid": "ic2"}]}
-            ],
-            "result": {"id": "minecraft:stone"}
-        });
-        LoadConditions::new(["create"]).filter_elements(&mut recipe, "data/a/recipe/b.json");
-        assert_eq!(
-            recipe["ingredients"],
-            json!(["minecraft:stick", {"item": "create:zinc"}])
-        );
+    fn loot_pool_conditions_drop_failing_pools_and_strip_passing_keys() {
+        let mut table = json!({"pools": [
+            {"rolls": 1},
+            {"rolls": 2, "neoforge:conditions": [
+                {"type": "neoforge:mod_loaded", "modid": "create"}]},
+            {"rolls": 3, "neoforge:conditions": [
+                {"type": "neoforge:mod_loaded", "modid": "ic2"}]}
+        ]});
+        assert!(LoadConditions::new(["create"]).admit_loot_table(&mut table, "a:b"));
+        assert_eq!(table["pools"], json!([{"rolls": 1}, {"rolls": 2}]));
     }
 
     #[test]

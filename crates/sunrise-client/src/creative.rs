@@ -548,6 +548,10 @@ impl Creative {
                 .collect(),
         )
     }
+    /// The `hasPermissions` the tabs were last built with.
+    pub fn permissions(&self) -> bool {
+        self.permissions
+    }
     /// Invalidate collected contents after client resources are published, even
     /// when permissions have not changed. The next refresh recollects mod stacks.
     pub fn invalidate_build(&mut self) {

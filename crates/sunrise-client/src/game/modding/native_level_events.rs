@@ -10,6 +10,7 @@ use mod_api::{
     BlockKey, EntityRef, ExplodeError, ExplosionInteraction, ExplosionSettings, LevelRef,
 };
 use sunrise_world::level::{BlockEventData, LevelEvent};
+use sunrise_world::registry::BlockStateId;
 
 /// A position inside the world's horizontal and vertical bounds.
 fn in_bounds(at: [f64; 3]) -> bool {
@@ -69,6 +70,16 @@ impl Game<'_> {
         }
         self.level_event_at(id, pos, data);
         true
+    }
+    /// Plays the break effect of `state` at `pos` (`Level.levelEvent(2001, pos,
+    /// Block.getId(state))`); the state's id is resolved here, never by the mod.
+    pub(super) fn level_block_break_effect(
+        &mut self,
+        level: LevelRef,
+        pos: [i32; 3],
+        state: BlockStateId,
+    ) -> bool {
+        self.level_level_event(level, 2001, pos, state.0 as i32)
     }
     /// Plays level event `id` for every player on the server
     /// (`ServerLevel.globalLevelEvent`), or for the players near `pos` when the

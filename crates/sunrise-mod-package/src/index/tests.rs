@@ -1,7 +1,7 @@
 //! The sample index (`tests/index/index-v1.json`, the one docs/modding/src/reference/registry-index.md
-//! shows) and its files: `coords_hud-0.1.0.hmod`, signed with the throwaway
+//! shows) and its files: `coords_hud-0.1.0.smod`, signed with the throwaway
 //! key `test.pub` (Ed25519/Blake2b via OpenSSL; its private key was deleted),
-//! `cozy-1.0.0.hpack`, unsigned, and `glow-1.0.0.hshader`, unsigned
+//! `cozy-1.0.0.spack`, unsigned, and `glow-1.0.0.sshader`, unsigned
 //! (`sunrise-shader new --template post`, then `sunrise-shader pack`).
 use super::*;
 use std::path::PathBuf;
@@ -76,14 +76,14 @@ fn a_capability_this_build_does_not_know_blocks_only_its_version() {
 #[test]
 fn files_pass_against_their_entries() {
     let index = sample();
-    let hmod = fixtures().join("coords_hud-0.1.0.hmod");
-    assert_eq!(check(&index, "coords_hud", &hmod), Ok(Trust::Verified));
-    let hpack = fixtures().join("cozy-1.0.0.hpack");
-    assert_eq!(check(&index, "cozy", &hpack), Ok(Trust::Unsigned));
-    let hshader = fixtures().join("glow-1.0.0.hshader");
-    assert_eq!(check(&index, "glow", &hshader), Ok(Trust::Unsigned));
+    let smod = fixtures().join("coords_hud-0.1.0.smod");
+    assert_eq!(check(&index, "coords_hud", &smod), Ok(Trust::Verified));
+    let spack = fixtures().join("cozy-1.0.0.spack");
+    assert_eq!(check(&index, "cozy", &spack), Ok(Trust::Unsigned));
+    let sshader = fixtures().join("glow-1.0.0.sshader");
+    assert_eq!(check(&index, "glow", &sshader), Ok(Trust::Unsigned));
     let world = index.project("skyblock_start").unwrap();
-    let e = check_file(&index, world, &world.versions[0], &hpack).unwrap_err();
+    let e = check_file(&index, world, &world.versions[0], &spack).unwrap_err();
     assert!(e.contains("bytes"), "{e}");
 }
 
@@ -92,23 +92,23 @@ fn a_changed_file_key_or_manifest_is_refused() {
     let index = sample();
     let dir = std::env::temp_dir().join(format!("sunrise-index-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let hmod = fixtures().join("coords_hud-0.1.0.hmod");
-    let mut bytes = std::fs::read(&hmod).unwrap();
+    let smod = fixtures().join("coords_hud-0.1.0.smod");
+    let mut bytes = std::fs::read(&smod).unwrap();
     let last = bytes.len() - 1;
     bytes[last] ^= 1;
-    let tampered = dir.join("coords_hud-0.1.0.hmod");
+    let tampered = dir.join("coords_hud-0.1.0.smod");
     std::fs::write(&tampered, &bytes).unwrap();
     let e = check(&index, "coords_hud", &tampered).unwrap_err();
     assert!(e.contains("SHA-256"), "{e}");
 
     let mut other_key = index.clone();
     other_key.projects[0].key = Some(OTHER_KEY.into());
-    let e = check(&other_key, "coords_hud", &hmod).unwrap_err();
+    let e = check(&other_key, "coords_hud", &smod).unwrap_err();
     assert!(e.contains("key"), "{e}");
 
     let mut more_caps = index.clone();
     more_caps.projects[0].versions[0].capabilities = Default::default();
-    let e = check(&more_caps, "coords_hud", &hmod).unwrap_err();
+    let e = check(&more_caps, "coords_hud", &smod).unwrap_err();
     assert!(e.contains("isn't what the index lists"), "{e}");
 
     let mut revoked = index.clone();
@@ -118,7 +118,7 @@ fn a_changed_file_key_or_manifest_is_refused() {
         reason: "Test.".into(),
         date: String::new(),
     });
-    let e = check(&revoked, "coords_hud", &hmod).unwrap_err();
+    let e = check(&revoked, "coords_hud", &smod).unwrap_err();
     assert!(e.contains("taken down: Test."), "{e}");
     std::fs::remove_dir_all(&dir).unwrap();
 }
@@ -147,7 +147,7 @@ fn refuses_broken_indexes() {
         i.projects.push(twin)
     });
     assert!(e.contains("listed twice"), "{e}");
-    let e = broken(&|i| i.projects[0].versions[0].file.url = "http://example.org/x.hmod".into());
+    let e = broken(&|i| i.projects[0].versions[0].file.url = "http://example.org/x.smod".into());
     assert!(e.contains("https"), "{e}");
     // A local test registry may list files on disk; the published one may not.
     let local = text.replace(
@@ -163,7 +163,7 @@ fn refuses_broken_indexes() {
             .any(|l| l.reason.contains("https"))
     );
     assert!(Index::parse_local(&local).unwrap().left_out.is_empty());
-    let e = broken(&|i| i.projects[0].versions[0].file.name = "../coords_hud.hmod".into());
+    let e = broken(&|i| i.projects[0].versions[0].file.name = "../coords_hud.smod".into());
     assert!(e.contains("plain file name"), "{e}");
     let e = broken(&|i| i.projects[0].versions[0].file.name = "coords_hud.zip".into());
     assert!(e.contains("plain file name"), "{e}");
@@ -222,7 +222,7 @@ fn a_bad_version_is_left_out_and_its_project_keeps_the_others() {
     let native = index.projects.last_mut().unwrap();
     let mut good = native.versions[0].clone();
     good.version = "0.0.9".into();
-    good.file.name = "accurate_block_placement-0.0.9.hmod".into();
+    good.file.name = "accurate_block_placement-0.0.9.smod".into();
     native.versions.push(good);
     let index = reread(&index);
     let native = index.project("accurate_block_placement").unwrap();
@@ -235,7 +235,7 @@ fn a_bad_version_is_left_out_and_its_project_keeps_the_others() {
 #[test]
 fn a_modpack_whose_mod_was_left_out_is_left_out_too() {
     let mut index = sample();
-    index.projects[0].versions[0].file.url = "http://example.org/coords_hud.hmod".into();
+    index.projects[0].versions[0].file.url = "http://example.org/coords_hud.smod".into();
     let index = reread(&index);
     assert!(index.project("coords_hud").is_none());
     assert!(index.project("cozy").is_none());
@@ -398,19 +398,19 @@ fn shader_packs_pass_the_game_s_own_check() {
     };
     let dir = std::env::temp_dir().join(format!("sunrise-mods-shader-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let good = dir.join("glow-1.0.0.hshader");
+    let good = dir.join("glow-1.0.0.sshader");
     std::fs::write(
         &good,
         pack("fn post(input: PostInput) -> vec4<f32> { return input.color; }\n"),
     )
     .unwrap();
-    let bad = dir.join("bad.hshader");
+    let bad = dir.join("bad.sshader");
     std::fs::write(
         &bad,
         pack("fn post(input: PostInput) -> vec4<f32> { return input.color }\n"),
     )
     .unwrap();
-    let experimental = dir.join("glow-0.2.hshader");
+    let experimental = dir.join("glow-0.2.sshader");
     let files = [
         (
             sunrise_shader_api::MANIFEST,
@@ -431,7 +431,7 @@ fn shader_packs_pass_the_game_s_own_check() {
     let experimental = inspect(&Kind::Shader, &experimental).unwrap_err();
     let facts = inspect(&Kind::Shader, &good);
     let refused = inspect(&Kind::Shader, &bad).unwrap_err();
-    let not_a_pack = inspect(&Kind::Shader, &fixtures().join("cozy-1.0.0.hpack")).unwrap_err();
+    let not_a_pack = inspect(&Kind::Shader, &fixtures().join("cozy-1.0.0.spack")).unwrap_err();
     std::fs::remove_dir_all(&dir).unwrap();
     let facts = facts.unwrap();
     assert_eq!(
@@ -451,6 +451,55 @@ fn shader_packs_pass_the_game_s_own_check() {
         not_a_pack.contains(sunrise_shader_api::MANIFEST),
         "{not_a_pack}"
     );
-    assert_eq!(Kind::Shader.extension(), Some("hshader"));
+    assert_eq!(Kind::Shader.extension(), Some("sshader"));
     assert!(open(&Kind::Shader).is_ok());
+}
+
+/// A wasm package (a module the loader accepts, its `[wasm]` hash and one `runtime/` file) as a `.smod`.
+fn wasm_package(name: &str, nav: &[u8]) -> PathBuf {
+    use std::io::Write;
+    let module = wat::parse_str(
+        r#"(module (@custom "dylink.0" "\01\04\00\00\00\00")
+            (func (export "sunrise_layout")) (func (export "sunrise_in")) (func (export "sunrise_hook")))"#,
+    )
+    .unwrap();
+    let module = module.as_slice();
+    let manifest = format!(
+        "id='ruby'\nname='Ruby'\nversion='0.1.0'\napi='0.2'\ncapabilities=['registries']\n\
+         [wasm]\nsha512='{}'\ntoolchain='test'\n[runtime]\n\"nav.bin\"='{}'\n",
+        crate::manifest::sha512_of(module),
+        crate::manifest::sha512_of(b"tables"),
+    );
+    let path = std::env::temp_dir().join(format!("{name}-{}.smod", std::process::id()));
+    let mut zip = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
+    let options = zip::write::SimpleFileOptions::default();
+    for (entry, bytes) in [
+        (crate::manifest::MANIFEST, manifest.as_bytes()),
+        ("mod.wasm", module),
+        (
+            "Cargo.toml",
+            b"[package]\nname='ruby'\nversion='0.1.0'\n".as_slice(),
+        ),
+        ("src/lib.rs", b"pub fn hooks() {}".as_slice()),
+        ("runtime/nav.bin", nav),
+    ] {
+        zip.start_file(entry, options).unwrap();
+        zip.write_all(bytes).unwrap();
+    }
+    zip.finish().unwrap();
+    path
+}
+
+#[test]
+fn installing_a_wasm_mod_checks_its_runtime_files_against_the_manifest() {
+    let good = wasm_package("runtime-wasm-ok", b"tables");
+    let facts = inspect(&Kind::Mod, &good);
+    // The same name and length, different bytes.
+    let edited = wasm_package("runtime-wasm-edited", b"tablez");
+    let refused = inspect(&Kind::Mod, &edited);
+    std::fs::remove_file(good).unwrap();
+    std::fs::remove_file(edited).unwrap();
+    assert_eq!(facts.unwrap().id.as_deref(), Some("ruby"));
+    let error = refused.unwrap_err();
+    assert!(error.contains("runtime/nav.bin"), "{error}");
 }

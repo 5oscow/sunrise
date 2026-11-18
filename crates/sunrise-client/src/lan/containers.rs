@@ -4,7 +4,11 @@ use super::{
     hub::Hub,
     menu::{self, Menu, NativeMenuEvent, Rules, Slots, View},
 };
-use crate::{containers::BlockEntity, items::ItemStack, world::World};
+use crate::{
+    containers::{BlockEntity, ModContainerInsertRule},
+    items::ItemStack,
+    world::World,
+};
 use std::collections::HashMap;
 use sunrise_core::nbt::Tag;
 use sunrise_core::random::RandomSource;
@@ -70,6 +74,14 @@ pub struct PreparedClick {
     hidden: Vec<usize>,
     items: Option<Vec<Option<ItemStack>>>,
     container_limits: Vec<Option<u32>>,
+    pub(crate) container_insert_rules: Vec<ModContainerInsertRule>,
+}
+
+impl PreparedClick {
+    /// The declaration's per-slot admission rules, for the gameplay click path.
+    pub fn container_insert_rules(&self) -> &[ModContainerInsertRule] {
+        &self.container_insert_rules
+    }
 }
 
 impl Hub {
@@ -151,6 +163,10 @@ impl Hub {
             pitch,
             seed,
         })
+    }
+    /// Replace the server sound-seed stream, for a probe that needs its draws known.
+    pub fn set_sound_seeds(&self, random: sunrise_core::random::LegacyRandom) {
+        *self.sound_seeds.lock().unwrap() = random;
     }
     /// Draw the next seed from the server sound source.
     pub fn next_sound_seed(&self) -> i64 {
@@ -748,26 +764,50 @@ impl Hub {
         let shulker = in_menu
             && shulker_box.is_some()
             && self.guests[i].menu.as_ref().map(|m| m.kind) == shulker_box;
-        let (drag, hidden, items, container_limits) = self.guests.update(i, |guest| {
-            let drag = if in_menu {
-                guest.menu.as_mut().and_then(|m| m.drag.take())
-            } else {
-                guest.drag.take()
-            };
-            let hidden = guest
-                .menu
-                .as_ref()
-                .filter(|_| in_menu)
-                .map_or_else(Vec::new, |m| m.hidden.clone());
-            let items = source.and_then(|s| s.read(world, guest));
-            if in_menu && items.is_none() {
-                return None;
-            }
-            let container_limits = source
-                .map(|source| source.stack_limits(world, items.as_ref().map_or(0, Vec::len)))
-                .unwrap_or_default();
-            Some((drag, hidden, items, container_limits))
-        })?;
+        let (drag, hidden, items, container_limits, container_insert_rules) =
+            self.guests.update(i, |guest| {
+                let drag = if in_menu {
+                    guest.menu.as_mut().and_then(|m| m.drag.take())
+                } else {
+                    guest.drag.take()
+                };
+                let hidden = guest
+                    .menu
+                    .as_ref()
+                    .filter(|_| in_menu)
+                    .map_or_else(Vec::new, |m| m.hidden.clone());
+                let items = source.and_then(|s| s.read(world, guest));
+                if in_menu && items.is_none() {
+                    return None;
+                }
+                let container_limits = source
+                    .map(|source| source.stack_limits(world, items.as_ref().map_or(0, Vec::len)))
+                    .unwrap_or_default();
+                let mut container_insert_rules = source
+                    .map(|source| {
+                        source.container_insert_rules(world, items.as_ref().map_or(0, Vec::len))
+                    })
+                    .unwrap_or_default();
+                if let Some(range) = guest
+                    .menu
+                    .as_ref()
+                    .filter(|_| in_menu)
+                    .and_then(Menu::linked_slot_range)
+                {
+                    for slot in range {
+                        if let Some(rule) = container_insert_rules.get_mut(slot) {
+                            *rule = ModContainerInsertRule::Any;
+                        }
+                    }
+                }
+                Some((
+                    drag,
+                    hidden,
+                    items,
+                    container_limits,
+                    container_insert_rules,
+                ))
+            })?;
         Some(PreparedClick {
             i,
             in_menu,
@@ -777,6 +817,7 @@ impl Hub {
             hidden,
             items,
             container_limits,
+            container_insert_rules,
         })
     }
 
@@ -809,6 +850,88 @@ impl Hub {
                 rules,
             )
         })
+    }
+
+    /// The cursor and the stack in menu slot `slot` of guest `conn`'s open menu, as a click on it
+    /// finds them now: what a decision compares with the stacks it froze.
+    pub fn click_stacks(
+        &self,
+        conn: u32,
+        slot: usize,
+        world: &World,
+    ) -> Option<(Option<ItemStack>, Option<ItemStack>)> {
+        let i = self.guests.iter().position(|g| g.conn == conn)?;
+        Some((
+            self.guests[i].carried.clone(),
+            self.view_slot(i, world, slot),
+        ))
+    }
+
+    /// The pickup click `p` as `item_stacked_on_other` is asked about it, on the container the
+    /// first step read: the stacks it finds. `None` for a click that never asks.
+    pub fn stacked_click(
+        &mut self,
+        prepared: &mut PreparedClick,
+        p: &play::ContainerClick,
+    ) -> Option<crate::menu::StackedClick> {
+        if p.input != menu::input::PICKUP {
+            return None;
+        }
+        let loop_context = &self.loop_context;
+        self.guests.update(prepared.i, |guest| {
+            View {
+                guest,
+                container: prepared.items.as_deref_mut(),
+                shulker: prepared.shulker,
+                container_limits: Vec::new(),
+                hidden: &prepared.hidden,
+                loop_context,
+                slot_snapshot: Default::default(),
+            }
+            .stacked_click(i32::from(p.slot), i32::from(p.button))
+        })
+    }
+
+    /// Run the click `p` on the prepared state to see what it would ask of `rules`, then put
+    /// everything it touched back: the guest's slots and cursor, the container's slots and the
+    /// drag. Only what `rules` kept of the asks remains.
+    pub fn plan_click(
+        &mut self,
+        prepared: &mut PreparedClick,
+        p: &play::ContainerClick,
+        rules: &dyn Rules,
+    ) {
+        let loop_context = &self.loop_context;
+        self.guests.update(prepared.i, |guest| {
+            let kept = (
+                guest.inventory.clone(),
+                guest.armor.clone(),
+                guest.offhand.clone(),
+                guest.carried.clone(),
+                guest.craft_grid.clone(),
+                guest.craft_result.clone(),
+            );
+            let (items, drag) = (prepared.items.clone(), prepared.drag.clone());
+            let _ = menu::click(
+                &mut View {
+                    guest,
+                    container: prepared.items.as_deref_mut(),
+                    shulker: prepared.shulker,
+                    container_limits: prepared.container_limits.clone(),
+                    hidden: &prepared.hidden,
+                    loop_context,
+                    slot_snapshot: Default::default(),
+                },
+                &mut prepared.drag,
+                i32::from(p.slot),
+                i32::from(p.button),
+                p.input,
+                rules,
+            );
+            (guest.inventory, guest.armor, guest.offhand) = (kept.0, kept.1, kept.2);
+            (guest.carried, guest.craft_grid, guest.craft_result) = (kept.3, kept.4, kept.5);
+            (prepared.items, prepared.drag) = (items, drag);
+        });
     }
 
     /// The last step: the container's slots back into the world, the unfinished drag back on the

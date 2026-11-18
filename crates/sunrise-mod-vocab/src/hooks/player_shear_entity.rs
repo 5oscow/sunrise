@@ -3,7 +3,11 @@
 
 pub trait Hooks {
     /// A player shearing a mob is about to do so. Set `cancel` to leave the mob and shears unchanged.
-    /// The guest's state is swapped in.
+    /// The guest's state is swapped in. The listener may change the world: straight
+    /// after it returns without cancelling, the game finds the mob again by its
+    /// entity id and checks that it still exists, is not removed, and that the held
+    /// stack keeps its item and count; if not, the click is spent and nothing is
+    /// sheared.
     #[hook(
         side = "server",
         contract = "cancel",

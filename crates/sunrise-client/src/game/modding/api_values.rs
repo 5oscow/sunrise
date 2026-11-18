@@ -4,6 +4,10 @@
 #[path = "api_values/ingredient.rs"]
 mod ingredient_values;
 use mod_api::item::item_stack::{ItemStack as ApiStack, StackWriteError};
+use std::sync::Arc;
+#[cfg(test)]
+use sunrise_client::parallel::ListenSnapshot;
+use sunrise_client::parallel::TickThread;
 use sunrise_core::nbt::{Compound, JavaString, Tag};
 use sunrise_items::items::{ItemStack as EngineStack, Items};
 #[path = "api_values/aggregates.rs"]
@@ -12,6 +16,20 @@ pub(in crate::game) mod aggregates;
 pub(in crate::game) mod block_edit;
 #[path = "api_values/block_state.rs"]
 pub(in crate::game) mod block_state;
+
+/// The engine's generator as the API's owned source: the same state and cached gaussian, so it
+/// draws on as the engine's would.
+pub(crate) fn random_to_api(
+    random: &sunrise_core::random::LegacyRandom,
+) -> mod_api::LegacyRandomSource {
+    <(u64, Option<f64>)>::from(random).into()
+}
+/// The API's owned source as the engine's generator, state and cached gaussian kept.
+pub(crate) fn random_to_engine(
+    source: &mod_api::LegacyRandomSource,
+) -> sunrise_core::random::LegacyRandom {
+    <(u64, Option<f64>)>::from(source).into()
+}
 
 pub(crate) fn block_jump_factor(
     context: &sunrise_world::native_load_context::LoopContext,
@@ -87,7 +105,30 @@ pub(crate) fn behavior_block(
 }
 pub(crate) use super::native_ground::alter_ground;
 pub(in crate::game) use super::native_worldgen::prepare as prepare_block_states;
-pub(in crate::game) use block_state::install as install_block_states;
+
+/// Publish the block state index prepared for this game. Between a tick's phases only: the
+/// token is the tick thread's, which a phase's work can't take or capture.
+pub(in crate::game) fn install_block_states(_tick: &TickThread, prepared: Arc<block_state::Index>) {
+    block_state::install(prepared);
+}
+
+/// Publish the parts table prepared for this game, and with it its listen index. Between a tick's
+/// phases only, like [`install_block_states`]: a phase keeps the `ListenSnapshot` it captured.
+pub(in crate::game) fn install_resolved_parts(_tick: &TickThread, parts: Option<mod_api::Parts>) {
+    mod_api::__private::install_resolved_parts(parts);
+}
+
+/// Who listens, as the tick thread holds it now, for a phase view to keep: None before this
+/// game's block states are bound.
+#[cfg(test)]
+pub(in crate::game) fn listen_snapshot(tick: &TickThread) -> Option<ListenSnapshot> {
+    let index = block_state::current().ok()?;
+    Some(ListenSnapshot::capture(
+        tick,
+        mod_api::__private::game_listen_index(),
+        index.blocks(),
+    ))
+}
 #[path = "api_values/inside_write.rs"]
 mod inside_write;
 #[path = "api_values/landing_write.rs"]
@@ -133,6 +174,8 @@ pub(in crate::game) fn resolve_block_definitions(
         mod_platform::__private::part_tests::install_parts_fixture(&[])
             .map_err(|errors| errors.join("\n"))?;
     }
+    // A load entry point, not a phase's: the mint refuses a worker by name.
+    let _tick = TickThread::mint();
     block_state::clear();
     if mod_api::__private::block_definitions().is_some() {
         return bind_worker_blocks(registry);
@@ -475,6 +518,19 @@ where
         .map_err(|error| error.into_write_error().into())
 }
 
+/// Convert a successful block-state write answer; a state the registry cannot name is the
+/// write's own `InvalidState` error.
+pub(in crate::game) fn call_state_write<W>(
+    call: impl FnOnce() -> W,
+) -> Result<<W::Value as TryIntoApi>::Api, W::Error>
+where
+    W: IntoWriteResult,
+    W::Value: TryIntoApi,
+    W::Error: From<<W::Value as TryIntoApi>::Error>,
+{
+    call_write(call)?.try_into_api().map_err(Into::into)
+}
+
 macro_rules! scalar_values {
     ($($ty:ty),* $(,)?) => { $(
         impl TryIntoApi for $ty {
@@ -658,22 +714,28 @@ impl TryIntoEngine for mod_api::ItemDisplayContext {
     type Engine = sunrise_assets::item_model::DisplayContext;
     type Error = ();
     fn try_into_engine(&self, _: &Items) -> Result<Self::Engine, Self::Error> {
-        use mod_api::ItemDisplayContext as Api;
-        use sunrise_assets::item_model::DisplayContext as Engine;
-        Ok(match self {
-            Api::None => Engine::None,
-            Api::ThirdPersonLeftHand => Engine::ThirdPersonLeftHand,
-            Api::ThirdPersonRightHand => Engine::ThirdPersonRightHand,
-            Api::FirstPersonLeftHand => Engine::FirstPersonLeftHand,
-            Api::FirstPersonRightHand => Engine::FirstPersonRightHand,
-            Api::Head => Engine::Head,
-            Api::Gui => Engine::Gui,
-            Api::Ground => Engine::Ground,
-            Api::Fixed => Engine::Fixed,
-            Api::OnShelf => Engine::OnShelf,
-            _ => return Err(()),
-        })
+        engine_display_context(*self).ok_or(())
     }
+}
+/// The engine's display context for the API's, `None` for one this game doesn't have.
+pub(in crate::game) fn engine_display_context(
+    context: mod_api::ItemDisplayContext,
+) -> Option<sunrise_assets::item_model::DisplayContext> {
+    use mod_api::ItemDisplayContext as Api;
+    use sunrise_assets::item_model::DisplayContext as Engine;
+    Some(match context {
+        Api::None => Engine::None,
+        Api::ThirdPersonLeftHand => Engine::ThirdPersonLeftHand,
+        Api::ThirdPersonRightHand => Engine::ThirdPersonRightHand,
+        Api::FirstPersonLeftHand => Engine::FirstPersonLeftHand,
+        Api::FirstPersonRightHand => Engine::FirstPersonRightHand,
+        Api::Head => Engine::Head,
+        Api::Gui => Engine::Gui,
+        Api::Ground => Engine::Ground,
+        Api::Fixed => Engine::Fixed,
+        Api::OnShelf => Engine::OnShelf,
+        _ => return None,
+    })
 }
 
 impl TryIntoApi for sunrise_client::merchant::ItemCost {
@@ -1011,6 +1073,30 @@ impl TryIntoApi for crate::crafting::FireworkShapeIngredient {
         ))
     }
 }
+/// A recipe listing crosses one entry at a time: one unrepresentable recipe must not
+/// hide the rest of its type. Other collection conversions remain all-or-nothing.
+#[derive(Default)]
+pub(in crate::game) struct RecipeListing(pub std::sync::Arc<[crate::crafting::RecipeSnapshot]>);
+impl TryIntoApi for RecipeListing {
+    type Api = std::sync::Arc<[mod_api::Recipe]>;
+    type Error = std::convert::Infallible;
+    fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
+        Ok(self
+            .0
+            .iter()
+            .filter_map(|recipe| match recipe.try_into_api() {
+                Ok(recipe) => Some(recipe),
+                Err(reason) => {
+                    log::debug!(
+                        "Skipping recipe {} in the mod API listing: {reason:?}",
+                        recipe.id
+                    );
+                    None
+                }
+            })
+            .collect())
+    }
+}
 impl TryIntoApi for crate::crafting::RecipeSnapshot {
     type Api = mod_api::Recipe;
     type Error = StackReadError;
@@ -1059,53 +1145,6 @@ pub(crate) fn install_stack_hooks() {
     });
 }
 
-struct ApiSlot<'a> {
-    engine: &'a mut dyn crate::menu::SlotView,
-    invalid: bool,
-}
-impl mod_api::item::menu::SlotView for ApiSlot<'_> {
-    fn item(&self) -> Option<ApiStack> {
-        self.engine.item().and_then(|s| s.try_into_api().ok())
-    }
-    fn may_place(&self, stack: &ApiStack) -> bool {
-        stack_value(stack).is_ok_and(|s| self.engine.may_place(&s))
-    }
-    fn may_pickup(&self) -> bool {
-        self.engine.may_pickup()
-    }
-    fn allow_modification(&self) -> bool {
-        self.engine.allow_modification()
-    }
-    fn safe_insert(&mut self, stack: Option<ApiStack>, count: u32) -> Option<ApiStack> {
-        let value = match stack
-            .as_ref()
-            .map(|s| s.try_into_engine(self.engine.items()))
-            .transpose()
-        {
-            Ok(s) => s,
-            Err(_) => {
-                self.invalid = true;
-                return stack;
-            }
-        };
-        match self.engine.safe_insert(value, count).try_into_api() {
-            Ok(value) => value,
-            Err(_) => {
-                self.invalid = true;
-                None
-            }
-        }
-    }
-    fn safe_take(&mut self, count: u32, max: u32) -> Option<ApiStack> {
-        match self.engine.safe_take(count, max).try_into_api() {
-            Ok(value) => value,
-            Err(_) => {
-                self.invalid = true;
-                None
-            }
-        }
-    }
-}
 /// Adapt a player's block menu `stillValid` check; the game asks only for a menu
 /// whose type has a part answering it (`menu_still_valid_listens`, when it opened).
 pub(crate) fn menu_still_valid(
@@ -1119,71 +1158,6 @@ pub(crate) fn menu_still_valid(
     let reader = sunrise_client_render::api_context::LoopReader(context);
     let context = reader.context();
     mod_api::dispatch_menu_still_valid(&context, player, menu, pos, eye, valid);
-}
-
-pub(crate) fn stacked_on_other(
-    context: &sunrise_world::native_load_context::LoopContext,
-    event: &mut crate::menu::StackedOnOther<'_>,
-    canceled: &mut bool,
-) {
-    if !mod_api::__private::listened(mod_api::HookId::ItemStackedOnOther) {
-        return;
-    }
-    let Ok(mut carried) = event.carried.0.try_into_api() else {
-        return;
-    };
-    let mut candidate_canceled = *canceled;
-    let mut cancellation_result = event.cancellation_result;
-    let mut admitted = None;
-    let mut run = |clicked: &mut dyn crate::menu::SlotView| {
-        let mut slot = ApiSlot {
-            engine: clicked,
-            invalid: false,
-        };
-        let mut api = mod_api::item::menu::StackedOnOther {
-            player: event.player,
-            player_entity_id: event.player_entity_id,
-            slot: event.slot,
-            container: event.container,
-            container_slot: event.container_slot,
-            primary: event.primary,
-            carried: mod_api::item::menu::CarriedAccess(&mut carried),
-            clicked: &mut slot,
-            cancellation_result,
-        };
-        mod_api::dispatch_item_stacked_on_other(
-            &sunrise_client_render::api_context::LoopReader(context).context(),
-            &mut api,
-            &mut candidate_canceled,
-        );
-        cancellation_result = api.cancellation_result;
-        if slot.invalid {
-            return false;
-        }
-        let Ok(slot_value) = slot.engine.item().try_into_api() else {
-            return false;
-        };
-        if slot_value.try_into_engine(slot.engine.items()).is_err() {
-            return false;
-        }
-        match carried
-            .as_ref()
-            .map(|stack| stack.try_into_engine(slot.engine.items()))
-            .transpose()
-        {
-            Ok(value) => {
-                admitted = Some(value);
-                true
-            }
-            Err(_) => false,
-        }
-    };
-    let accepted = event.clicked.with_staged(&mut run);
-    if accepted {
-        *event.carried.0 = admitted.expect("an accepted cursor");
-        event.cancellation_result = cancellation_result;
-        *canceled = candidate_canceled;
-    }
 }
 
 impl TryIntoApi for crate::stations::AnvilResult {
@@ -1674,6 +1648,11 @@ mod enchantment_boundary_tests {
 fn prepare_stack_boundary_tests() {
     install_stack_hooks();
     install_parts(&[]).unwrap();
+    resolve_stack_boundary_test_items();
+}
+
+#[cfg(test)]
+fn resolve_stack_boundary_test_items() {
     mod_api::__private::resolve_items([
         "minecraft:iron_sword",
         "minecraft:stick",
@@ -1683,6 +1662,39 @@ fn prepare_stack_boundary_tests() {
         "minecraft:potion",
     ])
     .unwrap();
+}
+
+#[cfg(test)]
+mod recipe_listing_tests {
+    use super::*;
+    #[test]
+    fn a_bad_recipe_does_not_hide_the_good_recipe_of_its_type() {
+        let mut registries = mod_api::testing::FakeRegistries::default();
+        registries
+            .resolve_items([mod_api::Identifier::parse("minecraft:stick").unwrap()])
+            .unwrap();
+        let mut good = crate::crafting::RecipeSnapshot::new(
+            "example:good",
+            "example:machine",
+            serde_json::json!({}).into(),
+        );
+        good.results = vec![EngineStack::new("minecraft:stick", 1)];
+        let mut bad = crate::crafting::RecipeSnapshot::new(
+            "example:bad",
+            "example:machine",
+            serde_json::json!({}).into(),
+        );
+        bad.results = vec![EngineStack::new("example:unknown", 1)];
+        let entries = RecipeListing(vec![good, bad].into())
+            .try_into_api()
+            .unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].id, "example:good");
+        assert_eq!(
+            mod_api::__private::item_key_id(entries[0].results[0].item()),
+            Some("minecraft:stick")
+        );
+    }
 }
 
 #[cfg(test)]
@@ -1881,7 +1893,7 @@ impl super::Game<'_> {
         entity: &mut crate::containers::ModBlockEntity,
         container_slots: usize,
         slot: usize,
-        stack: &mut EngineStack,
+        stack: &mut Option<EngineStack>,
         handled: &mut bool,
     ) {
         if !mod_api::__private::has_part_hook(mod_api::HookId::MenuQuickMove) {
@@ -1929,23 +1941,41 @@ impl super::GameLevel<'_> {
         pos: sunrise_core::position::BlockPos,
         state: sunrise_world::registry::BlockStateId,
         entity: &crate::containers::ModBlockEntity,
-        drops: &mut Vec<EngineStack>,
-    ) {
+    ) -> super::spill::RemovalOutputs {
+        let mut outputs = super::spill::RemovalOutputs::default();
         if !mod_api::__private::has_part_hook(mod_api::HookId::PreRemoveSideEffects) {
-            return;
+            return outputs;
         }
         let Ok(api) = entity.try_into_api() else {
-            return;
+            return outputs;
         };
-        let mut added = Vec::new();
-        self.native_pre_remove_side_effects(pos, state, &api, &mut added);
-        drops.extend(added);
+        self.native_pre_remove_side_effects(super::native_hooks::PreRemoveSideEffectsCall {
+            pos,
+            state,
+            entity: &api,
+            keep_contents: &mut outputs.keep_contents,
+            drops: &mut outputs.drops,
+            spawns: &mut outputs.spawns,
+            experience: &mut outputs.experience,
+        });
+        if outputs.drops.len() > 1024
+            || outputs.spawns.len() > 1024
+            || outputs.experience.len() > 1024
+            || outputs
+                .spawns
+                .iter()
+                .any(|(_, at)| at.iter().any(|v| !v.is_finite()))
+            || outputs
+                .experience
+                .iter()
+                .any(|(_, at)| at.iter().any(|v| !v.is_finite()))
+        {
+            log::warn!("pre_remove_side_effects outputs refused: limit or nonfinite position");
+            return Default::default();
+        }
+        outputs
     }
 }
-
-#[cfg(test)]
-#[path = "api_values/stacked_slot_tests.rs"]
-mod stacked_slot_tests;
 
 #[cfg(test)]
 mod block_entity_snapshot_tests {
@@ -2170,7 +2200,7 @@ mod stack_limit_tests {
         let engine = explicit.try_into_engine(&items).unwrap();
         assert!(engine.carries_component(None, "minecraft:damage"));
         assert_eq!(
-            sunrise_items::item_data::encode_components(&engine)
+            sunrise_items::item_data::component_snapshot(&engine)
                 .unwrap()
                 .get("minecraft:damage"),
             Some(&Tag::Int(0))
@@ -2364,8 +2394,8 @@ mod stack_limit_tests {
             );
             let back = api.try_into_engine(&items).unwrap();
             assert_eq!(
-                sunrise_items::item_data::encode_components(&original),
-                sunrise_items::item_data::encode_components(&back),
+                sunrise_items::item_data::component_snapshot(&original),
+                sunrise_items::item_data::component_snapshot(&back),
                 "write {patch:?}"
             );
             assert_eq!(original, back, "round trip {patch:?}");
@@ -2935,13 +2965,27 @@ mod game_rule_values;
 mod item_properties;
 #[path = "api_values/loot_values.rs"]
 pub(crate) mod loot_values;
-#[path = "api_values/particle_values.rs"]
-mod particle_values;
-pub(crate) use loot_values::{dispatch_loot_condition, dispatch_loot_function};
 #[path = "api_values/package_snapshot.rs"]
 mod package_snapshot;
+#[path = "api_values/particle_values.rs"]
+mod particle_values;
 pub(in crate::game) use package_snapshot::install_packages;
 #[path = "api_values/phase_values.rs"]
 mod phase_values;
 #[path = "api_values/small_values.rs"]
 mod small_values;
+
+impl TryIntoApi for (EngineStack, [f64; 3]) {
+    type Api = (ApiStack, [f64; 3]);
+    type Error = StackReadError;
+    fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
+        Ok((self.0.try_into_api()?, self.1))
+    }
+}
+impl TryIntoEngine for (ApiStack, [f64; 3]) {
+    type Engine = (EngineStack, [f64; 3]);
+    type Error = StackWriteError;
+    fn try_into_engine(&self, items: &Items) -> Result<Self::Engine, Self::Error> {
+        Ok((self.0.try_into_engine(items)?, self.1))
+    }
+}

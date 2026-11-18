@@ -7,6 +7,7 @@
 mod navigation;
 
 use super::event_loop::EventLoopCtl;
+use super::owner_link::{ControlRequest, OwnerRequest};
 use super::{Game, Screen};
 use navigation::{Cell, Node, Plan, Progress};
 use serde_json::{Value, json};
@@ -27,7 +28,6 @@ use sunrise_client::{
 use sunrise_core::geometry::Vec3;
 use sunrise_world::registry::BlockStateId;
 use winit::{
-    dpi::PhysicalPosition,
     event::{DeviceId, ElementState, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent},
     keyboard::KeyCode,
 };
@@ -203,6 +203,16 @@ pub(super) fn yaw_pitch(eye: [f64; 3], at: [f64; 3]) -> (f32, f32) {
     )
 }
 
+/// The reply of `command` in a world you host or run alone: `ok` (the request
+/// was delivered), its feedback lines and, from the command's result callbacks
+/// (`recording_command_outcome`), `success` (any fork succeeded) and `result`
+/// (the last fork's). None when no callback ran (a syntax error, an unknown
+/// command, nothing served, a line refused before it ran): `success` is false
+/// and `result` null.
+fn command_reply(chat: Vec<String>, outcome: Option<(bool, i32)>) -> Value {
+    let (success, result) = outcome.map_or((false, None), |(s, r)| (s, Some(r)));
+    json!({ "ok": true, "chat": chat, "success": success, "result": result })
+}
 fn counts(items: impl Iterator<Item = ItemStack>) -> BTreeMap<String, i64> {
     let mut map = BTreeMap::new();
     for s in items {
@@ -400,7 +410,7 @@ impl Game<'_> {
             v["max_damage"] = json!(max);
             v["durability_left"] = json!((i64::from(max) - i64::from(s.damage)).max(0));
         }
-        if let Some(c) = sunrise_client::item_data::encode_components(s) {
+        if let Some(c) = sunrise_client::item_data::component_snapshot(s) {
             v["components"] = json!(sunrise_client::snbt::to_snbt(&c));
         }
         v
@@ -475,8 +485,6 @@ impl Game<'_> {
             Screen::DebugOptions => "debug-options",
             Screen::Mod => "mod",
             Screen::HudEditor => "hud-editor",
-            Screen::Studio => "studio",
-            Screen::EmoteWheel => "emote-wheel",
         }
     }
     pub(super) fn inventory_counts(&self) -> BTreeMap<String, i64> {
@@ -554,7 +562,7 @@ impl Game<'_> {
         let mut state = json!({
             "dialog": self.dialog_status(),
             "screen": self.screen_label(),
-            "menu": (self.title.is_some() || self.split_profiles_open() || self.split_setup_open()).then(|| self.title_value()),
+            "menu": self.title.is_some().then(|| self.title_value()),
             "world": (self.title.is_none()).then(|| match &self.integrated {
                 Some(server) => server.world_name.clone(),
                 None => self.level.name.clone(),
@@ -590,23 +598,8 @@ impl Game<'_> {
         state
     }
 
-    /// Splitscreen's profile page, a joining player's (`split_profiles`).
-    fn split_profiles_open(&self) -> bool {
-        self.screen == Screen::Options
-            && self.ui.options.page() == sunrise_client::options_ui::Page::SplitProfiles
-    }
-    fn split_setup_open(&self) -> bool {
-        self.screen == Screen::Options
-            && self.ui.options.page() == sunrise_client::options_ui::Page::SplitSetup
-    }
     fn title_value(&self) -> Value {
         use sunrise_client::title::Mode;
-        if self.split_profiles_open() {
-            return self.ui.options.split_profiles.state();
-        }
-        if self.split_setup_open() {
-            return json!({ "mode": "splitscreen-setup", "status": self.ui.options.split_setup.status() });
-        }
         let Some(title) = &self.title else {
             return Value::Null;
         };
@@ -836,7 +829,7 @@ impl Game<'_> {
             v["chat_input"] = json!(chat.input.value);
             v["chat_suggestions"] = json!(chat.suggestions_visible());
         }
-        if self.title.is_some() || self.split_profiles_open() || self.split_setup_open() {
+        if self.title.is_some() {
             v["menu"] = self.title_value();
         }
         if self.screen == Screen::Inventory && self.title.is_none() {
@@ -1051,20 +1044,12 @@ impl Game<'_> {
         button: MouseButton,
     ) -> Result<()> {
         let id = self.window.as_ref().ok_or("no window yet")?.id();
-        let scale = self
-            .renderer
-            .as_ref()
-            .map(|r| {
-                sunrise_client::hud::HudBatch::new(
-                    [r.config.width, r.config.height],
-                    self.settings.gui_scale_inputs(),
-                )
-                .scale
-            })
+        let projection = self
+            .renderer_pointer_projection()
             .ok_or("no renderer yet")?;
         let device_id = DeviceId::dummy();
-        for (i, &(x, y)) in points.iter().enumerate() {
-            let position = PhysicalPosition::new(f64::from(x * scale), f64::from(y * scale));
+        for (i, &point) in points.iter().enumerate() {
+            let position = projection.window_pointer(point);
             self.handle_window_event(
                 event_loop,
                 id,
@@ -1593,7 +1578,7 @@ impl Game<'_> {
                         self.remote_drop(all);
                     }
                 } else {
-                    self.drop_held(all);
+                    self.drop_held_item(all);
                 }
                 ok(
                     json!({ "ok": true, "dropped_from": before, "held": self.held().map(|s| self.stack_value(s)) }),
@@ -1651,19 +1636,11 @@ impl Game<'_> {
                 let (x, y) = (a.f64(0, "X")? as f32, a.f64(1, "Y")? as f32);
                 let steps = a.f64(2, "STEPS")? as f32;
                 let id = self.window.as_ref().ok_or("no window yet")?.id();
-                let scale = self
-                    .renderer
-                    .as_ref()
-                    .map(|r| {
-                        sunrise_client::hud::HudBatch::new(
-                            [r.config.width, r.config.height],
-                            self.settings.gui_scale_inputs(),
-                        )
-                        .scale
-                    })
+                let projection = self
+                    .renderer_pointer_projection()
                     .ok_or("no renderer yet")?;
                 let device_id = DeviceId::dummy();
-                let position = PhysicalPosition::new(f64::from(x * scale), f64::from(y * scale));
+                let position = projection.window_pointer((x, y));
                 self.handle_window_event(
                     event_loop,
                     id,
@@ -1696,22 +1673,6 @@ impl Game<'_> {
                 };
                 self.synth_click(event_loop, x, y, button)?;
                 ok(json!({ "ok": true, "screen": self.screen_label() }))
-            }
-            // Splitscreen's profile page, over a joining player's title screen.
-            "type" if self.split_profiles_open() => {
-                let text = line
-                    .trim_start()
-                    .strip_prefix("type")
-                    .unwrap_or("")
-                    .strip_prefix(' ')
-                    .unwrap_or("");
-                let page = &mut self.ui.options.split_profiles;
-                if text == "\\b" {
-                    page.key(winit::keyboard::KeyCode::Backspace, None);
-                } else {
-                    page.type_text(text);
-                }
-                ok(json!({ "ok": true, "menu": self.title_value() }))
             }
             "type" if self.title.is_some() => {
                 // type [--field name|seed] [--replace] TEXT on the title screens.
@@ -1799,17 +1760,22 @@ impl Game<'_> {
                 let command = format!("/{text}");
                 // Single player's console is its server thread's.
                 if let Some(server) = &self.integrated {
-                    let chat = server
-                        .call(move |g| g.owner_console_command(&command))
+                    let (chat, outcome) = server
+                        .ask(|reply| {
+                            OwnerRequest::Control(ControlRequest::ConsoleCommand { command, reply })
+                        })
                         .ok_or(super::integrated::NO_ANSWER)?;
-                    return ok(json!({ "ok": true, "chat": chat }));
+                    return ok(command_reply(chat, outcome));
                 }
+                // A server we joined answers in the chat, not to this reply:
+                // no `success`, no `result`.
                 if self.remote.is_some() {
                     self.send_signed_chat_input(&command);
                     return ok(json!({ "ok": true }));
                 }
-                self.as_console(|g| g.handle_chat_input(&command));
-                ok(json!({ "ok": true, "chat": self.ui.chat.recent_lines(5) }))
+                let ((), outcome) = self
+                    .recording_command_outcome(|g| g.as_console(|g| g.handle_chat_input(&command)));
+                ok(command_reply(self.ui.chat.recent_lines(5), outcome))
             }
             "respawn" if self.remote.is_none() => {
                 if self.screen != Screen::Dead {
@@ -2405,7 +2371,7 @@ mod tests {
                 name: "Moor".into(),
                 ..Default::default()
             }
-            .write(&saves.join("Moor"))
+            .write(&saves.join("Moor"), &Default::default())
             .unwrap();
             let world = list_worlds(&saves).remove(0);
             let mut title = Title::new(saves, scratch.path(), "");
@@ -2482,6 +2448,26 @@ mod tests {
             assert_eq!(face_name(dir), name);
         }
         assert!(face_dir("sideways").is_err());
+    }
+
+    #[test]
+    fn command_reply_carries_the_commands_own_outcome() {
+        let chat = || vec!["Gave 4 Oak Log".to_owned()];
+        // `/give @s oak_log 4` returns the number of targets, 1.
+        assert_eq!(
+            command_reply(chat(), Some((true, 1))),
+            json!({"ok": true, "chat": ["Gave 4 Oak Log"], "success": true, "result": 1})
+        );
+        // `/clear` of nothing: the command ran and failed, with result 0.
+        assert_eq!(
+            command_reply(vec![], Some((false, 0))),
+            json!({"ok": true, "chat": [], "success": false, "result": 0})
+        );
+        // Never reached its callback: delivered, not successful, no result.
+        assert_eq!(
+            command_reply(vec![], None),
+            json!({"ok": true, "chat": [], "success": false, "result": null})
+        );
     }
 
     #[test]

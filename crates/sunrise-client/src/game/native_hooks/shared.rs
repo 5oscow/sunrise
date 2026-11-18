@@ -2,8 +2,20 @@
 mod book_screen;
 #[path = "shared/item_fallthrough.rs"]
 mod item_fallthrough;
+#[cfg(test)]
+#[path = "shared/label_tests.rs"]
+mod label_tests;
 #[path = "shared/loot.rs"]
 mod loot;
+#[cfg(test)]
+#[path = "shared/screen_position_tests.rs"]
+mod screen_position_tests;
+#[cfg(test)]
+#[path = "shared/slot_icon_tests.rs"]
+mod slot_icon_tests;
+#[cfg(test)]
+#[path = "shared/slot_tooltip_tests.rs"]
+mod slot_tooltip_tests;
 
 use super::screen_build::ObservedScreen;
 use crate::game::api_values::{TryIntoApi, TryIntoEngine};
@@ -77,6 +89,12 @@ impl Game<'_> {
     /// again, a game with no mod listening to either, and a server's or a guest's `Game`
     /// are a plain assignment.
     pub(super) fn set_screen(&mut self, screen: Screen) {
+        self.set_screen_with(screen, |_| {});
+    }
+    /// `set_screen`, with `before` run once the hooks let the change go ahead and
+    /// before it applies: what a screen's own `onClose` does only when it really
+    /// closes (a container screen's close packet).
+    pub(super) fn set_screen_with(&mut self, screen: Screen, before: impl FnOnce(&mut Self)) {
         if self.screen == screen {
             return;
         }
@@ -100,6 +118,7 @@ impl Game<'_> {
         if self.screen == screen && owner.is_none() {
             return;
         }
+        before(self);
         if self.screen == Screen::Options {
             self.ui.options.discard_draw();
         }
@@ -500,6 +519,7 @@ fn shake_pose(shake: Shake) -> glam::Mat4 {
 /// (`sunrise:menu_extra`), when it did.
 pub(super) struct OpenNativeScreen {
     pub(super) layout_revision: u64,
+    slot_moves: SlotMoves,
     key: Pos,
     window: i32,
     block: String,
@@ -508,7 +528,87 @@ pub(super) struct OpenNativeScreen {
     extra: Option<sunrise_protocol::menu_extra::Message>,
 }
 
+/// Where a mod moved the open screen's slots after it opened, over the
+/// positions its `Screen` declared. Interior state, as the screen hooks that
+/// move slots hold `&self`. A move is pending until the layout build commits
+/// it, so drawing and hit-testing read one position within a frame and both
+/// take a move together from the next.
+#[derive(Default)]
+pub(super) struct SlotMoves {
+    /// Each moved slot's position, or None for a slot a mod hid.
+    committed: std::cell::RefCell<std::collections::HashMap<usize, Option<[f32; 2]>>>,
+    pending: std::cell::RefCell<std::collections::HashMap<usize, Option<[f32; 2]>>>,
+    /// How many moves changed a position, for the layout build's cache key.
+    count: std::cell::Cell<u32>,
+}
+
+impl SlotMoves {
+    /// Slot `slot`'s position this frame: where the last build committed it
+    /// (None once hidden), else `declared`.
+    fn position(&self, slot: usize, declared: [f32; 2]) -> Option<[f32; 2]> {
+        self.committed
+            .borrow()
+            .get(&slot)
+            .copied()
+            .unwrap_or(Some(declared))
+    }
+    /// Where slot `slot` of a screen that declared `slots` will be from the
+    /// next build: the last move, pending or committed, else its declaration.
+    fn latest(&self, slots: &[Option<mod_api::ScreenSlot>], slot: usize) -> Option<[f32; 2]> {
+        let declared = slots.get(slot)?.as_ref()?.position;
+        let pending = self.pending.borrow().get(&slot).copied();
+        match pending {
+            Some(pending) => pending,
+            None => self.position(slot, declared),
+        }
+    }
+    /// Moves slot `slot` of a screen that declared `slots` to `pos`, or hides
+    /// it with None, from the next build. A slot the screen hid when it opened
+    /// (the server's menu has no such slot) is never shown. Each refusal
+    /// changes nothing; repeating the slot's current place changes nothing
+    /// either, not even the move count.
+    fn set(
+        &self,
+        slots: &[Option<mod_api::ScreenSlot>],
+        slot: usize,
+        pos: Option<[f32; 2]>,
+    ) -> Result<(), mod_api::ScreenSlotRefusal> {
+        use mod_api::ScreenSlotRefusal;
+        match slots.get(slot) {
+            None => return Err(ScreenSlotRefusal::NoSuchSlot),
+            Some(None) if pos.is_some() => return Err(ScreenSlotRefusal::HiddenAtOpen),
+            Some(None) => return Ok(()),
+            Some(Some(_)) => {}
+        }
+        if pos.is_some_and(|[x, y]| !x.is_finite() || !y.is_finite()) {
+            return Err(ScreenSlotRefusal::BadPosition);
+        }
+        if self.latest(slots, slot) != pos {
+            self.pending.borrow_mut().insert(slot, pos);
+            self.count.set(self.count.get().wrapping_add(1));
+        }
+        Ok(())
+    }
+    /// Makes the pending moves the positions drawing and hit-testing read.
+    fn commit(&self) {
+        let mut pending = self.pending.borrow_mut();
+        if !pending.is_empty() {
+            self.committed.borrow_mut().extend(pending.drain());
+        }
+    }
+}
+
 impl OpenNativeScreen {
+    /// How many slot moves changed a position, so a layout built before the
+    /// last one is rebuilt.
+    pub(in crate::game) fn slot_move_count(&self) -> u32 {
+        self.slot_moves.count.get()
+    }
+    /// Makes the slot moves a mod made since the last build the screen's
+    /// positions; the layout build calls it before it reads them.
+    pub(in crate::game) fn commit_slot_moves(&self) {
+        self.slot_moves.commit();
+    }
     /// The block the menu is of: where the server said, else the clicked
     /// block its slots are under (a server without `sunrise:menu_extra`).
     fn pos(&self) -> Option<[i32; 3]> {
@@ -765,10 +865,28 @@ impl Game<'_> {
     }
 
     pub(super) fn settle_title_toasts(&mut self) {
-        let pending = self.title.as_mut().and_then(|title| {
-            title.poll_backup();
-            title.take_pending_toast()
-        });
+        let pending = self
+            .title
+            .as_mut()
+            .and_then(|title| {
+                title.poll_backup();
+                title.take_pending_toast()
+            })
+            .or_else(|| {
+                // The launcher's "Playing offline" can sit behind this window: say it here too, once
+                // the toast slot is free.
+                let reason = self
+                    .options
+                    .offline_reason
+                    .take_if(|_| self.title.as_ref().is_some_and(|title| !title.has_toast()))?;
+                Some(
+                    sunrise_client::toasts::SystemToast::new(
+                        sunrise_client::text::Text::tr("sunrise.title.playing_offline", &[]),
+                        Some(sunrise_client::text::Text::literal(reason)),
+                    )
+                    .with_display_time(sunrise_client::toasts::SystemToast::LONG_DISPLAY_TIME),
+                )
+            });
         if let Some(toast) = pending.and_then(|toast| self.add_system_toast(toast))
             && let Some(title) = self.title.as_mut()
         {
@@ -907,8 +1025,8 @@ impl Game<'_> {
         // left down, right down, left up sends no drag while right is still held.
         self.drag_button = pressed.then_some(button);
     }
-    pub(super) fn screen_mouse_dragged(&self, previous: (f32, f32)) -> ScreenMousePre {
-        if self.pad_synthetic_input() || self.cursor == previous {
+    pub(super) fn screen_mouse_dragged(&self, delta: [f32; 2]) -> ScreenMousePre {
+        if self.pad_synthetic_input() || delta == [0.0; 2] {
             return ScreenMousePre::NotFired;
         }
         let Some(button) = self
@@ -921,7 +1039,6 @@ impl Game<'_> {
             return ScreenMousePre::NotFired;
         };
         let button = super::glfw_button(button);
-        let delta = [self.cursor.0 - previous.0, self.cursor.1 - previous.1];
         let mut canceled = false;
         self.native_screen_mouse_dragged_pre(
             &screen,
@@ -1332,6 +1449,12 @@ pub(super) fn incoming_damage(
     let Ok(weapon) = attack.weapon_of(source.direct).try_into_api() else {
         return false;
     };
+    let causing_weapon = (source.causing != 0 && source.causing == attack.attacker)
+        .then_some(attack.held[0].as_ref())
+        .flatten();
+    let Ok(causing_weapon) = causing_weapon.try_into_api() else {
+        return false;
+    };
     let mut snapshot = (*container).try_into_api().expect("scalar damage snapshot");
     HitLevel(level).native_living_incoming_damage(mod_api::__private::LivingIncomingDamageCall {
         entity,
@@ -1339,6 +1462,7 @@ pub(super) fn incoming_damage(
         source: &source,
         victim: &victim,
         weapon: weapon.as_ref(),
+        causing_weapon: causing_weapon.as_ref(),
         container: &mut snapshot,
         canceled: &mut canceled,
     });
@@ -1433,7 +1557,7 @@ impl Game<'_> {
             .as_ref()
             .is_some_and(|p| p.entity_id == attacker)
         {
-            self.owner_damage_uuid()
+            self.player_uuid_of(self.lan_acting)
         } else {
             self.lan
                 .as_ref()
@@ -1455,11 +1579,7 @@ impl Game<'_> {
     /// the attack the enclosing [`Self::with_attack`] lends.
     pub(super) fn attack_of_who(&self, attacker: Option<Who>) -> Attack {
         match attacker {
-            Some(Who::Player) => {
-                let mut attack = self.attack_of(self.player.as_ref().map_or(0, |p| p.entity_id));
-                attack.player_uuid = self.owner_damage_uuid();
-                attack
-            }
+            Some(Who::Player) => self.attack_of(self.player.as_ref().map_or(0, |p| p.entity_id)),
             Some(Who::Mob(id)) => self.attack_of(id as i32),
             None => self.current_attack(),
         }
@@ -1487,6 +1607,10 @@ pub(super) fn knockback(level: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut
             causing => causing,
         },
     };
+    let (kill_credit, credit_main) = level.knockback_credit(&pushed);
+    let Ok(credit_main) = credit_main.map(TryIntoApi::try_into_api).transpose() else {
+        return false;
+    };
     let (entity, kind, source) = hurt_server_args(pushed, level.attack());
     let mut canceled = false;
     let [main, off] = &attack.held;
@@ -1501,6 +1625,8 @@ pub(super) fn knockback(level: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut
         attacker,
         attacker_main: main.as_ref(),
         attacker_off: off.as_ref(),
+        kill_credit,
+        kill_credit_main: credit_main.as_ref(),
         entry,
         strength: &mut knock.strength,
         x: &mut knock.x,
@@ -1579,7 +1705,7 @@ pub(super) const BLOCK_CONTACT_HOOKS: sunrise_client::block_contact::Hooks =
                 }
             }
         },
-        fall_on: |dimension, level, c, distance, damage, writes| {
+        fall_on: |dimension, level, c, distance, damage_multiplier, writes| {
             HitLevel(level.reborrow()).native_fall_on(
                 crate::game::native_hooks::fire::FallOnCall {
                     dimension,
@@ -1588,7 +1714,7 @@ pub(super) const BLOCK_CONTACT_HOOKS: sunrise_client::block_contact::Hooks =
                     state: c.state,
                     pos: c.position,
                     distance,
-                    damage,
+                    damage_multiplier,
                     writes,
                 },
             );
@@ -1694,34 +1820,6 @@ pub(super) fn sound_id(id: &str) -> bool {
         && !path.is_empty()
         && namespace.chars().all(|c| allowed(c, false))
         && path.chars().all(|c| allowed(c, true))
-}
-
-/// Sets the viewer counts `known` holds for `dim` to `now` and returns the
-/// changes as `(pos, previous, viewers)`, in position order. A container that
-/// is no longer counted goes to 0 and leaves `known`.
-pub(super) fn viewer_changes(
-    known: &mut HashMap<(&'static str, (i32, i32, i32)), u32>,
-    dim: &'static str,
-    mut now: HashMap<(i32, i32, i32), u32>,
-) -> Vec<((i32, i32, i32), u32, u32)> {
-    let mut changes = Vec::new();
-    known.retain(|&(d, pos), previous| {
-        if d != dim {
-            return true;
-        }
-        let viewers = now.remove(&pos).unwrap_or(0);
-        if viewers != *previous {
-            changes.push((pos, *previous, viewers));
-            *previous = viewers;
-        }
-        viewers > 0
-    });
-    for (pos, viewers) in now {
-        known.insert((dim, pos), viewers);
-        changes.push((pos, 0, viewers));
-    }
-    changes.sort_unstable();
-    changes
 }
 
 fn dimension_id(dimension: LevelDimension) -> &'static str {
@@ -2421,6 +2519,17 @@ impl Game<'_> {
         if !mod_api::__private::listened(mod_api::HookId::EntityPlace) {
             return false;
         }
+        self.placement_canceled(self.entity(placer), pos, state, placed_against, companion)
+    }
+
+    fn placement_canceled(
+        &mut self,
+        placer: Option<EntityRef>,
+        pos: BlockPos,
+        state: BlockStateId,
+        placed_against: BlockStateId,
+        companion: Option<(BlockPos, BlockStateId)>,
+    ) -> bool {
         let placement = match companion {
             None => Placement::Single,
             Some((at, extra)) => {
@@ -2433,34 +2542,54 @@ impl Game<'_> {
                 ]))
             }
         };
-        let placer = self.entity(placer);
         let mut canceled = false;
         self.native_entity_place(placer, pos, state, placed_against, placement, &mut canceled);
         canceled
     }
-    /// Whether a mod canceled the block the player's `ctx` would place
-    /// (`entity_place`): nothing is previewed unless a mod listens.
-    pub(super) fn player_place_canceled(&mut self, ctx: &PlaceContext) -> bool {
+    /// Let `entity_place` veto exactly the decision the world will apply. If the
+    /// callback changed the inputs, do not choose another target behind its back.
+    pub(super) fn place_item_block(
+        &mut self,
+        ctx: &PlaceContext,
+        by_player: bool,
+    ) -> Option<(PlacementContext, BlockStateId)> {
         if !mod_api::__private::listened(mod_api::HookId::EntityPlace) {
-            return false;
+            return self
+                .with_level(|b, level, ticks| b.place_block_with_context(level, ticks, ctx));
         }
-        let Some(preview) =
-            self.with_level(|b, level, ticks| b.placement_preview(level, ticks, ctx))
-        else {
-            return false;
+        let (decision, preview) =
+            self.with_level(|b, level, ticks| b.decide_placement(level, ticks, ctx))?;
+        let against_pos = decision.placed_against_pos();
+        let block = |game: &Game<'_>, pos: BlockPos| game.world.block(pos.x, pos.y, pos.z);
+        let against = block(self, against_pos);
+        let target_before = block(self, preview.pos);
+        let companion_before = preview.companion.map(|(pos, _)| (pos, block(self, pos)));
+        let hand = if by_player {
+            self.held().cloned()
+        } else {
+            None
         };
-        let against_pos = ctx.placed_against_pos(preview.pos);
-        let against = self
-            .world
-            .block(against_pos.x, against_pos.y, against_pos.z);
-        let (_, entity) = self.native_clicker();
-        self.place_canceled(
-            entity.cast_unsigned(),
+        let placer = by_player
+            .then(|| self.native_clicker().1.cast_unsigned())
+            .and_then(|entity| self.entity(entity));
+        // The existing block revision and journal epoch cover rule inputs such as
+        // supporting blocks and block-entity shapes without tracing ordinary reads.
+        let level = (self.dim, self.world.revision, self.transactions.writes());
+        if self.placement_canceled(
+            placer,
             preview.pos,
             preview.state,
             against,
             preview.companion,
-        )
+        ) || level != (self.dim, self.world.revision, self.transactions.writes())
+            || block(self, preview.pos) != target_before
+            || block(self, against_pos) != against
+            || companion_before.is_some_and(|(pos, state)| block(self, pos) != state)
+            || (by_player && self.held() != hand.as_ref())
+        {
+            return None;
+        }
+        self.with_level(|b, level, ticks| b.apply_placement(level, ticks, decision))
     }
     /// `MobEvent::PlaceBlock`: a mob sets `state` at `pos` unless a mod
     /// cancels `entity_place`. Enderman attempts use `enderman_place_block`.
@@ -2608,17 +2737,6 @@ impl Game<'_> {
         if mod_api::__private::listened(mod_api::HookId::GameRuleChanged) {
             self.native_game_rule_changed(name, value, actor);
         }
-    }
-    /// `MobSplitEvent` for the dying cube mob `m`, which made `count`
-    /// children: how many to spawn.
-    pub(super) fn mob_split_count(&mut self, m: &sunrise_client::mobs::Mob, count: u32) -> u32 {
-        if !mod_api::__private::listened(mod_api::HookId::MobSplit) {
-            return count;
-        }
-        let (size, kind) = (m.extra.size, mob_kind(m));
-        let (mut count, mut cancel) = (count, false);
-        self.native_mob_split(m.id, &kind, size, size / 2, &mut count, &mut cancel);
-        if cancel { 0 } else { count.min(64) }
     }
     /// `AnimalTameEvent` for the mob at `index`, whose taming roll by the
     /// player `tamer` (`tamer_entity_id`) succeeded: true when a mod cancels
@@ -2829,6 +2947,7 @@ impl Game<'_> {
                     for list in c.faces.iter_mut().chain([&mut c.inputs, &mut c.outputs]) {
                         list.retain(|&s| s < n);
                     }
+                    c.insert_rules.truncate(n);
                     c.menu = c
                         .menu
                         .filter(|m| mod_menu(m).is_some_and(|(_, size)| size == n));
@@ -2930,44 +3049,6 @@ impl Game<'_> {
         }
         true
     }
-    /// `ContainerOpenersCounter` for the mod containers of the level in place:
-    /// everyone with one open, recounted every tick, so a change is heard
-    /// whichever way an opener left (`native_mod_container_viewers`). The
-    /// openers are the guests (but not a spectator, `BarrelBlockEntity.startOpen`),
-    /// the host's own player, and the copper golems that opened it
-    /// (`chest_openers`).
-    pub(super) fn tick_mod_container_viewers(&mut self) {
-        let mut now: HashMap<(i32, i32, i32), u32> = HashMap::new();
-        let mut open = |game: &Self, pos: (i32, i32, i32), n: u32| {
-            if n > 0 && game.mod_menu_at(pos).is_some() {
-                *now.entry(pos).or_default() += n;
-            }
-        };
-        if let Some(host) = &self.lan {
-            for g in host
-                .hub
-                .guests
-                .iter()
-                .filter(|g| host.hub.here(g) && !g.spectator())
-            {
-                if let Some(m) = &g.menu
-                    && let Slots::Block(pos) = m.slots
-                {
-                    open(self, pos, 1);
-                }
-            }
-        }
-        if let Some(pos) = self.container.filter(|_| !self.spectator()) {
-            open(self, pos, 1);
-        }
-        for (&pos, &(golems, _)) in &self.world.chest_openers {
-            open(self, pos, golems.max(0) as u32);
-        }
-        let dim = self.dim.id();
-        for (pos, previous, viewers) in viewer_changes(&mut self.mod_container_viewers, dim, now) {
-            self.native_mod_container_viewers(dim, [pos.0, pos.1, pos.2], viewers, previous);
-        }
-    }
     /// The menu type of the mod container at `key`, if it has one.
     pub(super) fn mod_menu_at(&self, key: Pos) -> Option<&'static str> {
         let state = self.world.block(key.0, key.1, key.2).0;
@@ -2984,23 +3065,56 @@ impl Game<'_> {
             .as_mut()
             .is_some_and(|s| s.set_data(window, id, value))
     }
-    /// Where the open mod screen puts container slot `slot`.
+    /// Where the open mod screen puts container slot `slot` this frame: where
+    /// a mod last moved it, else where the screen declared it; None once a mod
+    /// hid it.
     pub(super) fn native_screen_slot(&self, slot: usize) -> Option<(f32, f32)> {
         let s = self.shown_native_screen()?;
-        s.screen
-            .slots
-            .get(slot)
-            .copied()
-            .flatten()
-            .map(|p| (p[0], p[1]))
+        let declared = s.screen.slots.get(slot)?.as_ref()?.position;
+        let [x, y] = s.slot_moves.position(slot, declared)?;
+        Some((x, y))
     }
-    /// The container slots the open mod screen shows (300.. ids).
+    pub(in crate::game) fn native_screen_slot_icon(&self, slot: usize) -> Option<&str> {
+        self.shown_native_screen()?
+            .screen
+            .slots
+            .get(slot)?
+            .as_ref()?
+            .no_item_icon
+            .as_deref()
+    }
+    /// Where the open mod screen of `block` puts container slot `slot` from
+    /// the next frame: the mod's last move, else the screen's declaration;
+    /// None for a hidden slot, another block's screen or none.
+    pub(in crate::game) fn screen_slot(&self, block: &str, slot: usize) -> Option<[f32; 2]> {
+        let s = self.shown_native_screen().filter(|s| s.block == block)?;
+        s.slot_moves.latest(&s.screen.slots, slot)
+    }
+    /// Moves container slot `slot` of the open mod screen of `block` to `pos`
+    /// (relative to the screen's origin), or hides it with None, from the
+    /// next frame (`SlotMoves::set`).
+    pub(in crate::game) fn set_screen_slot(
+        &self,
+        block: &str,
+        slot: usize,
+        pos: Option<[f32; 2]>,
+    ) -> Result<(), mod_api::ScreenSlotRefusal> {
+        let s = self
+            .shown_native_screen()
+            .filter(|s| s.block == block)
+            .ok_or(mod_api::ScreenSlotRefusal::NoScreen)?;
+        s.slot_moves.set(&s.screen.slots, slot, pos)
+    }
+    /// The container slots the open mod screen shows this frame (300.. ids).
     pub(super) fn native_screen_slots(&self) -> Option<Vec<usize>> {
         let s = self.shown_native_screen()?;
         let shown = s.screen.slots.iter().enumerate();
         Some(
             shown
-                .filter(|(_, p)| p.is_some())
+                .filter(|(i, p)| {
+                    p.as_ref()
+                        .is_some_and(|p| s.slot_moves.position(*i, p.position).is_some())
+                })
                 .map(|(i, _)| 300 + i)
                 .collect(),
         )
@@ -3009,7 +3123,15 @@ impl Game<'_> {
     /// it (`Game::slot_count` asks every frame).
     pub(super) fn native_screen_slot_count(&self) -> Option<usize> {
         let s = self.shown_native_screen()?;
-        Some(s.screen.slots.iter().filter(|p| p.is_some()).count())
+        let shown = s.screen.slots.iter().enumerate();
+        Some(
+            shown
+                .filter(|(i, p)| {
+                    p.as_ref()
+                        .is_some_and(|p| s.slot_moves.position(*i, p.position).is_some())
+                })
+                .count(),
+        )
     }
     /// The first row of the player's inventory on the open mod screen.
     pub(super) fn native_screen_inventory_y(&self) -> Option<f32> {
@@ -3065,18 +3187,34 @@ impl Game<'_> {
                 );
             }
         }
-        self.native_screen_draw(&s.block, &s.data, batch, [ox, oy]);
+        if mod_api::__private::has_scoped_hook(mod_api::HookId::ScreenDraw) {
+            let gui_size = [batch.width as i32, batch.height as i32];
+            let mut draw = crate::game::host::draw::GameDrawContext::new(self, batch);
+            self.native_screen_draw(mod_api::__private::ScreenDrawCall {
+                block: &s.block,
+                pos: s.pos(),
+                data: &s.data,
+                origin: [ox, oy],
+                pointer: [self.cursor.0 as i32, self.cursor.1 as i32],
+                gui_size,
+                draw: &mut draw,
+            });
+        }
         self.draw_screen_phase(batch, sunrise_client::screen_draw::RenderPhase::Background);
         if s.screen.own_labels {
             return true;
         }
         let grey = rgba(64, 64, 64, 255);
         if let Some(title) = self.remote_menu_title() {
-            batch.text_styled(atlas, &title, ox + 8.0, oy + 6.0, grey, false);
+            let [x, y] = s.screen.title_label.unwrap_or([8.0, 6.0]);
+            batch.text_styled(atlas, &title, ox + x, oy + y, grey, false);
         }
         let inventory = self.translate_with_fallback("container.inventory", "Inventory");
-        let label_y = oy + s.screen.inventory_y - 11.0;
-        batch.text(atlas, &inventory, ox + 8.0, label_y, grey, false);
+        let [x, y] = s
+            .screen
+            .inventory_label
+            .unwrap_or([8.0, s.screen.height - 94.0]);
+        batch.text(atlas, &inventory, ox + x, oy + y, grey, false);
         true
     }
     /// Puts back a mod block entity taken out for a call, unless the call
@@ -3165,16 +3303,49 @@ impl Game<'_> {
         if slot.is_some_and(|i| self.slot_view(i).is_some()) {
             return;
         }
-        let Some((block, data, at)) = self.native_screen_at() else {
+        let mut lines = Vec::new();
+        self.native_screen_tooltip_lines(batch, slot, &mut lines);
+        self.draw_tooltip_lines(batch, &lines, self.cursor.0, self.cursor.1);
+    }
+    /// The screen-specific line override, shared by filled-slot and empty-space tooltips.
+    /// Item images and component gathering remain on the stack's normal drawing path.
+    pub(super) fn native_screen_tooltip_lines(
+        &self,
+        batch: &HudBatch,
+        slot: Option<usize>,
+        lines: &mut Vec<(sunrise_client::text::Text, u32)>,
+    ) {
+        // Scoped hooks subscribe through Parts, not the global Hooks subscriber table.
+        if !mod_api::__private::has_scoped_hook(mod_api::HookId::ScreenTooltip) {
+            return;
+        }
+        let Some(screen) = self.shown_native_screen() else {
             return;
         };
-        let mut lines = Vec::new();
-        self.native_screen_tooltip(&block, &data, at, &mut lines);
-        let lines: Vec<(sunrise_client::text::Text, u32)> = lines
-            .into_iter()
-            .map(|l| (sunrise_client::text::Text::literal(l), u32::MAX))
-            .collect();
-        self.draw_tooltip_lines(batch, &lines, self.cursor.0, self.cursor.1);
+        let menu_slot = slot.and_then(|slot| {
+            Self::menu_slot_index(self.native_screen_menu()?, slot).map(|slot| slot as u32)
+        });
+        let (ox, oy) = self.inventory_origin(batch);
+        let at = [self.cursor.0 - ox, self.cursor.1 - oy];
+        use crate::game::api_values::{TryIntoApi, TryIntoEngine};
+        // Keep the original tooltip if either conversion fails. A hovered
+        // item's text can fail on every frame, so do not log the refusal here.
+        let Ok(mut snapshot) = lines.try_into_api() else {
+            return;
+        };
+        self.native_screen_tooltip(mod_api::__private::ScreenTooltipCall {
+            block: &screen.block,
+            data: &screen.data,
+            at,
+            slot: menu_slot,
+            origin: [ox, oy],
+            pointer: [self.cursor.0 as i32, self.cursor.1 as i32],
+            gui_size: [batch.width as i32, batch.height as i32],
+            lines: &mut snapshot,
+        });
+        if let Ok(replacement) = snapshot.try_into_engine(&()) {
+            *lines = replacement;
+        }
     }
     /// Options > Mods' rows for loaded code mods, after the content-only rows.
     pub(super) fn list_native_mods(&mut self) {
@@ -3395,26 +3566,6 @@ impl Game<'_> {
         self.native_shader_params(partial, &mut params);
         finite_params(params)
     }
-    /// The minimap a native mod shows.
-    pub(super) fn native_minimap_now(&self) -> Option<mod_api::Minimap> {
-        let mut minimap = None;
-        self.native_minimap(&mut minimap);
-        minimap.map(|m| mod_api::Minimap {
-            size: finite(m.size, 16.0, 256.0),
-            blocks_per_pixel: finite(m.blocks_per_pixel, 0.5, 4.0),
-            ..m
-        })
-    }
-}
-
-/// Whether `rgba` is a whole `width` x `height` image that fits a
-/// `slot_width` x `slot_height` atlas slot (a native mod's `mod_image`).
-fn mod_image_fits(width: u32, height: u32, rgba: usize, slot_width: u32, slot_height: u32) -> bool {
-    width > 0
-        && height > 0
-        && width <= slot_width
-        && height <= slot_height
-        && rgba == width as usize * height as usize * 4
 }
 
 /// Whether F3's debug screen, open when `debug`, covers `corner`
@@ -3858,7 +4009,15 @@ mod tests {
             let error = root.unwrap_err().to_string();
             assert!(error.contains("be_test:shared"), "{error}");
             assert!(error.contains("be_test:missing"), "{error}");
-            assert!(!std::path::Path::new(".sunrise-cache").exists());
+            // A refused declaration builds no content root. The roots folder's own `.lock`
+            // is made by every start and never deleted, so it is not a root.
+            let built: Vec<_> = std::fs::read_dir(".sunrise-cache/mod-content")
+                .into_iter()
+                .flatten()
+                .map(|entry| entry.unwrap().file_name())
+                .filter(|name| name != ".lock")
+                .collect();
+            assert!(built.is_empty(), "{built:?}");
             return;
         }
         if let Some(id) = unknown {
@@ -3931,6 +4090,7 @@ mod tests {
                     pos,
                     game.world.block_entities.get(&pos).unwrap(),
                     block,
+                    &Default::default(),
                 );
                 assert_eq!(saved.get("energy"), Some(&Tag::Long(6301)));
                 let (saved_pos, restored) =
@@ -3944,6 +4104,7 @@ mod tests {
                     pos,
                     game.world.block_entities.get(&pos).unwrap(),
                     block,
+                    &Default::default(),
                 );
                 assert_eq!(saved.get("energy"), Some(&Tag::Long(6302)));
             }
@@ -3953,7 +4114,7 @@ mod tests {
             use crate::game::api_values::TryIntoApi;
             let written = game.with_level(|_, level, ticks| {
                 LevelWriteHost::set_block(
-                    &mut super::super::mod_api_host::LevelTicks { level, ticks },
+                    &mut super::super::mod_api_host::LevelTicks::new(level, ticks),
                     [5, 64, 0],
                     first.try_into_api().unwrap(),
                     BlockUpdateFlags::NONE,
@@ -4066,7 +4227,8 @@ mod tests {
             assert_eq!(machine.data, [7]);
             assert_ne!(machine.revision(), made);
             assert!(game.world.modified.contains(&(0, 0)));
-            let saved = block_entity_encode::encode(pos, entity, "minecraft:stone");
+            let saved =
+                block_entity_encode::encode(pos, entity, "minecraft:stone", &Default::default());
             let (saved_pos, loaded) = decode_block_entity(&saved).unwrap();
             assert_eq!(saved_pos, pos);
             assert_eq!(loaded.id(), "test:machine");
@@ -4671,6 +4833,7 @@ mod tests {
     #[test]
     fn mod_screen_data_is_its_windows_only() {
         let mut s = super::OpenNativeScreen {
+            slot_moves: Default::default(),
             layout_revision: 0,
             key: (0, 0, 0),
             window: 4,
@@ -4682,6 +4845,67 @@ mod tests {
         assert!(s.set_data(4, 1, 7));
         assert!(!s.set_data(3, 1, 99));
         assert_eq!(s.data, [0, 7]);
+    }
+
+    /// A slot move changes only a shown slot, to a finite position, takes
+    /// effect at the commit, and counts only what changed a position (a
+    /// repeat of the effective position, declared or moved, keeps the layout).
+    #[test]
+    fn slot_moves_refuse_what_the_screen_does_not_show() {
+        let declared = [
+            Some(mod_api::ScreenSlot {
+                position: [8.0, 18.0],
+                ..Default::default()
+            }),
+            None,
+            Some(mod_api::ScreenSlot {
+                position: [26.0, 18.0],
+                ..Default::default()
+            }),
+        ];
+        use mod_api::ScreenSlotRefusal::*;
+        let moves = super::SlotMoves::default();
+        // The current place again changes nothing, not even the count.
+        assert_eq!(moves.set(&declared, 0, Some([8.0, 18.0])), Ok(()));
+        assert_eq!(moves.count.get(), 0);
+        assert_eq!(moves.set(&declared, 2, Some([100.5, -4.0])), Ok(()));
+        assert_eq!(moves.count.get(), 1);
+        // Pending until the build commits it; the read-back sees it at once.
+        assert_eq!(moves.position(2, [26.0, 18.0]), Some([26.0, 18.0]));
+        assert_eq!(moves.latest(&declared, 2), Some([100.5, -4.0]));
+        moves.commit();
+        assert_eq!(moves.position(2, [26.0, 18.0]), Some([100.5, -4.0]));
+        assert_eq!(moves.position(0, [8.0, 18.0]), Some([8.0, 18.0]));
+        // Refusals change nothing.
+        for (slot, pos, refusal) in [
+            (1, Some([0.0, 0.0]), HiddenAtOpen),
+            (3, Some([0.0, 0.0]), NoSuchSlot),
+            (usize::MAX, None, NoSuchSlot),
+            (0, Some([f32::NAN, 0.0]), BadPosition),
+            (0, Some([0.0, f32::INFINITY]), BadPosition),
+        ] {
+            assert_eq!(
+                moves.set(&declared, slot, pos),
+                Err(refusal),
+                "{slot} {pos:?}"
+            );
+        }
+        assert_eq!(moves.count.get(), 1);
+        assert_eq!(moves.position(0, [8.0, 18.0]), Some([8.0, 18.0]));
+        // Hiding a slot hidden at open is already so.
+        assert_eq!(moves.set(&declared, 1, None), Ok(()));
+        assert_eq!(moves.count.get(), 1);
+        // Hidden, then shown again where the mod puts it.
+        assert_eq!(moves.set(&declared, 2, None), Ok(()));
+        assert_eq!(moves.count.get(), 2);
+        assert_eq!(moves.set(&declared, 2, None), Ok(()));
+        assert_eq!(moves.count.get(), 2);
+        moves.commit();
+        assert_eq!(moves.position(2, [26.0, 18.0]), None);
+        assert_eq!(moves.set(&declared, 2, Some([26.0, 18.0])), Ok(()));
+        moves.commit();
+        assert_eq!(moves.position(2, [26.0, 18.0]), Some([26.0, 18.0]));
+        assert_eq!(moves.count.get(), 3);
     }
 
     #[test]
@@ -4696,27 +4920,6 @@ mod tests {
             assert!(!line.contains("cfg"), "a cfg in the breathing hook: {line}");
             for mac in ["!(", "![", "! {", "!{"] {
                 assert!(!line.contains(mac), "a macro in the breathing hook: {line}");
-            }
-        }
-    }
-
-    #[test]
-    fn native_loot_kinds_stay_hookable() {
-        let source = include_str!("../../../../sunrise-world/src/loot.rs").replace("\r\n", "\n");
-        for hook in [
-            "pub fn native_invoke_loot_function(",
-            "pub fn native_invoke_loot_condition(",
-        ] {
-            let at = source
-                .find(hook)
-                .unwrap_or_else(|| panic!("{hook} not found"));
-            let start = source[..at].rfind("///").unwrap();
-            let body = &source[start..start + source[start..].find("\n}\n").unwrap()];
-            for line in body.lines() {
-                assert!(!line.contains("cfg"), "a cfg in a loot hook point: {line}");
-                for mac in ["!(", "![", "! {", "!{"] {
-                    assert!(!line.contains(mac), "a macro in a loot hook point: {line}");
-                }
             }
         }
     }
@@ -4905,18 +5108,6 @@ mod tests {
         assert!(!debug_takes(Corner::BottomRight, true, [true, false]));
         assert!(debug_takes(Corner::BottomRight, true, [false, true]));
     }
-
-    /// An image is taken whole, and only when it fits its slot.
-    #[test]
-    fn a_mod_image_is_taken_whole_and_only_when_it_fits() {
-        use super::mod_image_fits;
-        assert!(mod_image_fits(4, 2, 32, 1024, 1024));
-        assert!(mod_image_fits(1024, 1024, 1024 * 1024 * 4, 1024, 1024));
-        assert!(!mod_image_fits(0, 2, 0, 1024, 1024));
-        assert!(!mod_image_fits(4, 2, 31, 1024, 1024));
-        assert!(!mod_image_fits(4, 2, 33, 1024, 1024));
-        assert!(!mod_image_fits(2048, 1, 2048 * 4, 1024, 1024));
-    }
 }
 
 #[cfg(test)]
@@ -4938,7 +5129,7 @@ mod item_fall_on_tests {
                 event.kind.to_owned(),
                 event.pos,
                 event.distance,
-                event.damage,
+                event.damage_multiplier,
             ));
             event.request(mod_api::LandingWrite::DestroyBlock { drop: false });
         }
@@ -4961,6 +5152,7 @@ mod item_fall_on_tests {
         sync: false,
     };
 
+    use mod_api::RandomSource as _;
     use sunrise_core::random::RandomSource as _;
 
     struct LoanPart(std::sync::Arc<()>);
@@ -4981,6 +5173,8 @@ mod item_fall_on_tests {
     #[mod_api::__subscriptions]
     impl Hooks for LoanMod {
         fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
+            r.register_attachment_type("loan_test:progress", false)
+                .unwrap();
             let key = r.block_key("minecraft:stone");
             r.block_part(key, LoanPart(self.0.clone()));
         }
@@ -5025,9 +5219,13 @@ mod item_fall_on_tests {
                         .unwrap();
                     game.world.attachment_syncs.insert(mod_api::Holder::Level);
                     let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        sunrise_client::block_contact::in_level(Some(game.dim.id()), || {
-                            game.item_fall_on(42, pos, 5.0);
-                        });
+                        sunrise_client::block_contact::in_level(
+                            sunrise_client::parallel::TickThread::mint(),
+                            Some(game.dim.id()),
+                            || {
+                                game.item_fall_on(42, pos, 5.0);
+                            },
+                        );
                     }))
                     .expect_err("actual Part must panic");
                     assert!(std::sync::Arc::ptr_eq(
@@ -5099,9 +5297,13 @@ mod item_fall_on_tests {
                 let mut destructions = 0;
                 for _ in 0..80 {
                     game.ticked_entities_through = u32::MAX;
-                    sunrise_client::block_contact::in_level(Some(game.dim.id()), || {
-                        game.tick_items();
-                    });
+                    sunrise_client::block_contact::in_level(
+                        sunrise_client::parallel::TickThread::mint(),
+                        Some(game.dim.id()),
+                        || {
+                            game.tick_items();
+                        },
+                    );
                     if game.world.block(1, 64, 1) == air {
                         destructions += 1;
                         game.world.set(1, 64, 1, stone).unwrap();

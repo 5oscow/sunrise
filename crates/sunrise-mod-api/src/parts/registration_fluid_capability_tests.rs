@@ -96,6 +96,24 @@ mod tests {
         }
     }
 
+    /// #1273: a non-string entry in a fluid list fails the ingredient instead of
+    /// being dropped.
+    #[test]
+    fn a_non_string_list_entry_fails_the_fluid_ingredient() {
+        let reader = load();
+        let context = OwningLoad::new(DataLoadOrigin::ServerDataLoad, &reader);
+        for json in [
+            serde_json::json!(["minecraft:water", 5]),
+            serde_json::json!(["minecraft:water", {}]),
+            serde_json::json!(["minecraft:water", null]),
+        ] {
+            assert!(matches!(
+                FluidIngredient::from_json(&json, &context),
+                Err(FluidIngredientError::Invalid)
+            ));
+        }
+    }
+
     /// A single fluid matches itself and nothing else.
     #[test]
     fn a_single_fluid_matches_itself() {

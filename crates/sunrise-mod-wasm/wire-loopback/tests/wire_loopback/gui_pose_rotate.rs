@@ -8,7 +8,7 @@ struct Draw {
     painted: Vec<Vec<GuiDraw>>,
 }
 impl DrawContext for Draw {
-    fn gui_paint(&mut self, draws: &[GuiDraw]) -> Result<(), mod_api::text::TextFormError> {
+    fn gui_paint(&mut self, draws: &[GuiDraw]) -> Result<(), mod_api::GuiPaintError> {
         self.painted.push(draws.to_vec());
         Ok(())
     }

@@ -215,7 +215,8 @@ impl Game<'_> {
                     }
                     let nbt = self.world.block_entities.get(&at).map(|entity| {
                         let name = &*self.res.facts().get(state).name;
-                        let mut tag = save::block_entity_encode::encode(at, entity, name);
+                        let mut tag =
+                            save::block_entity_encode::encode(at, entity, name, self.res.items());
                         Self::write_pending_loot(&self.world, at, &mut tag);
                         let Tag::Compound(mut c) = tag else {
                             return Compound::new();
@@ -394,8 +395,23 @@ impl Game<'_> {
             return false;
         };
         let template = StructureTemplate::from_nbt(&entry.tag, registry, transforms);
+        self.place_template_object(&template, at, settings, mirror, rotation)
+    }
+
+    /// [`place_template_entry`](Self::place_template_entry) for a template
+    /// already read, whichever way it was read: the level's own placement, the
+    /// entities it brings spawned, and the block entities it loaded sent to the
+    /// clients. Returns whether it placed.
+    pub(super) fn place_template_object(
+        &mut self,
+        template: &StructureTemplate,
+        at: BlockPos,
+        settings: TemplateSettings,
+        mirror: sunrise_world::worldgen::structure::Mirror,
+        rotation: sunrise_world::worldgen::structure::Rotation,
+    ) -> bool {
         let placed = self.with_level(|behaviours, level, ticks| {
-            behaviours.place_template(level, ticks, &template, at, settings)
+            behaviours.place_template(level, ticks, template, at, settings)
         });
         let _ = self.process_level_events();
         let Some((placed, entities)) = placed else {
@@ -405,7 +421,7 @@ impl Game<'_> {
             self.spawn_entity_from_nbt(Tag::Compound(entity));
         }
         // The block entities the template loaded reach the clients.
-        let area = template.bounding_box([at.x, at.y, at.z], rotation, [0; 3], mirror);
+        let area = template.bounding_box([at.x, at.y, at.z], rotation, settings.pivot, mirror);
         let keys: Vec<Pos> = self
             .world
             .block_entities
@@ -670,6 +686,7 @@ pub(super) fn load_settings(
     TemplateSettings {
         mirror,
         rotation,
+        pivot: [0; 3],
         ignore_entities: false,
         known_shape: strict,
         integrity,

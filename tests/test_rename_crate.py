@@ -32,8 +32,8 @@ path = "../crates/sunrise-mod-package"
 # Put files in sunrise-mods/ and enable them in sunrise-mods.txt.
 '''
         self.assertEqual(rename.rewrite("crates/sunrise-mods/Cargo.toml", source), expected)
-        self.assertEqual(rename.destination("crates/sunrise-mods/tests/file.hmod"),
-                         "crates/sunrise-mod-package/tests/file.hmod")
+        self.assertEqual(rename.destination("crates/sunrise-mods/tests/file.smod"),
+                         "crates/sunrise-mod-package/tests/file.smod")
         self.assertEqual(rename.destination("crates/sunrise-mods-other/src/lib.rs"),
                          "crates/sunrise-mods-other/src/lib.rs")
         self.assertEqual(rename.rewrite("crates/sunrise-mod-registry/tests/submit.rs", '../sunrise-mods/tests/index'),
@@ -56,23 +56,7 @@ fn sunrise_mods_test_name() {}
 let folder = "sunrise-mods";
 let registry = "https://github.com/horizon-rust/horizon-mods";
 '''
-        self.assertEqual(rename.rewrite("launcher/src/native_mods/prebuilt.rs", source), expected)
-
-    def test_generated_manifest_packages_do_not_rename_player_or_negative_strings(self):
-        source = '''for name in [
-    "sunrise-mods",
-] { let dependency = path_dep(&format!("../{name}")); }
-let folder = "sunrise-mods";
-assert!(!dependencies.contains_key("sunrise-mods"));
-'''
-        expected = '''for name in [
-    "sunrise-mod-package",
-] { let dependency = path_dep(&format!("../{name}")); }
-let folder = "sunrise-mods";
-assert!(!dependencies.contains_key("sunrise-mods"));
-'''
-        self.assertEqual(rename.rewrite("launcher/src/native_mods/api.rs", source), expected)
-        self.assertEqual(rename.rewrite("launcher/src/export.rs", source), source)
+        self.assertEqual(rename.rewrite("crates/sunrise-client/src/native_mod_host.rs", source), expected)
 
     @unittest.skipUnless(shutil.which("rustfmt"), "requires rustfmt")
     def test_verify_rejects_an_unchanged_file_that_still_needs_the_mapping(self):

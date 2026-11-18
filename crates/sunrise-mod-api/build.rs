@@ -22,6 +22,15 @@ fn main() {
         std::fs::write(out_dir.join(format!("{area}_fixtures.rs")), includes)
             .expect("writing Part fixture includes");
     }
-    sunrise_mod_api_gen::generate(&root, &out_dir, sunrise_mod_api_gen::Target::Api)
-        .expect("generating the mod API");
+    sunrise_mod_api_gen::generate_api_parts(&root, &out_dir).expect("generating the Part modules");
+    // sunrise-mod-vocab's build generates the guest transport from the same sources, and this script
+    // reruns whenever that one does (its `links`).
+    let vocab = std::path::PathBuf::from(
+        std::env::var_os("DEP_SUNRISE_MOD_VOCAB_OUT_DIR")
+            .expect("sunrise-mod-vocab's build output"),
+    );
+    let guest = sunrise_mod_api_gen::GUEST_OUTPUT;
+    let code = std::fs::read(vocab.join(guest)).expect("reading the generated guest transport");
+    sunrise_mod_api_gen::write_if_changed(out_dir.join(guest), code)
+        .expect("writing the guest transport");
 }

@@ -345,7 +345,7 @@ pub struct TabInputs<'a> {
     /// (`AvatarRenderer.isPlayerUpsideDown`).
     pub upside_down: &'a dyn Fn(u128) -> bool,
     /// A mark after the player's head, or none: an extension point for what lives above the
-    /// engine (Sunrise's mark, `sunrise_cosmetics::mark`). Vanilla draws none.
+    /// engine. Vanilla draws none.
     pub mark: &'a dyn Fn(u128) -> Option<NameMark>,
 }
 

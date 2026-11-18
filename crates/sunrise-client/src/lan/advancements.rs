@@ -35,6 +35,8 @@ pub struct ServerAdvancements {
 /// recipes were unlocked) and ClientboundUpdateAdvancementsPacket's.
 pub struct FirstTick {
     pub recipe_book_add: Option<Vec<u8>>,
+    /// The recipes the completed advancements reward: `recipe_book_add` holds their displays.
+    pub recipes: Vec<String>,
     pub update_advancements: Vec<u8>,
     pub granted: Vec<CriterionGrant>,
 }
@@ -201,6 +203,7 @@ impl ServerAdvancements {
         }
         // AdvancementRewards.grant: the recipes, in the advancements' order.
         let mut entries = Vec::new();
+        let mut recipes = Vec::new();
         for (i, a) in self.tree.list.iter().enumerate() {
             if !done[i] {
                 continue;
@@ -209,6 +212,7 @@ impl ServerAdvancements {
             for id in &a.rewards.recipes {
                 entries.extend(self.book_entries(id, sync, NOTIFY_AND_HIGHLIGHT));
             }
+            recipes.extend_from_slice(&a.rewards.recipes);
         }
         let recipe_book_add = (!entries.is_empty()).then(|| book_add(entries, false));
         // flushDirty: every advancement the player may see, and its progress.
@@ -230,6 +234,7 @@ impl ServerAdvancements {
         w.bool(true); // show the advancements
         FirstTick {
             recipe_book_add,
+            recipes,
             update_advancements: w.data,
             granted,
         }
@@ -922,6 +927,43 @@ fn holder_set(w: &mut Writer, v: &Value, item: &dyn Fn(&str) -> Option<i32>) {
 }
 
 #[cfg(test)]
+impl ServerAdvancements {
+    /// `test:tick`, whose one `minecraft:tick` criterion rewards `rewarded`, beside the
+    /// recipes `others` no advancement rewards: each a shapeless recipe of stone.
+    pub(crate) fn tick_rewarding(rewarded: &str, others: &[&str]) -> Self {
+        use crate::advancements::{Advancement, Criterion, Rewards};
+        let mut tree = Tree::default();
+        tree.list.push(Advancement {
+            id: "test:tick".into(),
+            parent: None,
+            display: None,
+            criteria: vec![Criterion {
+                name: "tick".into(),
+                trigger: "minecraft:tick".into(),
+                conditions: Value::Null.into(),
+            }],
+            requirements: vec![vec!["tick".into()]],
+            rewards: Rewards {
+                recipes: vec![rewarded.into()],
+                ..Default::default()
+            },
+        });
+        let recipe: Box<str> = r#"{"type":"minecraft:crafting_shapeless","ingredients":[["minecraft:stone"]],"result":{"id":"minecraft:diamond"}}"#.into();
+        let recipes: BTreeMap<String, Box<str>> = std::iter::once(rewarded)
+            .chain(others.iter().copied())
+            .map(|id| (id.to_owned(), recipe.clone()))
+            .collect();
+        let mut advancements = SyncData::empty().advancements;
+        advancements.kids = tree.children();
+        advancements.layout = tree.layout();
+        advancements.tree = std::sync::Arc::new(tree);
+        advancements.displays = RecipeIndex::from_serialized(&recipes);
+        advancements.recipes = recipes;
+        advancements
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::path::PathBuf;
@@ -1478,7 +1520,7 @@ mod tests {
     }
 
     #[test]
-    fn a_recipe_with_an_unknown_ingredient_kind_stays_out_of_the_book() {
+    fn a_recipe_with_an_unknown_ingredient_kind_refuses_the_load_before_the_book() {
         let root = resources(
             "mymod_kind",
             &[(
@@ -1489,25 +1531,20 @@ mod tests {
                 "result":{"id":"minecraft:copper_ingot"}}"#,
             )],
         );
-        let defaults = sunrise_world::item_defaults::read(&root).unwrap();
-        let sync = SyncData::load(
+        // No mod registers `mymod:x`, so the source load refuses, naming the file and
+        // the kind, and no sources reach SyncData or the book.
+        let error = crate::crafting::ResolvedSources::load(
             &root,
             &sunrise_world::loot::PackOverlay::NONE,
-            &defaults,
-            &crate::test_resources::server_sources(&root, &sunrise_world::loot::PackOverlay::NONE),
+            &crate::test_resources::server_load(),
         )
-        .unwrap();
+        .err()
+        .unwrap()
+        .to_string();
+        assert!(error.contains("mymod_kind.json"), "{error}");
         assert!(
-            !sync
-                .advancements
-                .recipes
-                .contains_key("minecraft:mymod_kind"),
-            "the network copy drops the recipe"
-        );
-        assert!(
-            sync.advancements
-                .book_entries("minecraft:mymod_kind", &sync, NOTIFY_AND_HIGHLIGHT)
-                .is_empty()
+            error.contains("ingredient kind mymod:x is not registered by any mod"),
+            "{error}"
         );
         let _ = std::fs::remove_dir_all(&root);
     }

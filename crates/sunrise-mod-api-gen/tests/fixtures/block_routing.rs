@@ -1,6 +1,6 @@
-extern crate self as sunrise_world;
 extern crate self as log;
 extern crate self as mod_api;
+extern crate self as sunrise_world;
 #[macro_export]
 macro_rules! warn {
     ($($args:tt)*) => { eprintln!($($args)*) };
@@ -52,6 +52,12 @@ pub mod __private {
     }
     pub fn listened(_: crate::HookId) -> bool {
         true
+    }
+    pub fn scoped_state_listens(_: crate::HookId, _: u32) -> Option<bool> {
+        None
+    }
+    pub fn scoped_explosion_resistance_pure(_: u32) -> Option<bool> {
+        None
     }
     pub fn has_scoped_hook(_: crate::HookId) -> bool {
         true

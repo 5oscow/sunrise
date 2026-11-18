@@ -6,7 +6,7 @@ use mod_api::prelude::*;
 use mod_api::{BlockBreakingState, BlockPos, ClientFrameStats, ClientServer, PlayerRef};
 
 impl Game<'_> {
-    fn native_session(&self) -> Option<&Remote> {
+    pub(super) fn native_session(&self) -> Option<&Remote> {
         self.native_window().then_some(())?;
         self.native_lifecycle.epoch()?;
         self.remote.as_ref().filter(|remote| remote.logged_in)
@@ -434,6 +434,7 @@ pub(super) mod tests {
                     progress,
                     per_tick: 0.0,
                     ticks: 3,
+                    crack: None,
                 });
                 assert_eq!(
                     player.block_breaking(game),

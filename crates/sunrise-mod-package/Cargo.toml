@@ -13,6 +13,7 @@ sunrise-mod-point-shape = { path = "../sunrise-mod-point-shape" }
 sunrise-core = { path = "../sunrise-core" }
 # The uses table's file name and limit (`USES`, `MAX_USES`).
 sunrise-mod-surface = { path = "../sunrise-mod-surface" }
+mod_call = { package = "sunrise-mod-call", path = "../sunrise-mod-call" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 semver = { version = "1", features = ["serde"] }

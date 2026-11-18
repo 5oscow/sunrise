@@ -1,6 +1,7 @@
 //! Dropped items and experience orbs: their tick (`tick_items`, `tick_dropped_items`,
 //! `tick_experience`), the stacks a destroyed container lets fall, and spawning and merging orbs.
 use super::*;
+use crate::game::collision_source::Mover;
 
 /// A dropped item's `bobOffs` (its bob and spin phase) from its random's draw `drawn`, or under
 /// `SUNRISE_STILL` from a random seeded by its position alone: a client seeds an item's random
@@ -39,7 +40,7 @@ impl Game<'_> {
         // `Entity.checkBelowWorld`: below `Level.getMinY() - 64`.
         let void = f64::from(self.level_min_y() - 64);
         let mut obstacles =
-            sunrise_client::entities::ObstacleGrid::new(self.item_entity_collisions());
+            sunrise_client::entities::ObstacleGrid::new(self.entity_collisions(Mover::Passive));
         let mut nearby = Vec::new();
         let mut bubble_tops = Vec::new();
         let mut moves = ahead::Moves::work_out(self, &items, &obstacles, round, |item| {
@@ -230,6 +231,7 @@ impl Game<'_> {
                         Some(block_registries),
                         hooks,
                     )
+                    .no_push()
                     .invulnerability_check(
                         sunrise_client::health::Hurting::Entity(
                             item_id as i32,
@@ -695,7 +697,7 @@ impl Game<'_> {
 
     /// `new ItemEntity(level, x, y, z, stack)`: the item leaves with its own
     /// random's motion, which this returns.
-    pub(super) fn spawn_item_own(
+    pub(in crate::game) fn spawn_item_own(
         &mut self,
         stack: ItemStack,
         position: [f64; 3],
@@ -726,8 +728,7 @@ impl Game<'_> {
     }
 
     /// Block.popResource
-    pub(super) fn pop_resource(&mut self, pos: [i32; 3], mut stack: ItemStack) {
-        self.pending.attach(pos, &mut stack);
+    pub(super) fn pop_resource(&mut self, pos: [i32; 3], stack: ItemStack) {
         // Block.popResource: Mth.nextDouble offsets from the level random; the
         // motion is `new ItemEntity(..)`'s own, from the item's random.
         let p = spill::pop_position(&mut self.world.random, pos);
@@ -768,9 +769,8 @@ impl Game<'_> {
         &mut self,
         pos: [i32; 3],
         face: [i32; 3],
-        mut stack: ItemStack,
+        stack: ItemStack,
     ) {
-        self.pending.attach(pos, &mut stack);
         let (p, v) = spill::pop_position_from_face(&mut self.world.random, pos, face);
         // The private overload checks the gamerule after the offsets are drawn.
         if !self
@@ -786,7 +786,7 @@ impl Game<'_> {
     /// Player.drop: thrown from the eyes along the view direction. True when
     /// the selected stack's `on_dropped_by_player` Part kept it in the slot
     /// (`ServerPlayer.drop(boolean)`, as NeoForge asks it).
-    pub(in crate::game) fn drop_held(&mut self, all: bool) -> bool {
+    pub(in crate::game) fn drop_held_item(&mut self, all: bool) -> bool {
         if self.eye_position().is_none() {
             return false;
         }
@@ -808,7 +808,7 @@ impl Game<'_> {
     /// A guest's drop key. A drop the held item's Part refused sends the
     /// inventory back, undoing the removal the client predicted.
     pub(in crate::game) fn guest_drop_held(&mut self, gi: usize, conn: u32, all: bool) {
-        let kept = self.as_guest(conn, |g| g.drop_held(all)) == Some(true);
+        let kept = self.as_guest(conn, |g| g.drop_held_item(all)) == Some(true);
         if let Some(host) = self.lan.as_mut() {
             if kept {
                 host.hub.send_inventory(gi);

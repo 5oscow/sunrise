@@ -351,6 +351,7 @@ impl Game<'_> {
                 previous: position,
                 velocity: entity_nbt::motion(&tag),
                 fuse,
+                ticks: 0,
                 on_ground: entity_nbt::flag(&tag, "OnGround"),
                 fall_distance: sunrise_client::save::float(tag.get("fall_distance")).unwrap_or(0.0),
                 stuck: Vec3::ZERO,
@@ -900,6 +901,7 @@ impl Game<'_> {
             self.persist.raw.get(&id),
             Some(self.pack.assets.registry),
             |other| self.persist.uuid_of(other),
+            self.res.items(),
         );
         self.put_last_hurt_by_mob(self.mob_at(object), &mut tag);
         if sunrise_client::mobs::camel::is_camel(self.mob_at(object).species())

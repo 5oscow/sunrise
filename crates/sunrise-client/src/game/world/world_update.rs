@@ -48,7 +48,9 @@ impl Game<'_> {
         self.lod_level = None;
         let dim = self.dim;
         let source = match (&self.integrated, self.server_far_terrain(), &self.remote) {
-            (Some(server), ..) => server.call(move |game| game.lod_source_in(dim)).flatten(),
+            (Some(server), ..) => server
+                .ask(|reply| super::owner_link::OwnerRequest::LodSource(dim, reply))
+                .flatten(),
             (None, Some(offer), Some(remote)) => {
                 let states = self.res.facts().states.len() as u32;
                 let biomes = self.res.biomes().index.clone();
@@ -56,15 +58,12 @@ impl Game<'_> {
                     remote.session.far_terrain(offer, biomes, states);
                 Some(source)
             }
-            // A friend's world (a new code at every share) or a splitscreen
-            // guest's (the player's own world, its other guests writing the
-            // same folder): nothing to keep.
+            // A friend's world has a new code at every share: nothing to keep.
             (None, None, Some(remote))
-                if self.options.split_guest
-                    || remote
-                        .session
-                        .address
-                        .starts_with(sunrise_client::net::FRIEND) =>
+                if remote
+                    .session
+                    .address
+                    .starts_with(sunrise_client::net::FRIEND) =>
             {
                 None
             }
@@ -185,12 +184,16 @@ impl Game<'_> {
                 (p.position.x.floor() as i32) >> 4,
                 (p.position.z.floor() as i32) >> 4,
             );
+            self.streaming.center_y = p.position.y.floor() as i32;
         }
         sunrise_client::spans::time("tick_pregen", || self.tick_pregen());
         // A headless game has nothing to draw sections with: like a server's, they aren't
         // meshed while it has no renderer.
         if self.options.headless {
             self.streaming.mesh = self.renderer.is_some();
+        }
+        if self.defer_chunk_disk_save() {
+            return;
         }
         let areas = self.streaming.extra.len();
         let waiting = std::mem::take(&mut self.spawn_wait);

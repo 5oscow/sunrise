@@ -15,7 +15,7 @@ resource-file hooks and reload listeners retain their separate roles.
 
 A location such as `example:assets/example/resourcepacks/high_contrast` names a
 loaded mod and a directory inside its package, containing `pack.mcmeta` and the
-usual `assets/` or `data/` tree. Folder packages and `.hmod` archives use the same
+usual `assets/` or `data/` tree. Folder packages and `.smod` archives use the same
 logical paths, without extraction. Invalid locations, missing metadata and
 duplicate repository ids return `PackFinderError` without adding a partial pack.
 

@@ -4,16 +4,17 @@ use super::Game;
 use mod_api::__private::game::*;
 use mod_api::{
     BlockEntityDataError, BlockEntityError, BlockEntityItemError, BlockEntityRef,
-    BlockEntityTypeKey, LevelRef, PlayerRef, Transaction,
+    BlockEntityShapes, BlockEntityShapesError, BlockEntityTypeKey, LevelRef, PlayerRef,
+    Transaction,
 };
 use sunrise_client::{
     block_entity_nbt,
     containers::{BlockEntity, ModBlockEntity},
-    lan::menu::{Menu, Slots},
     save,
     world::World,
 };
 use sunrise_core::nbt::{Compound, Tag};
+use sunrise_core::position::BlockPos;
 use sunrise_items::items::ItemStack;
 use sunrise_world::registry::BlockStateId;
 
@@ -36,11 +37,7 @@ impl Game<'_> {
     /// the level it shows. An entity taken out for its tick cannot be read in that tick.
     pub(super) fn block_entity(&self, level: LevelRef, pos: [i32; 3]) -> Option<BlockEntityRef> {
         let world = self.native_level_read_world(level)?;
-        loaded_block_entity(world, pos)?;
-        let generation = world.block_entities.generation(&(pos[0], pos[1], pos[2]))?;
-        Some(mod_api::__private::game::block_entity_ref(
-            level, pos, generation,
-        ))
+        world_block_entity(world, level, pos)
     }
 
     /// `block_entity`, also for a block entity taken out for its own tick: its generation
@@ -74,7 +71,13 @@ impl Game<'_> {
         }
         let entity = loaded_block_entity(&self.world, pos)?;
         let block = &self.pack.assets.registry.state(state)?.name;
-        save_without_metadata(&self.world, (pos[0], pos[1], pos[2]), entity, block)
+        save_without_metadata(
+            &self.world,
+            (pos[0], pos[1], pos[2]),
+            entity,
+            block,
+            self.res.items(),
+        )
     }
 
     /// The saved data of `entity` at `key` without identity or position metadata, with its
@@ -85,7 +88,7 @@ impl Game<'_> {
         entity: &BlockEntity,
         block: &str,
     ) -> Option<Compound> {
-        save_without_metadata(&self.world, key, entity, block)
+        save_without_metadata(&self.world, key, entity, block, self.res.items())
     }
 
     /// Opens a block entity's menu for a connected player (`ServerPlayer.openMenu`).
@@ -148,7 +151,7 @@ impl Game<'_> {
         let (world, block_entity) = self.native_block_entity_target(entity)?;
         let [x, y, z] = entity.fields().position;
         let block = &self.pack.assets.registry.state(world.block(x, y, z))?.name;
-        save_without_metadata(world, (x, y, z), block_entity, block)
+        save_without_metadata(world, (x, y, z), block_entity, block, self.res.items())
     }
 
     /// The vanilla lock's item predicate, if present on a loaded block entity.
@@ -175,12 +178,9 @@ impl Game<'_> {
         {
             return Ok(false);
         }
-        let Some(mut tag) = self
-            .world
-            .block_entities
-            .get(&key)
-            .and_then(|current| save_with_metadata(&self.world, key, current, &block))
-        else {
+        let Some(mut tag) = self.world.block_entities.get(&key).and_then(|current| {
+            save_with_metadata(&self.world, key, current, &block, self.res.items())
+        }) else {
             return Ok(false);
         };
         match lock {
@@ -424,11 +424,7 @@ impl Game<'_> {
         let (key, block) = self
             .native_block_entity_write_target(entity)
             .ok_or(BlockEntityError::Stale)?;
-        let mut nbt = data;
-        for field in ["id", "x", "y", "z"] {
-            nbt.remove(&field.into());
-        }
-        let nbt = Tag::Compound(nbt);
+        let nbt = Tag::Compound(mod_payload(data));
         if sunrise_client::nbt_path::too_deep(&nbt, 0) {
             return Ok(false);
         }
@@ -436,31 +432,27 @@ impl Game<'_> {
             .world
             .block_entities
             .get(&key)
-            .and_then(|current| save_with_metadata(&self.world, key, current, &block))
+            .and_then(|current| {
+                save_with_metadata(&self.world, key, current, &block, self.res.items())
+            })
             .map(Tag::Compound)
         else {
             return Ok(false);
         };
-        let base = if replace {
-            let mut metadata = Compound::new();
-            if let Tag::Compound(fields) = &old {
-                for key in ["id", "x", "y", "z"] {
-                    if let Some(value) = fields.get(&key.into()) {
-                        metadata.insert(key.into(), value.clone());
-                    }
-                }
-            }
-            Tag::Compound(metadata)
-        } else {
-            old.clone()
-        };
-        let merged = sunrise_client::data_cmd::merged(&base, &nbt);
+        let merged = loaded_payload(&old, &nbt, replace);
         if merged == old {
             return Ok(false);
         }
         self.journal_block_entity(key);
+        let cleared = matches!(
+            self.world.block_entities.get(&key),
+            Some(BlockEntity::Mod(current)) if current.shapes_cleared()
+        );
         if !self.load_block_entity_data(key, &merged) {
             return Ok(false);
+        }
+        if cleared && let Some(BlockEntity::Mod(loaded)) = self.world.block_entities.get_mut(&key) {
+            loaded.keep_shapes_cleared(true);
         }
         self.block_entity_updated(key);
         self.container_changed(key);
@@ -477,6 +469,97 @@ impl Game<'_> {
             .native_block_entity_write_key(entity)
             .ok_or(BlockEntityError::Stale)?;
         self.container_changed(key);
+        Ok(true)
+    }
+
+    /// Register a generation-bound observer in its level's keyed contents index.
+    pub(super) fn block_entity_watch_contents(
+        &mut self,
+        entity: BlockEntityRef,
+        source: mod_api::BlockPos,
+        enabled: bool,
+    ) -> Result<(), mod_api::ContentsWatchError> {
+        let fields = entity.fields();
+        if !self.level_in_place(fields.level)
+            || self.block_entity_identity(fields.level, fields.position) != Some(entity)
+        {
+            return Err(mod_api::ContentsWatchError::Stale);
+        }
+        let [x, y, z] = fields.position;
+        if !crate::game::api_values::block_state::block_listens(
+            mod_api::HookId::ContentsChanged,
+            self.world.block(x, y, z),
+        ) {
+            return Err(mod_api::ContentsWatchError::NotSubscribed);
+        }
+        self.journal_block_entity((x, y, z));
+        let observer = self.world.block_entities.identity((x, y, z)).unwrap();
+        self.world.block_entities.contents_watches.set(
+            observer,
+            (source.x, source.y, source.z),
+            enabled,
+        );
+        Ok(())
+    }
+
+    /// Publishes the shapes the block entity's block has in place of its declared ones, or
+    /// clears them with None. Applied at once, to the queries that follow, and the block's
+    /// neighbours are notified; clients get them with the block entity update. Inside a
+    /// transaction an abort puts the old ones back.
+    pub(super) fn block_entity_set_shapes(
+        &mut self,
+        entity: BlockEntityRef,
+        shapes: Option<BlockEntityShapes>,
+    ) -> Result<bool, BlockEntityShapesError> {
+        let key = self
+            .native_block_entity_write_key(entity)
+            .ok_or(BlockEntityShapesError::Stale)?;
+        let state = self.world.block(key.0, key.1, key.2);
+        if !self.collision.publishes_shapes(state) {
+            return Err(BlockEntityShapesError::NotDeclared);
+        }
+        let shapes = shapes
+            .map(sunrise_client::containers::PublishedShapes::new)
+            .transpose()?
+            .map(std::sync::Arc::new);
+        let Some(current) = self.mod_block_entity_write_target(key) else {
+            return Err(BlockEntityShapesError::Stale);
+        };
+        if current.shapes() == shapes.as_deref() {
+            return Ok(false);
+        }
+        if cfg!(debug_assertions)
+            && shapes
+                .as_ref()
+                .is_some_and(|shapes| shapes.reaches_past_one_cell())
+        {
+            static WARNED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+            let block = self
+                .pack
+                .assets
+                .registry
+                .state(state)
+                .map(|s| s.name.clone());
+            if let (Some(block), Ok(mut warned)) = (block, WARNED.lock())
+                && !warned.contains(&block)
+            {
+                log::warn!(
+                    "{block}: a published shape has a box beyond one block of the block; collision never finds it"
+                );
+                warned.push(block);
+            }
+        }
+        self.write_mod_block_entity(key, |block_entity| {
+            block_entity.set_shapes(shapes);
+        });
+        self.block_entity_updated(key);
+        // Fluids and other neighbours read the shape: tell them it changed (the shulker lid's
+        // `doNeighborUpdates`, without its shape updates).
+        let at = BlockPos::new(key.0, key.1, key.2);
+        self.with_level(|b, level, ticks| {
+            let block = b.block(state);
+            b.update_neighbors_at(level, ticks, at, block);
+        });
         Ok(true)
     }
 
@@ -508,14 +591,15 @@ impl Game<'_> {
         }
         self.native_block_entity_target(entity)?;
         let epoch = self.native_lifecycle.epoch()?;
-        let level = entity.fields().level;
-        let [x, y, z] = entity.fields().position;
+        let fields = entity.fields();
+        let level = fields.level;
+        let [x, y, z] = fields.position;
         let key = (x, y, z);
         let mut viewers: Vec<PlayerRef> = self
             .lan
             .iter()
-            .flat_map(|host| host.hub.guests.simulation_iter())
-            .filter(|g| {
+            .flat_map(|host| host.hub.guests.simulation_iter().map(move |g| (host, g)))
+            .filter(|(host, g)| {
                 // The acting guest's mode is live in `Game` during its turn; the hub
                 // hears of a change only in `leave_guest`.
                 let spectator = if self.lan_acting_uuid == Some(g.uuid) {
@@ -527,9 +611,11 @@ impl Game<'_> {
                     && g.placed
                     && !spectator
                     && g.dimension == level.dimension_id()
-                    && g.menu.as_ref().is_some_and(|m| menu_holds(m, key))
+                    && host.menus.get(&g.conn).is_some_and(|menus| {
+                        menus.menu_holds(g.menu.as_ref(), key, fields.generation)
+                    })
             })
-            .filter_map(|g| {
+            .filter_map(|(_, g)| {
                 let id = u32::try_from(g.entity_id).ok()?;
                 Some(player_ref(mod_api::EntityRef::new(epoch, id), g.uuid))
             })
@@ -564,7 +650,7 @@ impl Game<'_> {
             .world
             .block_entities
             .get(&key)
-            .is_some_and(|current| nameable(key, current, &block));
+            .is_some_and(|current| nameable(key, current, &block, self.res.items()));
         if !nameable {
             return Ok(false);
         }
@@ -583,6 +669,73 @@ impl Game<'_> {
     }
 }
 
+/// The compound a merge (or, with `replace`, a replace) of `payload` loads over the block entity
+/// saved as `old`. A replace keeps the identity, position and published shapes, which are not
+/// the payload's to replace.
+fn loaded_payload(old: &Tag, payload: &Tag, replace: bool) -> Tag {
+    let base = if replace {
+        let mut metadata = Compound::new();
+        if let Tag::Compound(fields) = old {
+            for key in ["id", "x", "y", "z", sunrise_client::containers::SHAPES_KEY] {
+                if let Some(value) = fields.get(&key.into()) {
+                    metadata.insert(key.into(), value.clone());
+                }
+            }
+        }
+        Tag::Compound(metadata)
+    } else {
+        old.clone()
+    };
+    sunrise_client::data_cmd::merged(&base, payload)
+}
+
+/// A mod's data payload as the block entity takes it: without the fields the engine owns, which
+/// are its identity and position, and its published shapes (`set_shapes` alone writes those).
+fn mod_payload(mut data: Compound) -> Compound {
+    for field in ["id", "x", "y", "z", sunrise_client::containers::SHAPES_KEY] {
+        data.remove(&field.into());
+    }
+    data
+}
+
+#[cfg(test)]
+mod payload_tests {
+    use super::*;
+
+    #[test]
+    fn merge_and_replace_keep_the_published_shapes_whatever_the_payload_carries() {
+        use sunrise_client::containers::SHAPES_KEY;
+        let shapes = Tag::Compound(Compound::from([(
+            "collision".into(),
+            Tag::LongArray(vec![1, 2, 3, 4, 5, 6]),
+        )]));
+        let old = Tag::Compound(Compound::from([
+            ("id".into(), Tag::String("test:bus".into())),
+            ("x".into(), Tag::Int(1)),
+            ("progress".into(), Tag::Int(7)),
+            ("kept".into(), Tag::Int(9)),
+            (SHAPES_KEY.into(), shapes.clone()),
+        ]));
+        // A payload that carries the key, to overwrite it or to remove it.
+        let colliding = || {
+            mod_payload(Compound::from([
+                ("progress".into(), Tag::Int(8)),
+                ("id".into(), Tag::String("other:type".into())),
+                (SHAPES_KEY.into(), Tag::Compound(Compound::new())),
+            ]))
+        };
+        for replace in [false, true] {
+            let loaded = loaded_payload(&old, &Tag::Compound(colliding()), replace);
+            assert_eq!(loaded.get(SHAPES_KEY), Some(&shapes), "replace: {replace}");
+            // The ordinary field applies, and the identity stays.
+            assert_eq!(loaded.get("progress"), Some(&Tag::Int(8)));
+            assert_eq!(loaded.get("id"), Some(&Tag::String("test:bus".into())));
+            // A merge keeps the fields the payload omits; a replace drops them.
+            assert_eq!(loaded.get("kept").is_some(), !replace);
+        }
+    }
+}
+
 /// The block entity as `/data get block` shows it (`saveWithFullMetadata`), with the custom
 /// name Sunrise keeps beside the model.
 fn save_with_metadata(
@@ -590,8 +743,9 @@ fn save_with_metadata(
     pos: (i32, i32, i32),
     entity: &BlockEntity,
     block: &str,
+    items: &crate::items::Items,
 ) -> Option<Compound> {
-    let mut tag = save::block_entity_data(pos, entity, block, world.block_lock(pos));
+    let mut tag = save::block_entity_data(pos, entity, block, world.block_lock(pos), items);
     Game::write_pending_loot(world, pos, &mut tag);
     let Tag::Compound(mut data) = tag else {
         return None;
@@ -607,8 +761,9 @@ pub(super) fn save_without_metadata(
     pos: (i32, i32, i32),
     entity: &BlockEntity,
     block: &str,
+    items: &crate::items::Items,
 ) -> Option<Compound> {
-    let mut data = save_with_metadata(world, pos, entity, block)?;
+    let mut data = save_with_metadata(world, pos, entity, block, items)?;
     for key in ["id", "x", "y", "z"] {
         data.remove(&key.into());
     }
@@ -616,8 +771,13 @@ pub(super) fn save_without_metadata(
 }
 
 /// Whether the block entity keeps a `CustomName` (`Nameable`): its saved form does.
-fn nameable(pos: (i32, i32, i32), entity: &BlockEntity, block: &str) -> bool {
-    let mut tag = save::block_entity_encode::encode(pos, entity, block);
+fn nameable(
+    pos: (i32, i32, i32),
+    entity: &BlockEntity,
+    block: &str,
+    items: &crate::items::Items,
+) -> bool {
+    let mut tag = save::block_entity_encode::encode(pos, entity, block, items);
     if let Tag::Compound(map) = &mut tag {
         map.insert("CustomName".into(), Tag::String("x".into()));
     }
@@ -643,8 +803,66 @@ fn mod_item_slots(
     Ok(slots)
 }
 
+pub(super) fn part_snapshot(
+    world: &World,
+    level: Option<LevelRef>,
+    authoritative: bool,
+    index: Option<
+        &std::sync::Arc<
+            std::sync::Mutex<
+                sunrise_mod_runtime::attachments::index::AttachmentIndex<mod_api::AttachmentHolder>,
+            >,
+        >,
+    >,
+    entity: BlockEntityRef,
+    namespace: &str,
+    name: &str,
+) -> Result<mod_api::AttachmentBatch, mod_api::PartStateError> {
+    let fields = entity.fields();
+    if level != Some(fields.level) {
+        return Err(mod_api::PartStateError::OtherLevel);
+    }
+    let key = (fields.position[0], fields.position[1], fields.position[2]);
+    if !world.is_loaded_at(key.0, key.1, key.2)
+        || world.block_entities.generation(&key) != Some(fields.generation)
+    {
+        return Err(mod_api::PartStateError::Stale);
+    }
+    mod_api::__private::validate_attachment_use(namespace, name, false).map_err(|error| {
+        mod_api::PartStateError::Attachment {
+            namespace: "",
+            name: "",
+            error,
+        }
+    })?;
+    let empty = || sunrise_mod_runtime::attachments::AttachmentBatch::empty().into();
+    if !authoritative {
+        return Ok(empty());
+    }
+    Ok(index.map_or_else(empty, |index| {
+        sunrise_mod_runtime::attachments::AttachmentBatch::new(
+            index.lock().unwrap().snapshot_named(namespace, name),
+        )
+        .into()
+    }))
+}
+
+/// The handle of the loaded block entity at `pos`, without loading a chunk or taking one
+/// that is out of the world for its own tick.
+pub(super) fn world_block_entity(
+    world: &World,
+    level: LevelRef,
+    pos: [i32; 3],
+) -> Option<BlockEntityRef> {
+    loaded_block_entity(world, pos)?;
+    let generation = world.block_entities.generation(&(pos[0], pos[1], pos[2]))?;
+    Some(mod_api::__private::game::block_entity_ref(
+        level, pos, generation,
+    ))
+}
+
 fn loaded_block_entity(world: &World, [x, y, z]: [i32; 3]) -> Option<&BlockEntity> {
-    if !world.loaded(x, z) {
+    if !world.loaded(x, z) || !world.shape.contains_y(y) {
         return None;
     }
     world
@@ -653,35 +871,113 @@ fn loaded_block_entity(world: &World, [x, y, z]: [i32; 3]) -> Option<&BlockEntit
         .filter(|entity| !save::block_entity_placeholder(entity))
 }
 
-/// Whether an open menu holds the container at `key` (`isOwnContainer`): a double
-/// chest's holds both halves, an ender chest's the block it was opened from.
-fn menu_holds(menu: &Menu, key: (i32, i32, i32)) -> bool {
-    match menu.slots {
-        Slots::Block(at) => at == key,
-        Slots::Double(first, second) => first == key || second == key,
-        Slots::Ender => menu.pos == Some(key),
-        Slots::Native => false,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use mod_api::HostTransaction;
     use mod_api::ServerHost;
     use std::sync::Arc;
-    use sunrise_client::chunk::Chunk;
+    use sunrise_client::{chunk::Chunk, lan::menu::Slots};
     use sunrise_world::registry::BlockStateId;
 
     #[test]
     fn saved_data_omits_metadata_but_keeps_contents() {
         let world = World::new(BlockStateId(0), 0);
         let entity = BlockEntity::Chest(vec![None; 27]);
-        let data = save_without_metadata(&world, (1, 64, 2), &entity, "minecraft:chest").unwrap();
+        let data = save_without_metadata(
+            &world,
+            (1, 64, 2),
+            &entity,
+            "minecraft:chest",
+            &Default::default(),
+        )
+        .unwrap();
         for key in ["id", "x", "y", "z"] {
             assert!(!data.contains_key(&key.into()));
         }
         assert!(data.contains_key(&"Items".into()));
+    }
+
+    /// What a reader of a vanilla machine's progress (a crafting CPU's estimate, a progress
+    /// line) needs is in `BlockEntity.saveWithoutMetadata`, which `block_entity_data` returns:
+    /// a furnace's cooking and burning timers and the fuel's speed, a brewing stand's brew
+    /// timer counting down, its total, its fuel and its bottles.
+    #[test]
+    fn saved_data_carries_vanilla_machine_progress() {
+        use sunrise_client::{
+            brewing::BrewingStand,
+            containers::{Furnace, FurnaceKind},
+        };
+        let world = World::new(BlockStateId(0), 0);
+        let int = |data: &Compound, key: &str| match data.get(&key.into()) {
+            Some(Tag::Int(value)) => *value,
+            other => panic!("{key} is {other:?}"),
+        };
+        let float = |data: &Compound, key: &str| match data.get(&key.into()) {
+            Some(Tag::Float(bits)) => f32::from_bits(*bits),
+            other => panic!("{key} is {other:?}"),
+        };
+        let slots = |data: &Compound| match data.get(&"Items".into()) {
+            Some(Tag::List(items)) => items
+                .iter()
+                .map(|item| match item.get("Slot") {
+                    Some(Tag::Byte(slot)) => *slot,
+                    other => panic!("slot is {other:?}"),
+                })
+                .collect::<Vec<_>>(),
+            other => panic!("Items is {other:?}"),
+        };
+
+        let furnace = BlockEntity::Furnace(Furnace {
+            kind: FurnaceKind::BlastFurnace,
+            items: [Some(ItemStack::new("minecraft:raw_iron", 3)), None, None],
+            lit_remaining: 750,
+            lit_total: 800,
+            cooking_timer: 40,
+            cooking_total: 100,
+            speed: 2.0,
+            recipes_used: Default::default(),
+        });
+        let data = save_without_metadata(
+            &world,
+            (0, 64, 0),
+            &furnace,
+            "minecraft:blast_furnace",
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!(int(&data, "cooking_time_spent"), 40);
+        assert_eq!(int(&data, "cooking_total_time"), 100);
+        assert_eq!(int(&data, "lit_time_remaining"), 750);
+        assert_eq!(int(&data, "lit_total_time"), 800);
+        assert_eq!(float(&data, "speed_multiplier"), 2.0);
+        assert_eq!(slots(&data), vec![0], "the input slot is held");
+
+        let mut stand = BrewingStand::new();
+        stand.brew_time = 150;
+        stand.total_brew_time = 400;
+        stand.fuel = 12;
+        stand.items[0] = Some(ItemStack::new("minecraft:potion", 1));
+        stand.items[2] = Some(ItemStack::new("minecraft:potion", 1));
+        stand.items[3] = Some(ItemStack::new("minecraft:nether_wart", 1));
+        let stand = BlockEntity::Brewing(Box::new(stand));
+        let data = save_without_metadata(
+            &world,
+            (1, 64, 0),
+            &stand,
+            "minecraft:brewing_stand",
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!(int(&data, "BrewTime"), 150);
+        assert_eq!(int(&data, "total_brew_time"), 400);
+        assert_eq!(int(&data, "Fuel"), 12);
+        assert_eq!(float(&data, "speed_multiplier"), 1.0);
+        assert_eq!(
+            slots(&data),
+            vec![0, 2, 3],
+            "two bottles and the ingredient"
+        );
     }
 
     #[test]
@@ -703,6 +999,32 @@ mod tests {
             };
             game.world.block_entities.insert(pos, holder());
             let original = game.block_entity(level, [1, 64, 1]).unwrap();
+            assert_eq!(original.merge_data(game, compound("{count:3}")), Ok(true));
+            game.with_level(|_, host, ticks| {
+                let wrapped = super::super::mod_api_host::LevelTicks::new(&*host, ticks);
+                assert_eq!(
+                    mod_api::LevelHost::block_entity(&wrapped, [1, 64, 1]),
+                    mod_api::LevelHost::block_entity(&*host, [1, 64, 1]),
+                );
+                assert_eq!(
+                    mod_api::LevelHost::block_entity(&wrapped, [1, 64, 1]),
+                    Some(original),
+                );
+                assert_eq!(
+                    mod_api::LevelHost::block_entity(&wrapped, [1, 400, 1]),
+                    None,
+                );
+                // The ticks wrapper hands the same reads through, saved data included.
+                let data = mod_api::LevelHost::block_entity_data(&*host, original);
+                assert_eq!(
+                    data.as_ref().and_then(|data| data.get(&"count".into())),
+                    Some(&mod_api::Tag::Int(3))
+                );
+                assert_eq!(
+                    mod_api::LevelHost::block_entity_data(&wrapped, original),
+                    data,
+                );
+            });
             assert_eq!(original.set_data_slots(game, vec![7]), Ok(true));
             let mut tentative = None;
             let _: Result<(), ()> = game.transaction(|game, _| {
@@ -774,6 +1096,16 @@ mod tests {
             .block_entities
             .insert(key, BlockEntity::Mod(Box::default()));
         assert!(loaded_block_entity(&world, pos).is_none());
+        let outside_pos = [-1, world.shape.max_y(), 0];
+        world
+            .block_entities
+            .insert((-1, outside_pos[1], 0), BlockEntity::DaylightDetector);
+        assert!(loaded_block_entity(&world, outside_pos).is_none());
+        let below_pos = [-1, world.shape.min_y - 1, 0];
+        world
+            .block_entities
+            .insert((-1, below_pos[1], 0), BlockEntity::DaylightDetector);
+        assert!(loaded_block_entity(&world, below_pos).is_none());
     }
 
     fn compound(snbt: &str) -> Compound {
@@ -1383,7 +1715,7 @@ mod tests {
             flags: BlockUpdateFlags,
         ) -> bool {
             game.with_level(|_, level, ticks| {
-                LevelWriteHost::set_block(&mut LevelTicks { level, ticks }, pos, state, flags)
+                LevelWriteHost::set_block(&mut LevelTicks::new(level, ticks), pos, state, flags)
             })
         }
         with_game(|game| {
@@ -1454,6 +1786,7 @@ mod tests {
             ));
 
             // A client's copy of the level is not the server's.
+            game.options.execution_role = crate::game::execution_role::ExecutionRole::Client;
             game.options.dedicated = None;
             assert!(!write(game, [0, 64, 0], api_stone, flags));
             assert_eq!(game.world.block(0, 64, 0), grown);

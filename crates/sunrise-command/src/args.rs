@@ -32,6 +32,24 @@ pub struct CustomSuggestion {
     pub replace_start: Option<usize>,
 }
 
+/// One argument a command's dispatcher parsed before the one being completed: its name from the
+/// usage and the text the input covers for it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ParsedArgument {
+    /// The name between the brackets of the usage, `<name:kind>`.
+    pub name: String,
+    /// The text the input covers for the parsed argument.
+    pub text: String,
+}
+
+/// The most candidates a reply keeps for one argument (`ServerSuggestionProvider.limitSuggestionCount`),
+/// counted after the engine's own matching and bounds checks.
+pub const MAX_PROVIDER_SUGGESTIONS: usize = 1000;
+/// The longest completion text, in UTF-16 code units (STRING_UTF8's limit).
+pub const MAX_SUGGESTION_TEXT: usize = 32767;
+/// The longest tooltip, in bytes of Java modified UTF-8 (the NBT string limit).
+pub const MAX_SUGGESTION_TOOLTIP: usize = 65535;
+
 /// A mod's registered argument type, as the dispatcher parses and completes it.
 ///
 /// The mod API object lives above this crate; the game adapts it into these closures so command
@@ -42,6 +60,9 @@ pub struct CustomArgument {
     kind: CustomArgumentKind,
     parse: Arc<dyn Fn(&str) -> Result<String, Text> + Send + Sync>,
     suggest: Arc<dyn Fn(&Registries, &str) -> Vec<CustomSuggestion> + Send + Sync>,
+    provider: Option<
+        Arc<dyn Fn(&Registries, &str, &[ParsedArgument]) -> Vec<CustomSuggestion> + Send + Sync>,
+    >,
 }
 
 impl fmt::Debug for CustomArgument {
@@ -49,6 +70,7 @@ impl fmt::Debug for CustomArgument {
         f.debug_struct("CustomArgument")
             .field("id", &self.id)
             .field("kind", &self.kind)
+            .field("provider", &self.provider.is_some())
             .finish()
     }
 }
@@ -68,7 +90,26 @@ impl CustomArgument {
             kind,
             parse: Arc::new(parse),
             suggest: Arc::new(suggest),
+            provider: None,
         }
+    }
+    /// The same type, with a suggestion provider the type declares: the dispatcher asks it, with
+    /// the typed prefix, the arguments parsed before it and the registries carrying the sender,
+    /// instead of `suggest`.
+    pub fn with_provider(
+        mut self,
+        provider: impl Fn(&Registries, &str, &[ParsedArgument]) -> Vec<CustomSuggestion>
+        + Send
+        + Sync
+        + 'static,
+    ) -> Self {
+        self.provider = Some(Arc::new(provider));
+        self
+    }
+    /// Whether the type declares a suggestion provider: its arguments are answered by that
+    /// provider alone, and no completion listener may add to, replace or erase the answer.
+    pub(crate) fn declares_provider(&self) -> bool {
+        self.provider.is_some()
     }
     /// The registered type's namespaced id.
     pub fn id(&self) -> &str {
@@ -571,6 +612,84 @@ pub fn matches_sub_str(input: &str, candidate: &str) -> bool {
             Some(i) => index += i + 1,
             None => return false,
         }
+    }
+}
+/// The arguments the dispatcher parsed before the one being completed, each with the text the
+/// input covers for it (`CommandContext`'s arguments at the suggestion point, without the
+/// argument whose text starts at `start`).
+fn parsed_arguments(context: &Context, input: &str, start: usize) -> Vec<ParsedArgument> {
+    context
+        .args
+        .iter()
+        .filter(|argument| argument.range.0 < start)
+        .map(|argument| ParsedArgument {
+            name: argument.name.clone(),
+            text: input
+                .get(argument.range.0..argument.range.1)
+                .unwrap_or_default()
+                .to_owned(),
+        })
+        .collect()
+}
+
+/// The bytes a text occupies in Java modified UTF-8: a tooltip's NBT string limit counts those.
+fn modified_utf8_len(text: &str) -> usize {
+    text.encode_utf16()
+        .map(|unit| match unit {
+            1..=0x7f => 1,
+            0..=0x7ff => 2,
+            _ => 3,
+        })
+        .sum()
+}
+
+/// SharedSuggestionProvider.suggest for a mod's answer: the engine keeps the candidates that
+/// match the typed text (at its start, or after each `.`, `_` or `/`) within the protocol's text
+/// bounds and the reply's count. A candidate past a bound is dropped by name in the diagnostics
+/// and the others stay; nothing here panics.
+fn add_provider_suggestions(builder: &mut SuggestionsBuilder, candidates: Vec<CustomSuggestion>) {
+    let (count, lower) = (candidates.len(), builder.remaining_lower());
+    // The cap counts what the reply keeps, not what the provider answered: a candidate that does
+    // not match the typed text, equals it (the builder adds nothing for it), repeats an earlier
+    // text and tooltip pair, or is past a bound, spends none of it, so a long list of those
+    // before the useful ones still completes.
+    let typed = builder.remaining();
+    let mut seen = std::collections::HashSet::new();
+    let mut kept = 0;
+    for candidate in candidates {
+        if kept == MAX_PROVIDER_SUGGESTIONS {
+            break;
+        }
+        if candidate.text == typed
+            || !matches_sub_str(&lower, &candidate.text.to_lowercase())
+            || !seen.insert((candidate.text.clone(), candidate.tooltip.clone()))
+        {
+            continue;
+        }
+        // Suggestions use STRING_UTF8 (UTF-16 length); tooltips are literal NBT strings, whose
+        // modified UTF-8 byte length is an unsigned u16.
+        let tooltip = candidate.tooltip.as_deref().map_or(0, modified_utf8_len);
+        if candidate.text.encode_utf16().count() > MAX_SUGGESTION_TEXT
+            || tooltip > MAX_SUGGESTION_TOOLTIP
+        {
+            eprintln!(
+                "mod command argument provider suggestion `{}` is past the protocol's text \
+                 limit; dropped",
+                candidate.text
+            );
+            continue;
+        }
+        match candidate.tooltip {
+            Some(tooltip) => builder.suggest_tooltip(candidate.text, tooltip),
+            None => builder.suggest(candidate.text),
+        }
+        kept += 1;
+    }
+    if count > MAX_PROVIDER_SUGGESTIONS {
+        eprintln!(
+            "mod command argument provider answered {count} suggestions; at most \
+             {MAX_PROVIDER_SUGGESTIONS} are kept"
+        );
     }
 }
 /// SharedSuggestionProvider.filterResources (no prefix).
@@ -1950,30 +2069,38 @@ impl ArgType {
             ArgType::Anchor => builder.suggest_matching(["eyes", "feet"]),
             ArgType::Component | ArgType::Style | ArgType::NbtTag => super::snbt::suggest(builder),
             ArgType::Swizzle | ArgType::Message | ArgType::Nbt => {}
-            ArgType::Custom(custom) => {
-                let prefix = builder.remaining().to_owned();
-                for suggestion in (custom.suggest)(reg, &prefix) {
-                    // A suggestion may replace only the tail of the text argument, from its
-                    // offset: a completion for the token a greedy text is typing. One that
-                    // starts past the typed text or inside a character is left out rather than
-                    // panicking where the chat applies it (the game refuses it by name first).
-                    let start = match suggestion.replace_start {
-                        Some(offset)
-                            if offset <= prefix.len() && prefix.is_char_boundary(offset) =>
-                        {
-                            builder.start + offset
+            ArgType::Custom(custom) => match &custom.provider {
+                Some(provider) => {
+                    let prefix = builder.remaining().to_owned();
+                    let arguments = parsed_arguments(context, builder.input, builder.start);
+                    let candidates = provider(reg, &prefix, &arguments);
+                    add_provider_suggestions(builder, candidates);
+                }
+                None => {
+                    let prefix = builder.remaining().to_owned();
+                    for suggestion in (custom.suggest)(reg, &prefix) {
+                        // A suggestion may replace only the tail of the text argument, from its
+                        // offset: a completion for the token a greedy text is typing. One that
+                        // starts past the typed text or inside a character is left out rather than
+                        // panicking where the chat applies it (the game refuses it by name first).
+                        let start = match suggestion.replace_start {
+                            Some(offset)
+                                if offset <= prefix.len() && prefix.is_char_boundary(offset) =>
+                            {
+                                builder.start + offset
+                            }
+                            Some(_) => continue,
+                            None => builder.start,
+                        };
+                        match suggestion.tooltip {
+                            Some(tooltip) => {
+                                builder.suggest_at_tooltip(start, suggestion.text, tooltip)
+                            }
+                            None => builder.suggest_at(start, suggestion.text),
                         }
-                        Some(_) => continue,
-                        None => builder.start,
-                    };
-                    match suggestion.tooltip {
-                        Some(tooltip) => {
-                            builder.suggest_at_tooltip(start, suggestion.text, tooltip)
-                        }
-                        None => builder.suggest_at(start, suggestion.text),
                     }
                 }
-            }
+            },
             _ => {}
         }
     }

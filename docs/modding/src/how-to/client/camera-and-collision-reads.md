@@ -4,6 +4,11 @@
 screen is open. A multiplayer game continues running while its pause screen is open.
 The pause-change pre hook sees the old state; the post hook sees the new state.
 
+`ClientHost::gui_ticks()` reads the HUD's signed 32-bit tick counter (`Hud.getGuiTicks`).
+It advances once per unpaused client tick, including on the title screen, and wraps like
+Java's `int`. Pausing holds it; a server tick freeze does not. This is not world game time
+or the frame's animation clock.
+
 `ClientHost::gui_scale()` reads the GUI scale in effect (`Window.getGuiScale`), at least 1,
 or `None` without a window (a server, a headless run). Vanilla's `Window.calculateScale` resolves
 it from the GUI Scale option and the window size: the option is a maximum, where 0 means automatic,
@@ -11,6 +16,10 @@ so a large window still resolves below it, and with the Unicode font forced an o
 by one. `ClientHost::gui_options().gui_scale` is only that option. The framebuffer size stays
 `native_physical_window_size()`; divide it by this scale, rounding up, for the GUI-scaled width and
 height (`Window.getGuiScaledWidth/Height`).
+
+`LevelRef::brightness(host, layer, pos)` (`getBrightness`, the stored light 0 to 15) reads on a client too: the
+light of the level the client shows, as the server sent it for a chunk the client holds. It is `None` for a
+chunk the client does not hold and before login; `can_see_sky` stays a server read.
 
 `ClientHost::playing()` is true while the player is in the world with nothing over it: no screen, title, sign
 editor or book, so keys and zoom apply. `ClientHost::mapping(name)` reads a vanilla key mapping (`key.forward`,
@@ -67,6 +76,58 @@ vanilla camera. Requests from later render callbacks apply at the next frame's e
 Setting a type never emits `camera_type_cycle`; F5 alone cycles, and its final event choice
 wins over requests made inside the cycle callback.
 
+## The fluid the camera is in
+
+The `camera_submersion` hook answers which fluid the camera is in, as vanilla's
+`Camera.getFluidInCamera` does, given as the fog type at the camera: `Atmospheric`, `Water`, `Lava` or
+`PowderSnow`. It comes in as the game's answer, after the `state_at_viewpoint` parts of the blocks it reads,
+with the camera's position. Set it to `Atmospheric` to clear underwater, lava and powder snow submersion,
+or to a fluid to force it; listeners run in the usual hook order, each seeing the previous one's value. A
+free camera that passes through water, for one, keeps the air's fog:
+
+```rust,ignore
+fn camera_submersion(&self, _host: &dyn ClientHost, event: &mut CameraSubmersionEvent<'_>) {
+    if self.detached() {
+        *event.fog_type = FogType::Atmospheric;
+    }
+}
+```
+
+Every client reader of the camera's fluid reads the answer: the field of view in a fluid, the frame's
+fog, the sky pass and the overworld sky's dark disc (skipped under water), the screen overlays, water
+vision and conduit power's underwater vision, and a shader pack's `isEyeInWater`. The hook fires once per
+reader, several times a frame, and not always at the same point: the fog asks at the camera, the overlays
+at the eye. Nothing keeps the first answer, so answer from the event alone, the same way for the same
+position. The position can't be changed. Server and gameplay fluid checks (an entity in water, drowning,
+swimming, the sculk vibrations' water test) don't read it.
+
+## Block changes in the client level
+
+A client map or minimap keeps its own picture of the terrain and only has to redraw what changed.
+`client_chunk_load(dimension, chunk)` and `client_chunk_unload(dimension, chunk)` tell whole columns
+arriving and leaving; `client_block_changed(dimension, pos, old, new, predicted)` tells each block of a
+held column that changes state, after the write, so `host.level(dimension)` already reads `new` there:
+
+```rust
+fn client_block_changed(&self, _host: &dyn ClientHost, event: &mut ClientBlockChangedEvent<'_>) {
+    // The chunk to redraw: [x, z], in chunks.
+    self.stale(event.dimension, [event.pos.x >> 4, event.pos.z >> 4]);
+}
+```
+
+Every route a client writes a block by tells it: the server's block update, each block of a batched
+section update, the client's own predictions (a break, a placement, a use; `predicted` is true) and,
+when the server acknowledges them, each block that takes the server's state back (`predicted` false). A
+server update for a block still under a pending prediction is held, as in vanilla, and told when the
+acknowledgement applies it. A write that keeps the state is not told, so nothing has to rescan the
+loaded terrain. It needs no mod on the server: it runs on a client of any server, a LAN guest included.
+All three hooks also fire in singleplayer, where the window is a client of its own in-process server.
+The server-side world still reports its edits through `block_changed`. A level a server opens for
+viewing (below) is not told. A section update tells each of its blocks, so keep the listener cheap:
+mark the chunk and redraw it later.
+sunrise-org/sunrise-minimap is such a mod: it redraws a marked chunk into its map's dynamic texture and draws
+the map in `render_gui_post`.
+
 ## Viewed levels
 
 A server can open other levels for a client to view besides the one the player is in (`sunrise:levels`,
@@ -93,8 +154,10 @@ Native and wasm mods use the same handle methods.
 `CrosshairTarget::Block { pos, state, hit }` or
 `CrosshairTarget::Entity { entity, point }`. The block hit contains its world-space
 location, face and inside flag; the entity point is also in world coordinates.
-It uses the game's current targeting ray and block/entity reach, respects blocks
-occluding entities, and returns `None` on a miss or without a client world.
+It reads the last committed `client_pick` decision, and returns `None`
+on a miss or before the first pick. A tick refreshes it before key handling;
+a frame refreshes it before extraction. Consumption does not recheck liveness. It never
+casts a new ray. Without listeners the decision is the vanilla block/entity pick.
 It can be read with a screen open. `entity` is an `EntityRef` carrying the current
 client level's epoch and network entity ID, including dragon parts. It becomes stale
 when the client level is replaced or the client disconnects; a same-level respawn
@@ -103,7 +166,8 @@ in distant terrain or return a block behind a targeted entity.
 
 A client `EntityRef` supports `bounding_box(host)`, `eye_height(host)` and
 `eye_position(host)`. For the local player these use the current predicted body and pose;
-for a tracked target they use the client's displayed body. Stale handles and entities the
+for a tracked target they use the client's displayed body. End crystals expose their 2 x 2 box;
+dragon parts expose their own box. Stale handles and entities the
 client cannot read return `None`.
 
 The local `PlayerRef` also supports `within_entity_reach(host, target, rule)`: it reads the
@@ -135,32 +199,67 @@ These read the local player as the client sees it. They take no mod-controlled n
 - `ClientHost::hover_name(&stack)` is `ItemStack.getHoverName()` as plain text: the custom name, else
   a written book's non-blank title, else the item's name in the client's language, without rarity
   colour or italics. An invalid stack reads an empty string.
-- Reach is `targeting()` (below), which comes from the interaction-range attributes with the server's
-  and equipment's modifiers. Menu slot numbers are `Slot.index`, the position in the menu's slot list
+- `ClientHost::creative_search_items()` is the creative search tab's stacks, in the order the screen
+  lists them, once per item and components. Mod additions from `build_creative_mode_tab_contents`
+  join when the tabs are built, and the operator tab's items only with the last build's permissions.
+  It is empty before resources load. It reads the same on native and wasm.
+- `ClientHost::creative_tabs()` is the creative inventory's item tabs in `CreativeModeTabs.tabs()` order
+  (not the search, saved toolbars or survival inventory tabs), each a `CreativeModeTabInfo` with its
+  registry id and `display_items` (`CreativeModeTab.getDisplayItems`, components kept), and the build's
+  `has_permissions`. Mod stacks from `build_creative_mode_tab_contents` follow a tab's own, so this is
+  the read for "which tab shows this stack": `tabs_showing(&stack)` matches by item and components. The
+  operator tab is listed only when the last build had permissions. The contents come from the game's
+  tab export, built with vanilla's default feature flags: a world's feature set does not change them,
+  so there is no feature field. Empty before resources load; the same on native and wasm.
+- `ClientHost::item_uses_block_light(&stack, context)` is `ItemStackRenderState.usesBlockLight` of the
+  stack's model resolved for an `ItemDisplayContext` (no owner or level): true for a model lit like a
+  block from the side (`gui_light: side`), false for a flat item lit from the front. It is what
+  `BakedModel.isGui3d` became in 26.3, so use it to draw a stack as a flat sprite or as a 3D model.
+  It is false for an empty stack or one with no model.
+- Reach comes from the interaction-range attributes with the server's and equipment's
+  modifiers. Menu slot numbers are `Slot.index`, the position in the menu's slot list
   that `menu_slot` and `menu_slot_count` take; `menu_slot_backing` gives the index in the backing container.
 
 ## Combat targeting
 
-`ClientHost::targeting()` and `set_targeting(ClientTargeting)` control liquid picking,
-entity occlusion and an optional crosshair entity override. Defaults preserve ordinary
-vanilla targeting. Set `pick_liquids` to include source and flowing fluid shapes, or
-`hit_through_walls` to ignore block occlusion for entity picks and attacks. An `entity`
-override must name a live entity in this client level; stale or self handles make the
-setter return `false` without changing the controls. The setter requires a logged-in
-client world. An override is rechecked for reach, held-item range and occlusion when
-used and disappears from reads after its level is replaced.
+`client_pick` runs at both vanilla pick call sites: every client tick at
+partial tick 1.0 after the game mode tick and before key handling, even while
+paused; and every frame at its game-time partial tick before render-state
+extraction. Both write the same stored result. NeoForge 26.3 has no counterpart. The event supplies read-only `original`, `block_candidate` and
+`entity_candidate` values and a mutable `result`, initialized to `original`.
+Choose the block candidate to target a block through an entity, choose a target
+from the typed ray APIs, or clear the result for a miss. Later listeners see the
+previous listener's result. A reentrant `crosshair_target()` read sees `original`.
+
+The game accepts an unchanged original without revalidating its geometry. A
+replacement is validated at writeback: finite point, current level, live entity or
+matching block state, and the vanilla reach envelope, including forward movement
+for attack-range items. Invalid output becomes a miss, never a new ray. Attack,
+use and pick-item read their tick's stored pick; both hands of use share it. The
+highlight and crosshair read the frame's pick, which can differ from the tick's.
+Consumption does not recheck liveness: a creative break followed by use in the
+same tick still uses that tick's original block hit. Listener writes and publication
+run in one transaction. Buckets, bottles, boats, brushes and other item-specific
+rays remain independent and vanilla-exact.
+
+```rust,ignore
+fn client_pick(&self, _host: &mut dyn ClientHost, event: &mut ClientPickEvent<'_>) {
+    *event.result = event.block_candidate;
+}
+```
 
 Reach remains attribute-backed: use the server player's living handle and
 `set_attribute_base(host, "minecraft:block_interaction_range", value)` or
 `"minecraft:entity_interaction_range"`. The client's cached reach follows the server's
-attribute updates. Client targeting controls do not grant extra server reach.
+attribute updates. Replacing the client pick does not grant extra server reach.
 
 `client_attack_target` receives a mutable `targets` list before an ordinary melee click
 (spear jabs use their existing path). It starts with the crosshair entity. Replace it
 for redirection, append for multiple hits, or clear it to suppress an entity attack.
 `Flow::Cancel` cancels the batch. There is no batch cap; duplicates are sent once
-in first-occurrence order. Each target is checked again against live handles,
-attackability, reach, held-item range and the occlusion control. Clearing an entity hit
+in first-occurrence order. The selected entry keeps its committed tick-pick point
+and client occlusion policy. Additional targets are checked
+against live handles, attackability, reach, held-item range and ordinary block occlusion. Clearing an entity hit
 does not mine the block behind it; an empty list on a block or miss keeps the ordinary
 path. Each accepted hit uses normal attack packets and prediction. Server validation
 and cooldowns apply. Native and wasm mods use the same typed API.

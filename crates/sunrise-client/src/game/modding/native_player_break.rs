@@ -42,7 +42,7 @@ impl Drop for NestedBreak {
 
 impl Game<'_> {
     /// `ServerPlayerGameMode.destroyBlock` at `pos` as `player` breaks it, as FTB Ultimine does
-    /// (`PlayersBackendMut::player_destroy_block` says what holds and what is refused). With
+    /// (`PlayerInteractionBackendMut::player_destroy_block` says what holds and what is refused). With
     /// `into_inventory`, the drops `block_drops` leaves go to the player's inventory, and what
     /// doesn't fit drops from them as `Inventory.placeItemBackInInventory` drops it. Refused
     /// (false) once [`MAX_NESTED_BREAKS`] breaks are inside one another.
@@ -192,6 +192,91 @@ mod tests {
             assert!(popped(game, "minecraft:cobblestone"));
             assert_eq!(game.held().unwrap().damage, 1);
             assert_eq!(game.stats.get("mined", "minecraft:stone"), 1);
+        });
+    }
+
+    /// Only the selected slot harvests a block that requires a tool. Iron doors do not
+    /// require one in 26.3, so both hand arrangements harvest their lower-half drop.
+    #[test]
+    #[ignore = "daily"]
+    fn harvesting_uses_the_selected_slot_and_iron_doors_need_no_tool() {
+        with_game(|game| {
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(sunrise_client::chunk::Chunk::empty(0, 0)),
+            );
+            let pickaxe = ItemStack::new("minecraft:iron_pickaxe", 1);
+            let player = with_player(game, pickaxe.clone());
+            let iron = [8, 64, 4];
+            place(game, iron, "minecraft:iron_block");
+            assert!(game.player_destroy_block(player, iron, false));
+            assert!(
+                popped(game, "minecraft:iron_block"),
+                "selected pickaxe harvests"
+            );
+            game.dropped.clear();
+            game.inventory[game.selected] = None;
+            game.offhand = Some(pickaxe.clone());
+            game.hand = sunrise_client::first_person::Hand::Off;
+            place(game, iron, "minecraft:iron_block");
+            assert!(game.player_destroy_block(player, iron, false));
+            assert!(
+                !popped(game, "minecraft:iron_block"),
+                "offhand cannot harvest"
+            );
+            game.inventory[game.selected] = Some(pickaxe.clone());
+            game.offhand = None;
+            game.hand = sunrise_client::first_person::Hand::Main;
+            let (lower, upper) = ([6, 64, 4], [6, 65, 4]);
+            let door = |game: &mut Game<'_>, half: &str, pos: [i32; 3]| {
+                let state = game
+                    .pack
+                    .assets
+                    .registry
+                    .resolve(&sunrise_world::chunk::BlockState {
+                        name: "minecraft:iron_door".into(),
+                        properties: [
+                            ("facing", "north"),
+                            ("half", half),
+                            ("hinge", "left"),
+                            ("open", "false"),
+                            ("powered", "false"),
+                        ]
+                        .into_iter()
+                        .map(|(k, v)| (k.into(), v.into()))
+                        .collect(),
+                    })
+                    .unwrap();
+                game.world.set(pos[0], pos[1], pos[2], state).unwrap();
+            };
+            door(game, "lower", lower);
+            door(game, "upper", upper);
+            assert!(game.player_destroy_block(player, upper, false));
+            assert_eq!(block(game, upper), "minecraft:air");
+            // Vanilla takes the lower half out in the same call, by the neighbour update.
+            game.process_level_events().unwrap();
+            assert_eq!(
+                block(game, lower),
+                "minecraft:air",
+                "main hand: correct tool"
+            );
+            assert!(popped(game, "minecraft:iron_door"));
+
+            game.dropped.clear();
+            game.inventory[game.selected] = None;
+            game.offhand = Some(pickaxe);
+            game.hand = sunrise_client::first_person::Hand::Off;
+            door(game, "lower", lower);
+            door(game, "upper", upper);
+            assert_eq!(block(game, lower), "minecraft:iron_door");
+            assert!(game.player_destroy_block(player, upper, false));
+            assert_eq!(block(game, upper), "minecraft:air");
+            assert_eq!(
+                block(game, lower),
+                "minecraft:air",
+                "empty main hand: door needs no tool"
+            );
+            assert!(popped(game, "minecraft:iron_door"));
         });
     }
 

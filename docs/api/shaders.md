@@ -37,7 +37,7 @@ how the world is fed to the GPU.
 
 ## The pack format (schema 1)
 
-A pack is a folder, or the same files zipped as a `.hshader`, with `sunrise-shaders.toml` at its root
+A pack is a folder, or the same files zipped as a `.sshader`, with `sunrise-shaders.toml` at its root
 (crate `sunrise-shader-api`; the sample with every key is
 `crates/sunrise-shader-api/tests/samples/schema-1/`):
 
@@ -149,13 +149,13 @@ so a parallax effect fades out where the geometry took over.
 
 An option's `override` has the type of its kind: `bool`, `f32`, `i32`, or `u32` for a choice (the index of the
 value). The pack holds only the manifest, the `.wgsl` files it names (each used, UTF-8, 256 KiB at most),
-`README.md`, `LICENSE` (`.md`, `.txt`) and `icon.png`, under plain paths, 8 MiB in all. A `.hshader` is built
+`README.md`, `LICENSE` (`.md`, `.txt`) and `icon.png`, under plain paths, 8 MiB in all. A `.sshader` is built
 the same way every time (files in path order, fixed dates), so a pack's SHA-256 depends only on its files.
 
 Native selections are saved as `sunrise:<id>`; option values live in
 `shaderpacks/.sunrise-options/<id>.txt`. Updates and file renames keep both. Existing filename
 selections and sidecars are imported without deleting the originals; after an update has removed
-the old file, migration recognizes the launcher's `<id>-<version>.hshader` names. An arbitrary
+the old file, migration recognizes the launcher's `<id>-<version>.sshader` names. An arbitrary
 removed filename cannot be mapped back to an ID. If several installed packs share an ID, the first
 filename in lexical order is used and listed. The `SUNRISE_SHADER_PACK` development override still
 names an exact filesystem path; `shaders/` packs still use filenames.
@@ -361,7 +361,7 @@ draws them itself (the material stage covers terrain only). The first-person han
 - 2026-10-25: `sunrise-shader` (`new`, `check`, `pack`), three templates, the example pack and the guide.
 - 2026-10-25: the check (naga validation, signatures, options, budgets, SPIR-V/Metal/HLSL translation).
 - 2026-10-25: the stages of API 0.1 (sky, material, post), their inputs and the generated reference.
-- 2026-10-25: the pack format, schema 1: `sunrise-shaders.toml` and the `.hshader` package.
+- 2026-10-25: the pack format, schema 1: `sunrise-shaders.toml` and the `.sshader` package.
 - 2026-10-24: the earlier shader pack code was removed; this API is designed from scratch.
 - 2026-11-01: API 0.1 (additions): a stage's `files`.
 - 2026-11-01: API 0.1 (additions): `[material] fog`.

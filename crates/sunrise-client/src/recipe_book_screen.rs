@@ -50,7 +50,7 @@ pub enum Call {
         tw: i32,
         th: i32,
     },
-    /// `blitSprite`, the id without its namespace.
+    /// `blitSprite`: vanilla's id without its namespace, or a mod's `namespace:path`.
     Sprite {
         id: String,
         x: i32,
@@ -180,6 +180,8 @@ pub struct Screen<'a> {
     /// `slotSelectTime.currentIndex()`.
     pub index: usize,
     pub filtering: bool,
+    /// A mod book's own filter button look; none keeps the sprites and tooltips of `book`.
+    pub filter_look: Option<&'a mod_api::RecipeBookFilterLook>,
     pub search: &'a Search,
     pub tabs: &'a [TabView],
     /// The current page's buttons.
@@ -272,36 +274,39 @@ pub fn draw(s: &Screen) -> Vec<Drawn> {
     // The craftable filter.
     let (fx, fy) = (xo + 110, yo + 12);
     let hover = s.hovered(fx, fy, 26, 16);
-    let prefix = if s.book == BookType::Crafting {
-        "recipe_book/"
-    } else {
-        "recipe_book/furnace_"
+    let highlight = if hover { "_highlighted" } else { "" };
+    let sprite = match s.filter_look {
+        Some(look) => match (s.filtering, hover) {
+            (true, false) => look.enabled.clone(),
+            (false, false) => look.disabled.clone(),
+            (true, true) => look.enabled_highlighted.clone(),
+            (false, true) => look.disabled_highlighted.clone(),
+        },
+        None => {
+            let prefix = if s.book == BookType::Crafting {
+                "recipe_book/"
+            } else {
+                "recipe_book/furnace_"
+            };
+            let state = if s.filtering {
+                "filter_enabled"
+            } else {
+                "filter_disabled"
+            };
+            format!("{prefix}{state}{highlight}")
+        }
     };
-    let state = if s.filtering {
-        "filter_enabled"
-    } else {
-        "filter_disabled"
-    };
-    put(
-        sprite_call(
-            &format!("{prefix}{state}{}", if hover { "_highlighted" } else { "" }),
-            fx,
-            fy,
-            26,
-            16,
-        ),
-        IDENTITY,
-    );
+    put(sprite_call(&sprite, fx, fy, 26, 16), IDENTITY);
     if hover {
-        let key = if !s.filtering {
-            "gui.recipebook.toggleRecipes.all"
-        } else {
-            match s.book {
+        let key = match (s.filtering, s.filter_look) {
+            (false, _) => "gui.recipebook.toggleRecipes.all",
+            (true, Some(look)) => look.tooltip.as_str(),
+            (true, None) => match s.book {
                 BookType::Crafting => "gui.recipebook.toggleRecipes.craftable",
                 BookType::Furnace => "gui.recipebook.toggleRecipes.smeltable",
                 BookType::BlastFurnace => "gui.recipebook.toggleRecipes.blastable",
                 BookType::Smoker => "gui.recipebook.toggleRecipes.smokable",
-            }
+            },
         };
         put(
             Call::Tooltip(vec![vec![Run::plain((s.translate)(key))]]),

@@ -3,14 +3,15 @@
 //! Hook documentation and contract versions live in the catalog, not a shared changelog.
 //!
 //! Native mods are built against an exact game revision, rather than a hook API revision.
-//! Bodies have no `cfg` and no macros: sunrise-mixins refuses a target with
+//! Bodies have no `cfg` and no macros: horizon-mixins refuses a target with
 //! either (`tests::hook_points_stay_hookable`).
 
 /// Generated dispatch entry points, not hand-written hook implementations.
 mod fire;
+pub(in crate::game) use client_pick::ClientPick;
 pub(in crate::game) use fire::{
     BlockDropsCall, BlockScreenEffectDrawCall, ConnectsToCall, EntityChangeBlockPreCall,
-    ItemAfterVerticalCollisionCall, UpdateShapeCall,
+    ItemAfterVerticalCollisionCall, PreRemoveSideEffectsCall, UpdateShapeCall,
 };
 use mod_api::{BlockEntityDataSource, BlockEntityRef, ClockAdjustment};
 
@@ -58,7 +59,6 @@ use mod_api::{
     CameraType, Despawn, Identifier, MobRef, PermissionLevel, RailShape, SoundPlay, SoundRef,
 };
 use std::{
-    collections::HashMap,
     fs,
     path::{Path, PathBuf},
     sync::Arc,
@@ -88,7 +88,6 @@ use sunrise_client::{
     hud_layout::GuiDraw,
     items::ItemStack,
     keybinds,
-    lan::menu::Slots,
     merchant::MerchantOffer,
     mobs::Who,
     mod_list::{self, Installed, KeyMapping, NativePage, NativeSetting, NativeSettingValue},
@@ -102,7 +101,6 @@ use sunrise_core::{
     connection_kind::ConnectionKind,
     geometry::Direction,
     position::BlockPos,
-    random::LegacyRandom,
     ticks::{ScheduleResult, TickPriority},
 };
 use sunrise_world::level::{BonemealCheck, PlaceContext};
@@ -121,8 +119,8 @@ use {
 
 include!(concat!(env!("OUT_DIR"), "/native_hook_modules.rs"));
 pub(in crate::game) use add_attribute_tooltips::HookedAttributeTooltips;
+pub(in crate::game) use base::LevelView;
 pub(in crate::game) use bounce_restitution::install_block_contact_hooks;
-pub(in crate::game) use fishing_medium::NativeFishingMedium;
 pub(in crate::game) use living_change_target::NativeHookHost;
 include!("shared.rs");
 

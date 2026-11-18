@@ -1,6 +1,6 @@
 # Writing the modding book
 
-The modding book (`docs/modding`, published at <https://arismoko.github.io/sunrise/>) is the manual for mod
+The modding book (`docs/modding`, whose canonical Pages URL is <https://sunrise-org.github.io/sunrise/>, deployed by `modding-book-pages` while `MODDING_BOOK_PAGES` is `on`) is the manual for mod
 authors: it describes what the game does on main, nothing else. Designs, proposals, plans, trackers and coverage
 ledgers live in [`docs/design/`](design/) (mod API designs in [`docs/design/mod-api/`](design/mod-api/)), and
 notes for people working on Sunrise itself in [`docs/mod-api/`](mod-api/). The book build refuses a page whose
@@ -78,7 +78,7 @@ A reviewer runs your change in game at your head only when a test can't cover on
 - when or in what order something happens compared with vanilla, such as a hook's firing point.
 
 If your PR changes or removes something mods already use, the reviewer also runs
-[sunrise-machine-sample](https://github.com/arismoko/horizon-machine-sample) against it. A new item's `///` doc is its
+[sunrise-machine-sample](https://github.com/sunrise-org/sunrise-machine-sample) against it. A new item's `///` doc is its
 reference.
 
 ## A catalog point and the wasm fixture

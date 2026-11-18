@@ -50,7 +50,16 @@ static BLOB: AttachmentType<Vec<u8>> = AttachmentType {
 /// A mod with no hooks: with a mod loaded, the server sends joining players snapshots.
 pub(super) struct Route;
 #[mod_api::__subscriptions]
-impl mod_api::Hooks for Route {}
+impl mod_api::Hooks for Route {
+    fn register(&self, registrar: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+        registrar
+            .register_attachment_type("sync_route:value", true)
+            .unwrap();
+        registrar
+            .register_attachment_type("sync_route:blob", true)
+            .unwrap();
+    }
+}
 
 /// The server's own attachment store.
 pub(super) fn store<'a>(server: &'a mut Game<'_>) -> &'a mut dyn AttachmentStore {
@@ -76,6 +85,7 @@ fn window_value(game: &mut Game<'_>) -> Option<i32> {
     let host: &dyn Host = game;
     let rows = host
         .attachment_query("sync_route", "value")
+        .unwrap()
         .query(&VALUE)
         .ok()?;
     rows.iter().next().map(|row| *row.unwrap().value)
@@ -147,6 +157,19 @@ pub(super) fn peer(port: u16, name: &str, sunrise: bool) -> Connection {
     let local =
         sunrise_client::raw_payloads::Local::capture(sunrise_client::raw_payloads::Side::Client)
             .unwrap();
+    if sunrise {
+        // A server queries a client only once its brand says Sunrise.
+        let mut brand = sunrise_protocol::buf::Writer::new();
+        brand.string("sunrise");
+        c.send(
+            &cfg::Serverbound::CustomPayload(cfg::CustomPayload {
+                channel: "minecraft:brand".into(),
+                data: brand.data,
+            })
+            .encode(),
+        )
+        .unwrap();
+    }
     loop {
         assert!(Instant::now() < deadline, "configuration deadline: {name}");
         let (id, body) = c.recv().unwrap();
@@ -168,6 +191,8 @@ pub(super) fn peer(port: u16, name: &str, sunrise: bool) -> Connection {
                 c.send(&cfg::Serverbound::SelectKnownPacks(p).encode())
                     .unwrap();
             }
+            // The server pings a Sunrise client whose Offer is not in by its pack reply.
+            cfg::Clientbound::Ping(p) => c.send(&cfg::Serverbound::Pong(p).encode()).unwrap(),
             cfg::Clientbound::FinishConfiguration(_) => break,
             cfg::Clientbound::Disconnect(p) => panic!("disconnected: {p:?}"),
             _ => {}

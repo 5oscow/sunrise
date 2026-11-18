@@ -11,6 +11,9 @@ sunrise-game-discovery = { path = "../../sunrise-game-discovery" }
 sunrise-mod-api-gen = { path = "../../sunrise-mod-api-gen" }
 
 [dev-dependencies]
+sunrise-client-lib = { path = "../../sunrise-client-lib", default-features = false }
+sunrise-items = { path = "../../sunrise-items" }
+sunrise-protocol = { path = "../../sunrise-protocol" }
 sunrise-core = { path = "../../sunrise-core" }
 sunrise-mod-runtime = { path = "../../sunrise-mod-runtime" }
 sunrise-world = { path = "../../sunrise-world" }

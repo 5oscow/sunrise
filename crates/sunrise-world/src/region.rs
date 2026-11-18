@@ -387,6 +387,11 @@ impl RegionFile {
         self.file.sync_data()
     }
 
+    /// Clone the file handle so a caller can flush after releasing the region lock.
+    pub fn sync_handle(&self) -> io::Result<File> {
+        self.file.try_clone()
+    }
+
     /// `RegionFile.writeHeader`: both header sectors from memory, so the
     /// entries dropped as invalid when the file was opened are zero on disk too.
     fn write_header(&mut self) -> io::Result<()> {
@@ -749,6 +754,31 @@ mod tests {
         // The next region's chunk.
         assert!(header.read_chunk(ChunkPos::new(0, 64)).is_err());
         assert!(RegionHeader::read(dir.join("r.5.5.mca")).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_cloned_sync_handle_flushes_region_writes() {
+        let dir =
+            std::env::temp_dir().join(format!("sunrise-region-sync-handle-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("r.0.0.mca");
+        let chunk = ChunkPos::new(3, 5);
+        let record = ChunkRecord {
+            compression: Compression::None,
+            compressed: vec![7; 100],
+            timestamp: 7,
+        };
+        let mut region = RegionFile::open_writable(&path, true).unwrap();
+        region.write(chunk, &record).unwrap();
+        let handle = region.sync_handle().unwrap();
+        drop(region);
+        handle.sync_data().unwrap();
+
+        let mut reopened = RegionFile::open(&path).unwrap();
+        let saved = reopened.read(chunk).unwrap().unwrap();
+        assert_eq!(saved.compressed, record.compressed);
+        assert_eq!(saved.timestamp, record.timestamp);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

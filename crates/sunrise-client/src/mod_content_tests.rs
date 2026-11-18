@@ -10,6 +10,8 @@ mod block_entity_tests;
 mod farmland_tests;
 #[path = "mod_content_jar_tests.rs"]
 mod jar_tests;
+#[path = "mod_content_waterlogged_tests.rs"]
+mod waterlogged_tests;
 /// A Java jar's assets are a pack layer under the mod's own files, in mod
 /// order under the later mods. Passive assets stay in the jar, and the files
 /// every pack stacks (atlases here) merge across vanilla, the jars and the
@@ -462,6 +464,169 @@ fn state_light_from_native_declarations_invalidates_the_content_cache() {
     fs::remove_dir_all(base.parent().unwrap()).unwrap();
 }
 
+/// The prepared resources, a mod's files, and a game folder's link to them.
+fn tag_files(values: &str) -> Vec<(&'static str, String)> {
+    vec![
+        ("sunrise-mod.toml", manifest("testmod", "")),
+        (
+            "data/testmod/tags/item/a.json",
+            format!(r#"{{"values":[{values}]}}"#),
+        ),
+    ]
+}
+
+fn resources(dir: &Path) -> PathBuf {
+    let base = dir.join("resources");
+    small_base(&base);
+    fs::write(base.join("sunrise-resources.json"), b"{}").unwrap();
+    fs::write(
+        base.join("facts.json"),
+        r#"{"states":[["minecraft:stone"]],"defaults":{"minecraft:stone":0}}"#,
+    )
+    .unwrap();
+    fs::write(
+        base.join("gameplay-facts.json"),
+        r#"{"states":[{"item":"minecraft:stone"}]}"#,
+    )
+    .unwrap();
+    base
+}
+
+fn mod_in(dir: &Path, files: &[(&'static str, String)]) -> Vec<ContentMod> {
+    let files: Vec<(&str, &str)> = files.iter().map(|(n, t)| (*n, t.as_str())).collect();
+    vec![folder_mod(&dir.join("mod"), &files)]
+}
+
+#[test]
+fn the_stamp_follows_a_mod_files_contents_not_its_folder_or_time() {
+    let scratch = tempfile::tempdir().unwrap();
+    let base = resources(scratch.path());
+    let at = |dir: &str, files: &[(&'static str, String)]| {
+        let mods = mod_in(&scratch.path().join(dir), files);
+        stamp(&base, &base.join("jars"), &mods, &fixture_inventory(&mods)).unwrap()
+    };
+    let files = tag_files("");
+    let first = at("one", &files);
+    assert_eq!(first, at("two", &files), "the same files in another folder");
+    let tag = scratch.path().join("one/mod/data/testmod/tags/item/a.json");
+    fs::File::options()
+        .write(true)
+        .open(&tag)
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(60))
+        .unwrap();
+    assert_eq!(
+        first,
+        at("one", &files),
+        "a newer file time, the same bytes"
+    );
+    assert_ne!(
+        first,
+        at("three", &tag_files(r#""minecraft:stone""#)),
+        "one file's bytes differ"
+    );
+}
+
+/// Each game folder reaches the one set of prepared resources through its own link
+/// (`.local/sunrise-client/26.3`), and keeps its own copy of the mods.
+#[cfg(unix)]
+fn game_folder(
+    parent: &Path,
+    name: &str,
+    resources: &Path,
+    files: &[(&'static str, String)],
+) -> (PathBuf, Vec<ContentMod>) {
+    let folder = parent.join(name);
+    let link = folder.join(".local/sunrise-client/26.3");
+    fs::create_dir_all(link.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(resources, &link).unwrap();
+    (link, mod_in(&folder, files))
+}
+
+#[cfg(unix)]
+#[test]
+fn game_folders_linking_the_same_resources_share_a_stamp() {
+    let scratch = tempfile::tempdir().unwrap();
+    let real = resources(scratch.path());
+    let files = tag_files("");
+    let (one, mods_one) = game_folder(scratch.path(), "one", &real, &files);
+    let (two, mods_two) = game_folder(scratch.path(), "two", &real, &files);
+    let stamp_of = |base: &Path, mods: &[ContentMod]| {
+        stamp(base, &base.join("jars"), mods, &fixture_inventory(mods)).unwrap()
+    };
+    assert_eq!(stamp_of(&one, &mods_one), stamp_of(&two, &mods_two));
+    assert_eq!(stamp_of(&one, &mods_one), stamp_of(&real, &mods_one));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_root_built_from_one_game_folder_is_reused_after_it_is_deleted() {
+    let scratch = tempfile::tempdir().unwrap();
+    let real = resources(scratch.path());
+    let cache = scratch.path().join("cache");
+    let files = tag_files("");
+    let (one, mods_one) = game_folder(scratch.path(), "one", &real, &files);
+    let first = resource_root_fixture(&one, &one.join("jars"), &mods_one, &cache).unwrap();
+    let built = fs::metadata(first.join(STAMP)).unwrap().modified().unwrap();
+    fs::remove_dir_all(scratch.path().join("one")).unwrap();
+    let (two, mods_two) = game_folder(scratch.path(), "two", &real, &files);
+    let second = resource_root_fixture(&two, &two.join("jars"), &mods_two, &cache).unwrap();
+    assert_eq!(first, second, "the same root, not a rebuilt one");
+    assert_eq!(
+        built,
+        fs::metadata(second.join(STAMP))
+            .unwrap()
+            .modified()
+            .unwrap(),
+        "its stamp wasn't written again"
+    );
+    assert_eq!(
+        fs::read(second.join("facts.json")).unwrap(),
+        fs::read(real.join("facts.json")).unwrap(),
+        "its links reach the resources after the first folder is gone"
+    );
+    let loaded =
+        resolved_resources(&two, second.clone(), &two.join("jars"), &mods_two, cache).unwrap();
+    assert!(loaded.source().read("items.json").is_ok());
+}
+
+/// A smoke test: concurrent starts on one cache end with one valid root. It doesn't
+/// prove the lock is what kept them apart.
+#[cfg(unix)]
+#[test]
+fn starts_preparing_one_root_at_once_all_get_the_same_valid_root() {
+    let scratch = tempfile::tempdir().unwrap();
+    let real = resources(scratch.path());
+    let cache = scratch.path().join("cache");
+    let files = tag_files("");
+    let games: Vec<_> = ["one", "two", "three", "four"]
+        .into_iter()
+        .map(|name| game_folder(scratch.path(), name, &real, &files))
+        .collect();
+    let roots: Vec<PathBuf> = std::thread::scope(|scope| {
+        let starts: Vec<_> = games
+            .iter()
+            .map(|(base, mods)| {
+                let cache = &cache;
+                scope.spawn(move || {
+                    resource_root_fixture(base, &base.join("jars"), mods, cache).unwrap()
+                })
+            })
+            .collect();
+        starts.into_iter().map(|s| s.join().unwrap()).collect()
+    });
+    assert!(roots.iter().all(|root| root == &roots[0]));
+    let loaded = resolved_resources(
+        &games[0].0,
+        roots[0].clone(),
+        &games[0].0.join("jars"),
+        &games[0].1,
+        cache,
+    )
+    .unwrap();
+    assert!(loaded.source().read("items.json").is_ok());
+}
+
 #[test]
 #[ignore = "daily"]
 fn block_aliases_keep_the_original_item_in_placement_context() {
@@ -552,6 +717,8 @@ fn block_aliases_keep_the_original_item_in_placement_context() {
         }
         fn before_state_for_placement(
             &self,
+            _: &sunrise_world::level::Ticks,
+            _: Option<&sunrise_world::level::PreviewBlocks>,
             _: BlockStateId,
             c: &PlacementContext,
             _: sunrise_world::fluid::FluidState,
@@ -1588,7 +1755,13 @@ fn content_root_loads_with_every_table() {
         .find(crate::test_resources::server_loop_context(), &grid, 2)
         .unwrap();
     assert_eq!(&*result.item, "ruby:ruby");
-    let rest = recipes.remainders(id, &grid, 2, &|s| items.crafting_remainder(s));
+    let rest = recipes.remainders(
+        crate::test_resources::server_loop_context(),
+        id,
+        &grid,
+        2,
+        &|s| items.crafting_remainder(s),
+    );
     assert_eq!(rest[0].as_ref().map(|s| &*s.item), Some("minecraft:bowl"));
     assert!(!items.items.contains_key("ruby:ruby_glass"));
     let pickaxe = &items.block_tags["minecraft:mineable/pickaxe"];
@@ -2879,84 +3052,6 @@ fn mods_sharing_a_namespace_are_refused() {
     let _ = fs::remove_dir_all(&scratch);
 }
 
-#[test]
-#[ignore = "daily"]
-fn conditional_tag_layers_replace_only_when_server_inventory_accepts_them() {
-    let Some(base) = prepared() else { return };
-    let scratch =
-        std::env::temp_dir().join(format!("sunrise-tag-conditions-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&scratch);
-    let file = "data/minecraft/tags/block/conditional_probe.json";
-    let packages = [
-        ("lower", r#"{"values":["minecraft:stone"]}"#),
-        (
-            "conditional",
-            r#"{"neoforge:conditions":[{"type":"neoforge:mod_loaded","modid":"code_only"}],"replace":true,"values":["minecraft:dirt"]}"#,
-        ),
-        (
-            "unsupported",
-            r#"{"neoforge:conditions":[{"type":"unknown:condition"}],"replace":true,"values":["minecraft:diamond_block"]}"#,
-        ),
-        ("tail", r#"{"values":["minecraft:gold_block"]}"#),
-    ];
-    let mods: Vec<_> = packages
-        .into_iter()
-        .map(|(id, tag)| {
-            folder_mod(
-                &scratch.join(id),
-                &[("sunrise-mod.toml", &manifest(id, "")), (file, tag)],
-            )
-        })
-        .collect();
-    let inventory = |side: Option<mod_api::Side>| {
-        sunrise_mod_package::enabled::EnabledMods::new(
-            mods.iter()
-                .map(|m| (m.id.clone(), mod_api::Side::Both))
-                .chain(side.map(|side| ("code_only".into(), side))),
-        )
-    };
-    let cache = scratch.join("cache");
-    let read = |root: &Path| -> serde_json::Value {
-        serde_json::from_slice(&fs::read(root.join(file)).unwrap()).unwrap()
-    };
-    let off = super::resource_root(&base, Path::new(""), &mods, &cache, &inventory(None)).unwrap();
-    assert_eq!(
-        read(&off)["values"],
-        serde_json::json!(["minecraft:diamond_block", "minecraft:gold_block"])
-    );
-    let on = super::resource_root(
-        &base,
-        Path::new(""),
-        &mods,
-        &cache,
-        &inventory(Some(mod_api::Side::Both)),
-    )
-    .unwrap();
-    assert_ne!(on, off, "code-only IDs invalidate the flattened tag cache");
-    assert_eq!(
-        read(&on)["values"],
-        serde_json::json!(["minecraft:diamond_block", "minecraft:gold_block"])
-    );
-    assert!(read(&on).get("neoforge:conditions").is_none());
-    let client = super::resource_root(
-        &base,
-        Path::new(""),
-        &mods,
-        &cache,
-        &inventory(Some(mod_api::Side::Client)),
-    )
-    .unwrap();
-    assert_eq!(read(&client)["values"], read(&off)["values"]);
-    let again =
-        super::resource_root(&base, Path::new(""), &mods, &cache, &inventory(None)).unwrap();
-    assert_eq!(again, off);
-    assert_eq!(
-        read(&off)["values"],
-        serde_json::json!(["minecraft:diamond_block", "minecraft:gold_block"])
-    );
-    fs::remove_dir_all(scratch).unwrap();
-}
-
 #[path = "mod_content_tests_tests.rs"]
 mod more;
 
@@ -4134,8 +4229,9 @@ fn declared_shapes_drive_lighting_and_occlusion() {
         );
         let (base, mods) = block_base(label, &[&declaration]);
         let plan = Plan::new(&base, &mods).unwrap();
+        // A non-occluding template must not suppress an explicit true, even for a partial outline.
         let row =
-            r#"{"can_occlude":true,"solid_render":true,"dampening":15,"skylight_down":false}"#;
+            r#"{"can_occlude":false,"solid_render":false,"dampening":1,"skylight_down":false}"#;
         let mut gameplay: J =
             serde_json::from_str(&format!(r#"{{"states":[{row},{row}]}}"#)).unwrap();
         plan.json("gameplay-facts.json", &mut gameplay).unwrap();
@@ -4182,6 +4278,112 @@ fn declared_shapes_drive_lighting_and_occlusion() {
         }
         fs::remove_dir_all(base.parent().unwrap()).unwrap();
     }
+}
+
+#[test]
+fn declared_offset_occlusion_uses_origin_without_shifting_the_local_outline() {
+    let declaration = r#"{"template":"minecraft:test","item":false,"properties":{"offset":"XZ"},
+      "shapes":{"default":[[0,0,0,1,1,1]]}}"#;
+    let (base, mods) = block_base("offset-occlusion-origin", &[declaration]);
+    let plan = Plan::new(&base, &mods).unwrap();
+    let row = r#"{"can_occlude":true,"solid_render":true,"dampening":15}"#;
+    let mut gameplay: J = serde_json::from_str(&format!(r#"{{"states":[{row},{row}]}}"#)).unwrap();
+    plan.json("gameplay-facts.json", &mut gameplay).unwrap();
+    let Some(J::Arr(rows)) = gameplay.get("states") else {
+        panic!("states")
+    };
+    assert_eq!(rows[2].get("solid_render"), Some(&J::Bool(false)));
+    assert_eq!(rows[2].get("shape_occlusion"), Some(&J::Bool(true)));
+    assert_eq!(rows[2].get("dampening"), Some(&J::Num(0.into())));
+    assert_eq!(
+        rows[2].get("outline"),
+        Some(&J::Arr(vec![J::Arr(
+            [0., 0., 0., 1., 1., 1.].into_iter().map(J::f64).collect()
+        )]))
+    );
+    let mut occlusion = Tag::compound([
+        (
+            "states",
+            Tag::List(vec![test_state_row("x"), test_state_row("y")]),
+        ),
+        ("shapes", Tag::List(vec![])),
+        ("cached_shapes", Tag::IntArray(vec![-1, -1])),
+    ]);
+    plan.nbt(&mut occlusion);
+    plan.declared_shapes(&mut occlusion, false).unwrap();
+    let Some(Tag::List(shapes)) = occlusion.get("shapes") else {
+        panic!("shapes")
+    };
+    let Some(Tag::IntArray(mapping)) = occlusion.get("cached_shapes") else {
+        panic!("mapping")
+    };
+    let shifted = &shapes[mapping[2] as usize];
+    let offset_axis = Tag::LongArray(vec![(-0.25f64).to_bits() as i64, 0.75f64.to_bits() as i64]);
+    assert_eq!(shifted.get("x"), Some(&offset_axis));
+    assert_eq!(shifted.get("z"), Some(&offset_axis));
+    fs::remove_dir_all(base.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn enabling_occlusion_uses_the_templates_published_shape() {
+    let declaration =
+        r#"{"template":"minecraft:test","item":false,"properties":{"occludes":true}}"#;
+    let (base, mods) = block_base("enable-template-occlusion", &[declaration]);
+    let tag = Tag::compound([
+        ("DataVersion", Tag::Int(sunrise_world::DATA_VERSION)),
+        (
+            "states",
+            Tag::List(vec![test_state_row("x"), test_state_row("y")]),
+        ),
+        (
+            "shapes",
+            Tag::List(vec![
+                encode_shape(&VoxelShape::block()),
+                encode_shape(&VoxelShape::empty()),
+            ]),
+        ),
+        ("cached_shapes", Tag::IntArray(vec![0, 1])),
+    ]);
+    fs::write(
+        base.join("occlusion.nbt"),
+        nbt::write_named(
+            &nbt::NamedTag {
+                name: "".into(),
+                tag,
+            },
+            Limits::tables(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let plan = Plan::new(&base, &mods).unwrap();
+    let row = r#"{"can_occlude":false,"solid_render":false,"dampening":0,"skylight_down":true}"#;
+    let mut gameplay: J = serde_json::from_str(&format!(r#"{{"states":[{row},{row}]}}"#)).unwrap();
+    plan.json("gameplay-facts.json", &mut gameplay).unwrap();
+    let Some(J::Arr(rows)) = gameplay.get("states") else {
+        panic!("states")
+    };
+    assert_eq!(rows[2].get("can_occlude"), Some(&J::Bool(true)));
+    assert_eq!(rows[2].get("solid_render"), Some(&J::Bool(true)));
+    assert_eq!(rows[2].get("dampening"), Some(&J::Num(15.into())));
+    assert_eq!(rows[3].get("solid_render"), Some(&J::Bool(false)));
+    assert_eq!(rows[3].get("dampening"), Some(&J::Num(0.into())));
+    assert_eq!(rows[2].get("skylight_down"), Some(&J::Bool(true)));
+    let mut definitions: J =
+        serde_json::from_str(r#"{"minecraft:test":{"can_occlude":false}}"#).unwrap();
+    plan.json("render-definitions.json", &mut definitions)
+        .unwrap();
+    assert_eq!(
+        definitions.at("testmod:test/can_occlude"),
+        Some(&mut J::Bool(true))
+    );
+    let mut flags = Tag::compound([("blocks", Tag::compound([("minecraft:test", Tag::Byte(0))]))]);
+    plan.nbt(&mut flags);
+    assert_eq!(
+        flags.get("blocks").unwrap().get("testmod:test"),
+        Some(&Tag::Byte(16))
+    );
+    fs::remove_dir_all(base.parent().unwrap()).unwrap();
 }
 
 #[test]
@@ -5398,6 +5600,82 @@ fn configured_features_load_from_the_26_3_path() {
     fs::remove_dir_all(scratch).unwrap();
 }
 
+/// A content mod's own biomes join the biome set after vanilla's, by namespace
+/// then path; a `minecraft` biome file never joins it (the content fence refuses the file). Its tag keeps them, a
+/// modifier on that tag reaches them, and the biome suggestions list them.
+#[test]
+fn a_mods_own_biomes_join_the_biome_set() {
+    let base = biome_base("mod-biomes");
+    let scratch = base.parent().unwrap().to_owned();
+    fs::write(
+        base.join("command-registries.json"),
+        r#"{"blocks":{},"items":[],"by_registry":{"minecraft:worldgen/biome":{"ids":["minecraft:desert","minecraft:plains"]}}}"#,
+    )
+    .unwrap();
+    let foo = r#"{"temperature":1.5,"downfall":0.0,"features":[[]]}"#;
+    let m = folder_mod(
+        &scratch.join("zinc"),
+        &[
+            ("sunrise-mod.toml", &manifest("zinc", "")),
+            ("data/zinc/worldgen/biome/foo.json", foo),
+            ("data/zinc/worldgen/biome/bar/a.json", foo),
+            (
+                "data/zinc/worldgen/feature/ore_zinc.json",
+                r#"{"type":"minecraft:ore","config":{}}"#,
+            ),
+            (
+                "data/zinc/worldgen/placed_feature/ore_zinc.json",
+                r#"{"feature":"zinc:ore_zinc","placement":[]}"#,
+            ),
+            (
+                "data/zinc/tags/worldgen/biome/hot.json",
+                r#"{"values":["zinc:foo","zinc:missing"]}"#,
+            ),
+            (
+                "data/zinc/neoforge/biome_modifier/hot_ore.json",
+                r##"{"type":"neoforge:add_features","biomes":"#zinc:hot",
+                    "features":"zinc:ore_zinc","step":"underground_ores"}"##,
+            ),
+        ],
+    );
+    let out = scratch.join("out");
+    build_fixture(&base, Path::new(""), &[m], &out).unwrap();
+    let text = |root: &Path| fs::read_to_string(root.join("worldgen/biomes.json")).unwrap();
+    let bundle: BTreeMap<String, String> = serde_json::from_str(&text(&out)).unwrap();
+    let vanilla: BTreeMap<String, String> = serde_json::from_str(&text(&base)).unwrap();
+    for (id, biome) in &vanilla {
+        assert_eq!(&bundle[id], biome, "{id}");
+    }
+    assert_eq!(bundle.len(), vanilla.len() + 2);
+    let features = biome_features(&out);
+    assert_eq!(
+        features["zinc:foo"],
+        serde_json::json!([[], [], [], [], [], [], ["zinc:ore_zinc"]])
+    );
+    assert_eq!(features["zinc:bar/a"], serde_json::json!([[]]));
+    // After vanilla's, then by path.
+    let at = |id: &str| text(&out).find(&format!("\"{id}\":")).unwrap();
+    assert!(at("minecraft:plains") < at("zinc:bar/a") && at("zinc:bar/a") < at("zinc:foo"));
+    let tag: BTreeMap<String, String> =
+        serde_json::from_slice(&fs::read(out.join("worldgen/biome_tags.json")).unwrap()).unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&tag["zinc:hot"]).unwrap()["values"],
+        serde_json::json!(["zinc:foo"])
+    );
+    let commands: serde_json::Value =
+        serde_json::from_slice(&fs::read(out.join("command-registries.json")).unwrap()).unwrap();
+    assert_eq!(
+        commands["by_registry"]["minecraft:worldgen/biome"]["ids"],
+        serde_json::json!([
+            "minecraft:desert",
+            "minecraft:plains",
+            "zinc:bar/a",
+            "zinc:foo"
+        ])
+    );
+    let _ = fs::remove_dir_all(&scratch);
+}
+
 /// A world's data pack that replaces a vanilla biome (Terralith's plains)
 /// keeps the mods' modifier features, and a pack's own biome its tag puts
 /// under the modifier's selector gets them: modifiers apply after
@@ -6105,8 +6383,8 @@ fn signs_take_their_form_wood_and_wall_block_from_their_declaration() {
 
 /// A fence gate of a mod is a vanilla `FenceGateBlock` through its template, with
 /// its wood's sounds unless the file names its own: `open_sound` and
-/// `close_sound` replace `WoodType.fenceGateOpen` and `fenceGateClose`, the one
-/// value a use, a redstone change and an explosion all read.
+/// `close_sound` override every site or just the named sites, retaining the
+/// template wood for each missing site.
 #[test]
 #[ignore = "daily"]
 fn a_content_fence_gate_plays_its_own_sounds_or_its_woods() {
@@ -6133,6 +6411,10 @@ fn a_content_fence_gate_plays_its_own_sounds_or_its_woods() {
                 "data/gates/sunrise/block/half.json",
                 r#"{"template": "minecraft:birch_fence_gate", "open_sound": "gates:half.open"}"#,
             ),
+            (
+                "data/gates/sunrise/block/sites.json",
+                r#"{"template":"minecraft:oak_fence_gate","open_sound":{"use":"gates:use.open","redstone":"gates:wire.open"},"close_sound":{"explosion":"gates:blast.close"}}"#,
+            ),
         ],
     );
     let root = resource_root_fixture(
@@ -6148,12 +6430,15 @@ fn a_content_fence_gate_plays_its_own_sounds_or_its_woods() {
         let state = registry.default_state(name).unwrap();
         let data = behaviours.data(state);
         (
-            data.gate_open.as_deref().map(str::to_owned),
-            data.gate_close.as_deref().map(str::to_owned),
+            std::array::from_fn::<_, 3, _>(|i| data.gate_open[i].as_deref().map(str::to_owned)),
+            std::array::from_fn::<_, 3, _>(|i| data.gate_close[i].as_deref().map(str::to_owned)),
         )
     };
     let gate = |open: Option<&str>, close: Option<&str>| {
-        (open.map(str::to_owned), close.map(str::to_owned))
+        (
+            std::array::from_fn::<_, 3, _>(|_| open.map(str::to_owned)),
+            std::array::from_fn::<_, 3, _>(|_| close.map(str::to_owned)),
+        )
     };
     assert_eq!(
         sounds("gates:oak"),
@@ -6171,6 +6456,23 @@ fn a_content_fence_gate_plays_its_own_sounds_or_its_woods() {
         gate(
             Some("gates:half.open"),
             Some("minecraft:block.fence_gate.close")
+        )
+    );
+    assert_eq!(
+        sounds("gates:sites"),
+        (
+            [
+                "gates:use.open",
+                "minecraft:block.fence_gate.open",
+                "gates:wire.open"
+            ]
+            .map(|s| Some(s.to_owned())),
+            [
+                "minecraft:block.fence_gate.close",
+                "gates:blast.close",
+                "minecraft:block.fence_gate.close"
+            ]
+            .map(|s| Some(s.to_owned())),
         )
     );
     assert_eq!(
@@ -7329,4 +7631,320 @@ fn structure_modifiers_bundle_spawns_without_modifier_preserve_individual_files(
         10
     );
     fs::remove_dir_all(base.parent().unwrap()).unwrap();
+}
+
+/// The legacy solid bit of declared blocks in the generated behaviours table, through `Plan::new`
+/// and `Plan::json` over a hand-made base: the final flag integers, not only the helper's answer.
+#[test]
+fn declared_solid_reaches_the_behaviour_table() {
+    // Templates, one state each but `axis` (two): `plain` is not solid, `keeps` is, and the two
+    // forcing ones carry the opposite bit to what they force. Every row has the marker bit 64.
+    let facts = r#"{"states":[
+      ["minecraft:plain",false,false,"",{"id":"minecraft:plain"}],
+      ["minecraft:forced_on",false,false,"",{"id":"minecraft:forced_on"}],
+      ["minecraft:forced_off",false,false,"",{"id":"minecraft:forced_off"}],
+      ["minecraft:keeps",false,false,"",{"id":"minecraft:keeps"}],
+      ["minecraft:axis",false,false,"",{"id":"minecraft:axis","properties":{"axis":"x"}}],
+      ["minecraft:axis",false,false,"",{"id":"minecraft:axis","properties":{"axis":"y"}}]],
+      "defaults":{"minecraft:plain":0,"minecraft:forced_on":1,"minecraft:forced_off":2,
+        "minecraft:keeps":3,"minecraft:axis":4}}"#;
+    let (base, _) = block_base_of("declared-solid", &[], facts);
+    let template_flags = [64, 64, 64 | 1, 64 | 1, 64, 64 | 1];
+    let row = |name: &str, flags: i32| format!(r#"["{name}",{flags},0,0,false,{{"id":"{name}"}}]"#);
+    let rows: Vec<String> = ["plain", "forced_on", "forced_off", "keeps", "axis", "axis"]
+        .iter()
+        .zip(template_flags)
+        .map(|(name, flags)| row(&format!("minecraft:{name}"), flags))
+        .collect();
+    fs::write(
+        base.join("block-behaviours.json"),
+        format!(
+            r#"{{"blocks":[],"items":{{}},"states":[{}]}}"#,
+            rows.join(",")
+        ),
+    )
+    .unwrap();
+    // Block definition flags: bit 0 forces solid on, bit 1 forces it off.
+    let blocks = Compound::from(
+        [
+            ("minecraft:plain", 0),
+            ("minecraft:forced_on", 1),
+            ("minecraft:forced_off", 2),
+            ("minecraft:keeps", 0),
+            ("minecraft:axis", 0),
+        ]
+        .map(|(name, flags)| (JavaString::from(name), Tag::Byte(flags))),
+    );
+    fs::create_dir_all(base.join("worldgen/blocks")).unwrap();
+    fs::write(
+        base.join("worldgen/blocks/block-properties.nbt"),
+        nbt::write_named(
+            &nbt::NamedTag {
+                name: JavaString::from(""),
+                tag: Tag::Compound(Compound::from([(
+                    JavaString::from("blocks"),
+                    Tag::Compound(blocks),
+                )])),
+            },
+            Limits::tables(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let full = "[[0,0,0,1,1,1]]";
+    let thin = "[[0,0,0,1,0.1,1]]";
+    let declare = |template: &str, shapes: &str, collision: &str| {
+        format!(
+            r#"{{"template":"minecraft:{template}","item":false{shapes}{collision}}}"#,
+            shapes = if shapes.is_empty() {
+                String::new()
+            } else {
+                format!(r#","shapes":{shapes}"#)
+            },
+            collision = if collision.is_empty() {
+                String::new()
+            } else {
+                format!(r#","collision_shapes":{collision}"#)
+            },
+        )
+    };
+    let default = |boxes: &str| format!(r#"{{"default":{boxes}}}"#);
+    let files = [
+        // Collision wins over a full outline.
+        (
+            "collision_wins",
+            declare("plain", &default(full), &default(thin)),
+        ),
+        ("outline_only", declare("plain", &default(full), "")),
+        ("no_shape", declare("keeps", "", "")),
+        ("force_on", declare("forced_on", &default(thin), "")),
+        ("force_off", declare("forced_off", &default(full), "")),
+        ("cleared", declare("keeps", &default(thin), "")),
+        (
+            "per_state",
+            declare(
+                "axis",
+                &format!(r#"{{"properties":["axis"],"values":{{"x":{full}}},"default":{thin}}}"#),
+                "",
+            ),
+        ),
+    ];
+    let manifest = manifest("testmod", "");
+    let paths: Vec<String> = files
+        .iter()
+        .map(|(name, _)| format!("data/testmod/sunrise/block/{name}.json"))
+        .collect();
+    let mut entries: Vec<(&str, &str)> = vec![("sunrise-mod.toml", &manifest)];
+    entries.extend(
+        paths
+            .iter()
+            .zip(&files)
+            .map(|(path, (_, body))| (path.as_str(), body.as_str())),
+    );
+    let mods = vec![folder_mod(&base.parent().unwrap().join("mod"), &entries)];
+    let plan = Plan::new(&base, &mods).unwrap();
+    let mut doc: J = read_json(&base.join("block-behaviours.json")).unwrap();
+    plan.json("block-behaviours.json", &mut doc).unwrap();
+    let Some(J::Arr(table)) = doc.get("states") else {
+        panic!("states")
+    };
+    let flags = |index: usize| match &table[index] {
+        J::Arr(row) => match &row[1] {
+            J::Num(n) => n.as_i64().unwrap(),
+            other => panic!("flags {other:?}"),
+        },
+        other => panic!("row {other:?}"),
+    };
+    // Vanilla rows are as they were.
+    for (index, expected) in template_flags.into_iter().enumerate() {
+        assert_eq!(flags(index), i64::from(expected), "template row {index}");
+    }
+    let first = |id: &str| {
+        plan.blocks
+            .iter()
+            .find(|b| b.decl.id == id)
+            .unwrap_or_else(|| panic!("{id}"))
+            .rename
+            .first as usize
+    };
+    // The marker bit stays in every declared row; only bit 0 is recomputed.
+    for (id, solid) in [
+        ("testmod:collision_wins", 0),
+        ("testmod:outline_only", 1),
+        ("testmod:no_shape", 1),
+        ("testmod:force_on", 1),
+        ("testmod:force_off", 0),
+        ("testmod:cleared", 0),
+    ] {
+        assert_eq!(flags(first(id)), 64 | solid, "{id}");
+    }
+    // One row per state, in state order: x is the full shape, y the thin one.
+    let axis = first("testmod:per_state");
+    assert_eq!((flags(axis), flags(axis + 1)), (64 | 1, 64));
+    fs::remove_dir_all(base.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn a_declared_shape_decides_the_legacy_solid_bit() {
+    let boxed =
+        |top: f64| VoxelShape::from_box(Aabb::new(Vec3::ZERO, Vec3::new(1.0, top, 1.0))).unwrap();
+    // The other flag bits stay as the template has them.
+    let flags = 0b10;
+    // A full cube and a slab (average size 0.83) are solid, a flat carpet-thin box is not, and a
+    // box a block and a half tall is.
+    assert_eq!(with_solid_bit(flags, None, &boxed(1.0)), 0b11);
+    assert_eq!(with_solid_bit(flags, None, &boxed(0.5)), 0b11);
+    assert_eq!(with_solid_bit(flags | 1, None, &boxed(0.1)), 0b10);
+    assert_eq!(with_solid_bit(flags, None, &boxed(1.5)), 0b11);
+    // A thin tall pole is solid by height alone; a thin short one is not.
+    let pole = |top: f64| {
+        VoxelShape::from_box(Aabb::new(
+            Vec3::new(0.4, 0.0, 0.4),
+            Vec3::new(0.6, top, 0.6),
+        ))
+        .unwrap()
+    };
+    assert_eq!(with_solid_bit(flags, None, &pole(1.0)), 0b11);
+    assert_eq!(with_solid_bit(flags, None, &pole(0.5)), 0b10);
+    // A template that forces solidity keeps its answer whatever the shape.
+    assert_eq!(with_solid_bit(flags, Some(true), &boxed(0.1)), 0b11);
+    assert_eq!(with_solid_bit(flags | 1, Some(false), &boxed(1.0)), 0b10);
+}
+
+#[test]
+fn context_only_property_outline_moves_without_moving_the_fallback() {
+    use sunrise_world::{
+        collision::{CachedCollisionRegistry, ShapeChannel},
+        collision_context::EntityContextKind,
+        registry::{BlockRegistry, BlockStateId},
+    };
+    let declaration = r#"{"template":"minecraft:test","item":false,"properties":{"offset":"XZ"},
+      "outline_context_shapes":{"living":{"properties":["axis"],
+        "values":{"x":[[0.25,0,0.25,0.75,1,0.75]]},"default":[]}}}"#;
+    let (base, mods) = block_base("offset-context-variant", &[declaration]);
+    let plan = Plan::new(&base, &mods).unwrap();
+    let mut facts: J = read_json(&base.join("facts.json")).unwrap();
+    plan.json("facts.json", &mut facts).unwrap();
+    let registry =
+        BlockRegistry::from_facts_json(serde_json::to_vec(&facts).unwrap().as_slice()).unwrap();
+    let mut tag = Tag::compound([
+        ("DataVersion", Tag::Int(sunrise_world::DATA_VERSION)),
+        (
+            "states",
+            Tag::List(vec![test_state_row("x"), test_state_row("y")]),
+        ),
+        (
+            "shapes",
+            Tag::List(vec![encode_shape(&VoxelShape::block())]),
+        ),
+        ("cached_shapes", Tag::IntArray(vec![0, 0])),
+    ]);
+    plan.nbt(&mut tag);
+    plan.declared_shapes(&mut tag, true).unwrap();
+    let cached = CachedCollisionRegistry::from_nbt(&tag, &registry).unwrap();
+    for (id, axis) in [(2, "x"), (3, "y")] {
+        let state = BlockStateId(id);
+        assert_eq!(registry.state(state).unwrap().properties["axis"], axis);
+        let outline = cached
+            .context_outline_shape(state, EntityContextKind::Living)
+            .unwrap();
+        let pos = [1, 64, 2];
+        let outline = cached.positioned_shape(state, ShapeChannel::ContextOutline, pos, outline);
+        if axis == "x" {
+            assert_eq!(outline.min(Axis::X), 0.13333334028720856);
+            assert_eq!(outline.min(Axis::Z), 0.06666667014360428);
+        } else {
+            assert!(outline.is_empty());
+        }
+        assert!(
+            cached
+                .context_outline_shape(state, EntityContextKind::Other)
+                .is_none()
+        );
+        let fallback = cached.cached_shape(state).unwrap().unwrap();
+        assert_eq!(
+            fallback.bounds(),
+            Some(Aabb::new(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)))
+        );
+    }
+    fs::remove_dir_all(base.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn declared_offsets_resolve_modes_and_publish_only_declared_shape_channels() {
+    for (label, properties, expected) in [
+        ("none", r#""offset":"NONE""#, None),
+        (
+            "xz",
+            r#""offset":"XZ","max_vertical_offset":0.2"#,
+            Some((0.25f32, 0.0f32)),
+        ),
+        ("xyz", r#""offset":"XYZ""#, Some((0.25, 0.2))),
+        (
+            "clamped",
+            r#""offset":"XYZ","max_horizontal_offset":0.125,"max_vertical_offset":0.1"#,
+            Some((0.125, 0.1)),
+        ),
+        ("inherited", "", Some((0.25, 0.0))),
+        (
+            "inherited-xz",
+            r#""max_horizontal_offset":0.125,"max_vertical_offset":0.2"#,
+            Some((0.125, 0.0)),
+        ),
+    ] {
+        let declaration = format!(
+            r#"{{"template":"minecraft:test","item":false,"properties":{{{properties}}},
+          "shapes":{{"default":[[0,0,0,0.5,1,0.5]]}},
+          "interaction_shapes":{{"default":[[0,0,0,1,1,1]]}}}}"#
+        );
+        let (base, mods) = block_base(&format!("offset-{label}"), &[&declaration]);
+        let row = r#"{"offset":true,"outline_offset":true}"#;
+        fs::write(
+            base.join("gameplay-facts.json"),
+            format!(r#"{{"states":[{row},{row}]}}"#),
+        )
+        .unwrap();
+        let plan = Plan::new(&base, &mods).unwrap();
+        assert_eq!(plan.blocks[0].offset_limits, vec![expected; 2]);
+        let mut gameplay: J =
+            serde_json::from_str(&format!(r#"{{"states":[{row},{row}]}}"#)).unwrap();
+        plan.json("gameplay-facts.json", &mut gameplay).unwrap();
+        let Some(J::Arr(rows)) = gameplay.get("states") else {
+            panic!("states")
+        };
+        for row in &rows[2..] {
+            assert_eq!(row.get("offset"), Some(&J::Bool(expected.is_some())));
+            assert_eq!(
+                row.get("outline_offset"),
+                Some(&J::Bool(expected.is_some()))
+            );
+            if let Some((h, v)) = expected {
+                assert_eq!(
+                    row.get("offset_limits"),
+                    Some(&J::Arr(vec![J::f64(h as f64), J::f64(v as f64)]))
+                );
+            }
+        }
+        let mut tag = Tag::compound([
+            (
+                "states",
+                Tag::List(vec![test_state_row("x"), test_state_row("y")]),
+            ),
+            ("shapes", Tag::List(vec![])),
+            ("cached_shapes", Tag::IntArray(vec![-1, -1])),
+        ]);
+        plan.nbt(&mut tag);
+        plan.declared_shapes(&mut tag, true).unwrap();
+        if expected.is_some() {
+            let Some(Tag::List(offsets)) = tag.get("shape_offsets") else {
+                panic!("offsets")
+            };
+            assert_eq!(offsets.len(), 2);
+            // Default collision plus interaction; no contextual channels were declared.
+            assert_eq!(offsets[0].get("channels"), Some(&Tag::Byte(9)));
+        } else {
+            assert!(tag.get("shape_offsets").is_none());
+        }
+        fs::remove_dir_all(base.parent().unwrap()).unwrap();
+    }
 }

@@ -296,6 +296,8 @@ pub struct HumanoidRenderState<'a> {
     pub off_hand: Option<&'a ItemStack>,
     /// Whether the entity's main arm is its left arm.
     pub main_arm_left: bool,
+    /// Whether the entity is currently using an item.
+    pub is_using_item: bool,
     /// Hand currently using an item, absent when no item is in use.
     pub use_hand: Option<Hand>,
     /// Elapsed item-use ticks at extraction.
@@ -633,9 +635,7 @@ impl SoundPlay {
 /// Dropping or overwriting the handle doesn't stop the sound: keep a looping sound's handle while
 /// it plays (stop it before starting another in its place), or nothing can stop it until the
 /// player leaves the level.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its field is private, so mods cannot build or destructure it
 pub struct SoundRef {
     pub(crate) id: u64,
@@ -713,6 +713,35 @@ pub enum ScreenOpening {
     /// the title screen, a book, a prompt or while a world loads; the
     /// screen that was about to open does then).
     ModScreen,
+}
+
+/// Where a mod menu's recipe-book toggle sits: `x` GUI pixels right of the menu's left edge and
+/// `y` below the line `from` names. Vanilla screens place theirs either way:
+/// `leftPos + 5, topPos + 34` is `x: 5.0, y: 34.0, from: Menu`, and
+/// `leftPos + 5, height / 2 - 49` is `x: 5.0, y: -49.0, from: ScreenCentre`.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+// exhaustive: mods build it with a literal and the game reads every field
+#[derive(sunrise_mod_api_macros::Wire)]
+pub struct RecipeBookToggle {
+    /// Pixels right of the menu's left edge.
+    pub x: f32,
+    /// Pixels below the line `from` names; negative above it.
+    pub y: f32,
+    /// What `y` counts from.
+    pub from: ToggleOrigin,
+}
+
+/// The line a recipe-book toggle's `y` counts from.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+// exhaustive: the two lines vanilla's screens measure from, matched without a wildcard
+#[derive(sunrise_mod_api_macros::Wire)]
+pub enum ToggleOrigin {
+    /// The menu's top edge.
+    #[default]
+    Menu,
+    /// The window's vertical centre, as vanilla's `height / 2` (integer division, so an odd
+    /// window height rounds down).
+    ScreenCentre,
 }
 
 /// The stable identifier reported by screen hooks for an observed screen.
@@ -811,25 +840,6 @@ impl ColoredLight {
     }
 }
 
-/// The minimap a native mod shows (`minimap`), drawn by Sunrise's
-/// minimap: its corner, its side in GUI pixels, blocks per map pixel,
-/// turning with the player or north up, round or square.
-#[derive(Clone, Copy, Debug, PartialEq)]
-// exhaustive: the game builds it with a literal; mods only read it
-#[derive(sunrise_mod_api_macros::Wire)]
-pub struct Minimap {
-    /// The screen corner the map sits in.
-    pub corner: Corner,
-    /// The map's side length in GUI pixels.
-    pub size: f32,
-    /// How many blocks one pixel covers; larger zooms out.
-    pub blocks_per_pixel: f32,
-    /// Turn the map with the player's facing instead of keeping north up.
-    pub rotate: bool,
-    /// Draw the map as a circle instead of a square.
-    pub round: bool,
-}
-
 /// A mod block's screen over its menu (`screen`): its size, where
 /// each of the container's slots is (`Slot.x`, `Slot.y`; none hides the
 /// slot, and so do slots past the list; the server's menu does not have a
@@ -845,11 +855,18 @@ pub struct Screen {
     /// The screen's height in GUI pixels; vanilla's is 166.
     pub height: f32,
     /// Each menu slot's top-left (x, y), or `None` to hide it.
-    pub slots: Vec<Option<[f32; 2]>>,
+    pub slots: Vec<Option<ScreenSlot>>,
     /// The y of the player inventory's first row; vanilla's is 84.
     pub inventory_y: f32,
     /// The inventory's left column (vanilla's is 8).
     pub inventory_x: f32,
+    /// Title label position in GUI pixels from the screen's top-left corner.
+    /// `None` uses vanilla's `[8, 6]`. Ignored when `own_labels` is true.
+    pub title_label: Option<[f32; 2]>,
+    /// Inventory label position in GUI pixels from the screen's top-left corner.
+    /// `None` uses `[8, height - 94]`, independently of inventory slot positions.
+    /// Ignored when `own_labels` is true.
+    pub inventory_label: Option<[f32; 2]>,
     /// The mod draws the title and the "Inventory" label itself
     /// (`screen_draw`); Sunrise leaves them out.
     pub own_labels: bool,
@@ -860,11 +877,29 @@ pub struct Screen {
     /// target this menu; no panel is enabled until authoritative settings arrive.
     /// Leaving this unset keeps the screen without a recipe book.
     pub recipe_book: Option<crate::RecipeBookTypeKey>,
-    /// Optional 20 × 18 recipe-book toggle position relative to this menu.
+    /// Optional 20 × 18 recipe-book toggle position, from this menu's left and, per
+    /// [`RecipeBookToggle::from`], its top or the window's centre.
     /// The screen author reserves this area, as vanilla screen templates do.
     /// Without an anchor the engine uses an external gutter; if none fits,
     /// the book is refused with a diagnostic while the menu remains usable.
-    pub recipe_book_toggle: Option<[f32; 2]>,
+    pub recipe_book_toggle: Option<RecipeBookToggle>,
+    /// The recipe book's result ghost gets a 24 × 24 frame, vanilla's
+    /// `AbstractRecipeBookScreen.isBiggerResultSlot` for a crafting-table-sized result. Off by
+    /// default.
+    pub recipe_book_big_result: bool,
+}
+
+/// One visible container slot, including vanilla's `Slot.getNoItemIcon`.
+#[derive(Clone, Debug, Default, PartialEq)]
+// exhaustive: mods declare both geometry and the optional empty-slot sprite
+#[derive(sunrise_mod_api_macros::Wire)]
+pub struct ScreenSlot {
+    /// Top-left in GUI pixels relative to the screen.
+    pub position: [f32; 2],
+    /// GUI sprite identifier, such as `minecraft:container/slot/ingot`.
+    /// Drawn at 16 × 16 only when the displayed stack is empty, including
+    /// quick-craft previews. Unknown sprites refuse the client screen at open.
+    pub no_item_icon: Option<String>,
 }
 
 /// An item the panel shows (`panel_items`): its id
@@ -1017,9 +1052,7 @@ pub enum CrosshairTarget {
 /// that was removed (even if its id was added again) or a handle from an
 /// earlier open reads as `None` and changes nothing. Mob and raid bars are not
 /// custom boss events and have no handle.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct BossBarRef {
     pub(crate) epoch: WorldEpoch,
@@ -1162,27 +1195,10 @@ pub struct ClientBossBar {
 ///     menu.click(host, &[]);
 /// }
 /// ```
-#[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct MenuRef {
     pub(crate) player: PlayerRef,
     pub(crate) window: i32,
     pub(crate) generation: u64,
-}
-
-/// Per-window targeting controls. Defaults preserve vanilla picking. Reach remains backed
-/// by `minecraft:block_interaction_range` and `minecraft:entity_interaction_range`; a server
-/// mod changes those through the player's living attribute handle, not these client controls.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
-#[non_exhaustive]
-pub struct ClientTargeting {
-    /// Include source and flowing fluid shapes in the ordinary outline pick.
-    pub pick_liquids: bool,
-    /// Let entity picks and mod-selected attacks pass block outlines on this client.
-    pub hit_through_walls: bool,
-    /// Prefer this client-level entity for the crosshair and attacks; None restores the ray.
-    /// Stale, self, unsupported, out-of-reach or occluded targets cannot be attacked.
-    pub entity: Option<EntityRef>,
 }

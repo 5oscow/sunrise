@@ -36,6 +36,28 @@ fn uuid_words(uuid: u128) -> [i32; 4] {
     ]
 }
 
+/// A villager whose profession the world's table cannot resolve (its mod is
+/// gone): its trades skip the result processing and its screen closes.
+fn opaque_villager(
+    professions: &sunrise_client::mobs::villager::ResolvedProfessions,
+    species: sunrise_client::mobs::Species,
+    profession: &sunrise_client::mobs::villager::ProfessionState,
+) -> bool {
+    species == sunrise_client::mobs::Species::Villager
+        && professions.state_index(profession).is_none()
+}
+
+/// How a merchant menu op runs: as it is, only looking (the menu as a click finds it, kept
+/// nowhere), or as a decision asks (the slot rules its plan kept and the mods' answer).
+enum MerchantRun<'a> {
+    Plain,
+    Probe(&'a mut dyn FnMut(&mut Menu, &Env)),
+    Decided(
+        &'a dyn sunrise_client::menu::SlotRules,
+        Option<&'a sunrise_client::menu::StackedOutcome>,
+    ),
+}
+
 impl Game<'_> {
     /// Development oracle: observe the actual open guest merchant, never a synthetic menu.
     pub(super) fn harness_merchant(
@@ -253,6 +275,18 @@ impl Game<'_> {
         refresh_offers: bool,
         op: impl FnOnce(&mut Menu, &Env),
     ) -> bool {
+        self.lan_merchant_op_with(conn, window, refresh_offers, MerchantRun::Plain, op)
+    }
+
+    /// `lan_merchant_op`, run as a decision asks (see `MerchantRun`).
+    fn lan_merchant_op_with(
+        &mut self,
+        conn: u32,
+        window: Option<i32>,
+        refresh_offers: bool,
+        run: MerchantRun<'_>,
+        op: impl FnOnce(&mut Menu, &Env),
+    ) -> bool {
         let Some(mut gm) = self
             .lan
             .as_mut()
@@ -312,6 +346,7 @@ impl Game<'_> {
             can_equip: None,
             known_recipes: Some(&g.recipe_book),
             slot_rules: Some(self),
+            stacked: None,
         };
         let mut menu = Menu::new(Kind::Merchant);
         menu.set_registry_id(Some("minecraft:merchant"));
@@ -329,6 +364,22 @@ impl Game<'_> {
             menu.set_slot(&env, i, s.clone());
         }
         menu.merchant = Some(session);
+        let env = match &run {
+            MerchantRun::Decided(rules, stacked) => Env {
+                slot_rules: Some(*rules),
+                stacked: *stacked,
+                ..env
+            },
+            _ => env,
+        };
+        if let MerchantRun::Probe(probe) = run {
+            // Only look: the menu as the click finds it, and nothing of it kept.
+            probe(&mut menu, &env);
+            if let Some(host) = self.lan.as_mut() {
+                host.play.entry(conn).or_default().merchant = Some(gm);
+            }
+            return true;
+        }
         op(&mut menu, &env);
         let made = maps.made.take();
         let session = menu.merchant.take().expect("attached");
@@ -361,8 +412,11 @@ impl Game<'_> {
             .mob
             .and_then(|id| self.mobs.iter().find(|m| m.id == id))
             .is_some_and(|m| {
-                m.species() == sunrise_client::mobs::Species::Villager
-                    && m.extra.profession.index().is_none()
+                opaque_villager(
+                    &self.stations().professions,
+                    m.species(),
+                    &m.extra.profession,
+                )
             });
         let offers_refreshed = session
             .events
@@ -443,9 +497,62 @@ impl Game<'_> {
             _ => Input::PickupAll,
         };
         let (slot, button) = (i32::from(p.slot), i32::from(p.button));
-        self.lan_merchant_op(conn, Some(p.container), false, |menu, env| {
+        let op = move |menu: &mut Menu, env: &Env| {
             let _ = menu.click(env, slot, button, input);
-        })
+        };
+        if !Self::stacked_listened() || input != Input::Pickup {
+            return self.lan_merchant_op(conn, Some(p.container), false, op);
+        }
+        // Plan: what the click finds in the menu as the guest's trade state makes it, and what
+        // the slot rules say to it, on copies; nothing is kept.
+        let answers = std::rc::Rc::new(sunrise_client::menu::RuleAnswers::default());
+        let mut found = None;
+        let mut probe = |menu: &mut Menu, env: &Env| {
+            found = menu.stacked_click(env, slot, button, input);
+            if found.is_some() {
+                super::stacked_on_other::plan_click(menu, env, slot, button, &answers);
+            }
+        };
+        let open = self.lan_merchant_op_with(
+            conn,
+            Some(p.container),
+            false,
+            MerchantRun::Probe(&mut probe),
+            |_, _| {},
+        );
+        let Some(frozen) = found.filter(|_| open) else {
+            return self.lan_merchant_op(conn, Some(p.container), false, op);
+        };
+        let route = match self.lan.as_mut() {
+            Some(host) => host.menus.entry(conn).or_default().hub.id(),
+            None => return true,
+        };
+        let gi = self
+            .lan
+            .as_ref()
+            .and_then(|host| host.hub.guests.iter().position(|g| g.conn == conn));
+        let (carried, same) = (frozen.carried.clone(), frozen.clone());
+        let mut handled = true;
+        self.stacked_pickup(
+            route,
+            frozen,
+            move |game| {
+                let now = game.lan.as_ref()?.hub.guests.get(gi?)?.carried.clone();
+                (now == carried).then(|| same.clone())
+            },
+            |game, answer| {
+                game.journal_guest_click(conn);
+                let rules = sunrise_client::menu::StoredRules(&answers);
+                handled = game.lan_merchant_op_with(
+                    conn,
+                    Some(p.container),
+                    false,
+                    MerchantRun::Decided(&rules, answer),
+                    op,
+                );
+            },
+        );
+        handled
     }
     /// ServerboundSelectTradePacket: the selection hint, then tryMoveItems.
     pub(super) fn lan_select_trade(&mut self, conn: u32, index: i32) {
@@ -501,8 +608,11 @@ impl Game<'_> {
     ) -> bool {
         self.mobs.iter().find(|m| m.id == id).is_some_and(|m| {
             m.alive()
-                && (m.species() != sunrise_client::mobs::Species::Villager
-                    || m.extra.profession.index().is_some())
+                && !opaque_villager(
+                    &self.stations().professions,
+                    m.species(),
+                    &m.extra.profession,
+                )
                 && guest_within_entity_range(g, &m.bounds(), 4.0)
         })
     }
@@ -899,6 +1009,7 @@ mod tests {
                 None,
                 Some(game.pack.assets.registry),
                 |_| None,
+                &Default::default(),
             );
             game.apply_entity_nbt(super::super::commands::Target::Mob(40), tag)
                 .unwrap();
@@ -910,6 +1021,7 @@ mod tests {
                 None,
                 Some(game.pack.assets.registry),
                 |_| None,
+                &Default::default(),
             );
             if let Tag::Compound(data) = &mut tag {
                 data.insert(
@@ -990,7 +1102,10 @@ mod tests {
                 ),
                 (
                     "Offers",
-                    sunrise_client::entity_nbt::offers_to_nbt(std::slice::from_ref(&replacement)),
+                    sunrise_client::entity_nbt::offers_to_nbt(
+                        std::slice::from_ref(&replacement),
+                        &Default::default(),
+                    ),
                 ),
                 ("Xp", Tag::Int(9)),
             ]);
@@ -1160,6 +1275,43 @@ mod tests {
                 Some("minecraft:swamp")
             );
         });
+    }
+
+    #[test]
+    fn a_registered_profession_trades_normally_and_an_unregistered_one_stays_opaque() {
+        use sunrise_client::mobs::{
+            Species,
+            villager::{ProfessionState, ResolvedProfessions},
+        };
+        let id = |s| mod_api::Identifier::parse(s).unwrap();
+        let engineer = mod_api::ProfessionDefinition {
+            workstations: vec![],
+            key: mod_api::ProfessionKey(id("test:engineer")),
+            held_poi: vec![mod_api::PoiKey(id("test:assembler"))],
+            acquirable_poi: vec![mod_api::PoiKey(id("test:assembler"))],
+            requested_items: vec![],
+            secondary_blocks: vec![],
+            work_sound: None,
+            trades: vec![(1, mod_api::TradeSetKey(id("test:engineer")))],
+        };
+        let table =
+            ResolvedProfessions::prepare(vec![("test".into(), engineer)], |_, _| true).unwrap();
+        let registered = table
+            .state(table.resolve("test:engineer").unwrap())
+            .unwrap();
+        assert!(matches!(registered, ProfessionState::Registered { .. }));
+        assert!(
+            !opaque_villager(&table, Species::Villager, &registered),
+            "a registered mod profession gets the normal trade processing"
+        );
+        let missing = ProfessionState::Unresolved("gone:smith".into());
+        assert!(opaque_villager(&table, Species::Villager, &missing));
+        assert!(!opaque_villager(
+            &table,
+            Species::Villager,
+            &ProfessionState::from_index(5)
+        ));
+        assert!(!opaque_villager(&table, Species::WanderingTrader, &missing));
     }
 
     /// What the `trade_select` observer saw: the villager and offer index it

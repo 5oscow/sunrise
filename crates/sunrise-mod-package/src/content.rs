@@ -1,7 +1,7 @@
 //! A content mod's `assets/` and `data/` (API 0.2, docs/modpacks.md): the
 //! files it adds to the game's resource tree, and the blocks, items, mob
 //! effects, entity types and menu types it declares in
-//! `data/<id>/sunrise/{block,item,mob_effect,entity_type,menu}/`.
+//! `data/<id>/sunrise/{block,item,mob_effect,entity_type,fluid,fluid_interaction,menu}/`.
 //!
 //! Content is data, not code: nothing here executes. What a mod
 //! may add is fenced instead. Its own namespaces (its id and the ones its
@@ -64,7 +64,34 @@ pub(crate) fn check_namespace(name: &str, manifest: &Manifest) -> Result<(), Str
     // tags and atlases, and to the convention tags mods share.
     let shared = matches!(namespace, "minecraft" | "c");
     let atlas = top == "assets" && namespace == "minecraft" && rest.starts_with("atlases/");
-    let allowed = owned || (top == "data" && shared && rest.starts_with("tags/")) || atlas;
+    let mut extension = false;
+    if top == "data" && namespace == "sunrise" && rest.starts_with("tags/") {
+        let tag = rest
+            .strip_prefix("tags/")
+            .and_then(|s| s.strip_suffix(".json"));
+        if tag.is_some_and(|t| {
+            t.split_once('/')
+                .is_some_and(|(_, path)| path.starts_with("class/"))
+        }) {
+            return Err(format!(
+                "{name}: sunrise:class/* tags are generated; attach a part through block_part_tag instead"
+            ));
+        }
+        extension = tag
+            .and_then(|t| t.split_once('/'))
+            .is_some_and(|(registry, path)| {
+                crate::extension_tags::ALL.iter().any(|tag| {
+                    tag.registry == registry && tag.id.strip_prefix("sunrise:") == Some(path)
+                })
+            });
+        if !extension {
+            return Err(format!(
+                "{name}: not a declared Sunrise extension tag; see the SDK extension_tags list and the book's extension tags reference (mod professions use secondary_blocks)"
+            ));
+        }
+    }
+    let allowed =
+        owned || (top == "data" && shared && rest.starts_with("tags/")) || atlas || extension;
     if !allowed {
         return Err(format!(
             "{name}: a mod adds files in its own namespaces ({top}/{id}/ and those listed in namespaces), to vanilla and convention (c) tags, or to vanilla's atlases"
@@ -123,12 +150,59 @@ pub struct BlockProperties {
     #[serde(default, deserialize_with = "deserialize_push_reaction")]
     pub push_reaction: Option<PushReaction>,
     /// `false`: the block occludes nothing, so its neighbours' faces are drawn and light passes
-    /// it (`BlockBehaviour.Properties.noOcclusion`); unset or `true`: as its template.
+    /// it (`BlockBehaviour.Properties.noOcclusion`); `true`: occludes whatever the template
+    /// does, using the declared outline or the template's published occlusion shape. Unset
+    /// inherits the template.
     pub occludes: Option<bool>,
     /// `false`: the breaking crack (`destroy_stage_0..9`) is not drawn on the block, as for a
     /// block broken by use; unset or `true`, it is drawn. Only the overlay: the break and the
     /// destroy-progress packets are vanilla's.
     pub destroy_overlay: Option<bool>,
+    /// Per-column model offset and translation of declared outline, collision and interaction shapes.
+    /// Block-entity published shapes remain as published. Unset inherits the template.
+    #[serde(default, deserialize_with = "deserialize_offset")]
+    pub offset: Option<OffsetType>,
+    /// Maximum horizontal displacement, 0 to 0.25 (default 0.25 for an explicit offset mode).
+    #[serde(default, deserialize_with = "deserialize_horizontal_offset")]
+    pub max_horizontal_offset: Option<f32>,
+    /// Maximum downward displacement, 0 to 0.2 (default 0.2 for XYZ; XZ has no vertical offset).
+    #[serde(default, deserialize_with = "deserialize_vertical_offset")]
+    pub max_vertical_offset: Option<f32>,
+    /// Opt into `VegetationBlock` survival independently of the template.
+    #[serde(default)]
+    pub vegetation: bool,
+}
+
+/// Vanilla's per-column offset mode (`BlockBehaviour.OffsetType`).
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum OffsetType {
+    None,
+    Xz,
+    Xyz,
+}
+
+fn offset_float<'de, D: serde::Deserializer<'de>>(
+    d: D,
+    key: &str,
+) -> Result<Option<f32>, D::Error> {
+    Option::<f32>::deserialize(d).map_err(|e| serde::de::Error::custom(format!("{key}: {e}")))
+}
+fn deserialize_horizontal_offset<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<f32>, D::Error> {
+    offset_float(d, "max_horizontal_offset")
+}
+fn deserialize_vertical_offset<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<f32>, D::Error> {
+    offset_float(d, "max_vertical_offset")
+}
+fn deserialize_offset<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<OffsetType>, D::Error> {
+    Option::<OffsetType>::deserialize(d)
+        .map_err(|e| serde::de::Error::custom(format!("offset: {e}")))
 }
 
 /// Vanilla's `PushReaction`, by its constant's name.
@@ -301,13 +375,12 @@ impl BlockShapes {
     fn check(&self) -> Result<(), String> {
         self.check_selection("shapes")?;
         for boxes in self.values.values().chain(self.default.iter()) {
-            if boxes.len() > 16
-                || boxes.iter().any(|bounds| {
-                    bounds.iter().any(|value| !value.is_finite())
-                        || (0..3).any(|axis| bounds[axis] > bounds[axis + 3])
-                })
-            {
-                return Err("shape needs at most 16 finite boxes with ordered bounds".into());
+            // Vanilla's shapes have no box limit, so neither does a declared one.
+            if boxes.iter().any(|bounds| {
+                bounds.iter().any(|value| !value.is_finite())
+                    || (0..3).any(|axis| bounds[axis] > bounds[axis + 3])
+            }) {
+                return Err("shape needs finite boxes with ordered bounds".into());
             }
         }
         Ok(())
@@ -348,6 +421,17 @@ impl ShapeEntityKind {
             Self::Other => "other",
         }
     }
+}
+
+/// A vanilla block's context-dependent collision a block takes (`context_collision`), whatever
+/// its template.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ContextCollision {
+    /// Scaffolding's (`ScaffoldingBlock.getCollisionShape`): solid on top unless the entity is
+    /// descending, open below, and the bottom row's floor. Its states need scaffolding's
+    /// `distance` (0 to 7) and `bottom` properties, from the template or declared.
+    Scaffolding,
 }
 
 /// A state property a block declares on its own, beside its template's.
@@ -394,6 +478,9 @@ struct BlockFile {
     #[serde(default)]
     collision_context_shapes: BTreeMap<ShapeEntityKind, BlockShapes>,
     interaction_shapes: Option<BlockShapes>,
+    #[serde(default)]
+    shapes_from_block_entity: bool,
+    context_collision: Option<ContextCollision>,
     state_light: Option<StateLight>,
     #[serde(default)]
     state_properties: BTreeMap<String, StateProperty>,
@@ -415,10 +502,10 @@ struct BlockFile {
     base_block: Option<String>,
     #[serde(default = "yes")]
     item: bool,
-    #[serde(default)]
-    open_sound: Option<String>,
-    #[serde(default)]
-    close_sound: Option<String>,
+    #[serde(default, deserialize_with = "GateSound::deserialize_open")]
+    open_sound: Option<GateSound>,
+    #[serde(default, deserialize_with = "GateSound::deserialize_close")]
+    close_sound: Option<GateSound>,
     block_item: Option<String>,
     #[serde(default)]
     pick_item: Option<String>,
@@ -427,6 +514,33 @@ struct BlockFile {
 }
 fn yes() -> bool {
     true
+}
+
+/// A fence gate's sound event at every site, or only the named sites.
+/// Missing sites keep the template wood's sounds.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(untagged, deny_unknown_fields)]
+pub enum GateSound {
+    All(String),
+    Sites {
+        #[serde(rename = "use")]
+        on_use: Option<String>,
+        #[serde(rename = "explosion")]
+        on_explosion: Option<String>,
+        #[serde(rename = "redstone")]
+        on_redstone: Option<String>,
+    },
+}
+
+impl GateSound {
+    fn deserialize_open<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Self>, D::Error> {
+        Option::<Self>::deserialize(d)
+            .map_err(|e| serde::de::Error::custom(format!("open_sound: {e}")))
+    }
+    fn deserialize_close<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Self>, D::Error> {
+        Option::<Self>::deserialize(d)
+            .map_err(|e| serde::de::Error::custom(format!("close_sound: {e}")))
+    }
 }
 
 /// A block the mod adds: a vanilla template's behaviour, states and shapes
@@ -448,6 +562,12 @@ pub struct Block {
     pub collision_context_shapes: BTreeMap<ShapeEntityKind, BlockShapes>,
     /// Ray-face override; does not replace the outline hit point or create a hit.
     pub interaction_shapes: Option<BlockShapes>,
+    /// The block's block entity publishes its outline and collision shapes, which replace the
+    /// declared ones until cleared. Needs a block entity type that owns the block.
+    pub shapes_from_block_entity: bool,
+    /// A vanilla block's context collision it takes, over its shapes for entities that have
+    /// no `collision_context_shapes` of their own.
+    pub context_collision: Option<ContextCollision>,
     /// Per-state emission; takes precedence over `properties.light`.
     pub state_light: Option<StateLight>,
     /// State properties of its own, which its template does not have.
@@ -456,11 +576,13 @@ pub struct Block {
     pub default_state: BTreeMap<String, String>,
     /// Also add a block item with the same id.
     pub item: bool,
-    /// The sound event a fence gate plays opening, instead of its wood's
-    /// (`WoodType.fenceGateOpen`); needs a `*_fence_gate` template.
-    pub open_sound: Option<String>,
-    /// The sound event a fence gate plays closing (`WoodType.fenceGateClose`).
-    pub close_sound: Option<String>,
+    /// A fence gate's opening sounds (`WoodType.fenceGateOpen`). `All` replaces
+    /// every site; `Sites` keeps the template wood's sound for each missing site.
+    /// Needs a `*_fence_gate` template.
+    pub open_sound: Option<GateSound>,
+    /// A fence gate's closing sounds (`WoodType.fenceGateClose`), with the same
+    /// per-site fallback as `open_sound`.
+    pub close_sound: Option<GateSound>,
     /// The item this block is, for pick-block and `Block.asItem`, when
     /// it is not a block item of its own: an item of this mod or a vanilla
     /// one, checked to exist when the content loads. Needs `item` false.
@@ -754,6 +876,8 @@ pub const LIVING_TEMPLATES: [&str; 6] = [
 pub mod entity_sounds;
 mod entity_type;
 pub use entity_type::EntityType;
+pub mod fluid_interaction;
+pub use fluid_interaction::FluidInteraction;
 
 /// A block entity type declared in code, with the blocks it supports.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -860,6 +984,8 @@ pub struct Content {
     pub creative_tabs: Vec<CreativeTab>,
     /// How its fluids look, by id.
     pub fluids: Vec<FluidLook>,
+    /// What its liquid blocks turn into beside another fluid or block, in file-name order.
+    pub fluid_interactions: Vec<FluidInteraction>,
     pub entity_types: Vec<EntityType>,
     /// Block entity types declared by native code, not content files.
     pub block_entity_types: Vec<BlockEntityType>,
@@ -927,7 +1053,7 @@ pub fn clash(a: (&str, &[String]), b: (&str, &[String])) -> Option<String> {
 }
 
 impl Content {
-    /// The content of the mod at `path` (a `.hmod` or a mod folder).
+    /// The content of the mod at `path` (a `.smod` or a mod folder).
     pub fn read(path: &Path, manifest: &Manifest) -> Result<Content, String> {
         Self::read_declaring(path, manifest, &[])
     }
@@ -985,6 +1111,7 @@ impl Content {
             effects: Vec::new(),
             creative_tabs: Vec::new(),
             fluids: Vec::new(),
+            fluid_interactions: Vec::new(),
             entity_types: Vec::new(),
             block_entity_types: Vec::new(),
             menu_types: Vec::new(),
@@ -1005,6 +1132,7 @@ impl Content {
             effects: Vec::new(),
             creative_tabs: Vec::new(),
             fluids: Vec::new(),
+            fluid_interactions: Vec::new(),
             entity_types: Vec::new(),
             block_entity_types: Vec::new(),
             menu_types: Vec::new(),
@@ -1087,7 +1215,7 @@ impl Content {
         Ok(())
     }
 
-    /// Where the files are read from: the mod's folder or its `.hmod`.
+    /// Where the files are read from: the mod's folder or its `.smod`.
     pub fn source(&self) -> &Path {
         match &self.source {
             Source::Dir(path) => path,
@@ -1145,6 +1273,7 @@ impl Content {
         let mut effects = Vec::new();
         let mut tabs = Vec::new();
         let mut fluids = Vec::new();
+        let mut interactions = Vec::new();
         let mut types = Vec::new();
         let mut menus = Vec::new();
         for name in &self.files {
@@ -1185,13 +1314,15 @@ impl Content {
                 tabs.push((tab, name.clone()));
             } else if let Some(fluid) = parse("fluid") {
                 fluids.push((fluid, name.clone()));
+            } else if let Some(interaction) = parse("fluid_interaction") {
+                interactions.push((interaction, name.clone()));
             } else if let Some(kind) = parse("entity_type") {
                 types.push((kind, name.clone()));
             } else if let Some(menu) = parse("menu") {
                 menus.push((menu, name.clone()));
             } else {
                 return Err(format!(
-                    "{name}: data/{id}/sunrise/ holds block/, item/, mob_effect/, creative_tab/, fluid/, entity_type/ and menu/*.json only"
+                    "{name}: data/{id}/sunrise/ holds block/, item/, mob_effect/, creative_tab/, fluid/, fluid_interaction/, entity_type/ and menu/*.json only"
                 ));
             }
         }
@@ -1221,6 +1352,8 @@ impl Content {
                 outline_context_shapes: file.outline_context_shapes,
                 collision_context_shapes: file.collision_context_shapes,
                 interaction_shapes: file.interaction_shapes,
+                shapes_from_block_entity: file.shapes_from_block_entity,
+                context_collision: file.context_collision,
                 state_light: file.state_light,
                 state_properties: file.state_properties,
                 default_state: file.default_state,
@@ -1350,6 +1483,12 @@ impl Content {
                 self.items.push(item);
             }
             self.fluids.push(look);
+        }
+        for (_, name) in interactions {
+            let file: FluidInteraction =
+                serde_json::from_slice(&self.file(&name)?).map_err(|e| format!("{name}: {e}"))?;
+            file.check().map_err(|e| format!("{name}: {e}"))?;
+            self.fluid_interactions.push(file);
         }
         for (kind, name) in types {
             let file: EntityType =
@@ -1567,6 +1706,9 @@ fn check_block(file: &Block) -> Result<(), String> {
         light.check()?;
     }
     for (name, property) in &file.state_properties {
+        if name == "waterlogged" && !matches!(property, StateProperty::Boolean) {
+            return Err("state_properties.waterlogged must have type boolean".into());
+        }
         if !state_name(name) {
             return Err(format!(
                 "state property {name:?} is lower case letters, digits and underscores"
@@ -1607,6 +1749,14 @@ fn check_block(file: &Block) -> Result<(), String> {
             return Err(format!(
                 "random_ticks needs values of the block's own state property {property:?} (state_properties)"
             ));
+        }
+    }
+    for (key, value, max) in [
+        ("max_horizontal_offset", p.max_horizontal_offset, 0.25),
+        ("max_vertical_offset", p.max_vertical_offset, 0.2),
+    ] {
+        if value.is_some_and(|v| !v.is_finite() || !(0.0..=max).contains(&v)) {
+            return Err(format!("{key} is a finite number from 0 to {max}"));
         }
     }
     let finite = |v: Option<f32>| v.is_none_or(f32::is_finite);
@@ -1716,10 +1866,26 @@ fn check_block(file: &Block) -> Result<(), String> {
                 file.template
             ));
         }
-        if !namespaced_id(sound) {
-            return Err(format!(
-                "{key} {sound:?} is a sound event id, namespace:path"
-            ));
+        let sites = match sound {
+            GateSound::All(sound) => [("", Some(sound)), ("", None), ("", None)],
+            GateSound::Sites {
+                on_use,
+                on_explosion,
+                on_redstone,
+            } => [
+                (".use", on_use.as_ref()),
+                (".explosion", on_explosion.as_ref()),
+                (".redstone", on_redstone.as_ref()),
+            ],
+        };
+        for (site, sound) in sites {
+            if let Some(sound) = sound
+                && !namespaced_id(sound)
+            {
+                return Err(format!(
+                    "{key}{site} {sound:?} is a sound event id, namespace:path"
+                ));
+            }
         }
     }
     if let Some(item) = &file.block_item {
@@ -1840,6 +2006,18 @@ pub(crate) fn folder_files(root: &Path) -> Result<Vec<(String, u64)>, String> {
     Ok(out)
 }
 
+/// The files under a package folder's `runtime/`, as `(name below it, bytes)`. Symbolic links and
+/// other non-files are refused, not followed.
+pub(crate) fn runtime_folder_files(root: &Path) -> Result<Vec<(String, u64)>, String> {
+    let mut out = Vec::new();
+    walk(root, &root.join(crate::manifest::RUNTIME_DIR), &mut out)?;
+    let prefix = format!("{}/", crate::manifest::RUNTIME_DIR);
+    for (name, _) in &mut out {
+        *name = name.strip_prefix(&prefix).unwrap_or(name).to_owned();
+    }
+    Ok(out)
+}
+
 fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, u64)>) -> Result<(), String> {
     match std::fs::symlink_metadata(dir) {
         Ok(m) if !m.is_dir() => {
@@ -1920,7 +2098,7 @@ capabilities = ["registries"]
     }
     #[test]
     fn shape_tables_validate_tuples_defaults_and_collision() {
-        let content = hmod("shape-tuples", MANIFEST_TEXT, &[(
+        let content = smod("shape-tuples", MANIFEST_TEXT, &[(
             "data/ruby/sunrise/block/a.json",
             br#"{"template":"minecraft:stone","shapes":{"properties":["facing","count"],"values":{"north,2":[[0,0,0,1,0.5,1]]},"default":[[0,0,0,1,1,1]]},"collision_shapes":{"default":[]}}"#,
         )]).unwrap();
@@ -1949,7 +2127,7 @@ capabilities = ["registries"]
             let declaration =
                 format!(r#"{{"template":"minecraft:stone","collision_shapes":{value}}}"#);
             assert!(
-                hmod(
+                smod(
                     "bad-collision",
                     MANIFEST_TEXT,
                     &[("data/ruby/sunrise/block/a.json", declaration.as_bytes(),)]
@@ -1958,21 +2136,21 @@ capabilities = ["registries"]
                 "{value}"
             );
         }
-        let oversized = BlockShapes(StateValues {
+        let many = BlockShapes(StateValues {
             property: String::new(),
             properties: vec![],
             values: BTreeMap::new(),
-            default: Some(vec![[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]; 17]),
+            default: Some(vec![[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]; 100]),
         });
-        assert!(oversized.check().is_err());
-        let mut nonfinite = oversized;
+        assert_eq!(many.check(), Ok(()));
+        let mut nonfinite = many;
         nonfinite.default = Some(vec![[f64::NAN; 6]]);
         assert!(nonfinite.check().is_err());
     }
 
-    fn hmod(name: &str, manifest: &str, files: &[(&str, &[u8])]) -> Result<Content, String> {
+    fn smod(name: &str, manifest: &str, files: &[(&str, &[u8])]) -> Result<Content, String> {
         let dir = scratch(name);
-        let path = dir.join("m.hmod");
+        let path = dir.join("m.smod");
         std::fs::write(&path, Package::write_files(manifest, files)?).unwrap();
         let package = Package::read(&path);
         let content = package.and_then(|p| Content::read(&path, &p.manifest));
@@ -1986,7 +2164,7 @@ capabilities = ["registries"]
             let declaration = format!(
                 r#"{{"template":"minecraft:stone","properties":{{"light":3}},"state_light":{table}}}"#
             );
-            hmod(
+            smod(
                 name,
                 MANIFEST_TEXT,
                 &[("data/ruby/sunrise/block/lamp.json", declaration.as_bytes())],
@@ -2033,7 +2211,7 @@ capabilities = ["registries"]
     fn place_block_checks_files_and_native_declarations() {
         for (i, target) in ["ruby:frame", "minecraft:stone"].iter().enumerate() {
             let text = format!(r#"{{"template":"minecraft:stick","block":"{target}"}}"#);
-            let content = hmod(
+            let content = smod(
                 &format!("place-block-{i}"),
                 MANIFEST_TEXT,
                 &[("data/ruby/sunrise/item/empty_frame.json", text.as_bytes())],
@@ -2047,7 +2225,7 @@ capabilities = ["registries"]
         {
             let text = format!(r#"{{"template":"minecraft:stick","block":"{target}"}}"#);
             assert!(
-                hmod(
+                smod(
                     &format!("bad-place-block-{i}"),
                     MANIFEST_TEXT,
                     &[("data/ruby/sunrise/item/empty_frame.json", text.as_bytes())]
@@ -2152,7 +2330,7 @@ capabilities = ["registries"]
     fn a_connecting_block_file_names_its_tag_with_a_hash() {
         let cable = br#"{"template": "minecraft:chorus_plant", "connects_to": "ruby:cables"}"#;
         let files: &[(&str, &[u8])] = &[("data/ruby/sunrise/block/cable.json", cable)];
-        let e = hmod("bare-tag", MANIFEST_TEXT, files).unwrap_err();
+        let e = smod("bare-tag", MANIFEST_TEXT, files).unwrap_err();
         assert!(e.contains("#namespace:path"), "{e}");
     }
 
@@ -2167,7 +2345,7 @@ capabilities = ["registries"]
             ("assets/ruby/textures/block/ruby_block.png", b"png"),
             ("assets/minecraft/atlases/blocks.json", b"{}"),
         ];
-        let content = hmod("ok", MANIFEST_TEXT, files).unwrap();
+        let content = smod("ok", MANIFEST_TEXT, files).unwrap();
         assert_eq!(content.files.len(), 7);
         assert_eq!(
             content.blocks,
@@ -2179,6 +2357,8 @@ capabilities = ["registries"]
                 outline_context_shapes: BTreeMap::new(),
                 collision_context_shapes: BTreeMap::new(),
                 interaction_shapes: None,
+                shapes_from_block_entity: false,
+                context_collision: None,
                 state_light: None,
                 state_properties: BTreeMap::new(),
                 default_state: BTreeMap::new(),
@@ -2212,7 +2392,7 @@ capabilities = ["registries"]
     #[test]
     fn items_name_the_block_they_place() {
         let file = "data/ruby/sunrise/item/seeds.json";
-        let content = hmod(
+        let content = smod(
             "seeds",
             MANIFEST_TEXT,
             &[(
@@ -2222,7 +2402,7 @@ capabilities = ["registries"]
         )
         .unwrap();
         assert_eq!(content.items[0].block.as_deref(), Some("ruby:crop"));
-        let error = hmod(
+        let error = smod(
             "bad-block",
             MANIFEST_TEXT,
             &[(
@@ -2250,7 +2430,7 @@ capabilities = ["registries"]
             ),
             ("data/ruby/sunrise/item/c_flask.json", ITEM),
         ];
-        let content = hmod("remainder", MANIFEST_TEXT, files).unwrap();
+        let content = smod("remainder", MANIFEST_TEXT, files).unwrap();
         let rests: Vec<_> = content
             .items
             .iter()
@@ -2264,7 +2444,7 @@ capabilities = ["registries"]
         let item = |pose: &str| {
             let text = format!(r#"{{"template": "minecraft:stick", "arm_pose": "{pose}"}}"#);
             let files: &[(&str, &[u8])] = &[("data/ruby/sunrise/item/a.json", text.as_bytes())];
-            hmod("arm-pose", MANIFEST_TEXT, files)
+            smod("arm-pose", MANIFEST_TEXT, files)
         };
         assert_eq!(
             item("toot_horn").unwrap().items[0].arm_pose,
@@ -2276,7 +2456,7 @@ capabilities = ["registries"]
             "{refused}"
         );
         let files: &[(&str, &[u8])] = &[("data/ruby/sunrise/item/a.json", ITEM)];
-        let plain = hmod("arm-pose", MANIFEST_TEXT, files).unwrap();
+        let plain = smod("arm-pose", MANIFEST_TEXT, files).unwrap();
         assert_eq!(plain.items[0].arm_pose, None);
     }
 
@@ -2289,7 +2469,7 @@ capabilities = ["registries"]
         )];
         let read = |declared: &[String]| {
             let dir = scratch("declared-remainder");
-            let path = dir.join("m.hmod");
+            let path = dir.join("m.smod");
             std::fs::write(&path, Package::write_files(MANIFEST_TEXT, files).unwrap()).unwrap();
             let package = Package::read(&path).unwrap();
             let content = Content::read_declaring(&path, &package.manifest, declared);
@@ -2313,7 +2493,7 @@ capabilities = ["registries"]
                 "operation": "add_value", "slot": "mainhand"}],
             "!minecraft:repairable": {}}}"#;
         let files: &[(&str, &[u8])] = &[("data/ruby/sunrise/item/ruby_sword.json", sword)];
-        let content = hmod("components", MANIFEST_TEXT, files).unwrap();
+        let content = smod("components", MANIFEST_TEXT, files).unwrap();
         let components = &content.items[0].components;
         assert_eq!(
             components.keys().collect::<Vec<_>>(),
@@ -2338,7 +2518,7 @@ capabilities = ["registries"]
                 br#"{"category": "harmful", "color": 0}"#,
             ),
         ];
-        let content = hmod("effects", MANIFEST_TEXT, files).unwrap();
+        let content = smod("effects", MANIFEST_TEXT, files).unwrap();
         let effects: Vec<_> = content
             .effects
             .iter()
@@ -2375,7 +2555,7 @@ capabilities = ["registries"]
         ] {
             let files: &[(&str, &[u8])] =
                 &[("data/ruby/sunrise/mob_effect/a.json", file.as_bytes())];
-            let e = hmod(case, MANIFEST_TEXT, files).unwrap_err();
+            let e = smod(case, MANIFEST_TEXT, files).unwrap_err();
             assert!(e.contains(why), "{case}: {e}");
         }
     }
@@ -2393,7 +2573,7 @@ capabilities = ["registries"]
                 br#"{"slots": 16, "results": [11], "crafting": {"grid": 1, "result": 0}, "links": {"from": 12, "count": 4}}"#,
             ),
         ];
-        let content = hmod("menus", MANIFEST_TEXT, files).unwrap();
+        let content = smod("menus", MANIFEST_TEXT, files).unwrap();
         let menus: Vec<_> = content
             .menu_types
             .iter()
@@ -2502,7 +2682,7 @@ capabilities = ["registries"]
             ("menu-missing", r#"{"data_slots": 1}"#, "missing field"),
         ] {
             let files: &[(&str, &[u8])] = &[("data/ruby/sunrise/menu/a.json", file.as_bytes())];
-            let e = hmod(case, MANIFEST_TEXT, files).unwrap_err();
+            let e = smod(case, MANIFEST_TEXT, files).unwrap_err();
             assert!(e.contains(why), "{case}: {e}");
         }
     }
@@ -2521,7 +2701,7 @@ capabilities = ["registries"]
                 br#"{"template": "minecraft:snowball", "item": "ruby:dust"}"#,
             ),
         ];
-        let content = hmod("types", MANIFEST_TEXT, files).unwrap();
+        let content = smod("types", MANIFEST_TEXT, files).unwrap();
         let types: Vec<_> = content
             .entity_types
             .iter()
@@ -2581,7 +2761,7 @@ capabilities = ["registries"]
                 ("data/ruby/sunrise/item/gem.json", ITEM),
                 ("data/ruby/sunrise/entity_type/a.json", file.as_bytes()),
             ];
-            let e = hmod(case, MANIFEST_TEXT, files).unwrap_err();
+            let e = smod(case, MANIFEST_TEXT, files).unwrap_err();
             assert!(e.contains(why), "{case}: {e}");
         }
         let shared = snowball(r#", "item": "ruby:gem""#);
@@ -2590,7 +2770,7 @@ capabilities = ["registries"]
             ("data/ruby/sunrise/entity_type/a.json", shared.as_bytes()),
             ("data/ruby/sunrise/entity_type/b.json", shared.as_bytes()),
         ];
-        let e = hmod("type-shared", MANIFEST_TEXT, files).unwrap_err();
+        let e = smod("type-shared", MANIFEST_TEXT, files).unwrap_err();
         assert!(e.contains("already throws another entity type"), "{e}");
     }
 
@@ -2624,7 +2804,7 @@ capabilities = ["registries"]
                 br#"{"template": "minecraft:cat"}"#,
             ),
         ];
-        let content = hmod("living", MANIFEST_TEXT, files).unwrap();
+        let content = smod("living", MANIFEST_TEXT, files).unwrap();
         let types: Vec<_> = content
             .entity_types
             .iter()
@@ -2690,7 +2870,7 @@ capabilities = ["registries"]
                 ("data/ruby/sunrise/item/gem.json", ITEM),
                 ("data/ruby/sunrise/entity_type/a.json", file.as_bytes()),
             ];
-            let e = hmod(case, MANIFEST_TEXT, files).unwrap_err();
+            let e = smod(case, MANIFEST_TEXT, files).unwrap_err();
             assert!(e.contains(why), "{case}: {e}");
         }
     }
@@ -2711,7 +2891,7 @@ capabilities = ["registries"]
                 br#"{"template": "minecraft:wandering_trader", "passenger_attachments": 1.25}"#,
             ),
         ];
-        let content = hmod("passengers", MANIFEST_TEXT, files).unwrap();
+        let content = smod("passengers", MANIFEST_TEXT, files).unwrap();
         assert_eq!(
             content.entity_types[0].passenger_attachments,
             vec![[0.0, 0.7, -0.1]]
@@ -2734,7 +2914,7 @@ capabilities = ["registries"]
             );
             let files: &[(&str, &[u8])] =
                 &[("data/ruby/sunrise/block/panel.json", text.as_bytes())];
-            hmod("occludes", MANIFEST_TEXT, files)
+            smod("occludes", MANIFEST_TEXT, files)
         };
         let occludes = |c: Result<Content, String>| c.unwrap().blocks[0].properties.occludes;
         assert_eq!(occludes(block("false")), Some(false));
@@ -2749,7 +2929,7 @@ capabilities = ["registries"]
                 r#"{{"template": "minecraft:stone", "properties": {{"render_shape": {shape}}}}}"#
             );
             let files: &[(&str, &[u8])] = &[("data/ruby/sunrise/block/gear.json", text.as_bytes())];
-            hmod("render-shape", MANIFEST_TEXT, files)
+            smod("render-shape", MANIFEST_TEXT, files)
         };
         let shape = |c: Result<Content, String>| c.unwrap().blocks[0].properties.render_shape;
         assert_eq!(shape(block(r#""MODEL""#)), Some(RenderShape::Model));
@@ -2765,13 +2945,30 @@ capabilities = ["registries"]
     }
 
     #[test]
+    fn block_offset_refusals_name_the_file_and_key() {
+        for (properties, key) in [
+            (r#""offset":"XY""#, "offset"),
+            (r#""max_horizontal_offset":-0.1"#, "max_horizontal_offset"),
+            (r#""max_horizontal_offset":0.3"#, "max_horizontal_offset"),
+            (r#""max_horizontal_offset":"wide""#, "max_horizontal_offset"),
+            (r#""max_vertical_offset":0.3"#, "max_vertical_offset"),
+        ] {
+            let json = format!(r#"{{"template":"minecraft:stone","properties":{{{properties}}}}}"#);
+            let file = "data/ruby/sunrise/block/offset.json";
+            let error =
+                smod("offset-refusal", MANIFEST_TEXT, &[(file, json.as_bytes())]).unwrap_err();
+            assert!(error.contains(file) && error.contains(key), "{error}");
+        }
+    }
+
+    #[test]
     fn blocks_choose_vanilla_push_reactions() {
         for name in ["PUSH_PULL", "PUSH", "POPPED", "IMMOVEABLE", "IGNORE_ENTITY"] {
             let text = format!(
                 r#"{{"template":"minecraft:stone","properties":{{"push_reaction":"{name}"}}}}"#
             );
             let files: &[(&str, &[u8])] = &[("data/ruby/sunrise/block/gear.json", text.as_bytes())];
-            let content = hmod("push-reaction", MANIFEST_TEXT, files).unwrap();
+            let content = smod("push-reaction", MANIFEST_TEXT, files).unwrap();
             assert_eq!(
                 content.blocks[0].properties.push_reaction.unwrap().name(),
                 name
@@ -2787,7 +2984,7 @@ capabilities = ["registries"]
                 r#"{{"template": "minecraft:dirt", {own}, "properties": {{"random_ticks": {ticks}}}}}"#
             );
             let files: &[(&str, &[u8])] = &[("data/ruby/sunrise/block/crop.json", text.as_bytes())];
-            hmod("random-ticks", MANIFEST_TEXT, files)
+            smod("random-ticks", MANIFEST_TEXT, files)
         };
         let ticks =
             |c: Result<Content, String>| c.unwrap().blocks[0].properties.random_ticks.clone();
@@ -2820,7 +3017,7 @@ capabilities = ["registries"]
         let block = br#"{"template": "minecraft:iron_block", "components": {
             "minecraft:max_stack_size": 16, "!minecraft:lore": {}}}"#;
         let files: &[(&str, &[u8])] = &[("data/ruby/sunrise/block/ruby_block.json", block)];
-        let content = hmod("block-components", MANIFEST_TEXT, files).unwrap();
+        let content = smod("block-components", MANIFEST_TEXT, files).unwrap();
         let components = &content.blocks[0].components;
         assert_eq!(
             components.keys().collect::<Vec<_>>(),
@@ -2838,7 +3035,7 @@ capabilities = ["registries"]
             ("data/ruby/sunrise/item/gem.json", ITEM),
             ("data/ruby/sunrise/block/ruby_block.json", BLOCK),
         ] {
-            let content = hmod("server-refused", &server, &[(file, bytes)]).unwrap();
+            let content = smod("server-refused", &server, &[(file, bytes)]).unwrap();
             assert_eq!(
                 content.server_only_refusal(&manifest).unwrap(),
                 format!(
@@ -2846,7 +3043,7 @@ capabilities = ["registries"]
                 )
             );
         }
-        let content = hmod(
+        let content = smod(
             "server-loads",
             &server,
             &[
@@ -2882,7 +3079,7 @@ capabilities = ["registries"]
         let block = |json: &str| {
             let files: &[(&str, &[u8])] =
                 &[("data/ruby/sunrise/block/cable.json", json.as_bytes())];
-            hmod("cable", MANIFEST_TEXT, files)
+            smod("cable", MANIFEST_TEXT, files)
         };
         let content = block(
             r##"{"template": "minecraft:chorus_plant", "connects_to": "#ruby:cable_joins"}"##,
@@ -2912,9 +3109,30 @@ capabilities = ["registries"]
     }
 
     #[test]
+    fn declared_waterlogged_requires_a_boolean() {
+        let parse = |template: &str, property: &str| {
+            let json = format!(
+                r#"{{"template":"minecraft:{template}","state_properties":{{"waterlogged":{property}}}}}"#
+            );
+            smod(
+                "waterlogged",
+                MANIFEST_TEXT,
+                &[("data/ruby/sunrise/block/plant.json", json.as_bytes())],
+            )
+        };
+        assert!(parse("tall_grass", r#"{"type":"boolean"}"#).is_ok());
+        assert!(parse("stone", r#"{"type":"boolean"}"#).is_ok());
+        let error = parse("stone", r#"{"type":"enum","values":["false","true"]}"#).unwrap_err();
+        assert!(
+            error.contains("state_properties.waterlogged") && error.contains("plant.json"),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn gate_sounds_need_a_fence_gate_and_sound_ids() {
         let block = |json: &str| {
-            hmod(
+            smod(
                 "gate",
                 MANIFEST_TEXT,
                 &[("data/ruby/sunrise/block/gate.json", json.as_bytes())],
@@ -2925,12 +3143,29 @@ capabilities = ["registries"]
         )
         .unwrap();
         assert_eq!(
-            parsed.blocks[0].open_sound.as_deref(),
-            Some("ruby:gate.open")
+            parsed.blocks[0].open_sound,
+            Some(GateSound::All("ruby:gate.open".into()))
         );
         assert_eq!(
-            parsed.blocks[0].close_sound.as_deref(),
-            Some("minecraft:block.chain.break")
+            parsed.blocks[0].close_sound,
+            Some(GateSound::All("minecraft:block.chain.break".into()))
+        );
+        let sites = block(r#"{"template":"minecraft:oak_fence_gate","open_sound":{"use":"ruby:rope.open","redstone":"ruby:wire.open"},"close_sound":{"explosion":"ruby:blast.close"}}"#).unwrap();
+        assert_eq!(
+            sites.blocks[0].open_sound,
+            Some(GateSound::Sites {
+                on_use: Some("ruby:rope.open".into()),
+                on_explosion: None,
+                on_redstone: Some("ruby:wire.open".into()),
+            })
+        );
+        assert_eq!(
+            sites.blocks[0].close_sound,
+            Some(GateSound::Sites {
+                on_use: None,
+                on_explosion: Some("ruby:blast.close".into()),
+                on_redstone: None,
+            })
         );
         let plain = block(r#"{"template": "minecraft:oak_fence_gate"}"#).unwrap();
         assert_eq!(
@@ -2946,8 +3181,21 @@ capabilities = ["registries"]
                 r#"{"template": "minecraft:oak_fence_gate", "close_sound": "gate"}"#,
                 "namespace:path",
             ),
+            (
+                r#"{"template":"minecraft:oak_fence","open_sound":{"use":"ruby:open"}}"#,
+                "open_sound",
+            ),
+            (
+                r#"{"template":"minecraft:oak_fence_gate","open_sound":{"other":"ruby:open"}}"#,
+                "open_sound",
+            ),
+            (
+                r#"{"template":"minecraft:oak_fence_gate","close_sound":{"redstone":"bad"}}"#,
+                "close_sound.redstone",
+            ),
         ] {
             let e = block(bad).unwrap_err();
+            assert!(e.contains("data/ruby/sunrise/block/gate.json"), "{e}");
             assert!(e.contains(word), "{bad}: {e}");
         }
     }
@@ -2955,7 +3203,7 @@ capabilities = ["registries"]
     #[test]
     fn block_item_names_an_item_and_needs_item_false() {
         let block = |json: &str| {
-            hmod(
+            smod(
                 "blockitem",
                 MANIFEST_TEXT,
                 &[("data/ruby/sunrise/block/slab.json", json.as_bytes())],
@@ -2995,7 +3243,7 @@ capabilities = ["registries"]
     #[test]
     fn pick_item_names_an_item_whatever_the_blocks_own_is() {
         let block = |json: &str| {
-            hmod(
+            smod(
                 "pickitem",
                 MANIFEST_TEXT,
                 &[("data/ruby/sunrise/block/crop.json", json.as_bytes())],
@@ -3028,7 +3276,7 @@ capabilities = ["registries"]
     #[test]
     fn farmland_base_requires_farmland_and_a_block_id() {
         let block = |json: &str| {
-            hmod(
+            smod(
                 "farmland",
                 MANIFEST_TEXT,
                 &[("data/ruby/sunrise/block/farm.json", json.as_bytes())],
@@ -3052,7 +3300,7 @@ capabilities = ["registries"]
         let block = |json: &str| {
             let files: &[(&str, &[u8])] =
                 &[("data/ruby/sunrise/block/notice.json", json.as_bytes())];
-            hmod("sign", MANIFEST_TEXT, files)
+            smod("sign", MANIFEST_TEXT, files)
         };
         let files: &[(&str, &[u8])] = &[
             (
@@ -3064,7 +3312,7 @@ capabilities = ["registries"]
                 br#"{"template": "minecraft:oak_wall_sign", "item": false}"#,
             ),
         ];
-        let content = hmod("sign-pair", MANIFEST_TEXT, files).unwrap();
+        let content = smod("sign-pair", MANIFEST_TEXT, files).unwrap();
         assert_eq!(content.blocks[0].wood_type.as_deref(), Some("ruby:elm"));
         assert_eq!(
             content.blocks[0].wall_block.as_deref(),
@@ -3144,7 +3392,7 @@ capabilities = ["registries"]
             if wanted == "already paired" {
                 files.push(("data/ruby/sunrise/block/second.json", second.as_bytes()));
             }
-            let e = hmod("sign-wall", MANIFEST_TEXT, &files).unwrap_err();
+            let e = smod("sign-wall", MANIFEST_TEXT, &files).unwrap_err();
             assert!(e.contains(wanted), "{wanted}: {e}");
         };
         let wall = r#"{"template": "minecraft:oak_wall_sign", "item": false}"#;
@@ -3178,7 +3426,7 @@ capabilities = ["registries"]
                 ("data/ruby/sunrise/block/sign.json", sign.as_bytes()),
                 ("data/ruby/sunrise/block/wall.json", wall.as_bytes()),
             ];
-            hmod("sign-text", MANIFEST_TEXT, files)
+            smod("sign-text", MANIFEST_TEXT, files)
         };
         let white = r#", "sign_text_color": "white""#;
         assert!(pair(white, white).is_ok());
@@ -3230,10 +3478,70 @@ capabilities = ["registries"]
             ),
         ];
         assert!(
-            hmod("fluid-collision", MANIFEST_TEXT, files)
+            smod("fluid-collision", MANIFEST_TEXT, files)
                 .unwrap_err()
                 .contains("declared twice")
         );
+    }
+
+    #[test]
+    fn fluid_interaction_files_load_in_name_order_and_refuse_what_cannot_resolve() {
+        let file = |name: &str, body: &'static str| {
+            vec![(
+                format!("data/ruby/sunrise/fluid_interaction/{name}.json"),
+                body,
+            )]
+        };
+        let load = |files: Vec<(String, &'static str)>| {
+            let files: Vec<(&str, &[u8])> = files
+                .iter()
+                .map(|(n, b)| (n.as_str(), b.as_bytes()))
+                .collect();
+            smod("fluid-interaction", MANIFEST_TEXT, &files)
+        };
+        let slag = r#"{"source":"minecraft:lava","neighbour":{"fluid_tag":"minecraft:water"},
+            "below":{"block_tag":"ruby:cold"},"becomes":{"source":"ruby:slag","flowing":"ruby:slag[age=1]"}}"#;
+        let mut files = file("b_slag", slag);
+        files.extend(file(
+            "a_glass",
+            r#"{"source":"ruby:oil","neighbour":{"block":"minecraft:sand"},"becomes":{"flowing":"minecraft:glass"}}"#,
+        ));
+        let content = load(files).unwrap();
+        let sources: Vec<_> = content
+            .fluid_interactions
+            .iter()
+            .map(|i| i.source.as_str())
+            .collect();
+        assert_eq!(sources, ["ruby:oil", "minecraft:lava"], "by file name");
+        for (body, refusal) in [
+            (
+                r#"{"source":"lava","neighbour":{"block":"minecraft:sand"},"becomes":{"source":"minecraft:glass"}}"#,
+                "source",
+            ),
+            (
+                r#"{"source":"minecraft:lava","neighbour":{"block":"sand"},"becomes":{"source":"minecraft:glass"}}"#,
+                "neighbour",
+            ),
+            (
+                r#"{"source":"minecraft:lava","neighbour":{"block":"minecraft:sand"},"becomes":{}}"#,
+                "becomes",
+            ),
+            (
+                r#"{"source":"minecraft:lava","neighbour":{"block":"minecraft:sand"},"becomes":{"source":"glass"}}"#,
+                "becomes",
+            ),
+            (
+                r#"{"source":"minecraft:lava","neighbour":{"stone":"minecraft:sand"},"becomes":{"source":"minecraft:glass"}}"#,
+                "stone",
+            ),
+            (
+                r#"{"source":"minecraft:lava","neighbour":{"block":"minecraft:sand"},"becomes":{"source":"minecraft:glass"},"when":"any"}"#,
+                "when",
+            ),
+        ] {
+            let error = load(file("bad", body)).unwrap_err();
+            assert!(error.contains(refusal), "{body}: {error}");
+        }
     }
 
     #[test]
@@ -3248,7 +3556,7 @@ capabilities = ["registries"]
                 br#"{"world":{"bucket":false}}"#,
             ),
         ];
-        let content = hmod("world-fluid", MANIFEST_TEXT, files).unwrap();
+        let content = smod("world-fluid", MANIFEST_TEXT, files).unwrap();
         let oil = content.fluids.iter().find(|f| f.id == "ruby:oil").unwrap();
         assert_eq!(oil.flowing_id(), "ruby:flowing_oil");
         assert_eq!(oil.world.unwrap().tick_delay, 20);
@@ -3274,7 +3582,7 @@ capabilities = ["registries"]
             br#"{"world":{"slope_find_distance":5}}"#,
         ] {
             let files: &[(&str, &[u8])] = &[("data/ruby/sunrise/fluid/oil.json", world)];
-            assert!(hmod("bad-world-fluid", MANIFEST_TEXT, files).is_err());
+            assert!(smod("bad-world-fluid", MANIFEST_TEXT, files).is_err());
         }
         let files: &[(&str, &[u8])] = &[
             ("data/ruby/sunrise/fluid/oil.json", br#"{"world":{}}"#),
@@ -3284,7 +3592,7 @@ capabilities = ["registries"]
             ),
         ];
         assert!(
-            hmod("clashing-world-fluid", MANIFEST_TEXT, files)
+            smod("clashing-world-fluid", MANIFEST_TEXT, files)
                 .unwrap_err()
                 .contains("declared twice")
         );
@@ -3299,7 +3607,7 @@ capabilities = ["registries"]
             ),
             ("data/ruby/sunrise/fluid/bare.json", b"{}"),
         ];
-        let content = hmod("fluid", MANIFEST_TEXT, files).unwrap();
+        let content = smod("fluid", MANIFEST_TEXT, files).unwrap();
         assert_eq!(
             content.fluids,
             [
@@ -3324,7 +3632,7 @@ capabilities = ["registries"]
             br#"{"sprite":"ruby:"}"#,
         ] {
             let bad: &[(&str, &[u8])] = &[("data/ruby/sunrise/fluid/x.json", sprite)];
-            let e = hmod("fluid", MANIFEST_TEXT, bad).unwrap_err();
+            let e = smod("fluid", MANIFEST_TEXT, bad).unwrap_err();
             assert!(e.contains("sprite"), "{e}");
         }
     }
@@ -3334,7 +3642,7 @@ capabilities = ["registries"]
         let tab = |json: &str| {
             let files: &[(&str, &[u8])] =
                 &[("data/ruby/sunrise/creative_tab/gems.json", json.as_bytes())];
-            hmod("tab", MANIFEST_TEXT, files)
+            smod("tab", MANIFEST_TEXT, files)
         };
         let content =
             tab(r#"{"title": "Ruby Gems", "icon": "ruby:ruby", "items": ["ruby:ruby", "minecraft:diamond"]}"#)
@@ -3355,7 +3663,7 @@ capabilities = ["registries"]
     #[test]
     fn refuses_content_outside_its_fence() {
         let refused = |name: &str, files: &[(&str, &[u8])]| {
-            let e = hmod(name, MANIFEST_TEXT, files).unwrap_err();
+            let e = smod(name, MANIFEST_TEXT, files).unwrap_err();
             assert!(!e.is_empty());
             e
         };
@@ -3536,6 +3844,40 @@ capabilities = ["registries"]
     }
 
     #[test]
+    fn reserved_namespace_accepts_only_declared_extension_tags() {
+        for tag in crate::extension_tags::ALL {
+            let path = format!(
+                "data/sunrise/tags/{}/{}.json",
+                tag.registry,
+                tag.id.strip_prefix("sunrise:").unwrap()
+            );
+            let content = smod(
+                "extension",
+                MANIFEST_TEXT,
+                &[(path.as_str(), br#"{"values":[]}"#)],
+            )
+            .unwrap();
+            assert_eq!(content.files.len(), 1);
+        }
+        for (path, hint) in [
+            (
+                "data/sunrise/tags/block/villager_secondary_poi/custom.json",
+                "secondary_blocks",
+            ),
+            (
+                "data/sunrise/tags/item/villager_secondary_poi/farmer.json",
+                "extension_tags",
+            ),
+            ("data/sunrise/tags/block/class/crop.json", "block_part_tag"),
+            ("data/sunrise/loot_table/a.json", "own namespaces"),
+            ("assets/sunrise/lang/en_us.json", "own namespaces"),
+        ] {
+            let error = smod("extension-refused", MANIFEST_TEXT, &[(path, b"{}")]).unwrap_err();
+            assert!(error.contains(path) && error.contains(hint), "{error}");
+        }
+    }
+
+    #[test]
     fn listed_namespaces_hold_content() {
         let manifest = format!("{MANIFEST_TEXT}namespaces = [\"kaisyn\"]\n");
         let files: &[(&str, &[u8])] = &[
@@ -3543,12 +3885,12 @@ capabilities = ["registries"]
             ("data/kaisyn/structure/a.nbt", b"nbt"),
             ("assets/kaisyn/lang/en_us.json", b"{}"),
         ];
-        let content = hmod("listed", &manifest, files).unwrap();
+        let content = smod("listed", &manifest, files).unwrap();
         assert_eq!(content.files.len(), 3);
         assert_eq!(content.namespaces, ["ruby", "kaisyn"]);
         // Files and code share the manifest-owned namespace fence.
         let decl: &[(&str, &[u8])] = &[("data/kaisyn/sunrise/block/a.json", BLOCK)];
-        let content = hmod("listed-decl", &manifest, decl).unwrap();
+        let content = smod("listed-decl", &manifest, decl).unwrap();
         assert_eq!(content.blocks[0].id, "kaisyn:a");
         let mut code = Content::declared("ruby");
         code.namespaces.push("kaisyn".into());
@@ -3566,7 +3908,7 @@ capabilities = ["registries"]
         );
         // A namespace it does not list is still outside.
         let other: &[(&str, &[u8])] = &[("data/other/structure/a.nbt", b"nbt")];
-        assert!(hmod("listed-other", &manifest, other).is_err());
+        assert!(smod("listed-other", &manifest, other).is_err());
     }
 
     #[test]

@@ -15,13 +15,15 @@ fn overworld() -> LevelRef {
     LevelRef::new(WorldEpoch::new(1), mod_api::DimensionKey::OVERWORLD)
 }
 
-impl mod_api::prelude::LevelsBackend for World {
-    fn level_in_place(&self, level: LevelRef) -> bool {
-        level == overworld()
-    }
+impl mod_api::prelude::LevelRulesBackend for World {
     fn level_game_rule_bool(&self, level: LevelRef, key: BoolGameRuleKey) -> Option<bool> {
         (level == overworld() && mod_api::__private::game_rule_bool_slot(key).is_some())
             .then_some(true)
+    }
+}
+impl mod_api::prelude::LevelTickingBackend for World {
+    fn level_in_place(&self, level: LevelRef) -> bool {
+        level == overworld()
     }
 }
 impl mod_api::prelude::BlockEntitiesBackend for World {
@@ -32,7 +34,7 @@ impl mod_api::prelude::BlockEntitiesBackend for World {
     }
 }
 impl Backend for World {}
-mod_api::impl_backend_areas!(World, except(block_entities, levels));
+mod_api::impl_backend_areas!(World, except(block_entities, level_rules, level_ticking));
 impl mod_api::prelude::EntitiesHost for World {
     fn level(&self, dimension: &str) -> Option<LevelRef> {
         (dimension == "minecraft:overworld").then(overworld)
@@ -81,7 +83,7 @@ fn capability_is_answered_only_within_its_group() {
         let mut infos = Vec::new();
         let packages = ["counter_lib", "alpha", "beta", "gamma", "hog"].map(|id| {
             let path =
-                std::path::Path::new(&folder).join(format!("{id}/target/sunrise-mod/{id}.hmod"));
+                std::path::Path::new(&folder).join(format!("{id}/target/sunrise-mod/{id}.smod"));
             let manifest = sunrise_mod_package::Package::read(&path).unwrap().manifest;
             infos.push(mod_api::PackageInfo::new(
                 manifest.id.clone(),

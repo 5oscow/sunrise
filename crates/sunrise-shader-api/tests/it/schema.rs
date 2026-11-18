@@ -1,4 +1,4 @@
-//! Schema 1 of `sunrise-shaders.toml` and the `.hshader` package.
+//! Schema 1 of `sunrise-shaders.toml` and the `.sshader` package.
 use std::{collections::BTreeMap, path::Path};
 use sunrise_shader_api::{MANIFEST, Manifest, OptionKind, Pack, PageItem};
 
@@ -380,7 +380,7 @@ fn reads_the_sample_folder_and_its_package_alike() {
     );
     let dir = std::env::temp_dir().join(format!("sunrise-shader-api-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("sample_pack.hshader");
+    let path = dir.join("sample_pack.sshader");
     std::fs::write(&path, &bytes).unwrap();
     let packaged = Pack::read(&path).unwrap();
     std::fs::remove_dir_all(&dir).unwrap();

@@ -138,9 +138,7 @@ pub struct EntityUuid(pub u128);
 /// of an entity that is gone, or used on a client. `Host::entity` makes a server
 /// handle from an event's entity id; `ClientHost::crosshair_target` supplies a
 /// client handle for an entity hit.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct EntityRef {
     pub(crate) epoch: WorldEpoch,
@@ -162,6 +160,24 @@ impl EntityRef {
     pub fn epoch(self) -> WorldEpoch {
         self.epoch
     }
+    /// A float from the entity's own random (`Entity.getRandom().nextFloat()`), drawn from the
+    /// actual stream, which keeps it. None where the hit does not lend the entity.
+    pub fn next_float(self, hit: &mut dyn HitHost) -> Option<f32> {
+        hit.entity_next_float(self)
+    }
+    /// A double from the entity's own random, as [`Self::next_float`] draws.
+    pub fn next_double(self, hit: &mut dyn HitHost) -> Option<f64> {
+        hit.entity_next_double(self)
+    }
+    /// A boolean from the entity's own random, as [`Self::next_float`] draws.
+    pub fn next_bool(self, hit: &mut dyn HitHost) -> Option<bool> {
+        hit.entity_next_bool(self)
+    }
+    /// An int from 0 up to `bound` from the entity's own random, as [`Self::next_float`] draws.
+    /// None as well for a `bound` of 0 or less.
+    pub fn next_int(self, hit: &mut dyn HitHost, bound: i32) -> Option<i32> {
+        hit.entity_next_int(self, bound)
+    }
 }
 
 /// The resolved holder of a mob's or a boat's leash, or its absence.
@@ -182,9 +198,7 @@ pub enum LeashHolder {
 /// [`EntityRef`] of such an entity, and [`LivingRef::entity`] goes back, so the
 /// entity's methods work on it too. Stale handles read as `None`, as an
 /// `EntityRef`'s do.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct LivingRef(pub(crate) EntityRef);
 
@@ -327,9 +341,7 @@ pub enum EffectApplicable {
 }
 
 /// A vanilla `Mob`, narrowed from an entity with `host.mob(entity)`.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct MobRef(pub(crate) EntityRef);
 
@@ -352,17 +364,20 @@ impl MobRef {
 
 /// A mob the game has made but not yet added to a level (`finalize_spawn`'s and
 /// `mob_spawn_position_check`'s mob), lent to one hook call. It is not an [`EntityRef`]: the
-/// mob is in no level yet, so no entity lookup finds it. Reads take `&dyn Host`
+/// mob is in no level yet, so no entity lookup finds it. Pending-child editors borrow the
+/// action's actual owned mob; they do not clone it or authorize residency. Each listener and
+/// nested action expires those borrows; reacquire a child from its collection afterward.
+/// Reads take `&dyn Host`
 /// (`mob.kind(host)`); where a hook hands out an [`UnspawnedMobEdits`] with it, that makes the
 /// edits. Every read and edit after the hook returns, or with another lend's handle,
 /// is refused with [`UnspawnedMobError::Expired`], so a copy kept past the call changes nothing.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct UnspawnedMobRef {
     pub(crate) epoch: WorldEpoch,
     pub(crate) lend: u64,
+    pub(crate) action: u64,
+    pub(crate) slot: u32,
 }
 
 impl UnspawnedMobRef {
@@ -370,7 +385,29 @@ impl UnspawnedMobRef {
     // hidden: a game-side helper, not part of the mod surface
     #[doc(hidden)]
     pub fn new(epoch: WorldEpoch, lend: u64) -> Self {
-        Self { epoch, lend }
+        Self {
+            epoch,
+            lend,
+            action: 0,
+            slot: 0,
+        }
+    }
+    /// Names a callback borrow of an action-owned child. All numbers are checked by the engine.
+    // hidden: engine transport only; arena validation grants authority
+    #[doc(hidden)]
+    pub fn pending(epoch: WorldEpoch, action: u64, lease: u64, slot: u32) -> Self {
+        Self {
+            epoch,
+            lend: lease,
+            action,
+            slot,
+        }
+    }
+    /// Pending arena identity; `None` for a standalone spawning lend.
+    // hidden: engine transport only; arena validation grants authority
+    #[doc(hidden)]
+    pub fn pending_parts(self) -> Option<(u64, u64, u32)> {
+        (self.action != 0).then_some((self.action, self.lend, self.slot))
     }
     /// The open of the world the handle belongs to.
     // hidden: a game-side helper, not part of the mod surface
@@ -571,9 +608,7 @@ impl GoalSpec {
 }
 
 /// One goal of a mob's selector, as `goals` and `target_goals` read it.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq)]
 // exhaustive: the game builds it with a literal; mods only read it
 pub struct MobGoalEntry {
     /// The goal's priority: a lower number preempts a higher one.
@@ -586,9 +621,7 @@ pub struct MobGoalEntry {
 
 /// The ender dragon of the open world, narrowed with `host.dragon(entity)`.
 /// It is also a [`MobRef`] and a [`LivingRef`].
-#[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct DragonRef(pub(crate) EntityRef);
 
@@ -667,9 +700,7 @@ impl DragonPhase {
 }
 
 /// A dropped item entity of the open world, narrowed with `host.item_entity`.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ItemEntityRef(pub(crate) EntityRef);
 
@@ -688,9 +719,7 @@ impl ItemEntityRef {
 
 /// A display entity of the open world (`block_display`, `item_display` or
 /// `text_display`), narrowed with `host.display`.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct DisplayRef(pub(crate) EntityRef);
 
@@ -711,9 +740,7 @@ impl DisplayRef {
 /// `host.projectile`: arrows, tridents (a player's too), firework rockets,
 /// thrown items, fireballs, wind charges, skulls, shulker bullets and mods'
 /// thrown types.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ProjectileRef(pub(crate) EntityRef);
 
@@ -733,9 +760,7 @@ impl ProjectileRef {
 /// A cast fishing hook of the open world (vanilla's `FishingHook`), narrowed
 /// from an entity with `host.fishing_hook(entity)`. It does not narrow to a
 /// [`ProjectileRef`]: a hook's owner is always the player who cast it.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct FishingHookRef(pub(crate) EntityRef);
 
@@ -752,13 +777,33 @@ impl FishingHookRef {
     }
 }
 
+/// Where a fishing bobber outside water floats and fishes, as a mod answers
+/// `fishing_medium`: lava, the void under an island, a cloud. In the block of
+/// `surface` or below (its y under `floor(surface) + 1`) the bobber floats and
+/// fishes as in still water; above it, it falls as anywhere else.
+#[derive(Clone, Debug, Default, PartialEq)]
+// exhaustive: a mod builds the answer; write it with `..FishingMedium::default()`
+#[derive(sunrise_mod_api_macros::Wire)]
+pub struct FishingMedium {
+    /// The height the bobber floats at (world Y), as water's surface is. A value that is
+    /// not finite is no medium.
+    pub surface: f64,
+    /// The loot table a catch from here rolls (`mymod:gameplay/void_fishing`); None rolls
+    /// vanilla's `minecraft:gameplay/fishing`, and so does an id that is malformed or names
+    /// no table the server has (with one warning naming the mod and the id). Read on the
+    /// server; a client ignores it.
+    pub loot_table: Option<String>,
+    /// The ticks a fish takes to come, `[min, max]`: the wait is `min + nextInt(max - min +
+    /// 1)` less the rod's Lure, with `min` raised to at least 1 and `max` to at least `min`.
+    /// None keeps vanilla's 100 to 600. Read on the server; a client ignores it.
+    pub lure_ticks: Option<[i32; 2]>,
+}
+
 /// A villager or wandering trader (vanilla's `AbstractVillager`, a `Merchant`),
 /// narrowed from an entity with `host.merchant(entity)`. If a villager's saved
 /// profession is unresolved, offers read empty and merchant mutations are
 /// refused until its profession is available again; saved offers are retained.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct MerchantRef(pub(crate) EntityRef);
 
@@ -969,9 +1014,7 @@ impl NoBackend for HotbarSlotError {
 }
 
 /// A vanilla `AbstractMinecart`, narrowed from an entity with `host.minecart(entity)`.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct MinecartRef(pub(crate) EntityRef);
 
@@ -1079,9 +1122,7 @@ pub enum RemovalReason {
 /// player stay equal across respawn. Respawning does not invalidate a handle.
 /// A nested guest turn cannot re-enter a player active in an outer turn;
 /// operations requiring that player's swapped state report them unavailable.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct PlayerRef {
     pub(crate) entity: EntityRef,
@@ -1108,9 +1149,7 @@ impl From<PlayerRef> for EntityRef {
 /// The original player lent to `player_clone`. Every read expires when the hook returns;
 /// this is deliberately not a live player or entity handle.
 // exhaustive: its field is private, so mods cannot build or destructure it
-#[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct OriginalPlayerRef {
     pub(crate) token: u64,
 }
@@ -1302,6 +1341,10 @@ pub enum EffectTickChange {
 }
 
 impl ApplyEffectTickEvent<'_> {
+    /// `LivingEntity.hasEffect`: whether the holder currently has `effect`.
+    pub fn has_effect(&self, effect: crate::EffectKey) -> bool {
+        self.active_effects.contains(&effect)
+    }
     /// Queue `LivingEntity.heal` on the holder.
     pub fn heal(&mut self, amount: f32) {
         self.changes.push(EffectTickChange::Heal(amount));
@@ -1416,6 +1459,12 @@ pub struct PlayerActionSetup {
     pub pitch: f32,
     /// Secondary use, as when holding sneak; this does not change the standing eye height.
     pub secondary_use: bool,
+    /// Start with a full attack charge: with the stack in hand, the attack-strength ticker is
+    /// set so that `getAttackStrengthScale(0.5)` is 1.0, and the fake's own ticker comes back
+    /// afterwards with its other action timers. Only [`PlayerAction::Attack`] reads it. A stack
+    /// that leaves no attack speed never charges, as in vanilla.
+    /// `false` by default; set it by assignment: `setup.full_attack_charge = true;`.
+    pub full_attack_charge: bool,
 }
 
 impl PlayerActionSetup {
@@ -1433,6 +1482,7 @@ impl PlayerActionSetup {
             yaw,
             pitch,
             secondary_use,
+            full_attack_charge: false,
         }
     }
 }
@@ -1471,16 +1521,21 @@ pub enum MoveCause {
     ShulkerBox,
     /// `MoverType.SHULKER`: a shulker mob's opening lid pushes it away.
     Shulker,
+    /// Sunrise's own: a moving collider (an entity's `set_collider`) carries the body standing on
+    /// it by the displacement of the contact point, once a tick after the level's entities ticked.
+    /// Vanilla has no such mover.
+    Carried,
 }
 
 impl MoveCause {
     /// Every cause, in ordinal order.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::SelfMovement,
         Self::Player,
         Self::Piston,
         Self::ShulkerBox,
         Self::Shulker,
+        Self::Carried,
     ];
 }
 

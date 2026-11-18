@@ -48,7 +48,7 @@ impl Game<'_> {
     ) {
         // No block under the crosshair: vanilla calls releaseUsingItem, which
         // stops the use and causes the interaction vibration.
-        let Some(hit) = self.pick() else {
+        let Some(hit) = self.item_pick() else {
             self.stop_using_item(stack);
             return;
         };
@@ -71,18 +71,16 @@ impl Game<'_> {
                 return;
             }
         }
-        let elapsed = ticks + 1;
+        let elapsed = (USE_DURATION as i32)
+            .wrapping_sub(super::item_use::ticks_left(self.use_duration, ticks))
+            .wrapping_add(1);
         // The last tick before the backswing.
         if elapsed % 10 == 5 {
             self.brush_stroke(&hit, slot);
         }
-        // The use ends after USE_DURATION; stopUsingItem causes the vibration
-        // (vanilla's tickUsingItem), the held button starts it again.
-        if elapsed < USE_DURATION {
-            self.using = Some((slot, elapsed));
-        } else {
-            self.stop_using_item(stack);
-        }
+        // updateUsingItem owns the countdown and completion, including a
+        // replacement remaining counter from the Tick event.
+        self.using = Some((slot, ticks + 1));
     }
 
     /// One stroke on the block aimed at: dust (this window only), the brush
@@ -167,7 +165,7 @@ impl Game<'_> {
             return false;
         }
         brush.cooldown_ends_at = time + 10;
-        self.unpack_brush_loot(pos);
+        self.unpack_brush_loot(pos, slot);
         let before = completion_state(brush.count);
         brush.count += 1;
         if brush.count >= 10 {
@@ -184,8 +182,10 @@ impl Game<'_> {
     }
 
     /// `BrushableBlockEntity.unpackLootTable`: the table's roll becomes the
-    /// block entity's item.
-    fn unpack_brush_loot(&mut self, pos: [i32; 3]) {
+    /// block entity's item. `LootContextParamSets.ARCHAEOLOGY`: the brusher is
+    /// THIS_ENTITY, the brush in `slot` the TOOL and the block's centre the
+    /// ORIGIN, with the brusher's luck.
+    fn unpack_brush_loot(&mut self, pos: [i32; 3], slot: usize) {
         let key = (pos[0], pos[1], pos[2]);
         let Some(BlockEntity::Brushable(b)) = self.world.block_entities.get(&key) else {
             return;
@@ -198,16 +198,29 @@ impl Game<'_> {
             key,
             &BlockEntity::Brushable(b.clone()),
             "minecraft:brushable_block",
+            self.res.items(),
         );
         self.trigger_loot_table(&table);
         let loot = self.server_loot.get();
-        decorated_pot::unpack_loot(
-            &mut tag,
-            loot.as_deref(),
-            &mut self.world.random,
-            &mut self.rand_sequences,
-            self.level.seed,
-        );
+        let brusher = self.killer_loot_entity(None);
+        let luck = self.acting_luck();
+        let tool = self.stack_in(slot).map(super::creatures::to_loot);
+        let caller = self.caller_loot(Some(pos.map(|c| f64::from(c) + 0.5)), tool);
+        caller.with(|| {
+            decorated_pot::unpack_loot(
+                &mut tag,
+                loot.as_deref(),
+                &mut self.world.random,
+                &mut self.rand_sequences,
+                self.level.seed,
+                self.res.items(),
+                sunrise_world::loot::ContainerLootContext {
+                    luck,
+                    entity: Some(&brusher),
+                    ..Default::default()
+                },
+            )
+        });
         if let Some(BlockEntity::Brushable(b)) = self.world.block_entities.get_mut(&key) {
             b.loot_table = tag.get("LootTable").cloned();
             b.table_seed_tag = tag.get("LootTableSeed").cloned();

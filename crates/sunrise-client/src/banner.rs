@@ -425,7 +425,7 @@ mod tests {
     fn ominous_banner_hides_tooltip_layers_but_keeps_its_patterns() {
         let mut banner = crate::mobs::raider::ominous_banner();
         (banner.damage, banner.extra) = crate::item_data::decode_components(
-            crate::item_data::encode_components(&banner).as_ref(),
+            crate::item_data::encode_components(&banner, &Default::default()).as_ref(),
         );
         assert_eq!(
             layers(&banner).len(),

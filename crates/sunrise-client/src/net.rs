@@ -7,6 +7,7 @@
 //! (crate::auth): the login joins the server through the session service and
 //! encrypts the connection (ClientHandshakePacketListenerImpl.handleHello).
 use crate::auth::AuthSession;
+mod held_packets;
 pub mod ingress;
 mod known_packs;
 use known_packs::{fill_known_entries, select_known_packs};
@@ -51,7 +52,7 @@ use sunrise_hooks::tunnel;
 pub type Cookies = Arc<Mutex<HashMap<String, Vec<u8>>>>;
 
 /// A recording of the session's packets: the tap a replay recorder plugs into. Replay recording is a
-/// platform feature (docs/layers.md, "Controllers, splitscreen, replays and UI pages"); the engine only
+/// platform feature (docs/layers.md, "Controllers, replays and UI pages"); the engine only
 /// hands it the packets: the network thread what it receives, the game thread what the client makes for
 /// the recording itself (its own movement, pose and swings).
 pub trait PacketRecorder: Send {
@@ -494,7 +495,7 @@ impl Session {
             .as_ref()
             .cloned()
             .ok_or(SendPacketError::NotConnected)?;
-        writer.prepare_packet(encoded.data)
+        writer.prepare_packet(encoded.data, None)
     }
     /// The frozen receiving turn, retaining every input credit through its actor.
     #[sunrise_mod_api_macros::replaceable]
@@ -572,40 +573,6 @@ impl Session {
             .as_ref()
             .ok_or(mod_api::PayloadSendError::Disconnected)?
             .prepare_payload(body, id)
-    }
-    /// Send a play packet; silently dropped once the connection is gone,
-    /// and while the server has the connection back in configuration (a
-    /// proxy switching servers). Vanilla's `handleConfigurationStart` clears
-    /// the level before it acknowledges, so no play packet follows the
-    /// acknowledgement; one that did would reach the server as a
-    /// configuration packet, and Velocity drops such a client.
-    pub fn send(&self, packet: play::Serverbound) {
-        if self.debug
-            && !matches!(
-                packet,
-                play::Serverbound::ClientTickEnd(_)
-                    | play::Serverbound::MovePlayerPos(_)
-                    | play::Serverbound::MovePlayerPosRot(_)
-            )
-        {
-            eprintln!("[net] -> {packet:?}");
-        }
-        let body = match packet.try_encode() {
-            Ok(body) => body,
-            Err(error) => {
-                eprintln!("[net] send refused: {error}");
-                return;
-            }
-        };
-        let mut writer = self.writer.lock().unwrap();
-        if self.configuring.load(Ordering::Relaxed) {
-            return;
-        }
-        if let Some(w) = writer.as_mut()
-            && w.send(&body).is_err()
-        {
-            w.shutdown();
-        }
     }
     /// Far terrain the server samples, as it offered (`Event::FarTerrain`):
     /// biomes named by this client's indices, block states below `states`.
@@ -963,6 +930,7 @@ fn run(
     recorder: &RecorderSlot,
     payloads: &Arc<crate::raw_payloads::Transport>,
 ) -> Result<Reason, Reason> {
+    let singleplayer = local.is_some();
     let (host, port, mut c) = if let Some(pipe) = local {
         (address.to_owned(), 0, Connection::local(pipe))
     } else {
@@ -1114,15 +1082,13 @@ fn run(
     status(send, &tr(lang, "connect.joining"));
     // ClientHandshakePacketListenerImpl.handleLoginFinished: the brand, then
     // the client information.
-    c.send(
-        &cfg::Serverbound::CustomPayload(cfg::CustomPayload {
-            channel: "minecraft:brand".into(),
-            data: brand(),
-        })
-        .try_encode()
-        .map_err(e)?,
-    )
-    .map_err(e)?;
+    // The window's own server thread is no join to an address: it hears vanilla's identity.
+    let identity = if singleplayer {
+        sunrise_hooks::ClientIdentity::vanilla()
+    } else {
+        sunrise_hooks::engine::client_identity(address)
+    };
+    send_identity(&mut c, &identity).map_err(e)?;
     c.send(&cfg::Serverbound::ClientInformation(info).encode())
         .map_err(e)?;
     let (mut reader, writer) = c.split();
@@ -1571,11 +1537,29 @@ fn receive_brand(payload: &cfg::CustomPayload, send: &ingress::Producer<Event>) 
     }
 }
 
-/// `ClientBrandRetriever.getClientModName`: vanilla's default client brand.
-fn brand() -> Vec<u8> {
-    let mut w = sunrise_protocol::buf::Writer::new();
-    w.string("vanilla");
-    w.data
+/// `ClientBrandRetriever.getClientModName`, then the identity's configuration payloads, in order.
+fn send_identity(
+    c: &mut Connection,
+    identity: &sunrise_hooks::ClientIdentity,
+) -> Result<(), sunrise_protocol::Error> {
+    let mut brand = sunrise_protocol::buf::Writer::new();
+    brand.string(&identity.brand);
+    let brand = ("minecraft:brand", brand.data);
+    for (channel, data) in std::iter::once(brand).chain(
+        identity
+            .payloads
+            .iter()
+            .map(|(channel, data)| (channel.as_str(), data.clone())),
+    ) {
+        c.send(
+            &cfg::Serverbound::CustomPayload(cfg::CustomPayload {
+                channel: channel.into(),
+                data,
+            })
+            .try_encode()?,
+        )?;
+    }
+    Ok(())
 }
 
 /// Flatten a JSON chat component (login disconnects are JSON).
@@ -1851,6 +1835,47 @@ mod tests {
                 "missing response"
             }));
             std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn identity_sends_the_brand_then_its_payloads_in_order() {
+        for (payloads, expected) in [
+            (vec![], vec![("minecraft:brand", b"\x07vanilla".to_vec())]),
+            (
+                vec![
+                    ("a:one".to_owned(), vec![1, 1, 0]),
+                    ("a:two".to_owned(), vec![]),
+                ],
+                vec![
+                    ("minecraft:brand", b"\x03abc".to_vec()),
+                    ("a:one", vec![1, 1, 0]),
+                    ("a:two", vec![]),
+                ],
+            ),
+        ] {
+            let brand = if payloads.is_empty() {
+                "vanilla"
+            } else {
+                "abc"
+            };
+            let identity = sunrise_hooks::ClientIdentity {
+                brand: brand.to_owned(),
+                payloads,
+            };
+            let (client, server) = sunrise_protocol::connection::Pipe::pair();
+            let mut client = Connection::local(client);
+            send_identity(&mut client, &identity).unwrap();
+            let mut server = Connection::local(server);
+            for (channel, data) in expected {
+                let (id, body) = server.recv().unwrap();
+                let cfg::Serverbound::CustomPayload(p) =
+                    cfg::Serverbound::decode(id, &body).unwrap()
+                else {
+                    panic!("expected a custom payload")
+                };
+                assert_eq!((p.channel.as_str(), p.data), (channel, data));
+            }
         }
     }
 

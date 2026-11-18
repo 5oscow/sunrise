@@ -184,8 +184,7 @@ pub fn compress_records_with_pool(
                 .ensure_saveable()
                 .map_err(io::Error::other)?;
         }
-        record
-            .tag()
+        super::chunk_disk::encode_record(record)?
             .map(|tag| ChunkRecord::from_nbt(&tag, compression, timestamp, Limits::saved()))
             .transpose()
     };

@@ -130,6 +130,29 @@ impl RenderAssets for Game<'_> {
         );
         self.native_model(id)
     }
+    fn block_state_models(
+        &self,
+        state: mod_api::BlockStateId,
+    ) -> Result<Vec<mod_api::BakedModelKey>, ModelError> {
+        mod_api::__private::check_access(
+            "block_state_models",
+            mod_api::__private::LoadAccess::PublishedResources,
+        );
+        self.pack.render.block_state_models(
+            sunrise_world::registry::BlockStateId(state.0),
+            self.pack.assets.registry.len(),
+        )
+    }
+    fn baked_model(
+        &self,
+        key: mod_api::BakedModelKey,
+    ) -> Result<mod_api::BakedModelView, ModelError> {
+        mod_api::__private::check_access(
+            "baked_model",
+            mod_api::__private::LoadAccess::PublishedResources,
+        );
+        self.pack.render.baked_model(key)
+    }
     fn render_pipeline(&self, id: &Identifier) -> Result<RenderPipelineRef, RenderPipelineError> {
         mod_api::__private::check_access(
             "render_pipeline",

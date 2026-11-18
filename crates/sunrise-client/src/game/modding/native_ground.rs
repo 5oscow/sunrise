@@ -2,7 +2,7 @@
 //! provider as the decorator asks it. `mod_api` keeps only the API's provider traits.
 use mod_api::{
     BlockStateId as ApiState, GroundLevel, GroundProvider, GroundStateProvider, HookId,
-    StructureRandom,
+    RandomSource,
 };
 use std::sync::Arc;
 use sunrise_world::native_worldgen_hooks::{AlterGroundTree, GroundAccess, ModGroundProvider};
@@ -60,11 +60,11 @@ impl GroundLevel for Level<'_> {
     fn decorator_state(&mut self, pos: [i32; 3]) -> Option<ApiState> {
         self.0.decorator_state(pos).map(api)
     }
-    fn random(&mut self) -> &mut dyn StructureRandom {
+    fn random(&mut self) -> &mut dyn RandomSource {
         self
     }
 }
-impl StructureRandom for Level<'_> {
+impl RandomSource for Level<'_> {
     fn next_int_bound(&mut self, bound: i32) -> i32 {
         self.0.next_int_bound(bound)
     }
@@ -79,6 +79,12 @@ impl StructureRandom for Level<'_> {
     }
     fn next_boolean(&mut self) -> bool {
         self.0.next_boolean()
+    }
+    fn next_int(&mut self) -> i32 {
+        self.0.next_int()
+    }
+    fn next_gaussian(&mut self) -> f64 {
+        self.0.next_gaussian()
     }
 }
 
@@ -147,6 +153,14 @@ mod tests {
         fn next_boolean(&mut self) -> bool {
             self.draws += 1;
             false
+        }
+        fn next_int(&mut self) -> i32 {
+            self.draws += 1;
+            0
+        }
+        fn next_gaussian(&mut self) -> f64 {
+            self.draws += 1;
+            0.0
         }
     }
 

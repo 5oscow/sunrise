@@ -36,6 +36,7 @@ fn batch(info: Option<PlacementInfo>) -> Vec<RecipeBookCategory> {
         id: "demo:category".into(),
         recipe_type: "demo:cooking".into(),
         icon: "minecraft:stone".into(),
+        secondary_icon: None,
         target_menu: "demo:pot".into(),
         book: mod_api::wire::Reader::decode(wire.bytes()).unwrap(),
         search_group: "demo:search".into(),

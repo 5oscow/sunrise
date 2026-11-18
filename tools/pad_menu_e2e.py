@@ -24,7 +24,6 @@ Cases:
 - optimize_world: B doesn't stop Optimize World, which declares nothing.
 - pointer_screens: Statistics', Advancements' and the packs' Done show a glyph and B presses them.
 - settings_pages: nothing labelled Done, Back or Cancel is undeclared on any options page, Graphics included.
-- split_setup: Splitscreen Setup's Done is declared, and off while a player is held.
 - actions_follow_screen: right after a press opens a screen, the screen before it can't be pressed.
 - glyphs_title: the title's X and B on their buttons, A once the focus is on the exit, gone at the mouse.
 - glyph_on_field: A on a focused text field and B on Cancel; A opens one keyboard, which hides them; B closes it.
@@ -84,7 +83,7 @@ and prepared resources in .local/sunrise-client/26.3. Exit status 0 when every c
   keeps the name) and deletes a page, resets, Undo puts back what it found, and the opener's row binds Y in place.
 - radial_held_sneak: a sneak held on the pad stays held while the menu opens, selects and commits.
 - radial_focus_background: with Play in Background on, losing the window's focus still cancels the menu.
-- radial_unavailable: on a single saved page, an action that can't run (Emote, cosmetics off) is dimmed and its commit does nothing.
+- radial_unavailable: on a single saved page, an action that can't run (Quick Actions, no dialog given) is dimmed and its commit does nothing.
 - radial_old_file: a settings file from before the radial menu keeps D-pad down on the advancements.
 - radial_flick_with_press: a stick flicked as the opener goes down selects; one leaning since well before waits.
 - radial_held_drop: a drop held through the menu doesn't throw the rest of the stack as it closes.
@@ -556,31 +555,6 @@ def settings_pages(args, name):
         game.pad('east')
         game.wait_targets()
         check(game.rects() != before, 'B did not press Done on Graphics')
-    finally:
-        game.quit()
-    return check.failures
-
-
-def split_setup(args, name):
-    game = Game(args, name)
-    check = Check()
-    try:
-        game.wait_targets()
-        game.title_buttons()
-        game.pad('west')
-        game.ctl('options', 'sunrise')
-        time.sleep(SETTLE)
-        game.wait_targets()
-        click_widget(game, widget(game, 'split'))
-        game.wait_targets()
-        game.pad('down')
-        check(declared(game).get('Done') is True, f'Setup declares {declared(game)}')
-        check(game.menu()['undeclared'] == [], f"undeclared: {game.menu()['undeclared']}")
-        # A held player needs a second one, which one virtual pad can't be: `split_ui`'s
-        # done_is_declared_off_while_a_player_is_held has that.
-        game.pad('east')
-        game.wait_targets()
-        check(any('split' in w['id'] for w in game.widgets()), f'B did not press Done: {labels(game)}')
     finally:
         game.quit()
     return check.failures
@@ -4040,10 +4014,10 @@ def radial_focus_background(args, name):
 
 def radial_unavailable(args, name):
     def seed(home):
-        # One page: Emote up, Commands right.
+        # One page: Quick Actions up, Commands right.
         (home / 'sunrise-controller.txt').write_text(
-            'bindLayout:2\nradial_0_name:sunrise.radial.page.general\nradial_0_slots:key.emote,,key.command,,,,,\n')
-    game = Game(args, name, world=True, seed=seed, env={'SUNRISE_COSMETICS': '0'})
+            'bindLayout:2\nradial_0_name:sunrise.radial.page.general\nradial_0_slots:key.quickActions,,key.command,,,,,\n')
+    game = Game(args, name, world=True, seed=seed)
     check = Check()
     try:
         game.ctl('pad', 'focus', 'true')
@@ -4052,7 +4026,7 @@ def radial_unavailable(args, name):
         hold_opener(game)
         aim(game, 0, 1)
         state = radial(game)
-        check(state['pages'] == 1 and state['slots'][0] == 'sunrise:emote', f'not the saved page: {state}')
+        check(state['pages'] == 1 and state['slots'][0] == 'key.quickActions', f'not the saved page: {state}')
         check(state['selected'] == 0, f'up selected {state["selected"]}')
         check(state['available'][0] is False and state['available'][2] is True, f"available: {state['available']}")
         shot(game, 'radial_single_page_unavailable')
@@ -4652,7 +4626,7 @@ CASES = {'idle_a': idle_a, 'idle_b': idle_b, 'idle_x': idle_x, 'release': releas
          'pad_release': pad_release, 'pause_y': pause_y, 'settings': settings, 'create_world': create_world,
          'world_options': world_options, 'key_row_b': key_row_b, 'lock_question': lock_question,
          'optimize_world': optimize_world, 'pointer_screens': pointer_screens, 'settings_pages': settings_pages,
-         'split_setup': split_setup, 'actions_follow_screen': actions_follow_screen, 'glyphs_title': glyphs_title,
+         'actions_follow_screen': actions_follow_screen, 'glyphs_title': glyphs_title,
          'glyph_on_field': glyph_on_field, 'settings_apply': settings_apply, 'long_label': long_label,
          'tabs_create_world': tabs_create_world,
          'tab_release': tab_release,

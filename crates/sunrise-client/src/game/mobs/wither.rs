@@ -219,11 +219,19 @@ impl Game<'_> {
                     from: skull.from,
                     attacker_species: owner_species,
                 };
+                let plan =
+                    self.prepare_knockback_credit(id as i32, source.attacker, self.combat.attack());
+                let mut credit = plan.lend(&mut self.last_hurt_by_player);
                 let mut survived_hit = false;
                 let killed = match self.mobs.iter_mut().find(|m| m.id == id) {
                     Some(m) => {
                         let hit = m.damage(
-                            crate::game::entity::damage_level_of!(self, scoped),
+                            crate::game::entity::damage_level_of!(
+                                self,
+                                self.combat.attack(),
+                                &mut credit,
+                                None
+                            ),
                             amount,
                             source,
                         );

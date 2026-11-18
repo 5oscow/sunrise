@@ -77,6 +77,13 @@ fn with_guest(conflict: Option<&str>, f: impl FnOnce() + Send) {
         let mut mods = vec![ModEntry::new("earlier_capabilities", Box::new(Earlier))];
         mods.extend(loaded.mods);
         mods.push(ModEntry::new("later_capabilities", Box::new(Later)));
+        // Registration runs in its own phase, as in the game: the guest declares a general entity
+        // type, which any other phase refuses (that traps the guest and stops its group).
+        // The phase lives in the game backend that `initialize` installs: a scope opened before it
+        // would write a fallback the guest's registrar never reads.
+        mod_api::__private::initialize().unwrap();
+        let _registration =
+            mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::Registration);
         mod_api::testing::with_mods(mods.into(), f);
     });
 }
@@ -109,8 +116,15 @@ fn compiled_guest_capability_registration_order_and_proxy_metadata() {
         )
         .unwrap();
         let mut host = mod_api::testing::FakeHost::new();
+        // Every item key the guest asks for at registration must resolve, not only this test's:
+        // its prediction part (`predicted_use`) asks for paper.
         host.registries
-            .resolve_items(fixture::ITEMS.map(|id| mod_api::Identifier::parse(id).unwrap()))
+            .resolve_items(
+                fixture::ITEMS
+                    .into_iter()
+                    .chain(["minecraft:paper"])
+                    .map(|id| mod_api::Identifier::parse(id).unwrap()),
+            )
             .unwrap();
         for index in 0..4 {
             host.level

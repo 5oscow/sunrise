@@ -357,6 +357,24 @@ pub struct Guest {
     /// A mod's boxes of its level in which the level's blocks don't stop it (#3717): its moves
     /// are checked through them, and its body takes them at each turn. Not saved.
     pub collision_exclusions: sunrise_world::collision_exclusions::CollisionExclusions,
+    /// The moving collider carrying the player, and where the last accepted report put its
+    /// feet in the collider's frame (`lan/hub/carried_check.rs`). Not saved.
+    pub on_collider: Option<sunrise_core::geometry::carried::Carried>,
+    /// What the player's client last said about the age of its copy of the collider
+    /// (`sunrise:carry_age`): the collider and the ticks. Used by the next report only.
+    pub carry_hint: Option<(u32, u8)>,
+    /// The tick a mod last displaced the player and how many ticks in a row it has (a development
+    /// build warns at 20; a release build never reads it).
+    pub displaced_streak: (u64, u32),
+    /// Where a rejected report puts the player back: the feet as the server last accepted
+    /// them, in the collider's frame, under the collider's transform now.
+    pub carry_correction: Option<[f64; 3]>,
+    /// Where the accepted report of a carried player is committed: its local position under
+    /// the collider's transform now, after the world's collision. Read by the same report.
+    pub carry_commit: Option<[f64; 3]>,
+    /// The reports rejected while a collider carried the player. They never count toward the
+    /// flying kick.
+    pub carry_rejects: u32,
     // Entities.
     pub tracker: Tracker,
     // Player state the gameplay code reads and writes.
@@ -778,6 +796,12 @@ impl Guest {
             chunks_per_tick: 9.0,
             batch_quota: 0.0,
             collision_exclusions: Default::default(),
+            on_collider: None,
+            carry_hint: None,
+            displaced_streak: (0, 0),
+            carry_correction: None,
+            carry_commit: None,
+            carry_rejects: 0,
             tracker: Tracker::default(),
             motion: None,
             loaded_body: None,
@@ -879,6 +903,13 @@ impl Guest {
             Ok(body) => self.sender.send(body),
             Err(error) => eprintln!("[lan] send refused: {error}"),
         }
+    }
+    /// Whether this connection reads collider sync (`sunrise:collider_sync`).
+    pub fn negotiated_collider_sync(&self) -> bool {
+        crate::raw_payloads::negotiated(
+            self.sender.payload_transport(),
+            sunrise_protocol::collider_sync::CHANNEL,
+        )
     }
     /// Whether the guest's play epoch has attachment sync negotiated (a vanilla client never
     /// offers it).
@@ -1754,7 +1785,7 @@ pub(super) fn network_stack(
                 stack.added.push((kind, component));
             }
         }
-        for (name, value) in &d.other {
+        for (name, value) in d.preserved_components() {
             let (removed, kind) = match name.strip_prefix('!') {
                 Some(kind) => (true, kind),
                 None => (false, name.as_str()),
@@ -2457,8 +2488,7 @@ mod tests {
         ];
         let mut item = ItemStack::new("minecraft:diamond", 1);
         item.data_mut()
-            .other
-            .push(("minecraft:lore".into(), Tag::List(lines.clone())));
+            .set_other("minecraft:lore", Some(Tag::List(lines.clone())));
         let sent = stack_to_network(|_| 7, |_, _| None, &Some(item));
         let mut writer = Writer::new();
         sunrise_protocol::item::Slot::write(&sent, &mut writer);
@@ -2557,10 +2587,12 @@ mod tests {
     #[test]
     fn goat_horns_send_their_instrument_by_registry_id() {
         let mut horn = ItemStack::new("minecraft:goat_horn", 1);
-        horn.data_mut().other.push((
-            "minecraft:instrument".into(),
-            sunrise_core::nbt::Tag::String("minecraft:sing_goat_horn".into()),
-        ));
+        horn.data_mut().set_other(
+            "minecraft:instrument",
+            Some(sunrise_core::nbt::Tag::String(
+                "minecraft:sing_goat_horn".into(),
+            )),
+        );
         let synced_id = |registry: &str, name: &str| match (registry, name) {
             ("minecraft:instrument", "minecraft:sing_goat_horn") => Some(1),
             _ => None,

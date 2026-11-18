@@ -342,9 +342,9 @@ mod tests {
         let root =
             std::env::temp_dir().join(format!("launch-selection-{}-{nonce}", std::process::id()));
         for (file, id) in [
-            ("sunrise-mods/base.hmod", "base"),
-            ("other/sunrise-mods/other.hmod", "other"),
-            ("workspace/dev.hmod", "dev"),
+            ("sunrise-mods/base.smod", "base"),
+            ("other/sunrise-mods/other.smod", "other"),
+            ("workspace/dev.smod", "dev"),
         ] {
             let path = root.join(file);
             fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -390,7 +390,7 @@ mod tests {
                 ids: &["other"],
             },
             Case {
-                args: &["--dev-mod", "workspace/dev.hmod"],
+                args: &["--dev-mod", "workspace/dev.smod"],
                 environment: None,
                 home: "default",
                 ids: &["base", "dev"],

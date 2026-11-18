@@ -128,6 +128,10 @@ fn real_member() {
         loaded
             .initialize(&[info])
             .expect("guest initialization and point registration");
+        // The fixture guest declares a general entity type in `register`, which only the registration
+        // phase accepts. The scope follows `initialize`: the phase lives in the backend it installs.
+        let _registration =
+            mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::Registration);
         mod_api::testing::with_mods(loaded.mods.into(), || {
             mod_api::__private::install_parts(
                 mod_api::__private::mods(),
@@ -224,7 +228,46 @@ fn real_member() {
                 &mut entity,
             );
             assert_eq!(entity.data, [23]);
-            mod_api::__private::resolve_items(["minecraft:snowball", "minecraft:bow"]).unwrap();
+            mod_api::__private::resolve_items([
+                "minecraft:snowball",
+                "minecraft:bow",
+                "minecraft:paper",
+            ])
+            .unwrap();
+            let item = mod_api::__private::item_key_by_identifier(
+                &mod_api::Identifier::parse("minecraft:snowball").unwrap(),
+            )
+            .unwrap();
+            let stack = mod_api::ItemStack::new(item, 1).unwrap();
+            // Real wasm, not a model of the engine countdown: verify the guest's
+            // cancellation and replacement values reach both host-side callers.
+            for client in [false, true] {
+                for hand in [mod_api::Hand::Main, mod_api::Hand::Off] {
+                    for (input, expected, cancelled) in [
+                        (32, 32, true),
+                        (31, 0, false),
+                        (30, 1, false),
+                        (29, -7, false),
+                        (28, 28, false),
+                    ] {
+                        let (mut duration, mut canceled) = (input, false);
+                        let mut host = Quiet;
+                        mod_api::dispatch_living_entity_use_item_tick(
+                            if client {
+                                mod_api::HostSide::Client(&mut host)
+                            } else {
+                                mod_api::HostSide::Server(&mut host)
+                            },
+                            &stack,
+                            None,
+                            hand,
+                            &mut duration,
+                            &mut canceled,
+                        );
+                        assert_eq!((duration, canceled), (expected, cancelled));
+                    }
+                }
+            }
             lending::check_death(
                 &mut Quiet,
                 mod_api::__private::item_key("minecraft:bow").unwrap(),
@@ -385,54 +428,7 @@ fn remember_shutdown(failure: &mut Option<String>, message: String) {
 
 static __REPLACE: [std::sync::atomic::AtomicPtr<()>; 8] =
     [const { std::sync::atomic::AtomicPtr::new(std::ptr::null_mut()) }; 8];
-fn __fnr_read_slot_0() -> Option<fn(f32) -> f32> {
-    let pointer = crate::__REPLACE[0].load(std::sync::atomic::Ordering::Relaxed);
-    if pointer.is_null() {
-        None
-    } else {
-        Some(unsafe { std::mem::transmute::<*mut (), fn(f32) -> f32>(pointer) })
-    }
-}
-fn __fnr_read_body_0() -> Option<fn(f32) -> f32> {
-    let pointer = crate::__REPLACE[1].load(std::sync::atomic::Ordering::Relaxed);
-    if pointer.is_null() {
-        None
-    } else {
-        Some(unsafe { std::mem::transmute::<*mut (), fn(f32) -> f32>(pointer) })
-    }
-}
-fn __fnr_read_slot_2() -> Option<fn(u32, u32) -> u32> {
-    let pointer = crate::__REPLACE[2].load(std::sync::atomic::Ordering::Relaxed);
-    if pointer.is_null() {
-        None
-    } else {
-        Some(unsafe { std::mem::transmute::<*mut (), fn(u32, u32) -> u32>(pointer) })
-    }
-}
-fn __fnr_read_body_2() -> Option<fn(u32, u32) -> u32> {
-    let pointer = crate::__REPLACE[3].load(std::sync::atomic::Ordering::Relaxed);
-    if pointer.is_null() {
-        None
-    } else {
-        Some(unsafe { std::mem::transmute::<*mut (), fn(u32, u32) -> u32>(pointer) })
-    }
-}
-fn __fnr_read_slot_4() -> Option<fn(&mut Option<String>, String)> {
-    let pointer = crate::__REPLACE[4].load(std::sync::atomic::Ordering::Relaxed);
-    if pointer.is_null() {
-        None
-    } else {
-        Some(unsafe { std::mem::transmute::<*mut (), fn(&mut Option<String>, String)>(pointer) })
-    }
-}
-fn __fnr_read_body_4() -> Option<fn(&mut Option<String>, String)> {
-    let pointer = crate::__REPLACE[5].load(std::sync::atomic::Ordering::Relaxed);
-    if pointer.is_null() {
-        None
-    } else {
-        Some(unsafe { std::mem::transmute::<*mut (), fn(&mut Option<String>, String)>(pointer) })
-    }
-}
+include!(concat!(env!("OUT_DIR"), "/real_member_readers.rs"));
 
 #[path = "../src/test_stack.rs"]
 mod test_stack;

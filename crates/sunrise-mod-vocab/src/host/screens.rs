@@ -45,6 +45,34 @@ pub trait ScreensClientHost {
     #[access(ClientSetup)]
     fn screen_hovered_item(&self) -> Option<ItemKey>;
     /// Side: client.
+    /// Where the open mod screen of block `block` puts container slot `slot` from the next
+    /// frame (`Slot.x`, `Slot.y` in GUI pixels from the screen's top left, the item's top left
+    /// corner): where `set_screen_slot` last put it, else where the screen declared it. None
+    /// for a hidden slot, another block's screen, or none open.
+    #[access(ClientSetup)]
+    fn screen_slot(&self, block: &str, slot: usize) -> Option<[f32; 2]>;
+    /// Side: client.
+    /// Moves container slot `slot` of the open mod screen of block `block` to `pos`, or hides
+    /// it with None, as a Java screen that lays its slots out again sets `Slot.x`/`Slot.y` or
+    /// deactivates a slot (Tinkers' station layouts). `slot` indexes `Screen::slots`. From the
+    /// next frame the slot is a vanilla slot at that position: the hovered slot (the 18 by 18
+    /// box around it), its highlight, its contents, its empty-slot icon and the recipe book's
+    /// ghost items; a hidden one is none of these. A position outside the image is allowed.
+    /// The change lasts until the screen closes, and the next open starts from the declared
+    /// layout. Nothing is sent: the server's menu keeps every slot, so a hidden slot keeps its
+    /// item and a shift-click may still fill it, as a deactivated Java slot does, and a slot
+    /// the screen hid when it opened stays hidden. It takes `&self`, so a screen hook may call
+    /// it every frame; repeating a slot's current place changes nothing and costs no layout
+    /// work. Each refusal changes nothing and is named by `ScreenSlotRefusal`: `NoScreen`,
+    /// `NoSuchSlot`, `HiddenAtOpen`, `BadPosition` and `Unavailable`.
+    #[access(ClientSetup)]
+    fn set_screen_slot(
+        &self,
+        block: &str,
+        slot: usize,
+        pos: Option<[f32; 2]>,
+    ) -> Result<(), ScreenSlotRefusal>;
+    /// Side: client.
     /// Requests vanilla's menu background blur for this frame, with a per-frame guard
     /// so blur is applied at most once per frame. Returns true if blur was newly
     /// requested this frame, or false if it was already applied/requested this frame.
@@ -118,6 +146,11 @@ pub trait ScreensClientHost {
     /// The same screen identifier provided to screen hooks.
     #[access(ClientSetup)]
     fn observed_screen_id(&self) -> Option<ScreenId>;
+    /// Side: client.
+    /// Whether the client draws its debug overlay this frame. Always-on debug entries can
+    /// make it visible with F3 off. F1 hides the overlay unless a screen is open.
+    #[access(ClientSetup)]
+    fn debug_overlay_visible(&self) -> bool;
     /// Side: client.
     /// Whether a specific key is currently held down.
     /// `key` is the vanilla physical key name (`key.keyboard.left.shift`, for example).

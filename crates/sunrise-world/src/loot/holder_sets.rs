@@ -52,7 +52,7 @@ impl Binding {
         }
         Ok(Self { universes })
     }
-    fn field(
+    pub(super) fn field(
         &self,
         owner: &str,
         registry: &str,
@@ -242,7 +242,7 @@ impl Binding {
         }
         for (kind, entries) in [
             ("item_modifier", &mut data.modifiers),
-            ("predicate", &mut data.predicates),
+            ("predicate", Arc::make_mut(&mut data.predicates)),
         ] {
             for (id, value) in entries {
                 self.walk(&format!("{kind} {id}"), value, &data.tags)?;
@@ -275,14 +275,6 @@ impl Binding {
                     &data.tags,
                 )?;
             }
-        }
-        for (i, (ingredient, _, _)) in data.smelting.iter_mut().enumerate() {
-            self.field(
-                &format!("smelting[{i}].ingredient"),
-                "item",
-                ingredient,
-                &data.tags,
-            )?;
         }
         Ok(())
     }

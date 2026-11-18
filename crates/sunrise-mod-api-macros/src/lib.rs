@@ -130,6 +130,7 @@ fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
         "BlockEntityPart" => Some("block_entity_subscribed"),
         "ItemPart" => Some("item_subscribed"),
         "MenuPart" => Some("menu_subscribed"),
+        "MobEffectPart" => Some("effect_subscribed"),
         "FluidPart" => Some("fluid_subscribed"),
         "EntityPart" => Some("entity_subscribed"),
         _ => {
@@ -183,6 +184,16 @@ fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
     let id = format_ident!("HookId");
     let ids = format_ident!("hook_ids");
     let subscribed_name = format_ident!("{}", part.unwrap_or("subscribed"));
+    // The impl is a use of every export it overrides, and of the one that lists them: each is
+    // marked by a no-op import named for it, kept exactly while this impl is linked. A method
+    // the API keeps off wasm has no marker.
+    let owner = proc_macro2::Literal::string(&name.to_string());
+    let marks = {
+        let marked = methods.iter().zip(&cfgs).map(|(method, cfgs)| {
+            quote! { #(#cfgs)* mod_api::__sunrise_mark!(#owner #method); }
+        });
+        quote! { #(#marked)* mod_api::__sunrise_mark!(#owner #subscribed_name); }
+    };
     // Entity parts (#1077) carry plain methods beside their scoped hooks
     // (#792): the goal, behavior and spawn-size registrars are not hooks, so
     // their names subscribe nothing.
@@ -212,7 +223,22 @@ fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
             .collect();
         implementation.items.push(syn::parse_quote! {
             fn #subscribed_name(&self) -> &'static [Option<mod_api::#id>] {
+                #marks
                 &[#(#(#hooked_cfgs)* mod_api::#ids::#hooked),*]
+            }
+        });
+        // The plain methods subscribe nothing, but their override is capability
+        // metadata (#792 stage 4b): the wasm side reads it where the real part
+        // lives, and a mod overriding one is refused by name at load.
+        let native: Vec<_> = methods
+            .iter()
+            .zip(&plain)
+            .filter(|(_, plain)| **plain)
+            .map(|(method, _)| proc_macro2::Literal::string(&method.to_string()))
+            .collect();
+        implementation.items.push(syn::parse_quote! {
+            fn entity_native_only(&self) -> &'static [&'static str] {
+                &[#(#native),*]
             }
         });
         // A part impl carries no `#[listener]` (refused above) and no guest
@@ -222,6 +248,7 @@ fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
     let subscribed = {
         syn::parse_quote! {
             fn #subscribed_name(&self) -> &'static [Option<mod_api::#id>] {
+                #marks
                 &[#(#(#cfgs)* mod_api::#ids::#methods),*]
             }
         }
@@ -373,7 +400,8 @@ pub fn sunrise_part(_attribute: TokenStream, input: TokenStream) -> TokenStream 
 /// or wasm, gets the side's host (on a `Game` method) and a record holding a copy of every
 /// parameter as an API value (an engine type `mirror(…)` names as its `mod_api` mirror): the
 /// function runs with the record's by-value and `&T` values, and a `&mut T` parameter's place
-/// gets the record's value back.
+/// gets the record's value back. A type or const parameter is refused, naming it (lifetimes are
+/// allowed): the cell holds one function pointer, which can't stand for every instantiation.
 #[proc_macro_attribute]
 pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
     point::expand(attribute.into(), parse_macro_input!(input as ImplItemFn)).into()
@@ -409,6 +437,31 @@ pub fn sunrise_loop(attribute: TokenStream, input: TokenStream) -> TokenStream {
         .into();
     }
     input
+}
+
+/// Marks a provided trait method that a mod computes from the trait's other methods: the wasm
+/// boundary gives it no call of its own, so its default body runs wherever the trait object lives
+/// and only the methods it calls cross. A method without a default body is refused.
+#[proc_macro_attribute]
+pub fn computed_in_mod(attribute: TokenStream, input: TokenStream) -> TokenStream {
+    let method = parse_macro_input!(input as syn::TraitItemFn);
+    if !attribute.is_empty() {
+        return syn::Error::new_spanned(
+            proc_macro2::TokenStream::from(attribute),
+            "write #[computed_in_mod] with no arguments",
+        )
+        .to_compile_error()
+        .into();
+    }
+    if method.default.is_none() {
+        return syn::Error::new_spanned(
+            &method.sig,
+            "#[computed_in_mod] needs a default body: the mod computes this method itself",
+        )
+        .to_compile_error()
+        .into();
+    }
+    quote!(#method).into()
 }
 
 /// Derive subscriptions for internal test fixtures that construct their own mods.

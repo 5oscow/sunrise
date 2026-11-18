@@ -19,6 +19,7 @@ impl SpecialModelRenderer for Stick {
         _: &dyn ClientHost,
         stack: &ItemStack,
         _: &sunrise_core::nbt::Tag,
+        _: &mod_api::SpecialModelContext,
     ) -> Result<Vec<SpecialModelPart>, String> {
         ASKED.lock().unwrap().push(stack.count());
         Ok(vec![SpecialModelPart::new("minecraft:item/stick")])
@@ -43,6 +44,7 @@ pub(in crate::game) fn install_special_stick(game: &mut Game<'_>) {
         register_special_model_types(vec!["test:stick".into()]);
         assert!(super::register(vec![(
             "test:stick".into(),
+            mod_api::SpecialModelPolicy::Stack,
             Arc::new(Stick)
         )]));
     });

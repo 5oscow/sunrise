@@ -959,9 +959,9 @@ impl DataStore {
         }
         if let Some(conditions) = conditions {
             s.predicates
-                .retain(|id, value| conditions.admit_id(value, "predicate", id));
+                .retain(|id, value| conditions.allows_id(value, "predicate", id));
             s.item_modifiers
-                .retain(|id, value| conditions.admit_id(value, "item_modifier", id));
+                .retain(|id, value| conditions.allows_id(value, "item_modifier", id));
         }
         s
     }
@@ -2004,6 +2004,35 @@ mod tests {
         assert!(filtered.item_modifiers.is_empty());
         assert_eq!(filtered.files, store.files);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// #1381: predicates and item modifiers carry no element conditions: a
+    /// nested key stays, unevaluated.
+    #[test]
+    fn predicates_and_item_modifiers_keep_list_elements_conditions_as_data() {
+        let root =
+            std::env::temp_dir().join(format!("sunrise-1381-datapack-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let nested = serde_json::json!([{"type": "absent:condition"}]);
+        let predicate = serde_json::json!({"condition": "minecraft:all_of", "terms": [
+            {"condition": "minecraft:random_chance", "chance": 0.5, "neoforge:conditions": nested}]});
+        let modifier = serde_json::json!([
+            {"function": "minecraft:set_count", "count": 2, "neoforge:conditions": nested}]);
+        for (kind, value) in [("predicate", &predicate), ("item_modifier", &modifier)] {
+            let file = root.join(format!("data/demo/{kind}/entry.json"));
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(file, value.to_string()).unwrap();
+        }
+        let pack = DataPack::from_source("pack".into(), ResourceSource::directory(root.clone()));
+        let conditions = sunrise_world::conditions::LoadConditions::new([])
+            .with_diagnostics()
+            .with_lookup(std::collections::BTreeMap::new(), |_, _| None);
+        let store = DataStore::load_with_conditions(&[&pack], &conditions);
+        std::fs::remove_dir_all(&root).unwrap();
+        assert_eq!(store.predicates.get("demo:entry"), Some(&predicate));
+        assert_eq!(store.item_modifiers.get("demo:entry"), Some(&modifier));
+        assert_eq!(conditions.check_resource_errors("predicate"), Ok(()));
+        assert_eq!(conditions.check_resource_errors("item_modifier"), Ok(()));
     }
 
     #[test]

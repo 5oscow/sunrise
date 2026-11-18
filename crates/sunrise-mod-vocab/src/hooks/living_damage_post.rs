@@ -14,13 +14,15 @@ pub trait Hooks {
     /// carries `hurtServer`'s fresh-hit decision (`shouldCauseSideEffects`): false for a stronger
     /// hit inside the cooldown unless its source bypasses it, independent of the final damage
     /// or modded invulnerability ticks. It only listens. It can't write the
-    /// entity or the world's blocks: the level host gives the hit's random and level attachments.
+    /// entity or the world's blocks: the host (`HitHost`) gives the hit's random and level
+    /// attachments, level sounds, and the own random of the entities the hit lends.
     /// The container is an API-owned scalar snapshot; the engine retains sequencing and normalization.
     #[hook(
         side = "server",
         contract = "listen",
-        host = "level",
+        host = "hit",
         neoforge = "LivingDamageEvent.Post",
+        version = 2,
         target = "sunrise_client::game::native_hooks::living_damage_post::HitLevel<'_>::native_living_damage_post"
     )]
     fn living_damage_post();

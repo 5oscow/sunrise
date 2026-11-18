@@ -1,69 +1,13 @@
-//! HUD boxes in the corners: the minimap's place and mods' panels, small
-//! boxes in GUI pixels stacked per corner (`docs/extras.md`), and the layers crates above the
-//! engine register (`sunrise_hooks::hud`).
+//! HUD boxes in the corners: mods' panels, small boxes in GUI pixels stacked per corner
+//! (`docs/extras.md`), and the layers crates above the engine register (`sunrise_hooks::hud`).
 use crate::{
     extras::Corner,
-    hud::{HudAtlas, HudBatch, Rect, rgba},
+    hud::{HudAtlas, HudBatch, rgba},
 };
 pub use mod_api::client::extras_hud::Corners;
 use sunrise_hooks::hud;
 
 const BACKGROUND: u32 = 0x7800_0000;
-
-/// How the minimap shows: its corner and side in GUI pixels, its image (an
-/// atlas rect), the player arrow (the map item's decoration sprite) turned
-/// `arrow` degrees clockwise from up, and the rim's N toward `north` when the
-/// map turns.
-pub struct MinimapLook {
-    pub corner: Corner,
-    pub size: f32,
-    pub image: Rect,
-    pub arrow: f32,
-    pub north: Option<(f32, f32)>,
-}
-#[sunrise_mod_api_macros::replaceable]
-pub fn draw_minimap(
-    batch: &mut HudBatch,
-    atlas: &HudAtlas,
-    corners: &mut Corners,
-    look: &MinimapLook,
-) {
-    let MinimapLook {
-        corner,
-        size,
-        image,
-        arrow,
-        north,
-    } = *look;
-    let (x, y) = corners.place(corner, size, size);
-    batch.rect_uv(x, y, size, size, image, u32::MAX);
-    let (cx, cy) = (x + size / 2.0, y + size / 2.0);
-    if let Some(r) = atlas.sprites.get("map/decorations/player").copied() {
-        // MapRenderer's decorations draw the sprite flipped: its arrow
-        // points down the texture, so up on screen is half a turn.
-        let (s, c) = (arrow + 180.0).to_radians().sin_cos();
-        let p = |dx: f32, dy: f32| [cx + dx * c - dy * s, cy + dx * s + dy * c];
-        let h = 4.0;
-        batch.quad(
-            [p(-h, h), p(h, h), p(h, -h), p(-h, -h)],
-            [[r.u0, r.v0], [r.u1, r.v0], [r.u1, r.v1], [r.u0, r.v1]],
-            u32::MAX,
-        );
-    }
-    if let Some((nx, ny)) = north {
-        let reach = size / 2.0 - 6.0;
-        let tw = HudBatch::text_width(atlas, "N");
-        let (tx, ty) = (cx + nx * reach - tw / 2.0, cy + ny * reach - 4.0);
-        batch.text(
-            atlas,
-            "N",
-            tx.round(),
-            ty.round(),
-            rgba(255, 255, 255, 255),
-            true,
-        );
-    }
-}
 
 /// A box of text lines (a mod's HUD panel): `(text, 0xRRGGBB)` each.
 pub fn draw_lines(
@@ -202,7 +146,7 @@ mod tests {
         );
         let (width, height) = (batch.width, batch.height);
         let mut corners = Corners::new(width, height, 0.0);
-        // The minimap already took the top right.
+        // Another box already took the top right.
         corners.place(Corner::TopRight, 64.0, 64.0);
         let right = Panel {
             corner: hud::Corner::TopRight,
@@ -222,7 +166,7 @@ mod tests {
             [false, true, true, true],
         );
         let (_, y) = right.at.lock().unwrap()[0].expect("the top right shows");
-        assert_eq!(y, 2.0 + 64.0 + 2.0, "under the minimap");
+        assert_eq!(y, 2.0 + 64.0 + 2.0, "under the other box");
         assert_eq!(
             *left.at.lock().unwrap(),
             [None],

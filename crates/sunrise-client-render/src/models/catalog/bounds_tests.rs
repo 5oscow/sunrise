@@ -1,6 +1,6 @@
 use super::*;
 
-fn catalog(definition: &str) -> StateModels {
+pub(super) fn catalog(definition: &str) -> StateModels {
     let definition = BlockStateDefinition::from_json(definition).unwrap();
     let choices = CompiledChoices::new(&definition)
         .unwrap()

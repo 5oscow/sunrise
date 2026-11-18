@@ -5,8 +5,8 @@ Pictures of the game hold Minecraft's textures and can't be committed, so this t
 (BASE_SHA on the parity runner, else the merge-base with origin/main) and the change, draws the same fixed scenes with
 each offscreen under SUNRISE_STILL=1 (a frozen scene draws the same frame every run, docs/agent-control.md), and
 requires the decoded pixels to be identical. The oracle is the base build, not vanilla. It fails any change that moves
-the picture on purpose, so no automatic selection runs it (named_only in tools/parity_hosts.json): a pull request that
-must leave the picture alone carries the frame-identity label (docs/release-flow.md).
+the picture on purpose, so no automatic selection runs it (named_only in tools/parity_hosts.json): a change that must
+leave the picture alone runs it by name (tools/parity.py frame_identity).
 
 Sessions, each a fresh game and world (seed 7) per build:
 
@@ -86,9 +86,9 @@ SIZE = (854, 480)
 SEED = '7'
 # 🤖 Agent: changes under these, and Markdown outside crates/, build no game binary, so the base can reuse the
 # change's. Not all of docs/: sunrise-port-pack embeds docs/modpacks/atm10-mods.csv. Not all of tools/ either:
-# sunrise-mod-api-gen generates Rust from tools/native-hook-fragments/ (BUILT_FROM_TOOLS).
+# Rust reads the pinned toolchain, the mixins patch and the mod vocabulary's layering state from there (BUILT_FROM_TOOLS).
 NO_BINARY = ('tools/', 'tests/', '.github/')
-BUILT_FROM_TOOLS = ('tools/native-hook-fragments/',)
+BUILT_FROM_TOOLS = ('tools/ci/rust-version', 'tools/mixins/', 'tools/layering/')
 BUILD = ['cargo', 'build', '--locked', '--profile', 'fast', '-p', 'sunrise-game', '-p', 'sunrise-client-lib', '--bins']
 # 🤖 Agent: Where the overworld scenes are built, high above seed 7's spawn, so terrain below hardly shows.
 X, Y, Z = 8, 160, 8

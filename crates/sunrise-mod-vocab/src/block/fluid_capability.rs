@@ -126,7 +126,8 @@ pub struct FluidIngredient {
 
 impl FluidIngredient {
     /// Parse a fluid, tag, list or standard shape against this load's fluid registry.
-    /// Invalid shapes or unknown names return a typed error.
+    /// Invalid shapes or unknown names return a typed error; a list holding an entry
+    /// that isn't a fluid name or `#tag` is `Invalid`, never shortened.
     pub fn from_json(
         v: &serde_json::Value,
         context: &dyn DataLoadContext,

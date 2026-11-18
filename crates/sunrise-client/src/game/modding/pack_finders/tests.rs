@@ -36,7 +36,7 @@ impl Fixture {
             }))
             .unwrap()
         };
-        let package = root.join(if archive { "packmod.hmod" } else { "packmod" });
+        let package = root.join(if archive { "packmod.smod" } else { "packmod" });
         let fixture = Self {
             root, package, archive,
             files: vec![
@@ -53,7 +53,7 @@ impl Fixture {
     }
     fn publish(&self) {
         if self.archive {
-            let next = self.package.with_extension("next.hmod");
+            let next = self.package.with_extension("next.smod");
             let mut zip = zip::ZipWriter::new(fs::File::create(&next).unwrap());
             for (name, bytes) in &self.files {
                 zip.start_file(name, zip::write::SimpleFileOptions::default())

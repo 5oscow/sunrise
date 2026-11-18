@@ -20,6 +20,7 @@ pub fn qualified(id: &str) -> String {
 /// bare name, then the content mods' as `<ns>:<name>`, the world's packs'
 /// over them (`overlay`), parsed, and only those whose load conditions
 /// hold. A server sends some of them to its clients (`recipe_content`).
+/// A malformed JSON file refuses the whole load; no partial set is returned.
 pub fn sources(root: &Path, overlay: &PackOverlay) -> Result<Vec<(String, Value)>> {
     // Vanilla's recipes by bare name, then content mods' as `<ns>:<name>`.
     let mut sources: Vec<(String, Vec<u8>)> = Vec::new();
@@ -65,17 +66,13 @@ pub fn sources(root: &Path, overlay: &PackOverlay) -> Result<Vec<(String, Value)
     let filters = crate::recipe_filters::RecipeFilters::load(root, overlay);
     let mut parsed = Vec::with_capacity(sources.len());
     for (name, bytes) in sources {
-        // Vanilla's RecipeManager logs a file that does not parse and
-        // goes on ("Couldn't parse data file").
-        let mut v: Value = match serde_json::from_slice(&bytes) {
-            Ok(v) => v,
-            Err(e) => {
-                log::warn!("Sunrise: recipe {name} not loaded: {e}");
-                continue;
-            }
-        };
+        let mut v: Value = serde_json::from_slice(&bytes).map_err(|error| {
+            let id = qualified(&name);
+            let (namespace, path) = id.split_once(':').unwrap();
+            format!("recipes: data/{namespace}/recipe/{path}.json refused: {error}")
+        })?;
         // A file whose load conditions don't hold is silently absent.
-        if !conditions.admit_id(&mut v, "recipe", &qualified(&name)) {
+        if !conditions.allows_id(&v, "recipe", &qualified(&name)) {
             continue;
         }
         // The data's recipe filters, over the final set.
@@ -87,3 +84,7 @@ pub fn sources(root: &Path, overlay: &PackOverlay) -> Result<Vec<(String, Value)
     conditions.check_resource_errors("recipe")?;
     Ok(parsed)
 }
+
+#[cfg(test)]
+#[path = "recipe_sources_tests.rs"]
+mod tests;

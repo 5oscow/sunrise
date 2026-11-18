@@ -15,7 +15,12 @@ fn main() -> sunrise_items::Result<()> {
             return Err("expected label, command argument and saved stack".into());
         }
         let stack = parse_stack(fields[2])?.ok_or("expected a nonempty stack")?;
-        writeln!(output, "{}\t{}", fields[0], canon_stack(Some(&stack)))?;
+        writeln!(
+            output,
+            "{}\t{}",
+            fields[0],
+            canon_stack(Some(&stack), &Default::default())
+        )?;
     }
     Ok(())
 }

@@ -541,7 +541,7 @@ impl LevelAccess for GameLevel<'_> {
         output
     }
     fn adjust_analog_output(
-        &self,
+        &mut self,
         pos: BlockPos,
         state: BlockStateId,
         direction: Direction,
@@ -568,6 +568,16 @@ impl LevelAccess for GameLevel<'_> {
                 *state = self.block_state(pos);
             }
         }
+    }
+    fn has_held_block_ticks(&self) -> bool {
+        self.native_authoritative && mod_api::__private::any_mod_disabled()
+    }
+    fn hold_block_tick(&self, state: BlockStateId) -> bool {
+        self.native_authoritative
+            && api_values::block_state::block_listens(mod_api::HookId::TickBlock, state)
+            && state.try_into_api().is_ok_and(|state| {
+                mod_api::__private::block_hook_inert(mod_api::HookId::TickBlock, state)
+            })
     }
     fn before_tick_block(
         &mut self,
@@ -613,32 +623,108 @@ impl LevelAccess for GameLevel<'_> {
     #[allow(clippy::option_option)]
     fn before_state_for_placement(
         &self,
+        ticks: &Ticks,
+        preview: Option<&sunrise_world::level::PreviewBlocks>,
         state: BlockStateId,
         context: &PlacementContext,
         fluid: FluidState,
         answer: &mut Option<Option<BlockStateId>>,
     ) {
-        if self.native_authoritative
-            && let Some(fluid) = native_world_read::api_fluid_state(fluid)
-        {
-            self.native_state_for_placement(self.dimension, state, context, fluid, answer);
+        // Asked on both sides: a client's placement prediction asks it too.
+        if let Some(fluid) = native_world_read::api_fluid_state(fluid) {
+            self.view(ticks)
+                .previewing(preview)
+                .native_state_for_placement(self.dimension, state, context, fluid, answer);
         }
     }
-    fn before_can_survive(&self, pos: BlockPos, state: BlockStateId, survives: &mut Option<bool>) {
-        if self.native_authoritative {
-            self.native_can_survive(self.dimension, pos, state, survives);
-        }
+    fn placement_context(
+        &self,
+        item: &str,
+        context: &PlacementContext,
+    ) -> Option<Option<PlacementContext>> {
+        let mut answer = None;
+        self.native_placement_context(item, context, &mut answer);
+        answer.map(|answer| {
+            answer.and_then(|snapshot| {
+                if !snapshot.hit.iter().all(|n| n.is_finite())
+                    || !snapshot.yaw.is_finite()
+                    || !snapshot.pitch.is_finite()
+                {
+                    log::warn!("placement_context: refused {item}: nonfinite hit or rotation");
+                    return None;
+                }
+                if snapshot.item.and_then(mod_api::__private::item_key_id) != Some(item) {
+                    log::warn!("placement_context: refused {item}: replacement changed the item");
+                    return None;
+                }
+                Some(PlacementContext {
+                    pos: snapshot.pos,
+                    hit_pos: snapshot.hit_pos,
+                    face: snapshot.face,
+                    hit: sunrise_core::geometry::Vec3::new(
+                        snapshot.hit[0],
+                        snapshot.hit[1],
+                        snapshot.hit[2],
+                    ),
+                    inside: snapshot.inside,
+                    yaw: snapshot.yaw,
+                    pitch: snapshot.pitch,
+                    sneaking: snapshot.sneaking,
+                    item: context.item.clone(),
+                    replace_clicked: snapshot.replace_clicked,
+                })
+            })
+        })
+    }
+    fn must_survive(&self, item: &str) -> Option<bool> {
+        let mut answer = None;
+        self.native_must_survive(item, &mut answer);
+        answer
+    }
+    fn fence_gate_in_wall(&self, state: BlockStateId) -> Option<bool> {
+        let mut answer = None;
+        self.native_fence_gate_in_wall(state, &mut answer);
+        answer
+    }
+    fn before_can_survive(
+        &self,
+        ticks: &Ticks,
+        preview: Option<&sunrise_world::level::PreviewBlocks>,
+        pos: BlockPos,
+        state: BlockStateId,
+        survives: &mut Option<bool>,
+    ) -> bool {
+        let mut inert = false;
+        self.view(ticks).previewing(preview).native_can_survive(
+            self.dimension,
+            pos,
+            state,
+            survives,
+            &mut inert,
+        );
+        inert
     }
     fn before_can_sustain_plant(
         &self,
+        ticks: &Ticks,
+        preview: Option<&sunrise_world::level::PreviewBlocks>,
         state: BlockStateId,
         ground: BlockStateId,
         ground_pos: BlockPos,
         sustains: &mut Option<bool>,
-    ) {
-        if self.native_authoritative {
-            self.native_can_sustain_plant(self.dimension, state, ground, ground_pos, sustains);
-        }
+    ) -> bool {
+        let mut inert = false;
+        self.view(ticks)
+            .previewing(preview)
+            .native_can_sustain_plant(
+                self.dimension,
+                state,
+                ground,
+                ground_pos,
+                sustains,
+                &mut inert,
+            );
+        inert
     }
     fn asks_is_fertile(&self) -> bool {
         self.native_authoritative && mod_api::__private::has_scoped_hook(mod_api::HookId::IsFertile)
@@ -652,6 +738,12 @@ impl LevelAccess for GameLevel<'_> {
                 mod_api::HookId::CanBeHydrated,
                 state,
             )
+    }
+    fn hold_farmland_hydration(&self, state: BlockStateId) -> bool {
+        mod_api::__private::any_mod_disabled()
+            && state.try_into_api().is_ok_and(|state| {
+                mod_api::__private::block_hook_inert(mod_api::HookId::CanBeHydrated, state)
+            })
     }
     fn before_can_be_hydrated(
         &self,
@@ -667,14 +759,23 @@ impl LevelAccess for GameLevel<'_> {
     }
     fn before_may_place_on(
         &self,
+        ticks: &Ticks,
+        preview: Option<&sunrise_world::level::PreviewBlocks>,
         state: BlockStateId,
         ground: BlockStateId,
         ground_pos: BlockPos,
         may: &mut Option<bool>,
-    ) {
-        if self.native_authoritative {
-            self.native_may_place_on(self.dimension, state, ground, ground_pos, may);
-        }
+    ) -> bool {
+        let mut inert = false;
+        self.view(ticks).previewing(preview).native_may_place_on(
+            self.dimension,
+            state,
+            ground,
+            ground_pos,
+            may,
+            &mut inert,
+        );
+        inert
     }
     fn is_client_side(&self) -> bool {
         self.client_side
@@ -1112,6 +1213,20 @@ impl LevelAccess for GameLevel<'_> {
             .shulkers
             .get(&[pos.x, pos.y, pos.z])
             .map(|s| s.status == sunrise_client::block_entity_anim::ShulkerStatus::Closed)
+    }
+    /// What a mod block entity published for a block that may (`shapes_from_block_entity`).
+    fn published_collision_shape(
+        &self,
+        pos: BlockPos,
+        state: BlockStateId,
+    ) -> Option<sunrise_core::geometry::VoxelShape> {
+        if !self.collision.publishes_shapes(state) {
+            return None;
+        }
+        match self.world.block_entities.get(&(pos.x, pos.y, pos.z))? {
+            BlockEntity::Mod(entity) => entity.shapes().map(|shapes| shapes.collision().clone()),
+            _ => None,
+        }
     }
     fn remove_block_entity(&mut self, pos: BlockPos, old: BlockStateId, side_effects: bool) -> u8 {
         if let Some(change) = &mut self.command_block_transition

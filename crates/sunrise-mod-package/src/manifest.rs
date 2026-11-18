@@ -1,4 +1,4 @@
-//! `sunrise-mod.toml`, a mod's manifest, and the `.hmod` file around it.
+//! `sunrise-mod.toml`, a mod's manifest, and the `.smod` file around it.
 //!
 //! Raw injection schema adapted from horizon-mixins (Copyright (c) 2026 levzzz),
 //! MIT licensed; see `HORIZON_MIXINS_LICENSE` and `THIRD_PARTY_NOTICES.md`.
@@ -6,10 +6,14 @@ pub mod inject;
 mod jar;
 pub mod loops;
 pub mod mixin;
+mod runtime_files;
 mod wasm;
 pub use jar::{
     JarConflict, JarInputsError, JarRef, JarRequirement, MissingJar, collect_jar_requirements,
     missing_jars,
+};
+pub use runtime_files::{
+    MAX_RUNTIME_FILE, MAX_RUNTIME_FILES, MAX_RUNTIME_TOTAL, RUNTIME_DIR, RuntimeData, RuntimeTable,
 };
 pub use wasm::{MAX_WASM, Wasm, WasmError, sha512_of};
 
@@ -21,9 +25,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// The manifest's file name in a `.hmod` or a mod folder.
+/// The manifest's file name in a `.smod` or a mod folder.
 pub const MANIFEST: &str = "sunrise-mod.toml";
-/// Executable components are not content and are refused in a `.hmod`.
+/// Executable components are not content and are refused in a `.smod`.
 pub const WASM: &str = "mod.wasm";
 /// The largest uses table ([`USES_FILE`]) a package may carry: what the surface crate reads.
 pub const MAX_USES: u64 = mod_surface::uses::MAX_USES_BYTES as u64;
@@ -100,6 +104,10 @@ pub struct Manifest {
     pub native: Option<Native>,
     /// A wasm mod's `mod.wasm`, its toolchain and what it was linked against.
     pub wasm: Option<Wasm>,
+    /// The data files of the package's `runtime/` folder, each with its SHA-512: for a native and
+    /// a wasm mod alike. Not pack data.
+    #[serde(default)]
+    pub runtime: Option<RuntimeTable>,
     /// The linear memory, in MiB (1 to [`MAX_WASM_MEMORY_MIB`]), this wasm mod or library expects
     /// its dependency group to have. The group gets the largest any member declares, up to the
     /// instance's cap; with none declared it gets 1 GiB. Native mods are not wasm groups: they
@@ -235,10 +243,10 @@ pub struct Native {
     pub mixin: Vec<mixin::Mixin>,
     #[serde(default)]
     pub module: Vec<Module>,
-    /// Accessor and invoker bridges, forwarded as sunrise-mixins' `[[bridge]]`.
+    /// Accessor and invoker bridges, forwarded as horizon-mixins' `[[bridge]]`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bridge: Vec<mixin::Forwarded>,
-    /// State fields added to game types, forwarded as sunrise-mixins' `[[state]]`.
+    /// State fields added to game types, forwarded as horizon-mixins' `[[state]]`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub state: Vec<mixin::Forwarded>,
     /// Slots of published game loops, native only (`mod_api::loops`).
@@ -260,7 +268,7 @@ pub struct Internal {
     pub hash: Option<String>,
 }
 
-/// A support module merged into a game crate, forwarded as sunrise-mixins'
+/// A support module merged into a game crate, forwarded as horizon-mixins'
 /// `[[module]]`: self-contained Rust items, emitted into `file` as
 /// `mod name`, for helpers that need more than one function.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -427,6 +435,17 @@ impl Manifest {
         if !m.internals.is_empty() && m.native.is_none() && m.wasm.is_none() {
             return Err(format!(
                 "{MANIFEST}: internals need a [native] or [wasm] mod"
+            ));
+        }
+        if RESERVED_NAMESPACES.contains(&m.id.as_str()) {
+            return Err(format!(
+                "{MANIFEST}: id {:?} is a reserved namespace, not a mod's to claim",
+                m.id
+            ));
+        }
+        if m.runtime.is_some() && m.native.is_none() && m.wasm.is_none() {
+            return Err(format!(
+                "{MANIFEST}: a content mod has no code, so no [runtime]"
             ));
         }
         if reserved_mod_id(&m.id) {
@@ -703,7 +722,7 @@ pub fn source_file(name: &str) -> bool {
                 .any(|prefix| name.starts_with(prefix)))
 }
 
-fn plain_path(name: &str) -> bool {
+pub(crate) fn plain_path(name: &str) -> bool {
     !name.starts_with('/')
         && !name.contains(['\\', ':'])
         && !name
@@ -770,7 +789,7 @@ impl Package {
         Ok(bytes)
     }
 
-    /// Read a flat `.hmod` or project folder, without executing native code.
+    /// Read a flat `.smod` or project folder, without executing native code.
     pub fn read(path: &Path) -> Result<Self, String> {
         let metadata = std::fs::symlink_metadata(path).map_err(|e| e.to_string())?;
         let mut icon = None;
@@ -780,7 +799,7 @@ impl Package {
         let toml = if metadata.is_dir() {
             for old in [
                 "sunrise-native.json",
-                "sunrise-mixin.toml",
+                "horizon-mixin.toml",
                 "native",
                 "rust",
             ] {
@@ -848,6 +867,7 @@ impl Package {
             }
         };
         let mut package = Self::from_parts(&toml, icon, has_cargo, has_source, has_wasm)?;
+        package.check_runtime_layout(&crate::content::runtime_folder_files(path)?)?;
         match std::fs::File::open(path.join(crate::layouts::FILE)) {
             Ok(file) => {
                 check_folder_file(path, crate::layouts::FILE)?;
@@ -873,6 +893,7 @@ impl Package {
         let mut entries = Vec::new();
         let mut layouts = None;
         let mut uses = false;
+        let mut runtime = Vec::new();
         for i in 0..zip.len() {
             let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
             let name = entry.name().map_err(|e| e.to_string())?.into_owned();
@@ -881,7 +902,7 @@ impl Package {
             let first = name.split('/').next().unwrap_or("");
             if matches!(
                 first,
-                "sunrise-native.json" | "sunrise-mixin.toml" | "native" | "rust"
+                "sunrise-native.json" | "horizon-mixin.toml" | "native" | "rust"
             ) {
                 return Err(format!("{name}: unsupported package path"));
             }
@@ -900,6 +921,17 @@ impl Package {
                     return Err("duplicate layouts.json".into());
                 }
                 layouts = Some(crate::layouts::Layouts::read(&mut entry)?);
+                continue;
+            }
+            if let Some(below) = name
+                .strip_prefix(RUNTIME_DIR)
+                .and_then(|n| n.strip_prefix('/'))
+            {
+                // Any file type, but a file: its bytes are checked against `[runtime]` below.
+                if !matches!(mode & 0o170000, 0 | 0o100000) {
+                    return Err(format!("{name}: unsupported file type"));
+                }
+                runtime.push((below.to_owned(), entry.size()));
                 continue;
             }
             if name == USES_FILE && matches!(mode & 0o170000, 0 | 0o100000) {
@@ -953,6 +985,7 @@ impl Package {
             wasm.check(&bytes).map_err(|e| e.to_string())?;
         }
         package.layouts = layouts.unwrap_or_default();
+        package.check_runtime_layout(&runtime)?;
         if package.has_source() || package.manifest.wasm.is_some() {
             let mut names = std::collections::HashSet::new();
             let mut source_count = 0usize;
@@ -974,6 +1007,7 @@ impl Package {
                         && name != USES_FILE
                         && name != "icon.png"
                         && !(name == WASM && package.manifest.wasm.is_some())
+                        && !name.starts_with("runtime/")
                         && !name.starts_with("assets/")
                         && !name.starts_with("data/")
                         && !source_file(&name)
@@ -1010,6 +1044,62 @@ impl Package {
         Ok(package)
     }
 
+    /// Refuse a `runtime/` folder that is not the one `[runtime]` lists: an extra, a missing or an
+    /// oversized file, each named. `found` is each file below `runtime/` and its size.
+    fn check_runtime_layout(&self, found: &[(String, u64)]) -> Result<(), String> {
+        if !found.is_empty() && !self.has_source() && self.manifest.wasm.is_none() {
+            return Err("a content mod has no code, so no runtime/ folder".into());
+        }
+        RuntimeTable::check_layout(self.manifest.runtime.as_ref(), found)
+    }
+
+    /// The package's runtime files, read from `path` (a folder or a `.smod`) and each checked
+    /// against its `[runtime]` SHA-512: the one place their bytes are hashed. A mismatch is
+    /// refused by name. `None` for a package with no `[runtime]`.
+    pub fn read_runtime(&self, path: &Path) -> Result<Option<RuntimeData>, String> {
+        let Some(table) = &self.manifest.runtime else {
+            return Ok(None);
+        };
+        let mut files = std::collections::BTreeMap::new();
+        let folder = path.is_dir();
+        #[cfg(not(target_arch = "wasm32"))]
+        let mut zip = if folder {
+            None
+        } else {
+            let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+            Some(zip::ZipArchive::new(file).map_err(|e| e.to_string())?)
+        };
+        for (name, _) in table.files() {
+            let entry = format!("{RUNTIME_DIR}/{name}");
+            let mut bytes = Vec::new();
+            // At most one byte past the cap, so an oversized file is refused unread.
+            let read = if folder {
+                std::fs::File::open(path.join(&entry))
+                    .map_err(|e| format!("{entry}: {e}"))?
+                    .take(MAX_RUNTIME_FILE + 1)
+                    .read_to_end(&mut bytes)
+            } else {
+                #[cfg(target_arch = "wasm32")]
+                return Err("archive I/O is unavailable on wasm32".into());
+                #[cfg(not(target_arch = "wasm32"))]
+                zip.as_mut()
+                    .expect("an archive")
+                    .by_name(&entry)
+                    .map_err(|e| format!("{entry}: {e}"))?
+                    .take(MAX_RUNTIME_FILE + 1)
+                    .read_to_end(&mut bytes)
+            };
+            read.map_err(|e| format!("{entry}: {e}"))?;
+            table.check(name, &bytes)?;
+            files.insert(name.to_owned(), std::sync::Arc::from(bytes));
+        }
+        Ok(Some(RuntimeData::new(
+            files,
+            table.digest(),
+            folder.then(|| path.to_owned()),
+        )))
+    }
+
     fn from_parts(
         text: &str,
         icon: Option<crate::icon::Icon>,
@@ -1033,7 +1123,7 @@ impl Package {
         }
         Ok(package)
     }
-    /// Whether the mod at `path` (a `.hmod` or a folder) has a [`MANIFEST`].
+    /// Whether the mod at `path` (a `.smod` or a folder) has a [`MANIFEST`].
     pub fn has_manifest(path: &Path) -> bool {
         if path.is_dir() {
             return path.join(MANIFEST).is_file();
@@ -1075,6 +1165,14 @@ impl Package {
             wasm.check(&bytes).map_err(|e| e.to_string())?;
             files.insert(WASM.to_owned(), bytes);
         }
+        if let Some(runtime) = self.read_runtime(root)? {
+            for name in runtime.names() {
+                files.insert(
+                    format!("{RUNTIME_DIR}/{name}"),
+                    runtime.file(name).expect("a listed file").to_vec(),
+                );
+            }
+        }
         if self.has_source() {
             fn walk(
                 root: &Path,
@@ -1097,7 +1195,7 @@ impl Package {
                             .file_name()
                             .to_str()
                             .is_some_and(|name| NOT_PACKAGED.contains(&name))
-                            || matches!(name.as_str(), "assets" | "data")
+                            || matches!(name.as_str(), "assets" | "data" | RUNTIME_DIR)
                         {
                             continue;
                         }
@@ -1136,7 +1234,7 @@ impl Package {
         Self::pack_directory_with(root, None)
     }
 
-    /// The bytes of entry `name` in the `.hmod` at `path`, refused past `most` bytes; `None` when
+    /// The bytes of entry `name` in the `.smod` at `path`, refused past `most` bytes; `None` when
     /// it has no such entry.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn entry(path: &Path, name: &str, most: u64) -> Result<Option<Vec<u8>>, String> {
@@ -1163,6 +1261,16 @@ impl Package {
     pub fn pack_directory_with(root: &Path, uses: Option<&[u8]>) -> Result<Vec<u8>, String> {
         let package = Self::read(root)?;
         let mut files = package.directory_files(root)?;
+        // A source folder with the old file is valid to read and to build from; a package is
+        // written only from a file the build wrote again.
+        if let Some(bytes) = files.get(crate::layouts::FILE)
+            && crate::layouts::Layouts::read(bytes.as_slice())?.is_legacy()
+        {
+            return Err(format!(
+                "{}: a file of the old format: build the mod again to write it",
+                crate::layouts::FILE
+            ));
+        }
         if let Some(uses) = uses {
             files.insert(USES_FILE.to_owned(), uses.to_vec());
         }
@@ -1175,7 +1283,7 @@ impl Package {
         Self::write_files(&text, &files)
     }
 
-    /// The `.hmod` bytes for `manifest_text` and selected project files.
+    /// The `.smod` bytes for `manifest_text` and selected project files.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn write_files(manifest_text: &str, files: &[(&str, &[u8])]) -> Result<Vec<u8>, String> {
         use std::io::Write;
@@ -1197,6 +1305,15 @@ impl Package {
                 continue;
             }
             if *name == WASM && manifest.wasm.is_some() {
+                put(name, bytes)?;
+                continue;
+            }
+            if let Some(below) = name.strip_prefix("runtime/") {
+                let table = manifest
+                    .runtime
+                    .as_ref()
+                    .ok_or(format!("{name}: not listed in [runtime]"))?;
+                table.check(below, bytes)?;
                 put(name, bytes)?;
                 continue;
             }
@@ -1329,7 +1446,7 @@ fn check_folder_file(root: &Path, name: &str) -> Result<(), String> {
     check_file(name, mode, || std::fs::File::open(&path)).map_err(|e| e.to_string())
 }
 
-/// The `.hmod` files and mod folders in `dir`, by name.
+/// The `.smod` files and mod folders in `dir`, by name.
 pub fn find(dir: &Path) -> Vec<PathBuf> {
     let Ok(read) = std::fs::read_dir(dir) else {
         return Vec::new();
@@ -1337,11 +1454,15 @@ pub fn find(dir: &Path) -> Vec<PathBuf> {
     let mut found: Vec<PathBuf> = read
         .flatten()
         .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|e| e == "hmod") || p.join(MANIFEST).is_file())
+        .filter(|p| p.extension().is_some_and(|e| e == "smod") || p.join(MANIFEST).is_file())
         .collect();
     found.sort();
     found
 }
+
+#[cfg(test)]
+#[path = "manifest/runtime_files_tests.rs"]
+mod runtime_files_tests;
 
 #[cfg(test)]
 mod tests {
@@ -1547,7 +1668,7 @@ capabilities = ["registries"]
         let module = &manifest.native.as_ref().unwrap().module[0];
         assert_eq!(module.name, "runtime");
         assert_eq!(module.visibility, None);
-        // Support modules still forward whole to sunrise-mixins.
+        // Support modules still forward whole to horizon-mixins.
         let forwarded = toml::to_string(manifest.native.as_ref().unwrap()).unwrap();
         assert!(forwarded.contains("[[module]]"));
         assert!(forwarded.contains("id = \"runtime\""));
@@ -1569,7 +1690,7 @@ capabilities = ["registries"]
                 "file = 'crates/sunrise-client/src/game.rs'",
                 "file = '/abs.rs'",
             ),
-            // sunrise-mixins accepts exactly pub and pub(crate)
+            // horizon-mixins accepts exactly pub and pub(crate)
             valid.to_owned() + "visibility = 'public'\n",
         ] {
             assert!(
@@ -1683,13 +1804,14 @@ capabilities = ["registries"]
 
     #[test]
     fn layout_metadata_round_trips_and_malformed_archives_are_refused() {
-        let layouts = br#"{"ruby":{"ruby::T":"0123456789abcdef"}}"#;
+        let layouts = br#"{"ruby":{"ruby::T":"0123456789abcdef0123456789abcdef"}}"#;
         let bytes = Package::write_files(EXAMPLE, &[("layouts.json", layouts)]).unwrap();
         let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
         let package = Package::read_zip(&mut zip).unwrap();
-        let changed =
-            crate::layouts::Layouts::read(br#"{"ruby":{"ruby::T":"1123456789abcdef"}}"#.as_slice())
-                .unwrap();
+        let changed = crate::layouts::Layouts::read(
+            br#"{"ruby":{"ruby::T":"1123456789abcdef1123456789abcdef"}}"#.as_slice(),
+        )
+        .unwrap();
         assert_eq!(
             package.layouts.first_difference("ruby", &changed),
             Some("ruby::T")
@@ -1840,6 +1962,20 @@ capabilities = ["registries"]
     }
 
     #[test]
+    fn reserved_namespaces_cannot_be_the_mod_id() {
+        for id in RESERVED_NAMESPACES {
+            let manifest = EXAMPLE.replace("id = \"ruby\"", &format!("id = {id:?}"));
+            let error = Manifest::parse(&manifest).unwrap_err();
+            assert!(
+                error.contains(MANIFEST)
+                    && error.contains(id)
+                    && error.contains("reserved namespace"),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
     fn the_mods_screen_fields_are_optional_and_links_must_be_http() {
         let m = Manifest::parse(EXAMPLE).unwrap();
         assert!(m.license.is_empty() && m.credits.is_empty());
@@ -1869,7 +2005,7 @@ issues = \"http://example.org/issues\"
         // A minimal valid shared member: a `dylink.0` section and the three guest exports.
         let module = wat::parse_str(
             r#"(module (@custom "dylink.0" "\01\04\00\00\00\00")
-                (func (export "sunrise_layout")) (func (export "sunrise_in")) (func (export "sunrise_hook")))"#,
+                (func (export "sunrise_in")) (func (export "sunrise_hook")))"#,
         )
         .unwrap();
         let text = format!(
@@ -1941,7 +2077,7 @@ issues = \"http://example.org/issues\"
         let dir = root.join("folder");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(MANIFEST), EXAMPLE).unwrap();
-        let archive = root.join("ruby.hmod");
+        let archive = root.join("ruby.smod");
         std::fs::write(&archive, Package::write_files(EXAMPLE, &[]).unwrap()).unwrap();
         assert_eq!(Package::read(&archive).unwrap().manifest.id, "ruby");
         assert_eq!(Package::read(&dir).unwrap().manifest.id, "ruby");
@@ -2076,7 +2212,7 @@ issues = \"http://example.org/issues\"
         use std::io::Write;
         let root = std::env::temp_dir().join(format!("sunrise-mods-kinds-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
-        let path = root.join("ruby.hmod");
+        let path = root.join("ruby.smod");
         for link in [false, true] {
             let mut zip = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
             // Made by a Unix tool on every OS: the writer's default on Windows is DOS attributes,
@@ -2142,6 +2278,25 @@ issues = \"http://example.org/issues\"
         symlink(&dir, &link).unwrap();
         let error = Package::read(&link).err().unwrap();
         assert!(error.contains("unsupported file type"), "{error}");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_package_is_not_written_from_old_width_layout_metadata() {
+        let root = std::env::temp_dir().join(format!("legacy-pack-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(MANIFEST), EXAMPLE).unwrap();
+        std::fs::write(
+            root.join(crate::layouts::FILE),
+            br#"{"ruby":{"ruby::T":"0123456789abcdef"}}"#,
+        )
+        .unwrap();
+        // The folder reads and its files select; only writing the archive refuses.
+        let package = Package::read(&root).unwrap();
+        assert!(package.directory_files(&root).is_ok());
+        let error = Package::pack_directory_with(&root, None).unwrap_err();
+        assert!(error.contains("old format"), "{error}");
         std::fs::remove_dir_all(root).unwrap();
     }
 }

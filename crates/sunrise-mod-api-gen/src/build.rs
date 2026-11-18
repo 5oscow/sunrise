@@ -70,11 +70,7 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
         ],
         Target::Api | Target::Vocab => {
             if matches!(target, Target::Api) {
-                write_if_changed(
-                    out_dir.join("parts_registration_modules.rs"),
-                    super::parts::registration_source(root)?,
-                )
-                .map_err(|e| e.to_string())?;
+                generate_api_parts(root, out_dir)?;
             }
             if matches!(target, Target::Vocab) {
                 write_vocab_output(
@@ -113,13 +109,15 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
                 ("mod_api_generated_host.rs", generated.host),
                 ("capability_providers_generated.rs", providers),
                 ("wire_generated.rs", generated_wire.wire),
-                ("wire_guest_generated.rs", generated_wire.guest),
+                (GUEST_OUTPUT, generated_wire.guest),
             ];
             outputs
                 .into_iter()
+                // Vocab keeps the mod side's guest transport as well, for `sunrise-mod-api`'s build to
+                // take (`generate_api_parts`): it comes from the sources Vocab has just generated.
                 .filter(|(name, _)| match target {
-                    Target::Api => *name == "wire_guest_generated.rs",
-                    Target::Vocab => *name != "wire_guest_generated.rs",
+                    Target::Api => *name == GUEST_OUTPUT,
+                    Target::Vocab => true,
                     Target::Client => unreachable!(),
                 })
                 .collect()
@@ -127,7 +125,7 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
     };
     for (name, code) in outputs {
         let code = generated_source(root, &target, name, code)?;
-        if matches!(target, Target::Vocab) {
+        if matches!(target, Target::Vocab) && name != GUEST_OUTPUT {
             write_vocab_output(out_dir, name, &code, &inventory, &vocab_sources)?;
         } else {
             write_if_changed(out_dir.join(name), &code).map_err(|e| e.to_string())?;
@@ -135,6 +133,21 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
         syn::parse_file(&code).map_err(|e| format!("generated Rust: {name}: {e}"))?;
     }
     Ok(())
+}
+
+/// The mod side's WebAssembly guest transport, which `sunrise-mod-api` includes.
+pub const GUEST_OUTPUT: &str = "wire_guest_generated.rs";
+
+/// `sunrise-mod-api`'s own generated file: the modules and re-exports of its Part kinds. Its guest
+/// transport ([`GUEST_OUTPUT`]) comes from `sunrise-mod-vocab`'s build, which generates the same sources:
+/// the API's build script copies it instead of parsing the catalog, the vocabulary and the game again.
+pub fn generate_api_parts(root: &Path, out_dir: &Path) -> Result<(), String> {
+    crate::rerun_if_changed(&root.join("crates/sunrise-mod-api/src/parts").display());
+    write_if_changed(
+        out_dir.join("parts_registration_modules.rs"),
+        super::parts::registration_source(root)?,
+    )
+    .map_err(|e| e.to_string())
 }
 
 fn generated_source(

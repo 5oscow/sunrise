@@ -14,14 +14,6 @@ pub(crate) struct Options {
     /// `--pregen`: enable the command even when the saved Extras switch is off.
     pub(super) pregen: bool,
     pub(super) frames: Option<u64>,
-    /// A splitscreen player: the split window paces every player's frames, not each its own.
-    pub(super) paced_by_split: bool,
-    /// A splitscreen player other than P1: its windows are the split's (P1 alone decides
-    /// fullscreen; this game neither asks for it nor adopts it into its options).
-    pub(super) split_guest: bool,
-    /// A splitscreen guest drawn in Window 1, the game's own window: its F11 leaves that
-    /// window to P1.
-    pub(super) split_in_main_window: bool,
     /// `--world-frames N`: exit after N frames drawn in the world (smoke runs; the world may load slowly).
     pub(super) world_frames: Option<u64>,
     pub(super) screenshot_after: Option<u64>,
@@ -74,21 +66,22 @@ pub(crate) struct Options {
     /// `--fullscreen` (vanilla's): the window opens fullscreen whatever options.txt says,
     /// as vanilla's DisplayData does, without saving it there.
     pub(super) fullscreen: bool,
-    /// `--game-dir DIR`: the folder `read` makes the working directory (saves, options.txt...);
-    /// none for a splitscreen player's game, which shares P1's working directory.
+    /// `--game-dir DIR`: the folder `read` makes the working directory (saves, options.txt...).
     pub(super) game_dir: Option<PathBuf>,
     /// `--quickPlaySingleplayer`, checked once the game folder is known.
     pub(super) quick_play: Option<String>,
     pub(super) session_file: Option<String>,
     /// `--session-stdin`: the session file's JSON comes on standard input instead.
     pub(super) session_stdin: bool,
+    /// Why this game plays without an account: the launcher's `SUNRISE_OFFLINE_REASON`, or a
+    /// session it could not read. The title screen shows it once.
+    pub(super) offline_reason: Option<String>,
 }
 
 impl Options {
-    /// Whether this `Game` is the process's client start: not a dedicated server, and not
-    /// a splitscreen guest, whose `run` is another local player joining the same process.
+    /// Whether this `Game` is the process's client.
     pub(super) fn is_client_start(&self) -> bool {
-        self.execution_role.is_client() && !self.split_guest
+        self.execution_role.is_client()
     }
     /// The name to join servers with: the one given, else the offline name kept
     /// next to options.txt (created on first use).
@@ -134,11 +127,15 @@ impl Options {
                 // The chat key pair, ready before the first join.
                 sunrise_client::auth::prepare_chat_keys(true);
             }
-            Ok(None) => {}
-            Err(e) => eprintln!("Sunrise: not signed in: {e}"),
-        }
-        if !o.developer_single_player {
-            split::launcher::read_now();
+            Ok(None) => {
+                o.offline_reason = std::env::var("SUNRISE_OFFLINE_REASON")
+                    .ok()
+                    .filter(|reason| !reason.is_empty());
+            }
+            Err(e) => {
+                eprintln!("Sunrise: not signed in: {e}");
+                o.offline_reason = Some(e);
+            }
         }
         if let Some(dir) = o.game_dir.take() {
             std::fs::create_dir_all(&dir)
@@ -198,9 +195,6 @@ impl Options {
             test_terrain: false,
             pregen: false,
             frames: None,
-            paced_by_split: false,
-            split_guest: false,
-            split_in_main_window: false,
             world_frames: None,
             screenshot_after: None,
             timeout: None,
@@ -239,13 +233,14 @@ impl Options {
             quick_play: None,
             session_file: std::env::var("SUNRISE_SESSION_FILE").ok(),
             session_stdin: false,
+            offline_reason: None,
         };
         for argument in rest {
             match argument {
                 Argument::Switch(arg) => match arg.as_str() {
                     "--help" | "-h" => {
                         println!(
-                            "Sunrise — Minecraft Java Edition {} in Rust\n\n  --resources PATH        Prepared resources (sunrise-prepare)\n  --render-distance N     Chunks, 2..128 (default 12)\n  --world NAME            World folder under saves/ (default \"New World\")\n  --seed N                World seed for new worlds (default 0)\n  --width N, --height N   Window size (default 1280 x 720)\n  --creative              Creative mode (default survival)\n  --test-terrain          Simple test terrain instead of vanilla generation\n  --game-tests            Enable test-only mod content (or SUNRISE_GAME_TESTS=1/true)\n  --frames N              Exit after N frames (testing)\n  --world-frames N        Exit after N frames drawn in the world (testing)\n  --smoke-report PATH     Write a JSON report on exit\n  --benchmark SCENARIO    Run a benchmark (standard, village, forest, ocean, mountain, travel, ab:SWITCH), write its report to benchmarks/ and quit\n  --profile               With --benchmark: also write a performance capture that embeds the report\n  --benchmark-set S=V     With --benchmark travel: set gpu-culling, section-cull, section-sides or section-draws\n  --control               Accept sunrise-ctl commands on a local socket\n  --control-socket PATH   Control socket path (default $XDG_RUNTIME_DIR/sunrise-control.sock)\n  --server HOST[:PORT]    Join a multiplayer server (offline mode) at start\n  --quickPlaySingleplayer WORLD  Open this world of saves/ at start, only if it exists (vanilla's)\n  --quickPlayMultiplayer HOST[:PORT]  The same as --server (vanilla's name)\n  --name NAME             Player name for multiplayer (default: generated once, kept in sunrise-player.txt)\n  --session-file PATH     Signed-in account from the launcher (read once, then deleted)\n  --session-stdin         The same account as JSON on standard input\n  --game-dir DIR          Game folder: saves, options.txt, packs, mods (default: the working directory)\n  --home DIR              Logs and crash reports (default $SUNRISE_HOME, else the platform data folder)\n  --player-dir DIR        This player's own files when several play in one game folder: options.txt, logs, sunrise-player.txt, servers.dat, screenshots\n  --fullscreen            Open the window fullscreen\n  --launch-api            Print the Launch API version and options as JSON (docs/api/launch.md)\n  --dev-mod PATH          A content mod (.hmod or folder) to develop: always on\n  --pregen                Add Sunrise's /pregen command (docs/pregeneration.md)\n\nControls: mouse look, WASD move, Space jump, Left Shift sneak, Left Ctrl sprint,\nleft click break, right click place/use, 1-9/scroll hotbar, E inventory,\nQ drop, F3 debug, Esc pause.",
+                            "Sunrise — Minecraft Java Edition {} in Rust\n\n  --resources PATH        Prepared resources (sunrise-prepare)\n  --render-distance N     Chunks, 2..128 (default 12)\n  --world NAME            World folder under saves/ (default \"New World\")\n  --seed N                World seed for new worlds (default 0)\n  --width N, --height N   Window size (default 1280 x 720)\n  --creative              Creative mode (default survival)\n  --test-terrain          Simple test terrain instead of vanilla generation\n  --game-tests            Enable test-only mod content (or SUNRISE_GAME_TESTS=1/true)\n  --frames N              Exit after N frames (testing)\n  --world-frames N        Exit after N frames drawn in the world (testing)\n  --smoke-report PATH     Write a JSON report on exit\n  --benchmark SCENARIO    Run a benchmark (standard, village, forest, ocean, mountain, travel, ab:SWITCH), write its report to benchmarks/ and quit\n  --profile               With --benchmark: also write a performance capture that embeds the report\n  --benchmark-set S=V     With --benchmark travel: set gpu-culling, section-cull, section-sides or section-draws\n  --control               Accept sunrise-ctl commands on a local socket\n  --control-socket PATH   Control socket path (default $XDG_RUNTIME_DIR/sunrise-control.sock)\n  --server HOST[:PORT]    Join a multiplayer server (offline mode) at start\n  --quickPlaySingleplayer WORLD  Open this world of saves/ at start, only if it exists (vanilla's)\n  --quickPlayMultiplayer HOST[:PORT]  The same as --server (vanilla's name)\n  --name NAME             Player name for multiplayer (default: generated once, kept in sunrise-player.txt)\n  --session-file PATH     Signed-in account from the launcher (read once, then deleted)\n  --session-stdin         The same account as JSON on standard input\n  --game-dir DIR          Game folder: saves, options.txt, packs, mods (default: the working directory)\n  --home DIR              Logs and crash reports (default $SUNRISE_HOME, else the platform data folder)\n  --player-dir DIR        This player's own files when several play in one game folder: options.txt, logs, sunrise-player.txt, servers.dat, screenshots\n  --fullscreen            Open the window fullscreen\n  --launch-api            Print the Launch API version and options as JSON (docs/api/launch.md)\n  --dev-mod PATH          A content mod (.smod or folder) to develop: always on\n  --pregen                Add Sunrise's /pregen command (docs/pregeneration.md)\n\nControls: mouse look, WASD move, Space jump, Left Shift sneak, Left Ctrl sprint,\nleft click break, right click place/use, 1-9/scroll hotbar, E inventory,\nQ drop, F3 debug, Esc pause.",
                             sunrise_core::VANILLA_VERSION
                         );
                         return Ok(None);

@@ -270,11 +270,15 @@ impl Game<'_> {
         if deals_knockback {
             let (xd, zd) = self.extra_knockback_direction();
             let source = Damage::spear(from);
-            let level = crate::game::entity::damage_level_of!(self, &attack);
+            let plan = self.prepare_knockback_credit(id as i32, None, &attack);
+            let mut credit = plan.lend(&mut self.last_hurt_by_player);
+            let level = crate::game::entity::damage_level_of!(self, &attack, &mut credit, None);
             self.mobs[index].knockback_full(level, 0.4, xd, zd, &source, total, false);
             let (strength, _) = self.extra_knockback(&kind, 0.0);
             if strength > 0.0 {
-                let level = crate::game::entity::damage_level_of!(self, &attack);
+                let plan = self.prepare_knockback_credit(id as i32, None, &attack);
+                let mut credit = plan.lend(&mut self.last_hurt_by_player);
+                let level = crate::game::entity::damage_level_of!(self, &attack, &mut credit, None);
                 self.mobs[index].knockback_full(
                     level,
                     f64::from(strength),
@@ -468,35 +472,6 @@ impl Game<'_> {
         };
         if let (Some(kinetic), Some(at)) = (item.as_deref().and_then(Kinetic::of), at) {
             self.kinetic_hit_feedback(if own { OWN } else { id }, &kinetic, [at.x, at.y, at.z]);
-        }
-    }
-
-    /// Synchronize look rotation before sending a spear jab so the server
-    /// raycasts along the player's updated look direction.
-    pub(in crate::game) fn remote_sync_look(&mut self) {
-        let (yaw, pitch) = (self.yaw, self.pitch);
-        let (riding, controls) = (self.riding.is_some(), self.controls_camera());
-        if let Some(p) = self.player.as_ref()
-            && let Some(r) = self.remote.as_mut()
-        {
-            let pos = [p.position.x, p.position.y, p.position.z];
-            let (g, c) = (p.ground.on_ground, p.collision.horizontal);
-            let pkt = if riding {
-                Some(sunrise_protocol::packets::play::Serverbound::MovePlayerRot(
-                    sunrise_protocol::packets::play::MovePlayerRot {
-                        yaw,
-                        pitch,
-                        flags: u8::from(g) | u8::from(c) << 1,
-                    },
-                ))
-            } else if controls {
-                r.position_sender.update(pos, (yaw, pitch), g, c)
-            } else {
-                None
-            };
-            if let Some(pkt) = pkt {
-                r.session.send(pkt);
-            }
         }
     }
 }

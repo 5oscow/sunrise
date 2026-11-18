@@ -11,8 +11,8 @@ restart" to seconds. It builds on the registry v2 ([registry-v2.md](registry-v2.
 
 | | Install | Turn on or off | Change |
 |---|---|---|---|
-| Content mod (`.hmod`) | launcher, or by hand in `sunrise-mods/` | Options > Mods, then **restart** | rebuild the `.hmod`, restart |
-| Native mod (`.hnmod`) | launcher only | off: at once, if the mod checks `on`; on: **rebuild** | **rebuild** (minutes), restart |
+| Content mod (`.smod`) | launcher, or by hand in `sunrise-mods/` | Options > Mods, then **restart** | rebuild the `.smod`, restart |
+| Native mod (`.smod` with `[native]`) | launcher only | off: at once, if the mod checks `on`; on: **rebuild** | **rebuild** (minutes), restart |
 
 Three facts from the code shape the plan:
 
@@ -131,14 +131,14 @@ with the options screen's widgets (`options_ui`), every string through `Text::tr
   same dynamic-texture path as player skins (`skin_slots`), one at a time, loaded when the page opens.
 - **Install.** As the launcher's `install_version`: the newest version for this game that was not taken down, into
   `mod-browser/downloads/`, then `sunrise_mod_package::index::check_file` (size, SHA-256, the author's signature, the
-  file's manifest against the index), then moved to `sunrise-mods/<id>.hmod`, turned on in `sunrise-mods.txt`, and
+  file's manifest against the index), then moved to `sunrise-mods/<id>.smod`, turned on in `sunrise-mods.txt`, and
   recorded in `mod-browser.json` with the launcher's own fields, so the launcher lists it, updates it and removes
-  it. A file the index took down (`revoked.toml`) is refused. A `.hmod` with code (`needs_port`) is not offered.
+  it. A file the index took down (`revoked.toml`) is refused. A `.smod` with code (`needs_port`) is not offered.
 - **Kinds.** Content mods first. Resource packs, shader packs and data packs follow with the same page; each installs
   where the launcher puts it.
 - **Native mods.** Listed with the launcher's warning, word for word: they are native code with the player's rights,
   not sandboxed, and the red **Install** button asks first, as the launcher's trust notice does. The game can't
-  compile, so it installs the `.hnmod` into `sunrise-native-mods/`, and the launcher builds it before the next play
+  compile, so it installs the native `.smod` into `sunrise-native-mods/`, and the launcher builds it before the next play
   (#9901). The registry review stays the gate for every kind.
 
 ## Native mods: the fast path
@@ -232,7 +232,7 @@ What this note takes from them:
   reload above as they are; one dependency model for native and wasm.
 - From #7386: no unload for Rust `dylib`s, the spike's pass mark (under 30 s for a one-line mod change), and the
   static build kept for a settled mod set.
-- From levzzz5154's sunrise-mixins: mixins stay for what has no hook; option A keeps every mixin mod working,
+- From levzzz5154's horizon-mixins: mixins stay for what has no hook; option A keeps every mixin mod working,
   turned off only through `on`.
 - From Vaspyyy's #9866: the browser says before install whether a native mod builds on the player's Sunrise; the
   in-game list shows the same verdict.
@@ -242,6 +242,6 @@ What we'd ask them:
 - **arismoko:** Should option A's dispatch gate (skip a turned-off mod's `Hooks`) go in the generated dispatch
   upstream now, or does your fork's dispatch already have a per-mod switch we should take instead? When the wasm
   runtime lands upstream, can a wasm mod's instance be dropped while a world is open, so its switch is live too?
-- **levzzz5154:** Could sunrise-mixins wrap each mixin's injected code in a generated `on(<mod id>)` check,
+- **levzzz5154:** Could horizon-mixins wrap each mixin's injected code in a generated `on(<mod id>)` check,
   so a mixin mod turns off at run time without its author writing the check?
 - **Both:** Is a content root per mod set (`mod-content/<hash>/`) in the way of anything you load from it?

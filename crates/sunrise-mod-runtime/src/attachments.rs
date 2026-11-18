@@ -91,7 +91,7 @@ impl<'a> std::borrow::Borrow<dyn AttachmentKeyView + 'a> for (JavaString, JavaSt
 // no wire: owned by the lower runtime crate, which cannot depend on mod_api's derive;
 // mod_api supplies the explicit tagged Wire implementation, including bounded static text.
 /// An attachment operation could not be completed.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum AttachmentError {
     /// The holder does not exist or is unavailable on this side.
@@ -117,6 +117,11 @@ pub enum AttachmentError {
     /// falling, rocket, trident, spawner, cloud, cushion, knot, player, hook,
     /// dragonpart.
     UnsupportedHolder(&'static str),
+    /// No loaded package declared this attachment id.
+    Undeclared {
+        package_id: String,
+        attachment_id: String,
+    },
 }
 
 /// NBT key reserved for server-owned attachment maps.
@@ -159,6 +164,13 @@ pub enum AttachmentAccess {
 
 /// The game's access to each holder's map: every [`AttachmentStore`] answers through it.
 pub trait AttachmentHost {
+    /// Validate the load-owned declaration before accessing storage.
+    fn validate_attachment(
+        &self,
+        namespace: &str,
+        name: &str,
+        sync: bool,
+    ) -> Result<(), AttachmentError>;
     fn attachments(
         &mut self,
         holder: Holder,
@@ -206,6 +218,13 @@ pub enum AttachmentWrite {
 /// The current server's holders' values, erased to what crosses any boundary: the typed
 /// [`AttachmentType`] methods are built on it, for a native mod and a wasm mod alike.
 pub trait AttachmentStore {
+    /// Validate an attachment type against the loaded declarations.
+    fn validate_attachment(
+        &mut self,
+        namespace: &str,
+        name: &str,
+        sync: bool,
+    ) -> Result<(), AttachmentError>;
     /// Whether `holder` keeps a value under `namespace:name`, saved or decoded.
     fn holds(
         &mut self,
@@ -254,12 +273,21 @@ pub trait AttachmentStore {
 }
 
 impl<H: AttachmentHost + ?Sized> AttachmentStore for H {
+    fn validate_attachment(
+        &mut self,
+        namespace: &str,
+        name: &str,
+        sync: bool,
+    ) -> Result<(), AttachmentError> {
+        AttachmentHost::validate_attachment(self, namespace, name, sync)
+    }
     fn holds(
         &mut self,
         holder: Holder,
         namespace: &str,
         name: &str,
     ) -> Result<bool, AttachmentError> {
+        AttachmentHost::validate_attachment(self, namespace, name, false)?;
         Ok(Attachments::holds(
             self.attachments(holder, AttachmentAccess::Existing)?,
             namespace,
@@ -272,6 +300,7 @@ impl<H: AttachmentHost + ?Sized> AttachmentStore for H {
         namespace: &str,
         name: &str,
     ) -> Result<Option<AttachmentValue>, AttachmentError> {
+        AttachmentHost::validate_attachment(self, namespace, name, false)?;
         Attachments::decoded(
             self.attachments(holder, AttachmentAccess::Existing)?,
             namespace,
@@ -284,6 +313,7 @@ impl<H: AttachmentHost + ?Sized> AttachmentStore for H {
         namespace: &str,
         name: &str,
     ) -> Result<Option<Compound>, AttachmentError> {
+        AttachmentHost::validate_attachment(self, namespace, name, false)?;
         Attachments::saved(
             self.attachments(holder, AttachmentAccess::Existing)?,
             namespace,
@@ -298,6 +328,7 @@ impl<H: AttachmentHost + ?Sized> AttachmentStore for H {
         value: AttachmentValue,
         form: AttachmentForm,
     ) -> Result<(), AttachmentError> {
+        AttachmentHost::validate_attachment(self, namespace, name, form.policy.sync)?;
         let AttachmentForm {
             encoded,
             policy,
@@ -326,6 +357,7 @@ impl<H: AttachmentHost + ?Sized> AttachmentStore for H {
         name: &str,
         sync: bool,
     ) -> Result<(), AttachmentError> {
+        AttachmentHost::validate_attachment(self, namespace, name, sync)?;
         if matches!(holder, Holder::OriginalPlayer(_)) {
             return Err(AttachmentError::MissingHolder);
         }
@@ -343,6 +375,7 @@ impl<H: AttachmentHost + ?Sized> AttachmentStore for H {
         namespace: &str,
         name: &str,
     ) -> Result<(), AttachmentError> {
+        AttachmentHost::validate_attachment(self, namespace, name, true)?;
         Attachments::queue_sync(
             self.attachments(holder, AttachmentAccess::Existing)?,
             namespace,
@@ -423,6 +456,7 @@ impl<T: Clone + Send + Sync + 'static> AttachmentType<T> {
         store: &mut S,
         holder: Holder,
     ) -> Result<bool, AttachmentError> {
+        store.validate_attachment(self.namespace, self.name, self.sync)?;
         store.holds(holder, self.namespace, self.name)
     }
     /// Read a value only if present, like `getExistingData`; a saved value decodes once.
@@ -431,6 +465,7 @@ impl<T: Clone + Send + Sync + 'static> AttachmentType<T> {
         store: &mut S,
         holder: Holder,
     ) -> Result<Option<T>, AttachmentError> {
+        store.validate_attachment(self.namespace, self.name, self.sync)?;
         self.validate_policy()?;
         if let Some(value) = store.decoded(holder, self.namespace, self.name)? {
             return value
@@ -457,6 +492,7 @@ impl<T: Clone + Send + Sync + 'static> AttachmentType<T> {
         holder: Holder,
         read: impl FnOnce(Option<&T>) -> R,
     ) -> Result<R, AttachmentError> {
+        store.validate_attachment(self.namespace, self.name, self.sync)?;
         self.validate_policy()?;
         let value = store.decoded(holder, self.namespace, self.name)?;
         Ok(read(value.as_ref().and_then(|v| v.downcast_ref::<T>())))
@@ -469,6 +505,7 @@ impl<T: Clone + Send + Sync + 'static> AttachmentType<T> {
         holder: Holder,
         value: T,
     ) -> Result<(), AttachmentError> {
+        store.validate_attachment(self.namespace, self.name, self.sync)?;
         self.validate_policy()?;
         if let Some(old) = store.decoded(holder, self.namespace, self.name)?
             && !old.is::<T>()
@@ -497,6 +534,7 @@ impl<T: Clone + Send + Sync + 'static> AttachmentType<T> {
         store: &mut S,
         holder: Holder,
     ) -> Result<(), AttachmentError> {
+        store.validate_attachment(self.namespace, self.name, self.sync)?;
         self.validate_policy()?;
         if self.sync {
             store.queue_sync(holder, self.namespace, self.name)?;
@@ -757,6 +795,15 @@ impl fmt::Debug for Attachments {
 
 /// A lone map answers for any holder.
 impl AttachmentHost for Attachments {
+    fn validate_attachment(
+        &self,
+        namespace: &str,
+        name: &str,
+        sync: bool,
+    ) -> Result<(), AttachmentError> {
+        let _ = (namespace, name, sync);
+        Ok(())
+    }
     fn attachments(
         &mut self,
         _: Holder,
@@ -1829,6 +1876,15 @@ mod tests {
     fn original_player_reads_never_store_defaults_or_decoded_values() {
         struct One(Attachments);
         impl AttachmentHost for One {
+            fn validate_attachment(
+                &self,
+                namespace: &str,
+                name: &str,
+                sync: bool,
+            ) -> Result<(), AttachmentError> {
+                let _ = (namespace, name, sync);
+                Ok(())
+            }
             fn attachments(
                 &mut self,
                 _: Holder,
@@ -1872,6 +1928,15 @@ mod tests {
     fn sync_data_reports_the_current_value() {
         struct One(Attachments);
         impl AttachmentHost for One {
+            fn validate_attachment(
+                &self,
+                namespace: &str,
+                name: &str,
+                sync: bool,
+            ) -> Result<(), AttachmentError> {
+                let _ = (namespace, name, sync);
+                Ok(())
+            }
             fn attachments(
                 &mut self,
                 _: Holder,

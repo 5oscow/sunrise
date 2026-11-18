@@ -3,8 +3,8 @@ use super::Game;
 use super::mods;
 use glam::{DVec3, Mat4, Vec3};
 use mod_api::{
-    DrawError, InstanceError, ModelInstance, ModelRef, PipelineDrawError, PipelineQuad,
-    RenderLevelStage, RenderPipelineRef, WorldDrawUsage, WorldLine, WorldQuad,
+    DrawError, InstanceError, ModelInstance, ModelRef, NameTagOptions, PipelineDrawError,
+    PipelineQuad, RenderLevelStage, RenderPipelineRef, WorldDrawUsage, WorldLine, WorldQuad,
 };
 use sunrise_client::mesher::Vertex;
 use sunrise_client::screen_effects::{CameraQuads, sampling};
@@ -93,6 +93,82 @@ impl Game<'_> {
         }
         self.native_render_level_stage(*last, &view, draw);
         self.commit_model_instances(draw, DVec3::from(camera), entities);
+        // Labels (`name_tag`) draw with the world's translucent name tags, far to near, their
+        // see-through copies over everything.
+        draw.sort_labels();
+        let [world, see_through] = draw.labels();
+        if !world.is_empty() {
+            self.mark_translucent_entity(entities.len(), "minecraft:name_tag");
+            entities.extend_from_slice(world);
+        }
+        self.see_through_vertices.extend_from_slice(see_through);
+    }
+    /// A mod's label as `SubmitNodeCollection.submitNameTag` draws a name: 0.5 above `at`,
+    /// facing the camera, 0.025 blocks a font pixel. See-through, twice: opaque white text in
+    /// the world, its light raised to at least 2 (no backdrop), and the faded text on the
+    /// backdrop over everything, unlit. Otherwise once, depth tested and translucent: the faded
+    /// text on the backdrop in the caller's light. The faded text's alpha and the backdrop's
+    /// follow the player's text background opacity. Refused whole, before any layout, for a
+    /// position that is not finite; glyphs a refused label rasterized still upload.
+    pub(super) fn native_world_name_tag(
+        &self,
+        draw: &mut WorldGeometry,
+        at: [f64; 3],
+        text: &mod_api::Text,
+        options: NameTagOptions,
+    ) -> Result<(), DrawError> {
+        use super::api_values::TryIntoEngine;
+        draw.check_label(at)?;
+        let text = text.try_into_engine(&()).map_err(|error| match error {
+            mod_api::TextFormError::TooDeep => DrawError::TextTooDeep,
+            _ => DrawError::TextRefused,
+        })?;
+        let from_camera = DVec3::from(at) - DVec3::from(draw.camera());
+        let o = from_camera + DVec3::new(0.0, 0.5, 0.0);
+        let lines = [(text, 0.0)];
+        // Options.getBackgroundOpacity(0.25), and the faded text alpha that goes with it.
+        let backdrop = if options.background {
+            self.settings.text_background(0.25)
+        } else {
+            0
+        };
+        let faded = self.settings.faded_text_alpha(0.25);
+        let light = options.light;
+        let unit = super::names::NAME_TAG_UNIT;
+        let (mut world, mut see_through) = (Vec::new(), Vec::new());
+        let quads = |alpha, backdrop, layer, light, out: &mut Vec<Vertex>| {
+            self.styled_name_tag_quads(
+                o,
+                &lines,
+                alpha,
+                backdrop,
+                layer,
+                light,
+                unit,
+                out,
+                Default::default(),
+                None,
+            )
+        };
+        let mut patches = if options.see_through {
+            // LightCoordsUtil.lightCoordsWithEmission(light, 2): sky and block at least 2.
+            let lit = sunrise_client::block_entity_render::vertex_light(
+                (light >> 4).max(2) << 4 | (light & 15).max(2),
+            );
+            let mut patches = quads(0xFF, 0, 0, lit, &mut world);
+            // RenderPipelines.TEXT_SEE_THROUGH: no depth test, no lightmap.
+            patches.extend(quads(faded, backdrop, 2, 0, &mut see_through));
+            patches
+        } else {
+            // One translucent copy in the light as given.
+            let lit = sunrise_client::block_entity_render::vertex_light(light);
+            quads(faded, backdrop, 0, lit, &mut world)
+        };
+        // The layout cached any glyph it rasterized; its pixels upload even if the label is
+        // refused, or a later label using that glyph would sample an atlas never written.
+        let labelled = draw.label(from_camera.length_squared(), &world, &see_through);
+        self.text_patches.borrow_mut().append(&mut patches);
+        labelled
     }
     /// Submit unlit ARGB world lines atomically. Invalid coordinates or widths,
     /// or a batch exceeding the view's fixed capacity, leave the batch unchanged.

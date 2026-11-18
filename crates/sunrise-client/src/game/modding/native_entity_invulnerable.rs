@@ -30,10 +30,11 @@ impl Game<'_> {
         source: sunrise_client::health::HurtSource<'_>,
         vanilla: bool,
     ) -> bool {
-        crate::game::entity::damage_level_of!(self, scoped).invulnerability_check(
-            sunrise_client::health::Hurting::Entity(id as i32, kind, source),
-            vanilla,
-        )
+        crate::game::entity::damage_level_of!(self, self.combat.attack(), no_push, None)
+            .invulnerability_check(
+                sunrise_client::health::Hurting::Entity(id as i32, kind, source),
+                vanilla,
+            )
     }
     /// A player's body, where it is kept now.
     pub(super) fn native_player_body(
@@ -469,7 +470,7 @@ mod tests {
     impl mod_api::Hooks for SourceProbe {
         fn living_incoming_damage(
             &self,
-            _: &mut dyn mod_api::LevelRandomHost,
+            _: &mut dyn mod_api::HitHost,
             event: &mut mod_api::LivingIncomingDamageEvent<'_>,
         ) -> mod_api::Flow {
             self.0
@@ -531,7 +532,7 @@ mod tests {
     impl mod_api::Hooks for Probe {
         fn living_incoming_damage(
             &self,
-            _: &mut dyn mod_api::LevelRandomHost,
+            _: &mut dyn mod_api::HitHost,
             event: &mut mod_api::LivingIncomingDamageEvent<'_>,
         ) -> mod_api::Flow {
             self.0.lock().unwrap().push(event.entity as u32);
@@ -795,8 +796,14 @@ mod tests {
             ));
             game.mobs[0].invulnerable_flag = true;
             game.mobs[0].invulnerable_time = 9;
-            let tag =
-                sunrise_client::entity_nbt::mob_to_nbt(&game.mobs[0], [0; 4], None, None, |_| None);
+            let tag = sunrise_client::entity_nbt::mob_to_nbt(
+                &game.mobs[0],
+                [0; 4],
+                None,
+                None,
+                |_| None,
+                &Default::default(),
+            );
             let back =
                 sunrise_client::entity_nbt::mob_from_nbt(&tag, game.res.mob_types(), 30, None)
                     .unwrap();
@@ -842,13 +849,23 @@ mod tests {
             assert!(game.entity_set_invulnerable_time(victim, 60));
             let before = game.mobs[0].health;
             assert!(!game.mobs[0].damage(
-                crate::game::entity::damage_level_of!(game),
+                crate::game::entity::damage_level_of!(
+                    game,
+                    &sunrise_client::health::NO_ATTACK,
+                    no_push,
+                    None
+                ),
                 5.0,
                 Damage::of(DamageKind::Generic),
             ));
             assert_eq!(game.mobs[0].health, before, "the window refused it");
             assert!(game.mobs[0].damage(
-                crate::game::entity::damage_level_of!(game),
+                crate::game::entity::damage_level_of!(
+                    game,
+                    &sunrise_client::health::NO_ATTACK,
+                    no_push,
+                    None
+                ),
                 100.0,
                 Damage::of(DamageKind::OutOfWorld),
             ));

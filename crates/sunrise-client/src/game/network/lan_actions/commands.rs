@@ -64,15 +64,6 @@ impl Game<'_> {
             }
             return;
         }
-        // Sunrise's `/tempban` (game/administration/tempban.rs), on dedicated servers.
-        if crate::game::tempban::TEMPBAN_COMMANDS.contains(&words[0]) && self.server_lists.is_some()
-        {
-            if let Some(mut host) = self.lan.take() {
-                self.guest_tempban_command(&mut host, conn, &words);
-                self.lan = Some(host);
-            }
-            return;
-        }
         // A native mod's command, for every player its level allows,
         // whether the world allows commands or not (game/modding/native_server.rs).
         let allowed = self.options.dedicated.is_some() || self.allow_commands();
@@ -311,15 +302,20 @@ impl Game<'_> {
         // Commands.sendCommands prunes the tree a player's client completes from; the answer the
         // server sends follows the same test, so a child literal of a path the sender may not run
         // is not offered either (Bukkit hides it; brigadier alone lists every child).
-        let ((start, end), mut suggestions) =
-            d.client_suggestions(&parse, command.len(), &self.ui.registries);
-        self.native_tab_complete(
-            player_uuid,
-            &player_name,
-            command,
-            [start, end],
-            &mut suggestions,
-        );
+        let ((start, end), mut suggestions, provider) =
+            d.client_suggestions_owned(&parse, command.len(), &self.ui.registries);
+        // An argument whose type declares a suggestion provider owns its answer: the provider
+        // already gave it for this sender, so `tab_complete` is not asked and no listener can add
+        // to, replace or erase it. Ordinary completions keep the hook.
+        if !provider {
+            self.native_tab_complete(
+                player_uuid,
+                &player_name,
+                command,
+                [start, end],
+                &mut suggestions,
+            );
+        }
         let reg = self.suggestion_registries();
         reg.permission = level;
         reg.sender = own_sender;

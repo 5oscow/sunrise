@@ -138,6 +138,22 @@ pub trait BlockEntitiesBackendMut {
         entity: BlockEntityRef,
     ) -> Result<bool, BlockEntityError>;
     /// Side: server.
+    /// Watch one source position in this observer's level. The observer's BlockParts
+    /// receive the same contents_changed notice with observer = Some(self). Repeated
+    /// registration is idempotent; a self-watch never duplicates its own notice.
+    /// Registration changes join the transaction and abort restores them. Removal,
+    /// replacement and chunk unload discard watches; loading must register them again.
+    /// The source need not be loaded; watches follow the position, not its occupant.
+    /// No part subscribed to this moment returns NotSubscribed; an invalid observer
+    /// or a level not writable here returns Stale. Available during the observer's tick.
+    #[access(WorldOnly)]
+    fn block_entity_watch_contents(
+        &mut self,
+        entity: BlockEntityRef,
+        source: BlockPos,
+        enabled: bool,
+    ) -> Result<(), ContentsWatchError>;
+    /// Side: server.
     /// Sets the custom name, or clears it with None, as an anvil-renamed item placed with
     /// `components` sets `CustomName`. Plain text only. Clients get a block entity update.
     /// Ok(false) for an entity that is not nameable; Stale for an invalidated or
@@ -148,6 +164,32 @@ pub trait BlockEntitiesBackendMut {
         entity: BlockEntityRef,
         name: Option<&str>,
     ) -> Result<bool, BlockEntityError>;
+    /// Side: server.
+    /// Publishes the shapes this block entity's block has in place of its declared ones, or
+    /// clears them with None, so the declared shapes apply again. The block must declare
+    /// `shapes_from_block_entity`. Physics, selection, ray casts, support, the floor a mob's
+    /// path stands on, its move control's jump, an evoker's fangs, a panicking mob's search for
+    /// water and an iron golem's spawn check read the published value at the position
+    /// and never call into the mod, so a port of NeoForge's `getShape` publishes wherever
+    /// that state changes: it is published when it changes, not asked for per query.
+    ///
+    /// The server applies it at once, for the queries that follow in the same tick; a client
+    /// applies it when the block entity's update arrives, which may be a tick later, as any
+    /// block change. The game saves it with the block entity, restores it when the chunk
+    /// loads and sends it with the block entity to clients; it is dropped when the block
+    /// entity is removed or its block changes. An entity the new shape now overlaps is
+    /// treated as vanilla treats a block that appears inside it, with no push-out. Ok(false)
+    /// when nothing changed. Fluids read the collision shape too: water and lava pass between
+    /// two cells by their collision shapes at their positions. A publish, a clear and an abort
+    /// that puts the old shapes back each notify the block's neighbours, so a fluid beside it
+    /// reads the new shape; an unchanged value notifies nothing. The checks are those of
+    /// `BlockEntityShapes`; a shape that fails one is refused by name.
+    #[access(WorldOnly)]
+    fn block_entity_set_shapes(
+        &mut self,
+        entity: BlockEntityRef,
+        shapes: Option<BlockEntityShapes>,
+    ) -> Result<bool, BlockEntityShapesError>;
     /// Side: server.
     /// Set a mod block entity's menu data slot in place, joining the current transaction.
     /// This raw storage write issues no notification; call set_changed explicitly if needed.

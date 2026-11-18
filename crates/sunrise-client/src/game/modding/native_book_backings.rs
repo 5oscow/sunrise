@@ -36,6 +36,8 @@ impl Backings {
         before: &MenuSnapshot,
         plan: &MenuPlacement,
     ) -> Result<Self, Refusal> {
+        // A `Mod` layout names its grid later, so any visible stored slot may be cleared.
+        let any_slot = plan.awaits_grid();
         let guest = game
             .lan
             .as_ref()
@@ -74,7 +76,14 @@ impl Backings {
             };
             value.main_keys.push(key);
         }
-        for &slot in plan.cleared_slots() {
+        let cleared: Vec<usize> = if any_slot {
+            (0..before.size)
+                .filter(|slot| !before.hidden.contains(slot) && value.main_keys[*slot].is_some())
+                .collect()
+        } else {
+            plan.cleared_slots().to_vec()
+        };
+        for slot in cleared {
             if before.hidden.contains(&slot) {
                 return Err(Refusal::Unavailable);
             }
@@ -172,6 +181,10 @@ impl Backings {
                     _ => before.id.is_none() && before.data.is_none(),
                 }
             })
+    }
+    /// Whether `slot` is stored in a block, so a placement there can be published.
+    pub fn stores(&self, slot: usize) -> bool {
+        self.main_keys.get(slot).is_some_and(Option::is_some)
     }
     pub fn limits(&self) -> Vec<Option<u32>> {
         self.main_keys

@@ -55,6 +55,8 @@ fn frame(surface: &mut super::Surface<'_>) -> Result<String, String> {
     }
     let mut fields = String::new();
     let mut methods = String::new();
+    // Per accessor: the sources its chain tries, each with whether it counts only when lent mutably.
+    let mut chains: Vec<(String, Vec<(String, bool)>)> = Vec::new();
     for owner in super::imports() {
         let name = snake(owner);
         let path = trait_path(owner);
@@ -106,6 +108,7 @@ fn frame(surface: &mut super::Surface<'_>) -> Result<String, String> {
         writeln!(methods, "pub fn set_{name}(&mut self, v: &(dyn {path} + '_)) {{ self.{name} = Some((unsafe {{ std::mem::transmute(v as *const (dyn {path} + '_)) }}, false)); }} pub fn set_{name}_mut(&mut self, v: &mut (dyn {path} + '_)) {{ self.{name} = Some((unsafe {{ std::mem::transmute(v as *mut (dyn {path} + '_)) }}, true)); }}").unwrap();
         for mutable in [false, true] {
             let mut choices = Vec::new();
+            let mut tried: Vec<(String, bool)> = Vec::new();
             for sub in super::imports() {
                 if super::REACHED.iter().any(|(o, ..)| o == sub) {
                     continue;
@@ -115,6 +118,7 @@ fn frame(surface: &mut super::Surface<'_>) -> Result<String, String> {
                     sub.rsplit("::").next().unwrap(),
                     owner.rsplit("::").next().unwrap(),
                 ) {
+                    tried.push((snake(sub), mutable));
                     choices.push(format!(
                         "self.{}{filter}.map(|(p, _)| unsafe {{ &{m}*p as &{m}dyn {path} }})",
                         snake(sub),
@@ -148,20 +152,186 @@ fn frame(surface: &mut super::Surface<'_>) -> Result<String, String> {
                 let filter = if source_mut { ".filter(|(_,m)|*m)" } else { "" };
                 let s = if source_mut { "mut " } else { "" };
                 let m = if mutable { "mut " } else { "" };
+                tried.push((source.clone(), mutable || source_mut));
                 if fallible {
                     choices.push(format!("self.{source}{filter}.and_then(|(p,_)| unsafe {{ (&{s}*p).{}().ok().map(|host| host as &{m}dyn {path}) }})", method.name));
                 } else {
                     choices.push(format!("self.{source}{filter}.map(|(p,_)| unsafe {{ (&{s}*p).{}() as &{m}dyn {path} }})", method.name));
                 }
             }
+            // The sources are tried in an order that comes from file names, so it must never
+            // decide: a call lends at most one of the sources that serve this trait.
+            chains.push((
+                format!("{name}{}", if mutable { "_mut" } else { "" }),
+                tried,
+            ));
+            let overlap = if choices.len() > 1 {
+                format!(
+                    "debug_assert!([{}].into_iter().filter(|set| *set).count() <= 1, \"overlapping frame sources for {name}\");",
+                    choices
+                        .iter()
+                        .map(|choice| format!("{choice}.is_some()"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            } else {
+                String::new()
+            };
             let expr = choices.join(".or_else(|| ");
             let expr = format!("{expr}{}", ")".repeat(choices.len().saturating_sub(1)));
-            writeln!(methods, "pub unsafe fn {name}{suffix}(&self) -> Result<&'static {m}dyn {path}, ServeError> {{ {expr}.ok_or(ServeError::Missing(\"{name}\")) }}", suffix=if mutable {"_mut"} else {""}, m=if mutable {"mut "} else {""}).unwrap();
+            writeln!(methods, "pub unsafe fn {name}{suffix}(&self) -> Result<&'static {m}dyn {path}, ServeError> {{ {overlap}{expr}.ok_or(ServeError::Missing(\"{name}\")) }}", suffix=if mutable {"_mut"} else {""}, m=if mutable {"mut "} else {""}).unwrap();
         }
     }
+    check_one_source_per_chain(surface, &chains)?;
     Ok(format!(
         "#[derive(Default)] pub struct Frame {{ {fields} }}\n// SAFETY: pointers are used only by unsafe serve during the synchronous call that lent them.\nunsafe impl Send for Frame {{}}\nimpl Frame {{ {methods} }}"
     ))
+}
+
+/// The frame sources a lent value sets, as slots: the sources of one slot are alternatives of
+/// which a call sets one (a variant's cases), the slots of a call are all set. Each source is
+/// its snake-case name and whether it is lent mutably. Mirrors `event_input`.
+fn lent_slots(types: &super::ty::Types<'_>, ty: &Ty, slots: &mut Vec<Vec<(String, bool)>>) {
+    let inner = match ty {
+        Ty::Ref(t, _) => &**t,
+        t => t,
+    };
+    match inner {
+        Ty::Dyn(name, mutable) => slots.push(vec![(snake(name), *mutable)]),
+        Ty::Named(def) if types.defs[*def].lifetimes != 0 && types.defs[*def].view.is_none() => {
+            let def = &types.defs[*def];
+            if def.append.is_some() || def.projection.is_some() {
+                return;
+            }
+            if let super::ty::BorrowedShape::Variant(cases) = &def.borrowed {
+                slots.push(
+                    cases
+                        .iter()
+                        .filter_map(|case| match &case.payload[0] {
+                            Ty::Dyn(name, mutable) => Some((snake(name), *mutable)),
+                            _ => None,
+                        })
+                        .collect(),
+                );
+            } else if let Some(fields) = def.borrowed.fields() {
+                for field in fields.iter() {
+                    lent_slots(types, &field.ty, slots);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Refuse a call that lends two sources which one accessor chain tries (`host()` tries `host`,
+/// `server_host`, ...): the chain's order follows the role files' names, so it must never decide.
+fn check_one_source_per_chain(
+    surface: &super::Surface<'_>,
+    chains: &[(String, Vec<(String, bool)>)],
+) -> Result<(), String> {
+    for method in surface
+        .methods
+        .iter()
+        .chain(&surface.dropped)
+        .filter(|m| super::exports().contains(&m.owner))
+    {
+        let mut slots = Vec::new();
+        for (_, ty) in &method.params {
+            lent_slots(&surface.types, ty, &mut slots);
+        }
+        if let Some((accessor, a, b)) = overlapping_sources(&slots, chains) {
+            return Err(format!(
+                "{}::{} lends {a} and {b}, which both answer {accessor}(): the frame would pick by role-file name",
+                method.owner, method.name
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// The first accessor and the two sources of `slots` (see [`lent_slots`]) that it tries both.
+/// A source counts in a chain when it is lent and, for a chain that needs it, mutably.
+fn overlapping_sources(
+    slots: &[Vec<(String, bool)>],
+    chains: &[(String, Vec<(String, bool)>)],
+) -> Option<(String, String, String)> {
+    for (accessor, tried) in chains {
+        let reached: Vec<(usize, &str)> = slots
+            .iter()
+            .enumerate()
+            .flat_map(|(i, slot)| {
+                slot.iter()
+                    .filter(|(source, lent_mut)| {
+                        tried
+                            .iter()
+                            .any(|(name, needs_mut)| name == source && (*lent_mut || !needs_mut))
+                    })
+                    .map(move |(source, _)| (i, source.as_str()))
+            })
+            .collect();
+        for (a, (slot_a, source_a)) in reached.iter().enumerate() {
+            if let Some((_, source_b)) = reached[a + 1..]
+                .iter()
+                .find(|(slot_b, source_b)| slot_b != slot_a && source_b != source_a)
+            {
+                return Some((
+                    accessor.clone(),
+                    (*source_a).to_owned(),
+                    (*source_b).to_owned(),
+                ));
+            }
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod overlap_tests {
+    use super::overlapping_sources;
+
+    fn source(name: &str, lent_mut: bool) -> (String, bool) {
+        (name.to_owned(), lent_mut)
+    }
+
+    #[test]
+    fn two_lent_sources_of_one_chain_are_found_and_alternatives_and_other_chains_are_not() {
+        let chains = vec![
+            (
+                "host".to_owned(),
+                vec![source("host", false), source("server_host", false)],
+            ),
+            ("host_mut".to_owned(), vec![source("server_host", false)]),
+            ("random".to_owned(), vec![source("level_host", false)]),
+        ];
+        let both = [
+            vec![source("host", false)],
+            vec![source("server_host", false)],
+        ];
+        assert_eq!(
+            overlapping_sources(&both, &chains),
+            Some(("host".into(), "host".into(), "server_host".into()))
+        );
+        // The cases of one variant are alternatives: a call lends one of them.
+        let cases = [vec![source("host", false), source("server_host", false)]];
+        assert_eq!(overlapping_sources(&cases, &chains), None);
+        // Two sources that no one chain tries together.
+        let apart = [
+            vec![source("host", false)],
+            vec![source("level_host", false)],
+        ];
+        assert_eq!(overlapping_sources(&apart, &chains), None);
+        // A chain that needs a mutable lend ignores a source lent shared.
+        let mutable = vec![(
+            "host_mut".to_owned(),
+            vec![source("host", true), source("server_host", true)],
+        )];
+        assert_eq!(overlapping_sources(&both, &mutable), None);
+        let lent_mut = [
+            vec![source("host", true)],
+            vec![source("server_host", true)],
+        ];
+        assert!(overlapping_sources(&lent_mut, &mutable).is_some());
+    }
 }
 
 fn resource(ty: &Ty) -> bool {
@@ -297,10 +467,18 @@ fn fallback(
     reason: Option<&str>,
     isolate: bool,
 ) -> String {
-    if m.owner == "IPayloadHandler" && m.name == "handle" {
-        return match reason {
-            Some(reason) => format!("Err(mod_api::PayloadHandleError::Failed(format!(\"wasm call refused or trapped: {{}}\", {reason})))"),
-            None => "Err(mod_api::PayloadHandleError::Failed(String::from(\"wasm call refused or trapped\")))".into(),
+    if let Some(policy) = super::trait_roles::refusal(m.owner) {
+        let message = match reason {
+            Some(reason) => format!("format!(\"wasm call refused or trapped: {{}}\", {reason})"),
+            None => "String::from(\"wasm call refused or trapped\")".into(),
+        };
+        return match policy {
+            super::trait_roles::Refusal::Unwind => {
+                format!("panic!(\"{}: {{}}\", {message})", m.name)
+            }
+            super::trait_roles::Refusal::Error(constructor) => {
+                format!("Err(mod_api::{constructor}({message}))")
+            }
         };
     }
     match &m.ret {
@@ -412,6 +590,7 @@ pub(super) fn generate(
     surface: &mut super::Surface<'_>,
     prepared_hooks: &[(String, String)],
     isolated_hooks: &std::collections::HashSet<String>,
+    names: &super::Names,
 ) -> Result<String, String> {
     let mut code = String::from(
         "// @generated by sunrise-mod-api-gen; do not edit.\nuse mod_api::wire::{Reader, Writer, WireError, Slots};\n#[derive(Debug)] pub enum ServeError { Decode(WireError), Missing(&'static str), Stale, WrongThread, Phase { operation: &'static str, phase: mod_api::__private::ModPhase }, Unsupported(u32) } impl From<WireError> for ServeError { fn from(e: WireError) -> Self { Self::Decode(e) } } impl std::fmt::Display for ServeError { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, \"{self:?}\") } } impl std::error::Error for ServeError {} fn missing(s: &'static str) -> ServeError { ServeError::Missing(s) }\n#[derive(Default)] pub struct Cx { pub frames: Vec<Frame>, pub held: Slots<Box<dyn std::any::Any + Send>>, pub module: *const crate::WasmMod, pub refused: std::collections::HashMap<String,std::collections::HashSet<String>>, static_strings: std::collections::HashMap<&'static str,u32> } impl Cx { pub fn frame(&self) -> Result<&Frame, ServeError> { self.frames.last().ok_or(ServeError::Missing(\"frame\")) } }\n",
@@ -421,61 +600,43 @@ pub(super) fn generate(
     code.push_str(include_str!("owner_thread.rs"));
     code.push_str(&resources());
     let types = &surface.types;
-    code.push_str(
-        "pub fn export_id(owner: &str, name: &str) -> Option<u32> { match (owner,name) {\n",
-    );
-    for (id, m) in surface
+    // The id of a prepared hook's method is its `ask_` entry's: the host asks through it.
+    let export_id_of = |m: &super::Method| -> u64 {
+        match prepared_hooks
+            .iter()
+            .find(|(hook, _)| m.owner == "ItemPart" && *hook == m.name)
+        {
+            Some((hook, _)) => names.prepared(hook, &format!("ask_{hook}")).export_id(),
+            None => names.get(m.owner, &m.name).export_id(),
+        }
+    };
+    let mut export_ids: Vec<(String, String, u64)> = surface
         .methods
         .iter()
         .filter(|m| super::exports().contains(&m.owner))
-        .enumerate()
-    {
-        writeln!(code, "({:?},{:?}) => Some({id}),", m.owner, m.name).unwrap();
-    }
+        .map(|m| (m.owner.to_string(), m.name.clone(), export_id_of(m)))
+        .collect();
     for abi in super::prepared::describe(&surface.methods, prepared_hooks)? {
-        for entry in abi.entries {
-            writeln!(
-                code,
-                "(\"ItemPart\",{:?}) => Some({}),",
-                entry.name, entry.id
-            )
-            .unwrap();
+        for entry in &abi.entries {
+            export_ids.push((
+                "ItemPart".to_owned(),
+                entry.name.clone(),
+                names.prepared(&abi.hook, &entry.name).export_id(),
+            ));
         }
+    }
+    code.push_str(
+        "/// The id the game sends a guest's `sunrise_hook` for an export: a digest of its name.\npub fn export_id(owner: &str, name: &str) -> Option<u64> { match (owner,name) {\n",
+    );
+    for (owner, name, id) in &export_ids {
+        writeln!(code, "({owner:?},{name:?}) => Some({id}u64),").unwrap();
     }
     code.push_str("_ => None } }\n");
-    code.push_str("pub const EXPORT_NAMES: &[(u32, &str)] = &[\n");
-    for (id, m) in surface
-        .methods
-        .iter()
-        .filter(|m| super::exports().contains(&m.owner))
-        .enumerate()
-    {
-        writeln!(code, "({id}, {:?}),", format!("{}::{}", m.owner, m.name)).unwrap();
-    }
-    for abi in super::prepared::describe(&surface.methods, prepared_hooks)? {
-        for entry in abi.entries {
-            writeln!(
-                code,
-                "({}, {:?}),",
-                entry.id,
-                format!("ItemPart::{}", entry.name)
-            )
-            .unwrap();
-        }
+    code.push_str("pub const EXPORT_NAMES: &[(u64, &str)] = &[\n");
+    for (owner, name, id) in &export_ids {
+        writeln!(code, "({id}u64, {:?}),", format!("{owner}::{name}")).unwrap();
     }
     code.push_str("];\n");
-    code.push_str(
-        "pub fn import_id(owner: &str, name: &str) -> Option<u32> { match (owner,name) {\n",
-    );
-    for (id, m) in imports(&surface.methods)
-        .iter()
-        .copied()
-        .chain(held_methods(&surface.methods))
-        .enumerate()
-    {
-        writeln!(code, "({:?},{:?}) => Some({id}),", m.owner, m.name).unwrap();
-    }
-    code.push_str("_ => None } }\n");
     code.push_str(
         r#"
 impl Cx {
@@ -511,16 +672,23 @@ impl Cx {
 }
 "#,
     );
-    code.push_str("pub unsafe fn serve(id: u32, cx: *mut Cx, bytes: &[u8], out: &mut Writer) -> Result<(), ServeError> { let mut input = Reader::new(bytes); match id {\n");
     let imports = imports(&surface.methods);
     let mut import_gaps = Vec::new();
-    for (id, m) in imports
+    // Each call's serving function, and the table of them by name.
+    let mut served = String::new();
+    let mut table: Vec<(String, String)> = Vec::new();
+    for (n, m) in imports
         .iter()
         .copied()
         .chain(held_methods(&surface.methods))
         .enumerate()
     {
-        let is_held = id >= imports.len();
+        let is_held = n >= imports.len();
+        let name = if is_held {
+            names.held(m.owner, &m.name).text()
+        } else {
+            names.get(m.owner, &m.name).text()
+        };
         if (super::fallible_frame_accessor(m).is_none()
             && ((resource(&m.ret) && !supported_resource(&m.ret))
                 || (has_frame(&m.ret) && !resource(&m.ret))))
@@ -544,6 +712,7 @@ impl Cx {
                 m.owner,
                 m.name
             ));
+            table.push((name, "call_unsupported".to_owned()));
             continue;
         }
         let mut body = if is_held {
@@ -660,9 +829,24 @@ impl Cx {
         } else {
             ""
         };
-        writeln!(code, "{id} => {{ #[inline(never)] unsafe fn invoke(cx: *mut Cx, input: &mut Reader<'_>, out: &mut Writer) -> Result<(), ServeError> {{ {body} if !input.rest().is_empty() {{ return Err(ServeError::Decode(WireError::Tag(u32::MAX))); }} {access} {prepared_check} let receiver = {receiver}; let answer = receiver.{}({}); {answer} Ok(()) }} unsafe {{ invoke(cx, &mut input, out)?; }} }},",m.name,args.join(",")).unwrap();
+        writeln!(served, "#[inline(never)] unsafe fn call_{n}(cx: *mut Cx, bytes: &[u8], out: &mut Writer) -> Result<(), ServeError> {{ let mut input = Reader::new(bytes); let input = &mut input; {body} if !input.rest().is_empty() {{ return Err(ServeError::Decode(WireError::Tag(u32::MAX))); }} {access} {prepared_check} let receiver = {receiver}; let answer = receiver.{}({}); {answer} Ok(()) }}",m.name,args.join(",")).unwrap();
+        table.push((name, format!("call_{n}")));
     }
-    code.push_str("_ => return Err(ServeError::Unsupported(id)) } Ok(()) }\n");
+    code.push_str(&served);
+    code.push_str("unsafe fn call_unsupported(_: *mut Cx, _: &[u8], _: &mut Writer) -> Result<(), ServeError> { Err(ServeError::Unsupported(0)) }\n");
+    // One call the game serves: its name as a guest imports it, and the function that answers.
+    code.push_str("pub type Invoke = unsafe fn(*mut Cx, &[u8], &mut Writer) -> Result<(), ServeError>;\npub struct CallEntry { pub name: &'static str, pub invoke: Invoke }\n");
+    // Sorted by name: the loader looks each import of a module up once, at link time.
+    table.sort();
+    code.push_str("pub static CALLS: &[CallEntry] = &[\n");
+    for (name, function) in &table {
+        writeln!(code, "CallEntry {{ name: {name:?}, invoke: {function} }},").unwrap();
+    }
+    code.push_str("];\n");
+    // The test seam: a call by its place in `CALLS`, which no guest sees.
+    code.push_str("pub fn import_index(owner: &str, name: &str) -> Option<u32> { let plain = format!(\"call:{owner}::{name}#\"); let held = format!(\"call:held::{owner}::{name}#\"); CALLS.iter().position(|c| c.name.starts_with(&plain) || c.name.starts_with(&held)).map(|i| i as u32) }\n");
+    code.push_str("pub fn import_id(owner: &str, name: &str) -> Option<&'static str> { let plain = format!(\"call:{owner}::{name}#\"); let held = format!(\"call:held::{owner}::{name}#\"); CALLS.iter().map(|c| c.name).find(|c| c.starts_with(&plain) || c.starts_with(&held)) }\n");
+    code.push_str("pub unsafe fn serve(name: &str, cx: *mut Cx, bytes: &[u8], out: &mut Writer) -> Result<(), ServeError> { match CALLS.binary_search_by(|call| call.name.cmp(name)) { Ok(at) => unsafe { (CALLS[at].invoke)(cx, bytes, out) }, Err(_) => Err(ServeError::Unsupported(0)) } }\n");
     writeln!(
         code,
         "pub const UNSUPPORTED_IMPORTS: &[&str] = &{import_gaps:?};"
@@ -702,7 +886,7 @@ impl Cx {
                     "fn listeners(&self) -> &'static [mod_api::Listener] { self.listeners }\n",
                 );
             }
-            for (id, m) in surface
+            for m in surface
                 .methods
                 .iter()
                 .filter(|m| super::exports().contains(&m.owner))
@@ -712,9 +896,14 @@ impl Cx {
                         .iter()
                         .filter(|m| super::exports().contains(&m.owner)),
                 )
-                .enumerate()
-                .filter(|(_, m)| m.owner == *owner && m.via.as_deref().unwrap_or(m.owner) == group)
+                .filter(|m| m.owner == *owner && m.via.as_deref().unwrap_or(m.owner) == group)
             {
+                // A method the API keeps off wasm has no name, and is never called.
+                let id = if surface.dropped.iter().any(|d| std::ptr::eq(d, m)) {
+                    0
+                } else {
+                    export_id_of(m)
+                };
                 let sig = rust_sig(types, m);
                 let payload_handler = m.owner == "IPayloadHandler" && m.name == "handle";
                 if super::SUBSCRIBED
@@ -724,7 +913,7 @@ impl Cx {
                     let body = if receiver == "WasmMod" {
                         "self.subscribed".to_string()
                     } else {
-                        format!("self.subscriptions({owner:?}, {id})")
+                        format!("self.subscriptions({owner:?}, {id}u64)")
                     };
                     writeln!(
                         code,
@@ -905,9 +1094,9 @@ impl Cx {
                 };
                 let mut method = String::new();
                 if payload_handler {
-                    writeln!(method,"{sig} {{ let mut frame = Frame::default(); {setup} match self.module.call_payload(frame, {id}, Some(self.index), |w| {{ {put} }}, |r| {{ let answer: {} = r.take()?; {take} if !r.rest().is_empty() {{ return Err(WireError::Tag(u32::MAX)); }} Ok({tuple}) }}) {{ Ok(Some({tuple})) => {{ {apply} match answer {{ Err(mod_api::PayloadHandleError::Busy {{ holder, .. }}) => Err(mod_api::PayloadHandleError::Busy {{ payload: p0, holder }}), answer => answer }} }}, Ok(None) => {refusal}, Err(holder) => Err(mod_api::PayloadHandleError::Busy {{ payload: p0, holder }}) }} }}",rust_ty(types,&m.ret,true)).unwrap();
+                    writeln!(method,"{sig} {{ let mut frame = Frame::default(); {setup} match self.module.call_payload(frame, {id}u64, Some(self.index), |w| {{ {put} }}, |r| {{ let answer: {} = r.take()?; {take} if !r.rest().is_empty() {{ return Err(WireError::Tag(u32::MAX)); }} Ok({tuple}) }}) {{ Ok(Some({tuple})) => {{ {apply} match answer {{ Err(mod_api::PayloadHandleError::Busy {{ holder, .. }}) => Err(mod_api::PayloadHandleError::Busy {{ payload: p0, holder }}), answer => answer }} }}, Ok(None) => {refusal}, Err(holder) => Err(mod_api::PayloadHandleError::Busy {{ payload: p0, holder }}) }} }}",rust_ty(types,&m.ret,true)).unwrap();
                 } else {
-                    writeln!(method,"{sig} {{ let mut frame = Frame::default(); {setup} match self{module}.call({class}, frame, {id}, {}, |w| {{ {put} }}, |r| {{ let answer: {} = r.take()?; {take} if !r.rest().is_empty() {{ return Err(WireError::Tag(u32::MAX)); }} Ok({tuple}) }}) {{ Some({tuple}) => {{ {apply} answer }}, None => {} }} }}",if receiver=="WasmMod" {"None"} else {"Some(self.index)"},rust_ty(types,&m.ret,true),refusal,module=if receiver=="WasmMod" {""} else {".module"}).unwrap();
+                    writeln!(method,"{sig} {{ let mut frame = Frame::default(); {setup} match self{module}.call({class}, frame, {id}u64, {}, |w| {{ {put} }}, |r| {{ let answer: {} = r.take()?; {take} if !r.rest().is_empty() {{ return Err(WireError::Tag(u32::MAX)); }} Ok({tuple}) }}) {{ Some({tuple}) => {{ {apply} answer }}, None => {} }} }}",if receiver=="WasmMod" {"None"} else {"Some(self.index)"},rust_ty(types,&m.ret,true),refusal,module=if receiver=="WasmMod" {""} else {".module"}).unwrap();
                 }
                 if let Some(event) = prepared_event {
                     let name = &m.name;
@@ -977,12 +1166,6 @@ fn host_and_coverage(root: &std::path::Path) -> Result<(String, String), String>
         ("capability_providers_generated.rs", providers.as_str()),
     ];
     let mut surface = super::surface(root, &included)?;
-    let count = surface
-        .methods
-        .iter()
-        .filter(|m| super::exports().contains(&m.owner))
-        .position(|m| m.owner == "Hooks" && m.name == "subscribed")
-        .ok_or("Hooks::subscribed absent")?;
     let catalog = crate::Catalog::load(root)?;
     let prepared_hooks = catalog
         .hooks
@@ -993,20 +1176,25 @@ fn host_and_coverage(root: &std::path::Path) -> Result<(String, String), String>
                 .map(|parameter| (hook.name.clone(), parameter.to_owned()))
         })
         .collect::<Vec<_>>();
+    let names = super::call_names(&mut surface, &catalog.hooks, &prepared_hooks)?;
+    let subscribed = names.get("Hooks", "subscribed").export_id();
     let isolated_hooks = catalog
         .hooks
         .iter()
         .filter(|hook| hook.isolate)
         .map(|hook| hook.name.clone())
         .collect::<std::collections::HashSet<_>>();
-    let mut code = generate(&mut surface, &prepared_hooks, &isolated_hooks)?;
+    let mut code = generate(&mut surface, &prepared_hooks, &isolated_hooks, &names)?;
     let entries = super::prepared::describe(&surface.methods, &prepared_hooks)?
         .into_iter()
         .map(|abi| {
-            let entries: [(String, u32); 3] = abi
+            let entries: [(String, u64); 3] = abi
                 .entries
                 .into_iter()
-                .map(|entry| (entry.name, entry.id))
+                .map(|entry| {
+                    let id = names.prepared(&abi.hook, &entry.name).export_id();
+                    (entry.name, id)
+                })
                 .collect::<Vec<_>>()
                 .try_into()
                 .expect("prepare, ask and release entries");
@@ -1015,7 +1203,7 @@ fn host_and_coverage(root: &std::path::Path) -> Result<(String, String), String>
         .collect::<Vec<_>>();
     writeln!(
         code,
-        "pub const PREPARED_EXPORTS: &[(&str, [(&str,u32);3])] = &{entries:?};"
+        "pub const PREPARED_EXPORTS: &[(&str, [(&str,u64);3])] = &{entries:?};"
     )
     .unwrap();
 
@@ -1071,7 +1259,24 @@ fn host_and_coverage(root: &std::path::Path) -> Result<(String, String), String>
         .count();
     writeln!(report, "\nRequired gap total: {gaps}.").unwrap();
     report.push_str(include_str!("../../coverage-notes.md"));
-    writeln!(code, "pub const SUBSCRIBED: u32 = {count};").unwrap();
+    writeln!(code, "pub const SUBSCRIBED: u64 = {subscribed};").unwrap();
+    // The ids of the prepared entries of the first prepared hook, which the runtime tells apart.
+    let (prepare, release) = prepared_hooks.first().map_or((0, 0), |(hook, _)| {
+        (
+            names.prepared(hook, &format!("prepare_{hook}")).export_id(),
+            names.prepared(hook, &format!("release_{hook}")).export_id(),
+        )
+    });
+    writeln!(code, "pub const PREPARED_PREPARE: u64 = {prepare};").unwrap();
+    writeln!(code, "pub const PREPARED_RELEASE: u64 = {release};").unwrap();
+    // What a mod's markers may name: every hook, Part and handler method it can implement.
+    let mut marked: Vec<String> = names
+        .marked()
+        .into_iter()
+        .map(|(_, _, n)| n.text())
+        .collect();
+    marked.sort();
+    writeln!(code, "pub static EXPORT_CALLS: &[&str] = &{marked:?};").unwrap();
     code.push_str("pub fn hook_id(name: &str) -> Option<mod_api::HookId> { match name {\n");
     for (variant, name) in &surface.hooks {
         writeln!(code, "{:?} => Some(mod_api::HookId::{}),", name, variant).unwrap();

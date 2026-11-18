@@ -23,6 +23,7 @@ impl AttachmentBatch {
         self,
         key: &AttachmentType<T>,
     ) -> Result<AttachmentQuery<'_, T>, AttachmentError> {
+        crate::parts::validate_attachment_use(key.namespace, key.name, key.sync)?;
         #[cfg(target_arch = "wasm32")]
         if key.codec.is_none() {
             return Err(AttachmentError::Decode);
@@ -63,7 +64,6 @@ impl AttachmentWriteToken {
 
 impl crate::wire::Wire for AttachmentWriteToken {
     crate::wire::layout_fields!("holder" => crate::AttachmentHolder, "generation" => u64);
-    const LAYOUT_SEED: u64 = crate::wire::layout_seed(stringify!(AttachmentWriteToken));
     const MIN: usize = 12;
     fn put(&self, out: &mut crate::wire::Writer) {
         let (holder, generation) = self.0.parts();
@@ -80,7 +80,6 @@ impl crate::wire::Wire for AttachmentWriteToken {
 
 impl crate::wire::Wire for AttachmentBatch {
     crate::wire::layout_fields!("rows" => Vec<(crate::AttachmentWriteToken,Vec<u8>)>);
-    const LAYOUT_SEED: u64 = crate::wire::layout_seed(stringify!(AttachmentBatch));
     const MIN: usize = 4;
     fn put(&self, out: &mut crate::wire::Writer) {
         use sunrise_core::nbt::{self, Limits, Tag};

@@ -50,6 +50,7 @@ mod tests {
     #[mod_api::__subscriptions]
     impl Hooks for DeclaresSession {
         fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+            r.register_attachment_type("porter:session", false).unwrap();
             let kind = r.block_entity_type("press").blocks(&[]).build();
             let _ = r.block_entity_part_with_state(&kind, Session);
         }
@@ -78,7 +79,7 @@ mod tests {
     }
 
     #[test]
-    fn part_state_keys_stay_in_owned_namespaces_with_one_type_each() {
+    fn part_state_keys_allow_foreign_uses_with_one_type_each() {
         const fn key<T>(namespace: &'static str, default: fn() -> T) -> AttachmentType<T> {
             AttachmentType {
                 namespace,
@@ -114,15 +115,14 @@ mod tests {
                     &mut r,
                     PartStateDeclaration::of(&key("minecraft", || 0_u32))
                 ),
-                Err(PartStateDeclaration::of(&key("minecraft", || 0_u32))
-                    .refused("porter::Press", PartStateRefusal::UnownedNamespace))
+                Ok(())
             );
             assert_eq!(
                 r.refused.len(),
-                2,
-                "each refusal is the mod's registration refusal"
+                1,
+                "the incompatible layout is the registration refusal"
             );
-            assert!(r.refused[1].contains("minecraft:progress"));
+            assert!(r.refused[0].contains("legacy:progress"));
         });
     }
 

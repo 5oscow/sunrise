@@ -53,10 +53,11 @@ pub trait DrawContext {
         unimplemented!("DrawContext::fill_gradient")
     }
     /// Part `src` (`[x, y, w, h]` in the sprite's own pixels) of sprite
-    /// `name` (vanilla's `gui/...`, or a content mod's GUI texture
-    /// `mymod:gui/...`), drawn stretched into `dst` (`[x, y, w, h]` in GUI
-    /// pixels), every texel multiplied by `tint` (`0xAARRGGBB`, a fluid's colour)
-    /// when there is one. False when there is no such sprite.
+    /// `name` (vanilla's `gui/...`, a content mod's GUI texture `mymod:gui/...`, or
+    /// a client mod's dynamic texture, `ClientRenderClientHost::create_dynamic_texture`),
+    /// drawn stretched into `dst` (`[x, y, w, h]` in GUI pixels), every texel multiplied by
+    /// `tint` (`0xAARRGGBB`, a fluid's colour) when there is one. False when there is
+    /// no such sprite.
     fn sprite(&mut self, name: &str, src: [f32; 4], dst: [f32; 4], tint: Option<u32>) -> bool {
         unimplemented!("DrawContext::sprite")
     }
@@ -70,6 +71,12 @@ pub trait DrawContext {
     fn text(&mut self, text: &str, at: [f32; 2], argb: u32, shadow: bool) {
         unimplemented!("DrawContext::text")
     }
+    /// `text` scaled by `scale` about `at`, its top-left corner: what a GUI pose of translate,
+    /// scale and translate back around `text` draws (`PoseStack.scale` in vanilla's HUD), without
+    /// a `gui_paint` buffer. `0.5` is the half-size line under a widget's label.
+    fn text_scaled(&mut self, text: &str, at: [f32; 2], scale: f32, argb: u32, shadow: bool) {
+        unimplemented!("DrawContext::text_scaled")
+    }
     /// Stack drawing does not enforce resident count or damage maxima. Unknown
     /// item identities or unrepresentable component payloads still refuse drawing.
     /// Draw a stack and its slot decorations, except the count, at `at`,
@@ -78,9 +85,13 @@ pub trait DrawContext {
     fn item_stack(&mut self, stack: &ItemStack, at: [f32; 2], size: f32) -> bool {
         unimplemented!("DrawContext::item_stack")
     }
-    /// Paint GUI extraction calls through this window's atlas, including player faces.
-    /// Refuses text deeper than 512 component nodes before applying any changes.
-    fn gui_paint(&mut self, draws: &[GuiDraw]) -> Result<(), TextFormError> {
+    /// Paint GUI extraction calls through this window's atlas, including player faces, under
+    /// their poses: every op, an `Item` as vanilla's `item` then `itemDecorations` (the stack of
+    /// the local player's hotbar slot, scaled about its pivot, then its decorations unscaled) and
+    /// a `Blit` of every [`Blend`](crate::client::hud_layout::Blend). An op it cannot draw (text
+    /// deeper than 512 component nodes, an unknown slot, texture or sprite) refuses the whole
+    /// buffer with a [`GuiPaintError`] naming the op, and nothing of it is drawn.
+    fn gui_paint(&mut self, draws: &[GuiDraw]) -> Result<(), GuiPaintError> {
         unimplemented!("DrawContext::gui_paint")
     }
     /// Vanilla's nine-slice widget rendering. `color` is ARGB, as `fill` uses.
@@ -95,6 +106,57 @@ pub trait DrawContext {
     /// The width of `text` in GUI pixels, as `native_text` draws it on `draw` (`Font.width`).
     fn text_width(&self, text: &str) -> f32 {
         unimplemented!("DrawContext::text_width")
+    }
+    /// Lays `text` out as the lines a label shows, wrapped to `max_width` GUI pixels at `scale` and
+    /// placed by `align`: measurement and layout only, nothing is drawn, and no widget, theme or
+    /// state is involved. Draw each line where it says, and the label is the mod's own.
+    ///
+    /// The layout is measured unscaled and answered scaled: the text wraps at `max_width / scale`
+    /// GUI pixels, and every dimension and position it answers — each line's `at` and `width`, the
+    /// block's `width` and `height` — is in scaled GUI pixels. `scale` of one is the text as it
+    /// draws at its own size; `scale` of two is the label at twice the size, in a box of the same
+    /// `max_width`. Draw a line within [`GuiDraw::Push`](crate::GuiDraw::Push) of
+    /// [`PoseOp::Scale`](crate::client::hud_layout::PoseOp::Scale) at its `at` divided by `scale`
+    /// (the answer's positions are already scaled, and the pose scales them again), and its
+    /// glyphs cover the scaled box it measured.
+    ///
+    /// Wrapping is vanilla's (`Font.split`, as [`crate::ClientTextClientHost::text_split`] wraps):
+    /// a line breaks at a space that fits, a single word wider than the box is broken at a
+    /// character rather than dropped, and an explicit `\n` starts a new line, so a trailing `\n`
+    /// leaves an empty last line. A width below one pixel — `max_width` itself, or `max_width /
+    /// scale` — still wraps, at one pixel, as `Font.split` does: too narrow a box gives one
+    /// character a line rather than none, and a line is still wider than `max_width` when one
+    /// character alone is.
+    ///
+    /// Every style and colour inside the component is kept in each line's `Text`, and each line's
+    /// `width` is what `Font.width` answers for it, styles included. The lines carry no `§` codes:
+    /// the split keeps them, and each line's codes are then applied to the characters that follow
+    /// them and dropped, so a line drawn alone draws exactly what it measured. A `§r` goes back to
+    /// the style its run carried, so right after a break it restores the style the tail run
+    /// carried out of the break (a bold run stays bold), not no style.
+    ///
+    /// One line is `Font.lineHeight` times `scale` high, and the last line's `at[1]` plus one line
+    /// height is exactly [`TextLines::height`]: a scroll container sizes its content from it. A
+    /// centred line sits at `wrapWidth / 2 - floor(lineWidth / 2)`, scaled afterwards, both widths
+    /// unscaled, as vanilla's `TextAlignment.CENTER.calculateLeft` floors the half line width.
+    /// Empty text has no line at all, and then `width` and `height` are zero.
+    ///
+    /// Draw each line through [`gui_paint`](Self::gui_paint)'s
+    /// [`GuiDraw::Text`](crate::GuiDraw::Text): [`text`](Self::text) draws plain characters, so a
+    /// styled label is `GuiDraw::Text`'s.
+    ///
+    /// Refuses, answering no line at all (a [`TextLinesRefusal`], never a partial layout):
+    /// a `max_width` that is not finite or that dividing by `scale` overflows, a `scale` that is
+    /// not finite or is zero or less, text that wraps into more than 512 lines, lines holding more
+    /// than 8192 characters together, and text deeper than 512 component nodes.
+    fn text_lines(
+        &self,
+        text: &Text,
+        max_width: f32,
+        align: TextAlign,
+        scale: f32,
+    ) -> Result<TextLines, TextLinesRefusal> {
+        unimplemented!("DrawContext::text_lines")
     }
     /// Fluid `fluid` (`minecraft:water`, `mymod:oil`) drawn as a square with its top left at `at`, `size`
     /// GUI pixels wide (16 in a slot): the sprite its look names (`data/<mod>/sunrise/fluid/<name>.json`)
@@ -476,6 +538,28 @@ pub trait WorldDrawContext {
         quads: &[PipelineQuad],
     ) -> Result<(), PipelineDrawError> {
         unimplemented!("WorldDrawContext::pipeline_quads")
+    }
+    /// A label at world position `at`, drawn as vanilla draws a name tag
+    /// (`SubmitNodeCollection.submitNameTag`): 0.5 blocks above `at`, facing the camera,
+    /// 0.025 blocks per font pixel (so it shrinks with distance; scale by distance yourself
+    /// for a constant screen size), centred, in `text`'s styles. Without
+    /// [`NameTagOptions::see_through`] it is drawn once, as a sneaking name: depth tested and
+    /// translucent, the faded text on the backdrop, in [`NameTagOptions::light`] as given. With
+    /// it, twice, as an unsneaking name: opaque in the world (sky and block light each at least
+    /// 2), and faded on the backdrop over everything, walls included, unlit. Labels draw with
+    /// the world's name tags, far to near, whatever the stage. Each glyph and backdrop quad, both copies counted, takes one of
+    /// the view's 4,096 quads shared with [`quads`](Self::quads) ([`usage`](Self::usage)).
+    /// Refuses a non-finite `at` ([`DrawError::NonFinite`]), text deeper than 512 component
+    /// nodes ([`DrawError::TextTooDeep`]) or otherwise refused ([`DrawError::TextRefused`]),
+    /// and a label past the quads left ([`DrawError::CapacityExceeded`]); on `Err` nothing
+    /// is drawn.
+    fn name_tag(
+        &mut self,
+        at: [f64; 3],
+        text: &Text,
+        options: NameTagOptions,
+    ) -> Result<(), DrawError> {
+        unimplemented!("WorldDrawContext::name_tag")
     }
     /// Queued counts and fixed capacities, shared by both depth modes and all listeners.
     /// Capacity is allocated during setup, never grown during submission.

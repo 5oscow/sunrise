@@ -15,7 +15,7 @@ use sunrise_core::position::ChunkPos;
 /// The cushion's position: `Vec3.atCenterOfWithY(4 199 4, 200.0)`.
 const AT: [f64; 3] = [4.5, 200.0, 4.5];
 
-fn game() -> Game<'static> {
+fn game<'a>(resources: &'a mut Option<std::sync::Arc<crate::game::Resources>>) -> Game<'a> {
     let root = std::path::PathBuf::from(
         std::env::var_os("SUNRISE_TEST_RESOURCES")
             .expect("set SUNRISE_TEST_RESOURCES to prepared resources"),
@@ -37,7 +37,7 @@ fn game() -> Game<'static> {
     let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
     options.resources = root.clone();
     options.execution_role = execution_role::ExecutionRole::IntegratedServer;
-    let res: &'static _ = Box::leak(Box::new(loaded.resources));
+    let res = &*resources.insert(loaded.resources);
     let mut game = Game::new(
         res,
         loaded.pack,
@@ -104,7 +104,8 @@ fn events() -> Vec<(&'static str, [f64; 3], Option<Who>)> {
 #[test]
 #[ignore = "daily"]
 fn a_placed_cushion_keeps_its_stacks_custom_name() {
-    let mut game = game();
+    let mut resources = None;
+    let mut game = game(&mut resources);
     game.creative = true;
     assert!(game.place_cushion(&top_hit(), &named_stack()));
     assert_eq!(game.cushions.len(), 1);
@@ -136,7 +137,8 @@ fn a_placed_cushion_keeps_its_stacks_custom_name() {
 #[test]
 #[ignore = "daily"]
 fn a_creative_blast_leaves_no_cushion_item() {
-    let mut game = game();
+    let mut resources = None;
+    let mut game = game(&mut resources);
     // (creative, the TNT's owner is a player, the guest behind it, drops)
     for (creative, owner_player, guest, dropped) in [
         // A creative player's TNT: no item.
@@ -195,7 +197,8 @@ fn a_creative_blast_leaves_no_cushion_item() {
 #[test]
 #[ignore = "daily"]
 fn a_cushion_that_loses_its_support_is_discarded_silently() {
-    let mut game = game();
+    let mut resources = None;
+    let mut game = game(&mut resources);
     game.creative = true;
     assert!(game.place_cushion(&top_hit(), &named_stack()));
     capture();

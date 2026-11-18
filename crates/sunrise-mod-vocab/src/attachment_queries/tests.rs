@@ -22,9 +22,15 @@ struct Store {
 impl Host for Store {}
 crate::impl_host_areas!(Store, except(mod_state));
 impl ModStateHost for Store {
-    fn attachment_query(&self, namespace: &str, name: &str) -> AttachmentBatch {
-        runtime::AttachmentBatch::new(self.index.lock().unwrap().snapshot_named(namespace, name))
-            .into()
+    fn attachment_query(
+        &self,
+        namespace: &str,
+        name: &str,
+    ) -> Result<AttachmentBatch, AttachmentError> {
+        Ok(runtime::AttachmentBatch::new(
+            self.index.lock().unwrap().snapshot_named(namespace, name),
+        )
+        .into())
     }
     fn attachments(&mut self) -> &mut dyn AttachmentStore {
         self
@@ -41,6 +47,15 @@ impl ModStateServerHost for Store {
     }
 }
 impl AttachmentHost for Store {
+    fn validate_attachment(
+        &self,
+        namespace: &str,
+        name: &str,
+        sync: bool,
+    ) -> Result<(), AttachmentError> {
+        let _ = (namespace, name, sync);
+        Ok(())
+    }
     fn attachments(
         &mut self,
         holder: Holder,
@@ -82,6 +97,13 @@ fn all_scoped_variants_write_and_remove_the_exact_storage_target() {
         ),
         (AttachmentHolder::Level(level), Holder::Level),
     ];
+    crate::parts::install_input(crate::parts::installation::InstalledInput {
+        attachment_types: HashMap::from([(
+            "mapping".into(),
+            HashMap::from([("value".into(), false)]),
+        )]),
+        ..Default::default()
+    });
     let mut host = Store::default();
     for (scoped, target) in cases {
         let mut map = Attachments::default();

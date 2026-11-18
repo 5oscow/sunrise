@@ -12,7 +12,7 @@ use sunrise_client::{
     containers::BlockEntity,
     effects::{EffectInstance, PlayerEffects},
     fast_hash::{FxHashMap, FxHashSet},
-    mobs::{Mob, Species, Who, allay, warden},
+    mobs::{Mob, MovementEmission as Steps, Species, Who, allay, warden},
     particles::{ParticleOptions, ParticleType},
     sculk::{self, Context, Info, SculkEntity, SculkKind, WardenSpawnTracker},
 };
@@ -66,15 +66,6 @@ pub(super) fn sensor_signal(
         _ => None,
     }
 }
-/// `Entity.moveDist` / `nextStep` and the last state, per entity.
-#[derive(Clone, Copy, Debug)]
-struct Steps {
-    move_dist: f32,
-    next_step: f32,
-    last: [f64; 3],
-    on_ground: bool,
-    in_water: bool,
-}
 #[derive(Default)]
 pub(super) struct PlayerEvents {
     steps: Option<Steps>,
@@ -92,8 +83,8 @@ pub(super) struct SculkState {
     pub known: HashSet<(i32, i32)>,
     /// The chunk map's membership revision `known` was taken at.
     pub known_revision: Option<u64>,
-    // Keyed by mob ids the server gives out: the fast hasher is safe.
-    steps: FxHashMap<Who, Steps>,
+    /// The active player's movement-emission state (mobs keep their own).
+    steps: Option<Steps>,
     /// Items that have fallen since last touching the ground or water.
     falling_items: HashSet<u32>,
     /// The vehicle each rider had last tick and where it stood.
@@ -137,11 +128,7 @@ struct MobSlots {
 
 impl SculkState {
     pub(super) fn swap_player(&mut self, other: &mut PlayerEvents) {
-        let steps = self.steps.remove(&Who::Player);
-        if let Some(guest) = other.steps.take() {
-            self.steps.insert(Who::Player, guest);
-        }
-        other.steps = steps;
+        std::mem::swap(&mut self.steps, &mut other.steps);
         let mount = self.mounts.remove(&Who::Player);
         if let Some(guest) = other.mount.take() {
             self.mounts.insert(Who::Player, guest);
@@ -674,6 +661,7 @@ impl Game<'_> {
             });
         Context {
             source: Some(EventSource::Entity(id)),
+            source_uuid: self.persist.uuid_of(id),
             affected_state: state,
             dampening_state: self.state_dampens(state),
             dampens,
@@ -843,7 +831,10 @@ impl Game<'_> {
     /// event is heard. Only what the context already names is filled.
     fn with_vibration_uuids(&self, mut ctx: Context) -> Context {
         if ctx.source_uuid.is_none() {
-            ctx.source_uuid = self.vibration_uuid(ctx.source.and_then(|source| source.actor()));
+            ctx.source_uuid = match ctx.source {
+                Some(EventSource::Entity(id)) => self.persist.uuid_of(id),
+                source => self.vibration_uuid(source.and_then(EventSource::actor)),
+            };
         }
         if ctx.owner_uuid.is_none() {
             ctx.owner_uuid = self.vibration_uuid(ctx.owner);
@@ -2287,22 +2278,26 @@ impl Game<'_> {
                 self.step_on_redstone_ore(at, false, false);
             }
             // A mob first seen already riding raised its event when it spawned.
-            let seen = self.sculk.steps.contains_key(&Who::Mob(id));
+            let seen = self
+                .mob_slot(id)
+                .is_some_and(|i| self.mobs[i].movement_emission.is_some());
             self.mount_events(Who::Mob(id), vehicle, seen);
             let emits = !matches!(species, Species::Shulker);
             if emits && !ticked {
                 // Where it is now, without a move: a mob put elsewhere while
                 // it did not tick (a command) walked nowhere.
-                let entry = self.sculk.steps.entry(Who::Mob(id)).or_insert(Steps {
-                    move_dist: 0.0,
-                    next_step: 1.0,
-                    last: at,
-                    on_ground,
-                    in_water,
-                });
-                entry.last = at;
-                entry.on_ground = on_ground;
-                entry.in_water = in_water;
+                if let Some(slot) = self.motion_steps_mut(Who::Mob(id)) {
+                    let entry = slot.get_or_insert(Steps {
+                        move_dist: 0.0,
+                        next_step: 1.0,
+                        last: at,
+                        on_ground,
+                        in_water,
+                    });
+                    entry.last = at;
+                    entry.on_ground = on_ground;
+                    entry.in_water = in_water;
+                }
             } else if emits {
                 let warden = species == Species::Warden;
                 self.entity_motion_events(
@@ -2338,10 +2333,6 @@ impl Game<'_> {
         self.sculk.mob_slots = None;
         let alive: FxHashSet<u32> = self.mobs.iter().map(|m| m.id).collect();
         self.sculk.damaged.retain(|id, _| alive.contains(id));
-        self.sculk.steps.retain(|who, _| match who {
-            Who::Player => true,
-            Who::Mob(id) => alive.contains(id),
-        });
         self.sculk.mounts.retain(|who, _| match who {
             Who::Player => true,
             Who::Mob(id) => alive.contains(id),
@@ -2439,6 +2430,16 @@ impl Game<'_> {
             }
         }
     }
+    fn motion_steps_mut(&mut self, who: Who) -> Option<&mut Option<Steps>> {
+        match who {
+            Who::Player => Some(&mut self.sculk.steps),
+            Who::Mob(id) => {
+                let slot = self.mob_slot(id)?;
+                Some(&mut self.mobs[slot].movement_emission)
+            }
+        }
+    }
+
     /// `Entity.move`'s emission: footsteps, swimming, landing and splashes.
     fn entity_motion_events(
         &mut self,
@@ -2453,7 +2454,10 @@ impl Game<'_> {
         self.sculk_prepare();
         // Standing as it stood with no step due (a mob outside the simulation
         // distance, or one at rest): nothing below would change or be heard.
-        if let Some(e) = self.sculk.steps.get(&who)
+        let Some(slot) = self.motion_steps_mut(who) else {
+            return;
+        };
+        if let Some(e) = slot.as_ref()
             && e.last == at
             && e.on_ground == on_ground
             && e.in_water == in_water
@@ -2461,7 +2465,7 @@ impl Game<'_> {
         {
             return;
         }
-        let entry = self.sculk.steps.entry(who).or_insert(Steps {
+        let entry = slot.get_or_insert(Steps {
             move_dist: 0.0,
             next_step: 1.0,
             last: at,
@@ -2514,7 +2518,7 @@ impl Game<'_> {
         } else {
             horizontal
         };
-        let Some(entry) = self.sculk.steps.get_mut(&who) else {
+        let Some(entry) = self.motion_steps_mut(who).and_then(Option::as_mut) else {
             return;
         };
         entry.move_dist += travelled;
@@ -2529,7 +2533,7 @@ impl Game<'_> {
             None => unsupported,
         };
         let air = self.res.facts().is_air(state);
-        let Some(entry) = self.sculk.steps.get_mut(&who) else {
+        let Some(entry) = self.motion_steps_mut(who).and_then(Option::as_mut) else {
             return;
         };
         if !air {
@@ -2564,8 +2568,8 @@ impl Game<'_> {
     /// `ArmorStand.kill`, `VehicleEntity.destroy`): removed, then
     /// `gameEvent(ENTITY_DIE, attributedTo != null ? attributedTo : this)` at
     /// the entity's position. `by_player`: the player's hit killed it, so the
-    /// player is the source. Nonliving self sources have no Who handle;
-    /// their listener facts are represented by the default context.
+    /// player is the source. Nonliving self sources retain their entity id
+    /// even though they have no Who handle.
     pub(super) fn entity_killed_event(&mut self, at: [f64; 3], by_player: bool) {
         self.entity_killed_event_by(at, by_player.then_some(super::commands::Target::Player));
     }
@@ -2602,12 +2606,15 @@ impl Game<'_> {
                 return;
             }
         }
-        let who = match source {
-            Some(Target::Player) => Some(Who::Player),
-            Some(Target::Mob(id)) => Some(Who::Mob(id)),
-            _ => None,
+        let mut ctx = match source {
+            Some(Target::Player) => self.player_context(None),
+            Some(Target::Mob(id)) => self.mob_context(id, None),
+            Some(target) => self
+                .network_entity_id(target)
+                .map(|id| self.entity_event_context(id as u32, None))
+                .unwrap_or_default(),
+            None => Context::default(),
         };
-        let mut ctx = self.who_context(who, None);
         // A stand is living, but Warden.canTargetEntity explicitly excludes it.
         ctx.living |= matches!(source, Some(Target::Stand(_)));
         self.post_game_event(event, at, ctx);
@@ -3039,6 +3046,9 @@ mod command_damage_listener_tests {
             assert!(game.run_command("setblock 39 200 4 sculk_sensor strict"));
             game.sculk_prepare();
             game.sculk_sync_index();
+            // Establish the movement-emission snapshot before the teleport,
+            // as the real server does on the mob's preceding tick.
+            game.tick_mob_sculk_events();
             assert!(selected(&game, origin).is_none());
             assert!(selected(&game, destination).is_none());
             let before = game.world.game_time;

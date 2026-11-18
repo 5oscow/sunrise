@@ -6,11 +6,11 @@
 //!
 //! usage: creative_search_fixture RESOURCES CREATIVE_JSON VANILLA_JSON OUTPUT [permissions]
 use serde_json::{Value, json};
-use std::{fs, path::PathBuf, sync::Arc};
+use std::{fs, path::PathBuf};
 use sunrise_client::{
     creative::{Creative, Names},
-    enchant::Enchantments,
     item_data::canon_stack,
+    items::Items,
     lang::{self, Language},
 };
 
@@ -24,10 +24,13 @@ pub fn main() -> sunrise_client::Result<()> {
     let mut creative = Creative::from_json(&serde_json::from_slice(&fs::read(
         args.get(2).ok_or(usage)?,
     )?)?)?;
-    creative.set_enchantments(Arc::new(Enchantments::load(
+    let defaults = sunrise_world::item_defaults::read(&resources)?;
+    let items = Items::catalog(
         &resources,
-        &sunrise_world::item_defaults::read(&resources)?,
-    )?));
+        &sunrise_world::loot::PackOverlay::NONE,
+        &defaults,
+    )?;
+    creative.set_enchantments(items.enchantments.clone());
     let permissions = args.get(5).is_some_and(|a| a == "permissions");
     if creative.tabs_to_build(permissions).is_some() {
         creative.build(permissions, Vec::new(), &names);
@@ -43,7 +46,7 @@ pub fn main() -> sunrise_client::Result<()> {
                 "icon": t.icon,
                 "row": if t.top { "TOP" } else { "BOTTOM" },
                 "column": t.column,
-                "items": t.items.iter().map(|s| canon_stack(Some(s))).collect::<Vec<_>>(),
+                "items": t.items.iter().map(|s| canon_stack(Some(s), &items)).collect::<Vec<_>>(),
             })
         })
         .collect();
@@ -55,7 +58,7 @@ pub fn main() -> sunrise_client::Result<()> {
     let search: Vec<String> = creative
         .search_items()
         .iter()
-        .map(|s| canon_stack(Some(s)))
+        .map(|s| canon_stack(Some(s), &items))
         .collect();
     let out = json!({
         "tabs": tabs,

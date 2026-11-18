@@ -1,4 +1,4 @@
-//! Sunrise's design tokens, the one source of truth for the launcher (`launcher/src/theme.rs`),
+//! Sunrise's design tokens, the one source of truth for the launcher (`https://github.com/sunrise-org/sunrise-launcher/blob/main/src/theme.rs`),
 //! the game's on-screen keyboard (`sunrise-client`'s `ui_theme`) and the website (`tokens.css` in this crate,
 //! generated from [`css`] by `cargo run -p xtask -- tokens`, which the site's build reads from main). Change a value here and all three
 //! follow. The system is described in `docs/design-system.md`.
@@ -46,8 +46,8 @@ pub mod fonts {
 /// The glass look's icons: Hugeicons' free set (MIT, `icons/glass/LICENSE-hugeicons.txt`), the
 /// ones the mockup uses, 24 unit outlines stroked 1.6 in `currentColor`, by Hugeicons' name
 /// (`"folder-01"`, `"more-vertical"`…). `github` is GitHub's mark, drawn for Sunrise (filled,
-/// its cat cut out by a mask), beside the links to GitHub Sponsors. `sparkles` (Home's What's
-/// new) is drawn for Sunrise in the same 1.6 stroke.
+/// its cat cut out by a mask), for Settings' credit link. `sparkles` (Home's What's
+/// new) and `chat` (the sidebar's Discord link) are drawn for Sunrise in the same 1.6 stroke.
 pub mod glass_icons {
     macro_rules! icons {
         ($($name:literal),* $(,)?) => {
@@ -62,6 +62,7 @@ pub mod glass_icons {
         "arrow-down-01",
         "arrow-right-01",
         "book",
+        "chat",
         "map",
         "cancel-01",
         "clock",
@@ -74,7 +75,6 @@ pub mod glass_icons {
         "discord",
         "download-04",
         "earth",
-        "favourite",
         "flash",
         "folder-01",
         "game-controller-01",
@@ -139,7 +139,6 @@ pub mod icons {
         "folder",
         "gamepad",
         "globe",
-        "heart",
         "home",
         "image",
         "info-box",

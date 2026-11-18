@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Horizon -> Sunrise in the tracked files' contents and paths; then run cargo fmt and let Cargo re-sort lockfiles. Usage: tools/rebrand.py [--dry-run]"""
+"""Horizon -> Sunrise in the tracked files' contents and paths, and the package extensions .hmod, .hpack and
+.hshader -> .smod, .spack and .sshader; then run cargo fmt and let Cargo re-sort lockfiles. Usage: tools/rebrand.py [--dry-run]"""
 import os
 import re
 import subprocess
@@ -10,15 +11,25 @@ from pathlib import Path
 DRY = "--dry-run" in sys.argv
 os.chdir(Path(__file__).resolve().parent.parent)
 
-SKIP_FILES = re.compile(r"(^|/)(LICENSE[^/]*|LICENSES/.*|NOTICE[^/]*|COPYING[^/]*|CLA\.md|GOVERNANCE\.md)$|^tools/rebrand\.py$|^tests/fixtures/launcher-upstream/identity\.json$")
+# Files whose strings name an old URL on purpose: the modding book's stale-URL guard and its fixtures. A run
+# that rewrote them would leave a guard that passes because it no longer recognises what it refuses.
+SKIP_FILES = re.compile(
+    r"(^|/)(LICENSE[^/]*|LICENSES/.*|NOTICE[^/]*|COPYING[^/]*|CLA\.md|GOVERNANCE\.md)$"
+    r"|^tools/rebrand\.py$"
+    r"|^tools/modding_concept_pages\.py$|^tests/test_modding_concept_pages\.py$"
+    r"|^tests/test_modding_book_links\.py$")
 
 PROTECT = [
-    # Real repositories and their pages.
+    # Real repositories and their pages. Horizon's own projects (the machine sample, the mixins tool,
+    # the registry) keep their links. Historical references to the old mod API repository
+    # also stay pinned: their issue numbers belong to that tracker, not this fork.
     r"(?:https?://)?(?:www\.)?github\.com/horizon-rust\b[\w./#?=&-]*",
     r"\bhorizon-rust\.github\.io[\w./#-]*",
     r"@?\bhorizon-rust(?:/[\w.-]+)?",
     r"(?:https?://)?(?:www\.)?github\.com/arismoko/horizon[\w./#?=&-]*",
     r"\barismoko/horizon[\w.-]*(?:/(?:issues|pull)/\d+)?(?:#\d+)?",
+    r"(?:https?://)?(?:www\.)?github\.com/arismoko/horizon-machine-sample[\w./#?=&-]*",
+    r"\barismoko/horizon-machine-sample[\w.-]*",
     # Vanilla's sky horizon, in prose and in its own names.
     r"\b(?:the|The|below|above|at|near|to|over|on|from|toward|towards|under|past|beyond) horizon\b(?![-_:]|\s+(?:client|repo|main|`))",
     r"\bhorizon_height\b|\b[gs]etHorizonHeight\b|\bhorizonHeight\b|\bHorizonHeight\b|\bnear_horizon\b",
@@ -31,6 +42,9 @@ PROTECT = [
     # The earlier launchers' folders and keychain service, which a Sunrise build reads to carry data over.
     r"\bhorizon-fork-arismoko[\w/.-]*",
     r"\bdev\.playhorizon\.launcher\b",
+    # horizon-rust/horizon-mixins: its crates, binary, generated names and the files it reads.
+    r"(?i:horizon[-_ ]mixin)[\w-]*",
+    r"\.horizon-revision\b|\bhorizon_revision\b",
 ]
 PROTECT_RE = re.compile("|".join(f"(?:{p})" for p in PROTECT))
 BRAND = re.compile(r"horizon(?!tal)", re.IGNORECASE)
@@ -38,9 +52,14 @@ LICENCE_LINE = re.compile(r"(?i)copyright|MIT[- ]licen[cs]e|MIT licensed|MIT-Hor
 # Lines that explain or encode a kept name; left as they are.
 KEEP_LINE = re.compile(r'through the rename|Horizon\'s name, kept|before the Sunrise rename|"playhorizon\.dev": "playsunrise\.net"|^\s+"mods/horizon/src/", "mods/horizon-lab/src/"\)\):|sunriselab/" in path or "/dev/horizonlab/"')
 LICENCE_PATH = re.compile(r"(^|/)(LICENSES/[^/]*|[^/]*LICEN[CS]E[^/]*)$")
-# Files whose strings and comments name the earlier launchers themselves: only their code is renamed.
-KEEP_STRINGS = {"launcher/src/identity.rs", "launcher/src/setup_args.rs"}
-STRING = re.compile(r'"(?:[^"\\\n]|\\.)*"|//[^\n]*')
+# Sunrise's package extensions, as a whole word in any spelling (`.hmod`, `"hmod"`, `hmod_path`, `HMOD`; never `chmod`).
+PACKAGE = re.compile(r"(?<![A-Za-z0-9])([Hh])(mod|pack|shader|MOD|PACK|SHADER)(?![A-Za-z0-9])")
+# The journal is history, and roadmap.json is generated from it.
+PACKAGE_SKIP = re.compile(r"^roadmap/journal/|^roadmap/roadmap\.json$")
+
+
+def package(text):
+    return PACKAGE.sub(lambda m: ("S" if m.group(1) == "H" else "s") + m.group(2), text)
 
 
 def case(m):
@@ -61,68 +80,12 @@ def stashed(pattern, text, convert, mark):
     return re.sub(f"{mark}(\\d+){mark}", lambda m: keep[int(m.group(1))], text)
 
 
-FORK_IF = re.compile(r"cfg!\((?:horizon|sunrise)_fork_launcher\)")
-
-
-def block_end(text, start):
-    depth, i, quote = 0, start, False
-    while i < len(text):
-        c = text[i]
-        if quote:
-            if c == "\\":
-                i += 1
-            elif c == '"':
-                quote = False
-        elif c == '"':
-            quote = True
-        elif c == "{":
-            depth += 1
-        elif c == "}":
-            depth -= 1
-            if depth == 0:
-                return i + 1
-        i += 1
-    return len(text)
-
-
-def fork_branches(text):
-    spans, found = [], FORK_IF.search(text)
-    while found:
-        at = found.start()
-        then_open = text.find("{", at)
-        then_close = block_end(text, then_open)
-        spans.append((then_open, then_close))
-        rest = text[then_close:]
-        stripped = rest.lstrip()
-        if stripped.startswith("else") and stripped[4:].lstrip().startswith("{"):
-            else_open = text.find("{", then_close + (len(rest) - len(stripped)) + 4)
-            spans.append((else_open, block_end(text, else_open)))
-        found = FORK_IF.search(text, then_close)
-    return spans
-
-
-# Both branches of `if cfg!(horizon_fork_launcher) { .. } else { .. }` name Sunrise's and Horizon's real launchers.
-def keep_fork_branches(text, convert):
-    spans = fork_branches(text)
-    if not spans:
-        return convert(text)
-    keep = []
-
-    def stash(m):
-        keep.append(m.group(0))
-        return f"\x04{len(keep) - 1}\x04"
-
-    out, last = [], 0
-    for start, end in spans:
-        out.append(text[last:start])
-        out.append(STRING.sub(stash, text[start:end]))
-        last = end
-    out.append(text[last:])
-    return re.sub("\x04(\\d+)\x04", lambda m: keep[int(m.group(1))], convert("".join(out)))
-
-
 def convert_line(text):
     def brand(t):
+        # The fork's own repository and Pages site moved with the rename; the upstream projects stay
+        # protected above, and a later run of this tool names the new owner instead of `arismoko`.
+        t = re.sub(r"\barismoko/horizon(?![\w.-])", "sunrise-org/sunrise", t)
+        t = t.replace("arismoko.github.io/sunrise", "sunrise-org.github.io/sunrise")
         t = BRAND.sub(case, t.replace("playhorizon.dev", "playsunrise.net"))
         t = re.sub(r"([Pp]lay[Ss]unrise)\.dev\b", r"\1.net", t)
         return t.replace("upstream Sunrise", "upstream Horizon").replace("fork of Sunrise", "fork of Horizon")
@@ -158,6 +121,8 @@ def convert_rust(text):
 
 
 def convert_path(path):
+    if not PACKAGE_SKIP.search(path):
+        path = package(path)
     parts = path.split("/")
     keep_last = bool(LICENCE_PATH.search(path))
     return "/".join(
@@ -189,9 +154,11 @@ def main():
             text = raw.decode("utf-8")
         except UnicodeDecodeError:
             continue
-        out = stashed(STRING, text, convert, "\x01") if f in KEEP_STRINGS else keep_fork_branches(text, convert)
+        out = convert(text)
         if f.endswith(".rs"):
             out = convert_rust(out)
+        if not PACKAGE_SKIP.search(f):
+            out = package(out)
         if out != text:
             changed += 1
             if not DRY:

@@ -6,15 +6,15 @@ pub trait Hooks {
     /// `Block.setPlacedBy` completed (including companion blocks). Runs once,
     /// at the primary position, before sounds, level events and stack consumption.
     /// `stack` is the pre-shrink stack; `placer` is the placing player, or None
-    /// for a dispenser. `face` and `click` are the placement context's clicked
+    /// for a dispenser. `level` is the level the block was placed in. `face` and `click` are the placement context's clicked
     /// face and world-space hit point. Failed, refused and canceled placements
     /// never notify. Only Parts attached to the stack's item hear this server notice.
     #[notes = r##"### After a block item places its block
 
 `ItemPart::on_block_placed_by` is the server-side `BlockItemExtension.onBlockPlacedBy`
-notice (hook version 1). It runs once after the final state, stack block-entity data
+notice (hook version 2). It runs once after the final state, stack block-entity data
 and `Block.setPlacedBy` work exist, including a bed's head, at the primary position
-(the bed's foot). The event carries the pre-shrink `stack`, optional `placer`, `pos`,
+(the bed's foot). The event carries the pre-shrink `stack`, optional `placer`, placement `level`, `pos`,
 final `state`, clicked `face` and world-space `click`. A dispenser has no placer.
 Use the `ServerHost` and block-entity handles to copy stack data or link companions;
 writes are not overwritten by the placement's stack-data application. The notice
@@ -27,11 +27,13 @@ subscribed Part cost one `item_listens` lookup and no stack conversion.
         contract = "listen",
         scope = "item",
         key = "stack",
-        neoforge = "BlockItemExtension.onBlockPlacedBy"
+        neoforge = "BlockItemExtension.onBlockPlacedBy",
+        version = 2
     )]
     fn on_block_placed_by(
         stack: &ItemStack,
         placer: Option<PlayerRef>,
+        level: LevelRef,
         pos: [i32; 3],
         state: BlockState,
         face: BlockFace,

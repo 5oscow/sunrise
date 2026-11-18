@@ -2,6 +2,8 @@
 
 pub trait Hooks {
     /// A player's destroy speed for the block at `pos` may be changed or canceled.
+    /// A client without this mod predicts vanilla destroy speed; the server remains authoritative
+    /// and corrects the resulting block-breaking progress.
     #[hook(
         side = "both",
         contract = "cancel",

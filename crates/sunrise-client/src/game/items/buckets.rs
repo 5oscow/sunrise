@@ -27,7 +27,7 @@ impl Game<'_> {
         let distance = |p: [f64; 3]| {
             (p[0] - origin[0]).powi(2) + (p[1] - origin[1]).powi(2) + (p[2] - origin[2]).powi(2)
         };
-        match (self.pick(), self.pick_fluid()) {
+        match (self.item_pick(), self.pick_fluid()) {
             (Some(block), Some(fluid)) => Some(if distance(block.point) <= distance(fluid.point) {
                 block
             } else {

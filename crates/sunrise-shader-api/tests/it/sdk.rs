@@ -102,7 +102,7 @@ fn packs_and_checks_the_package() {
     let dir = root.join("glow");
     let dir_s = dir.to_str().unwrap();
     assert!(run(&["new", dir_s, "--name", "Glow"]).0);
-    let out = root.join("glow.hshader");
+    let out = root.join("glow.sshader");
     let (ok, text) = run(&["pack", dir_s, "--out", out.to_str().unwrap()]);
     assert!(ok, "{text}");
     let sha = text

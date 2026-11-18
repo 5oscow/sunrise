@@ -115,7 +115,13 @@ impl RayWorld for VisualRays<'_, '_> {
             return Ok(VoxelShape::block());
         }
         if name == "minecraft:snow" || name.ends_with("_fence") {
-            return ray_shape_from_boxes(&facts.outline);
+            let shape = ray_shape_from_boxes(&facts.outline)?;
+            let offset = if facts.outline_offset {
+                facts.offset_at(p.x, p.z)
+            } else {
+                [0.0; 3]
+            };
+            return Ok(shape.moved(Vec3::new(offset[0], offset[1], offset[2])));
         }
         self.inner.block_shape(state, p, RayBlockMode::Collider)
     }
@@ -407,7 +413,7 @@ impl Game<'_> {
         super::camera_rotation(CameraType::FirstPerson, yaw, pitch)
     }
     /// The player as `Camera.alignWithEntity` sees it.
-    fn player_camera_entity(&mut self) -> Option<CameraEntity> {
+    pub(super) fn player_camera_entity(&mut self) -> Option<CameraEntity> {
         let (scale, distance) = {
             let p = self.player.as_mut()?;
             (
@@ -834,7 +840,7 @@ impl Game<'_> {
                 camera,
                 &lookup,
                 packed,
-                self.res.mob_data(),
+                self,
                 &self.player_armor_layers(),
                 hidden,
                 (listened || layers.is_some()).then_some(&mut parts),
@@ -847,7 +853,7 @@ impl Game<'_> {
                 camera,
                 &lookup,
                 packed,
-                self.res.mob_data(),
+                self,
                 &self.player_armor_layers(),
                 (listened || layers.is_some()).then_some(&mut parts),
                 out,
@@ -909,7 +915,7 @@ impl Game<'_> {
                     camera,
                     &lookup,
                     packed,
-                    self.res.mob_data(),
+                    self,
                     &mut silhouette,
                 );
                 self.mark_outline(&silhouette, color);
@@ -965,7 +971,10 @@ impl Game<'_> {
         // A spectator preview still draws its own model: the poses'
         // visibility hides body parts, leaving the head and its layers.
         let body = self.own_body_visible() || self.spectator();
-        let (data, armour) = (self.res.mob_data(), self.player_armor_layers());
+        let (data, armour) = (
+            self as &dyn sunrise_client::mobs::render::RenderDataSource,
+            self.player_armor_layers(),
+        );
         // A screen preview: custom entity model animations see is_in_gui = 1.
         sunrise_client::mobs::cem_anim::in_gui(|| {
             let light = 240 | 240 << 8;
@@ -1109,7 +1118,7 @@ impl Game<'_> {
             return;
         };
         let assets = &self.armor_stand_assets;
-        let Some((texture, _)) = assets
+        let Some(layer) = assets
             .equipment
             .get(&asset)
             .and_then(|k| k.get("wings"))
@@ -1124,7 +1133,7 @@ impl Game<'_> {
             assets
                 .player
                 .get(if baby { "elytra_baby" } else { "elytra" }),
-            rect.or_else(|| sprites.get(texture)),
+            rect.or_else(|| sprites.get(&layer.texture)),
         ) else {
             return;
         };
@@ -1161,7 +1170,7 @@ impl Game<'_> {
                     .read()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
                 emissive
-                    .overlay(texture)
+                    .overlay(&layer.texture)
                     .and_then(|e| sprites.get(e))
                     .copied()
             })
@@ -1226,7 +1235,7 @@ impl Game<'_> {
             base,
             [rect.u0, rect.v0, rect.u1, rect.v1],
             light,
-            self.res.mob_data(),
+            self,
             out,
         );
     }
@@ -1260,7 +1269,7 @@ impl Game<'_> {
             sunrise_client::mobs::render::base_transform(m, partial, camera),
             [rect.u0, rect.v0, rect.u1, rect.v1],
             light,
-            self.res.mob_data(),
+            self,
             out,
         );
     }
@@ -1306,6 +1315,7 @@ impl Game<'_> {
             main_hand: api_stacks[0].as_ref(),
             off_hand: api_stacks[1].as_ref(),
             main_arm_left: m.main_arm_left(),
+            is_using_item: m.extra.using_item > 0,
             use_hand: (m.extra.using_item > 0).then_some(if m.extra.using_off_hand {
                 Hand::Off
             } else {
@@ -1379,7 +1389,7 @@ impl Game<'_> {
                 id,
                 partial,
                 camera,
-                self.res.mob_data(),
+                self,
                 count,
                 on_surface,
                 model,

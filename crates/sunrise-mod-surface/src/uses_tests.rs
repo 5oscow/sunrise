@@ -736,6 +736,77 @@ fn how_a_struct_is_built_is_read_from_literals_and_patterns() {
 }
 
 #[test]
+fn a_variant_of_the_mods_own_enum_is_not_a_literal_of_an_api_struct_of_the_same_name() {
+    let built = |source: &str, id: &str| entry(&scan_on(wider(), source), id).built;
+    let own =
+        "use mod_api::{Pos, Settings};\nenum Shape { Pos(i32, i32), Settings { height: i32 } }\n";
+    // Constructed and matched, the variants are the enum's, though the API's types share their names.
+    assert_eq!(
+        built(
+            &format!(
+                "{own}fn t(s: Shape) {{ let a = Shape::Pos(1, 2); let b = Shape::Settings {{ height: 1 }}; match s {{ Shape::Pos(x, y) => {{}} Shape::Settings {{ height }} => {{}} }} }}"
+            ),
+            "type:Pos"
+        ),
+        Some(Built::None)
+    );
+    assert_eq!(
+        built(
+            &format!(
+                "{own}fn t(s: Shape) {{ let b = Shape::Settings {{ height: 1 }}; match s {{ Shape::Settings {{ height }} => {{}} _ => {{}} }} }}"
+            ),
+            "type:Settings"
+        ),
+        Some(Built::None)
+    );
+    // An API enum's variant likewise is not the struct of its name, as a pattern, a call or a unit value.
+    assert_eq!(
+        built(
+            "use mod_api::{Item, TextHover};\nfn t(h: TextHover) { match h { TextHover::Item { .. } => {} _ => {} } let a = TextHover::Item; }",
+            "type:Item"
+        ),
+        Some(Built::None)
+    );
+    assert_eq!(
+        built(
+            &format!("{own}fn t() {{ let a = Shape::Pos; }}"),
+            "type:Pos"
+        ),
+        Some(Built::None)
+    );
+    // A qualifier bound to the API's crate or a module of it is a path, not a type, whatever its name.
+    assert_eq!(
+        built(
+            "use mod_api as Pos;\nfn t() { let a = Pos::Settings { height: 1 }; }",
+            "type:Settings"
+        ),
+        Some(Built::Full)
+    );
+    assert_eq!(
+        built(
+            "use mod_api as Pos;\nstruct Pos;\nfn t() { let a = Pos::Settings { height: 1 }; }",
+            "type:Settings"
+        ),
+        Some(Built::Full)
+    );
+    // The API's own literals are still read, written out, imported, or through a module's path.
+    assert_eq!(
+        built(
+            "use mod_api::Pos;\nenum Shape { Pos(i32, i32) }\nfn t() { let a = Shape::Pos(1, 2); let b = Pos(3, 4); }",
+            "type:Pos"
+        ),
+        Some(Built::Full)
+    );
+    assert_eq!(
+        built(
+            "enum Shape { Settings { height: i32 } }\nfn t() { let a = mod_api::Settings { height: 1 }; }",
+            "type:Settings"
+        ),
+        Some(Built::Full)
+    );
+}
+
+#[test]
 fn a_type_that_gains_an_impl_fits_and_one_that_loses_one_is_named() {
     let uses = scan_on(wider(), "fn f(s: &Settings) {}");
     assert_eq!(entry(&uses, "type:Settings").impls, ["Clone", "Default"]);
@@ -2206,6 +2277,28 @@ fn large_generated_files_scan_in_linear_time() {
     // Each would take quadratic time in some walk over the file: many macro bodies, many
     // `type` keywords in one body, a long path, and many `Self`s among many impls.
     let n = 20_000;
+    // CPU time, not wall time: on a loaded runner the waits for a CPU are not the scan's (one source took 1.06 s of
+    // wall time in verify on main 026c7217b; all four take about 0.3 s on an idle machine). A thread's own clock
+    // leaves out other threads, and the scan parses on a thread of its own (`syntax::read`), so the same parse is
+    // timed on a thread like it and added to this thread's time for the rest of the scan.
+    #[cfg(unix)]
+    let now = || {
+        let mut time = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        // SAFETY: clock_gettime only writes the timespec it is given.
+        assert_eq!(
+            unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut time) },
+            0
+        );
+        std::time::Duration::new(time.tv_sec as u64, time.tv_nsec as u32)
+    };
+    #[cfg(not(unix))]
+    let now = {
+        let start = std::time::Instant::now();
+        move || start.elapsed()
+    };
     for source in [
         format!("fn f(_: Settings) {{ {} }}", "a!(); ".repeat(n)),
         format!("m! {{ {} }}\nfn f(_: Settings) {{}}", "type ".repeat(n)),
@@ -2215,9 +2308,25 @@ fn large_generated_files_scan_in_linear_time() {
             "impl S { fn f() -> Self { Self } }\n".repeat(n / 2)
         ),
     ] {
-        let started = std::time::Instant::now();
+        // Off unix `now` is wall time, which already includes the scan's own parse thread.
+        #[cfg(unix)]
+        let parse = std::thread::scope(|scope| {
+            std::thread::Builder::new()
+                .stack_size(crate::syntax::PARSER_STACK)
+                .spawn_scoped(scope, || {
+                    let started = now();
+                    assert!(crate::syntax::parse(&source).is_ok());
+                    now() - started
+                })
+                .unwrap()
+                .join()
+                .unwrap()
+        });
+        #[cfg(not(unix))]
+        let parse = std::time::Duration::ZERO;
+        let started = now();
         assert!(ids(&scan_on(wider(), &source)).contains(&"type:Settings"));
-        let took = started.elapsed();
+        let took = now() - started + parse;
         assert!(
             took < std::time::Duration::from_millis(1000),
             "{took:?}: {}",

@@ -14,7 +14,11 @@
 //!
 //! The loaders need no mod code, vanilla state ids never move, and with no
 //! content mod the root is the base root itself.
-use crate::{Result, blocks::MAP_COLORS};
+use crate::{
+    Result,
+    blocks::MAP_COLORS,
+    mobs::data::{PartAnswers, PathComputationType, VALID_EMPTY_SPAWN},
+};
 use serde::{Deserialize, Serialize, de};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -28,11 +32,16 @@ use sunrise_core::{
     nbt::{Compound, JavaString, Limits, Tag},
 };
 use sunrise_mod_package::content::{
-    Block, BlockEntityType, BlockShapes, Content, CreativeTab, EntityType, FluidLook, MenuType,
-    MobEffect, Rarity, StateProperty, StateValues,
+    Block, BlockEntityType, BlockShapes, Content, ContextCollision, CreativeTab, EntityType,
+    FluidLook, MenuType, MobEffect, Rarity, StateProperty, StateValues,
 };
 use sunrise_mod_package::manifest::{
     JarInputsError, JarRef, collect_jar_requirements, missing_jars,
+};
+use sunrise_world::{
+    block_collision::ScaffoldingCollision,
+    block_properties::BlockDefinitionProperties,
+    fluid::{FluidKind, FluidState},
 };
 
 /// A content mod to put in the root: its id, its content, and the Java jars
@@ -154,7 +163,7 @@ pub fn register_world_fluids(
 
 #[path = "mod_content_fluid_declarations.rs"]
 mod fluid_declarations;
-pub use fluid_declarations::accept_world_fluids;
+pub use fluid_declarations::{accept_world_fluids, fluid_interactions, set_fluid_interactions};
 
 /// How the fluid `id` looks, when a mod declares it.
 pub fn fluid_look(id: &str) -> Option<FluidLook> {
@@ -514,6 +523,18 @@ fn combinations(
     Ok(combos)
 }
 
+/// `flags` with its legacy solid bit (bit 0) calculated from `shape`, unless the template forces it.
+fn with_solid_bit(flags: i64, force: Option<bool>, shape: &VoxelShape) -> i64 {
+    let definition = BlockDefinitionProperties {
+        force_solid_on: force == Some(true),
+        force_solid_off: force == Some(false),
+        replaceable: false,
+        liquid: false,
+        can_occlude: false,
+    };
+    (flags & !1) | i64::from(definition.calculate_solid(Some(shape)))
+}
+
 /// Puts a declared state property's values on one of a block's state rows.
 /// Only `facts.json` keeps a state's own row, whose fifth field is
 /// `{"id": …, "properties": {…}}`; the other files' rows are per block, so
@@ -606,6 +627,22 @@ fn encode_shape(shape: &VoxelShape) -> Tag {
     Tag::Compound(c)
 }
 
+/// A state's value of property `name`: its declared combination's, else its template state's.
+fn state_value<'a>(
+    combo: &'a [(String, String)],
+    template: Option<&'a J>,
+    name: &str,
+) -> Option<&'a str> {
+    combo
+        .iter()
+        .find(|(key, _)| key == name)
+        .map(|(_, value)| value.as_str())
+        .or_else(|| match template?.get(name) {
+            Some(J::Str(value)) => Some(value.as_str()),
+            _ => None,
+        })
+}
+
 fn resolve_state_values<'a, 's, T>(
     spec: &'s StateValues<T>,
     block: &str,
@@ -621,17 +658,12 @@ fn resolve_state_values<'a, 's, T>(
         let values = names
             .iter()
             .map(|name| {
-                combos[combo as usize]
-                    .iter()
-                    .find(|(key, _)| key == name)
-                    .map(|(_, value)| value.as_str())
-                    .or_else(|| {
-                        match properties(states.start + state).and_then(|props| props.get(name)) {
-                            Some(J::Str(value)) => Some(value.as_str()),
-                            _ => None,
-                        }
-                    })
-                    .ok_or_else(|| format!("{block}: state lacks property {name}"))
+                state_value(
+                    &combos[combo as usize],
+                    properties(states.start + state),
+                    name,
+                )
+                .ok_or_else(|| format!("{block}: state lacks property {name}"))
             })
             .collect::<std::result::Result<Vec<_>, _>>()?;
         let key = values.join(",");
@@ -729,10 +761,19 @@ struct NewBlock<'a> {
     item: Option<String>,
     shapes: Option<Vec<VoxelShape>>,
     collision_shapes: Option<Vec<VoxelShape>>,
+    /// The template's `isAir` property, which precedes the fluid check in the walk evaluator.
+    is_air: bool,
     /// Whether each shaped state contains fluid, including intrinsic template fluids.
     has_fluid: Vec<bool>,
+    /// Resolved per-state limits; template inheritance is resolved once at load.
+    offset_limits: Vec<Option<(f32, f32)>>,
     skylight: SkylightRule,
     custom_dampening: bool,
+    /// Fullness of the published occlusion shape when explicitly enabling occlusion.
+    template_occlusion_full: Vec<bool>,
+    /// The template's `forceSolidOn` (`Some(true)`) or `forceSolidOff` (`Some(false)`), which keeps
+    /// its answer over the declared shape's.
+    force_solid: Option<bool>,
     context_shapes: BTreeMap<String, Vec<VoxelShape>>,
     state_light: Option<Vec<u8>>,
     default: u32,
@@ -757,6 +798,17 @@ impl NewBlock<'_> {
             Some(item) => Some(item),
             None => (!self.decl.item && self.wall_of.is_none()).then_some("minecraft:air"),
         }
+    }
+
+    /// Vanilla caches occlusion using the outline at BlockPos.ZERO, not the block-local outline.
+    fn declared_occlusion(&self, index: usize, shape: &VoxelShape) -> VoxelShape {
+        self.offset_limits[index].map_or_else(
+            || shape.clone(),
+            |limits| {
+                let [x, y, z] = sunrise_core::random::column_offset(limits, 0, 0);
+                shape.moved(Vec3::new(x, y, z))
+            },
+        )
     }
 
     /// Template states and declared combinations in registry order.
@@ -1049,8 +1101,33 @@ impl<'a> Plan<'a> {
         // use the resolved state's fluid, not the template's cached dry answer.
         let mut skylight_rules = BTreeMap::new();
         let mut custom_dampening = BTreeSet::new();
+        let needs_waterlogging = mods.iter().any(|m| {
+            m.content
+                .blocks
+                .iter()
+                .any(|b| b.state_properties.contains_key("waterlogged"))
+        });
+        let mut water_states = Vec::new();
+        let mut liquid_templates = BTreeSet::new();
+        let mut speleothems = BTreeSet::new();
         if base.join("block-behaviours.json").exists() {
             let behaviors = read_json(&base.join("block-behaviours.json"))?;
+            if needs_waterlogging {
+                let Some(J::Arr(states)) = behaviors.get("states") else {
+                    return Err("block-behaviours.json has no state fluids".into());
+                };
+                for state in states {
+                    // Compact state row column 2 is the exported fluid registry ordinal,
+                    // also decoded by sunrise_world::level::data::build_with_gameplay.
+                    let kind = match state {
+                        J::Arr(row) => row.get(2).and_then(J::as_u32),
+                        _ => None,
+                    }
+                    .and_then(|index| FluidKind::ALL.get(index as usize))
+                    .ok_or("block-behaviours.json has an invalid state fluid")?;
+                    water_states.push(matches!(kind, FluidKind::Water | FluidKind::FlowingWater));
+                }
+            }
             let Some(J::Arr(blocks)) = behaviors.get("blocks") else {
                 return Err("block-behaviours.json has no blocks".into());
             };
@@ -1067,6 +1144,9 @@ impl<'a> Plan<'a> {
                         _ => None,
                     })
                     .collect();
+                if classes.contains(&"SpeleothemBlock") {
+                    speleothems.insert(name.clone());
+                }
                 if let Some(rule) = classes.iter().find_map(|class| match *class {
                     "BarrierBlock"
                     | "CrossCollisionBlock"
@@ -1087,9 +1167,32 @@ impl<'a> Plan<'a> {
                 {
                     custom_dampening.insert(name.clone());
                 }
+                if needs_waterlogging && classes.contains(&"LiquidBlock") {
+                    liquid_templates.insert(name.clone());
+                }
             }
         }
-        let mut facts = read_json(&base.join("facts.json"))?;
+        let mut force_solid = BTreeMap::new();
+        if let Ok(bytes) = fs::read(base.join("worldgen/blocks/block-properties.nbt")) {
+            let (named, _) = nbt::read_named(&bytes, Limits::tables())
+                .map_err(|e| format!("block-properties.nbt: {e}"))?;
+            if let Some(Tag::Compound(blocks)) = named.tag.get("blocks") {
+                for (name, flags) in blocks {
+                    // Bit 0 is `forceSolidOn`, bit 1 `forceSolidOff`; force-on wins.
+                    if let (Ok(name), Tag::Byte(flags)) = (name.to_string(), flags) {
+                        match (flags & 1 != 0, flags & 2 != 0) {
+                            (true, _) => force_solid.insert(name, true),
+                            (_, true) => force_solid.insert(name, false),
+                            _ => None,
+                        };
+                    }
+                }
+            }
+        }
+        let facts_path = base.join("facts.json");
+        let facts_bytes = fs::read(&facts_path)?;
+        let mut facts: J = serde_json::from_slice(&facts_bytes)
+            .map_err(|e| format!("{}: {e}", facts_path.display()))?;
         let names: Vec<String> = match facts.at("states") {
             Some(J::Arr(states)) => states
                 .iter()
@@ -1183,6 +1286,8 @@ impl<'a> Plan<'a> {
         let mut sorted: Vec<&ContentMod> = mods.iter().collect();
         sorted.sort_by(|a, b| a.id.cmp(&b.id));
         let mut wanted_sounds = Vec::new();
+        let template_registry = std::cell::OnceCell::new();
+        let mut template_occlusion = None;
         for m in &sorted {
             let mut declared: Vec<&Block> = m.content.blocks.iter().collect();
             declared.sort_by(|a, b| a.id.cmp(&b.id));
@@ -1202,6 +1307,15 @@ impl<'a> Plan<'a> {
                 };
                 if defaults.contains_key(&decl.id) {
                     return Err(format!("{}: {} is already a block", m.id, decl.id).into());
+                }
+                if decl.shapes_from_block_entity
+                    && !block_entity_factories.contains_key(decl.id.as_str())
+                {
+                    return Err(format!(
+                        "{}: shapes_from_block_entity needs a block entity type that owns the block",
+                        decl.id
+                    )
+                    .into());
                 }
                 let states = range(&decl.template).ok_or_else(|| {
                     format!("{}: template {} is not a block", decl.id, decl.template)
@@ -1232,6 +1346,10 @@ impl<'a> Plan<'a> {
                 let Some(J::Arr(rows)) = facts.get("states") else {
                     unreachable!()
                 };
+                let is_air = matches!(
+                    rows.get(default as usize),
+                    Some(J::Arr(row)) if matches!(row.get(1), Some(J::Bool(true)))
+                );
                 let properties = |id: u32| -> Option<&J> {
                     let J::Arr(row) = rows.get(id as usize)? else {
                         return None;
@@ -1245,6 +1363,23 @@ impl<'a> Plan<'a> {
                             decl.id, decl.template
                         )
                         .into());
+                    }
+                }
+                if decl.state_properties.contains_key("waterlogged") {
+                    if liquid_templates.contains(&decl.template) {
+                        return Err(format!(
+                            "{}: state_properties.waterlogged cannot be added: template {} is a standalone liquid block",
+                            decl.id, decl.template
+                        ).into());
+                    }
+                    let template_water = water_states
+                        .get(states.start as usize..states.end as usize)
+                        .ok_or("block-behaviours.json is missing template state fluids")?;
+                    if template_water.iter().all(|water| *water) {
+                        return Err(format!(
+                            "{}: state_properties.waterlogged cannot be added: every state of template {} already holds water",
+                            decl.id, decl.template
+                        ).into());
                     }
                 }
                 let combos = combinations(&decl.state_properties, &decl.default_state)
@@ -1310,6 +1445,21 @@ impl<'a> Plan<'a> {
                     .map(|(name, property)| (name.clone(), property.values().len() as u32))
                     .collect();
                 let order = block_order(&states, properties, &declared, combos.len() as u32);
+                if decl.context_collision == Some(ContextCollision::Scaffolding) {
+                    for &(state, combo) in &order {
+                        let value = |name| {
+                            state_value(
+                                &combos[combo as usize],
+                                properties(states.start + state),
+                                name,
+                            )
+                        };
+                        ScaffoldingCollision::from_values(value("distance"), value("bottom"))
+                            .map_err(|e| {
+                                format!("{}: context_collision scaffolding: {e}", decl.id)
+                            })?;
+                    }
+                }
                 let resolve = |spec: &BlockShapes| {
                     resolve_shapes(spec, &decl.id, &states, &order, &combos, properties)
                 };
@@ -1324,6 +1474,31 @@ impl<'a> Plan<'a> {
                     })
                 };
                 let collision_shapes = decl.collision_shapes.as_ref().map(resolve).transpose()?;
+                let mut template_occlusion_full = Vec::new();
+                if decl.properties.occludes == Some(true) && shapes.is_none() {
+                    use sunrise_world::{
+                        collision::CachedCollisionRegistry,
+                        registry::{BlockRegistry, BlockStateId, BlockTableFile},
+                    };
+                    let cached = match &template_occlusion {
+                        Some(cached) => cached,
+                        None => {
+                            let (registry, _) = BlockRegistry::from_facts_json_bytes(&facts_bytes)?;
+                            let registry = template_registry.get_or_init(|| registry);
+                            let file = BlockTableFile::open(&base.join("occlusion.nbt"), registry)?;
+                            template_occlusion.insert(CachedCollisionRegistry::from_table(
+                                file.table("occlusion")?,
+                            )?)
+                        }
+                    };
+                    for &(state, _) in &order {
+                        let shape = cached
+                            .cached_shape(BlockStateId(states.start + state))?
+                            .ok_or("template has no published occlusion shape")?;
+                        template_occlusion_full
+                            .push(!shape.join_is_not_empty(&VoxelShape::block(), ShapeOp::XOR)?);
+                    }
+                }
                 let mut has_fluid = Vec::new();
                 if shapes.is_some() {
                     for &(state, combo) in &order {
@@ -1389,12 +1564,16 @@ impl<'a> Plan<'a> {
                     item: None,
                     shapes,
                     collision_shapes,
+                    is_air,
                     has_fluid,
+                    offset_limits: Vec::new(),
+                    template_occlusion_full,
                     skylight: skylight_rules
                         .get(&decl.template)
                         .copied()
                         .unwrap_or(SkylightRule::Shape),
                     custom_dampening: custom_dampening.contains(&decl.template),
+                    force_solid: force_solid.get(&decl.template).copied(),
                     context_shapes,
                     state_light,
                     default,
@@ -1443,6 +1622,43 @@ impl<'a> Plan<'a> {
         }
         let mut items = Vec::new();
         for b in &mut blocks {
+            let p = &b.decl.properties;
+            let inherited = crate::blocks::inherited_offset_limits(
+                &b.decl.template,
+                speleothems.contains(&b.decl.template),
+            );
+            b.offset_limits = b
+                .order
+                .iter()
+                .map(|(state, _)| {
+                    use sunrise_mod_package::content::OffsetType;
+                    let enabled = match p.offset {
+                        Some(OffsetType::None) => false,
+                        Some(_) => true,
+                        None => matches!(
+                            rows[(b.rename.states.start + state) as usize].get("offset"),
+                            Some(J::Bool(true))
+                        ),
+                    };
+                    enabled.then(|| {
+                        let defaults = match p.offset {
+                            Some(OffsetType::Xz) => (0.25, 0.0),
+                            Some(OffsetType::Xyz) => (0.25, 0.2),
+                            _ => inherited,
+                        };
+                        (
+                            p.max_horizontal_offset.unwrap_or(defaults.0),
+                            if p.offset == Some(OffsetType::Xz)
+                                || (p.offset.is_none() && inherited.1 == 0.0)
+                            {
+                                0.0
+                            } else {
+                                p.max_vertical_offset.unwrap_or(defaults.1)
+                            },
+                        )
+                    })
+                })
+                .collect();
             let row = &rows[b.rename.states.start as usize];
             b.item = match row.get("item") {
                 Some(J::Str(i)) if i != "minecraft:air" => Some(i.clone()),
@@ -1538,9 +1754,9 @@ impl<'a> Plan<'a> {
         out
     }
 
-    /// Appends each new block's copies of the template's states to `list`;
-    /// `gameplay` rows get their index and the declared overrides.
-    fn states(&self, list: &mut Vec<J>, ids: bool, gameplay: bool) -> Result<()> {
+    /// Appends each new block's copies of the template's states to `list`,
+    /// writing the declared overrides in the table's row format.
+    fn states(&self, list: &mut Vec<J>, ids: bool, name: &str) -> Result<()> {
         if list.len() != self.states {
             return Err(format!("{} states, not {}", list.len(), self.states).into());
         }
@@ -1557,7 +1773,57 @@ impl<'a> Plan<'a> {
                 if !combo.is_empty() {
                     set_state_properties(&mut row, combo);
                 }
-                if gameplay {
+                if matches!(
+                    name,
+                    "block-behaviours.json"
+                        | "facts.json"
+                        | "mob-data.json"
+                        | "worldgen/block_flags.json"
+                ) && combo
+                    .iter()
+                    .any(|(key, value)| key == "waterlogged" && value == "true")
+                {
+                    let J::Arr(columns) = &mut row else {
+                        return Err(format!("{name}: missing state row {id}").into());
+                    };
+                    if name == "block-behaviours.json" {
+                        let fluid = columns
+                            .get_mut(2..5)
+                            .ok_or("block-behaviours.json: missing state fluid")?;
+                        let water = FluidState::WATER;
+                        let ordinal = FluidKind::ALL
+                            .iter()
+                            .position(|&kind| kind == water.kind())
+                            .expect("source water belongs to the vanilla fluid registry");
+                        fluid.clone_from_slice(&[
+                            J::Num(ordinal.into()),
+                            J::Num(water.amount().into()),
+                            J::Bool(water.falling()),
+                        ]);
+                    } else if name == "mob-data.json" {
+                        let [path, flags, ..] = columns.as_mut_slice() else {
+                            return Err("mob-data.json: missing state pathfinding data".into());
+                        };
+                        // Only the walk evaluator's generic OPEN result looks at the fluid here.
+                        // Air, blocked and special paths keep their template's answer.
+                        if !b.is_air && path.as_str() == Some("OPEN") {
+                            *path = J::Str("WATER".into());
+                        }
+                        let mask = flags.as_u32().ok_or("mob-data.json: invalid state flags")?;
+                        // Inherited waterlogged properties never take this branch: their exported
+                        // WATER answer is kept. For a new declaration use BlockBehaviour's default.
+                        let water =
+                            u32::from(PartAnswers::pathfindable_bit(PathComputationType::Water));
+                        *flags = J::Num(((mask | water) & !u32::from(VALID_EMPTY_SPAWN)).into());
+                    } else {
+                        let has_fluid = if name == "facts.json" { 2 } else { 1 };
+                        *columns
+                            .get_mut(has_fluid)
+                            .ok_or_else(|| format!("{name}: missing state fluid flag"))? =
+                            J::Bool(true);
+                    }
+                }
+                if name == "gameplay-facts.json" {
                     row.set("id", J::Num(next.into()));
                     if let Some(item) = b.item_row() {
                         row.set("item", J::Str(item.into()));
@@ -1588,8 +1854,10 @@ impl<'a> Plan<'a> {
                             })
                             .collect();
                         // BlockState.initCache and BlockBehaviour.getLightDampening:
-                        // the declared outline is the block's occlusion shape.
-                        let full = !shape.join_is_not_empty(&VoxelShape::block(), ShapeOp::XOR)?;
+                        // the occlusion shape uses the offset at the cache's origin.
+                        let occlusion = b.declared_occlusion(state_index, shape);
+                        let full =
+                            !occlusion.join_is_not_empty(&VoxelShape::block(), ShapeOp::XOR)?;
                         let can_occlude = matches!(row.get("can_occlude"), Some(J::Bool(true)));
                         let solid = can_occlude && full;
                         let down = match b.skylight {
@@ -1648,6 +1916,17 @@ impl<'a> Plan<'a> {
         row: &mut J,
     ) {
         let p = &b.decl.properties;
+        let offset = b.offset_limits[state_index];
+        row.set("offset", J::Bool(offset.is_some()));
+        if let Some((horizontal, vertical)) = offset {
+            row.set(
+                "offset_limits",
+                J::Arr(vec![J::f64(horizontal as f64), J::f64(vertical as f64)]),
+            );
+        }
+        if b.shapes.is_some() || p.offset == Some(sunrise_mod_package::content::OffsetType::None) {
+            row.set("outline_offset", J::Bool(offset.is_some()));
+        }
         if let Some(ticks) = &p.random_ticks {
             row.set("random_ticks", J::Bool(ticks.applies(combo)));
         }
@@ -1663,6 +1942,20 @@ impl<'a> Plan<'a> {
         // `noOcclusion`: a block that can't occlude is never a solid render either, and a solid
         // render's full light dampening becomes a non-solid block's (`getLightDampening`: 0 when
         // skylight passes down, else 1, as for leaves and spawners).
+        if let Some(can_occlude) = p.occludes {
+            row.set("can_occlude", J::Bool(can_occlude));
+        }
+        if p.occludes == Some(true) && b.shapes.is_none() {
+            let solid = b.template_occlusion_full[state_index];
+            row.set("solid_render", J::Bool(solid));
+            if !b.custom_dampening {
+                let down = matches!(row.get("skylight_down"), Some(J::Bool(true)));
+                row.set(
+                    "dampening",
+                    J::Num((if solid { 15 } else { i64::from(!down) }).into()),
+                );
+            }
+        }
         if p.occludes == Some(false) {
             let solid = matches!(row.get("solid_render"), Some(J::Bool(true)));
             if solid {
@@ -1788,17 +2081,40 @@ impl<'a> Plan<'a> {
         Ok(())
     }
 
+    /// `BlockStateBase.calculateSolid` of every state that declares a collision shape, over the
+    /// template's flag: the legacy solid bit (bit 0 of a state row's flags) follows the declared
+    /// shape unless the template forces it.
+    fn declared_solid(&self, doc: &mut J) {
+        let Some(J::Arr(rows)) = doc.at("states") else {
+            return;
+        };
+        for b in &self.blocks {
+            let Some(shapes) = b.collision_shapes.as_ref().or(b.shapes.as_ref()) else {
+                continue;
+            };
+            for (offset, shape) in shapes.iter().enumerate() {
+                let Some(J::Arr(row)) = rows.get_mut(b.rename.first as usize + offset) else {
+                    continue;
+                };
+                if let Some(J::Num(flags)) = row.get_mut(1) {
+                    *flags =
+                        with_solid_bit(flags.as_i64().unwrap_or(0), b.force_solid, shape).into();
+                }
+            }
+        }
+    }
+
     /// One JSON table, rewritten.
     fn json(&self, name: &str, doc: &mut J) -> Result<()> {
-        let states = |doc: &mut J, path: &str, ids: bool, gameplay: bool| -> Result<()> {
+        let states = |doc: &mut J, path: &str, ids: bool| -> Result<()> {
             match doc.at(path) {
-                Some(J::Arr(a)) => self.states(a, ids, gameplay),
+                Some(J::Arr(a)) => self.states(a, ids, name),
                 _ => Err(format!("no list at /{path}").into()),
             }
         };
         match name {
             "facts.json" => {
-                states(doc, "states", false, false)?;
+                states(doc, "states", false)?;
                 let defaults = doc.at("defaults").ok_or("no defaults")?;
                 for b in &self.blocks {
                     let default = b.default;
@@ -1806,10 +2122,11 @@ impl<'a> Plan<'a> {
                     defaults.set(&b.decl.id, J::Num(id.into()));
                 }
             }
-            "gameplay-facts.json" => states(doc, "states", false, true)?,
+            "gameplay-facts.json" => states(doc, "states", false)?,
             "creative-inventory.json" => self.creative_tabs(doc)?,
             "block-behaviours.json" => {
-                states(doc, "states", false, false)?;
+                states(doc, "states", false)?;
+                self.declared_solid(doc);
                 let Some(J::Arr(blocks)) = doc.at("blocks") else {
                     return Err("no blocks".into());
                 };
@@ -1824,6 +2141,14 @@ impl<'a> Plan<'a> {
                         if let Some(item) = b.item_row() {
                             v.set("item", J::Str(item.into()));
                         }
+                        if b.decl.state_properties.contains_key("waterlogged") {
+                            if let Some(J::Arr(interfaces)) = v.at("interfaces") {
+                                interfaces.push(J::Str("SimpleWaterloggedBlock".into()));
+                            }
+                            if let Some(fields) = v.at("fields") {
+                                fields.set("declaredWaterlogged", J::Bool(true));
+                            }
+                        }
                         // `SignBlock.getWoodType`: the wood's name is what
                         // the editor reads of it.
                         if let Some(wood) = &b.decl.wood_type
@@ -1831,13 +2156,39 @@ impl<'a> Plan<'a> {
                         {
                             *name = J::Str(wood.clone());
                         }
-                        // `new FenceGateBlock(woodType, ..)`: the gate's own sounds replace its wood's.
-                        if let Some(fields) = v.at("fields/type") {
-                            if let Some(sound) = &b.decl.open_sound {
-                                fields.set("fenceGateOpen", J::Str(sound.clone()));
-                            }
-                            if let Some(sound) = &b.decl.close_sound {
-                                fields.set("fenceGateClose", J::Str(sound.clone()));
+                        // Resolve each gate site against the untouched template wood sound.
+                        if let Some(fields) = v.at("fields") {
+                            for (key, sound) in [
+                                ("gateOpenSounds", &b.decl.open_sound),
+                                ("gateCloseSounds", &b.decl.close_sound),
+                            ] {
+                                let Some(sound) = sound else { continue };
+                                use sunrise_mod_package::content::GateSound;
+                                let sites = match sound {
+                                    GateSound::All(sound) => {
+                                        [Some(sound), Some(sound), Some(sound)]
+                                    }
+                                    GateSound::Sites {
+                                        on_use,
+                                        on_explosion,
+                                        on_redstone,
+                                    } => [
+                                        on_use.as_ref(),
+                                        on_explosion.as_ref(),
+                                        on_redstone.as_ref(),
+                                    ],
+                                };
+                                fields.set(
+                                    key,
+                                    J::Arr(
+                                        sites
+                                            .into_iter()
+                                            .map(|sound| {
+                                                sound.map_or(J::Null, |sound| J::Str(sound.clone()))
+                                            })
+                                            .collect(),
+                                    ),
+                                );
                             }
                         }
                         // `createDefaultSignText`: the colour and glow a new sign's text starts with.
@@ -1873,6 +2224,9 @@ impl<'a> Plan<'a> {
                             fields.set("connectsTo", J::Str(tag.clone()));
                             v.set("fields", fields);
                         }
+                        if b.decl.properties.vegetation {
+                            v.set("declared_vegetation", J::Bool(true));
+                        }
                         blocks.push(v);
                     }
                 }
@@ -1891,8 +2245,8 @@ impl<'a> Plan<'a> {
                         continue;
                     };
                     // Faces beside a block that occludes nothing are drawn (`Block.shouldRenderFace`).
-                    if !model && b.decl.properties.occludes == Some(false) {
-                        entry.set("can_occlude", J::Bool(false));
+                    if !model && let Some(can_occlude) = b.decl.properties.occludes {
+                        entry.set("can_occlude", J::Bool(can_occlude));
                     }
                     if model && let Some(schema) = entry.get_mut("schema") {
                         for (property_name, property) in &b.decl.state_properties {
@@ -2049,11 +2403,11 @@ impl<'a> Plan<'a> {
                     ids.extend(new_types());
                 }
             }
-            "mob-data.json" => states(doc, "states", false, false)?,
-            "worldgen/block_flags.json" => states(doc, "", false, false)?,
+            "mob-data.json" => states(doc, "states", false)?,
+            "worldgen/block_flags.json" => states(doc, "", false)?,
             "worldgen/blocks/structure-blocks.json" => {
                 for key in ["rotate", "mirror", "full_block"] {
-                    states(doc, key, true, false)?;
+                    states(doc, key, true)?;
                 }
                 let added: usize = self
                     .blocks
@@ -2064,6 +2418,43 @@ impl<'a> Plan<'a> {
             }
             _ => return Err("no rule for this table".into()),
         }
+        Ok(())
+    }
+
+    /// The states whose block entity publishes their shapes (`shapes_from_block_entity`), in
+    /// the collision and support tables, which mark such states in their scan metadata.
+    fn published_states(&self, tag: &mut Tag) -> Result<()> {
+        self.list_states(tag, "published_shapes", |decl| {
+            decl.shapes_from_block_entity
+        })
+    }
+
+    /// The states whose block takes scaffolding's context collision (`context_collision`), in
+    /// the collision tables.
+    fn scaffolding_states(&self, tag: &mut Tag) -> Result<()> {
+        self.list_states(tag, "scaffolding_collision", |decl| {
+            decl.context_collision == Some(ContextCollision::Scaffolding)
+        })
+    }
+
+    /// Lists under `key` the states of the blocks `wanted` picks; no list when it picks none.
+    fn list_states(&self, tag: &mut Tag, key: &str, wanted: impl Fn(&Block) -> bool) -> Result<()> {
+        let states: Vec<i32> = self
+            .blocks
+            .iter()
+            .filter(|block| wanted(block.decl))
+            .flat_map(|block| {
+                (0..block.order.len())
+                    .map(move |offset| (block.rename.first as usize + offset) as i32)
+            })
+            .collect();
+        if states.is_empty() {
+            return Ok(());
+        }
+        let Tag::Compound(root) = tag else {
+            return Err("collision table is not a compound".into());
+        };
+        root.insert(key.into(), Tag::IntArray(states));
         Ok(())
     }
 
@@ -2084,6 +2475,13 @@ impl<'a> Plan<'a> {
             if let Some(shapes) = shapes {
                 let mut encoded = BTreeMap::new();
                 for (offset, shape) in shapes.iter().enumerate() {
+                    let occlusion;
+                    let shape = if collision {
+                        shape
+                    } else {
+                        occlusion = block.declared_occlusion(offset, shape);
+                        &occlusion
+                    };
                     let key: Vec<_> = shape
                         .boxes()
                         .iter()
@@ -2149,6 +2547,51 @@ impl<'a> Plan<'a> {
         }
         if !contexts.is_empty() {
             root.insert("context_shapes".into(), Tag::List(contexts));
+        }
+        if collision {
+            let mut offsets = Vec::new();
+            for block in &self.blocks {
+                let mut channels = 0;
+                if block.shapes.is_some() || block.collision_shapes.is_some() {
+                    channels |= 1;
+                }
+                if block
+                    .context_shapes
+                    .keys()
+                    .any(|key| key.starts_with("collision_"))
+                {
+                    channels |= 2;
+                }
+                if block
+                    .context_shapes
+                    .keys()
+                    .any(|key| key.starts_with("outline_"))
+                {
+                    channels |= 4;
+                }
+                if block.context_shapes.contains_key("interaction") {
+                    channels |= 8;
+                }
+                if channels == 0 {
+                    continue;
+                }
+                for (index, limits) in block.offset_limits.iter().enumerate() {
+                    if let Some((horizontal, vertical)) = limits {
+                        offsets.push(Tag::compound([
+                            (
+                                "state",
+                                Tag::Int((block.rename.first as usize + index) as i32),
+                            ),
+                            ("channels", Tag::Byte(channels)),
+                            ("horizontal", Tag::Float(horizontal.to_bits())),
+                            ("vertical", Tag::Float(vertical.to_bits())),
+                        ]));
+                    }
+                }
+            }
+            if !offsets.is_empty() {
+                root.insert("shape_offsets".into(), Tag::List(offsets));
+            }
         }
         let Some(Tag::IntArray(mapping)) = root.get_mut(&JavaString::from("cached_shapes")) else {
             return Err("collision table has no mapping".into());
@@ -2271,10 +2714,10 @@ impl<'a> Plan<'a> {
                         else {
                             continue;
                         };
-                        if b.decl.properties.occludes == Some(false)
+                        if let Some(can_occlude) = b.decl.properties.occludes
                             && let Tag::Byte(flags) = &mut v
                         {
-                            *flags &= !16;
+                            *flags = (*flags & !16) | if can_occlude { 16 } else { 0 };
                         }
                         if let (Some(f), Some(slot)) =
                             (b.decl.properties.friction, v.get_mut("friction"))
@@ -2332,9 +2775,11 @@ const TAG_BUNDLES: [&str; 2] = ["block-tags.json", "worldgen/block_tags.json"];
 const BIOME_TAGS: &str = "worldgen/biome_tags.json";
 /// Worldgen registries a content mod may add to, and the bundle the
 /// worldgen loader reads each from (id → the file's text): what structure
-/// mods hold. Biomes, noise and density functions change the terrain and
+/// mods hold, and a mod's own biomes (any namespace but `minecraft`, which
+/// no mod can replace). Noise and density functions change the terrain and
 /// are not read from mods.
-const WORLDGEN_BUNDLES: [(&str, &str); 6] = [
+const WORLDGEN_BUNDLES: [(&str, &str); 7] = [
+    ("biome", "worldgen/biomes.json"),
     ("structure", "worldgen/structures.json"),
     ("structure_set", "worldgen/structure_sets.json"),
     ("template_pool", "worldgen/template_pools.json"),
@@ -2345,7 +2790,8 @@ const WORLDGEN_BUNDLES: [(&str, &str); 6] = [
 
 /// The registry of `command-registries.json` that each bundle's ids join,
 /// for the commands that suggest them (`/locate`, `/place`).
-const COMMAND_REGISTRIES: [(&str, &str); 6] = [
+const COMMAND_REGISTRIES: [(&str, &str); 7] = [
+    ("worldgen/biomes.json", "minecraft:worldgen/biome"),
     ("worldgen/structures.json", "minecraft:worldgen/structure"),
     (
         "worldgen/structure_sets.json",
@@ -2371,6 +2817,9 @@ fn worldgen_entry(file: &str) -> Option<(&'static str, String)> {
     let (ns, rest) = file.strip_prefix("data/")?.split_once("/worldgen/")?;
     let (kind, path) = rest.split_once('/')?;
     let (_, bundle) = WORLDGEN_BUNDLES.iter().find(|(k, _)| *k == kind)?;
+    if *bundle == BIOMES && ns == "minecraft" {
+        return None;
+    }
     Some((bundle, format!("{ns}:{}", path.strip_suffix(".json")?)))
 }
 
@@ -2471,7 +2920,7 @@ const PLACED_FEATURES: &str = "worldgen/placed_features.json";
 const CARVERS: &str = "worldgen/carvers.json";
 
 /// Rewrites the biome bundle with the mods' biome modifiers. `biome_tags`
-/// and `placed` are the bundles as the mods left them (`None`: the base's).
+/// `placed` and `biome_doc` are the bundles as the mods left them (`None`: the base's).
 fn place_in_biomes(
     base: &Path,
     overlay: &Overlay<'_>,
@@ -2479,6 +2928,7 @@ fn place_in_biomes(
     enabled_mods: Vec<String>,
     biome_tags: Option<J>,
     placed: Option<J>,
+    biome_doc: Option<J>,
     tags: &BTreeMap<String, TagMerge>,
     warnings: &mut Vec<String>,
 ) -> Result<()> {
@@ -2502,7 +2952,10 @@ fn place_in_biomes(
     if !base.join(BIOMES).exists() {
         return Err(format!("biome modifiers need {BIOMES}").into());
     }
-    let mut doc = read_json(&base.join(BIOMES))?;
+    let mut doc = match biome_doc {
+        Some(doc) => doc,
+        None => read_json(&base.join(BIOMES))?,
+    };
     let biome_tags = bundle(biome_tags, BIOME_TAGS)?;
     let placed: BTreeSet<String> = bundle(placed, PLACED_FEATURES)?.into_keys().collect();
     let feature_tags = bundle(None, FEATURE_TAGS)?;
@@ -2874,7 +3327,12 @@ struct Known {
     tag_files: std::collections::BTreeSet<String>,
 }
 impl Known {
-    fn new(base: &Path, plan: &Plan, tags: &BTreeMap<String, TagMerge>) -> Result<Self> {
+    fn new(
+        base: &Path,
+        plan: &Plan,
+        tags: &BTreeMap<String, TagMerge>,
+        mod_biomes: impl Iterator<Item = String>,
+    ) -> Result<Self> {
         let mut blocks: std::collections::BTreeSet<String> =
             plan.defaults.keys().cloned().collect();
         blocks.extend(plan.blocks.iter().map(|b| b.decl.id.clone()));
@@ -2892,10 +3350,12 @@ impl Known {
                 false => Default::default(),
             })
         };
+        let mut biomes = keys(BIOMES)?;
+        biomes.extend(mod_biomes);
         Ok(Known {
             blocks,
             items,
-            biomes: keys("worldgen/biomes.json")?,
+            biomes,
             biome_tags: keys(BIOME_TAGS)?,
             tag_files: tags.keys().cloned().collect(),
         })
@@ -2987,6 +3447,10 @@ fn tables(base: &Path, plan: &Plan, overlay: &Overlay<'_>, jobs: &[(&str, u64)])
             plan.nbt(&mut named.tag);
             if name == "cached-collision.nbt" || name == "worldgen/blocks/cached-collision.nbt" {
                 plan.declared_shapes(&mut named.tag, true)?;
+                plan.published_states(&mut named.tag)?;
+                plan.scaffolding_states(&mut named.tag)?;
+            } else if name == "worldgen/blocks/cached-support.nbt" {
+                plan.published_states(&mut named.tag)?;
             } else if name == "occlusion.nbt" {
                 plan.declared_shapes(&mut named.tag, false)?;
             } else if name == "worldgen/blocks/block-properties.nbt" {
@@ -3236,6 +3700,14 @@ fn used_path(root: &Path) -> PathBuf {
     root.with_extension("used")
 }
 
+/// In the roots folder: held while a root is checked, built or pruned there, and never deleted.
+const ROOTS_LOCK: &str = ".lock";
+
+/// Where the base really is: the root links into it, so the key and the links use this path.
+fn real_base(base: &Path) -> Result<PathBuf> {
+    Ok(fs::canonicalize(base).map_err(|e| format!("{}: {e}", base.display()))?)
+}
+
 /// Whether turning a content mod on or off can apply in a running game
 /// (docs/design/mod-hotload.md): its assets and data can, through the
 /// resource reload and the server's data reload. What a world numbers or
@@ -3306,7 +3778,12 @@ pub fn check_jars(root: &Path, jar_store: &Path) -> std::result::Result<(), JarI
 
 /// What a content root is built from: this build of the game, the base's
 /// manifest and the tables [`build`] rewrites, and every file of every mod
-/// in order. Files count by size and modification time, as build tools do.
+/// in order. The base's tables count by path, size and modification time (the
+/// root links into the base, so its real path belongs in the key). The
+/// game's build (its commit, else its executable's contents) and every mod
+/// file count by name and contents, not by where they sit, so identical
+/// copies in other folders share one root. A jar is
+/// named by its SHA-512 in `m.jars`, and counts only if it is in `jar_store`.
 fn stamp(
     base: &Path,
     jar_store: &Path,
@@ -3327,12 +3804,33 @@ fn stamp(
             modified.as_nanos()
         ))
     };
+    let hash = |path: &Path| -> Result<String> {
+        let mut hasher = Sha256::new();
+        let mut file = fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        std::io::copy(&mut file, &mut hasher).map_err(|e| format!("{}: {e}", path.display()))?;
+        Ok(format!("{:x}", hasher.finalize()))
+    };
+    // This build of the game: its commit when the build knows it, else the
+    // executable's contents (once per process, not on every stamp). Contents, not size and
+    // time: copies of one executable in other folders must share a root.
+    static EXE: std::sync::OnceLock<std::result::Result<String, String>> =
+        std::sync::OnceLock::new();
+    let exe = match crate::save::level_mods::build_commit() {
+        Some(commit) => commit.to_owned(),
+        None => EXE
+            .get_or_init(|| {
+                let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+                hash(&exe).map_err(|e| e.to_string())
+            })
+            .clone()?,
+    };
     let mut parts = vec![
-        "sunrise mod content 7".to_owned(),
+        "sunrise mod content 8".to_owned(),
         serde_json::to_string(inventory)?,
     ];
-    parts.push(meta(&std::env::current_exe()?)?);
-    let base = std::path::absolute(base)?;
+    parts.push(exe);
+    // The root links into the base: where it really is, not how this folder reaches it.
+    let base = real_base(base)?;
     parts.push(
         String::from_utf8_lossy(&fs::read(base.join("sunrise-resources.json"))?).into_owned(),
     );
@@ -3344,8 +3842,13 @@ fn stamp(
     for m in mods {
         parts.push(m.id.clone());
         parts.push(format!("jars {}", serde_json::to_string(&m.jars)?));
+        // A jar's file is named by its SHA-512: only whether it is still in the
+        // store (and its size) counts, so a root isn't reused once one is gone.
         for jar in &m.jars {
-            parts.push(meta(&jar.cache_path(jar_store)).unwrap_or_else(|_| "not cached".into()));
+            parts.push(match fs::metadata(jar.cache_path(jar_store)) {
+                Ok(file) => format!("cached {}", file.len()),
+                Err(_) => "not cached".into(),
+            });
         }
         // What it declares, so blocks and items from code count too.
         parts.push(format!(
@@ -3357,10 +3860,10 @@ fn stamp(
             // Declared in code only: nothing to read.
         } else if source.is_dir() {
             for file in &m.content.files {
-                parts.push(meta(&source.join(file))?);
+                parts.push(format!("{file} {}", hash(&source.join(file))?));
             }
         } else {
-            parts.push(meta(source)?);
+            parts.push(hash(source)?);
         }
     }
     let mut hasher = Sha256::new();

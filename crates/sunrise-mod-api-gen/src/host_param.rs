@@ -9,13 +9,13 @@ pub(super) struct HostParam {
 }
 
 /// Whether the hook's host is a level host: a `GameLevel` method, or a hook marked
-/// `"host": "level"` whose receiver is another level (a hit's `HitLevel`).
+/// `"host": "level"` or `"host": "hit"` whose receiver is another level (a hit's `HitLevel`).
 pub(super) fn is_level(hook: &Hook) -> bool {
-    hook.host == Some(HostAccess::Level) || game_level(hook)
+    matches!(hook.host, Some(HostAccess::Level | HostAccess::Hit)) || game_level(hook)
 }
 
 fn game_level(hook: &Hook) -> bool {
-    hook.target.contains("::GameLevel<")
+    hook.target.contains("::GameLevel<") || hook.target.contains("::LevelView<")
 }
 
 /// Validate catalog access restrictions against the hook's receiver.
@@ -42,9 +42,15 @@ pub(super) fn validate(
             HostAccess::Level
                 if !game_level(hook)
                     && !ticks
-                    && (hook.side == Side::Server && mutable == Some(true)
+                    && (hook.side == Side::Server && mutable.is_some()
                         || hook.side == Side::Both && mutable == Some(false)) => {}
-            HostAccess::Read | HostAccess::Level => {
+            // A hit's capability is the server hit's: a both-side hit's host only reads.
+            HostAccess::Hit
+                if !game_level(hook)
+                    && !ticks
+                    && hook.side == Side::Server
+                    && mutable == Some(true) => {}
+            HostAccess::Read | HostAccess::Level | HostAccess::Hit => {
                 return Err(format!("{name}: this entry takes no host marker"));
             }
         }
@@ -80,6 +86,7 @@ pub(super) fn context_param(
         PhaseContext::DataLoad => "LoadContext",
         PhaseContext::Loop => "LoopContext",
         PhaseContext::Worldgen => "OwningWorldgen",
+        PhaseContext::ChunkDisk => "OwningChunkDisk",
     };
     let valid = args.first().is_some_and(|(name, ty)| {
         name == "context"
@@ -99,6 +106,7 @@ pub(super) fn context_param(
             PhaseContext::DataLoad => "&dyn DataLoadContext",
             PhaseContext::Loop => "&dyn LoopContext",
             PhaseContext::Worldgen => "&dyn WorldgenHost",
+            PhaseContext::ChunkDisk => "&dyn ChunkDiskHost",
         }
         .into(),
         call: "context",
@@ -130,6 +138,12 @@ pub(super) fn host_param(hook: &Hook, mutable: Option<bool>, ticks: bool) -> Opt
                 call: "super::mod_api_host::level_side(self)",
             };
         }
+        if hook.host == Some(HostAccess::Hit) {
+            return HostParam {
+                ty: "&mut dyn HitHost".into(),
+                call: "self",
+            };
+        }
         let kind = if is_level {
             match (mutable, ticks) {
                 (true, true) => "LevelWriteHost",
@@ -148,7 +162,7 @@ pub(super) fn host_param(hook: &Hook, mutable: Option<bool>, ticks: bool) -> Opt
         HostParam {
             ty: format!("&{mutable}dyn {kind}"),
             call: if ticks {
-                "&mut super::mod_api_host::LevelTicks { level: self, ticks }"
+                "&mut super::mod_api_host::LevelTicks::new(self, ticks)"
             } else {
                 "self"
             },

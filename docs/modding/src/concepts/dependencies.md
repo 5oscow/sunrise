@@ -45,6 +45,6 @@ Public statics must use appropriate synchronization for shared and reentrant hoo
 another mod's hook object is not exposed.
 
 Hook listeners run in descending priority, then resolved dependency dispatch order, with dependency-order ties kept in bundle order. Mixin injection order remains
-sunrise-mixins' priority, mod ID, then injection ID for source splices. Function-slot listeners
+horizon-mixins' priority, mod ID, then injection ID for source splices. Function-slot listeners
 instead use descending priority, dependency/registration order, then injection ID within a mod;
 call-site listeners retain mod-ID tie ordering.

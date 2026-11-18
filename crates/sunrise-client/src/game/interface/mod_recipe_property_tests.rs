@@ -62,8 +62,7 @@ mod tests {
                         0,
                         stack,
                         sunrise_client::menu::SlotContext::default(),
-                        true,
-                        64,
+                        (true, true, 64),
                         64,
                     )
                     .0

@@ -85,6 +85,44 @@ mod customize_boss_event_progress_tests {
             .collect()
     }
 
+    #[test]
+    #[ignore = "daily"]
+    fn an_unconvertible_boss_bar_keeps_vanilla_draws_without_dispatch() {
+        super::super::super::native_entity_refs::tests::with_game(|game| {
+            let name = Tag::compound([
+                ("object", Tag::String("player".into())),
+                ("player", Tag::String("abcdefghijklmnopq".into())),
+            ]);
+            game.boss_overlay.apply(
+                &BossEvent {
+                    id: 1,
+                    action: BossAction::Add {
+                        name,
+                        progress: 1.0,
+                        color: 0,
+                        overlay: 0,
+                        darken: false,
+                        music: false,
+                        fog: false,
+                    },
+                },
+                0,
+            );
+            let vanilla = game.boss_bar_draws(480, 270);
+            assert!(!backgrounds(&vanilla).is_empty());
+            let seen = Seen::default();
+            let mods = vec![ModEntry::new(
+                "rearrange",
+                Box::new(Rearrange(Arc::clone(&seen))),
+            )]
+            .into();
+            with_mods(mods, || {
+                assert_eq!(game.boss_bar_draws(480, 270), vanilla);
+                assert!(seen.lock().unwrap().is_empty());
+            });
+        });
+    }
+
     /// `CustomizeGuiOverlayEvent.BossEventProgress`: with no mod the bars sit 19 pixels apart from
     /// y = 12; a mod hears each bar at vanilla's place, and hides one, spaces the next and moves
     /// another without touching the rest.

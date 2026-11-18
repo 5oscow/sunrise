@@ -10,7 +10,6 @@ use sunrise_world::registry::BlockStateId;
 pub struct NativeClientHooks {
     pub menu_still_valid: fn(&LoopContext, u128, &str, [i32; 3], [f64; 3], &mut bool),
     pub menu_still_valid_listens: fn(&str) -> bool,
-    pub item_stacked_on_other: fn(&LoopContext, &mut crate::menu::StackedOnOther<'_>, &mut bool),
     pub living_heal: fn(&LoopContext, u32, &mut f32, &mut bool),
     pub living_breathe: fn(&LoopContext, u32, &str, &mut bool, &mut i32, &mut i32),
     pub farmland_trample: fn(&LoopContext, u32, [i32; 3], u32, f64, &mut bool),
@@ -19,7 +18,7 @@ pub struct NativeClientHooks {
     pub player_tab_list_name_format: fn(&LoopContext, u128, &str, &mut Option<crate::text::Text>),
     pub living_drown: fn(&LoopContext, u32, &str, &mut bool, &mut f32, &mut i32, &mut bool),
     pub living_fall: fn(&LoopContext, u32, &str, &mut f64, &mut f32, &mut bool),
-    pub living_jump: fn(&LoopContext, u32, &str),
+    pub living_jump: fn(&LoopContext, u32, &str, [f64; 3]),
     pub living_jump_power: fn(&LoopContext, u32, &str, &mut f32),
     pub living_speed: fn(&LoopContext, u32, &str, &mut f32),
     pub living_flying_speed: fn(&LoopContext, u32, &str, &mut f32),
@@ -29,6 +28,18 @@ pub struct NativeClientHooks {
     pub makes_open_trapdoor_above_climbable:
         fn(&LoopContext, BlockStateId, BlockPos, BlockStateId, &mut bool),
     pub friction: fn(&LoopContext, u32, &str, BlockPos, BlockStateId, &mut f32),
+    /// `BlockPart::collision_shape` of the state's block, for one collision query; `shape`
+    /// arrives `None` and leaves checked.
+    pub collision_shape: fn(
+        &LoopContext,
+        BlockPos,
+        BlockStateId,
+        &mod_api::CollisionQuery,
+        &mut Option<Vec<[f64; 6]>>,
+    ),
+    /// A part's answer to `collision_shape` was refused by the bounds: the game switches that
+    /// block's part off for the session and logs it once.
+    pub collision_shape_refused: fn(BlockStateId, &str),
     pub player_stays_on_ground_surface: fn(&LoopContext, u32, &mut bool),
     pub ender_entity_teleport: fn(&LoopContext, u32, &str, [f64; 3], &mut [f64; 3], &mut bool),
     pub fluid_flow: fn(&LoopContext, &str, BlockPos, &mut [f64; 3]),
@@ -81,16 +92,6 @@ pub(crate) fn menu_still_valid_listens(menu: &str) -> bool {
     HOOKS
         .get()
         .is_some_and(|hooks| (hooks.menu_still_valid_listens)(menu))
-}
-
-pub(crate) fn item_stacked_on_other(
-    context: &LoopContext,
-    event: &mut crate::menu::StackedOnOther<'_>,
-    canceled: &mut bool,
-) {
-    if let Some(hooks) = HOOKS.get() {
-        (hooks.item_stacked_on_other)(context, event, canceled);
-    }
 }
 
 pub(crate) fn living_heal(context: &LoopContext, entity: u32, amount: &mut f32, cancel: &mut bool) {
@@ -185,9 +186,9 @@ pub(crate) fn living_fall(
     }
 }
 
-pub(crate) fn living_jump(context: &LoopContext, entity: u32, kind: &str) {
+pub(crate) fn living_jump(context: &LoopContext, entity: u32, kind: &str, velocity: [f64; 3]) {
     if let Some(hooks) = HOOKS.get() {
-        (hooks.living_jump)(context, entity, kind);
+        (hooks.living_jump)(context, entity, kind, velocity);
     }
 }
 
@@ -255,6 +256,24 @@ pub(crate) fn friction(
 ) {
     if let Some(hooks) = HOOKS.get() {
         (hooks.friction)(context, entity, kind, pos, state, friction);
+    }
+}
+
+pub(crate) fn collision_shape(
+    context: &LoopContext,
+    pos: BlockPos,
+    state: BlockStateId,
+    query: &mod_api::CollisionQuery,
+    shape: &mut Option<Vec<[f64; 6]>>,
+) {
+    if let Some(hooks) = HOOKS.get() {
+        (hooks.collision_shape)(context, pos, state, query, shape);
+    }
+}
+
+pub(crate) fn collision_shape_refused(state: BlockStateId, error: &str) {
+    if let Some(hooks) = HOOKS.get() {
+        (hooks.collision_shape_refused)(state, error);
     }
 }
 

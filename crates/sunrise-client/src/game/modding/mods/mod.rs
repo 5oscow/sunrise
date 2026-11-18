@@ -2,7 +2,10 @@
 //! Mods in the game (`docs/modding/src/how-to/content-mods.md`): content mods' blocks, items, data and
 //! assets (`content_root`), and the Mods page's rows. Code mods are native (`native_hooks.rs`)
 //! or wasm (`sunrise-mod-wasm`, loaded at startup); any other executable file is refused.
-use super::{Game, execution_role::ExecutionRole, registration_capability_coverage as coverage};
+use super::{
+    Game, execution_role::ExecutionRole, owner_link::OwnerRequest,
+    registration_capability_coverage as coverage,
+};
 mod menu_books;
 mod standalone;
 use mod_api::__private::game::*;
@@ -80,6 +83,8 @@ pub(super) struct ModsState {
         Arc<std::sync::OnceLock<Result<crate::game::load_conditions::ConditionTable, String>>>,
     pub(super) profession_declarations:
         Arc<std::sync::OnceLock<Vec<(String, mod_api::ProfessionDefinition)>>>,
+    pub(super) loot_modifier_serializers:
+        Arc<std::sync::OnceLock<super::global_loot_modifiers::Serializers>>,
     /// Saved switches gate the first data inventory while registration keeps
     /// its existing startup ordering. Runtime dispatch owns later switches.
     pub(super) code_switches: Option<Arc<CodeSwitches>>,
@@ -544,7 +549,11 @@ fn register_special_model_renderers() {
     );
     super::native_special_renderers::register(
         kept.into_iter()
-            .filter_map(|kind| renderers.remove(&kind).map(|renderer| (kind, renderer)))
+            .filter_map(|kind| {
+                renderers
+                    .remove(&kind)
+                    .map(|(policy, renderer)| (kind, policy, renderer))
+            })
             .collect(),
     );
 }
@@ -684,6 +693,32 @@ pub(super) struct ContentOverlay {
     pub(super) content_mods: Vec<sunrise_client::save::level_mods::ModRecord>,
 }
 
+/// A package's primary namespace is not an alias another layer can acquire.
+fn refuse_primary_namespace_claims(
+    manifests: &[&sunrise_mod_package::Manifest],
+) -> sunrise_client::Result<()> {
+    let mut primary: std::collections::HashSet<&str> = manifests
+        .iter()
+        .map(|manifest| manifest.id.as_str())
+        .collect();
+    for id in mod_api::__private::installed_code_ids() {
+        primary.insert(id);
+    }
+    for manifest in manifests {
+        if let Some(namespace) = manifest
+            .namespaces
+            .iter()
+            .find(|ns| primary.contains(ns.as_str()))
+        {
+            return Err(format!(
+                "mod {} claims namespace {namespace}, which is the primary namespace of mod {namespace}",
+                manifest.id,
+            ).into());
+        }
+    }
+    Ok(())
+}
+
 /// Builds the content overlay: every enabled or dev content mod's files
 /// merged over `root`. Registration of what the mods declare is
 /// [`content_root`]'s step.
@@ -759,6 +794,7 @@ pub(super) fn content_overlay(
         })
         .collect();
     let manifests: Vec<_> = packages.iter().map(|source| source.manifest).collect();
+    refuse_primary_namespace_claims(&manifests)?;
     let overrides = sunrise_mod_package::dependencies::Overrides::read(&sources.overrides_dir)?;
     let resolution = sunrise_mod_package::dependencies::resolve_manifests(
         &manifests,
@@ -989,7 +1025,10 @@ mod particle_registry_reload_tests {
 /// The content root with everything the mods declare registered against the
 /// process: block entities, mob effects, entity and menu types, fluid looks,
 /// and the protocol's local mod list, each set once.
-pub(super) fn content_root(
+///
+/// `pub(in crate::game)`: the general entity tick's wasm tests
+/// (`game::entities::general::tick_tests`) build the fixture's game the same way.
+pub(in crate::game) fn content_root(
     root: &std::path::Path,
     sources: &ModsState,
 ) -> sunrise_client::Result<sunrise_assets::resource_source::ResourceRoot> {
@@ -1022,6 +1061,10 @@ pub(super) fn content_root(
         |id| sunrise_client_core::potions::effect(id).map(|def| def.index),
     )
     .map_err(|errors| errors.join("\n"))?;
+    mod_api::__private::validate_effect_part_owners(|id| {
+        sunrise_client_core::potions::effect(id)?.owner
+    })
+    .map_err(|errors| errors.join("\n"))?;
     let behavior: serde_json::Value =
         sunrise_world::json_file::read(&overlay.root.prepared().join("block-behaviours.json"))?;
     let fluids = behavior["fluids"]
@@ -1047,6 +1090,16 @@ pub(super) fn content_root(
     register_menu_types(&overlay.mods)?;
     register_iterated_registries(overlay.root.prepared())?;
     sunrise_client::mod_content::set_fluid_looks(&overlay.mods);
+    sunrise_client::mod_content::set_fluid_interactions(&overlay.mods);
+    // Freeze ownership with the startup registries, before preparing Parts. Pack and data
+    // reloads can change layers but cannot replace the registered blocks and block entity types.
+    mod_api::__private::install_content_owners(overlay.mods.iter().flat_map(|layer| {
+        layer
+            .content
+            .namespaces
+            .iter()
+            .map(|namespace| (namespace.as_str(), layer.id.as_str()))
+    }));
     Ok(overlay.root)
 }
 
@@ -1228,24 +1281,33 @@ fn announced_entry(
 fn register_mob_effects(mods: &[sunrise_client::mod_content::ContentMod]) {
     use sunrise_client::brewing::{self, Category};
     use sunrise_mod_package::content::EffectCategory;
-    let effects = sunrise_client::mod_content::mob_effects(mods);
+    let mut effects: Vec<_> = mods
+        .iter()
+        .flat_map(|m| m.content.effects.iter().map(move |effect| (&m.id, effect)))
+        .collect();
+    effects.sort_by(|(_, a), (_, b)| a.id.cmp(&b.id));
     if effects.is_empty() {
         return;
     }
-    let ids: Vec<String> = effects.iter().map(|e| e.id.clone()).collect();
-    let set = brewing::register_mod_effects(effects.into_iter().map(|e| {
+    let ids: Vec<_> = effects
+        .iter()
+        .map(|(owner, e)| (e.id.clone(), owner.to_string()))
+        .collect();
+    let set = brewing::register_mod_effects(effects.into_iter().map(|(owner, e)| {
         let category = match e.category {
             EffectCategory::Beneficial => Category::Beneficial,
             EffectCategory::Harmful => Category::Harmful,
             EffectCategory::Neutral => Category::Neutral,
         };
-        (e.id.clone(), e.color, category, e.sort_order)
+        (e.id.clone(), e.color, category, e.sort_order, owner.clone())
     }));
     if !set
         && brewing::mod_effects()
             .iter()
-            .map(|e| e.id)
-            .ne(ids.iter().map(String::as_str))
+            .map(|e| (e.id, e.owner))
+            .ne(ids
+                .iter()
+                .map(|(id, owner)| (id.as_str(), Some(owner.as_str()))))
     {
         log::warn!("Sunrise: the mods' mob effects changed; restart the game to use them");
     }
@@ -1412,7 +1474,7 @@ fn not_built(
     let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)
         .map(|d| d.flatten().map(|e| e.path()).collect())
         .unwrap_or_default();
-    paths.retain(|p| p.extension().is_some_and(|e| e == "hmod"));
+    paths.retain(|p| p.extension().is_some_and(|e| e == "smod"));
     paths.sort();
     let mut out: Vec<Installed> = Vec::new();
     for path in paths {
@@ -1440,6 +1502,17 @@ pub(super) struct PreparedLoopContext {
     audio: Option<sunrise_world::native_load_context::LoopContext>,
     /// A server's context for the features it generates (`alter_ground`).
     worldgen: Option<sunrise_world::native_load_context::WorldgenContext>,
+}
+
+/// What a live content mod switch changes on the server (`Game::apply_mods_reload`).
+pub(super) struct ModsReload {
+    root: PathBuf,
+    data_source: sunrise_assets::resource_source::ResourceSource,
+    data_changes: sunrise_assets::resource_source::ResourceSource,
+    additional_data: Arc<[Arc<sunrise_client::datapack::DataPack>]>,
+    enabled: std::collections::BTreeSet<String>,
+    selected: Arc<[sunrise_mod_package::selection::SelectedPackage]>,
+    refused: Arc<Mutex<Vec<MissingJar>>>,
 }
 
 impl Game<'_> {
@@ -1689,42 +1762,45 @@ impl Game<'_> {
         if !applied {
             return;
         }
-        let root = self.options.resources.clone();
-        let data_source = self.pack.data_source.clone();
-        let data_changes = self.pack.data_changes.clone();
-        let additional_data = self.pack.additional_data.clone();
-        let enabled = self.applied_mods();
-        let selected = self.mods.selected.clone();
-        let refused = self.mods.refused.clone();
-        let reload = move |g: &mut Game<'_>| {
-            let at = std::time::Instant::now();
-            g.options.resources = root;
-            g.pack.data_source = data_source;
-            g.pack.data_changes = data_changes;
-            g.pack.additional_data = additional_data;
-            g.settings.mods.enabled = enabled.clone();
-            g.mods.applied = Some(enabled);
-            g.mods.selected = selected;
-            g.mods.refused = refused;
-            g.mods.data_switched = true;
-            if g.world_root.as_os_str().is_empty() {
-                return;
-            }
-            if let Err(error) = g.reload_datapacks(true, &g.level.enabled_features.clone()) {
-                log::warn!("Sunrise: content mods data reload failed: {error}");
-                return;
-            }
-            log::info!(
-                "Sunrise: content mods switched live: server data reloaded in {} ms",
-                at.elapsed().as_millis()
-            );
+        let reload = ModsReload {
+            root: self.options.resources.clone(),
+            data_source: self.pack.data_source.clone(),
+            data_changes: self.pack.data_changes.clone(),
+            additional_data: self.pack.additional_data.clone(),
+            enabled: self.applied_mods(),
+            selected: self.mods.selected.clone(),
+            refused: self.mods.refused.clone(),
         };
         log::info!("Sunrise: content mods switched live: resources reloaded in {resources_ms} ms");
         if let Some(server) = &self.integrated {
-            server.post(reload);
+            server.tell(OwnerRequest::ReloadMods(Box::new(reload)));
         } else if self.remote.is_none() {
-            reload(self);
+            self.apply_mods_reload(reload);
         }
+    }
+    /// The server's side of a live switch: the data packs reload from the new root.
+    pub(super) fn apply_mods_reload(&mut self, reload: ModsReload) {
+        let at = std::time::Instant::now();
+        self.options.resources = reload.root;
+        self.pack.data_source = reload.data_source;
+        self.pack.data_changes = reload.data_changes;
+        self.pack.additional_data = reload.additional_data;
+        self.settings.mods.enabled = reload.enabled.clone();
+        self.mods.applied = Some(reload.enabled);
+        self.mods.selected = reload.selected;
+        self.mods.refused = reload.refused;
+        self.mods.data_switched = true;
+        if self.world_root.as_os_str().is_empty() {
+            return;
+        }
+        if let Err(error) = self.reload_datapacks(true, &self.level.enabled_features.clone()) {
+            log::warn!("Sunrise: content mods data reload failed: {error}");
+            return;
+        }
+        log::info!(
+            "Sunrise: content mods switched live: server data reloaded in {} ms",
+            at.elapsed().as_millis()
+        );
     }
     /// Apply the player's switches at the canonical native and wasm dispatch boundary.
     pub(super) fn sync_native_switches(&self) {
@@ -2004,6 +2080,26 @@ mod tests {
     use sunrise_mod_package::runtime::Runtime;
 
     #[test]
+    fn a_package_cannot_claim_another_packages_primary_namespace() {
+        let manifest = |id, aliases| {
+            sunrise_mod_package::Manifest::parse(&format!(
+                "id='{id}'\nname='{id}'\nversion='1.0.0'\napi='0.2'\ncapabilities=['registries']\nnamespaces=[{aliases}]"
+            ))
+            .unwrap()
+        };
+        let owner = manifest("owner", "");
+        let claimant = manifest("claimant", "'owner'");
+        for layers in [[&owner, &claimant], [&claimant, &owner]] {
+            assert_eq!(
+                refuse_primary_namespace_claims(&layers)
+                    .unwrap_err()
+                    .to_string(),
+                "mod claimant claims namespace owner, which is the primary namespace of mod owner"
+            );
+        }
+    }
+
+    #[test]
     fn only_clients_collect_registered_keys() {
         let declared = [(
             "sample",
@@ -2041,7 +2137,7 @@ mod tests {
         fn runtime(&self) -> Runtime {
             let dir = self.0.join("compiled");
             let package = dir.join(mod_list::NATIVE_DIR).join("machine_sample");
-            let file = std::fs::File::open(self.0.join("machine_sample.hmod")).unwrap();
+            let file = std::fs::File::open(self.0.join("machine_sample.smod")).unwrap();
             zip::ZipArchive::new(file)
                 .unwrap()
                 .extract(&package)
@@ -2101,8 +2197,16 @@ mod tests {
             Mob::new(2, ghoul.clone(), at, 0.0),
         );
         assert_eq!(ghoul.health, 40.0);
-        let saved =
-            |m: &Mob| sunrise_client::entity_nbt::mob_to_nbt(m, [0, 0, 0, 2], None, None, |_| None);
+        let saved = |m: &Mob| {
+            sunrise_client::entity_nbt::mob_to_nbt(
+                m,
+                [0, 0, 0, 2],
+                None,
+                None,
+                |_| None,
+                &Default::default(),
+            )
+        };
         let keys = |tag: &sunrise_core::nbt::Tag| -> Vec<String> {
             let sunrise_core::nbt::Tag::Compound(map) = tag else {
                 panic!("a mob saves a compound");
@@ -2164,8 +2268,14 @@ mod tests {
                 Species::Parrot => pet.extra.variant = 2,
                 _ => pet.extra.color = if species == Species::Wolf { 14 } else { 3 },
             }
-            let tag =
-                sunrise_client::entity_nbt::mob_to_nbt(&pet, [0, 0, 0, 1], None, None, |_| None);
+            let tag = sunrise_client::entity_nbt::mob_to_nbt(
+                &pet,
+                [0, 0, 0, 1],
+                None,
+                None,
+                |_| None,
+                &Default::default(),
+            );
             let get = |key: &str| tag.get(key).cloned();
             assert_eq!(
                 get("id"),
@@ -2622,8 +2732,16 @@ mod tests {
         let trader = Mob::new(1, types["minecraft:wandering_trader"].clone(), at, 0.0);
         let merchant = Mob::new(2, merchant.clone(), at, 0.0);
         assert!(merchant.ai.goals.has("Float") && trader.ai.goals.has("Float"));
-        let saved =
-            |m: &Mob| sunrise_client::entity_nbt::mob_to_nbt(m, [0, 0, 0, 2], None, None, |_| None);
+        let saved = |m: &Mob| {
+            sunrise_client::entity_nbt::mob_to_nbt(
+                m,
+                [0, 0, 0, 2],
+                None,
+                None,
+                |_| None,
+                &Default::default(),
+            )
+        };
         let keys = |tag: &Tag| -> Vec<String> {
             let Tag::Compound(map) = tag else {
                 panic!("a mob saves a compound");
@@ -2754,7 +2872,7 @@ mod tests {
         );
     }
 
-    fn hmod(dir: &std::path::Path, id: &str) {
+    fn smod(dir: &std::path::Path, id: &str) {
         let manifest = format!(
             "id = '{id}'\nname = '{id}'\nversion = '0.3.0'\napi = '0.2'\nside = 'both'\ncapabilities = ['registries']\n[native]\ngame = '26.3'\nsunrise = '{}'\nmixins = '{}'\n",
             "a".repeat(40),
@@ -2768,7 +2886,7 @@ mod tests {
             ("src/lib.rs", b"pub fn hooks() {}"),
         ];
         let bytes = sunrise_mod_package::Package::write_files(&manifest, files).unwrap();
-        std::fs::write(dir.join(format!("{id}.hmod")), bytes).unwrap();
+        std::fs::write(dir.join(format!("{id}.smod")), bytes).unwrap();
     }
 
     #[test]
@@ -2917,7 +3035,7 @@ mod tests {
             return;
         }
         let f = Fixture::new(mode.as_deref().unwrap());
-        hmod(&f.0, "machine_sample");
+        smod(&f.0, "machine_sample");
         let native = if mode.as_deref() == Some("compiled") {
             f.runtime()
         } else {
@@ -2926,10 +3044,10 @@ mod tests {
         let here = f.0.join("unrelated-game");
         let misplaced = here.join(mod_list::NATIVE_DIR);
         std::fs::create_dir_all(&misplaced).unwrap();
-        hmod(&misplaced, "machine_sample");
+        smod(&misplaced, "machine_sample");
         let manifest = "id='plain'\nname='Plain'\nversion='1.0.0'\napi='0.2'\nside='both'\ncapabilities=['registries']\n";
         let plain = sunrise_mod_package::Package::write_files(manifest, &[]).unwrap();
-        std::fs::write(misplaced.join("plain.hmod"), plain).unwrap();
+        std::fs::write(misplaced.join("plain.smod"), plain).unwrap();
         let base = f.0.join("resources");
         std::fs::create_dir_all(&base).unwrap();
         // A prepared root's registry report: block entity registration reads it (B1).
@@ -3014,7 +3132,7 @@ mod tests {
                 &[]
             };
             std::fs::write(
-                f.0.join(format!("{id}.hmod")),
+                f.0.join(format!("{id}.smod")),
                 sunrise_mod_package::Package::write_files(&text, code).unwrap(),
             )
             .unwrap();
@@ -3023,7 +3141,7 @@ mod tests {
             ["alpha", "beta", "gamma"]
                 .into_iter()
                 .map(|id| {
-                    let path = f.0.join(format!("{id}.hmod"));
+                    let path = f.0.join(format!("{id}.smod"));
                     sunrise_mod_package::selection::SelectedPackage {
                         package: sunrise_mod_package::Package::read(&path).unwrap(),
                         path,
@@ -3108,10 +3226,10 @@ mod tests {
     fn native_mods_installed_but_not_built_get_a_row_saying_so() {
         let f = Fixture::new("not-built");
         for id in ["veinminer", "zoom", "minimap", "machine_sample"] {
-            hmod(&f.0, id);
+            smod(&f.0, id);
         }
         std::fs::write(f.0.join("notes.txt"), "not a mod").unwrap();
-        std::fs::write(f.0.join("broken.hmod"), "not a zip").unwrap();
+        std::fs::write(f.0.join("broken.smod"), "not a zip").unwrap();
         let rows = not_built(&f.0, &[], &[]);
         let ids: Vec<_> = rows.iter().map(|r| r.id.as_str()).collect();
         assert_eq!(ids, ["machine_sample", "minimap", "veinminer", "zoom"]);
@@ -3155,7 +3273,8 @@ mod tests {
             "test:effect".to_owned(),
             0,
             brewing::Category::Neutral,
-            None
+            None,
+            "test-potions".into()
         )]));
     }
 }

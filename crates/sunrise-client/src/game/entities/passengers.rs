@@ -143,7 +143,8 @@ impl Game<'_> {
                     || tnts.contains(&v)
                     || cushions.contains(&v)
                     || self.seat(v).is_some()
-                    || index.get(&v).is_some_and(|&j| !self.mobs[j].removed));
+                    || index.get(&v).is_some_and(|&j| !self.mobs[j].removed)
+                    || self.player_vehicle(v).is_some());
             if valid {
                 let place = (self.mobs[i].extra.vehicle_order, self.mobs[i].id);
                 riding
@@ -177,7 +178,8 @@ impl Game<'_> {
                         || self.cart_object(v).is_some()
                         || self.cushions.iter().any(|c| c.id == v)
                         || self.tnts.iter().any(|t| t.id == v && v != 0)
-                        || self.seat(v).is_some());
+                        || self.seat(v).is_some()
+                        || self.player_vehicle(v).is_some());
                 (!valid).then_some((m.id, v))
             })
             .collect();
@@ -236,7 +238,7 @@ impl Game<'_> {
     /// `Entity.positionRider` for every mob passenger: in its boat, then on
     /// its mob. A server's client places them itself too, as the server sends
     /// no passenger's position.
-    pub(super) fn position_riders(&mut self) {
+    pub(in crate::game) fn position_riders(&mut self) {
         let blocked = self.mobs_below_off_level();
         // Every vehicle's riders in one pass over the mobs, not one pass per
         // boat, minecart and primed TNT. Seating moves the riders but changes
@@ -278,6 +280,10 @@ impl Game<'_> {
                     if self.seats_own_riders(v) {
                         continue;
                     }
+                    // A mob a mod seated on a server player (`native_ride_player.rs`).
+                    if self.seat_player_passenger(i, v) {
+                        continue;
+                    }
                     // A mob on a text display: NPC plugins seat their sitting
                     // NPCs on one. The server's position for a passenger
                     // gives way to its seat, as `rideTick` places it.
@@ -307,7 +313,10 @@ impl Game<'_> {
                     // EntityType.TEXT_DISPLAY's box is a point at the seat.
                     let seat = Vec3::new(at.x, at.y, at.z);
                     m.seated(v, offset, Aabb::new(seat, seat));
-                    m.position = Vec3::new(at.x, at.y - offset, at.z);
+                    sunrise_client::mobs::living::teleports::set_pos(
+                        m,
+                        Vec3::new(at.x, at.y - offset, at.z),
+                    );
                     m.previous = Vec3::new(before.x, before.y - offset, before.z);
                     m.velocity = Vec3::ZERO;
                     m.fall_distance = 0.0;
@@ -397,7 +406,10 @@ impl Game<'_> {
                 let m = &mut self.mobs[i];
                 let offset = riders::vehicle_attachment(m, vehicle_width);
                 m.seated(v, offset, vehicle_box);
-                m.position = riders::seat(attach, offset, pos, yaw);
+                sunrise_client::mobs::living::teleports::set_pos(
+                    m,
+                    riders::seat(attach, offset, pos, yaw),
+                );
                 m.previous = riders::seat(attach, offset, prev, prev_yaw);
                 m.velocity = Vec3::ZERO;
                 m.fall_distance = 0.0;
@@ -555,7 +567,17 @@ impl Game<'_> {
             .map(|&j| &self.mobs[j])
             .or_else(|| self.mobs.iter().find(|m| m.id == vehicle))
         {
-            let at = riders::seat(riders::passenger_attachment(v), 0.0, v.position, v.yaw);
+            // Another player: the top of its box for the pose its server synced.
+            let attachment = if &*v.kind.id == "minecraft:player" {
+                [
+                    0.0,
+                    player_box_top(v.extra.synced_pose, riders::scale(v)),
+                    0.0,
+                ]
+            } else {
+                riders::passenger_attachment(v)
+            };
+            let at = riders::seat(attachment, 0.0, v.position, v.yaw);
             return Some(glam::DVec3::new(at.x, at.y, at.z));
         }
         if let Some(d) = self.text_displays.get(&(vehicle as i32)) {
@@ -613,6 +635,9 @@ impl Game<'_> {
         };
         let lift = if kind == "minecraft:area_effect_cloud" {
             0.5
+        } else if kind == "minecraft:player" {
+            // A player this client has no copy of yet, so no synced pose: standing.
+            player_box_top(0, 1.0)
         } else {
             0.0
         };
@@ -730,6 +755,47 @@ impl Game<'_> {
             self.enchant_item(id, slot, special);
         }
         Some(id)
+    }
+}
+
+/// `Player`'s passenger attachment for synced pose `pose` (the `Pose` id): the top of its box
+/// in `Player.POSES` (`EntityDimensions.scale`, in floats), at the player's scale. Poses it has
+/// no box for stand (`getOrDefault(pose, STANDING_DIMENSIONS)`).
+fn player_box_top(pose: u8, scale: f64) -> f64 {
+    let height: f32 = match pose {
+        // FALL_FLYING, SWIMMING, SPIN_ATTACK: 0.6 x 0.6.
+        1 | 3 | 4 => 0.6,
+        // SLEEPING and DYING: 0.2 x 0.2.
+        2 | 7 => 0.2,
+        // CROUCHING: 0.6 x 1.5.
+        5 => 1.5,
+        _ => 1.8,
+    };
+    f64::from(height * scale as f32)
+}
+
+#[cfg(test)]
+mod player_seat_tests {
+    #[test]
+    fn another_players_passengers_sit_on_its_box_for_its_pose() {
+        // Player.POSES heights as floats widened to doubles: standing 1.8, crouching 1.5,
+        // swimming 0.6.
+        assert_eq!(super::player_box_top(0, 1.0), 1.7999999523162842);
+        assert_eq!(super::player_box_top(5, 1.0), 1.5);
+        assert_eq!(super::player_box_top(3, 1.0), 0.6000000238418579);
+        assert_eq!(super::player_box_top(1, 1.0), 0.6000000238418579, "gliding");
+        assert_eq!(super::player_box_top(4, 1.0), 0.6000000238418579, "riptide");
+        assert_eq!(
+            super::player_box_top(2, 1.0),
+            0.20000000298023224,
+            "sleeping"
+        );
+        assert_eq!(
+            super::player_box_top(12, 1.0),
+            1.7999999523162842,
+            "a pose with no box stands"
+        );
+        assert_eq!(super::player_box_top(5, 2.0), 3.0, "scaled with the player");
     }
 }
 
@@ -1596,23 +1662,12 @@ mod nested_vehicle_discard_tests {
         sync: false,
     };
 
-    fn bind_vehicle_test_attachment(game: &mut Game<'_>, cart: bool) {
+    fn set_vehicle_test_attachment(game: &mut Game<'_>) {
+        // The real store path binds the resident owner's registration. Rebinding
+        // it manually would replace that lifetime before removal is exercised.
         VEHICLE_VALUE
             .set(game, mod_api::Holder::Entity(71), 37)
             .unwrap();
-        let entity = game.entity(71).unwrap();
-        let index = game.attachment_indexes[&game.dim].clone();
-        let holder = mod_api::AttachmentHolder::Entity(entity);
-        let values = game.entity_attachments.get_mut(&71).unwrap();
-        if cart {
-            game.carts.update(0, |owner| {
-                owner.attachment_lifetime.bind(values, &index, holder)
-            });
-        } else {
-            game.boats.update(0, |owner| {
-                owner.attachment_lifetime.bind(values, &index, holder)
-            });
-        }
     }
 
     fn assert_vehicle_queries_hidden(host: &mut dyn mod_api::ServerHost, kind: &str) {
@@ -1645,6 +1700,7 @@ mod nested_vehicle_discard_tests {
         );
         assert_eq!(
             host.attachment_query("vehicle_boundary", "value")
+                .unwrap()
                 .query(&VEHICLE_VALUE)
                 .unwrap()
                 .iter()
@@ -1662,6 +1718,16 @@ mod nested_vehicle_discard_tests {
     }
     #[mod_api::__subscriptions]
     impl mod_api::Hooks for RemovalBoundaryObserver {
+        fn register(
+            &self,
+            registrar: &mut dyn mod_api::Registrar,
+            _: &mod_api::RegistrationContext,
+        ) {
+            registrar
+                .register_attachment_type("vehicle_boundary:value", false)
+                .unwrap();
+        }
+
         fn entity_mount(
             &self,
             host: &mut dyn mod_api::ServerHost,
@@ -1675,7 +1741,12 @@ mod nested_vehicle_discard_tests {
                 let level = host.level("minecraft:overworld").unwrap();
                 let removed = mod_api::EntityRef::new(level.epoch(), 71);
                 assert!(removed.position(host).is_none());
-                assert!(!host.entity(73).unwrap().start_riding(host, removed, true));
+                assert!(
+                    host.entity(73)
+                        .unwrap()
+                        .start_riding(host, removed, true)
+                        .is_err()
+                );
                 if self.cancel.load(Ordering::Relaxed) {
                     return mod_api::Flow::Cancel;
                 }
@@ -1720,7 +1791,7 @@ mod nested_vehicle_discard_tests {
             let leaves = Arc::new(AtomicUsize::new(0));
             let destroys = Arc::new(AtomicUsize::new(0));
             let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
-                "removal_boundary",
+                "vehicle_boundary",
                 Box::new(RemovalBoundaryObserver {
                     kind,
                     cancel: cancel.clone(),
@@ -1740,7 +1811,7 @@ mod nested_vehicle_discard_tests {
                         game.carts
                             .update(0, |cart| cart.kind = super::super::minecarts::CartKind::Tnt);
                     }
-                    bind_vehicle_test_attachment(game, cart);
+                    set_vehicle_test_attachment(game);
                     let vehicle = game.entity(71).unwrap();
                     let uuid = [160, 0, 0, 71];
                     let holder = sunrise_client::save::uuid_text(uuid);
@@ -1958,6 +2029,16 @@ mod nested_vehicle_discard_tests {
     }
     #[mod_api::__subscriptions]
     impl mod_api::Hooks for ObserveDestroyedVehicle {
+        fn register(
+            &self,
+            registrar: &mut dyn mod_api::Registrar,
+            _: &mod_api::RegistrationContext,
+        ) {
+            registrar
+                .register_attachment_type("vehicle_boundary:value", false)
+                .unwrap();
+        }
+
         fn entity_mount(
             &self,
             host: &mut dyn mod_api::ServerHost,
@@ -1970,7 +2051,7 @@ mod nested_vehicle_discard_tests {
                     "execute if entity @e[type=minecraft:{}]",
                     self.kind
                 )));
-                let batch = host.attachment_query("vehicle_boundary", "value");
+                let batch = host.attachment_query("vehicle_boundary", "value").unwrap();
                 assert_eq!(batch.query(&VEHICLE_VALUE).unwrap().iter().count(), 0);
                 return mod_api::Flow::Cancel;
             }
@@ -1985,7 +2066,7 @@ mod nested_vehicle_discard_tests {
             let calls = Arc::new(AtomicUsize::new(0));
             let kind = if cart { "minecart" } else { "oak_boat" };
             let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
-                "observe_destroyed_vehicle",
+                "vehicle_boundary",
                 Box::new(ObserveDestroyedVehicle {
                     kind,
                     calls: calls.clone(),
@@ -1998,9 +2079,10 @@ mod nested_vehicle_discard_tests {
                     game.native_level_opened(super::super::Dim::Overworld);
                     game.build_registries();
                     game.set_allow_commands(true);
-                    bind_vehicle_test_attachment(game, cart);
+                    set_vehicle_test_attachment(game);
                     assert_eq!(
                         game.attachment_query("vehicle_boundary", "value")
+                            .unwrap()
                             .query(&VEHICLE_VALUE)
                             .unwrap()
                             .iter()
@@ -2048,8 +2130,8 @@ mod nested_vehicle_discard_tests {
                     let kind = if cart { "minecart" } else { "oak_boat" };
                     let command = format!("execute if entity @e[type=minecraft:{kind}]");
                     assert!(game.run_command(&command));
-                    bind_vehicle_test_attachment(game, cart);
-                    let batch = game.attachment_query("vehicle_boundary", "value");
+                    set_vehicle_test_attachment(game);
+                    let batch = game.attachment_query("vehicle_boundary", "value").unwrap();
                     assert_eq!(batch.query(&VEHICLE_VALUE).unwrap().iter().count(), 1);
                     let vehicle = game.entity(71).unwrap();
                     if cart {
@@ -2068,7 +2150,7 @@ mod nested_vehicle_discard_tests {
                     assert!(game.native_entity_target(vehicle).is_none());
                     assert!(game.entity_passengers(vehicle).is_none());
                     assert!(!game.run_command(&command));
-                    let batch = game.attachment_query("vehicle_boundary", "value");
+                    let batch = game.attachment_query("vehicle_boundary", "value").unwrap();
                     assert_eq!(batch.query(&VEHICLE_VALUE).unwrap().iter().count(), 0);
                 });
             });
@@ -2343,7 +2425,7 @@ mod nested_vehicle_discard_tests {
             if !event.mounting && event.entity == 72 {
                 let later = host.entity(73).unwrap();
                 let replacement = host.entity(74).unwrap();
-                assert!(later.start_riding(host, replacement, true));
+                assert!(later.start_riding(host, replacement, true).is_ok());
                 return mod_api::Flow::Cancel;
             }
             mod_api::Flow::Continue
@@ -2491,7 +2573,7 @@ mod nested_vehicle_discard_tests {
                 host.entity(71).unwrap().discard(host);
                 let rider = host.entity(72).unwrap();
                 let replacement = host.entity(74).unwrap();
-                assert!(rider.start_riding(host, replacement, true));
+                assert!(rider.start_riding(host, replacement, true).is_ok());
             }
             mod_api::Flow::Continue
         }

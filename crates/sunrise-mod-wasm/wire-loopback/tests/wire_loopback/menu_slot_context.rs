@@ -81,6 +81,7 @@ fn menu_slot_context_reads_the_same_through_the_wire() {
                 stack: &stack,
                 context,
                 may_place: true,
+                may_pickup: true,
                 max_stack: 64,
             };
             part.menu_slot_rules(&World, &mut event);

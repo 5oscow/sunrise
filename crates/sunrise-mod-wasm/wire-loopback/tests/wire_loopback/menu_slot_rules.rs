@@ -48,6 +48,7 @@ fn menu_slot_rules_answers_and_asks_match_native_through_the_wire() {
                         stack: &stack,
                         context: &MenuSlotContext::default(),
                         may_place,
+                        may_pickup: true,
                         max_stack,
                     };
                     part.menu_slot_rules(&World, &mut event);

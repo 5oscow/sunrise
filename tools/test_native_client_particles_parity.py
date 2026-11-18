@@ -22,8 +22,8 @@ except ImportError:
 
 SOURCES = [
     'crates/sunrise-client/src/game.rs',
-    'crates/sunrise-client/src/game/native_client_particles.rs',
-    'crates/sunrise-client/src/game/native_client_particles_fixture.rs',
+    'crates/sunrise-client/src/game/modding/native_client_particles.rs',
+    'crates/sunrise-client/src/game/modding/native_client_particles_fixture.rs',
     'crates/sunrise-client-render/src/particles.rs',
     'native-hooks.json',  # Stamping moves the helper here and consumes its fragment.
     'tools/test_native_client_particles_parity.py',
@@ -49,7 +49,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='hz-native-particles-') as scratch:
         # Declare fixture providers before the load-owned particle registry freezes.
         import zipfile
-        fixture_mod = Path(scratch) / 'fixture.hmod'
+        fixture_mod = Path(scratch) / 'fixture.smod'
         with zipfile.ZipFile(fixture_mod, 'w') as package:
             package.writestr('sunrise-mod.toml', 'id = "fixture"\nname = "Fixture"\nversion = "0.1.0"\napi = "0.2"\nside = "both"\ncapabilities = ["registries"]\n')
             for provider in ('encoded', 'spark'):

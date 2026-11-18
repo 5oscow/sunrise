@@ -35,6 +35,11 @@ impl Game<'_> {
                 ingredients,
                 result,
                 station,
+            }
+            | Display::Custom {
+                slots: ingredients,
+                result,
+                station,
             } => {
                 for slot in ingredients {
                     self.concretize_mod_book_slot(slot)?;

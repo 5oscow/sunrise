@@ -233,6 +233,10 @@ impl Game<'_> {
     }
 
     pub(super) fn native_lifecycle_world_ready(&mut self) {
+        // The saved scoreboard is there for the server-started hooks, before any tick.
+        if self.remote.is_none() {
+            self.load_scoreboard();
+        }
         if let Some(context) = self.native_lifecycle.world_open_ready() {
             self.native_server_started(context.authority == Authority::DedicatedServer);
         }

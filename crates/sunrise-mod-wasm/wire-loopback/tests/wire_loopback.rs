@@ -67,7 +67,7 @@ impl WasmHandler {
     fn belongs_to(&self, module: &WasmMod) -> bool {
         self.module.same_group(module)
     }
-    fn subscriptions(&self, owner: &'static str, id: u32) -> &'static [Option<mod_api::HookId>] {
+    fn subscriptions(&self, owner: &'static str, id: u64) -> &'static [Option<mod_api::HookId>] {
         let names = self
             .module
             .call(
@@ -97,7 +97,7 @@ impl WasmMod {
     fn call_payload<R>(
         &self,
         frame: boundary::Frame,
-        id: u32,
+        id: u64,
         handler: Option<Id>,
         encode: impl FnOnce(&mut Writer),
         decode: impl FnOnce(&mut Reader<'_>) -> Result<R, WireError>,
@@ -114,7 +114,7 @@ impl WasmMod {
         &self,
         _: CallClass,
         frame: boundary::Frame,
-        id: u32,
+        id: u64,
         handler: Option<Id>,
         encode: impl FnOnce(&mut Writer),
         decode: impl FnOnce(&mut Reader<'_>) -> Result<R, WireError>,
@@ -151,14 +151,22 @@ impl WasmMod {
             return None;
         }
         let bytes = unsafe { std::slice::from_raw_parts(at, len as usize) };
+        // Only the action returns an append buffer; the paired cadence answer stays intact.
+        let attack = if EFFECT_APPEND_ATTACK.get() != 0
+            && boundary::export_id("MobEffectPart", "apply_effect_tick") == Some(id)
+        {
+            EFFECT_APPEND_ATTACK.replace(0)
+        } else {
+            0
+        };
         let mut forged;
-        let bytes = if matches!(APPEND_ATTACK.get(), 1 | 2) {
+        let bytes = if matches!(attack, 1 | 2) {
             forged = bytes.to_vec();
             let at = forged
                 .windows(4)
                 .position(|b| b == 0x7fc01234u32.to_le_bytes())
                 .unwrap();
-            if APPEND_ATTACK.get() == 1 {
+            if attack == 1 {
                 forged[at..at + 4].copy_from_slice(&1.0f32.to_le_bytes());
             } else {
                 let count = u32::from_le_bytes(forged[at - 8..at - 4].try_into().unwrap());
@@ -169,7 +177,7 @@ impl WasmMod {
         } else {
             bytes
         };
-        let bytes = if self.corrupt || APPEND_ATTACK.get() == 3 {
+        let bytes = if self.corrupt || APPEND_ATTACK.get() == 3 || attack == 3 {
             &bytes[..bytes.len().saturating_sub(1)]
         } else {
             bytes
@@ -190,6 +198,15 @@ impl WasmMod {
 }
 struct Context;
 impl LoopContext for Context {
+    fn is_in_tag(&self, _: mod_api::ItemKey, _: mod_api::TagKey) -> Option<bool> {
+        None
+    }
+    fn item_count(&self, _: mod_api::TagKey) -> Option<usize> {
+        None
+    }
+    fn item_at(&self, _: mod_api::TagKey, _: usize) -> Option<mod_api::ItemKey> {
+        None
+    }
     fn side(&self) -> mod_api::LoopSide {
         mod_api::LoopSide::Server
     }
@@ -388,7 +405,7 @@ fn static_reply(
     }
     let bytes = out.into_bytes();
     guest::set_transport(Some(Rc::new(move |_, _| bytes.clone())));
-    let result = guest::host(0, guest::begin())
+    let result = guest::host_named("test", guest::begin())
         .take_static::<()>()
         .map(|(text, ())| text);
     guest::set_transport(None);
@@ -440,7 +457,7 @@ fn static_reply_definitions_are_checked_before_acknowledgement() {
         let bytes = out.into_bytes();
         guest::set_transport(Some(Rc::new(move |_, _| bytes.clone())));
         assert!(
-            guest::host(0, guest::begin())
+            guest::host_named("test", guest::begin())
                 .take_static::<bool>()
                 .is_err()
         );
@@ -715,47 +732,78 @@ fn wire_loopback_checked_append_is_atomic_and_bit_exact() {
     mod_api::__private::initialize().unwrap();
     let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     use mod_api::EffectTickChange;
+    struct TickOwner;
+    #[mod_api::__subscriptions]
+    impl Hooks for TickOwner {
+        fn register(
+            &self,
+            registrar: &mut dyn mod_api::Registrar,
+            _: &mod_api::RegistrationContext,
+        ) {
+            let effect = registrar.effect_key("wire_test:tick");
+            REGISTERED_EFFECT.set(Some(effect));
+            let handler = WasmHandler {
+                index: guest::add_handler(vec![guest::view::<dyn mod_api::MobEffectPart>(
+                    Arc::new(apply_effect_tick_hook::ApplyEffectTickHooks),
+                )]),
+                module: WasmMod {
+                    group: 0,
+                    subscribed: &[],
+                    listeners: &[],
+                    corrupt: false,
+                },
+            };
+            registrar.mob_effect_part(&effect, handler).unwrap();
+        }
+    }
     struct World;
     impl mod_api::Host for World {}
     mod_api::impl_host_areas!(World);
-    let mods = [mod_api::ModEntry::new(
-        "wire_test",
-        Box::new(WasmMod {
-            group: 0,
-            subscribed: &[Some(mod_api::HookId::ApplyEffectTick)],
-            listeners: &[],
-            corrupt: false,
-        }),
-    )];
+    let mods = [mod_api::ModEntry::new("wire_test", Box::new(TickOwner))];
     mod_api::__private::install_parts(
         &mods,
         &mod_api::__private::part_tests::rule_schema(),
         |_| false,
     )
     .unwrap();
+    mod_api::__private::resolve_effects(["wire_test:tick"], |_| Some(0)).unwrap();
     let holder = mod_api::LivingRef::new(mod_api::EntityRef::new(mod_api::WorldEpoch::new(1), 7));
     mod_api::testing::with_mods(Arc::from(mods), || {
-        for attack in [0, 1, 2, 3] {
-            APPEND_ATTACK.set(attack);
+        let effect = REGISTERED_EFFECT.get().unwrap();
+        let active_effects = [effect];
+        for (ticks, attack) in [(1, 0), (2, 0), (2, 1), (2, 2), (2, 3)] {
+            EFFECT_APPEND_ATTACK.set(attack);
             let mut changes = vec![EffectTickChange::Heal(f32::from_bits(0x7fc01234))];
             let mut keep = true;
-            mod_api::dispatch_apply_effect_tick(
+            mod_api::__private::dispatch_mob_effect_tick(
                 &World,
-                mod_api::__private::ApplyEffectTickCall {
-                    effect: REGISTERED_EFFECT.get().unwrap(),
+                ticks,
+                effect,
+                0,
+                |effect, amplifier| mod_api::__private::ApplyEffectTickCall {
+                    effect,
                     dimension: "test:world",
                     entity: Some(7),
-                    amplifier: 0,
+                    amplifier,
                     holder,
                     health: 10.,
                     max_health: 20.,
                     food: None,
+                    active_effects: &active_effects,
                     changes: &mut changes,
                     keep: &mut keep,
                 },
             );
+            assert_eq!(
+                EFFECT_APPEND_ATTACK.get(),
+                0,
+                "the action response must be forged"
+            );
             assert!(matches!(changes[0], EffectTickChange::Heal(v) if v.to_bits() == 0x7fc01234));
-            if attack == 0 {
+            if ticks == 1 {
+                assert!(keep, "a false guest cadence must not run the action");
+                assert_eq!(changes.len(), 1);
+            } else if attack == 0 {
                 assert!(!keep);
                 assert_eq!(
                     &changes[1..],
@@ -774,7 +822,6 @@ fn wire_loopback_checked_append_is_atomic_and_bit_exact() {
                 assert_eq!(changes.len(), 1);
             }
         }
-        APPEND_ATTACK.set(0);
     });
 }
 #[test]
@@ -940,39 +987,6 @@ fn wire_loopback_item_toss_carries_the_item_entity_and_its_cancel() {
     assert!(
         matches!(flow, mod_api::Flow::Cancel),
         "the guest's cancel comes back"
-    );
-}
-#[test]
-fn wire_loopback_item_picked_up_partial_carries_the_original_and_writes_back_the_remainder() {
-    mod_api::__private::initialize().unwrap();
-    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
-    struct World;
-    impl mod_api::Host for World {}
-    mod_api::impl_host_areas!(World);
-    impl mod_api::ServerHost for World {}
-    mod_api::impl_server_host_areas!(World);
-    install_counter();
-    let module = WasmMod {
-        group: 0,
-        subscribed: &[],
-        listeners: &[],
-        corrupt: false,
-    };
-    let original = mod_api::ItemStack::new(REGISTERED_ITEM.get().unwrap(), 8).unwrap();
-    let mut remaining = Some(mod_api::ItemStack::new(REGISTERED_ITEM.get().unwrap(), 3).unwrap());
-    let mut event = mod_api::ItemPickedUpPartialEvent {
-        player: 0x1234_5678_9abc_def0_1234_5678_9abc_def0,
-        original: &original,
-        remaining: &mut remaining,
-    };
-    module.item_picked_up_partial(&mut World, &mut event);
-    assert_eq!(
-        PICKED_UP_PARTIAL.get(),
-        Some((0x1234_5678_9abc_def0_1234_5678_9abc_def0, 8, Some(3)))
-    );
-    assert!(
-        remaining.is_none(),
-        "the remainder a guest empties comes back"
     );
 }
 #[test]
@@ -1144,49 +1158,15 @@ fn wire_loopback_item_fished_edits_catch() {
     assert!(!event.cancelled);
     assert_eq!(drops, vec![mod_api::ItemStack::new(key, 2).unwrap()]);
 }
-#[test]
-fn wire_loopback_nested_tuple_reference_writes_back() {
-    mod_api::__private::initialize().unwrap();
-    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
-    let module = WasmMod {
-        subscribed: &[],
-        listeners: &[],
-        group: 0,
-        corrupt: false,
-    };
-    install_counter();
-    let mut carried = Some(mod_api::ItemStack::new(REGISTERED_ITEM.get().unwrap(), 1).unwrap());
-    let mut clicked = guest::Guest;
-    let mut stack = mod_api::StackedOnOther {
-        player: None,
-        player_entity_id: None,
-        slot: 0,
-        container: 0,
-        container_slot: 0,
-        primary: true,
-        carried: mod_api::item::menu::CarriedAccess(&mut carried),
-        clicked: &mut clicked,
-        cancellation_result: false,
-    };
-    module.item_stacked_on_other(
-        &Context,
-        &mut mod_api::ItemStackedOnOtherEvent {
-            event: &mut stack,
-            cancelled: false,
-        },
-    );
-    assert!(stack.carried.0.is_none());
-    assert!(stack.cancellation_result);
-}
 thread_local! {
     static REGISTERED_ITEM:std::cell::Cell<Option<mod_api::ItemKey>> = const {std::cell::Cell::new(None)};
     static REGISTERED_BLOCK:std::cell::Cell<Option<mod_api::BlockKey>> = const {std::cell::Cell::new(None)};
     static REGISTERED_EFFECT:std::cell::Cell<Option<mod_api::EffectKey>> = const {std::cell::Cell::new(None)};
     static APPEND_ATTACK:std::cell::Cell<u8> = const {std::cell::Cell::new(0)};
+    static EFFECT_APPEND_ATTACK: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
     static REGISTERED_KIND:std::cell::Cell<Option<mod_api::BlockEntityTypeKey>> = const {std::cell::Cell::new(None)};
     static PICKED_UP_POST: std::cell::Cell<Option<(u128, u32, u32, Option<u32>)>> = const { std::cell::Cell::new(None) };
     static TOSSED: std::cell::Cell<Option<(u128, u32)>> = const { std::cell::Cell::new(None) };
-    static PICKED_UP_PARTIAL: std::cell::Cell<Option<(u128, u32, Option<u32>)>> = const { std::cell::Cell::new(None) };
 }
 fn install_counter() {
     let mods = [mod_api::ModEntry::new(
@@ -1311,7 +1291,7 @@ fn wire_loopback_returned_frame_resource_uses_source_permissions() {
     struct Start {
         draws: i64,
     }
-    impl mod_api::StructureRandom for Start {
+    impl mod_api::RandomSource for Start {
         fn next_long(&mut self) -> i64 {
             self.draws += 1;
             41 + self.draws
@@ -1328,12 +1308,18 @@ fn wire_loopback_returned_frame_resource_uses_source_permissions() {
         fn next_boolean(&mut self) -> bool {
             unreachable!()
         }
+        fn next_int(&mut self) -> i32 {
+            unreachable!()
+        }
+        fn next_gaussian(&mut self) -> f64 {
+            unreachable!()
+        }
     }
     impl mod_api::GenerationContext for Start {
         fn metadata(&self) -> &dyn mod_api::BlockMetadata {
             unreachable!()
         }
-        fn random(&mut self) -> &mut dyn mod_api::StructureRandom {
+        fn random(&mut self) -> &mut dyn mod_api::RandomSource {
             self
         }
         fn chunk(&self) -> mod_api::ChunkPos {
@@ -1376,7 +1362,7 @@ fn wire_loopback_returned_frame_resource_uses_source_permissions() {
     frame.set_generation_context_mut(&mut start);
     cx.frames.push(frame);
     let mut out = Writer::new();
-    let id = boundary::import_id("StructureRandom", "next_long").unwrap();
+    let id = boundary::import_id("RandomSource", "next_long").unwrap();
     unsafe { boundary::serve(id, &mut cx, &[], &mut out) }.unwrap();
     assert_eq!(Reader::decode::<i64>(out.bytes()).unwrap(), 42);
     assert_eq!(start.draws, 1);
@@ -1535,10 +1521,10 @@ fn wire_loopback_provider_queries_return_owned_options_and_atomic_cursor_writeba
     let corrupt = Rc::new(std::cell::Cell::new(false));
     let flag = corrupt.clone();
     guest::set_transport(Some(Rc::new(move |id, bytes| {
-        if id == mod_api::wire::HOST_LOG {
+        if id.starts_with("protocol:log#") {
             return Vec::new();
         }
-        if id == mod_api::wire::HOST_RELEASE {
+        if id.starts_with("protocol:release#") {
             let id = Reader::decode(bytes).unwrap();
             let released = unsafe { (&mut *pointer).held.remove(id) }.unwrap();
             drop(released);
@@ -1547,7 +1533,7 @@ fn wire_loopback_provider_queries_return_owned_options_and_atomic_cursor_writeba
         let _scope = unsafe { boundary::resource_scope(pointer, false) };
         let mut out = Writer::new();
         unsafe { boundary::serve(id, pointer, bytes, &mut out) }.unwrap();
-        if flag.get() && id != mod_api::wire::HOST_RELEASE {
+        if flag.get() && !id.starts_with("protocol:release#") {
             out.put(&0xffu8)
         }
         out.into_bytes()
@@ -1781,7 +1767,7 @@ fn wire_loopback_bad_import_bytes_are_typed_errors() {
     let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     let mut cx = boundary::Cx::default();
     let mut out = Writer::new();
-    let id = boundary::import_id("StructureRandom", "next_int_bound").unwrap();
+    let id = boundary::import_id("RandomSource", "next_int_bound").unwrap();
     assert!(matches!(
         unsafe { boundary::serve(id, &mut cx, &[0xff], &mut out) },
         Err(boundary::ServeError::Decode(_))

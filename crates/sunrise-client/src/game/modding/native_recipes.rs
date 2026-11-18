@@ -87,7 +87,7 @@ impl Index {
 /// them (`[minecraft:potion_contents={potion:"minecraft:swiftness"}]`), or "".
 pub(super) fn components(s: &ItemStack) -> String {
     use sunrise_core::nbt::Tag;
-    let Some(Tag::Compound(entries)) = sunrise_client::item_data::encode_components(s) else {
+    let Some(Tag::Compound(entries)) = sunrise_client::item_data::component_snapshot(s) else {
         return String::new();
     };
     let parts: Vec<String> = entries
@@ -180,10 +180,13 @@ impl Game<'_> {
                     recipes.recipe(id),
                     Some(sunrise_client::crafting::Recipe::Mod(_))
                 ) {
-                    recipes
-                        .mod_remainders_rect(id, grid, size, w, h, &|s| self.crafting_remainder(s))
+                    recipes.mod_remainders_rect(&self.loop_context, id, grid, size, w, h, &|s| {
+                        self.crafting_remainder(s)
+                    })
                 } else {
-                    recipes.remainders(id, grid, size, &|s| self.crafting_remainder(s))
+                    recipes.remainders(&self.loop_context, id, grid, size, &|s| {
+                        self.crafting_remainder(s)
+                    })
                 };
                 let remainders = (0..w * h)
                     .map(|i| placed[at(i)].take().try_into_api().map_err(|_| InvalidItem))

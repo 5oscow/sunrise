@@ -64,6 +64,9 @@ static NEST: AtomicU8 = AtomicU8::new(0);
 struct Observer;
 #[mod_api::__subscriptions]
 impl Hooks for Observer {
+    fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+        r.register_attachment_type("journal:mark", false).unwrap();
+    }
     fn entity_constructing(&self, host: HostSide<'_>, event: &mut EntityConstructingEvent) {
         if let (HostSide::Server(host), Holder::Entity(id)) = (host, event.holder) {
             HEARD.lock().unwrap().constructed.push(id);
@@ -186,7 +189,7 @@ fn boat_with_rider(game: &mut Game<'_>) -> (EntityRef, EntityRef) {
     let boat = summon(game, "minecraft:oak_boat", "{}").unwrap();
     let cow = summon(game, "minecraft:cow", "{}").unwrap();
     let (boat, cow) = (game.entity(boat).unwrap(), game.entity(cow).unwrap());
-    assert!(game.entity_start_riding(cow, boat, true));
+    assert!(game.entity_start_riding(cow, boat, true).is_ok());
     heard();
     (boat, cow)
 }

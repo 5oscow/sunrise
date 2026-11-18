@@ -718,9 +718,7 @@ impl Game<'_> {
                 .and_then(|id| self.entity(id)),
             Target::Mob(id) => {
                 let m = self.mobs.iter().find(|m| m.id == id && !m.removed)?;
-                let who =
-                    m.ai.last_hurt_by
-                        .filter(|_| m.age as i32 - m.ai.last_hurt_by_time <= 100)?;
+                let who = m.recent_hurt_by()?;
                 let attacker = match who {
                     Who::Mob(id) => Some(id),
                     // A player's hurt carries no id in `Who`: the hit's
@@ -1930,7 +1928,12 @@ mod tests {
                 crate::game::native_entity_refs::tests::bind_local_player(game, 20, 123);
                 game.note_attacker("minecraft:mob_attack", 15);
                 let rules = game.world.health_rules;
-                let level = super::super::entity::damage_level_of!(game);
+                let level = super::super::entity::damage_level_of!(
+                    game,
+                    &sunrise_client::health::NO_ATTACK,
+                    no_push,
+                    None
+                );
                 let player = game.player.as_mut().unwrap();
                 assert!(
                     player
@@ -2297,11 +2300,20 @@ mod tests {
                     assert_eq!(game.living_equipment(living, slot), Some(stack));
                 }
             }
-            let saved = game.dragon.as_ref().unwrap().to_nbt([0; 4], None);
+            let saved = game
+                .dragon
+                .as_ref()
+                .unwrap()
+                .to_nbt([0; 4], None, &Default::default());
             let loaded = super::super::dragon::Dragon::from_nbt(&saved, 0).unwrap();
             assert_eq!(loaded.equipment, game.dragon.as_ref().unwrap().equipment);
             let stored = game.armor_stands.last().unwrap();
-            let saved = sunrise_client::entity_nbt::armor_stand_to_nbt(stored, [0; 4], None);
+            let saved = sunrise_client::entity_nbt::armor_stand_to_nbt(
+                stored,
+                [0; 4],
+                None,
+                &Default::default(),
+            );
             let loaded = sunrise_client::entity_nbt::armor_stand_from_nbt(&saved, 16).unwrap();
             assert_eq!(loaded.equipment, stored.equipment);
             for living in [dragon, stand] {
@@ -2312,7 +2324,11 @@ mod tests {
             for slot in EquipmentSlot::ALL {
                 assert!(game.living_set_equipment(dragon, slot, None));
             }
-            let stale = game.dragon.as_ref().unwrap().to_nbt([0; 4], Some(&saved));
+            let stale =
+                game.dragon
+                    .as_ref()
+                    .unwrap()
+                    .to_nbt([0; 4], Some(&saved), &Default::default());
             assert!(stale.get("equipment").is_none());
         });
     }
@@ -2346,7 +2362,7 @@ mod tests {
             // onEquipItem: each item in its own slot plays its equip sound.
             assert_eq!(game.audio.capture.as_ref().unwrap().len(), 2);
             game.sync_level();
-            let tag = game.level.player_tag();
+            let tag = game.level.player_tag(&Default::default());
             let equipment = tag.get("equipment").unwrap();
             assert!(equipment.get("body").is_some() && equipment.get("saddle").is_some());
             let mut read = sunrise_client::save::Level::default();
@@ -2566,7 +2582,8 @@ mod tests {
             let item = ItemStack::new("minecraft:apple", 1);
             game.inventory[game.selected] = Some(item.clone());
             let player_random = game.player.as_ref().unwrap().random.clone();
-            let (_, seeds) = sunrise_client::random_source::record_seeds(|| game.drop_held(true));
+            let (_, seeds) =
+                sunrise_client::random_source::record_seeds(|| game.drop_held_item(true));
             let key_velocity = game.dropped.last().unwrap().velocity;
             *game.world.random = sunrise_core::random::LegacyRandom::new(12345);
             crate::game::native_entity_refs::tests::bind_local_player(game, 42, 123);

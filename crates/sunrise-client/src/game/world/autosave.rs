@@ -67,6 +67,7 @@ impl Game<'_> {
             &mut self.level,
             &self.world_root,
             self.options.execution_role,
+            self.res.items(),
         )?;
         // PlayerEvent.SaveToFile for the owner, once level.dat is written.
         if let Some((uuid, name)) = stored_owner {
@@ -95,7 +96,7 @@ impl Game<'_> {
                                 "progress":g.advancements.to_json(&self.adv.tree, sunrise_world::DATA_VERSION)})
                         );
                     }
-                    self.player_autosaves.enqueue(g, &self.world_root);
+                    self.player_autosaves.enqueue(g, &self.world_root, self.res.items());
                 }
             });
         }

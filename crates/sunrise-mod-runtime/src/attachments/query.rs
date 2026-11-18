@@ -9,7 +9,7 @@ use super::{
 // no wire: owned by the lower runtime crate, which cannot depend on mod_api's derive;
 // mod_api supplies the explicit tagged Wire implementation, including bounded static text.
 /// A failed row read or write through a retained batch.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum AttachmentRowError {
     /// The stored binding could not be read as the requested type.

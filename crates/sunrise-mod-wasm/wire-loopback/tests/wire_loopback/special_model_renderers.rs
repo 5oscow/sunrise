@@ -1,8 +1,8 @@
 use super::*;
 use mod_api::__private::game::RegistrationContextNew;
 use mod_api::{
-    ClientHost, ItemStack, SpecialModelPart, SpecialModelRenderer, SpecialModelRendererRegistry,
-    SpecialModelRenderers, Tag,
+    ClientHost, ItemStack, SpecialModelContext, SpecialModelPart, SpecialModelPolicy,
+    SpecialModelRenderer, SpecialModelRendererRegistry, SpecialModelRenderers, Tag,
 };
 /// Draws `model` once per item of the stack, a block apart, tinted by the config's `tint`;
 /// refuses a stack of more than 8.
@@ -13,6 +13,7 @@ impl SpecialModelRenderer for Row {
         _host: &dyn ClientHost,
         stack: &ItemStack,
         config: &Tag,
+        _: &SpecialModelContext,
     ) -> Result<Vec<SpecialModelPart>, String> {
         if stack.count() > 8 {
             return Err("too many".into());
@@ -32,14 +33,20 @@ impl SpecialModelRenderer for Row {
 pub(super) fn register(renderers: &mut dyn SpecialModelRenderers) {
     renderers.register(
         "wire_test:pan".into(),
+        SpecialModelPolicy::Stack,
         Arc::new(Row("wire_test:item/early")),
     );
     renderers.register(
         "minecraft:bell".into(),
+        SpecialModelPolicy::Stack,
         Arc::new(Row("wire_test:item/bell")),
     );
     // The later registration of a type wins.
-    renderers.register("wire_test:pan".into(), Arc::new(Row("wire_test:item/pan")));
+    renderers.register(
+        "wire_test:pan".into(),
+        SpecialModelPolicy::Frame,
+        Arc::new(Row("wire_test:item/pan")),
+    );
 }
 struct Native;
 #[mod_api::__subscriptions]
@@ -95,7 +102,8 @@ fn wire_loopback_special_model_renderers_register_and_answer_alike_for_native_an
                 assert_eq!(replaced.len(), 1, "guest {guest}");
                 assert_eq!(replaced[0].kind, "wire_test:pan");
                 let parts = renderers["wire_test:pan"]
-                    .extract(&Client, &stack(2), &config)
+                    .1
+                    .extract(&Client, &stack(2), &config, &SpecialModelContext::STACK)
                     .unwrap();
                 assert_eq!(
                     parts,
@@ -107,14 +115,24 @@ fn wire_loopback_special_model_renderers_register_and_answer_alike_for_native_an
                     ],
                     "guest {guest}"
                 );
-                let refused = renderers["minecraft:bell"].extract(&Client, &stack(9), &config);
+                let refused = renderers["minecraft:bell"].1.extract(
+                    &Client,
+                    &stack(9),
+                    &config,
+                    &SpecialModelContext::STACK,
+                );
                 assert_eq!(refused, Err("too many".into()), "guest {guest}");
                 if guest {
                     // A guest call whose reply doesn't decode (as a refused or trapped call
                     // leaves none) is an `Err`, never a silent `Ok`: the game then draws the
                     // missing model.
                     APPEND_ATTACK.set(3);
-                    let trapped = renderers["wire_test:pan"].extract(&Client, &stack(2), &config);
+                    let trapped = renderers["wire_test:pan"].1.extract(
+                        &Client,
+                        &stack(2),
+                        &config,
+                        &SpecialModelContext::STACK,
+                    );
                     APPEND_ATTACK.set(0);
                     assert!(
                         trapped

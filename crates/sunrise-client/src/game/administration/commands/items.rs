@@ -1626,7 +1626,7 @@ impl Game<'_> {
 
 /// Edit a stack's components as their saved compound.
 fn edit_components(stack: &mut ItemStack, f: impl FnOnce(&mut sunrise_core::nbt::Compound)) {
-    let mut c = match sunrise_client::item_data::encode_components(stack) {
+    let mut c = match sunrise_client::item_data::component_snapshot(stack) {
         Some(Tag::Compound(c)) => c,
         _ => sunrise_core::nbt::Compound::new(),
     };
@@ -3080,7 +3080,7 @@ mod set_custom_data_tests {
     fn merging_an_empty_tag_into_a_stack_without_custom_data_adds_no_component() {
         let mut stack = ItemStack::new("minecraft:stick", 1);
         set_custom_data(&mut stack, &Tag::Compound(Default::default()));
-        let saved = sunrise_client::item_data::encode_components(&stack);
+        let saved = sunrise_client::item_data::component_snapshot(&stack);
         assert!(saved.is_none_or(|c| c.get("minecraft:custom_data").is_none()));
     }
 }

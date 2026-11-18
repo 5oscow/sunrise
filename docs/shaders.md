@@ -22,7 +22,7 @@ Sunrise's own format.
 cargo install --path crates/sunrise-shader-api      # or: cargo run -p sunrise-shader-api --bin sunrise-shader -- <command>
 sunrise-shader new my_pack --template post          # also: --template sky, --template material; --name "My Pack"
 sunrise-shader check my_pack                        # what the game, the launcher and the registry will check
-sunrise-shader pack my_pack                         # check, then write my_pack-0.1.0.hshader beside the folder
+sunrise-shader pack my_pack                         # check, then write my_pack-0.1.0.sshader beside the folder
 ```
 
 `check` prints each stage with its cost, and the pack's SHA-256:
@@ -46,7 +46,7 @@ my_pack 0.1.0 (shader API 0.1): FAILED
 
 ## Trying a pack in the game
 
-Put the pack folder (or its `.hshader`) in `shaderpacks/` beside `options.txt` (Open Pack Folder opens it) and pick
+Put the pack folder (or its `.sshader`) in `shaderpacks/` beside `options.txt` (Open Pack Folder opens it) and pick
 it on Options > Video Settings > Shaders > Shader Packs..., which lists Sunrise's packs, marked (Sunrise), beside packs in the
 `shaders/` format; one runs at a time, and clicking it again turns it off. `SUNRISE_SHADER_PACK=<its folder or file
 name>` runs a pack whatever the page says, for development. The game checks the pack first, and refuses one that
@@ -85,7 +85,7 @@ cancel` stops one.
 
 ## A pack
 
-A folder (or the same files zipped as a `.hshader`) with `sunrise-shaders.toml` and WGSL files:
+A folder (or the same files zipped as a `.sshader`) with `sunrise-shaders.toml` and WGSL files:
 
 ```toml
 schema = 1

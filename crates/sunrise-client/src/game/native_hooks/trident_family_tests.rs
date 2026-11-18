@@ -5,8 +5,8 @@ use crate::game::Game;
 use crate::game::api_values::TryIntoApi;
 use crate::game::native_entity_refs::tests::{bind_local_player, with_game};
 use mod_api::{
-    Flow, Hooks, HurtSource, LevelRandomHost, LivingDeathEvent, LivingIncomingDamageEvent,
-    ModEntry, ServerHost,
+    Flow, HitHost, Hooks, HurtSource, LivingDeathEvent, LivingIncomingDamageEvent, ModEntry,
+    ServerHost,
 };
 use std::sync::{Arc, Mutex};
 use sunrise_client::{
@@ -49,7 +49,7 @@ struct Probe(Arc<Mutex<Seen>>);
 impl Hooks for Probe {
     fn living_incoming_damage(
         &self,
-        _: &mut dyn LevelRandomHost,
+        _: &mut dyn HitHost,
         event: &mut LivingIncomingDamageEvent<'_>,
     ) -> Flow {
         self.0.lock().unwrap().incoming.push(Hit::new(

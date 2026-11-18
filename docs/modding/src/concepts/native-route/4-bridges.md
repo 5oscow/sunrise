@@ -38,18 +38,18 @@ bindings = [{ name = "game", ty = "&mut Game<'_>", value = "&mut *self" }]
 
 ```rust,ignore
 fn head(game: &mut Game<'_>) {
-    let ticks = game.__sunrise_mixins_fnr_support_ticks();
+    let ticks = game.__horizon_mixins_fnr_support_ticks();
     *ticks = crate::game::autosave::fnr_runtime::bumped(*ticks);
     fnr_support::note(&format!("module and bridge: ticks_until_autosave {}", *ticks));
 }
 ```
 
-The bridge `ticks` of the mod `fnr_support` becomes the method `__sunrise_mixins_fnr_support_ticks`. It returns
+The bridge `ticks` of the mod `fnr_support` becomes the method `__horizon_mixins_fnr_support_ticks`. It returns
 `&mut i64` because the field is an `i64`. This field is also visible directly from the example's target module.
 
 ## The generated method
 
-Its name is `__sunrise_mixins_<mod>_<id>`: the mod's id and the row's id, lowercased, with `-` turned into `_`.
+Its name is `__horizon_mixins_<mod>_<id>`: the mod's id and the row's id, lowercased, with `-` turned into `_`.
 So use only letters, digits, `_` and `-` in a bridge id, and keep ids distinct after that change.
 
 | `kind` | Method | `target` | `member` |
@@ -60,7 +60,7 @@ So use only letters, digits, `_` and `-` in a bridge id, and keep ids distinct a
 | `INVOKE` | The method's own signature, renamed | The method, written like a [mixin target](2-mixins.md#naming-the-target) | leave it out |
 
 `T` is the field's type: read it in the game's source, since a wrong guess is a compiler error. An `INVOKE`
-bridge is called as `value.__sunrise_mixins_<mod>_<id>(…)`, or `Type::__sunrise_mixins_<mod>_<id>(…)` for a
+bridge is called as `value.__horizon_mixins_<mod>_<id>(…)`, or `Type::__horizon_mixins_<mod>_<id>(…)` for a
 function without `self`.
 
 Name a field bridge's struct by the module that declares it, without lifetimes (`sunrise_client::game::Game`).

@@ -224,6 +224,14 @@ pub fn background_color(chat_only: bool, opacity: f64, default: f32) -> u32 {
     color_from_float(a, 0.0, 0.0, 0.0)
 }
 
+/// The alpha of a name tag's faded text (`NameTagFeatureRenderer`'s see-through and sneaking
+/// text) that goes with [`background_color`]'s opacity: the floor of 255 times the larger of
+/// (opacity + 0.75) / 2 and 0.5. 0x7F at the default 0.25, 159 at 0.5, 223 at 1.0.
+pub fn faded_text_alpha(chat_only: bool, opacity: f64, default: f32) -> u32 {
+    let a = if chat_only { default } else { opacity as f32 };
+    as8(((a + 0.75) / 2.0).max(0.5))
+}
+
 /// `Mth.floor`.
 pub fn floor(x: f32) -> i32 {
     let i = x as i32;
@@ -779,7 +787,19 @@ impl HealthHud {
 /// Draws the calls with the HUD batch under their poses; items are left to
 /// the caller (they need the item renderer) and so are the vignette and
 /// nausea blits (their blending needs the screen-effect pipeline).
+/// [`paint_items`] draws both.
 pub fn paint(batch: &mut crate::hud::HudBatch, atlas: &crate::hud::HudAtlas, draws: &[GuiDraw]) {
+    paint_with(batch, atlas, draws, None);
+}
+
+/// [`paint`], and with `items` also each `Item` (its stack, scaled about its pivot, then its
+/// decorations) and the blits of every blend. Without `items` those draw nothing, as `paint`.
+fn paint_with(
+    batch: &mut crate::hud::HudBatch,
+    atlas: &crate::hud::HudAtlas,
+    draws: &[GuiDraw],
+    mut items: Option<&mut dyn GuiItems>,
+) {
     let mut stack = vec![IDENTITY];
     // One buffer for the sprite keys, instead of a string per drawn sprite.
     let mut name = String::new();
@@ -857,9 +877,10 @@ pub fn paint(batch: &mut crate::hud::HudBatch, atlas: &crate::hud::HudAtlas, dra
                     abgr(*color),
                 );
             }
+            GuiDraw::Blit { blend, .. } if *blend != Blend::Textured && items.is_none() => {}
             GuiDraw::Blit {
                 texture,
-                blend: Blend::Textured,
+                blend,
                 x,
                 y,
                 w,
@@ -880,8 +901,28 @@ pub fn paint(batch: &mut crate::hud::HudBatch, atlas: &crate::hud::HudAtlas, dra
                 r.u0 = u0;
                 r.v0 = v0;
                 batch.rect_uv(*x as f32, *y as f32, *w as f32, *h as f32, r, abgr(*color));
+                match blend {
+                    Blend::Textured => {}
+                    Blend::Vignette => batch.blend_since(start, crate::hud::Blend::Vignette),
+                    Blend::Nausea => batch.blend_since(start, crate::hud::Blend::Additive),
+                    Blend::Crosshair => batch.invert_since(start),
+                }
             }
-            GuiDraw::Blit { .. } | GuiDraw::Item { .. } => {}
+            GuiDraw::Item {
+                slot,
+                x,
+                y,
+                seed,
+                scale,
+                pivot,
+            } => {
+                if let Some(items) = items.as_deref_mut() {
+                    // `extractSlot`: the item under the pop squeeze, its decorations outside it.
+                    items.item(batch, *slot, *x, *y, *seed);
+                    batch.scale_since(start, pivot[0], pivot[1], scale[0], scale[1]);
+                    items.decorations(batch, *slot, *x, *y);
+                }
+            }
             GuiDraw::Fill {
                 x0,
                 y0,
@@ -966,9 +1007,30 @@ fn opaque(color: u32) -> u32 {
     }
 }
 
+#[path = "hud_layout_items.rs"]
+mod items;
+pub use items::{GuiItems, Undrawable, item_slot, paint_checked, paint_items, undrawable};
+
 #[cfg(test)]
 #[path = "hud_layout_gradient_tests.rs"]
 mod gradient_tests;
 #[cfg(test)]
 #[path = "hud_layout_rotate_tests.rs"]
 mod rotate_tests;
+
+#[cfg(test)]
+mod faded_text_tests {
+    use super::{background_color, faded_text_alpha};
+
+    #[test]
+    fn faded_text_follows_the_text_background_opacity() {
+        // Chat only: the default 0.25 whatever the slider says.
+        assert_eq!(faded_text_alpha(true, 1.0, 0.25), 0x7F);
+        assert_eq!(background_color(true, 1.0, 0.25), 0x3F00_0000);
+        // The slider at 0.5: backdrop 127, text 159; at 1.0, text 223; never below 0.5.
+        assert_eq!(background_color(false, 0.5, 0.25) >> 24, 127);
+        assert_eq!(faded_text_alpha(false, 0.5, 0.25), 159);
+        assert_eq!(faded_text_alpha(false, 1.0, 0.25), 223);
+        assert_eq!(faded_text_alpha(false, 0.0, 0.25), 127);
+    }
+}

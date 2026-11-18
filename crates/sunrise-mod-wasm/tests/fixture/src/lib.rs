@@ -45,6 +45,14 @@ impl Hooks for Mod {
         movement::movement_input(event);
     }
 
+    fn render_level_stage(
+        &self,
+        _: &dyn mod_api::ClientHost,
+        event: &mut mod_api::RenderLevelStageEvent<'_>,
+    ) {
+        world_name_tags::render_level_stage(event);
+    }
+
     fn tick_target_millis(
         &self,
         host: &dyn mod_api::ClientHost,
@@ -182,7 +190,43 @@ impl Hooks for Mod {
     ) {
         lending::Lender.menu_links(host, event);
     }
+    fn chunk_data_save(
+        &self,
+        host: &dyn mod_api::ChunkDiskHost,
+        event: &mut mod_api::ChunkDataSaveEvent<'_>,
+    ) {
+        chunk_disk::save(host, event.data);
+    }
+    fn chunk_data_load(
+        &self,
+        host: &dyn mod_api::ChunkDiskHost,
+        event: &mut mod_api::ChunkDataLoadEvent<'_>,
+    ) {
+        chunk_disk::load(host, event.data);
+    }
 
+    fn living_entity_use_item_tick(
+        &self,
+        _: mod_api::HostSide,
+        event: &mut mod_api::LivingEntityUseItemTickEvent<'_>,
+    ) -> mod_api::Flow {
+        match event.duration {
+            32 => mod_api::Flow::Cancel,
+            31 => {
+                event.duration = 0;
+                mod_api::Flow::Continue
+            }
+            30 => {
+                event.duration = 1;
+                mod_api::Flow::Continue
+            }
+            29 => {
+                event.duration = -7;
+                mod_api::Flow::Continue
+            }
+            _ => mod_api::Flow::Continue,
+        }
+    }
     fn register_json_animation_types(
         &self,
         _: &mod_api::RegistrationContext,
@@ -277,12 +321,31 @@ impl Hooks for Mod {
         mod_api::Flow::Continue
     }
 
+    fn mob_split(
+        &self,
+        host: &mut dyn mod_api::ServerHost,
+        event: &mut mod_api::MobSplitEvent<'_>,
+    ) -> mod_api::Flow {
+        pending_children::mob_split(host, event)
+    }
+
+    fn baby_entity_spawn(
+        &self,
+        host: &mut dyn mod_api::ServerHost,
+        event: &mut mod_api::BabyEntitySpawnEvent<'_>,
+    ) -> mod_api::Flow {
+        pending_children::baby_entity_spawn(host, event)
+    }
+
     fn blocks(&self, _: &mod_api::RegistrationContext, event: &mut mod_api::BlocksEvent<'_>) {
         part_state::blocks(event);
     }
 
     fn register(&self, registrar: &mut dyn mod_api::Registrar, cx: &mod_api::RegistrationContext) {
+        block_path_type::register(registrar, cx);
         block_state_notice::register(registrar, cx);
+        #[cfg(target_arch = "wasm32")]
+        collision_shape::register(registrar, cx);
         runtime_environment::register(cx);
         capability_registration::register(registrar, cx);
         game_payload::register(registrar);
@@ -292,6 +355,10 @@ impl Hooks for Mod {
         cauldron::register(registrar);
         tick_reply::register(registrar);
         part_state::register(registrar);
+        entity_parts::register(registrar);
+        // A command argument type whose arguments declare a suggestion provider: the game asks the
+        // provider through the nested handle (tests/fixture/src/suggestion_provider.rs).
+        registrar.register_command_argument("warps", suggestion_provider::WarpsArgument);
         registrar.register_custom_stat("steps").unwrap();
         if cx.mods().get("wasm_storage_attempt_observer").is_some() {
             storage_attempts::register(registrar);
@@ -333,6 +400,11 @@ impl Hooks for Mod {
             .blocks(&[])
             .build();
         registrar.block_entity_part(&reads, CounterReads).unwrap();
+        let looped = registrar
+            .block_entity_type("counter_loop")
+            .blocks(&[])
+            .build();
+        registrar.block_entity_part(&looped, CounterLoop).unwrap();
     }
 }
 
@@ -344,6 +416,8 @@ pub fn on_tick(_: mod_api::HostSide<'_>, args: &mut mod_points::TickArgs) {
 
 pub struct Counter;
 pub struct CounterReads;
+/// A tick that calls the host a thousand times: the guest-to-host cost of the boundary.
+pub struct CounterLoop;
 
 #[mod_api::sunrise_part]
 impl mod_api::BlockPart for CounterReads {}
@@ -362,6 +436,28 @@ impl mod_api::BlockEntityPart for CounterReads {
             .nbt
             .insert("counter".into(), mod_api::Tag::Int(17));
         event.entity.data = vec![if first == second { 24 } else { 25 }];
+        event.entity.items.clear();
+    }
+}
+
+#[mod_api::sunrise_part]
+impl mod_api::BlockPart for CounterLoop {}
+
+#[mod_api::sunrise_part]
+impl mod_api::BlockEntityPart for CounterLoop {
+    fn block_entity_tick(
+        &self,
+        host: &mut dyn mod_api::ServerHost,
+        event: &mut mod_api::BlockEntityTickEvent<'_>,
+    ) {
+        let loaded = (0..1000)
+            .filter(|_| host.is_loaded(std::hint::black_box("wasm_fixture")))
+            .count();
+        event
+            .entity
+            .nbt
+            .insert("counter".into(), mod_api::Tag::Int(17));
+        event.entity.data = vec![if loaded == 1000 { 26 } else { 27 }];
         event.entity.items.clear();
     }
 }

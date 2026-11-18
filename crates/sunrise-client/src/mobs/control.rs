@@ -312,14 +312,13 @@ impl Mob {
                     self.position.z.floor() as i32,
                 );
                 let state = w.world.block(bx, by, bz);
-                let top = w.data.state(state).top;
+                // `getCollisionShape(level, pos).max(Y)`: a published shape's (#1666).
+                let top = w.collision_top(bx, by, bz);
                 let name = &w.facts.get(state).name;
                 let door_or_fence = name.ends_with("_door") || name.ends_with("fence");
                 if yd > self.kind.step_height
                     && xd * xd + zd * zd < f64::from(self.width().max(1.0))
-                    || top > 0.0
-                        && self.position.y < f64::from(top) + f64::from(by)
-                        && !door_or_fence
+                    || top > 0.0 && self.position.y < top + f64::from(by) && !door_or_fence
                 {
                     self.ai.jump = true;
                     self.ai.mov.operation = Operation::Jumping;

@@ -27,7 +27,7 @@ fn git_project_build_checks_only_the_files_it_packages() {
     fs::write(project.join("work/cache.bin"), b"\0asm").unwrap();
     run(Command::new(binary).current_dir(&project).arg("build"));
     run(Command::new(binary).current_dir(&project).arg("build"));
-    let path = project.join("target/sunrise-mod/ruby.hmod");
+    let path = project.join("target/sunrise-mod/ruby.smod");
     let package = sunrise_mod_package::Package::read(&path).unwrap();
     assert_eq!(package.manifest.id, "ruby");
     let zip = zip::ZipArchive::new(fs::File::open(&path).unwrap()).unwrap();

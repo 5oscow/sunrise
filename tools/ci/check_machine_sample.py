@@ -11,7 +11,7 @@ import time
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
-PIN = "1b0e0008107562b407a46c134903cc0b9369674d"
+PIN = "2e49fae17e6ca4ffa40d29b87374a6f1cd0a6c1c"
 
 
 def main():
@@ -29,7 +29,7 @@ def main():
 
 def check(directory, revision):
     sample = directory / "sample"
-    subprocess.run(["git", "clone", "--no-checkout", "https://github.com/arismoko/horizon-machine-sample", str(sample)], check=True)
+    subprocess.run(["git", "clone", "--no-checkout", "https://github.com/sunrise-org/sunrise-machine-sample", str(sample)], check=True)
     subprocess.run(["git", "fetch", "origin", revision], cwd=sample, check=True)
     subprocess.run(["git", "checkout", "--detach", revision], cwd=sample, check=True)
     # The sample names the API by the path `cargo sunrise-mod` fetches the signed SDK to. This checkout's own API

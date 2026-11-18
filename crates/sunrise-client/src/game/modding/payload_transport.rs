@@ -38,6 +38,22 @@ impl Game<'_> {
             .clone();
         self.queue_current_payload(Endpoint::server(sender), id, bytes)
     }
+    /// `player_send_payload` to each of `players`; a refused send is skipped. The caller crossed
+    /// the body once; each connection's queue owns its own copy.
+    pub(super) fn players_send_payload(
+        &mut self,
+        players: &[PlayerRef],
+        id: &PayloadId,
+        bytes: PayloadBytes,
+    ) -> u32 {
+        players
+            .iter()
+            .filter(|player| {
+                self.player_send_payload(**player, id, bytes.clone())
+                    .is_ok()
+            })
+            .count() as u32
+    }
     pub(super) fn send_payload_to_server(
         &mut self,
         id: &PayloadId,
@@ -105,8 +121,15 @@ impl Game<'_> {
             return true;
         }
         if let Some(holder) = incoming.expired_busy(std::time::Instant::now()) {
-            log::warn!("{}", incoming.busy_failure(holder));
-            if !incoming.raw {
+            let error = incoming.busy_failure(holder);
+            if incoming.raw {
+                log::warn!(
+                    "Mod {} failed on raw channel {}: {error}",
+                    incoming.receiver.owner(),
+                    incoming.id.0
+                );
+            } else {
+                log::warn!("{error}");
                 endpoint.disconnect(Text::translate(
                     "disconnect.genericReason",
                     vec![Text::literal(format!(
@@ -148,8 +171,15 @@ impl Game<'_> {
                 if incoming.defer(payload, &holder, std::time::Instant::now()) {
                     return false;
                 }
-                log::warn!("{}", incoming.busy_failure(&holder));
-                if !incoming.raw {
+                let error = incoming.busy_failure(&holder);
+                if incoming.raw {
+                    log::warn!(
+                        "Mod {} failed on raw channel {}: {error}",
+                        incoming.receiver.owner(),
+                        incoming.id.0
+                    );
+                } else {
+                    log::warn!("{error}");
                     endpoint.disconnect(Text::translate(
                         "disconnect.genericReason",
                         vec![Text::literal(format!(
@@ -182,9 +212,6 @@ impl Game<'_> {
                 incoming.receiver.owner(),
                 incoming.id.0
             );
-            if let Some(reason) = reason {
-                endpoint.disconnect(reason);
-            }
         } else if let Some(error) = failure {
             // The reason goes to the log; the player is told only which mod's handler failed.
             log::warn!("payload {} failed: {error}", incoming.id.0);
@@ -298,6 +325,9 @@ mod raw_fault_tests;
 #[cfg(test)]
 #[path = "payload_transport/sender_tests.rs"]
 mod sender_tests;
+#[cfg(test)]
+#[path = "payload_transport/task_tests.rs"]
+mod task_tests;
 #[cfg(test)]
 #[path = "payload_transport/tests.rs"]
 mod tests;

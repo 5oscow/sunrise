@@ -11,7 +11,10 @@ use sunrise_client::{
     save,
 };
 use sunrise_core::random::LegacyRandom;
-use {sunrise_core::nbt::Tag, sunrise_world::loot::LootData};
+use {
+    sunrise_core::nbt::Tag,
+    sunrise_world::loot::{ContainerLootContext, LootData},
+};
 
 /// `DecoratedPotBlockEntity.WobbleStyle` ordinals.
 const WOBBLE_POSITIVE: i32 = 0;
@@ -27,6 +30,8 @@ pub(super) fn unpack_loot(
     random: &mut LegacyRandom,
     sequences: &mut RandomSequences,
     world_seed: i64,
+    items: &crate::items::Items,
+    context: ContainerLootContext<'_>,
 ) {
     let Tag::Compound(map) = tag else {
         return;
@@ -45,15 +50,15 @@ pub(super) fn unpack_loot(
     let table = table.to_string_lossy();
     // No origin biome: the pot tables have no location checks.
     let slots = if seed != 0 {
-        loot.fill(&table, seed, 1, None)
+        loot.fill_in(&table, &mut LegacyRandom::new(seed), 1, context)
     } else if let Some(sequence) = loot.random_sequence(&table) {
-        loot.fill_with(&table, sequences.get(sequence, world_seed), 1, None)
+        loot.fill_in(&table, sequences.get(sequence, world_seed), 1, context)
     } else {
-        loot.fill_with(&table, random, 1, None)
+        loot.fill_in(&table, random, 1, context)
     };
     if let Some(stack) = slots.into_iter().next().flatten() {
         let item = sunrise_client::structure_blocks::loot_item_with_components(&stack);
-        map.insert("item".into(), save::item_to_nbt(&item));
+        map.insert("item".into(), save::item_to_nbt(&item, items));
     }
 }
 
@@ -120,6 +125,8 @@ impl Game<'_> {
             &mut self.world.random,
             &mut self.rand_sequences,
             self.level.seed,
+            self.res.items(),
+            ContainerLootContext::default(),
         );
         Some(tag)
     }
@@ -181,7 +188,7 @@ impl Game<'_> {
         };
         let pitch_bend = inserted.count as f32 / self.max_stack(inserted) as f32;
         if let (Tag::Compound(map), Some(item)) = (&mut tag, &pot_item) {
-            map.insert("item".into(), save::item_to_nbt(item));
+            map.insert("item".into(), save::item_to_nbt(item, self.res.items()));
         }
         spill::put_saved_entity(&mut self.world, pos, tag);
         // The sherds and item go to the guests (BlockEntityData).

@@ -1,7 +1,7 @@
-//! The players the game shows, as a crate above the engine sees them (Sunrise's emotes, spec
-//! #14091): [`PlayerModels`] in [`crate::Hooks::tick`], [`Frame`] in [`crate::Hooks::frame`],
-//! [`BodyPose`], a pose laid over a player's body after its vanilla animation, what goes by their
-//! names, and the crate's [`Sprites`]. Plain types only: no engine type crosses this line.
+//! The players the game shows, as a crate above the engine sees them (spec #14091):
+//! [`PlayerModels`] in [`crate::Hooks::tick`], [`Frame`] in [`crate::Hooks::frame`], [`BodyPose`],
+//! a pose laid over a player's body after its vanilla animation, what goes by their names, and the
+//! crate's [`Sprites`]. Plain types only: no engine type crosses this line.
 use std::sync::Arc;
 
 /// The player model's parts a [`BodyPose`] poses, in its order.
@@ -14,9 +14,9 @@ pub const BODY_PARTS: [&str; 6] = [
     "left_leg",
 ];
 
-/// A pose a crate lays over a player model's body after its vanilla animation (Sunrise's emotes,
-/// docs/cosmetics.md), handed to the model with [`PlayerModels::set_body_pose`]. The crate
-/// downcasts its own back through [`std::any::Any`].
+/// A pose a crate lays over a player model's body after its vanilla animation, handed to the model
+/// with [`PlayerModels::set_body_pose`]. The crate downcasts its own back through
+/// [`std::any::Any`].
 pub trait BodyPose: std::any::Any + std::fmt::Debug + Send + Sync {
     /// Poses the [`BODY_PARTS`] at `age` (the model's ticks): `at_rest` holds each part before the
     /// animation, `poses` as the animation left it (x, y, z, x/y/z rotation, x/y/z scale); a part

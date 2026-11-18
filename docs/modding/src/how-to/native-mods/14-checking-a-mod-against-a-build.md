@@ -8,7 +8,7 @@ In a mod folder, `cargo sunrise-mod` does this for you from the SDK it fetched i
 - `cargo sunrise-mod build` packs the list into the package as `uses.json`, with each item's fingerprint at the
   pinned build. A mod with a `[native.*]` table or internals is made for exactly one build and gets no list.
 - `cargo sunrise-mod fits` says, one line per build, whether the mod fits the current Nightly, or each build
-  `--build` names. `cargo sunrise-mod fits greeter.hmod --build nightly-2026-11-20` asks the same of a package.
+  `--build` names. `cargo sunrise-mod fits greeter.smod --build nightly-2026-11-20` asks the same of a package.
   It exits 0 when every build fits, 1 when one does not, and 2 when it cannot tell or the question does not
   apply (a mod made for one build, a content mod, or a package made by an older tool).
 - `cargo sunrise-mod update` prints what moving the pin breaks in this mod, item by item with the line that uses
@@ -44,7 +44,10 @@ It exits 2 when an input cannot be read or judged.
 
 The check reads the mod's source with a Rust parser; it is not a compiler and does not expand macros. A name
 it cannot resolve with certainty counts as used and as built field by field. A struct literal written with a
-path (`world::DimensionSettings { … }`) counts for the API's struct of that name; an unqualified one counts as
+path (`world::DimensionSettings { … }`) counts for the API's struct of that name, unless the segment before the
+name is a type (`Self`, a type the mod defines, or an API type: `Shape::Pos(…)` and `TextHover::Item { … }` are
+variants, not the structs `Pos` and `Item`), which the scan reads through the mod's `use` items first, so
+`use mod_api as Pos; Pos::Settings { … }` is still the API's `Settings`; an unqualified one counts as
 the mod's own only in the file that defines it outside any `#[cfg]`, when nothing in that file (a `use`, a glob,
 an inline module, a macro or attribute that is not standard or the API's) could change what the name means and
 the mod has no `include!`. What the parser cannot see counts as doubt, which refuses rather than guesses:

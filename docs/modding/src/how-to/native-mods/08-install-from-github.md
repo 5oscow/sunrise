@@ -24,7 +24,7 @@ GitHub installs are not reviewed by the Sunrise registry.
 The launcher resolves links through GitHub's public API without sign-in. It reports rate-limit
 errors; set `SUNRISE_GITHUB_TOKEN` to use an authenticated rate limit.
 
-A release with a `.hmod` asset installs that package. The launcher compares its SHA-256 with
+A release with a `.smod` asset installs that package. The launcher compares its SHA-256 with
 GitHub's digest **when GitHub supplies one**. Without a package asset, it downloads the source
 archive at the resolved commit from `codeload.github.com`.
 
@@ -33,7 +33,7 @@ Source discovery follows `native-build FOLDER`: each mod is a flat project with
 with `[native] sunrise`. If the archive contains several mods, select one with `--mod ID` or
 install all with `--all`. Use `--instance NAME` to choose the destination instance.
 
-The launcher validates packages and packs source projects into `.hmod` files before installation.
+The launcher validates packages and packs source projects into `.smod` files before installation.
 Validation checks flat source and content layouts and size limits without executing the mod.
 This installer rejects content-only release packages.
 

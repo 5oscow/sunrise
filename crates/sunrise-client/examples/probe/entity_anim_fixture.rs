@@ -403,6 +403,7 @@ pub fn main() -> sunrise_client::Result<()> {
             swing: f("swingAnimation"),
             baby,
             partial: 0.0,
+            observer: None,
         };
         let mut poses = Poses::new(&model);
         entity_state(&mut mob, def.species, case);

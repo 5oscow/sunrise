@@ -41,8 +41,12 @@ pub enum Contract {
 pub enum HostAccess {
     /// The shared read-only `Host`.
     Read,
-    /// A level host, for a receiver that is a level but not `GameLevel`.
+    /// A level host, for a receiver that is a level but not `GameLevel`: read-only on `&self`,
+    /// with the random host on `&mut self`.
     Level,
+    /// A hit's host: a level host that can also play level sounds and draw from the
+    /// random of the entities the hit lends (`HitHost`). Server hooks only.
+    Hit,
 }
 
 /// A hook fired in a load phase, which takes that phase's context instead of a host.
@@ -55,6 +59,8 @@ pub enum PhaseContext {
     Loop,
     /// A hook fired while a feature generates, on a worldgen worker or the server thread.
     Worldgen,
+    /// A chunk disk job, with no live world authority.
+    ChunkDisk,
 }
 
 /// The kind of thing whose Parts a scoped hook calls.
@@ -65,6 +71,7 @@ pub enum PartKind {
     BlockEntity,
     Item,
     Menu,
+    Effect,
     Fluid,
     Entity,
 }
@@ -114,6 +121,9 @@ pub struct Hook {
     pub owner: Option<String>,
     /// Validate a collector's edits at the per-listener ownership boundary.
     pub collect_validator: Option<String>,
+    /// The inert answer for a disabled content owner's subscribed block Part: Rust statements
+    /// setting the answer, or `signal` to report engine inactivity separately from listener output.
+    pub inert: Option<String>,
     /// A global cancel hook whose dispatch runs every listener inside `catch_unwind`: one that
     /// unwinds is switched off for this hook for the session, and the outputs it had written roll
     /// back to what the game requested (#2414 ruling).
@@ -260,6 +270,7 @@ struct HookEntry {
     /// Only `prepared = "stack"` on `can_equip` is supported; reject at parse time.
     prepared: Option<String>,
     stack_count: Option<StackCount>,
+    inert: Option<String>,
     neoforge: Option<serde_json::Value>,
     fabric: Option<serde_json::Value>,
     paper: Option<serde_json::Value>,
@@ -326,6 +337,21 @@ impl Hook {
         ) {
             return Err(CatalogError::InvalidContract(name));
         }
+        if let Some(inert) = &entry.inert
+            && (!scope
+                .as_ref()
+                .is_some_and(|scope| scope.kind == PartKind::Block)
+                || !matches!(api.contract, Contract::Cancel | Contract::Replace)
+                || (inert != "signal"
+                    && syn::parse_str::<syn::Block>(&format!("{{ {inert} }}")).is_err()))
+        {
+            return Err(CatalogError::InvalidHook {
+                hook: name,
+                error:
+                    "inert requires a block-scoped cancel/replace hook and Rust statements or `signal`"
+                        .into(),
+            });
+        }
         if entry.stack_count.is_some() {
             if api.contract != Contract::Collect || api.out.is_none() || api.answered_by.is_some() {
                 return Err(CatalogError::InvalidHook {
@@ -386,6 +412,7 @@ impl Hook {
             answered_by_mod,
             owner: api.owner,
             collect_validator: api.collect_validator,
+            inert: entry.inert,
             isolate,
             scope,
             host: entry.host,
@@ -496,6 +523,9 @@ fn arguments(
             .ok_or_else(|| meta.error("expected a key"))?
             .to_string();
         let value = argument(&meta.value()?.parse()?).map_err(|e| meta.error(e))?;
+        if map.contains_key(&key) {
+            return Err(meta.error(format!("duplicate key {key}")));
+        }
         map.insert(key, value);
         Ok(())
     })
@@ -825,6 +855,7 @@ impl Hook {
             answered_by_mod: false,
             owner: None,
             collect_validator: None,
+            inert: None,
             isolate: false,
             scope: None,
             host: None,
@@ -977,6 +1008,23 @@ mod tests {
 
     fn file(name: &str, source: &str) -> (String, String) {
         (name.to_owned(), source.to_owned())
+    }
+
+    #[test]
+    fn a_key_given_twice_in_one_attribute_is_refused() {
+        let error = Catalog::parse(&[file(
+            "a.rs",
+            r#"
+            pub trait Hooks {
+                /// Twice.
+                #[hook(side = "server", version = 2, contract = "listen", version = 3)]
+                fn twice();
+            }
+            "#,
+        )])
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("duplicate key version"), "{error}");
     }
 
     #[test]

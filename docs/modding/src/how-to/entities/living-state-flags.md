@@ -24,6 +24,36 @@ beside the bed with the normal wake animation, teleport and pose sync; the usual
 occupying a bed or playing a wake animation. The next entity sync publishes the changed pose and bed to clients.
 Villagers use `start_sleeping`/`stop_sleeping`, not the raw player position setters.
 
+## Sprinting
+
+`EntityRef::is_sprinting` reads `Entity.isSprinting` and `EntityRef::set_sprinting(host, sprinting)` sets it
+(`Entity.setSprinting`, server only): a player's flag with the movement speed modifier that goes with it, or a mob's flag, which the
+mob's movement speed already reads as that modifier (a cat's or ocelot's own AI may set it again on its next step). It returns `false` for a stale
+handle, on a client and for a kind with no sprinting flag. It is the flag `Entity.isSprinting` reads, not
+the player's sprint key: a player's own client sets its flag again from its input.
+
+## Fire, water and consumption
+
+`EntityRef::is_on_fire(host)` reads vanilla `Entity.isOnFire` on either side: an entity that is not
+fire immune and has positive fire ticks or, on a client, synced shared flag 0. It covers players,
+mobs, armor stands and dropped items, including item-stack fire immunity. On a client it reads
+that client's copy, including the local player's predicted timer, not a server query.
+
+`EntityRef::is_under_water(host)` reads `Entity.isUnderWater` for players and mobs on either side:
+the previous eye-in-water sample AND current water contact. The local client player follows the
+`LocalPlayer.isUnderWater` override instead: its saved eye sample alone, even when current water
+contact is false. It is deliberately not equivalent to checking `eye_fluid` now. Both reads return
+`None` for unsupported kinds or stale handles.
+
+`PlayerRef::trigger_consume_item(host, &stack)` is server-only and fires just
+`CriteriaTriggers.CONSUME_ITEM.trigger(serverPlayer, stack)`, the vanilla public call that NeoForge
+mods can also use. It uses the same advancement path as food and potions, with the supplied stack,
+in the player's own level. It does not eat, update inventory, or award a used statistic.
+`Ok(())` means reached, whether or not a criterion matched. Invalid stacks return
+`TriggerCriterionError::Stack` before firing; clients return `NotServer`, and stale, offline or
+nested-turn displaced players return `PlayerUnavailable`. The generic `trigger_criterion` still
+refuses `minecraft:` trigger identifiers.
+
 ## Portals and leashes
 
 `EntityRef::portal_cooldown` takes `&dyn Host` and reads the remaining portal cooldown in ticks from the
@@ -53,6 +83,9 @@ level is parked, or that a saved holder has not resolved; this read neither load
 fence as `Leashable.setLeashedTo` does: the entity lets go of any other holder and gets off its vehicle, and neither
 `canBeLeashed` nor the distance is asked, so a holder too far away snaps the lead on the next tick. `detach_leash`
 drops the lead as an item or removes it; a mob's removal fires `entity_unleash`.
+
+A successful mob mount through `EntityRef::start_riding` drops the mob's lead as an item without a sound
+and emits `entity_unleash`. A refused mount leaves the leash alone. Natural mob boarding follows the same rule.
 
 ## Physics
 

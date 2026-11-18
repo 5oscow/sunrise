@@ -32,7 +32,7 @@ cargo sunrise-mod build --wasm
 ```
 
 The tool compiles the crate with the pinned toolchain, writes `mod.wasm` beside `sunrise-mod.toml`, records it in a
-`[wasm]` table, and packs `target/sunrise-mod/greeter.hmod`:
+`[wasm]` table, and packs `target/sunrise-mod/greeter.smod`:
 
 ```toml
 [wasm]
@@ -44,7 +44,7 @@ Never write `[wasm]` by hand; rebuild instead.
 
 ## 3. Play
 
-Copy `greeter.hmod` into the game folder's `sunrise-mods/` (in the launcher: **Open folder** in the instance's ⋮
+Copy `greeter.smod` into the game folder's `sunrise-mods/` (in the launcher: **Open folder** in the instance's ⋮
 menu), and turn it on with a line `mod.greeter:true` in `sunrise-mods.txt` beside `options.txt`. The game loads it at start-up; join a world and the greeting appears.
 If the game refuses the mod (a wrong layout, a missing dependency, a limit), the Mods screen shows why in red.
 

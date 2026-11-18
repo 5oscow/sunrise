@@ -7,7 +7,7 @@ use crate::game::Game;
 use crate::game::native_entity_refs::tests::{bind_local_player, run_on_guest_stack, with_game};
 use mod_api::{
     EntityRef, ExplodeError, ExplosionCalculator, ExplosionDetonateEvent, ExplosionInteraction,
-    ExplosionSettings, ExplosionStartEvent, Flow, Hooks, LevelRandomHost, LivingDamagePostEvent,
+    ExplosionSettings, ExplosionStartEvent, Flow, HitHost, Hooks, LivingDamagePostEvent,
     LivingDeathEvent, ModEntry, ServerHost,
     wire::{Reader, Writer},
 };
@@ -118,17 +118,15 @@ fn wasm_explode(game: &mut Game<'_>, level: mod_api::LevelRef, blast: Blast, exp
           (@custom "dylink.0" "\01\04\00\00\00\00")
           (import "env" "memory" (memory 1))
           (import "env" "__indirect_function_table" (table 1 funcref))
-          (import "sunrise" "host" (func $host (param i32 i32 i32 i32 i32) (result i32)))
-          (import "sunrise" "host_reply" (func (param i32)))
-          (func (export "sunrise_layout") (result i64) i64.const {layout})
+          {imports}
           (data (i32.const 4096) "{input}")
           (data (i32.const 16384) "{reply}")
           (func (export "sunrise_in") (param i32) (result i32) i32.const 512)
-          (func (export "sunrise_hook") (param i32) (result i64)
+          (func (export "sunrise_hook") (param i64) (result i64)
             i32.const {id} i32.const 4096 i32.const {input_len} i32.const 32768 i32.const 4096 call $host drop
             {check}
             i64.const {reply_at}))"#,
-        layout = *mod_api::wire::LAYOUT,
+        imports = sunrise_mod_wasm::fixture::wat_imports(),
         input = escape(input.bytes()),
         reply = escape(reply.bytes()),
         input_len = input.bytes().len(),
@@ -532,11 +530,7 @@ impl Hooks for Listener {
     fn explosion_detonate(&self, _: &mut dyn ServerHost, _: &mut ExplosionDetonateEvent<'_>) {
         self.0.lock().unwrap().detonates += 1;
     }
-    fn living_damage_post(
-        &self,
-        _: &mut dyn LevelRandomHost,
-        event: &mut LivingDamagePostEvent<'_>,
-    ) {
+    fn living_damage_post(&self, _: &mut dyn HitHost, event: &mut LivingDamagePostEvent<'_>) {
         let heard = (i64::from(event.entity), event.source.damage_type.to_owned());
         self.0.lock().unwrap().damage.push(heard);
     }

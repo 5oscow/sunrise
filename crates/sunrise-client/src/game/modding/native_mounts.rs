@@ -73,6 +73,8 @@ impl Game<'_> {
             self.target_type(Target::Stand(id))
         } else if self.others.iter().any(|o| o.id == id) {
             self.target_type(Target::Other(id))
+        } else if self.player_vehicle(id).is_some() {
+            "minecraft:player".into()
         } else {
             String::new()
         }

@@ -112,10 +112,6 @@ enabled = true               # false pauses it and keeps the webhook
 # tempban_after = 3          # the hit that bans for tempban_hours; 0: never
 # words_file = ""            # your own list, in the format of the built-in one; "": the built-in list
 
-# Fights follow 26.3's rules. For 1.8.9's (no attack cooldown or sweep, 1.8 weapon damage; docs/pvp.md):
-# [combat]
-# legacy = true
-
 # A world's biome regions from mods are fixed when it is made (docs/design/mod-api/mod-biome-regions.md).
 # When a mod with one is gone, the server refuses to start until you choose. To change it:
 # [biome_regions]
@@ -214,9 +210,6 @@ pub struct Config {
     /// A one-time prune of barely visited chunks before a start (prune.rs); written only when set.
     #[serde(default, skip_serializing_if = "crate::prune::Settings::is_default")]
     pub prune_chunks: crate::prune::Settings,
-    /// The game reads this section itself (docs/pvp.md); written only when it isn't the default.
-    #[serde(default, skip_serializing_if = "Combat::is_default")]
-    pub combat: Combat,
     /// The game reads this section itself (game/interface/dedicated/biome_regions.rs); written only when it
     /// isn't the default.
     #[serde(default, skip_serializing_if = "BiomeRegions::is_default")]
@@ -271,19 +264,6 @@ impl Entities {
             return Err("entities.dab_activation_dist_mod must be 30 or less".into());
         }
         Ok(())
-    }
-}
-
-/// `[combat]`: `legacy = true` resolves the players' melee hits by 1.8.9's rules (no attack cooldown or sweep,
-/// 1.8.9 weapon damage). The game reads it from the same file (game/interface/dedicated/mod.rs, `load_combat`).
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct Combat {
-    pub legacy: bool,
-}
-impl Combat {
-    fn is_default(&self) -> bool {
-        *self == Self::default()
     }
 }
 
@@ -773,7 +753,14 @@ impl Config {
     /// wrote, for [`sync_back`].
     pub fn write_properties(&self, dir: &Path) -> std::io::Result<Vec<(String, String)>> {
         let path = dir.join(PROPERTIES);
-        let mut properties = read_properties(&path).unwrap_or_default();
+        // Only a missing file starts empty. One that cannot be read is left as it is and the start stops
+        // with why, so the owner's other keys (RCON, command blocks...) are not reset to defaults.
+        let mut properties = match std::fs::read(&path) {
+            Ok(bytes) => Properties::load_file(&bytes)
+                .map_err(|e| std::io::Error::other(format!("{}: {e}", path.display())))?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Properties::default(),
+            Err(e) => return Err(e),
+        };
         let written = self.vanilla();
         for (key, value) in &written {
             properties.put(key, value.clone());
@@ -875,7 +862,6 @@ pub fn render(config: &Config) -> String {
         "anticheat",
         "chat_filter",
         "prune_chunks",
-        "combat",
         "biome_regions",
         "entities",
     ] {
@@ -1184,20 +1170,6 @@ mod tests {
     }
 
     #[test]
-    fn legacy_combat_is_off_unless_its_section_turns_it_on() {
-        assert!(!Config::default().combat.legacy);
-        assert!(!TEMPLATE.lines().any(|l| l.trim() == "[combat]"));
-        let on = Config::parse(&format!("{TEMPLATE}\n[combat]\nlegacy = true\n")).unwrap();
-        assert!(on.combat.legacy);
-        // Kept when the file is written again, and left out while off.
-        assert_eq!(Config::parse(&render(&on)).unwrap(), on);
-        let off = render(&Config::default());
-        assert!(!off.lines().any(|l| l.trim() == "[combat]"), "{off}");
-        assert!(Config::parse("[combat]\nlegacy = 1\n").is_err());
-        assert!(Config::parse("[combat]\nlegcy = true\n").is_err());
-    }
-
-    #[test]
     fn biome_regions_refuse_missing_mods_unless_their_section_says() {
         assert_eq!(
             Config::default().biome_regions.missing,
@@ -1378,6 +1350,26 @@ mod tests {
             .map(|e| e.unwrap().file_name())
             .collect();
         assert_eq!(names, [std::ffi::OsString::from(FILE)]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_server_properties_that_cannot_be_read_is_left_alone() {
+        let dir =
+            std::env::temp_dir().join(format!("sunrise-server-config-bad-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(FILE), render(&Config::default())).unwrap();
+        // The owner's own keys, and a line the properties parser refuses (a bad \u escape).
+        let own = "enable-rcon=true\nrcon.password=secret\nresource-pack=C:\\uZZZZ\\pack.zip\n";
+        std::fs::write(dir.join(PROPERTIES), own).unwrap();
+        let error = Config::default().write_properties(&dir).unwrap_err();
+        assert!(error.to_string().contains(PROPERTIES), "{error}");
+        assert_eq!(std::fs::read_to_string(dir.join(PROPERTIES)).unwrap(), own);
+        // No file at all is a first start: it is written from server.toml.
+        std::fs::remove_file(dir.join(PROPERTIES)).unwrap();
+        Config::default().write_properties(&dir).unwrap();
+        assert!(dir.join(PROPERTIES).is_file());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

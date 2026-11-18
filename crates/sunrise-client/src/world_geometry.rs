@@ -32,6 +32,14 @@ pub struct ModelBatch {
     pub bounds: [[f32; 3]; 2],
 }
 
+/// One label's span of the name-tag vertices, and its squared distance from the camera.
+#[derive(Clone, Copy, Debug)]
+struct LabelRun {
+    distance_sq: f64,
+    start: u32,
+    end: u32,
+}
+
 /// Reused between views, including frames with no subscribers or output.
 pub struct WorldGeometry {
     camera: [f64; 3],
@@ -43,6 +51,14 @@ pub struct WorldGeometry {
     /// a stage. They count against the quad capacity.
     pipeline_quads: Vec<PipelineVertex>,
     pipeline_runs: Vec<PipelineRun>,
+    /// Labels (`name_tag`), 4 vertices a quad: drawn with the world's name tags, then their
+    /// see-through copies. They count against the quad capacity.
+    labels: [Vec<Vertex>; 2],
+    /// Each label's span of `labels[0]` and its squared distance from the camera, so the
+    /// translucent name tags draw far to near ([`Self::sort_labels`]).
+    label_runs: Vec<LabelRun>,
+    /// Reused while [`Self::sort_labels`] reorders `labels[0]`.
+    label_scratch: Vec<Vertex>,
     /// `PipelineFrame.time` for this view.
     time: f32,
     copies: Vec<ModelCopy>,
@@ -64,6 +80,9 @@ impl Default for WorldGeometry {
             quads: std::array::from_fn(|_| Vec::with_capacity(CAPACITY as usize * 4)),
             pipeline_quads: Vec::with_capacity(CAPACITY as usize * 4),
             pipeline_runs: Vec::with_capacity(CAPACITY as usize),
+            labels: std::array::from_fn(|_| Vec::with_capacity(CAPACITY as usize * 4)),
+            label_runs: Vec::with_capacity(CAPACITY as usize),
+            label_scratch: Vec::with_capacity(CAPACITY as usize * 4),
             time: 0.0,
             copies: Vec::with_capacity(INSTANCE_CAPACITY as usize),
             groups: std::collections::HashSet::with_capacity(INSTANCE_CAPACITY as usize),
@@ -84,6 +103,8 @@ impl WorldGeometry {
         self.quads.iter_mut().for_each(Vec::clear);
         self.pipeline_quads.clear();
         self.pipeline_runs.clear();
+        self.labels.iter_mut().for_each(Vec::clear);
+        self.label_runs.clear();
         self.clear_copies();
         self.model_cut = 0;
         self.groups.clear();
@@ -123,7 +144,8 @@ impl WorldGeometry {
             self.lines.iter().map(|v| v.len() as u32).sum(),
             CAPACITY,
             self.quads.iter().map(|v| v.len() as u32 / 4).sum::<u32>()
-                + self.pipeline_quads.len() as u32 / 4,
+                + self.pipeline_quads.len() as u32 / 4
+                + self.labels.iter().map(|v| v.len() as u32 / 4).sum::<u32>(),
             CAPACITY,
             self.accepted_models,
             INSTANCE_CAPACITY,
@@ -277,6 +299,61 @@ impl WorldGeometry {
             ));
         }
         Ok(())
+    }
+    /// Refuses a label's position before its text is read or laid out.
+    pub fn check_label(&self, at: [f64; 3]) -> Result<(), DrawError> {
+        self.validate_positions(std::iter::once(at))
+    }
+    /// Append one label's quads, laid out by the caller (`world` drawn with the name tags,
+    /// `see_through` over everything), or leave the output unchanged. `distance_sq` is the
+    /// label's squared distance from the camera, by which the name tags are sorted.
+    pub fn label(
+        &mut self,
+        distance_sq: f64,
+        world: &[Vertex],
+        see_through: &[Vertex],
+    ) -> Result<(), DrawError> {
+        let quads = (world.len() + see_through.len()) / 4;
+        if quads > (CAPACITY - self.usage().quads) as usize {
+            return Err(DrawError::CapacityExceeded);
+        }
+        if !world.is_empty() {
+            let start = self.labels[0].len() as u32;
+            self.label_runs.push(LabelRun {
+                distance_sq,
+                start,
+                end: start + world.len() as u32,
+            });
+        }
+        self.labels[0].extend_from_slice(world);
+        self.labels[1].extend_from_slice(see_through);
+        Ok(())
+    }
+    /// Orders the labels drawn with the name tags far to near, as vanilla sorts its translucent
+    /// name tags (`NameTagFeatureRenderer`): equally far ones keep their submission order.
+    /// Their see-through copies are not depth tested and keep submission order.
+    pub fn sort_labels(&mut self) {
+        if self
+            .label_runs
+            .windows(2)
+            .all(|pair| pair[0].distance_sq >= pair[1].distance_sq)
+        {
+            return;
+        }
+        self.label_runs
+            .sort_by(|a, b| b.distance_sq.total_cmp(&a.distance_sq));
+        let mut sorted = std::mem::take(&mut self.label_scratch);
+        sorted.clear();
+        for run in &mut self.label_runs {
+            let start = sorted.len() as u32;
+            sorted.extend_from_slice(&self.labels[0][run.start as usize..run.end as usize]);
+            (run.start, run.end) = (start, sorted.len() as u32);
+        }
+        self.label_scratch = std::mem::replace(&mut self.labels[0], sorted);
+    }
+    /// This view's labels: those drawn with the name tags, then their see-through copies.
+    pub fn labels(&self) -> [&[Vertex]; 2] {
+        [&self.labels[0], &self.labels[1]]
     }
     /// Append an entire batch of quads drawn by the mod pipeline in `slot`, or leave the
     /// output unchanged. The caller has resolved the handle; quads that follow the last ones
@@ -862,5 +939,79 @@ mod tests {
                 assert_eq!(capture.0.get(), expected);
             }
         }
+    }
+
+    #[test]
+    fn labels_share_the_quad_capacity_atomically_and_reset_per_view() {
+        let mut draw = WorldGeometry::default();
+        draw.reset([30_000_000.0, 20.0, 0.0], Mat4::IDENTITY, [0.5, 0.5]);
+        assert_eq!(draw.check_label([30_000_000.5, 70.0, 0.5]), Ok(()));
+        for at in [
+            [f64::NAN, 70.0, 0.5],
+            [0.5, f64::INFINITY, 0.5],
+            [f64::MAX, 70.0, 0.5],
+        ] {
+            assert_eq!(draw.check_label(at), Err(DrawError::NonFinite));
+        }
+        let quad = [<Vertex as bytemuck::Zeroable>::zeroed(); 4];
+        // One glyph in the world, and its see-through copy on a backdrop: three quads.
+        draw.label(1.0, &quad, &[quad, quad].concat()).unwrap();
+        assert_eq!(draw.usage().quads, 3);
+        assert_eq!(draw.labels().map(<[Vertex]>::len), [4, 8]);
+        let world = WorldQuad::new([[30_000_000.0, 20.0, -1.0]; 4], !0, WorldDepth::Tested);
+        draw.quads(&vec![world; CAPACITY as usize - 4]).unwrap();
+        // One quad left: a label of two is refused whole, one of one fits.
+        assert_eq!(
+            draw.label(1.0, &quad, &quad),
+            Err(DrawError::CapacityExceeded)
+        );
+        assert_eq!(draw.labels().map(<[Vertex]>::len), [4, 8]);
+        draw.label(1.0, &[], &quad).unwrap();
+        assert_eq!(draw.usage().quads, CAPACITY);
+        assert_eq!(draw.quads(&[world]), Err(DrawError::CapacityExceeded));
+        let capacities = draw.labels.each_ref().map(Vec::capacity);
+        draw.reset([0.0; 3], Mat4::IDENTITY, [0.0; 2]);
+        assert_eq!(draw.labels().map(<[Vertex]>::len), [0, 0]);
+        assert_eq!(draw.labels.each_ref().map(Vec::capacity), capacities);
+    }
+
+    #[test]
+    fn labels_draw_far_to_near_and_equal_distances_keep_their_order() {
+        let mut draw = WorldGeometry::default();
+        draw.reset([0.0; 3], Mat4::IDENTITY, [0.5, 0.5]);
+        // Each label's quad is told apart by its colour; two quads for the second.
+        let quad = |color| {
+            [Vertex {
+                color,
+                ..<Vertex as bytemuck::Zeroable>::zeroed()
+            }; 4]
+        };
+        let colors = |draw: &WorldGeometry| -> Vec<u32> {
+            draw.labels()[0]
+                .iter()
+                .step_by(4)
+                .map(|v| v.color)
+                .collect()
+        };
+        draw.label(4.0, &quad(1), &[]).unwrap();
+        draw.label(16.0, &[quad(2), quad(2)].concat(), &quad(9))
+            .unwrap();
+        draw.label(4.0, &quad(3), &[]).unwrap();
+        draw.label(1.0, &quad(4), &[]).unwrap();
+        draw.sort_labels();
+        assert_eq!(colors(&draw), [2, 2, 1, 3, 4]);
+        assert_eq!(
+            draw.labels()[1].len(),
+            4,
+            "see-through copies are not reordered"
+        );
+        // Sorted runs stay sorted when labels are added and sorted again.
+        draw.label(9.0, &quad(5), &[]).unwrap();
+        draw.sort_labels();
+        assert_eq!(colors(&draw), [2, 2, 5, 1, 3, 4]);
+        assert_eq!(draw.usage().quads, 7);
+        draw.reset([0.0; 3], Mat4::IDENTITY, [0.5, 0.5]);
+        draw.sort_labels();
+        assert!(draw.labels()[0].is_empty());
     }
 }

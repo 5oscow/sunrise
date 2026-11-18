@@ -1,6 +1,9 @@
 //! The package candidates the game loads, before content validation and conflicts.
 mod context;
-pub use context::{Argument, LaunchArguments, MissingValue, ModSelectionContext, data_dir_with};
+pub use context::{
+    Argument, LaunchArguments, MissingValue, ModSelectionContext, cache_home_in, data_dir_with,
+    private_home_in,
+};
 
 use crate::{
     Package, find,
@@ -122,7 +125,7 @@ mod tests {
             };
             let directory = self.0.join(folder);
             fs::create_dir_all(&directory).unwrap();
-            let path = directory.join(format!("{id}.hmod"));
+            let path = directory.join(format!("{id}.smod"));
             fs::write(&path, Package::write_files(&manifest, source).unwrap()).unwrap();
             path
         }
@@ -166,7 +169,7 @@ mod tests {
         let home = Scratch::new();
         let discovered = home.package("sunrise-mods", "discovered", false);
         let external = home.package("workspace", "external", false);
-        let invalid = home.0.join("sunrise-mods/invalid.hmod");
+        let invalid = home.0.join("sunrise-mods/invalid.smod");
         fs::write(&invalid, b"not a package").unwrap();
         let enabled = BTreeSet::from(["discovered".into(), "invalid".into()]);
         let dev = [discovered.clone(), external.clone(), invalid];

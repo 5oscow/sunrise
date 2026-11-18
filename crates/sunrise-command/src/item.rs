@@ -67,6 +67,7 @@ pub const DECODED_COMPONENTS: &[&str] = &[
     "minecraft:lodestone_tracker",
     "minecraft:damage_resistant",
     "minecraft:use_effects",
+    "minecraft:custom_data",
     "minecraft:block_entity_data",
     "minecraft:enchantable",
     "minecraft:ominous_bottle_amplifier",
@@ -189,6 +190,9 @@ pub fn decoded_component_value(id: &str, value: &Tag, reg: &Registries) -> Resul
     }
     if id == "minecraft:note_block_sound" {
         return identifier_value(value);
+    }
+    if id == "minecraft:custom_data" {
+        return sunrise_items::item_data::custom_data::decode(value.clone());
     }
     decode_component(id, value, reg)?;
     if id == "minecraft:block_entity_data" {
@@ -470,6 +474,7 @@ pub fn decode_component(id: &str, t: &Tag, reg: &Registries) -> Result<(), Strin
             .map(|_| ())
             .map_err(str::to_owned),
         "minecraft:note_block_sound" => identifier_value(t).map(|_| ()),
+        "minecraft:custom_data" => sunrise_items::item_data::custom_data::validate(t),
         // TypedEntityData.codec: the type is the compound's id.
         "minecraft:block_entity_data" => match t {
             Tag::Compound(c) => match c.get(&"id".into()) {

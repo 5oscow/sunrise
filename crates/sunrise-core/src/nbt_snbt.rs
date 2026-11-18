@@ -66,9 +66,13 @@ pub fn snbt_suggestions(text: &str) -> (usize, Vec<String>) {
         }
         Ok(_) => {}
         Err(error) => {
+            let error = parser.furthest(error);
             let values: Vec<&str> = error.suggestions.iter().map(String::as_str).collect();
             parser.record(error.cursor, &values);
         }
+    }
+    if let Some(kept) = parser.deferred.take() {
+        parser.record(kept.cursor, &[]);
     }
     (parser.suggestion_cursor, parser.suggestions)
 }
@@ -86,6 +90,9 @@ struct Parser<'a> {
     collect_suggestions: bool,
     suggestion_cursor: usize,
     suggestions: Vec<String>,
+    /// The furthest error of an alternative that failed and was left behind (a float
+    /// literal whose integer reading took over); `LongestOnly` still reports it.
+    deferred: Option<SnbtError>,
 }
 impl<'a> Parser<'a> {
     fn new(input: Input<'a>) -> Self {
@@ -96,11 +103,32 @@ impl<'a> Parser<'a> {
             collect_suggestions: false,
             suggestion_cursor: 0,
             suggestions: Vec::new(),
+            deferred: None,
         }
     }
     fn parse(mut self) -> Result<(Tag, usize), SnbtError> {
-        let value = self.value()?;
-        Ok((value, self.cursor))
+        match self.value() {
+            Ok(value) => Ok((value, self.cursor)),
+            Err(error) => Err(self.furthest(error)),
+        }
+    }
+    /// Remember a failed alternative's error; the first of the furthest ones is kept.
+    fn defer(&mut self, error: SnbtError) {
+        if self
+            .deferred
+            .as_ref()
+            .is_none_or(|kept| error.cursor > kept.cursor)
+        {
+            self.deferred = Some(error);
+        }
+    }
+    /// `ErrorCollector.LongestOnly`: the error that reached furthest wins, the earlier
+    /// stored one on a tie.
+    fn furthest(&mut self, error: SnbtError) -> SnbtError {
+        match self.deferred.take() {
+            Some(kept) if kept.cursor >= error.cursor => kept,
+            _ => error,
+        }
     }
     fn error(&self, key: &'static str) -> SnbtError {
         SnbtError {
@@ -237,10 +265,17 @@ impl<'a> Parser<'a> {
             }
             Some(0x22 | 0x27) => self.string().map(Tag::String),
             Some(0x2b | 0x2d | 0x2e | 0x30..=0x39) => {
-                if let Some(value) = self.float()? {
-                    Ok(value)
-                } else {
-                    self.integer(None)
+                // FloatLiteral | IntegerLiteral: a float that fails anywhere, including
+                // its value check, leaves the integer reading to try from the start.
+                let start = self.cursor;
+                match self.float() {
+                    Ok(Some(value)) => Ok(value),
+                    Ok(None) => self.integer(None),
+                    Err(error) => {
+                        self.defer(error);
+                        self.cursor = start;
+                        self.integer(None)
+                    }
                 }
             }
             _ => self.word(),
@@ -343,7 +378,9 @@ impl<'a> Parser<'a> {
                     self.bump();
                     name.push(char::from(c));
                 }
-                if name.is_empty() && self.peek() == Some(0x7d) {
+                // `GreedyPatternParseRule` needs at least one name character and offers
+                // no completion when it fails, so `\N{` suggests nothing, not `}`.
+                if name.is_empty() {
                     return Err(self.error("snbt.parser.invalid_character_name"));
                 }
                 self.expect(b'}')?;
@@ -505,7 +542,23 @@ impl<'a> Parser<'a> {
             self.cursor = start;
             return Ok(None);
         }
-        let exponent = self.exponent(&mut text)?;
+        // The exponent is optional after a dot; without one the float needs it, and a
+        // malformed exponent ends this reading instead of failing the value.
+        let before_exponent = self.cursor;
+        let text_len = text.len();
+        let exponent = match self.exponent(&mut text) {
+            Ok(found) => found,
+            Err(error) => {
+                self.defer(error);
+                if !dot {
+                    self.cursor = start;
+                    return Ok(None);
+                }
+                self.cursor = before_exponent;
+                text.truncate(text_len);
+                false
+            }
+        };
         let suffix_start = self.cursor;
         let suffix = self.lower().filter(|suffix| matches!(suffix, b'f' | b'd'));
         if suffix.is_none() {
@@ -800,5 +853,37 @@ mod tests {
             crate::text::parse_java_uuid("١-１-1-1-1"),
             Some(0x00000001_00010001_00010000_00000001)
         );
+    }
+
+    /// `GreedyPatternParseRule` for the name fails without suggestions, so an
+    /// unfinished `\N{` offers nothing; the closing brace is only expected after a name.
+    #[test]
+    fn unfinished_unicode_name_escape_suggestions() {
+        assert_eq!(snbt_suggestions("\"\\N{"), (4, Vec::new()));
+        assert_eq!(snbt_suggestions("\"\\N{LATIN"), (9, vec!["}".to_owned()]));
+        let finished = "\"\\N{LATIN SMALL LETTER A}\"";
+        assert_eq!(snbt_suggestions(finished), (finished.len(), Vec::new()));
+        assert_eq!(
+            parse_snbt_argument("'\\N{!}'").unwrap_err().key,
+            "snbt.parser.invalid_character_name"
+        );
+    }
+
+    /// `FloatLiteral | IntegerLiteral`: a malformed or out-of-range float falls back to the
+    /// integer reading, an optional exponent after a dot is dropped, and the furthest failed
+    /// alternative is still what a later failure reports.
+    #[test]
+    fn failed_float_alternatives_fall_back() {
+        let double = |value: f64| Tag::Double(value.to_bits());
+        assert_eq!(parse_snbt_argument("1e").unwrap(), (Tag::Int(1), 1));
+        assert_eq!(parse_snbt_argument("1e309").unwrap(), (Tag::Int(1), 1));
+        assert_eq!(parse_snbt_argument("1.5e").unwrap(), (double(1.5), 3));
+        assert_eq!(parse_snbt_argument("1e5").unwrap(), (double(1e5), 3));
+        let error = parse_snbt_argument("[1e309]").unwrap_err();
+        assert_eq!(
+            (error.key, error.cursor),
+            ("snbt.parser.infinity_not_allowed", 6)
+        );
+        assert!(parse_snbt_argument("{v:1e}").is_err());
     }
 }

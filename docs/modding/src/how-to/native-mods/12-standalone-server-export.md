@@ -19,7 +19,7 @@ It runs on the same OS/architecture as the host and requires an installed launch
 It is copied outside managed cache folders. On Windows use `sunrise-engine.exe`.
 
 Wasm packages use API hooks and API injection points, not engine internals. Install and
-enable their `.hmod` packages in the server game folder's `sunrise-mods/`. A plain engine
+enable their `.smod` packages in the server game folder's `sunrise-mods/`. A plain engine
 build refuses API listeners by name; listeners require the staged SDK engine.
 
 A mod's crate depends on `sunrise-mod-api` and never on the game: a `sunrise-client` dependency,
@@ -43,7 +43,7 @@ Updates do not rebuild a pinned `engine.path`: build a new export folder, set `e
 the old folder for manual rollback. The supervisor does not auto-update or rebuild a pinned engine path.
 
 To inspect the running server, its authenticated
-[`GET /api/v1/mods`](https://github.com/arismoko/horizon/blob/main/docs/api/server.md) queries the engine's canonical `LoadedMods` inventory:
+[`GET /api/v1/mods`](https://github.com/sunrise-org/sunrise/blob/main/docs/api/server.md) queries the engine's canonical `LoadedMods` inventory:
 `mods` lists loaded native, wasm and content package ids and versions in inventory order.
 `provenance` separately reports the configured program's build record, which may differ and is never
 used as an inventory fallback. A stopped or unreachable engine returns HTTP 409, not an empty list.

@@ -8,6 +8,7 @@ use super::{
 };
 use crate::blocks::Fluid;
 use crate::fast_hash::FxHashMap;
+use crate::items::BlockTagFlags;
 use sunrise_core::geometry::{Aabb, Vec3};
 use sunrise_core::position::BlockPos;
 
@@ -70,7 +71,7 @@ impl MobWorld<'_> {
                     } else if data::vanilla_burning_block(
                         &facts.name,
                         facts.emission > 0,
-                        self.has_tag("minecraft:fire", &facts.name),
+                        self.state_flag(state, BlockTagFlags::FIRE),
                     ) {
                         Some(PathType::FireInNeighbor)
                     } else {
@@ -82,9 +83,10 @@ impl MobWorld<'_> {
                     if let Some(adjacent) = adjacent {
                         return adjacent;
                     }
-                    // A declined block answer keeps this neighbour's fluid
-                    // contribution before the vanilla type mappings.
-                    if matches!(facts.fluid, Fluid::Water | Fluid::Modded) {
+                    // Custom fluids retain their default neighbour contribution.
+                    // Vanilla water contributes through its classified path type:
+                    // a solid waterlogged block is BLOCKED, not WATER.
+                    if facts.fluid == Fluid::Modded {
                         return PathType::WaterBorder;
                     }
                     if let Some(adjacent) = data::vanilla_adjacent(own) {
@@ -100,7 +102,35 @@ impl MobWorld<'_> {
     /// the same block instead of overflowing (#4443).
     pub fn floor_level(&self, x: i32, y: i32, z: i32) -> f64 {
         let below = y.saturating_sub(1);
-        f64::from(below) + f64::from(self.data.state(self.world.block(x, below, z)).top)
+        f64::from(below) + self.collision_top(x, below, z)
+    }
+    /// The block's collision top (0 for an empty shape), as `getFloorLevel`,
+    /// `MoveControl.tick` and `EvokerAttackSpellGoal.createSpellEntity` read it: the shape
+    /// at this cell for published or displaced collision (#1666, #1710), else the state's
+    /// cached height.
+    pub fn collision_top(&self, x: i32, y: i32, z: i32) -> f64 {
+        let state = self.world.block(x, y, z);
+        if !self.collision.has_positioned_collision(state) {
+            return f64::from(self.data.state(state).top);
+        }
+        self.bound_collision_shape(state, [x, y, z])
+            .filter(|shape| !shape.is_empty())
+            .map_or(0.0, |shape| shape.max(sunrise_core::geometry::Axis::Y))
+    }
+    /// `getCollisionShape(level, pos)` of `state` at `p` through the collision binding:
+    /// the shape its block entity publishes, else the declared one. None when the query
+    /// fails.
+    pub fn bound_collision_shape(
+        &self,
+        state: sunrise_world::registry::BlockStateId,
+        p: [i32; 3],
+    ) -> Option<sunrise_core::geometry::VoxelShape> {
+        let mut scene = crate::collisions::SceneCollisions {
+            world: self.world,
+            binding: self.collision,
+            subject: None,
+        };
+        self.collision.collision_shape(&mut scene, state, p).ok()
     }
 }
 
@@ -436,9 +466,6 @@ impl<'a, 'w> Finder<'a, 'w> {
         self.path_type(x, y, z)
     }
     // --- world access -------------------------------------------------
-    fn state(&self, x: i32, y: i32, z: i32) -> data::StateData {
-        self.w.data.state(self.w.world.block(x, y, z))
-    }
     fn pathfindable(&self, x: i32, y: i32, z: i32, kind: PathComputationType) -> bool {
         self.w.data.pathfindable(self.w.world.block(x, y, z), kind)
     }
@@ -453,8 +480,7 @@ impl<'a, 'w> Finder<'a, 'w> {
     }
     /// WalkNodeEvaluator.getFloorLevel(level, pos).
     pub fn static_floor(&self, x: i32, y: i32, z: i32) -> f64 {
-        let below = y.saturating_sub(1);
-        f64::from(below) + f64::from(self.state(x, below, z).top)
+        self.w.floor_level(x, y, z)
     }
     fn floor_level(&self, x: i32, y: i32, z: i32) -> f64 {
         let amphibious = matches!(self.eval, Evaluator::Amphibious { .. });

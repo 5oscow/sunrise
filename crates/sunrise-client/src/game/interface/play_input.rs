@@ -471,7 +471,7 @@ impl Game<'_> {
     }
 }
 
-/// The input source (docs/layers.md, "Controllers, splitscreen, replays and UI pages"): what
+/// The input source (docs/layers.md, "Controllers, replays and UI pages"): what
 /// gameplay asks of a device beyond the keyboard and mouse, and tells it. Gameplay calls these,
 /// never the controller modules; today `pad` answers.
 impl Game<'_> {

@@ -2,6 +2,7 @@
 
 pub(crate) mod block_entity_data;
 pub(crate) mod block_entity_items;
+pub(crate) mod block_entity_shapes;
 pub(crate) mod block_entity_type;
 /// Read-only block metadata and typed operation errors.
 pub mod block_metadata;
@@ -16,6 +17,7 @@ pub(crate) mod block_tint;
 pub(crate) mod bundle_items;
 pub(crate) mod cauldron_fluid_content;
 pub(crate) mod cauldron_interactions;
+pub(crate) mod collision_query;
 pub(crate) mod fluid_capability;
 pub(crate) mod fluid_model;
 pub(crate) mod fluid_states;

@@ -8,7 +8,10 @@ use sunrise_client_core::{
 };
 use sunrise_items::{banner_layer::BannerLayer, items::ItemStack};
 mod mod_models;
-pub use mod_api::item::containers::{ModContainer, ModEnergyBuffer, ModFluidTanks};
+pub mod published_shapes;
+pub use mod_api::item::containers::{
+    ModContainer, ModContainerInsertRule, ModEnergyBuffer, ModFluidTanks,
+};
 pub use mod_models::{ModBlockEntity, ModBlockEntityFields, ModRevision};
 use std::{collections::HashMap, sync::Arc};
 use {

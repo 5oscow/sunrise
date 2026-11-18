@@ -60,3 +60,45 @@ pub struct ItemModelLevel {
     /// `tickRateManager().runsNormally()`.
     pub runs_normally: bool,
 }
+
+/// Whose display transform a layer of a model node draws under (`ItemTransform` of
+/// `ItemTransforms`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+#[derive(sunrise_mod_api_macros::Wire)]
+pub enum ItemTransformMode {
+    /// The layer's own model's transform for the display context, as every model has.
+    #[default]
+    Model,
+    /// None: the layer is drawn only centred (the model's origin at the item's middle), so a
+    /// wrapping model whose own transform already placed the item doesn't apply one twice.
+    None,
+}
+
+/// A model `item_model_update` answers: one of the node's declared `models`, and whose display
+/// transform it draws under.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+#[derive(sunrise_mod_api_macros::Wire)]
+pub struct ItemModelLayer {
+    /// The key of the model in the node's `models`; a key it doesn't have draws nothing.
+    pub model: String,
+    /// Whose display transform the model, and every model it draws, goes under.
+    pub item_transform: ItemTransformMode,
+}
+
+impl ItemModelLayer {
+    /// The node's model `model`, under its own display transform.
+    pub fn new(model: impl Into<String>) -> Self {
+        Self {
+            model: model.into(),
+            item_transform: ItemTransformMode::Model,
+        }
+    }
+
+    /// The same layer under `item_transform`.
+    pub fn with_item_transform(mut self, item_transform: ItemTransformMode) -> Self {
+        self.item_transform = item_transform;
+        self
+    }
+}

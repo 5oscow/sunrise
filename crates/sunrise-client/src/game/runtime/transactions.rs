@@ -26,10 +26,11 @@
 //! damage, death or attribute operations.
 //! An entity added inside one goes at an abort, one removed is only marked until the root
 //! commit, and mods hear of joins and leaves at the root commit (`transactions/entities.rs`).
-use super::{BlockEntity, BlockStateId, Game, machines::HopperState};
+use super::{BlockEntity, BlockStateId, Game, machines::HopperState, maps::MapData};
 use mod_api::{Transaction, TransactionLifecycle, TransactionSeal};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use sunrise_client::{items::ItemStack, world::BlockEntityExtras};
+use sunrise_core::position::BlockPos;
 use sunrise_mod_runtime::attachments::{Attachments, Holder};
 
 #[path = "transactions/decision.rs"]
@@ -50,6 +51,13 @@ type ComposterRandoms =
 pub(super) struct OpenTransactions {
     levels: Vec<Level>,
     closing: Option<TransactionLifecycle>,
+    /// How many writes the journals have been asked to keep, ever: a whole-state epoch that no
+    /// restore moves back. A decision that read a player's inventory or a container's slots
+    /// compares it before and after its listeners ran; an equal rewrite counts as a write.
+    writes: u64,
+    /// The same count for a player's own state only (inventory, cursor, menu storage): what a
+    /// decision that must stay open to other writes (a mod's move into another block) reads.
+    player_writes: u64,
     /// The root commits telling their joins and leaves, outermost first: a listener's command in
     /// another level can commit a transaction there while this level's commit is told.
     committing: Vec<entities::Committing>,
@@ -58,6 +66,17 @@ pub(super) struct OpenTransactions {
     composter_randoms: ComposterRandoms,
     #[cfg(test)]
     pub(in crate::game) trace: Option<std::sync::Arc<std::sync::Mutex<Vec<String>>>>,
+}
+
+impl OpenTransactions {
+    /// The journaled-write epoch.
+    pub(in crate::game) fn writes(&self) -> u64 {
+        self.writes
+    }
+    /// The journaled-write epoch of players' own state.
+    pub(in crate::game) fn player_writes(&self) -> u64 {
+        self.player_writes
+    }
 }
 
 impl std::ops::Deref for OpenTransactions {
@@ -112,6 +131,8 @@ pub(super) struct Level {
     biomes: HashMap<Pos, u16>,
     /// Each player's inventory before this transaction first wrote it, by UUID.
     players: HashMap<u128, KeptPlayer>,
+    /// Ender storage has one journal shared by player and menu writes.
+    ender_items: HashMap<u128, Vec<Option<ItemStack>>>,
     /// Synced player health and its unpublished update events before set_health.
     player_health: HashMap<u128, KeptPlayerHealth>,
     /// Mob health and synchronization dirtiness before set_health.
@@ -128,6 +149,8 @@ pub(super) struct Level {
     item_entities: HashMap<u32, ItemStack>,
     /// Each guest's menu storage before this transaction first wrote it, by connection.
     menus: HashMap<u32, KeptMenus>,
+    /// The scoreboard before this transaction first wrote it (`journal_scoreboard`), whole.
+    board: Option<sunrise_client::scoreboard::Scoreboard>,
     /// Each entity's, player's, chunk's and the level's attachment map before this transaction
     /// first reached it (a block entity's is kept with it).
     attachments: HashMap<Holder, KeptAttachments>,
@@ -139,6 +162,8 @@ pub(super) struct Level {
     /// attachment map in it: an abort puts them back, so a chunk only a tentative write marked
     /// is clean again.
     chunk_marks: HashMap<(i32, i32), sunrise_client::world::ChunkMark>,
+    /// New map data and its reserved IDs. Neither enters the saved map table until root commit.
+    pub(super) new_maps: BTreeMap<i32, MapData>,
     /// What the root commit does, in order.
     after: Vec<After>,
     /// Internal decide/fire/apply state. No menu route uses this yet.
@@ -183,6 +208,7 @@ struct Kept {
     name: Option<sunrise_core::nbt::Tag>,
     /// The container lock and loot table roll kept beside the model.
     extras: BlockEntityExtras,
+    contents_watches: Vec<(Pos, u64)>,
 }
 
 impl Kept {
@@ -198,6 +224,12 @@ impl Kept {
             hopper: hoppers.get(&pos).copied(),
             name: world.block_names.get(&pos).cloned(),
             extras: world.block_entity_extras(pos),
+            contents_watches: world
+                .block_entities
+                .identity(pos)
+                .map_or_else(Vec::new, |observer| {
+                    world.block_entities.contents_watches.snapshot(observer)
+                }),
         }
     }
 }
@@ -220,7 +252,6 @@ struct KeptMobHealth {
 
 #[derive(Clone)]
 struct KeptPlayer {
-    ender_items: Vec<Option<ItemStack>>,
     player_extra: Option<sunrise_core::nbt::Tag>,
     inventory: Vec<Option<ItemStack>>,
     armor: [Option<ItemStack>; 4],
@@ -239,7 +270,6 @@ enum KeptEquipment {
 
 #[derive(Clone)]
 struct KeptMenus {
-    ender_items: Vec<Option<ItemStack>>,
     craft_grid: [Option<ItemStack>; 4],
     native_menu: Vec<Option<ItemStack>>,
 }
@@ -249,7 +279,10 @@ pub(super) enum After {
     /// Reserved raw bytes publish only when their connection incarnation is still live.
     Payload(super::payload_transport::Deferred),
     /// A mod's validated vanilla packet, bound to its physical protocol incarnation.
-    Packet(sunrise_client::net::PreparedPacket),
+    Packet(
+        sunrise_client::net::PreparedPacket,
+        mod_api::ServerboundPlayPacket,
+    ),
     Cauldron(super::cauldron_interactions::Effects),
     Composter(super::composter::Effects),
     /// A mod's world pickup or placement of fluid, its block already set: what is left of it
@@ -511,11 +544,17 @@ impl Game<'_> {
                 for (id, kept) in level.equipment {
                     outer.equipment.entry(id).or_insert(kept);
                 }
+                if outer.board.is_none() {
+                    outer.board = level.board;
+                }
                 for (id, kept) in level.item_entities {
                     outer.item_entities.entry(id).or_insert(kept);
                 }
                 for (id, len) in level.mob_lengths {
                     outer.mob_lengths.entry(id).or_insert(len);
+                }
+                for (uuid, kept) in level.ender_items {
+                    outer.ender_items.entry(uuid).or_insert(kept);
                 }
                 for (conn, kept) in level.menus {
                     outer.menus.entry(conn).or_insert(kept);
@@ -536,6 +575,7 @@ impl Game<'_> {
                 for (chunk, mark) in level.chunk_marks {
                     outer.chunk_marks.entry(chunk).or_insert(mark);
                 }
+                outer.new_maps.append(&mut level.new_maps);
                 outer.after.extend(level.after);
                 // The nearest enclosing transaction of this level takes its entities back; a
                 // parent in another level can't, and with none in this level they are told now.
@@ -641,6 +681,7 @@ impl Game<'_> {
     /// Keeps the block entity at `pos` as it is, with its attachments and a hopper's
     /// cooldown, if a transaction is open and hasn't yet.
     pub(super) fn journal_block_entity(&mut self, pos: Pos) {
+        self.transactions.writes = self.transactions.writes.wrapping_add(1);
         let Some(level) = self.transactions.last_mut() else {
             return;
         };
@@ -696,6 +737,7 @@ impl Game<'_> {
     /// the entity's slot list (a mod's list shorter than its container) is a write that grows
     /// the list: the entity is kept whole instead, length and all.
     pub(super) fn journal_block_entity_slot(&mut self, pos: Pos, slot: usize) {
+        self.transactions.writes = self.transactions.writes.wrapping_add(1);
         let exists = self
             .world
             .block_entities
@@ -775,11 +817,16 @@ impl Game<'_> {
     /// Keeps the inventory of the player whose state is in `Game` now, `uuid`, as it is, if a
     /// transaction is open and hasn't yet. Called inside `native_as_player`.
     pub(super) fn journal_player(&mut self, uuid: u128) {
+        self.transactions.player_writes = self.transactions.player_writes.wrapping_add(1);
+        self.transactions.writes = self.transactions.writes.wrapping_add(1);
         let Some(level) = self.transactions.last_mut() else {
             return;
         };
+        level
+            .ender_items
+            .entry(uuid)
+            .or_insert_with(|| self.ender_items.clone());
         level.players.entry(uuid).or_insert_with(|| KeptPlayer {
-            ender_items: self.ender_items.clone(),
             player_extra: self.level.player_extra.clone(),
             inventory: self.inventory.clone(),
             armor: self.armor.clone(),
@@ -835,28 +882,40 @@ impl Game<'_> {
     }
     /// Keeps `player`'s menu storage as it is, if a transaction is open and hasn't yet.
     pub(super) fn journal_menus(&mut self, player: mod_api::PlayerRef) {
+        self.transactions.player_writes = self.transactions.player_writes.wrapping_add(1);
+        self.transactions.writes = self.transactions.writes.wrapping_add(1);
         let Some(level) = self.transactions.last() else {
             return;
         };
-        let Some(super::native_server::PlayerRead::Guest(g)) = self.player_handle_read(player)
-        else {
+        let Some(g) = self.native_menu_player(player) else {
             return;
         };
         let conn = g.conn;
         if level.menus.contains_key(&conn) {
             return;
         }
+        let uuid = player.uuid();
+        let ender = (!level.ender_items.contains_key(&uuid)).then(|| {
+            if self.lan_acting == Some(conn) {
+                self.ender_items.clone()
+            } else {
+                g.ender_items.clone()
+            }
+        });
         let kept = KeptMenus {
-            ender_items: g.ender_items.clone(),
             craft_grid: g.craft_grid.clone(),
             native_menu: g.native_menu.clone(),
         };
         if let Some(level) = self.transactions.last_mut() {
             level.menus.insert(conn, kept);
+            if let Some(ender) = ender {
+                level.ender_items.insert(uuid, ender);
+            }
         }
     }
     /// Keeps entity `id`'s inventory as it is, if a transaction is open and hasn't yet.
     pub(super) fn journal_entity(&mut self, id: u32) {
+        self.transactions.writes = self.transactions.writes.wrapping_add(1);
         if self.transactions.is_empty() {
             return;
         }
@@ -865,6 +924,17 @@ impl Game<'_> {
         };
         if let Some(level) = self.transactions.last_mut() {
             level.entities.entry(id).or_insert(slots);
+        }
+    }
+    /// Keeps the scoreboard as it is, if a transaction is open and hasn't yet: a copy of the
+    /// whole board, taken on the transaction's first scoreboard write and never otherwise, so a
+    /// transaction that writes none pays nothing. An abort puts it back.
+    pub(super) fn journal_scoreboard(&mut self) {
+        let Some(level) = self.transactions.last_mut() else {
+            return;
+        };
+        if level.board.is_none() {
+            level.board = Some(self.score.board.clone());
         }
     }
     /// Keeps mob `id`'s equipment as it is, if a transaction is open and hasn't yet (#932):
@@ -931,7 +1001,7 @@ impl Game<'_> {
     fn run_after(&mut self, after: After) {
         match after {
             After::Payload(payload) => payload.publish(),
-            After::Packet(packet) => packet.publish(),
+            After::Packet(packet, body) => self.publish_mod_held(packet, body),
             After::Cauldron(effects) => self.commit_cauldron_effects(effects),
             After::Composter(effects) => self.commit_composter_effects(effects),
             After::FluidWrite(written) => self.commit_fluid_write(*written),
@@ -1020,6 +1090,10 @@ impl Game<'_> {
         }
     }
     fn root_commit(&mut self, level: Level) {
+        // A deferred listener may read a new map or create one of its own.
+        for (id, data) in level.new_maps {
+            self.publish_map(id, data);
+        }
         let mut told = std::collections::HashSet::new();
         let mut biome_columns = std::collections::HashSet::new();
         for after in level.after {
@@ -1113,9 +1187,22 @@ impl Game<'_> {
             }
         }
 
+        // Block entities whose published shapes the abort changed back.
+        let mut reshaped = Vec::new();
         for (pos, kept) in level.block_entities {
             match (&kept.entity, self.world.block_entities.get_mut(&pos)) {
                 (Some(entity), Some(now)) => {
+                    fn shapes(
+                        entity: &BlockEntity,
+                    ) -> Option<&sunrise_client::containers::PublishedShapes> {
+                        match entity {
+                            BlockEntity::Mod(entity) => entity.shapes(),
+                            _ => None,
+                        }
+                    }
+                    if shapes(now) != shapes(entity) {
+                        reshaped.push(pos);
+                    }
                     *now = entity.clone();
                     self.world
                         .block_entities
@@ -1135,6 +1222,14 @@ impl Game<'_> {
                 None => self.world.block_names.remove(&pos),
             };
             self.world.set_block_entity_extras(pos, kept.extras);
+            if let Some(observer) = self.world.block_entities.identity(pos)
+                && Some(observer.generation) == kept.generation
+            {
+                self.world
+                    .block_entities
+                    .contents_watches
+                    .restore(observer, kept.contents_watches);
+            }
             match kept.hopper {
                 Some(hopper) => self.hoppers.insert(pos, hopper),
                 None => self.hoppers.remove(&pos),
@@ -1177,6 +1272,16 @@ impl Game<'_> {
         for (pos, state) in level.blocks {
             self.world.set_stored(pos.0, pos.1, pos.2, state);
         }
+        // The shapes are back: the neighbours that read them (a fluid beside it) are told, as
+        // the publish told them.
+        for pos in reshaped {
+            let at = BlockPos::new(pos.0, pos.1, pos.2);
+            let state = self.world.block(pos.0, pos.1, pos.2);
+            self.with_level(|b, level, ticks| {
+                let block = b.block(state);
+                b.update_neighbors_at(level, ticks, at, block);
+            });
+        }
         for (chunk, randoms) in level.composter_randoms {
             self.transactions
                 .composter_randoms
@@ -1204,7 +1309,6 @@ impl Game<'_> {
         if let Some(host) = self.lan.as_mut() {
             host.hub.guests.update_all(|g| {
                 if let Some(kept) = level.menus.get(&g.conn).filter(|_| g.placed) {
-                    g.ender_items.clone_from(&kept.ender_items);
                     g.craft_grid.clone_from(&kept.craft_grid);
                     g.native_menu.clone_from(&kept.native_menu);
                 }
@@ -1277,9 +1381,25 @@ impl Game<'_> {
             }
         }
         level.actions.rollback_in(self);
+        if let Some(saved) = level.board {
+            self.score.board.restore(saved);
+            self.sync_score_registries();
+        }
+        for (uuid, kept) in level.ender_items {
+            if self.native_acting_id() == uuid {
+                self.ender_items = kept;
+            } else if let Some(host) = self.lan.as_mut()
+                && let Some(index) = host
+                    .hub
+                    .guests
+                    .iter()
+                    .position(|g| g.placed && g.uuid == uuid)
+            {
+                host.hub.guests.update(index, |g| g.ender_items = kept);
+            }
+        }
         for (uuid, kept) in level.players {
             self.native_as_player(uuid, |g| {
-                g.ender_items = kept.ender_items;
                 g.level.player_extra = kept.player_extra;
                 g.inventory = kept.inventory;
                 g.armor = kept.armor;

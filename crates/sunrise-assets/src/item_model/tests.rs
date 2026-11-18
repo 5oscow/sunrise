@@ -359,6 +359,12 @@ fn a_patched_stack_reads_its_patch_over_its_items_defaults() {
 /// with no mod answering the node draws nothing.
 #[test]
 fn registered_node_draws_the_models_the_mod_answers_per_stack() {
+    fn choice(name: &str) -> ModelChoice {
+        ModelChoice {
+            model: name.to_owned(),
+            transform: LayerTransform::Model,
+        }
+    }
     struct Env;
     impl ItemEnv for Env {
         fn item_model_update(
@@ -367,11 +373,11 @@ fn registered_node_draws_the_models_the_mod_answers_per_stack() {
             config: &sunrise_core::nbt::Tag,
             stack: &StackView,
             ctx: &Context,
-            models: &mut Vec<String>,
+            models: &mut Vec<ModelChoice>,
         ) {
             assert_eq!(kind, "nodetest:charge");
             if ctx.display == DisplayContext::Ground {
-                models.push("full".to_owned());
+                models.push(choice("full"));
                 return;
             }
             assert_eq!(config.get("glow"), Some(&sunrise_core::nbt::Tag::Byte(1)));
@@ -380,7 +386,7 @@ fn registered_node_draws_the_models_the_mod_answers_per_stack() {
                 2 => &["full", "empty"],
                 _ => &["absent"],
             };
-            models.extend(names.iter().map(|name| (*name).to_owned()));
+            models.extend(names.iter().map(|name| choice(name)));
         }
     }
     assert_eq!(
@@ -451,6 +457,86 @@ fn registered_node_draws_the_models_the_mod_answers_per_stack() {
     assert!(matches!(&layers[..], [layer] if matches!(&layer.content,
         LayerContent::Model { model } if model == "nodetest:item/full")));
     assert!(drawn(1, &NoEnv).is_empty(), "no mod answers");
+}
+
+/// A choice with no display transform marks every layer its model draws, however deep, and a
+/// choice that keeps the model's transform leaves the layers' own marks alone.
+#[test]
+fn a_choice_without_a_display_transform_owns_the_layers_below_it() {
+    struct Env;
+    impl ItemEnv for Env {
+        fn item_model_update(
+            &self,
+            _: &str,
+            _: &sunrise_core::nbt::Tag,
+            _: &StackView,
+            _: &Context,
+            layers: &mut Vec<ModelChoice>,
+        ) {
+            layers.push(ModelChoice {
+                model: "bare".into(),
+                transform: LayerTransform::None,
+            });
+            layers.push(ModelChoice {
+                model: "plain".into(),
+                transform: LayerTransform::Model,
+            });
+        }
+    }
+    // A local definition holding a `Registered` node, so the process-wide node table stays
+    // untouched.
+    let model = |json: serde_json::Value| ItemModelNode::decode(&json).unwrap();
+    let definition = ClientItem {
+        model: ItemModelNode::Registered {
+            kind: "layertest:wrap".into(),
+            transformation: None,
+            config: Arc::new(sunrise_core::nbt::Tag::Compound(Default::default())),
+            models: vec![
+                (
+                    "bare".into(),
+                    model(serde_json::json!({"type":"minecraft:composite","models":[
+                        {"type":"minecraft:model","model":"layertest:item/a"},
+                        {"type":"minecraft:model","model":"layertest:item/b"}]})),
+                ),
+                (
+                    "plain".into(),
+                    model(serde_json::json!({"type":"minecraft:model","model":"layertest:item/c"})),
+                ),
+            ],
+        },
+        hand_animation_on_swap: true,
+        oversized_in_gui: false,
+        swap_animation_scale: 1.0,
+    };
+    let mut models = ItemModels::default();
+    models
+        .definitions
+        .insert("layertest:wrap".into(), definition);
+    let mut stack = StackView::new("layertest:wrap", 1);
+    stack.patch.insert(
+        "minecraft:item_model".into(),
+        Some(serde_json::json!("layertest:wrap")),
+    );
+    let context = Context {
+        display: DisplayContext::Gui,
+        owner: None,
+        level: None,
+        seed: 0,
+    };
+    let marks: Vec<_> = models
+        .resolve(&stack, &context, &Env)
+        .layers
+        .iter()
+        .map(|layer| layer.display_transform)
+        .collect();
+    assert_eq!(
+        marks,
+        [
+            LayerTransform::None,
+            LayerTransform::None,
+            LayerTransform::Model
+        ]
+    );
 }
 
 #[test]

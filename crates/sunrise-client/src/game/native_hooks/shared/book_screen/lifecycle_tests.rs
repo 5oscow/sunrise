@@ -21,6 +21,7 @@ impl mod_api::Hooks for BookMod {
             id: "geometry:initial".into(),
             recipe_type: "geometry:crafting".into(),
             icon: "minecraft:stone".into(),
+            secondary_icon: None,
             target_menu: "geometry:menu".into(),
             book: KEY.get().unwrap().clone(),
             search_group: "geometry:search".into(),
@@ -50,9 +51,22 @@ impl mod_api::Hooks for BoundBookMod {
                 mod_api::Screen {
                     width: 176.0,
                     height: 166.0,
-                    slots: vec![Some([8.0, 18.0]), Some([80.0, 18.0])],
+                    slots: vec![
+                        Some(mod_api::ScreenSlot {
+                            position: [8.0, 18.0],
+                            ..Default::default()
+                        }),
+                        Some(mod_api::ScreenSlot {
+                            position: [80.0, 18.0],
+                            ..Default::default()
+                        }),
+                    ],
                     recipe_book: Some(key.clone()),
-                    recipe_book_toggle: Some([153.0, 60.0]),
+                    recipe_book_toggle: Some(mod_api::RecipeBookToggle {
+                        x: 153.0,
+                        y: 60.0,
+                        from: mod_api::ToggleOrigin::Menu,
+                    }),
                     ..Default::default()
                 },
             )
@@ -75,6 +89,7 @@ fn entering_inventory_requests_catalogue_for_preinstalled_bound_screen() {
             game.screen = Screen::Playing;
             game.container = Some((i32::MIN, 0, 0));
             game.mod_screen = Some(OpenNativeScreen {
+                slot_moves: Default::default(),
                 layout_revision: 4,
                 key: (i32::MIN, 0, 0),
                 window: 1,
@@ -108,6 +123,7 @@ fn entering_inventory_requests_catalogue_for_preinstalled_bound_screen() {
         });
     });
 }
+const STONE: &str = "minecraft:stone";
 fn geometry(game: &Game<'_>) -> ((f32, f32), Vec<(usize, [f32; 4])>) {
     let batch = sunrise_client::hud::HudBatch::new([1280, 720], game.settings.gui_scale_inputs());
     let layout = game.built_container(&batch).expect("cached container");
@@ -140,6 +156,7 @@ fn authoritative_custom_book_rebuilds_cached_geometry_without_observe_screen() {
             game.title = None;
             game.container = Some((i32::MIN, 0, 0));
             game.mod_screen = Some(OpenNativeScreen {
+                slot_moves: Default::default(),
                 layout_revision: 0,
                 key: (i32::MIN, 0, 0),
                 window: 1,
@@ -149,13 +166,19 @@ fn authoritative_custom_book_rebuilds_cached_geometry_without_observe_screen() {
                 screen: mod_api::Screen {
                     width: 176.0,
                     height: 166.0,
-                    slots: vec![Some([8.0, 18.0])],
+                    slots: vec![Some(mod_api::ScreenSlot {
+                        position: [8.0, 18.0],
+                        ..Default::default()
+                    })],
                     inventory_y: 84.0,
                     inventory_x: 8.0,
+                    title_label: None,
+                    inventory_label: None,
                     own_labels: false,
                     own_background: false,
                     recipe_book: Some(key.clone()),
                     recipe_book_toggle: None,
+                    recipe_book_big_result: false,
                 },
             });
             // A snapshot may precede the first draw. The build itself must
@@ -296,6 +319,306 @@ fn authoritative_custom_book_rebuilds_cached_geometry_without_observe_screen() {
             assert_eq!(geometry(game), opened);
             game.reset_book_view();
             assert_eq!(geometry(game), closed);
+        });
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn a_moved_slot_takes_its_place_for_drawing_and_input_from_the_next_frame() {
+    let mods: mod_api::Mods = Vec::<mod_api::ModEntry>::new().into();
+    mod_platform::testing::with_mods(mods, || {
+        crate::game::native_entity_refs::tests::with_client_game(|game| {
+            game.settings.gui_scale = 1;
+            game.recipe_ui.test_viewport = Some([1280, 720]);
+            game.screen = Screen::Inventory;
+            game.title = None;
+            game.container = Some((i32::MIN, 0, 0));
+            game.mod_screen = Some(OpenNativeScreen {
+                slot_moves: Default::default(),
+                layout_revision: 0,
+                key: (i32::MIN, 0, 0),
+                window: 1,
+                block: "minecraft:stone".into(),
+                data: Vec::new(),
+                extra: None,
+                screen: mod_api::Screen {
+                    width: 176.0,
+                    height: 166.0,
+                    slots: vec![
+                        Some(mod_api::ScreenSlot {
+                            position: [8.0, 18.0],
+                            ..Default::default()
+                        }),
+                        Some(mod_api::ScreenSlot {
+                            position: [26.0, 18.0],
+                            ..Default::default()
+                        }),
+                        None,
+                    ],
+                    inventory_y: 84.0,
+                    inventory_x: 8.0,
+                    ..Default::default()
+                },
+            });
+            game.build_screen();
+            let before = geometry(game);
+            // Origin (552, 277): slot 0's 18 by 18 box starts one pixel up and left of it.
+            assert_eq!(before.0, (552.0, 277.0));
+            assert!(before.1.contains(&(300, [559.0, 294.0, 18.0, 18.0])));
+            let batch =
+                sunrise_client::hud::HudBatch::new([1280, 720], game.settings.gui_scale_inputs());
+            assert_eq!(game.slot_at(&batch, 600.0, 340.0), None);
+
+            // A render hook moves it after this frame's build: drawing and
+            // hit-testing both still use the old place this frame.
+            assert!(game.set_screen_slot(STONE, 0, Some([48.0, 60.0])).is_ok());
+            assert_eq!(game.slot_position(300), (8.0, 18.0));
+            assert_eq!(game.slot_at(&batch, 600.0, 340.0), None);
+            assert_eq!(game.slot_at(&batch, 560.0, 295.0), Some(300));
+            assert_eq!(geometry(game), before);
+            // The next frame's build takes it for both.
+            game.build_screen();
+            assert_eq!(game.slot_position(300), (48.0, 60.0));
+            let after = geometry(game);
+            assert!(after.1.contains(&(300, [599.0, 336.0, 18.0, 18.0])));
+            // The 18 by 18 box holds the pointer at its first pixel and not past its last.
+            assert_eq!(game.slot_at(&batch, 599.0, 336.0), Some(300));
+            assert_eq!(game.slot_at(&batch, 616.0, 353.0), Some(300));
+            assert_eq!(game.slot_at(&batch, 617.0, 340.0), None);
+            assert_ne!(game.slot_at(&batch, 560.0, 295.0), Some(300));
+            assert_eq!(game.slot_position(301), (26.0, 18.0));
+
+            // The controller's slot targets read the same committed position.
+            let pad: Vec<[f32; 4]> = game
+                .pad_slot_targets(&batch)
+                .iter()
+                .map(|t| t.rect)
+                .collect();
+            assert!(pad.contains(&[600.0, 337.0, 16.0, 16.0]));
+            assert!(!pad.contains(&[560.0, 295.0, 16.0, 16.0]));
+
+            // Repeating the position, or the declared one, rebuilds nothing.
+            let builds = crate::game::container_layout::LAYOUT_CONSTRUCTIONS.with(|c| c.get());
+            assert!(game.set_screen_slot(STONE, 0, Some([48.0, 60.0])).is_ok());
+            assert!(game.set_screen_slot(STONE, 1, Some([26.0, 18.0])).is_ok());
+            game.build_screen();
+            assert_eq!(
+                crate::game::container_layout::LAYOUT_CONSTRUCTIONS.with(|c| c.get()),
+                builds
+            );
+            assert!(!game.set_screen_slot(STONE, 2, Some([1.0, 1.0])).is_ok());
+            assert!(!game.set_screen_slot(STONE, 9, Some([1.0, 1.0])).is_ok());
+            assert_eq!(geometry(game), after);
+
+            // Overlaps resolve by menu index: the container slot over the hotbar's
+            // first slot (8, 142) and over the main inventory's first (8, 84).
+            assert!(game.set_screen_slot(STONE, 0, Some([8.0, 142.0])).is_ok());
+            assert!(game.set_screen_slot(STONE, 1, Some([8.0, 84.0])).is_ok());
+            game.build_screen();
+            assert_eq!(game.slot_at(&batch, 561.0, 420.0), Some(300));
+            assert_eq!(game.slot_at(&batch, 561.0, 362.0), Some(301));
+
+            // A slot beyond the image takes the click instead of making it an outside click.
+            assert!(game.set_screen_slot(STONE, 0, Some([200.0, 20.0])).is_ok());
+            game.build_screen();
+            game.cursor = (555.0 + 200.0, 277.0 + 22.0);
+            assert_eq!(game.target_at(&batch), (Some(300), false));
+            game.cursor = (555.0 + 230.0, 277.0 + 22.0);
+            assert_eq!(game.target_at(&batch), (None, true));
+        });
+    });
+}
+
+/// A hidden slot keeps its place this frame, then leaves drawing, listing and hit-testing from
+/// the next build, and comes back where the mod puts it. Each refusal is named and changes
+/// nothing; a slot hidden when the screen opened is never shown.
+#[test]
+#[ignore = "daily"]
+fn a_hidden_slot_leaves_the_screen_and_comes_back_where_put() {
+    use mod_api::ScreenSlotRefusal::*;
+    use mod_api::prelude::ScreensClientHost;
+    let mods: mod_api::Mods = Vec::<mod_api::ModEntry>::new().into();
+    mod_platform::testing::with_mods(mods, || {
+        crate::game::native_entity_refs::tests::with_client_game(|game| {
+            game.settings.gui_scale = 1;
+            game.recipe_ui.test_viewport = Some([1280, 720]);
+            game.screen = Screen::Inventory;
+            game.title = None;
+            game.container = Some((i32::MIN, 0, 0));
+            game.mod_screen = Some(OpenNativeScreen {
+                slot_moves: Default::default(),
+                layout_revision: 0,
+                key: (i32::MIN, 0, 0),
+                window: 1,
+                block: STONE.into(),
+                data: Vec::new(),
+                extra: None,
+                screen: mod_api::Screen {
+                    width: 176.0,
+                    height: 166.0,
+                    slots: vec![
+                        Some(mod_api::ScreenSlot {
+                            position: [8.0, 18.0],
+                            ..Default::default()
+                        }),
+                        Some(mod_api::ScreenSlot {
+                            position: [26.0, 18.0],
+                            ..Default::default()
+                        }),
+                        None,
+                    ],
+                    inventory_y: 84.0,
+                    inventory_x: 8.0,
+                    ..Default::default()
+                },
+            });
+            game.build_screen();
+            let batch =
+                sunrise_client::hud::HudBatch::new([1280, 720], game.settings.gui_scale_inputs());
+            assert_eq!(game.slot_at(&batch, 560.0, 295.0), Some(300));
+
+            // Hidden by a render hook: still there this frame, gone from the next build.
+            assert_eq!(game.set_screen_slot(STONE, 0, None), Ok(()));
+            assert_eq!(ScreensClientHost::screen_slot(game, STONE, 0), None);
+            assert_eq!(game.slot_at(&batch, 560.0, 295.0), Some(300));
+            game.build_screen();
+            assert_eq!(game.slot_at(&batch, 560.0, 295.0), None);
+            assert!(!geometry(game).1.iter().any(|(id, _)| *id == 300));
+            assert_eq!(game.native_screen_slots(), Some(vec![301]));
+            assert_eq!(game.native_screen_slot_count(), Some(1));
+            assert_eq!(game.native_screen_slot(0), None);
+
+            // Shown again where the mod puts it.
+            assert_eq!(game.set_screen_slot(STONE, 0, Some([48.0, 60.0])), Ok(()));
+            assert_eq!(game.screen_slot(STONE, 0), Some([48.0, 60.0]));
+            game.build_screen();
+            assert_eq!(game.slot_at(&batch, 600.0, 340.0), Some(300));
+            assert_eq!(game.native_screen_slots(), Some(vec![300, 301]));
+            assert_eq!(game.screen_slot(STONE, 1), Some([26.0, 18.0]));
+
+            // Refusals, each by name, and nothing changes.
+            let before = geometry(game);
+            assert_eq!(
+                game.set_screen_slot(STONE, 2, Some([1.0, 1.0])),
+                Err(HiddenAtOpen)
+            );
+            assert_eq!(game.set_screen_slot(STONE, 3, None), Err(NoSuchSlot));
+            assert_eq!(
+                game.set_screen_slot(STONE, 0, Some([f32::NAN, 0.0])),
+                Err(BadPosition)
+            );
+            assert_eq!(game.set_screen_slot("other:block", 0, None), Err(NoScreen));
+            assert_eq!(game.screen_slot("other:block", 0), None);
+            // Hiding a slot hidden at open is already so.
+            assert_eq!(game.set_screen_slot(STONE, 2, None), Ok(()));
+            game.build_screen();
+            assert_eq!(geometry(game), before);
+
+            // With the screen closed there is no screen to change.
+            game.screen = Screen::Playing;
+            assert_eq!(game.set_screen_slot(STONE, 0, None), Err(NoScreen));
+            assert_eq!(game.screen_slot(STONE, 0), None);
+        });
+    });
+}
+
+/// A bound book with an accepted catalogue keeps its catalogue and its placement window
+/// through a slot move and a hide (they change no window nonce), while closing and reopening
+/// the screen still gives a new window that refuses the old catalogue.
+#[test]
+#[ignore = "daily"]
+fn a_bound_books_catalogue_survives_slot_moves_and_hides() {
+    use sunrise_client::recipe_book::placement_sync::{CatalogIdentity, Frame};
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new("bound", Box::new(BoundBookMod))].into();
+    mod_platform::testing::with_mods(mods, || {
+        crate::game::native_entity_refs::tests::with_client_game(|game| {
+            mod_api::__private::resolve_menus(["bound:menu"]).unwrap();
+            let (pipe, _server) = sunrise_protocol::connection::Pipe::pair();
+            game.connect_local(pipe, "Bound").unwrap();
+            let remote = game.remote.as_mut().unwrap();
+            remote.custom_books = true;
+            remote.joined = true;
+            remote.menu.set(Some((1, "bound:menu".into())));
+            game.settings.gui_scale = 1;
+            game.recipe_ui.test_viewport = Some([1280, 720]);
+            game.title = None;
+            let open = |game: &mut Game<'_>, nonce: u64| {
+                game.screen = Screen::Playing;
+                game.container = Some((i32::MIN, 0, 0));
+                game.mod_screen = Some(OpenNativeScreen {
+                    slot_moves: Default::default(),
+                    layout_revision: nonce,
+                    key: (i32::MIN, 0, 0),
+                    window: 1,
+                    block: "bound:block".into(),
+                    data: Vec::new(),
+                    extra: None,
+                    screen: mod_api::RecipeBookLayout::registered_screen("bound:menu").unwrap(),
+                });
+                game.set_screen(Screen::Inventory);
+            };
+            game.native_net.placement.client.hello(6);
+            assert!(
+                game.native_net
+                    .placement
+                    .client
+                    .ready(6, sunrise_client::recipe_book::placement_sync::schema())
+            );
+            open(game, 4);
+            let window = game.native_net.placement.client.window().unwrap().clone();
+            assert_eq!(window.nonce, 4);
+
+            // The server's catalogue for this window, received whole and accepted.
+            let client = &mut game.native_net.placement.client;
+            let Some(Frame::Catalog { epoch, number, .. }) = client.open(window.clone()) else {
+                panic!("no catalogue request")
+            };
+            let identity = CatalogIdentity {
+                epoch,
+                number,
+                window: window.window,
+                nonce: window.nonce,
+                instance: 1,
+                generation: 1,
+                menu: window.menu.clone(),
+                book: window.book.clone(),
+            };
+            let (_, _, layout) = mod_api::RecipeBookLayout::registered("bound:menu").unwrap();
+            client.start(identity.clone(), layout, 1).unwrap();
+            assert!(client.part(epoch, number, 0, vec![0]).unwrap().is_some());
+            assert!(client.accept_catalog(identity.clone()));
+            let kept = |game: &Game<'_>| {
+                game.native_net.placement.client.catalog() == Some(&identity)
+                    && game.native_net.placement.client.window() == Some(&window)
+                    && game.native_book_placement_catalog_matches(&identity)
+                    && game.native_book_placement_window_matches(&window)
+            };
+            assert!(kept(game));
+
+            // A move and a hide, built, and the retry check that clears a stale window.
+            assert_eq!(
+                game.set_screen_slot("bound:block", 0, Some([30.0, 40.0])),
+                Ok(())
+            );
+            assert_eq!(game.set_screen_slot("bound:block", 1, None), Ok(()));
+            game.build_screen();
+            game.check_mod_book_placement_timeout();
+            game.ensure_mod_book_catalog();
+            assert!(kept(game));
+            assert_eq!(game.native_screen_slot(0), Some((30.0, 40.0)));
+            assert_eq!(game.native_screen_slot(1), None);
+
+            // Close and reopen: a new screen, a new nonce, and the old catalogue no longer fits.
+            open(game, 5);
+            assert!(!game.native_book_placement_catalog_matches(&identity));
+            assert_eq!(
+                game.native_net.placement.client.window().map(|w| w.nonce),
+                Some(5)
+            );
+            assert_eq!(game.native_net.placement.client.catalog(), None);
+            // And the reopened screen starts from its declared layout.
+            assert_eq!(game.native_screen_slot(1), Some((80.0, 18.0)));
         });
     });
 }

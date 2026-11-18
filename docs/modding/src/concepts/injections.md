@@ -34,7 +34,9 @@ A staged SDK build supplies these sites. A plain, unstaged game has no point sit
 refuses API listeners at load by name. The launcher selects the SDK build when any
 enabled mod, native or wasm, declares an `[[inject]]` row. Each point is a replaceable
 engine function with an API record: its head loads one replacement cell, and the
-dispatcher for a listened point is installed through that cell.
+dispatcher for a listened point is installed through that cell. Because a cell holds one
+function pointer, a point is never generic: `#[point]` refuses a function with a type or
+const parameter (lifetimes are allowed), and the staging pass lists none.
 
 ## Ordering
 

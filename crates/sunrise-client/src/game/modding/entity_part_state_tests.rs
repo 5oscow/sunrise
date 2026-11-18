@@ -61,6 +61,8 @@ struct StateMod {
 #[mod_api::__subscriptions]
 impl Hooks for StateMod {
     fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
+        r.register_attachment_type("part_state:charge", false)
+            .unwrap();
         r.declare_general_entity(
             "robot",
             mod_api::GeneralEntityCategory::Misc,
@@ -275,7 +277,7 @@ fn entity_part_state_is_per_entity_through_edits_transactions_and_panics() {
             name: "charge",
             error: AttachmentError::Decode,
         };
-        assert_eq!(Charge::state(game, b), Err(decode));
+        assert_eq!(Charge::state(game, b), Err(decode.clone()));
         let mut ran = false;
         assert_eq!(Charge::edit_state(game, b, |_, _| ran = true), Err(decode));
         assert!(!ran);

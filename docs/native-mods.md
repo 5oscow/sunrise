@@ -1,6 +1,6 @@
 # Native mods
 
-Native mod docs live in the modding book: [native mods](modding/src/how-to/native-mods.md), [trait mods, Parts and attachments](modding/src/concepts/parts.md), [injections](modding/src/concepts/injections.md) and the [hook notes](https://arismoko.github.io/sunrise/reference/hook-notes.html).
+Native mod docs live in the modding book: [native mods](modding/src/how-to/native-mods.md), [trait mods, Parts and attachments](modding/src/concepts/parts.md), [injections](modding/src/concepts/injections.md) and the [hook notes](https://sunrise-org.github.io/sunrise/reference/hook-notes.html).
 
 ## Living death version 2
 
@@ -52,7 +52,7 @@ cargo build -p cargo-sunrise-mod
 "$ROOT/target/debug/cargo-sunrise-mod" sunrise-mod wasm-std "$ROOT/target/sunrise-wasm-std.wasm" --catalog points.json
 # From the repository root:
 cargo test -p sunrise-mod-wasm --features listener-fixture --test native_listener collect_positions_copy_in_and_out_natively_as_in_the_real_guest -- --exact
-SUNRISE_WASM_FIXTURE="$PWD/crates/sunrise-mod-wasm/tests/fixture/target/sunrise-mod/wasm_fixture.hmod" SUNRISE_WASM_STD="$PWD/target/sunrise-wasm-std.wasm" cargo test -p sunrise-mod-wasm --features listener-fixture --test real_member real_member -- --ignored --exact
+SUNRISE_WASM_FIXTURE="$PWD/crates/sunrise-mod-wasm/tests/fixture/target/sunrise-mod/wasm_fixture.smod" SUNRISE_WASM_STD="$PWD/target/sunrise-wasm-std.wasm" cargo test -p sunrise-mod-wasm --features listener-fixture --test real_member real_member -- --ignored --exact
 ```
 
 ### Victim ownership and hot path
@@ -110,7 +110,7 @@ python3 tools/native_dylib_probe.py --sdk prebuilt --output target/native-dylib-
 
 For a server archive, add `--server` to the build command. Use a fresh
 `CARGO_TARGET_DIR` when collecting a clean-build proof; all commands must use the
-same compiler as `launcher/src/rust_toolchain.rs`.
+same compiler as `https://github.com/sunrise-org/sunrise-launcher/blob/main/src/rust_toolchain.rs`.
 
 ## Upstream service contracts carried by this sync
 

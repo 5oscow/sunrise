@@ -8,7 +8,7 @@ pub trait RecipesHost {
     /// Published asset/data read: available in Setup, Reloading and World.
     /// The recipes of registered recipe type `kind` (`minecraft:crafting`, `mymod:crusher`), vanilla's
     /// types and mods' own alike, from `data/<namespace>/recipe/*.json` of vanilla,
-    /// the content mods (`.hmod`) and the world's data packs, in file order: each
+    /// the content mods (`.smod`) and the world's data packs, in file order: each
     /// one typed (`Recipe`: its ingredients, results, group, cooking time and
     /// experience, or its stonecutting, smithing or special crafting rule),
     /// with its file as JSON for a mod's own type. The file's type field names its
@@ -18,7 +18,9 @@ pub trait RecipesHost {
     /// types once per load/reload and match those in mod memory; those return
     /// RecipeLookupError::NotMatchable. These are the
     /// recipes in force (`RecipeManager.getAllRecipesFor`): data packs merged and
-    /// load conditions held, so a pack's override or removal shows. A data pack
+    /// load conditions held, so a pack's override or removal shows. A loaded recipe the API
+    /// cannot represent is left out of this listing and logged at debug level with its id
+    /// and reason; the rest remain in order. This does not change recipe loading. A data pack
     /// changes them on `/reload`, so look them up again when you need them. Empty
     /// for a type nobody uses and outside a world. These are the server's table on
     /// the server thread, a dedicated server or a LAN host; a client, the
@@ -60,6 +62,32 @@ pub trait RecipesHost {
     /// Rebuilt when the recipe table changes. Does not unlock any recipes.
     #[access(PublishedResources)]
     fn recipe_book_category(&mut self, kind: &str) -> Option<RecipeBookCategory>;
+}
+/// The server host's methods of the `recipes` area, implemented by the game and reached through [`ServerHost`].
+#[sunrise_mod_api_macros::host_area]
+pub trait RecipesServerHost {
+    /// Side: server.
+    /// Only inside `recipe_book_place`, once per click: places `recipe`, the recipe that hook was asked about, into a
+    /// grid of the open mod menu as vanilla's `ServerPlaceRecipe.placeRecipe` does. `grid_width` and
+    /// `grid_height` give the grid's cells, row by row; `grid_slots` the menu slot of each cell (a
+    /// recipe never fills a cell past the last slot given); `clear_slots` the slots emptied first, their
+    /// items going back to the player's inventory (the grid's slots are cleared too). `use_max_items`
+    /// places as many sets as the items allow (Shift), else one more than the grid holds when it
+    /// already matches. Items are taken from the player's inventory and from what the menu's sources
+    /// lend. Returns whether items were missing: the grid was cleared and the answer for
+    /// `ghost`. Refused (and nothing changes) outside that hook, on a second call, for another recipe, a slot the menu
+    /// lacks or hides, a repeated slot, an empty grid, a recipe larger than the slots given, a slot
+    /// whose pickup a part refuses, or a player with no room for the cleared items outside creative mode.
+    #[access(WorldOnly)]
+    fn place_recipe_in_grid(
+        &mut self,
+        recipe: &str,
+        grid_width: u16,
+        grid_height: u16,
+        grid_slots: Vec<u16>,
+        clear_slots: Vec<u16>,
+        use_max_items: bool,
+    ) -> Result<bool, String>;
 }
 /// The client host's methods of the `recipes` area, implemented by the game and reached through [`crate::ClientHost`].
 #[sunrise_mod_api_macros::host_area]
@@ -120,24 +148,26 @@ pub trait RecipesClientHost {
     #[access(WorldOnly)]
     fn transfer_recipe_id(&mut self, recipe: &str, max: bool);
     /// Side: client.
-    /// What `transfer_recipe(book_id)` would do now, worked out by the server
-    /// without moving anything: the player's inventory, the grid and every
+    /// What `transfer_recipe_id(recipe, false)` would do now for the recipe
+    /// with id `recipe` (`minecraft:stick`), worked out by the server without
+    /// moving anything: the open mod menu's `menu_transfer` part asked first,
+    /// then the grid, with the player's inventory, the grid and every
     /// container a mod lends the grid's recipes (a crafting station's chests,
-    /// which the client can't see) counted. For a viewer's "+", to mark the
-    /// inputs it lacks. The first call for a recipe asks and returns None;
-    /// the answer comes a moment later and is kept for that recipe while the
-    /// menu, the inventory and the grid stay as they were; while it is still
-    /// wanted it is asked again every two seconds, at most fifteen times for
-    /// one state of the menu. None outside a screen that
-    /// takes `transfer_recipe` and on a server that doesn't answer it.
+    /// which the client can't see) counted. Any recipe the server knows,
+    /// whether or not the player's recipe book holds it. For a viewer's "+",
+    /// to mark the inputs it lacks. The first call for a recipe asks and
+    /// returns None; the answer comes a moment later and is kept for that
+    /// recipe while the menu, the inventory and the grid stay as they were;
+    /// while it is still wanted it is asked again every two seconds, at most
+    /// fifteen times for one state of the menu. None outside a screen that
+    /// takes `transfer_recipe_id` and on a server that doesn't answer it.
     #[access(WorldOnly)]
-    fn transfer_recipe_check(&mut self, book_id: i32) -> Option<RecipeTransferCheck>;
+    fn transfer_recipe_check(&mut self, recipe: &str) -> Option<RecipeTransferCheck>;
     /// Side: client.
     /// The `book_id`s of the recipe `recipe_id` (`minecraft:stick`), the ids
-    /// `transfer_recipe`, `transfer_recipe_check`, `place_recipe` and
-    /// `known_recipes` use: one for each way the recipe book shows it, in the
-    /// book's order. For a recipe viewer, which has the recipe from
-    /// `recipes_of_type` and needs its id for "+". A server numbers its
+    /// `transfer_recipe`, `place_recipe` and `known_recipes` use: one for each
+    /// way the recipe book shows it, in the book's order. For a recipe viewer,
+    /// which has the recipe from `recipes_of_type`. A server numbers its
     /// recipes itself and names none of them, so an id is given only when the
     /// server sent the recipe book entry with that number and this client's
     /// own numbering of the recipe agrees with it: the entry is the same

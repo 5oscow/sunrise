@@ -8,8 +8,8 @@ use super::{Dim, Game, entity_culling::EntityCullDecision};
 use serde_json::Value;
 use std::{cell::RefCell, collections::HashMap};
 use sunrise_assets::item_model::{
-    Components, ComponentsView, DisplayContext, FluidAppearance, GlobalPos, ItemEnv, LevelState,
-    OwnerState, StackView,
+    Components, ComponentsView, DisplayContext, FluidAppearance, GlobalPos, ItemEnv,
+    LayerTransform, LevelState, ModelChoice, OwnerState, StackView,
 };
 use sunrise_client::{
     block_entity_render::{diffuse_lights, vertex_light},
@@ -29,11 +29,9 @@ struct ItemEntityDraw<'a> {
     entity: bool,
 }
 
-/// The game's painter for the HUD kit's icons (`hud_kit::icon`): items by their models, the
-/// player's face from `face`, their skin's texture.
+/// The game's painter for the HUD kit's icons (`hud_kit::icon`): items by their models.
 pub(super) struct IconPainter<'g, 'a> {
     pub(super) game: &'g Game<'a>,
-    pub(super) face: Option<&'g str>,
 }
 
 impl sunrise_client::hud_kit::icon::IconPainter for IconPainter<'_, '_> {
@@ -44,25 +42,6 @@ impl sunrise_client::hud_kit::icon::IconPainter for IconPainter<'_, '_> {
         let scale = size / sunrise_client::hud_kit::icon::ITEM_SIZE;
         batch.scale_since(start, x, y, scale, scale);
         batch.vertices.len() > start
-    }
-    fn face(&self, batch: &mut HudBatch, [x, y, size]: [f32; 3]) -> bool {
-        let Some(skin) = self.face else {
-            return false;
-        };
-        let mut draws = Vec::new();
-        // `PlayerFaceExtractor`: the face, then its hat layer.
-        sunrise_client::tab_list::face(
-            &mut draws,
-            skin,
-            x as i32,
-            y as i32,
-            size as i32,
-            true,
-            false,
-            u32::MAX,
-        );
-        sunrise_client::hud_layout::paint(batch, &self.game.gui.atlas, &draws);
-        true
     }
 }
 
@@ -156,7 +135,7 @@ impl ItemEnv for Env<'_, '_> {
         config: &sunrise_core::nbt::Tag,
         stack: &StackView,
         ctx: &sunrise_assets::item_model::Context,
-        models: &mut Vec<String>,
+        models: &mut Vec<ModelChoice>,
     ) {
         if !mod_api::__private::listened(mod_api::HookId::ItemModelUpdate) {
             return;
@@ -167,6 +146,7 @@ impl ItemEnv for Env<'_, '_> {
         let Ok(display) = ctx.display.try_into_api();
         let owner = ctx.owner.and_then(|owner| owner.try_into_api().ok());
         let level = ctx.level.and_then(|level| level.try_into_api().ok());
+        let mut layers = Vec::new();
         self.game
             .native_item_model_update(mod_api::__private::ItemModelUpdateCall {
                 kind,
@@ -177,8 +157,15 @@ impl ItemEnv for Env<'_, '_> {
                 owner: owner.as_ref(),
                 level: level.as_ref(),
                 seed: ctx.seed,
-                models,
+                layers: &mut layers,
             });
+        models.extend(layers.into_iter().map(|layer| ModelChoice {
+            model: layer.model,
+            transform: match layer.item_transform {
+                mod_api::ItemTransformMode::None => LayerTransform::None,
+                _ => LayerTransform::Model,
+            },
+        }));
     }
     fn special_model_parts(
         &self,
@@ -186,8 +173,15 @@ impl ItemEnv for Env<'_, '_> {
         base: &str,
         config: &std::sync::Arc<sunrise_core::nbt::Tag>,
         stack: &StackView,
+        ctx: &sunrise_assets::item_model::Context,
     ) -> Option<sunrise_assets::item_model::PreparedParts> {
-        super::native_special_renderers::parts(self.game, slot, config, stack, |parts| {
+        let Ok(display) = ctx.display.try_into_api();
+        let context = mod_api::SpecialModelContext::new(
+            display,
+            ctx.level.map(|level| level.game_time),
+            self.game.frame_world_partial_tick() as f32,
+        );
+        super::native_special_renderers::parts(self.game, slot, config, stack, &context, |parts| {
             self.game.pack.item_renderer.prepare_parts(base, parts)
         })
     }
@@ -531,7 +525,19 @@ impl Game<'_> {
         seed: i32,
         hand: CitHand,
     ) -> ItemRenderState {
-        let level = self.item_level();
+        self.resolve_item_in_level(stack, display, owner, Some(&self.item_level()), seed, hand)
+    }
+    /// [`Self::resolve_item_in_hand`] with the level the model reads given: `None` for a
+    /// resolution that has no level, whose `context_dimension` selects take their fallback.
+    pub(super) fn resolve_item_in_level(
+        &self,
+        stack: &ItemStack,
+        display: DisplayContext,
+        owner: Option<&OwnerState>,
+        level: Option<&LevelState>,
+        seed: i32,
+        hand: CitHand,
+    ) -> ItemRenderState {
         let renderer = &self.pack.item_renderer;
         let (rule, glint) = renderer.cit.as_ref().map_or((None, None), |cit| {
             let item_max = self
@@ -550,7 +556,7 @@ impl Game<'_> {
             &item_render::stack_view(stack),
             display,
             owner,
-            Some(&level),
+            level,
             seed,
             &self.item_env(),
             rule,
@@ -870,7 +876,7 @@ impl Game<'_> {
                     q.z.floor() as i32,
                 ))
             };
-            let seed = i64::from(self.pack.item_renderer.item_id(&item.stack.item))
+            let seed = i64::from(self.item_number(&item.stack.item).unwrap_or(0))
                 + i64::from(item.stack.damage);
             let copies = item_render::cluster_poses_with_depth(
                 pose,
@@ -1239,13 +1245,24 @@ mod tests {
             } else {
                 "empty"
             };
-            event.models.push(format!("{place}/{fill}"));
-            event.models.push(format!("seed {}", event.seed));
+            event
+                .layers
+                .push(mod_api::ItemModelLayer::new(format!("{place}/{fill}")));
+            event.layers.push(
+                mod_api::ItemModelLayer::new(format!("seed {}", event.seed))
+                    .with_item_transform(mod_api::ItemTransformMode::None),
+            );
             if let Some(owner) = event.owner {
-                event.models.push(format!("owner {}", owner.entity_type));
+                event.layers.push(mod_api::ItemModelLayer::new(format!(
+                    "owner {}",
+                    owner.entity_type
+                )));
             }
             if let Some(level) = event.level {
-                event.models.push(format!("level {}", level.dimension));
+                event.layers.push(mod_api::ItemModelLayer::new(format!(
+                    "level {}",
+                    level.dimension
+                )));
             }
         }
     }
@@ -1291,6 +1308,9 @@ mod tests {
                 &mut models,
             );
             models
+                .into_iter()
+                .map(|choice| (choice.model, choice.transform == LayerTransform::None))
+                .collect::<Vec<_>>()
         };
         let mods: mod_api::Mods = vec![mod_api::ModEntry::new("cellmod", Box::new(Cell))].into();
         mod_platform::testing::with_mods(mods, || {
@@ -1301,15 +1321,15 @@ mod tests {
                 let env = Env { game };
                 assert_eq!(
                     drawn(&env, "cellmod:cell", 1, &in_screen),
-                    ["gui/empty", "seed 7"]
+                    [("gui/empty".to_owned(), false), ("seed 7".to_owned(), true)]
                 );
                 assert_eq!(
                     drawn(&env, "cellmod:cell", 2, &on_ground),
                     [
-                        "ground/full",
-                        "seed 42",
-                        "owner minecraft:zombie",
-                        "level minecraft:the_nether"
+                        ("ground/full".to_owned(), false),
+                        ("seed 42".to_owned(), true),
+                        ("owner minecraft:zombie".to_owned(), false),
+                        ("level minecraft:the_nether".to_owned(), false)
                     ]
                 );
                 assert!(drawn(&env, "othermod:cell", 2, &on_ground).is_empty());

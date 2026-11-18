@@ -17,8 +17,11 @@ calls both.
 
 Queued actions are taken oldest first, at most **64 entries per queue per drain**, with at most
 **1024 pending entries**. A burst spills into later drains, normally later client ticks, rather than
-all acting on the next tick. Hotbar selection can drain more than once per tick, so its limit is per
-drain, not per tick. A full queue refuses the new entry, logs its first refusal once for that queue's
+all acting on the next tick. The hotbar differs: each number key keeps its own counter of up to
+**1024 pending clicks**, and a selection drain consumes **one click per key**, in order from key 1 to
+key 9, so the highest key clicked wins and a key's further clicks wait for later drains. Hotbar
+selection can drain more than once per tick, so its limit is per drain, not per tick: there is no
+once-per-tick guard. A full queue refuses the new entry, logs its first refusal once for that queue's
 lifetime, and the call returns normally (`Ok(())`), like a lost physical press. Clearing pending
 input does not reset that diagnostic. Physical input using these queues has the same limits; ordinary
 input below the limits keeps its order and timing.
@@ -59,6 +62,9 @@ mapping a mod holds, as `KeyMapping.releaseAll` does; hold it again once the scr
 `interaction_key_mapping_triggered` fires at the attack or use as it does for the player's click, and
 its cancel and swing work the same. `key_mapping_pre` is not asked: it is about physical key and mouse
 button events. `ClientHost::mapping(name)` reads a held mapping as down, whoever holds it.
+`ClientHost::mapping_state(name)` is the same read without the label, for a HUD that reads mappings every
+frame: whether the mapping is held, and a hash of the key it is bound to. The hash changes when the binding
+does, so read the label with `mapping` only then. It allocates nothing.
 
 The game has no bare swing to add: in 26.3 a swing sends nothing of its own, and the attack mapping
 produces the swing and its packet.

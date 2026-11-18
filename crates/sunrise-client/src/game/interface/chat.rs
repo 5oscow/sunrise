@@ -178,7 +178,7 @@ impl Game<'_> {
             keep
         });
         let arguments = super::native_server::command_arguments();
-        let (tree, _, problems) = super::native_server::command_tree(
+        let (tree, _, problems) = super::native_server::client_command_tree(
             &commands,
             |name| base.find(name).is_some(),
             &arguments,
@@ -770,6 +770,14 @@ impl Game<'_> {
     pub(in crate::game) fn sync_loot_table_ids(&mut self) {
         let mut ids: Vec<String> = self.items().loot_table_ids().map(str::to_owned).collect();
         ids.sort();
+        if let Some(entry) = self
+            .ui
+            .registries
+            .by_registry
+            .get_mut("minecraft:loot_table")
+        {
+            entry.ids.clone_from(&ids);
+        }
         self.ui.registries.loot_tables = ids;
     }
     /// Registry contents for argument parsing (built when a world opens).
@@ -2633,7 +2641,7 @@ mod tests {
         let vanilla = sunrise_client::command::vanilla::game_dispatcher();
         let commands = [mod_api::Command::new("xmode <mode:word>")];
         let arguments = super::super::native_server::command_arguments();
-        let (tree, _, problems) = super::super::native_server::command_tree(
+        let (tree, _, problems) = super::super::native_server::client_command_tree(
             &commands,
             |name| vanilla.find(name).is_some(),
             &arguments,

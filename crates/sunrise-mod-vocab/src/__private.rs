@@ -53,6 +53,37 @@ pub fn set_mod_enabled(id: &str, on: bool) -> bool {
     crate::set_mod_enabled(id, on)
 }
 
+/// Index the `(namespace, mod ID)` pairs admitted to the startup registries.
+pub fn install_content_owners<'a>(owners: impl IntoIterator<Item = (&'a str, &'a str)>) {
+    crate::runtime::install_content_owners(owners);
+}
+
+/// Whether the engine has bound content ownership for the installed dispatch.
+pub fn content_owners_published() -> bool {
+    crate::runtime::content_owners_published()
+}
+
+/// Whether the declaring package of this content is switched off.
+pub fn content_owner_disabled(id: &str) -> bool {
+    crate::runtime::content_owner_disabled(id)
+}
+
+/// Whether any installed mod is off; computed only at load/toggle time.
+pub fn any_mod_disabled() -> bool {
+    crate::runtime::any_mod_disabled()
+}
+
+/// Whether a block's owner has a disabled Part subscribed to this hook.
+/// The scheduler uses the same pre-indexed table as dispatch, before consuming a tick.
+pub fn block_hook_inert(hook: HookId, state: BlockState) -> bool {
+    let table = crate::parts(hook, "block_hook_inert");
+    table
+        .for_hook(hook)
+        .and_then(|table| table.block_entry(state))
+        .and_then(|entry| entry.disabled_owner_slot())
+        .is_some()
+}
+
 /// Resolve a listener's owner once at load, for dispatch through [`mod_index_on`].
 pub fn mod_index(id: &str) -> Option<usize> {
     crate::mods().iter().position(|entry| entry.id == id)
@@ -121,7 +152,7 @@ pub fn installed_code_ids() -> impl Iterator<Item = &'static str> {
 
 /// What the installed code mod `id` carries that a joining client must have, as the end of a
 /// sentence about the mod: its first subscription to a client-side hook, its first part that
-/// subscribes to one, or its first required payload channel sent to clients. The engine refuses
+/// subscribes to one, a synced attachment, or a required payload channel sent to clients. The engine refuses
 /// a `side = "server"` mod that has one. Read once the parts are installed.
 pub fn client_requirement(id: &str) -> Option<String> {
     let mine = || crate::mods().iter().filter(|entry| entry.id == id);
@@ -133,6 +164,15 @@ pub fn client_requirement(id: &str) -> Option<String> {
         return Some(format!(
             "attaches the part {part}, which listens to the client hook {hook}"
         ));
+    }
+    if let Some(types) = installed.attachment_types.get(id)
+        && let Some(name) = types
+            .iter()
+            .filter(|(_, sync)| **sync)
+            .map(|(name, _)| name)
+            .min()
+    {
+        return Some(format!("declares the synced attachment {id}:{name}"));
     }
     let channel = installed.keys.payloads.as_ref()?.client_bound(id)?;
     Some(format!("sends the required payload {channel} to clients"))
@@ -192,6 +232,22 @@ pub mod built {
     pub fn model_ref(generation: u64, slot: u32) -> crate::ModelRef {
         crate::ModelRef(generation, slot)
     }
+    /// An empty baked model copy the game fills field by field.
+    pub fn baked_model_view() -> crate::BakedModelView {
+        crate::BakedModelView {
+            ambient_occlusion: true,
+            particle: None,
+            quads: Vec::new(),
+        }
+    }
+    /// What a mod may still create of its dynamic textures: `images` and `bytes` of pixels left.
+    pub fn dynamic_texture_budget(images: u32, bytes: u64) -> crate::DynamicTextureBudget {
+        crate::DynamicTextureBudget { images, bytes }
+    }
+    /// Wrap a slot of the baked model store's published generation.
+    pub fn baked_model_key(generation: u64, slot: u32) -> crate::BakedModelKey {
+        crate::BakedModelKey(generation, slot)
+    }
     /// Wrap a slot in the pipeline set's published generation.
     pub fn render_pipeline_ref(generation: u64, slot: u32) -> crate::RenderPipelineRef {
         crate::RenderPipelineRef::from_parts(generation, slot)
@@ -232,6 +288,14 @@ pub mod game {
     /// A boss bar handle the game names.
     pub fn boss_bar_ref(epoch: WorldEpoch, uuid: u128) -> BossBarRef {
         BossBarRef { epoch, uuid }
+    }
+    /// A scoreboard objective handle the game names.
+    pub fn objective_ref(epoch: WorldEpoch, id: u64) -> ObjectiveRef {
+        ObjectiveRef { epoch, id }
+    }
+    /// A scoreboard team handle the game names.
+    pub fn team_ref(epoch: WorldEpoch, id: u64) -> TeamRef {
+        TeamRef { epoch, id }
     }
     /// A chunk handle the game names.
     pub fn chunk_ref(level: LevelRef, pos: [i32; 2]) -> ChunkRef {
@@ -301,6 +365,16 @@ pub mod game {
         }
     }
 
+    impl Fields for crate::BakedModelKey {
+        type Fields<'a> = ModelRefFields;
+        fn fields(&self) -> ModelRefFields {
+            ModelRefFields {
+                generation: self.0,
+                slot: self.1,
+            }
+        }
+    }
+
     impl Fields for RenderPipelineRef {
         type Fields<'a> = ModelRefFields;
         fn fields(&self) -> ModelRefFields {
@@ -347,6 +421,36 @@ pub mod game {
             BossBarRefFields {
                 epoch: self.epoch,
                 uuid: self.uuid,
+            }
+        }
+    }
+
+    #[non_exhaustive]
+    pub struct ObjectiveRefFields {
+        pub epoch: WorldEpoch,
+        pub id: u64,
+    }
+    impl Fields for ObjectiveRef {
+        type Fields<'a> = ObjectiveRefFields;
+        fn fields(&self) -> ObjectiveRefFields {
+            ObjectiveRefFields {
+                epoch: self.epoch,
+                id: self.id,
+            }
+        }
+    }
+
+    #[non_exhaustive]
+    pub struct TeamRefFields {
+        pub epoch: WorldEpoch,
+        pub id: u64,
+    }
+    impl Fields for TeamRef {
+        type Fields<'a> = TeamRefFields;
+        fn fields(&self) -> TeamRefFields {
+            TeamRefFields {
+                epoch: self.epoch,
+                id: self.id,
             }
         }
     }
@@ -459,13 +563,36 @@ pub mod game {
         }
     }
 
+    pub trait GlobalLootModifierManagerNew {
+        fn prepared(
+            entries: Vec<(Identifier, std::sync::Arc<dyn crate::GlobalLootModifier>)>,
+            owner: std::sync::Arc<dyn std::any::Any + Send + Sync>,
+        ) -> Self;
+        fn bind_from(&self, source: &Self);
+    }
+    impl GlobalLootModifierManagerNew for crate::GlobalLootModifierManager {
+        fn prepared(
+            entries: Vec<(Identifier, std::sync::Arc<dyn crate::GlobalLootModifier>)>,
+            owner: std::sync::Arc<dyn std::any::Any + Send + Sync>,
+        ) -> Self {
+            Self::prepared(entries, owner)
+        }
+        fn bind_from(&self, source: &Self) {
+            Self::bind_from(self, source);
+        }
+    }
     pub trait ServerReloadListenersOrder {
         fn new() -> Self;
+        /// The engine has registered this builtin and linked the preceding anchor.
+        fn set_last_vanilla_listener(&mut self, id: Identifier);
         fn finish(
             self,
         ) -> Result<crate::world::server_reload::OrderedServerReload, ReloadOrderError>;
     }
     impl ServerReloadListenersOrder for crate::world::server_reload::ServerListenerRegistry {
+        fn set_last_vanilla_listener(&mut self, id: Identifier) {
+            self.default_anchor = id;
+        }
         fn new() -> Self {
             crate::world::server_reload::ServerListenerRegistry::new()
         }
@@ -599,3 +726,9 @@ pub mod ingredient_parser;
 pub mod points;
 
 include!(concat!(env!("OUT_DIR"), "/mod_api_exports_private.rs"));
+
+/// How many listeners this thread has entered, wasm and native alike. A scoped
+/// resource that must not outlive one listener compares it between operations.
+pub fn listener_serial() -> u64 {
+    crate::runtime::listener_serial()
+}

@@ -9,7 +9,7 @@
 //! tree stands in and draws from the decorator's own random through
 //! [`GroundLevel`], so with the decorator's own provider kept, the blocks and the
 //! draws are vanilla's.
-use crate::{BlockState, BlockStateId, StructureRandom};
+use crate::{BlockState, BlockStateId, RandomSource};
 use std::sync::Arc;
 
 /// A mod's ground provider: NeoForge's `AlterGroundEvent.StateProvider`.
@@ -34,7 +34,7 @@ pub trait GroundLevel {
     fn decorator_state(&mut self, pos: [i32; 3]) -> Option<BlockStateId>;
     /// The decorator's random (`TreeDecorator.Context.random()`): a provider's
     /// draws come between the decorator's own, in the order it asks.
-    fn random(&mut self) -> &mut dyn StructureRandom;
+    fn random(&mut self) -> &mut dyn RandomSource;
 }
 
 /// The provider a tree decorator places its ground with:
@@ -94,7 +94,7 @@ pub fn native_on_tree_grow(
     context: &crate::OwningWorldgen<'_>,
     state: BlockState,
     pos: [i32; 3],
-    random: &mut dyn StructureRandom,
+    random: &mut dyn RandomSource,
     soil: &mut Option<Option<BlockState>>,
 ) {
     crate::dispatch_on_tree_grow(context, state, pos, random, soil);

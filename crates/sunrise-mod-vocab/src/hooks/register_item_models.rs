@@ -15,7 +15,7 @@ pushes the type id once at start, before resources load, and `Hooks::item_model_
 whose definition holds that node is drawn.
 
 The node lists the models it can draw in a `models` object; they are ordinary nodes, decoded and baked by the
-game. Per stack, the mod pushes the names of the ones to draw, in order:
+game. Per stack, the mod pushes a layer for each one to draw, in order, naming it:
 
 ```rust,ignore
 fn register_item_models(
@@ -29,7 +29,7 @@ fn register_item_models(
 fn item_model_update(&self, _host: &dyn ClientHost, event: &mut ItemModelUpdateEvent<'_>) {
     if event.kind == "example:charge" {
         let name = if event.stack.count() > 1 { "full" } else { "empty" };
-        event.models.push(name.into());
+        event.layers.push(ItemModelLayer::new(name));
     }
 }
 ```
@@ -42,7 +42,14 @@ fn item_model_update(&self, _host: &dyn ClientHost, event: &mut ItemModelUpdateE
 
 The node's whole object reaches the hook as `event.config`, converted once at load, and its `transformation`
 applies to every model it draws. A name the node's `models` doesn't have draws nothing, and so does a node no
-mod answers. A node type no mod registered is an error naming it: the item definition holding it isn't loaded,
+mod answers.
+
+A layer also owns whose display transform its models draw under. `ItemModelLayer::new` keeps each model's own
+transform for the display context (a hand, a screen, the ground). A layer built with
+`.with_item_transform(ItemTransformMode::None)` draws its models, and every model nested under them, with no
+display transform, only centred as every item is: use it where the node sits in a model that already placed the
+item (a pan holding its food), so the transform is not applied twice. `item_model_update` is at version 2, which
+replaced the pushed names (`models: Vec<String>`) with these layers. A node type no mod registered is an error naming it: the item definition holding it isn't loaded,
 and the item draws the missing model."#]
     #[hook(
         side = "client",

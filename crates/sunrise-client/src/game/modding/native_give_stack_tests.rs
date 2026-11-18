@@ -32,7 +32,7 @@ fn an_snbt_item_goes_through_the_api_unchanged() {
             );
             let (tag, _) = parse_snbt(snbt).unwrap();
             assert_eq!(
-                sunrise_items::item_nbt::item_to_nbt_with_items(&engine, game.items()),
+                sunrise_items::item_nbt::item_to_nbt(&engine, game.items()),
                 tag,
                 "{snbt}"
             );

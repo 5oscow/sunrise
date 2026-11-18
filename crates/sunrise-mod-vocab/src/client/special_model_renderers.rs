@@ -7,15 +7,38 @@
 //! models draw, each posed and tinted, and the game draws them as it draws any item model, with
 //! the special model's `base` display transforms, particle and GUI light.
 use crate::wire::{Reader, Wire, WireError, Writer};
-use crate::{ClientHost, ItemStack, Tag};
+use crate::{ClientHost, ItemDisplayContext, ItemStack, Tag};
 use std::{collections::BTreeMap, sync::Arc};
 
-/// One resource model a special model renderer draws.
+/// What a [`SpecialModelPart`] draws.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, sunrise_mod_api_macros::Wire)]
+pub enum SpecialPartContent {
+    /// A resource model: the id (`mymod:item/skillet_pan`) of a model file of the packs.
+    Model(String),
+    /// An item stack, resolved through the item model resolver as any held or displayed item is:
+    /// the item's own models, tints and foil, drawn as `display` says. The part's transform
+    /// places the item's centre, and its `tints` are not used.
+    Stack {
+        /// The stack drawn.
+        stack: ItemStack,
+        /// The display context the item is resolved and drawn with (`Fixed` as in an item frame,
+        /// `Ground`, `Gui`): its own display transform applies.
+        display: ItemDisplayContext,
+    },
+}
+
+/// The most nested stack parts one draw of an item may expand, all its renderers' and the
+/// stacks' own together: a draw that would expand more, or that meets a stack already being
+/// expanded above it, is refused whole.
+pub const MAX_NESTED_STACK_PARTS: usize = 64;
+
+/// One thing a special model renderer draws: a resource model or an item stack.
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, sunrise_mod_api_macros::Wire)]
 pub struct SpecialModelPart {
-    /// The model's id (`mymod:item/skillet_pan`), a model file of the packs.
-    pub model: String,
+    /// What is drawn.
+    pub content: SpecialPartContent,
     /// Where it is drawn: a row-major 3×4 affine transform in the special model's space, in
     /// blocks with the origin at the model's corner (a model element's coordinates over 16).
     pub transform: [f32; 12],
@@ -31,7 +54,16 @@ impl SpecialModelPart {
     /// `model` where the special model is, untinted.
     pub fn new(model: impl Into<String>) -> Self {
         Self {
-            model: model.into(),
+            content: SpecialPartContent::Model(model.into()),
+            transform: Self::IDENTITY,
+            tints: Vec::new(),
+        }
+    }
+
+    /// `stack` drawn as `display` says, centred where the special model is.
+    pub fn stack(stack: ItemStack, display: ItemDisplayContext) -> Self {
+        Self {
+            content: SpecialPartContent::Stack { stack, display },
             transform: Self::IDENTITY,
             tints: Vec::new(),
         }
@@ -58,22 +90,83 @@ impl SpecialModelPart {
     }
 }
 
+/// When a special model renderer is asked again: what its answer depends on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+#[derive(sunrise_mod_api_macros::Wire)]
+pub enum SpecialModelPolicy {
+    /// The answer is a pure function of the stack and the model object: asked once for an
+    /// unchanged stack however many frames and display contexts draw it, and given the neutral
+    /// [`SpecialModelContext::STACK`]. A deliberate difference from vanilla, which extracts
+    /// every frame.
+    Stack,
+    /// Asked in every frame the item is drawn, for each display context and game time it is
+    /// drawn with, as vanilla's `ItemModel.update` is: for an answer that moves with time. There
+    /// is no cap on animated items: the renderer costs one `extract` per drawn item per frame,
+    /// for each display context it is drawn in.
+    Frame,
+}
+
+/// What a [`SpecialModelPolicy::Frame`] renderer is told besides the stack, as `ItemModel.update`
+/// reads it: where the item is drawn and when.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+#[derive(sunrise_mod_api_macros::Wire)]
+pub struct SpecialModelContext {
+    /// Where the item is drawn (a hand, a screen, the ground, a frame, the head).
+    pub display: ItemDisplayContext,
+    /// `getGameTime` of the level the item is drawn in; `None` outside a world.
+    pub game_time: Option<i64>,
+    /// How far the world is between its last tick and the next, in `[0, 1)`: the fraction the
+    /// frame draws the world at.
+    pub partial_tick: f32,
+}
+
+impl SpecialModelContext {
+    /// The context of one drawn item; only the game builds one, mods read it.
+    // hidden: the game's constructor for a received struct, not a mod authoring surface.
+    #[doc(hidden)]
+    pub const fn new(
+        display: ItemDisplayContext,
+        game_time: Option<i64>,
+        partial_tick: f32,
+    ) -> Self {
+        Self {
+            display,
+            game_time,
+            partial_tick,
+        }
+    }
+    /// What a [`SpecialModelPolicy::Stack`] renderer is always given: no display context, no
+    /// time.
+    pub const STACK: Self = Self {
+        display: ItemDisplayContext::None,
+        game_time: None,
+        partial_tick: 0.0,
+    };
+}
+
 /// The most parts one answer of a special model renderer may have: more refuse it.
 pub const MAX_SPECIAL_MODEL_PARTS: usize = 256;
 
 /// A mod's special model renderer: vanilla's `SpecialModelRenderer`, held by the game for every
 /// special model of the type it is registered for. Models of a type share one renderer, so what
 /// differs between them comes from the model object (`config`) and the stack.
-/// Renderer answers depend only on stack and configuration. Host-state changes do not invalidate a continuously drawn unchanged stack. Answers drop after all views stop drawing the stack or resources reload.
+/// The renderer's [`SpecialModelPolicy`] is chosen when it is registered. Under `Stack`, answers
+/// depend only on stack and configuration: host-state changes do not invalidate a continuously
+/// drawn unchanged stack, and answers drop after all views stop drawing the stack or resources
+/// reload. Under `Frame` an answer is kept for one frame of one view only.
 pub trait SpecialModelRenderer: Send + Sync + 'static {
     /// `extractArgument` and `submit` in one: the models to draw for `stack`, in order, from the
     /// special model's `model` object (`config`, its JSON as NBT, converted once at load). Asked
-    /// on the client's main thread when an item of such a model is drawn and its stack differs
-    /// from the last one this model was asked about: an unchanged stack is asked once, however
-    /// many frames draw it. Every display context (a hand, a screen, the ground, a frame, a head)
-    /// draws the same answer, under the `base` model's display transforms. Diverges: vanilla's
-    /// renderer submits geometry; Sunrise's answers resource models, so geometry stays in the
-    /// packs.
+    /// on the client's main thread when an item of such a model is drawn. Under
+    /// [`SpecialModelPolicy::Stack`], when its stack differs from the last one this model was
+    /// asked about: an unchanged stack is asked once, however many frames draw it, every display
+    /// context draws the same answer, and `context` is [`SpecialModelContext::STACK`]. Under
+    /// [`SpecialModelPolicy::Frame`], once per frame for each display context and game time the
+    /// item is drawn with, `context` saying which. The `base` model's display transforms apply
+    /// to the parts either way. Diverges: vanilla's renderer submits geometry; Sunrise's answers
+    /// resource models, so geometry stays in the packs.
     ///
     /// An `Err`, a panic, a wasm call that is refused or traps, more than
     /// [`MAX_SPECIAL_MODEL_PARTS`] parts, and a transform that isn't finite all refuse the answer
@@ -85,6 +178,7 @@ pub trait SpecialModelRenderer: Send + Sync + 'static {
         host: &dyn ClientHost,
         stack: &ItemStack,
         config: &Tag,
+        context: &SpecialModelContext,
     ) -> Result<Vec<SpecialModelPart>, String>;
 }
 
@@ -94,10 +188,15 @@ crate::wire::wire_handlers::handler!(dyn SpecialModelRenderer, "SpecialModelRend
 /// `RegisterSpecialModelRendererEvent`.
 pub trait SpecialModelRenderers {
     /// `register(location, codec)`: `renderer` draws every special model of the type `kind`
-    /// (`mymod:skillet`), vanilla's types included. A later registration of a type replaces the
+    /// (`mymod:skillet`), vanilla's types included, asked as `policy` says. A later registration of a type replaces the
     /// earlier one, whichever mod made it, as in NeoForge; the game logs both mods' ids. An id
     /// that is not `<namespace>:<path>` is logged and left out.
-    fn register(&mut self, kind: String, renderer: Arc<dyn SpecialModelRenderer>);
+    fn register(
+        &mut self,
+        kind: String,
+        policy: SpecialModelPolicy,
+        renderer: Arc<dyn SpecialModelRenderer>,
+    );
 }
 
 // no wire: a report the game logs at registration; it holds `&'static` mod ids and never crosses to a guest.
@@ -113,20 +212,38 @@ pub struct ReplacedSpecialModelRenderer {
     pub later: Option<&'static str>,
 }
 
+/// A type's policy and its renderer, as the registry keeps them.
+type PolicyRenderer = (SpecialModelPolicy, Arc<dyn SpecialModelRenderer>);
+
 // no wire: process-local listener or callback storage; trait objects are invoked through host dispatch, not serialized.
 /// The game's [`SpecialModelRenderers`]: the registrations by type.
 #[derive(Default)]
 // exhaustive: its fields are private; the game builds it
 pub struct SpecialModelRendererRegistry {
-    renderers: BTreeMap<String, (Option<&'static str>, Arc<dyn SpecialModelRenderer>)>,
+    renderers: BTreeMap<
+        String,
+        (
+            Option<&'static str>,
+            SpecialModelPolicy,
+            Arc<dyn SpecialModelRenderer>,
+        ),
+    >,
     replaced: Vec<ReplacedSpecialModelRenderer>,
     initial: Vec<(String, Option<&'static str>)>,
 }
 
 impl SpecialModelRenderers for SpecialModelRendererRegistry {
-    fn register(&mut self, kind: String, renderer: Arc<dyn SpecialModelRenderer>) {
+    fn register(
+        &mut self,
+        kind: String,
+        policy: SpecialModelPolicy,
+        renderer: Arc<dyn SpecialModelRenderer>,
+    ) {
         let later = crate::content::crash::current_native_mod();
-        if let Some((earlier, _)) = self.renderers.insert(kind.clone(), (later, renderer)) {
+        if let Some((earlier, ..)) = self
+            .renderers
+            .insert(kind.clone(), (later, policy, renderer))
+        {
             self.replaced.push(ReplacedSpecialModelRenderer {
                 kind,
                 earlier,
@@ -147,18 +264,18 @@ impl SpecialModelRendererRegistry {
             .map(|(kind, owner)| (kind.as_str(), *owner))
     }
 
-    /// Each type's renderer, the last registration of a type winning, and the registrations that
-    /// replaced an earlier one.
+    /// Each type's policy and renderer, the last registration of a type winning, and the
+    /// registrations that replaced an earlier one.
     pub fn into_renderers(
         self,
     ) -> (
-        BTreeMap<String, Arc<dyn SpecialModelRenderer>>,
+        BTreeMap<String, PolicyRenderer>,
         Vec<ReplacedSpecialModelRenderer>,
     ) {
         let renderers = self
             .renderers
             .into_iter()
-            .map(|(kind, (_, renderer))| (kind, renderer))
+            .map(|(kind, (_, policy, renderer))| (kind, (policy, renderer)))
             .collect();
         (renderers, self.replaced)
     }
@@ -175,6 +292,7 @@ mod tests {
             _: &dyn ClientHost,
             _: &ItemStack,
             _: &Tag,
+            _: &SpecialModelContext,
         ) -> Result<Vec<SpecialModelPart>, String> {
             Ok(Vec::new())
         }
@@ -186,16 +304,21 @@ mod tests {
     fn the_last_registration_of_a_type_wins() {
         let last: Arc<dyn SpecialModelRenderer> = Arc::new(Nothing);
         let mut registry = SpecialModelRendererRegistry::default();
-        registry.register("a:pan".into(), Arc::new(Nothing));
-        registry.register("a:pan".into(), last.clone());
-        registry.register("minecraft:shield".into(), Arc::new(Nothing));
+        registry.register("a:pan".into(), SpecialModelPolicy::Stack, Arc::new(Nothing));
+        registry.register("a:pan".into(), SpecialModelPolicy::Frame, last.clone());
+        registry.register(
+            "minecraft:shield".into(),
+            SpecialModelPolicy::Stack,
+            Arc::new(Nothing),
+        );
         assert_eq!(
             registry.initial_owners().collect::<Vec<_>>(),
             vec![("a:pan", None), ("minecraft:shield", None)]
         );
         let (renderers, replaced) = registry.into_renderers();
         assert_eq!(renderers.len(), 2);
-        assert!(Arc::ptr_eq(&renderers["a:pan"], &last));
+        assert_eq!(renderers["a:pan"].0, SpecialModelPolicy::Frame);
+        assert!(Arc::ptr_eq(&renderers["a:pan"].1, &last));
         assert_eq!(replaced.len(), 1);
         assert_eq!(replaced[0].kind, "a:pan");
     }

@@ -72,11 +72,11 @@ fn main() -> sunrise_client::Result<()> {
         root,
         &sunrise_world::loot::PackOverlay::NONE,
         &defaults,
-        &sunrise_client::crafting::ResolvedSources::load_or_empty(
+        &sunrise_client::crafting::ResolvedSources::load(
             root,
             &sunrise_world::loot::PackOverlay::NONE,
             &server_load(),
-        ),
+        )?,
     )?;
     let biome_registry: Vec<String> = sync
         .dynamic
@@ -99,7 +99,13 @@ fn main() -> sunrise_client::Result<()> {
                     || s.properties.get("waterlogged").is_some_and(|v| v == "true"),
             )
         });
-        let mut e = ChunkEncoder::new(states, &sync.builtin, &biome_names, &biome_registry);
+        let mut e = ChunkEncoder::new(
+            states,
+            &sync.builtin,
+            &biome_names,
+            &biome_registry,
+            Default::default(),
+        );
         e.tables = Some(tables.clone());
         e
     };

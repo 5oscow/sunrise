@@ -40,7 +40,7 @@ mod tests {
             let (
                 crate::AttachmentError::UnsupportedHolder(a),
                 crate::AttachmentError::UnsupportedHolder(b),
-            ) = (first, next)
+            ) = (first.clone(), next)
             else {
                 unreachable!()
             };

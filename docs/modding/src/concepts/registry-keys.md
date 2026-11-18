@@ -16,6 +16,21 @@ Keys identify entries for the running mod load, not persistent data. Persist can
 and property strings rather than registration slots or state ordinals. Reload preserves key identity;
 world numeric mappings and tag membership are separate reloadable data.
 
+## Item registry numbers
+
+`ItemKey::registry_id(host)` returns `Option<u32>` on either side and on both targets.
+This is the number the game uses for dropped-item scatter seeds, not the key's opaque slot.
+It returns `None` before registry completion or for an unresolved item. It reads this side's
+prepared registry, with mod items numbered after vanilla in content-plan order. A connected
+client still uses its local prepared numbering: these numbers are not synced by the server.
+
+Use `host.registry_protocol_id(registry, name)` when reading or writing a raw packet.
+That answer is tied to a connection and may be unavailable without one, even when
+`ItemKey::registry_id(host)` can return the local rendering number.
+
+Numbers are stable only within that game session. Save and send identifiers, never numbers.
+Add the stack's damage separately when reproducing vanilla's nonempty stack scatter seed.
+
 ## Entity-type reads
 
 `EntityRef::kind(host)` and the handles that delegate to it return
@@ -200,7 +215,7 @@ Use API-owned values rather than importing engine or package-loader types.
 | `Suggestion` | Construct with `Suggestion::new((start, end), text)`. Offsets are bytes; `tooltip` and `int_value` are writable. |
 | `Block`, `Item` | Registration declarations. Component patches are `(String, Option<Tag>)` entries; `None` removes a component. Content-file admission checks apply. |
 | `BlockEntityTypeDecl` | Declaration snapshot produced by `r.block_entity_type(...).build()`. |
-| `GuiDraw` | GUI commands; `DrawContext::gui_paint` returns a typed text-conversion result. Handle refusal before drawing. HUD hooks reject invalid writeback as a whole. |
+| `GuiDraw` | GUI commands; `DrawContext::gui_paint` returns a `GuiPaintError` naming the op it could not draw (text conversion, an item slot, a texture or sprite), and draws nothing of that buffer. HUD hooks reject invalid writeback as a whole. |
 
 `ServerHost::game_rule(id)` reads the one server-wide rule store without a
 `LevelRef`, including in `server_about_to_start` and `server_starting`.

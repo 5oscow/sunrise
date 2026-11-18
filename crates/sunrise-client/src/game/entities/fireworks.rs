@@ -133,6 +133,7 @@ impl Rocket {
         uuid: [i32; 4],
         player: Option<[i32; 4]>,
         raw: Option<&sunrise_core::nbt::Tag>,
+        items: &crate::items::Items,
     ) -> sunrise_core::nbt::Tag {
         sunrise_client::entity_nbt::firework_rocket_to_nbt(
             &sunrise_client::entity_nbt::RocketSave {
@@ -155,6 +156,7 @@ impl Rocket {
             },
             uuid,
             raw,
+            items,
         )
     }
     /// A rocket loaded from its NBT (`/summon`, a saved chunk).
@@ -904,9 +906,11 @@ impl Game<'_> {
             0
         });
         for &(id, amount) in hits {
+            let plan = self.prepare_knockback_credit(id as i32, attacker, &attack);
+            let mut credit = plan.lend(&mut self.last_hurt_by_player);
             if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
                 let hurt = m.damage(
-                    crate::game::entity::damage_level_of!(self, &attack),
+                    crate::game::entity::damage_level_of!(self, &attack, &mut credit, None),
                     amount,
                     Damage::fireworks(attacker, at),
                 );

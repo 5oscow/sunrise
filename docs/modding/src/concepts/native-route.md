@@ -28,6 +28,9 @@ which cannot declare `[native]` tables. Data kept on one entity or block is an
 | `[[native.module]]` | add a module of your own code inside a game source file, for your mixin code to share | [Support modules](native-route/5-support-modules.md) |
 | `[[native.state]]` | add a field to a game type: refused, use an attachment | [Native state](native-route/6-native-state.md) |
 
+A mod that embeds a wasm engine links the game's own wasmtime instead of bringing one:
+[The game's wasmtime](native-route/8-wasmtime.md).
+
 Every row of these tables has an `id`. No two rows of one mod share an `id`, counting `[[inject]]` rows too.
 
 ## It is tied to one game build
@@ -38,7 +41,7 @@ the game's own types, such as `Game` and its fields, and these change between bu
 - To move to a new build, change `sunrise` and rebuild. A target that was renamed or moved fails the build
   with an error naming your mod.
 - A change elsewhere in a target's body is not reported. Reread the functions you target on each new build.
-- Read the game's source at your `sunrise` commit on [GitHub](https://github.com/arismoko/horizon). Every
+- Read the game's source at your `sunrise` commit on [GitHub](https://github.com/sunrise-org/sunrise). Every
   target path, field and type on these pages comes from it.
 - This code runs with the player's rights. It is not sandboxed.
 
@@ -48,7 +51,7 @@ the game's own types, such as `Game` and its fields, and these change between bu
 | --- | --- |
 | `game` | The Minecraft version, `"26.3"`. |
 | `sunrise` | The game build: the exact Sunrise commit, 40 lowercase hex characters. |
-| `mixins` | The exact commit of the [sunrise-mixins](https://github.com/horizon-rust/horizon-mixins) tool, which applies `[[native.mixin]]` rows; 40 lowercase hex characters. |
+| `mixins` | The exact commit of the [horizon-mixins](https://github.com/horizon-rust/horizon-mixins) tool, which applies `[[native.mixin]]` rows; 40 lowercase hex characters. |
 
 `cargo sunrise-mod new path/to/mod --template native` writes all three; to move an existing mod, edit them. Otherwise the mod is an ordinary native mod
 ([Your first native mod](../start/first-mod.md)).
@@ -59,7 +62,7 @@ Build as for any native mod: the launcher's **Build**, or
 `sunrise-launcher native-build path/to/mod --trust-native-code`. The flag says you trust the mod's code to
 run with your rights.
 
-A build with a `[[native.mixin]]` row obtains the sunrise-mixins tool for your `mixins` commit.
+A build with a `[[native.mixin]]` row obtains the horizon-mixins tool for your `mixins` commit.
 
 The prebuilt tool is checked against its release's `SHA256SUMS` and against the commit, patch and platform the
 launcher pins. Where no prebuilt exists for your platform or pin, the launcher builds the tool from source.

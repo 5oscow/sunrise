@@ -268,9 +268,27 @@ impl Poses {
         !self.hidden.is_empty() && self.hidden.contains(&key(name))
     }
 }
+/// Gameplay's read-only observer at the humanoid mid-setupAnim seam.
+/// This library knows only animation inputs and poses, never Game or a Host.
+pub trait HumanoidSetup {
+    fn before_arm_pose(&self, mob: &Mob, state: &State<'_>, poses: &mut Poses);
+}
+
+#[derive(Clone, Copy)]
+pub struct Observation<'a> {
+    source: &'a Mob,
+    observer: &'a dyn HumanoidSetup,
+}
+
+impl std::fmt::Debug for Observation<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("HumanoidSetup")
+    }
+}
+
 /// The LivingEntityRenderState values setupAnim reads.
 #[derive(Clone, Copy, Debug)]
-pub struct State {
+pub struct State<'a> {
     pub pos: f32,
     pub speed: f32,
     pub age: f32,
@@ -281,7 +299,24 @@ pub struct State {
     pub swing: f32,
     pub baby: bool,
     pub partial: f32,
+    /// Optional frame-local observer; absent without subscribers.
+    pub observer: Option<Observation<'a>>,
 }
+
+impl State<'static> {
+    /// Attach the gameplay observer for this particular animation invocation.
+    pub fn observed<'a>(
+        self,
+        source: &'a Mob,
+        observer: Option<&'a dyn HumanoidSetup>,
+    ) -> State<'a> {
+        State {
+            observer: observer.map(|observer| Observation { source, observer }),
+            ..self
+        }
+    }
+}
+
 /// `LivingEntityRenderer.isEntityUpsideDown`: named Dinnerbone or Grumm.
 pub fn upside_down(m: &Mob) -> bool {
     matches!(m.custom_name.as_deref(), Some("Dinnerbone" | "Grumm"))
@@ -302,7 +337,7 @@ pub fn body_rot(m: &Mob, alpha: f32) -> f32 {
         None => m.previous_body_yaw + wrap(m.body_yaw - m.previous_body_yaw) * alpha,
     }
 }
-pub fn state(m: &Mob, alpha: f32) -> State {
+pub fn state(m: &Mob, alpha: f32) -> State<'static> {
     let body = body_rot(m, alpha);
     let head = m.previous_head_yaw + wrap(m.head_yaw - m.previous_head_yaw) * alpha;
     let mut swing = m.anim.attack_anim - m.anim.attack_anim_o;
@@ -329,6 +364,7 @@ pub fn state(m: &Mob, alpha: f32) -> State {
         swing,
         baby: m.is_baby(),
         partial: alpha,
+        observer: None,
     }
 }
 fn head(p: &mut Poses, s: &State) {
@@ -657,6 +693,18 @@ fn pose_arm(p: &mut Poses, pose: ArmPose, right: bool, h: &Hum) {
 }
 /// `HumanoidModel.setupAnim` (and `ZombieModel.setupAttackAnimation`).
 pub(super) fn humanoid(p: &mut Poses, s: &State, h: &Hum) {
+    humanoid_with_setup(p, s, h, |p| {
+        if let Some(observation) = s.observer {
+            observation
+                .observer
+                .before_arm_pose(observation.source, s, p);
+        }
+    });
+}
+
+/// Run the shared humanoid animation, observing the prepared pose before arm
+/// posing. Specialized adapters can supply their own entity view at this seam.
+pub fn humanoid_with_setup(p: &mut Poses, s: &State, h: &Hum, setup: impl FnOnce(&mut Poses)) {
     head(p, s);
     if h.fall_flying {
         p.xrot("head", -std::f32::consts::FRAC_PI_4);
@@ -680,6 +728,7 @@ pub(super) fn humanoid(p: &mut Poses, s: &State, h: &Hum) {
         p.yrot("left_leg", -PI / 10.0);
         p.zrot("left_leg", -0.078_539_82);
     }
+    setup(p);
     // The main arm is the right one: the off-hand pose goes first unless it
     // needs both hands.
     for right in sunrise_core::arm_pose::application_order(h.right, h.left)
@@ -775,6 +824,12 @@ pub(super) fn humanoid(p: &mut Poses, s: &State, h: &Hum) {
 /// `Mth.rotLerpRad`.
 fn rot_lerp_rad(a: f32, from: f32, to: f32) -> f32 {
     let mut diff = to - from;
+    // A mod's `humanoid_setup_anim` answer may be any finite angle: past a few turns, bring it
+    // into one turn first, or the wrapping loops below never finish (adding 2π to a huge f32 rounds
+    // back to it). Ordinary angles skip this and wrap exactly as vanilla's loops do.
+    if diff.abs() > 64.0 * PI {
+        diff = diff.rem_euclid(PI * 2.0);
+    }
     while diff < -PI {
         diff += PI * 2.0;
     }
@@ -1211,6 +1266,21 @@ mod body_pose_tests {
 }
 
 #[cfg(test)]
+mod rot_lerp_tests {
+    use super::*;
+
+    #[test]
+    fn a_huge_finite_angle_wraps_instead_of_looping() {
+        for from in [f32::MAX, -f32::MAX, 1.0e9, -1.0e9] {
+            let out = rot_lerp_rad(0.5, from, -std::f32::consts::FRAC_PI_4);
+            assert!(out.is_finite(), "from {from}");
+        }
+        // Ordinary angles are untouched: half way from 0 to 3π/2 goes the short way, to -π/4.
+        assert!((rot_lerp_rad(0.5, 0.0, 1.5 * PI) + 0.25 * PI).abs() < 1e-6);
+    }
+}
+
+#[cfg(test)]
 mod flight_pose_tests {
     use super::*;
     use std::sync::Arc;
@@ -1340,6 +1410,7 @@ mod flight_pose_tests {
             swing: 0.0,
             baby: false,
             partial: 0.0,
+            observer: None,
         };
         let mut poses = Poses {
             map: [
@@ -1397,6 +1468,7 @@ mod flight_pose_tests {
             swing: 0.0,
             baby: false,
             partial: 0.0,
+            observer: None,
         };
         let make = || Poses {
             map: [
@@ -1446,6 +1518,7 @@ mod flight_pose_tests {
             swing: 0.0,
             baby: false,
             partial: 0.0,
+            observer: None,
         };
         let make = || Poses {
             map: ["head", "right_arm", "left_arm", "right_leg", "left_leg"]
@@ -1553,6 +1626,7 @@ mod flight_pose_tests {
             swing: 0.0,
             baby: false,
             partial: 0.0,
+            observer: None,
         };
         let mut p = Poses {
             map: ["head", "right_arm", "left_arm"]
@@ -1610,6 +1684,7 @@ mod flight_pose_tests {
             swing: 0.0,
             baby: false,
             partial: 0.0,
+            observer: None,
         };
         let make = || Poses {
             map: ["head", "right_arm", "left_arm"]
@@ -1677,6 +1752,7 @@ mod flight_pose_tests {
             swing: 0.0,
             baby: false,
             partial: 0.0,
+            observer: None,
         };
         let make = || Poses {
             map: ["head", "right_arm", "left_arm", "right_leg", "left_leg"]
@@ -1725,6 +1801,7 @@ mod flight_pose_tests {
             swing: 0.0,
             baby: false,
             partial: 0.0,
+            observer: None,
         };
         for (anim, pose, expected) in [
             (Anim::Zombie, ArmPose::ThrowTrident, -PI),
@@ -1765,6 +1842,120 @@ mod flight_pose_tests {
     }
 
     #[test]
+    fn setup_observer_precedes_item_crouch_and_bob_for_each_invocation() {
+        use std::cell::Cell;
+        struct Observer(Cell<usize>);
+        impl HumanoidSetup for Observer {
+            fn before_arm_pose(&self, mob: &Mob, state: &State<'_>, poses: &mut Poses) {
+                self.0.set(self.0.get() + 1);
+                assert_eq!(state.partial, 0.5);
+                if mob.extra.using_item > 0 {
+                    let arm = if mob.main_arm_left() {
+                        "left_arm"
+                    } else {
+                        "right_arm"
+                    };
+                    // This is after walking, before ITEM halves the angle.
+                    assert_eq!(poses.get(arm)[3], 0.0);
+                    poses.xrot(arm, (-20.0_f32).to_radians());
+                }
+            }
+        }
+        let observer = Observer(Cell::new(0));
+        let make = || {
+            let mut poses = Poses::default();
+            for name in [
+                "head",
+                "hat",
+                "body",
+                "right_arm",
+                "left_arm",
+                "right_leg",
+                "left_leg",
+            ] {
+                poses
+                    .map
+                    .insert(key(name), [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0]);
+            }
+            poses
+        };
+        for left in [false, true] {
+            for using in [false, true] {
+                for crouching in [false, true] {
+                    let mut mob = player();
+                    mob.extra.set_main_hand(Some("minecraft:stick".into()));
+                    mob.extra.main_hand_left = left;
+                    mob.extra.using_item = i32::from(using);
+                    mob.extra.crouching = crouching;
+                    let state = state(&mob, 0.5);
+                    let observed = state.observed(&mob, Some(&observer));
+                    for _ in 0..2 {
+                        let before = observer.0.get();
+                        let mut poses = make();
+                        setup(&mob, &observed, &mut poses, &HashMap::new());
+                        assert_eq!(observer.0.get(), before + 1);
+                        let arm = if left { "left_arm" } else { "right_arm" };
+                        let input = if using { -20.0 * PI / 180.0 } else { 0.0 };
+                        let bob = (0.5_f32 * 0.067).sin() * 0.05 * if left { -1.0 } else { 1.0 };
+                        let expected =
+                            input * 0.5 - PI / 10.0 + if crouching { 0.4 } else { 0.0 } + bob;
+                        // The engine's Mth sine table quantizes bob; the
+                        // independent analytic sine differs by a few microradians.
+                        assert!(
+                            (poses.get(arm)[3] - expected).abs() < 1.0e-5,
+                            "left={left} using={using} crouching={crouching}: got {}, expected {expected}",
+                            poses.get(arm)[3]
+                        );
+                        if !using {
+                            let mut baseline = make();
+                            setup(&mob, &state, &mut baseline, &HashMap::new());
+                            assert_eq!(poses.map, baseline.map);
+                        }
+                    }
+                }
+            }
+        }
+        for animation in [
+            Anim::Zombie,
+            Anim::Humanoid { zombie_arms: true },
+            Anim::Enderman,
+            Anim::Piglin,
+        ] {
+            let mut mob = player();
+            Arc::make_mut(&mut mob.kind).anim = animation;
+            let state = state(&mob, 0.5).observed(&mob, Some(&observer));
+            let before = observer.0.get();
+            setup(&mob, &state, &mut make(), &HashMap::new());
+            assert_eq!(observer.0.get(), before + 1, "{animation:?}");
+        }
+    }
+
+    #[test]
+    fn swimming_setup_returns_after_a_listener_writes_the_largest_finite_head_angle() {
+        use std::cell::Cell;
+        struct Listener(Cell<bool>);
+        impl HumanoidSetup for Listener {
+            fn before_arm_pose(&self, _: &Mob, _: &State<'_>, poses: &mut Poses) {
+                self.0.set(true);
+                poses.xrot("head", f32::MAX);
+            }
+        }
+        let listener = Listener(Cell::new(false));
+        let mut mob = player();
+        mob.extra.swim.old = 1.0;
+        mob.extra.swim.amount = 1.0;
+        mob.extra.swim.visually = true;
+        let state = state(&mob, 0.5).observed(&mob, Some(&listener));
+        let mut poses = Poses::default();
+        poses
+            .map
+            .insert(key("head"), [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0]);
+        setup(&mob, &state, &mut poses, &HashMap::new());
+        assert!(listener.0.get());
+        assert!(poses.get("head")[3].is_finite());
+    }
+
+    #[test]
     fn a_humanoid_mobs_two_handed_item_pose_keeps_vanillas_other_arm() {
         let mut m = player();
         Arc::make_mut(&mut m.kind).anim = Anim::Skeleton;
@@ -1800,6 +1991,7 @@ mod flight_pose_tests {
                 swing: 0.0,
                 baby: false,
                 partial: 0.0,
+                observer: None,
             };
             setup(&m, &state, &mut p, &HashMap::new());
             for arm in ["right_arm", "left_arm"] {

@@ -214,6 +214,8 @@ impl Game<'_> {
         state: TransferredEntityState,
     ) {
         self.journal_arrival(id);
+        let level = self.dim;
+        self.entity_attachments.move_collider(id, level);
         if let Some(source) = state.journaled {
             self.journal_travel(source, id);
         }

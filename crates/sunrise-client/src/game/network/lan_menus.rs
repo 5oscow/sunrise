@@ -17,6 +17,9 @@ pub(in crate::game) struct GuestMenus {
     pub(in crate::game) crafting: GuestCrafting,
     /// The workstation menu the guest has open (game/network/lan_stations.rs).
     pub(in crate::game) station: MenuOwner<Option<GuestStation>>,
+    /// Names the hub's container clicks of this guest, which have no menu value of their own: a
+    /// click while another of the guest's is being decided is refused as busy.
+    pub(in crate::game) hub: MenuOwner<()>,
     /// The successful open already announced to mods, retained through a loan of `GuestPlay`.
     pub(in crate::game) menu_heard: Option<super::native_menus::HeardMenu>,
     /// The storage a mod backed its open menu's slots with (`player_back_mod_menu_slots`);

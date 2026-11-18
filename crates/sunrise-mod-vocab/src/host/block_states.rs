@@ -127,6 +127,23 @@ pub trait BlockStatesBackend {
     #[access(Metadata)]
     fn block_state_destroy_speed(&self, state: BlockState) -> Option<f32>;
     /// Side: both.
+    /// `ItemStack.isCorrectToolForDrops(state)`: whether `stack`'s `minecraft:tool` component has a
+    /// rule that sets `correct_for_drops` and names the block of `state`, and the first such rule
+    /// says yes. A stack with no tool component, or no matching rule, is not the correct tool. Only
+    /// the stack is asked: not whether the block requires a tool, the player, the position or any
+    /// mod's hooks (`PlayerRef::has_correct_tool_for_drops` asks those). None for an unknown state.
+    #[access(Metadata)]
+    fn block_state_correct_tool_for_drops(
+        &self,
+        stack: &ItemStack,
+        state: BlockState,
+    ) -> Option<bool>;
+    /// Side: both.
+    /// `BlockState.requiresCorrectToolForDrops()`: whether the block drops its loot only when
+    /// mined with a correct tool (stone and ores yes, dirt and logs no). None for an unknown state.
+    #[access(Metadata)]
+    fn block_state_requires_correct_tool(&self, state: BlockState) -> Option<bool>;
+    /// Side: both.
     /// The explosion resistance the block of this state declares (`Block.getExplosionResistance`,
     /// `BlockBehaviour.Properties.explosionResistance`): stone 6, obsidian 1200, bedrock 3,600,000,
     /// water 100. Not what a blast meets at a position, which parts, fluids and the blast's own
@@ -149,6 +166,28 @@ pub trait BlockStatesBackend {
     /// by it (`MapItem.update`). None for an unknown state.
     #[access(Metadata)]
     fn block_state_map_color(&self, state: BlockState) -> Option<u8>;
+    /// Side: both.
+    /// Decode a packed map color for [`BlockStates::map_color_rgba`].
+    #[access(Metadata)]
+    fn block_state_map_color_rgba(&self, packed: u8) -> Option<[u8; 4]>;
+    /// Side: both.
+    /// `BlockState.getLightEmission()`: the light level the state gives off, 0 to 15 (a torch 14,
+    /// glowstone 15, stone 0). The state's own value: a block that declares `dynamic_light`
+    /// answers per cell through its parts, which this does not ask. None for an unknown state.
+    #[access(Metadata)]
+    fn block_state_light_emission(&self, state: BlockState) -> Option<u8>;
+    /// Side: both.
+    /// The friction of the state's block (`BlockBehaviour.getFriction`, as
+    /// `BlockState.getBlock().getFriction()` reads it): 0.6 for most blocks, 0.98 for ice, 0.8
+    /// for slime. None for an unknown state.
+    #[access(Metadata)]
+    fn block_state_friction(&self, state: BlockState) -> Option<f32>;
+    /// Side: both.
+    /// `BlockState.isSolidRender()`: whether the state is a full, occluding cube for rendering
+    /// and light (stone yes; glass, leaves and slabs no). Not `isSolid` and not full collision.
+    /// None for an unknown state.
+    #[access(Metadata)]
+    fn block_state_is_solid_render(&self, state: BlockState) -> Option<bool>;
     /// Side: both.
     /// The states of `block` (`StateDefinition.getPossibleStates`) in immutable local ordinal
     /// order, independent of world numeric IDs. None for unavailable metadata or an unknown block.

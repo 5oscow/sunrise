@@ -17,7 +17,7 @@ address. The script then checks, from both sides, what a guest's game used to ge
              leaves the host's screen and mouse look alone;
 - datapack-recipe: (--server-thread) a crafting recipe from the world's data pack shows its result in the
              table of the host's window and of a guest, and taking it crafts (#6733);
-- recipes-hmod: opt-in, requires native Recipes: search original .hmod content, fill the server's
+- recipes-smod: opt-in, requires native Recipes: search original .smod content, fill the server's
              crafting grid, consume inputs and preserve both players' output after save/rejoin (#9647);
 - spawned:   the host and a guest new to the world join on different spots (PlayerSpawnFinder), and the
              guest opens a crafting table, a chest, a furnace and a stonecutter where it joined;
@@ -7381,8 +7381,8 @@ def run(ctl, out, resources, checks):
         launch.append('--no-pause')
     results = {}
     try:
-        if 'recipes-hmod' in checks:
-            prepare_recipes_hmod(host, guest)
+        if 'recipes-smod' in checks:
+            prepare_recipes_smod(host, guest)
         host.pid = host.raw(*launch)['pid']
         # Guests' commands need the world's Allow Commands as well as the LAN's (#372): a creative
         # world has them; everyone plays in survival.
@@ -7464,7 +7464,7 @@ def main():
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
     # Recipes is an opt-in native mod; this check requires a game built with it.
-    checks = args.check or [name for name in CHECKS if name != 'recipes-hmod']
+    checks = args.check or [name for name in CHECKS if name != 'recipes-smod']
     results = run(bins / 'sunrise-ctl', out, resources, checks)
     (out / 'results.json').write_text(json.dumps({'checks': results}, indent=2) + '\n')
     print(json.dumps(results, indent=1))
@@ -13547,9 +13547,9 @@ CHECKS += ['pig-saddle-shears']
 CHECK_FNS['pig-saddle-shears'] = check_pig_saddle_shears
 
 
-def prepare_recipes_hmod(*games):
+def prepare_recipes_smod(*games):
     """Install the same original content package in both scratch game folders."""
-    fixture = ROOT / 'tools/fixtures/recipes_hmod'
+    fixture = ROOT / 'tools/fixtures/recipes_smod'
     package = io.BytesIO()
     with zipfile.ZipFile(package, 'w', zipfile.ZIP_DEFLATED) as archive:
         for path in sorted(fixture.rglob('*')):
@@ -13558,7 +13558,7 @@ def prepare_recipes_hmod(*games):
     for game in games:
         mods = game.work / 'sunrise-mods'
         mods.mkdir()
-        (mods / 'recipe_pilot.hmod').write_bytes(package.getvalue())
+        (mods / 'recipe_pilot.smod').write_bytes(package.getvalue())
         (game.work / 'sunrise-mods.txt').write_text('mod.recipe_pilot:true\nmod.recipes:true\n')
         (game.work / 'options.txt').write_text('lang:en_us\n')
         settings = mods / '.sunrise-mod-data/recipes'
@@ -13566,7 +13566,7 @@ def prepare_recipes_hmod(*games):
         (settings / 'give').write_text('false')
 
 
-def exercise_recipes_hmod(game, out, mode, supplied):
+def exercise_recipes_smod(game, out, mode, supplied):
     """Use the real Recipes panel and the authoritative crafting table."""
     item = 'minecraft:echo_shard'
 
@@ -13579,8 +13579,8 @@ def exercise_recipes_hmod(game, out, mode, supplied):
         ui = game.raw('ui')
         fields = [w for w in ui['widgets'] if w['kind'] == 'field']
         if not fields:
-            game.shot(out, 'recipes-hmod-no-search')
-            (out / f'{game.name}-recipes-hmod-ui.json').write_text(json.dumps(ui, indent=2))
+            game.shot(out, 'recipes-smod-no-search')
+            (out / f'{game.name}-recipes-smod-ui.json').write_text(json.dumps(ui, indent=2))
         assert fields, f'{game.name}: no Recipes search field (mod absent or empty-search recovery failed)'
         # The native panel is to the right of the vanilla recipe book's search field.
         field = max(fields, key=lambda w: w['bounds'][0])
@@ -13672,11 +13672,11 @@ def exercise_recipes_hmod(game, out, mode, supplied):
             'grid': grid, 'result': result, 'crafted': crafted}
 
 
-def check_recipes_hmod(host, guest, out):
+def check_recipes_smod(host, guest, out):
     """Exercise Survival and Creative through the real host/guest server."""
     seen = {
-        host.name: exercise_recipes_hmod(host, out, 'survival', 4),
-        guest.name: exercise_recipes_hmod(guest, out, 'creative', 5),
+        host.name: exercise_recipes_smod(host, out, 'survival', 4),
+        guest.name: exercise_recipes_smod(guest, out, 'creative', 5),
     }
     save_and_reopen(host, guest)
     for game in (host, guest):
@@ -13684,12 +13684,12 @@ def check_recipes_hmod(host, guest, out):
         assert persisted == seen[game.name]['crafted'], f'{game.name}: after rejoin {persisted}'
         seen[game.name]['rejoined'] = persisted
         game.shot(out, f"{seen[game.name]['mode']}-rejoined")
-    (out / 'recipes-hmod.json').write_text(json.dumps(seen, indent=2) + '\n')
+    (out / 'recipes-smod.json').write_text(json.dumps(seen, indent=2) + '\n')
     return seen
 
 
-CHECKS += ['recipes-hmod']
-CHECK_FNS['recipes-hmod'] = check_recipes_hmod
+CHECKS += ['recipes-smod']
+CHECK_FNS['recipes-smod'] = check_recipes_smod
 
 
 def check_levelup_sounds(host, guest, out):
@@ -14136,41 +14136,16 @@ def check_death_credit(host, guest, out):
 
 CHECKS += ['death-credit']
 CHECK_FNS['death-credit'] = check_death_credit
-def set_legacy_rules(game, on):
-    """The PvP page's "1.8 combat in worlds you host" switch, as a player flips it."""
-    game('options', page='pvp')
-    # The switch sits at the end of the page: wheel down over the list until it stops moving, so the row is
-    # whole inside the list (a click on a row half under the list's edge lands outside it, as in vanilla).
-    switch = None
-    for _ in range(60):
-        ui = game.raw('ui')
-        found = next((w for w in ui['widgets']
-                      if w.get('label', '').startswith('1.8 combat in worlds you host')), None)
-        if found and switch and found['bounds'] == switch['bounds']:
-            break
-        switch = found
-        width, height = ui['gui_size']
-        game.raw('scroll-at', f'{width / 2:.1f}', f'{height / 2:.1f}', -3)
-    assert switch, 'the PvP page has no "1.8 combat in worlds you host" switch'
-    if switch['label'].endswith('On') != on:
-        game('click', id=switch['id'])
-        now = next(w for w in game.raw('ui')['widgets'] if w.get('id') == switch['id'])
-        assert now['label'].endswith('On') == on, f'the click did not flip the switch: {now}'
-    game('close')
-    game.wait(5)
 
 
-def check_legacy_pvp(host, guest, out):
-    """The host's legacy combat rules (crates/sunrise-client/src/legacy_combat.rs) on a guest's diamond axe hits:
+def check_attack_charge(host, guest, out):
+    """26.3's attack charge on a guest's diamond axe hits, resolved by the host:
     one at full charge, and one right after a hotbar swap and back, which empties the charge on the server
     (Player.tick resets attackStrengthTicker when the main hand's item changes). The stick is held a few ticks:
     the client sends a slot change from its next tick (MultiPlayerGameMode.tick), so a swap and back within one
     tick sends nothing, as vanilla's.
 
-    1.8.9, EntityPlayer.attackTargetEntityWithCurrentItem: the hit deals the attack damage attribute, which is
-    EntityPlayer.applyEntityAttributes' base 1 plus the axe's weapon modifier (ItemAxe's 3.0F +
-    Item.ToolMaterial.EMERALD.getDamageVsEntity() 3.0F): 7, and 7 again after the swap, as nothing charges.
-    26.3, Player.attack: 9 at full charge, and the swapped hit is scaled by getAttackStrengthScale down to
+    Player.attack: 9 at full charge, and the swapped hit is scaled by getAttackStrengthScale down to
     9 * (0.2 + scale^2 * 0.8)."""
     if dead(guest):
         guest.raw('respawn')
@@ -14203,24 +14178,19 @@ def check_legacy_pvp(host, guest, out):
         guest.wait(10)
         return before - health()
 
-    hits = {}
     try:
-        for name, rules in (('modern', False), ('legacy', True)):
-            set_legacy_rules(host, rules)
-            hits[name] = (dealt(False), dealt(True))
-            guest.shot(out, f'legacy-pvp-{name}')
+        full, swapped = dealt(False), dealt(True)
+        guest.shot(out, 'attack-charge')
     finally:
-        set_legacy_rules(host, False)
         host('command', command='attribute @s minecraft:knockback_resistance base set 0')
         host('command', command='gamerule natural_health_regeneration true')
-    assert hits['legacy'] == (7.0, 7.0), f'1.8.9 rules: 7, charged or not: {hits}'
-    full, swapped = hits['modern']
-    assert full == 9.0 and swapped < 9.0, f'26.3 rules: 9 charged, less right after a swap: {hits}'
-    return hits
+    # 9 * (0.2 + scale^2 * 0.8) is at least 1.8: a hit that never landed deals 0 and fails here.
+    assert full == 9.0 and 1.8 <= swapped < 9.0, f'9 charged, 1.8 to 9 right after a swap: {full}, {swapped}'
+    return full, swapped
 
 
-CHECKS += ['legacy-pvp']
-CHECK_FNS['legacy-pvp'] = check_legacy_pvp
+CHECKS += ['attack-charge']
+CHECK_FNS['attack-charge'] = check_attack_charge
 
 def check_ride_seats(host, guest, out):
     """RideCommand.mount forces the ride (startRiding(vehicle, true, true)), so an item display, an

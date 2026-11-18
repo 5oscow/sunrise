@@ -32,6 +32,9 @@ impl Bundle {
         if !package.is_native() {
             return Err("not a native package".into());
         }
+        // An install is the first open: the runtime files' hashes are checked here, before the
+        // download is accepted.
+        package.read_runtime(path)?;
         let mut files = BTreeMap::new();
         for i in 0..zip.len() {
             let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
@@ -84,7 +87,7 @@ mod tests {
 
     fn read(name: &str, manifest: &str, extras: &[(&str, &[u8])]) -> Result<Bundle, String> {
         let path =
-            std::env::temp_dir().join(format!("native-bundle-{name}-{}.hmod", std::process::id()));
+            std::env::temp_dir().join(format!("native-bundle-{name}-{}.smod", std::process::id()));
         let mut zip = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
         let options = zip::write::SimpleFileOptions::default();
         for (name, bytes) in [
@@ -105,6 +108,26 @@ mod tests {
         let result = Bundle::read(&path);
         std::fs::remove_file(path).unwrap();
         result
+    }
+
+    #[test]
+    fn an_install_refuses_runtime_bytes_that_do_not_match_the_manifest() {
+        let manifest = format!(
+            "{}[runtime]\n\"nav.bin\"='{}'\n",
+            manifest(),
+            crate::manifest::sha512_of(b"tables")
+        );
+        let bundle = read("runtime-ok", &manifest, &[("runtime/nav.bin", b"tables")]).unwrap();
+        assert_eq!(bundle.files["runtime/nav.bin"], b"tables");
+        // The same name and size, different bytes.
+        let error = read(
+            "runtime-edited",
+            &manifest,
+            &[("runtime/nav.bin", b"tablez")],
+        )
+        .err()
+        .unwrap();
+        assert!(error.contains("runtime/nav.bin"), "{error}");
     }
 
     #[test]
@@ -141,7 +164,7 @@ mod tests {
     fn refuses_old_paths_unsafe_entries_and_unknown_fields() {
         for (i, name) in [
             "sunrise-native.json",
-            "sunrise-mixin.toml",
+            "horizon-mixin.toml",
             "native/rust/src/lib.rs",
             "rust/src/lib.rs",
             "../escape.rs",
@@ -174,7 +197,7 @@ mod tests {
         for (folder, native) in [("content", true), ("native", false)] {
             let dir = root.join(folder);
             std::fs::create_dir_all(&dir).unwrap();
-            let path = dir.join("test.hmod");
+            let path = dir.join("test.smod");
             let text = manifest();
             let (text, files) = if native {
                 (

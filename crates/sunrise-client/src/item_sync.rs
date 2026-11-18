@@ -1456,21 +1456,23 @@ mod tests {
     #[test]
     fn saved_components_make_any_item_a_glider() {
         let mut stack = ItemStack::new("minecraft:diamond_chestplate", 1);
-        stack.data_mut().other = vec![
-            ("minecraft:glider".into(), Tag::Compound(Default::default())),
-            (
-                "minecraft:equippable".into(),
-                Tag::compound([("slot", Tag::String("chest".into()))]),
-            ),
-        ];
+        stack
+            .data_mut()
+            .set_other("minecraft:glider", Some(Tag::Compound(Default::default())));
+        stack.data_mut().set_other(
+            "minecraft:equippable",
+            Some(Tag::compound([("slot", Tag::String("chest".into()))])),
+        );
         assert_eq!(
             glider_and_slot(&stack, false, Some("chest".into())),
             (true, Some("chest".into()))
         );
-        stack.data_mut().other = vec![(
-            "!minecraft:equippable".into(),
-            Tag::Compound(Default::default()),
-        )];
+        stack.data_mut().set_other("minecraft:glider", None);
+        stack.data_mut().set_other("minecraft:equippable", None);
+        stack.data_mut().set_other(
+            "!minecraft:equippable",
+            Some(Tag::Compound(Default::default())),
+        );
         assert_eq!(glider_and_slot(&stack, true, Some("chest".into())).1, None);
     }
 
@@ -1514,10 +1516,10 @@ mod tests {
         assert!(!c.particles);
 
         // removal !minecraft:consumable
-        stack.data_mut().other = vec![(
-            "!minecraft:consumable".into(),
-            Tag::Compound(Default::default()),
-        )];
+        stack.data_mut().set_other(
+            "!minecraft:consumable",
+            Some(Tag::Compound(Default::default())),
+        );
         assert!(consumable(&stack, &items).is_none());
     }
 
@@ -2515,7 +2517,7 @@ mod tests {
         let mut back = from_network(&decoded, &builtin, &Dynamic::default());
         back.data_mut().wire = Default::default();
         assert_eq!(back, modeled);
-        assert_eq!(crate::save::item_to_nbt(&back), source);
+        assert_eq!(crate::save::item_to_nbt(&back, &Default::default()), source);
         let again = crate::lan::guest::stack_to_network(|_| 1, |_, _| None, &Some(back)).unwrap();
         assert!(matches!(
             again.component(component::TRIM),
@@ -2606,8 +2608,7 @@ mod tests {
         d.custom_name = Some(Tag::String("Keeper".into()));
         // A translatable item name reaches the client as the same component.
         let item_name = Tag::compound([("translate", Tag::String("filled_map.monument".into()))]);
-        d.other
-            .push(("minecraft:item_name".into(), item_name.clone()));
+        d.set_other("minecraft:item_name", Some(item_name.clone()));
         d.trim = Some(("minecraft:gold".into(), "minecraft:sentry".into()));
         let id = |registry: &str, name: &str| {
             builtin

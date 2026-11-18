@@ -343,3 +343,97 @@ fn a_code_declared_half_slab_resolves_to_block_unit_bounds() {
     }
     fs::remove_dir_all(base.parent().unwrap()).unwrap();
 }
+
+#[test]
+fn shapes_from_block_entity_is_refused_by_name_without_a_block_entity_type() {
+    let base = base("published-shapes");
+    let mut mods = [declared_mod()];
+    mods[0]
+        .content
+        .blocks
+        .iter_mut()
+        .find(|block| block.id == "test:a")
+        .unwrap()
+        .shapes_from_block_entity = true;
+    assert_eq!(
+        Plan::new(&base, &mods).err().unwrap().to_string(),
+        "test:a: shapes_from_block_entity needs a block entity type that owns the block"
+    );
+    // A type that owns another block does not do.
+    mods[0].content.block_entity_types = vec![kind("test:machine", &["test:b"])];
+    assert!(Plan::new(&base, &mods).is_err());
+    mods[0].content.block_entity_types = vec![kind("test:machine", &["test:a"])];
+    let plan = Plan::new(&base, &mods).unwrap();
+    // Only the flagged block's states reach the collision and support tables' scan metadata.
+    let mut table = Tag::Compound(nbt::Compound::new());
+    plan.published_states(&mut table).unwrap();
+    let flagged = plan
+        .blocks
+        .iter()
+        .find(|block| block.decl.id == "test:a")
+        .unwrap();
+    let expected: Vec<i32> = (0..flagged.order.len())
+        .map(|offset| (flagged.rename.first as usize + offset) as i32)
+        .collect();
+    assert_eq!(
+        table.get("published_shapes"),
+        Some(&Tag::IntArray(expected))
+    );
+    drop(plan);
+    mods[0]
+        .content
+        .blocks
+        .iter_mut()
+        .for_each(|block| block.shapes_from_block_entity = false);
+    let plan = Plan::new(&base, &mods).unwrap();
+    let mut table = Tag::Compound(nbt::Compound::new());
+    plan.published_states(&mut table).unwrap();
+    assert!(table.get("published_shapes").is_none());
+    fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn scaffolding_context_collision_lists_its_states_and_needs_scaffolding_properties() {
+    let base = base("scaffolding-collision");
+    let mut mods = [declared_mod()];
+    fn declared(mods: &mut [ContentMod; 1]) -> &mut Block {
+        mods[0]
+            .content
+            .blocks
+            .iter_mut()
+            .find(|block| block.id == "test:a")
+            .unwrap()
+    }
+    declared(&mut mods).context_collision = Some(ContextCollision::Scaffolding);
+    // Stone's one state has neither of scaffolding's properties.
+    assert_eq!(
+        Plan::new(&base, &mods).err().unwrap().to_string(),
+        "test:a: context_collision scaffolding: invalid scaffold distance"
+    );
+    declared(&mut mods).state_properties = BTreeMap::from([
+        ("bottom".to_owned(), StateProperty::Boolean),
+        (
+            "distance".to_owned(),
+            StateProperty::Enum {
+                values: (0..8).map(|n| n.to_string()).collect(),
+            },
+        ),
+    ]);
+    let plan = Plan::new(&base, &mods).unwrap();
+    let mut table = Tag::Compound(nbt::Compound::new());
+    plan.scaffolding_states(&mut table).unwrap();
+    let block = plan
+        .blocks
+        .iter()
+        .find(|block| block.decl.id == "test:a")
+        .unwrap();
+    let expected: Vec<i32> = (0..16)
+        .map(|offset| block.rename.first as i32 + offset)
+        .collect();
+    assert_eq!(block.order.len(), 16);
+    assert_eq!(
+        table.get("scaffolding_collision"),
+        Some(&Tag::IntArray(expected))
+    );
+    fs::remove_dir_all(base).unwrap();
+}

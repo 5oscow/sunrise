@@ -8,6 +8,7 @@ use std::{
     path::PathBuf,
     sync::OnceLock,
 };
+use sunrise_core::geometry::VoxelShape;
 use sunrise_core::random::RandomSource;
 pub(super) struct Fixture {
     pub(super) registry: BlockRegistry,
@@ -103,6 +104,7 @@ pub(crate) struct TestLevel {
     /// `ShulkerBoxBlockEntity.isClosed` at a position: `true` for a shut lid,
     /// `false` for an open box. Positions not listed have no block entity.
     pub shulker_closed: HashMap<BlockPos, bool>,
+    pub published: HashMap<BlockPos, VoxelShape>,
     /// The containers `container_open` reports as open.
     pub opened: HashSet<BlockPos>,
     /// `Level.getWorldBorder`, for `within_world_border`: centred on the
@@ -150,6 +152,7 @@ impl TestLevel {
             note_players: std::cell::RefCell::new(Vec::new()),
             refuse_portals: false,
             shulker_closed: HashMap::new(),
+            published: HashMap::new(),
             opened: HashSet::new(),
             border: sunrise_core::geometry::border::BorderGeometry::new(
                 [0.0, 0.0],
@@ -185,6 +188,9 @@ impl LevelAccess for TestLevel {
     }
     fn shulker_is_closed(&self, pos: BlockPos) -> Option<bool> {
         self.shulker_closed.get(&pos).copied()
+    }
+    fn published_collision_shape(&self, pos: BlockPos, _: BlockStateId) -> Option<VoxelShape> {
+        self.published.get(&pos).cloned()
     }
     fn adjust_has_analog_output(&self, state: BlockStateId, vanilla: bool) -> bool {
         vanilla || self.analog_states.contains(&state)
@@ -234,7 +240,7 @@ impl LevelAccess for TestLevel {
             .unwrap_or(vanilla)
     }
     fn adjust_analog_output(
-        &self,
+        &mut self,
         pos: BlockPos,
         _state: BlockStateId,
         _direction: Direction,
@@ -1788,6 +1794,75 @@ fn a_fence_gate_plays_the_open_and_close_sound_of_its_data() {
 }
 
 #[test]
+#[ignore = "daily"]
+fn fence_gate_sites_play_distinct_sounds() {
+    let root = std::env::var_os("SUNRISE_RESOURCES")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../.local/sunrise-client")
+                .join(sunrise_core::VANILLA_VERSION)
+        });
+    let registry = data::load_registry(&root).expect("prepared registry");
+    let mut behaviours = Behaviours::load(&registry, &root).expect("prepared behaviours");
+    let state = registry.default_state("minecraft:oak_fence_gate").unwrap();
+    let block = behaviours.table.block(state);
+    behaviours.blocks[block.0 as usize].gate_open =
+        ["gate:use.open", "gate:blast.open", "gate:wire.open"].map(|s| Some(s.into()));
+    behaviours.blocks[block.0 as usize].gate_close =
+        ["gate:use.close", "gate:blast.close", "gate:wire.close"].map(|s| Some(s.into()));
+    let f = Fixture {
+        registry,
+        behaviours,
+    };
+    let mut w = World::new(&f);
+    w.floor(0, 10, "stone");
+    let gate = w.id("oak_fence_gate", &[("facing", "north")]);
+    let sounds = |w: &World| {
+        w.level
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                LevelEvent::Sound { sound, .. } => Some(sound.to_string()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let pos = BlockPos::new(0, 1, 0);
+    w.put(pos, gate);
+    w.use_block(pos);
+    assert_eq!(sounds(&w), ["gate:use.open"]);
+    w.level.events.clear();
+    w.use_block(pos);
+    assert_eq!(sounds(&w), ["gate:use.close"]);
+    w.level.events.clear();
+    let powered = BlockPos::new(1, 1, 0);
+    w.set(powered, w.id("redstone_block", &[]));
+    assert_eq!(sounds(&w), ["gate:wire.open"]);
+    w.level.events.clear();
+    // Powered gates ignore explosions, with no sound or random pitch draw.
+    assert!(
+        !w.f.behaviours
+            .fence_gate_exploded(&mut w.level, &mut w.ticks, pos)
+    );
+    assert!(sounds(&w).is_empty());
+    w.set(powered, w.b().air());
+    assert_eq!(sounds(&w), ["gate:wire.close"]);
+    w.level.events.clear();
+    assert!(
+        w.f.behaviours
+            .fence_gate_exploded(&mut w.level, &mut w.ticks, pos)
+    );
+    assert_eq!(sounds(&w), ["gate:blast.open"]);
+    w.level.events.clear();
+    assert!(
+        w.f.behaviours
+            .fence_gate_exploded(&mut w.level, &mut w.ticks, pos)
+    );
+    assert_eq!(sounds(&w), ["gate:blast.close"]);
+}
+
+#[test]
 fn crops_grow_and_leaves_decay() {
     let mut w = world!();
     let farmland = w.id("farmland", &[("moisture", "7")]);
@@ -3241,6 +3316,113 @@ fn using_storage_and_interactable_blocks_succeeds() {
 }
 
 #[test]
+#[ignore = "daily"]
+fn a_published_shape_decides_support_over_the_declared_one() {
+    use sunrise_core::geometry::{Aabb, Vec3};
+    let mut w = world!();
+    let pos = BlockPos::new(0, 1, 0);
+    let torch_pos = BlockPos::new(0, 2, 0);
+    w.put(torch_pos, w.id("torch", &[]));
+    let torch = w.get(torch_pos);
+    let slab = VoxelShape::from_box(Aabb::new(Vec3::ZERO, Vec3::new(1.0, 0.25, 1.0))).unwrap();
+    // A full block that publishes a slab loses its support.
+    w.put(pos, w.id("stone", &[]));
+    let sim = w.b().sim(&mut w.level, &mut w.ticks);
+    assert!(sim.sturdy(pos, Direction::Up) && sim.can_support_center(pos, Direction::Up));
+    assert!(sim.can_survive(torch, torch_pos));
+    w.level.published.insert(pos, slab.clone());
+    let sim = w.b().sim(&mut w.level, &mut w.ticks);
+    assert!(!sim.sturdy(pos, Direction::Up));
+    assert!(!sim.can_support_rigid_block(pos));
+    assert!(!sim.can_survive(torch, torch_pos));
+    // A slab that publishes a full cube gains it.
+    w.level.published.clear();
+    w.put(pos, w.id("stone_slab", &[("type", "bottom")]));
+    let sim = w.b().sim(&mut w.level, &mut w.ticks);
+    assert!(!sim.sturdy(pos, Direction::Up));
+    w.level.published.insert(pos, VoxelShape::block());
+    let sim = w.b().sim(&mut w.level, &mut w.ticks);
+    assert!(sim.sturdy(pos, Direction::Up));
+    assert!(sim.can_survive(torch, torch_pos));
+}
+
+#[test]
+#[ignore = "daily"]
+fn a_published_face_decides_whether_lichen_attaches() {
+    let mut w = world!();
+    let pos = BlockPos::new(0, 1, 0);
+    let lichen_pos = BlockPos::new(0, 2, 0);
+    let lichen = w.id(
+        "glow_lichen",
+        &[
+            ("down", "true"),
+            ("up", "false"),
+            ("north", "false"),
+            ("south", "false"),
+            ("east", "false"),
+            ("west", "false"),
+        ],
+    );
+    w.put(lichen_pos, lichen);
+    // A full block holds lichen on its top face; one that publishes an empty shape does not.
+    w.put(pos, w.id("stone", &[]));
+    let sim = w.b().sim(&mut w.level, &mut w.ticks);
+    assert!(sim.multiface_can_attach_at(pos, Direction::Down));
+    assert!(sim.can_survive(lichen, lichen_pos));
+    w.level.published.insert(pos, VoxelShape::empty());
+    let sim = w.b().sim(&mut w.level, &mut w.ticks);
+    assert!(!sim.multiface_can_attach_at(pos, Direction::Down));
+    assert!(!sim.can_survive(lichen, lichen_pos));
+    // A slab that publishes a full cube holds it.
+    w.level.published.clear();
+    w.put(pos, w.id("stone_slab", &[("type", "bottom")]));
+    let sim = w.b().sim(&mut w.level, &mut w.ticks);
+    assert!(!sim.multiface_can_attach_at(pos, Direction::Down));
+    w.level.published.insert(pos, VoxelShape::block());
+    let sim = w.b().sim(&mut w.level, &mut w.ticks);
+    assert!(sim.multiface_can_attach_at(pos, Direction::Down));
+    assert!(sim.collision_face_full_at(pos, Direction::Up));
+    assert!(sim.can_survive(lichen, lichen_pos));
+}
+
+#[test]
+#[ignore = "daily"]
+fn a_published_shape_decides_whether_snow_stands() {
+    let mut w = world!();
+    let pos = BlockPos::new(0, 1, 0);
+    let snow_pos = BlockPos::new(0, 2, 0);
+    w.put(snow_pos, w.id("snow", &[("layers", "1")]));
+    let snow = w.get(snow_pos);
+    w.put(pos, w.id("stone", &[]));
+    assert!(
+        w.b()
+            .sim(&mut w.level, &mut w.ticks)
+            .can_survive(snow, snow_pos)
+    );
+    // A full block that publishes an empty shape no longer holds snow.
+    w.level.published.insert(pos, VoxelShape::empty());
+    assert!(
+        !w.b()
+            .sim(&mut w.level, &mut w.ticks)
+            .can_survive(snow, snow_pos)
+    );
+    // A slab that publishes a full cube does.
+    w.level.published.clear();
+    w.put(pos, w.id("stone_slab", &[("type", "bottom")]));
+    assert!(
+        !w.b()
+            .sim(&mut w.level, &mut w.ticks)
+            .can_survive(snow, snow_pos)
+    );
+    w.level.published.insert(pos, VoxelShape::block());
+    assert!(
+        w.b()
+            .sim(&mut w.level, &mut w.ticks)
+            .can_survive(snow, snow_pos)
+    );
+}
+
+#[test]
 fn open_shulker_box_supports_only_through_its_base_plate() {
     let mut w = world!();
     let pos = BlockPos::new(0, 1, 0);
@@ -3971,6 +4153,8 @@ fn the_level_chooses_the_state_a_block_is_placed_in() {
         }
         fn before_state_for_placement(
             &self,
+            _: &Ticks,
+            _: Option<&PreviewBlocks>,
             state: BlockStateId,
             context: &PlacementContext,
             fluid: FluidState,
@@ -4188,29 +4372,35 @@ fn survive_hooks_answer_for_the_block() {
         }
         fn before_can_survive(
             &self,
+            _: &Ticks,
+            _: Option<&PreviewBlocks>,
             _pos: BlockPos,
             state: BlockStateId,
             survives: &mut Option<bool>,
-        ) {
+        ) -> bool {
             self.asked.set(self.asked.get() + 1);
             if let Some((block, answer)) = self.survive
                 && self.b.block(state) == block
             {
                 *survives = Some(answer);
             }
+            false
         }
         fn before_may_place_on(
             &self,
+            _: &Ticks,
+            _: Option<&PreviewBlocks>,
             state: BlockStateId,
             ground: BlockStateId,
             _ground_pos: BlockPos,
             may: &mut Option<bool>,
-        ) {
+        ) -> bool {
             if let Some((plant, on)) = self.ground
                 && self.b.block(state) == plant
             {
                 *may = Some(self.b.block(ground) == on);
             }
+            false
         }
     }
     let Some(f) = fixture() else { return };

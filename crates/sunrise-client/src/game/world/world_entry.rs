@@ -46,7 +46,6 @@ impl Game<'_> {
             &self.options.resources,
             &self.pack.data_changes,
             self.pack.assets.registry,
-            &self.res.core.item_data,
         );
         if std::mem::take(&mut self.pending_pack_reload) {
             self.reload_packs();
@@ -189,12 +188,11 @@ impl Game<'_> {
     pub(super) fn items(&self) -> &Items {
         world_items!(self)
     }
-    pub(super) fn mob_suffocation(
+    /// The level's suffocation rules, for its mobs and its players.
+    pub(super) fn level_suffocation(
         &self,
     ) -> &sunrise_world::suffocation::SuffocationRegistry<'static> {
-        self.world_tables
-            .as_ref()
-            .map_or_else(|| self.res.suffocation(), |t| &t.suffocation)
+        level_suffocation_of(&self.world_tables, &self.res)
     }
     pub(super) fn recipes(&self) -> &Recipes {
         match &self.world_tables {
@@ -241,7 +239,14 @@ impl Game<'_> {
         // recomputes the pack files it contributes every time.
         let mut contributed = Vec::new();
         self.native_data_pack_files(&mut contributed);
-        let files = functions::overlay_files(stack, contributed);
+        let modifier_files = global_loot_modifiers::contributed(&contributed);
+        let files = functions::overlay_files(
+            stack,
+            contributed
+                .into_iter()
+                .filter(|(key, _)| !key.starts_with("loot_modifiers/"))
+                .collect(),
+        );
         let inventory = sunrise_mod_package::enabled::EnabledMods::read(root)?;
         let conditions = self.registered_load_conditions(&inventory, stack, root, &files)?;
         let overlay = sunrise_world::loot::PackOverlay {
@@ -426,13 +431,38 @@ impl Game<'_> {
                     .registry_order(),
             ));
         drop(registries);
+        // Prepare one private loot generation with the same winning inputs and
+        // final condition lookup as this world's items. Nothing is published here.
+        let mut loot = sunrise_world::loot::LootData::load(
+            root,
+            &overlay,
+            self.res.core.item_data.defaults(),
+        )?;
+        let context = lan::sync::server_data_load(root, &self.res.core.item_data)?;
+        if !mod_api::__private::mods().is_empty() {
+            loot.apply_native_table_loads(&context)?;
+        }
+        let serializers = self
+            .mods
+            .loot_modifier_serializers
+            .get_or_init(global_loot_modifiers::Serializers::capture);
+        let (modifiers, loot_modifier_manager) = serializers.prepare(
+            global_loot_modifiers::files(root, stack, modifier_files),
+            &conditions,
+            &context,
+        )?;
+        loot.set_global_modifiers(modifiers);
+        items.set_loot_data(&loot);
         conditions.check_errors()?;
+        let loot = Arc::new(loot);
         Ok((
             Some(WorldTables {
                 conditions,
                 suffocation,
                 files,
                 items: Arc::new(items),
+                loot,
+                loot_modifier_manager,
                 recipes,
                 stations,
                 reload_sources: reload.then_some(sources),
@@ -508,11 +538,13 @@ impl Game<'_> {
         self.world_tables = tables;
         self.health_resources = health;
         self.mods.datapack_registries = registries.map(Arc::new);
+        self.load_server_loot();
         self.data_map_registries = self
             .world_tables
             .as_ref()
             .map_or_else(Vec::new, |t| t.data_maps.registries());
         self.install_block_maps();
+        self.install_fluid_interactions()?;
         self.install_profession_save_snapshots();
         self.share_mob_maps();
         sunrise_client::datapack_net::serve(self.mods.datapack_registries.clone());
@@ -565,11 +597,16 @@ impl Game<'_> {
         self.mods.datapack_registries = datapack_registries.map(Arc::new);
         self.health_resources = health;
         self.world_tables = tables;
+        // Publish the paired item and world evaluators before any callbacks.
+        self.load_server_loot();
         self.data_map_registries = self
             .world_tables
             .as_ref()
             .map_or_else(Vec::new, |t| t.data_maps.registries());
         self.install_block_maps();
+        if let Err(error) = self.install_fluid_interactions() {
+            log::error!("Sunrise: {error}");
+        }
         self.install_profession_save_snapshots();
         self.share_mob_maps();
         self.world.pois.clear();
@@ -580,13 +617,10 @@ impl Game<'_> {
         self.send_datapack_snapshots();
         self.refresh_recipe_property_context();
         self.structure_spawns = structure_spawns;
-        self.server_items = None;
         self.refresh_infiniburn();
         self.install_parts(parts);
         self.damage_tag_generation = self.damage_tag_generation.wrapping_add(1);
         self.forget_book();
-        sunrise_client::structure_blocks::forget_loot_data();
-        self.load_server_loot();
         // Before the players are sent the reloaded data below.
         self.sync_recipe_content();
         // PlayerList.reloadResources: the tags and recipes go to the players
@@ -642,21 +676,24 @@ impl Game<'_> {
     }
     /// Build and publish one server snapshot for this world load or reload.
     pub(super) fn load_server_loot(&mut self) {
+        if let Some(tables) = &self.world_tables {
+            self.server_items = Some(tables.items.clone());
+            self.server_loot.set(Some(tables.loot.clone()));
+            global_loot_modifiers::bind_retained(
+                &self.reload_resources,
+                &tables.loot_modifier_manager,
+            );
+            return;
+        }
         self.server_items = None;
         let overlay = pack_files(&self.world_tables);
-        let loot = if mod_api::__private::mods().is_empty() {
-            sunrise_client::structure_blocks::world_loot_data(
-                &self.options.resources,
-                &overlay,
-                self.res.item_defaults(),
-            )
-        } else {
-            match sunrise_world::loot::LootData::load(
-                &self.options.resources,
-                &overlay,
-                self.res.item_defaults(),
-            ) {
-                Ok(mut loot) => {
+        let loot = match sunrise_world::loot::LootData::load(
+            &self.options.resources,
+            &overlay,
+            self.res.item_defaults(),
+        ) {
+            Ok(mut loot) => {
+                if !mod_api::__private::mods().is_empty() {
                     let context = match lan::sync::server_data_load(
                         &self.options.resources,
                         &self.res.core.item_data,
@@ -673,12 +710,12 @@ impl Game<'_> {
                         self.server_loot.set(None);
                         return;
                     }
-                    Some(Arc::new(loot))
                 }
-                Err(e) => {
-                    log::warn!("Sunrise: server loot tables unavailable: {e}");
-                    None
-                }
+                Some(Arc::new(loot))
+            }
+            Err(e) => {
+                log::warn!("Sunrise: server loot tables unavailable: {e}");
+                None
             }
         };
         if !mod_api::__private::mods().is_empty()
@@ -692,6 +729,12 @@ impl Game<'_> {
     }
 
     pub(super) fn prepare_parts(&self, items: &Items) -> Result<PreparedParts> {
+        // Some unit fixtures construct the Part tables without loading game content.
+        #[cfg(not(test))]
+        debug_assert!(
+            mod_api::__private::content_owners_published(),
+            "admitted ownership must be published before caching the block Part owner slots"
+        );
         let registry = self.pack.assets.registry;
         let block_tags = &items.block_tags;
         let tags = self.block_tag_sets(items);
@@ -751,7 +794,13 @@ impl Game<'_> {
             {
                 Some(sources) => sources,
                 None => {
-                    lan::sync::prepare_server_sources(root, &self.res.core.item_data, &overlay)?
+                    let sources = lan::sync::prepare_server_sources(
+                        root,
+                        &self.res.core.item_data,
+                        &overlay,
+                    )?;
+                    sources.check()?;
+                    sources
                 }
             };
             Some(
@@ -804,9 +853,10 @@ impl Game<'_> {
                 self.pack.assets.registry,
             );
         }
-        api_values::install_block_states(prepared.block_states);
+        api_values::install_block_states(&self.tick, prepared.block_states);
         native_world_read::install_block_tags(prepared.tags);
-        mod_api::__private::install_resolved_parts(prepared.parts);
+        api_values::install_resolved_parts(&self.tick, prepared.parts);
+        self.mark_collision_shape_states();
         self.resolve_block_paths();
         self.resolve_piston_reactions();
         self.resolve_primary_items();
@@ -833,4 +883,15 @@ impl Game<'_> {
             },
         );
     }
+}
+
+/// [`Game::level_suffocation`] from the fields it reads, for a caller that holds other fields: the
+/// world's own tables (its datapacks' `causes_suffocation`), else the built-in ones.
+pub(super) fn level_suffocation_of<'a>(
+    world_tables: &'a Option<WorldTables>,
+    res: &'a Resources,
+) -> &'a sunrise_world::suffocation::SuffocationRegistry<'static> {
+    world_tables
+        .as_ref()
+        .map_or_else(|| res.suffocation(), |t| &t.suffocation)
 }

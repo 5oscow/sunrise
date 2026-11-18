@@ -11,11 +11,21 @@ pub trait Hooks {
     /// `stack` is a copy of what the slot holds; take what you move out of
     /// it (put it in `entity.items`, or in another block through its
     /// `ITEMS` capability) and set `handled`: the slot then holds what is
-    /// left of `stack` (whatever you wrote to that slot of `entity.items`),
+    /// left of `stack` (`None` empties it, overriding that slot of `entity.items`),
     /// the game's routing is skipped, and the player's client gets the menu
     /// again. Left unhandled, `entity.items` goes back to what it held and
     /// the game moves the stack as for any container; a later mod sees what
     /// an earlier one did to `stack`.
+    ///
+    /// The move is one action: the answer is validated once and applied once,
+    /// and a refused move changes nothing, with every write the listener made
+    /// undone and the client given the menu again. It is refused when a
+    /// listener fails (panics or traps), when the answer is invalid (a stack
+    /// past its item's maximum in `entity.items` or `stack`), or when a
+    /// listener wrote through the `Host` to a player's inventory, cursor or
+    /// menu storage (the move read its own player's; a write to any player's
+    /// counts). Writes to another block, as a move into its `ITEMS`
+    /// capability makes, do not make it stale.
     ///
     /// For a mod container on a vanilla menu type and on a mod menu type,
     /// the left or right button, a slot that holds something and that the
@@ -32,7 +42,8 @@ pub trait Hooks {
         scope = "block_entity",
         key = "entity",
         neoforge = "none (a Java menu overrides AbstractContainerMenu.quickMoveStack; no event)",
-        cancellable = true
+        cancellable = true,
+        version = 3
     )]
     fn menu_quick_move();
 }

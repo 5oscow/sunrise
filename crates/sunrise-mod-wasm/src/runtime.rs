@@ -1,8 +1,11 @@
 //! Sandboxed core-wasm transport. One lock, memory and poison flag per dependency group.
 //! Ordinary refusals leave the group running. Faults, native unwinds and a failed
 //! prepared release poison it, since the guest may still own retained state.
-//! The preallocated call path adds an Arc increment/decrement per call, without
-//! allocating on success. Diagnostic keys are built and checked only on refusal.
+//! The preallocated call path allocates nothing on success: a crossing records the member
+//! slot and export id it enters, and the names a depth refusal or a payload snapshot prints
+//! are resolved only when one of those is built. A top-level call still takes its holding
+//! mod, thread and timestamp eagerly: a caller on another thread cannot recover them later,
+//! and `held_millis` measures from that instant (see #1009).
 #[cfg(all(test, feature = "test-copy-probe"))]
 #[path = "equip_scope_tests.rs"]
 mod equip_scope_tests;
@@ -14,7 +17,8 @@ mod runtime_tests;
 mod threads_tests;
 use crate::{
     Refusal,
-    boundary::{Cx, Frame, serve},
+    boundary::{Cx, Frame},
+    imports::{Bound, resolve},
     link::{Group, Member},
 };
 use mod_api::{
@@ -121,7 +125,11 @@ pub(crate) struct State {
     outputs: Vec<Vec<u8>>,
     imports: Vec<Vec<u8>>,
     depth: usize,
-    path: Vec<(Arc<str>, u32)>,
+    /// The member each open crossing entered, as `(name slot, export id)`. A slot costs no
+    /// refcount, so a successful crossing clones no name; only a depth refusal resolves them.
+    path: Vec<(usize, u64)>,
+    /// The group's member names by slot, resolved only when a depth refusal is formatted.
+    names: Vec<Arc<str>>,
     refusals: std::collections::HashSet<String>,
     epoch_budget: u64,
     group: usize,
@@ -144,6 +152,7 @@ impl State {
             imports: Vec::new(),
             depth: 0,
             path: Vec::with_capacity(64),
+            names: Vec::new(),
             refusals: Default::default(),
             epoch_budget: 0,
             group: 0,
@@ -190,17 +199,93 @@ pub(crate) fn engine_config() -> wasmtime::Config {
 pub(crate) fn engine() -> wasmtime::Result<Engine> {
     let config = engine_config();
     let engine = Engine::new(&config)?;
-    let weak = engine.weak();
-    std::thread::Builder::new()
-        .name("wasm epoch".into())
-        .spawn(move || {
-            loop {
-                std::thread::sleep(Duration::from_millis(1));
-                let Some(engine) = weak.upgrade() else { break };
-                engine.increment_epoch();
-            }
-        })?;
+    let ticker = TICKER
+        .as_ref()
+        .map_err(|why| wasmtime::Error::msg(format!("wasm epoch thread: {why}")))?;
+    ticker.register(&engine);
     Ok(engine)
+}
+
+/// What the epoch thread shares with the guest calls: how many are running, and the engines
+/// to tick.
+struct Shared {
+    running: AtomicUsize,
+    engines: Mutex<Vec<wasmtime::EngineWeak>>,
+}
+
+/// Drives the epoch of every engine, one tick a millisecond, but only while a guest runs: an
+/// idle game never wakes it. Deadlines count ticks, so a guest's budget is as long as when the
+/// thread ticked for the engines' whole life.
+struct Ticker {
+    shared: Arc<Shared>,
+    thread: std::thread::Thread,
+}
+
+impl Ticker {
+    fn start(name: &str) -> std::io::Result<Self> {
+        let shared = Arc::new(Shared {
+            running: AtomicUsize::new(0),
+            engines: Mutex::new(Vec::new()),
+        });
+        let ticking = shared.clone();
+        let thread = std::thread::Builder::new()
+            .name(name.into())
+            .spawn(move || {
+                loop {
+                    if ticking.running.load(Ordering::Acquire) == 0 {
+                        // A guest that starts after the check above leaves the unpark token.
+                        std::thread::park();
+                        continue;
+                    }
+                    std::thread::sleep(Duration::from_millis(1));
+                    ticking
+                        .engines
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .retain(|weak| {
+                            weak.upgrade().is_some_and(|engine| {
+                                engine.increment_epoch();
+                                true
+                            })
+                        });
+                }
+            })?
+            .thread()
+            .clone();
+        Ok(Self { shared, thread })
+    }
+
+    fn register(&self, engine: &Engine) {
+        self.shared
+            .engines
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(engine.weak());
+    }
+
+    /// Ticks until the returned guard drops, together with any other guard held.
+    fn ticking(&self) -> Ticking {
+        if self.shared.running.fetch_add(1, Ordering::AcqRel) == 0 {
+            self.thread.unpark();
+        }
+        Ticking(self.shared.clone())
+    }
+}
+
+static TICKER: std::sync::LazyLock<std::io::Result<Ticker>> =
+    std::sync::LazyLock::new(|| Ticker::start("wasm epoch"));
+
+/// Held for as long as a guest runs on this thread: the epoch ticks while any is held.
+pub(crate) struct Ticking(Arc<Shared>);
+impl Ticking {
+    pub(crate) fn begin() -> Option<Self> {
+        TICKER.as_ref().ok().map(Ticker::ticking)
+    }
+}
+impl Drop for Ticking {
+    fn drop(&mut self) {
+        self.0.running.fetch_sub(1, Ordering::AcqRel);
+    }
 }
 
 struct Releases<T> {
@@ -243,7 +328,7 @@ enum CallMode {
 }
 
 // Names are resolved once, outside dispatch. A contended payload only clones Arcs.
-static EXPORT_NAMES: std::sync::LazyLock<std::collections::HashMap<u32, Arc<str>>> =
+static EXPORT_NAMES: std::sync::LazyLock<std::collections::HashMap<u64, Arc<str>>> =
     std::sync::LazyLock::new(|| {
         crate::boundary::EXPORT_NAMES
             .iter()
@@ -266,22 +351,33 @@ struct Running {
     holder: Mutex<Option<Holder>>,
 }
 
-/// A top-level call holding a group: its mod, export, thread and when it took the lock.
+/// A top-level call holding a group: its mod, export and thread, and when it took the lock.
+/// The export's printable name is resolved from [`EXPORT_NAMES`] only when a payload snapshot
+/// prints it, so a successful crossing does no lookup. A busy refusal names the export by id.
 struct Holder {
     module: Arc<str>,
-    export: u32,
-    name: Arc<str>,
+    export: u64,
     thread: Arc<str>,
     since: Instant,
 }
 
 impl Holder {
+    /// The holding export's name, always the same `Arc` for the same export.
+    fn export_name(&self) -> &Arc<str> {
+        EXPORT_NAMES
+            .get(&self.export)
+            .unwrap_or(&OUTSIDE_GUEST.export)
+    }
+    /// How long this call has held its group, in whole milliseconds.
+    fn held_millis(&self) -> u64 {
+        self.since.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
+    }
     fn snapshot(&self) -> mod_api::PayloadBusy {
         mod_api::PayloadBusy {
             owner: self.module.clone(),
-            export: self.name.clone(),
+            export: self.export_name().clone(),
             thread: self.thread.clone(),
-            held_millis: self.since.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+            held_millis: self.held_millis(),
         }
     }
 }
@@ -296,7 +392,7 @@ impl Running {
                 h.module,
                 h.export,
                 h.thread,
-                h.since.elapsed().as_millis(),
+                h.held_millis(),
                 waited.as_millis()
             ),
             None => format!(
@@ -305,6 +401,26 @@ impl Running {
                 waited.as_millis()
             ),
         }
+    }
+}
+
+/// A depth refusal's open crossings, named from the group's table when the refusal is built.
+/// Its `Debug` prints exactly what a `Vec<(Arc<str>, u64)>` of the same path printed.
+struct DepthPath<'a> {
+    path: &'a [(usize, u64)],
+    names: &'a [Arc<str>],
+}
+impl std::fmt::Debug for DepthPath<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list()
+            .entries(self.path.iter().map(|&(slot, id)| {
+                let name = self
+                    .names
+                    .get(slot)
+                    .map_or("<unknown member>", |name| &**name);
+                (name, id)
+            }))
+            .finish()
     }
 }
 thread_local! {
@@ -416,31 +532,34 @@ impl Drop for FrameScope {
 #[derive(Clone)]
 pub struct WasmMod {
     id: Arc<str>,
+    /// This member's index in its group's name table: a depth refusal resolves a name from it.
+    slot: usize,
     running: Arc<Running>,
     input: TypedFunc<u32, u32>,
-    hook: TypedFunc<u32, u64>,
+    hook: TypedFunc<u64, u64>,
     pub subscribed: &'static [Option<HookId>],
     pub(crate) listeners: &'static [mod_api::Listener],
     released: Arc<Releases<Id>>,
     prepared_releases: Arc<Releases<(u32, u32)>>,
     prepared: Arc<Mutex<crate::prepared::Slots>>,
-    prepared_entries: Arc<std::collections::HashMap<u32, TypedFunc<(), u64>>>,
-    subscriptions: Arc<Mutex<std::collections::HashMap<(Id, u32), &'static [Option<HookId>]>>>,
+    prepared_entries: Arc<std::collections::HashMap<u64, TypedFunc<(), u64>>>,
+    subscriptions: Arc<Mutex<std::collections::HashMap<(Id, u64), &'static [Option<HookId>]>>>,
 }
 /// A guest object never owns the store that may itself retain that object.
 #[derive(Clone)]
 pub(crate) struct WeakWasmMod {
     id: Arc<str>,
+    slot: usize,
     running: Weak<Running>,
     input: TypedFunc<u32, u32>,
-    hook: TypedFunc<u32, u64>,
+    hook: TypedFunc<u64, u64>,
     subscribed: &'static [Option<HookId>],
     pub(crate) listeners: &'static [mod_api::Listener],
     released: Arc<Releases<Id>>,
     prepared_releases: Arc<Releases<(u32, u32)>>,
     prepared: Arc<Mutex<crate::prepared::Slots>>,
-    prepared_entries: Arc<std::collections::HashMap<u32, TypedFunc<(), u64>>>,
-    subscriptions: Arc<Mutex<std::collections::HashMap<(Id, u32), &'static [Option<HookId>]>>>,
+    prepared_entries: Arc<std::collections::HashMap<u64, TypedFunc<(), u64>>>,
+    subscriptions: Arc<Mutex<std::collections::HashMap<(Id, u64), &'static [Option<HookId>]>>>,
 }
 impl WeakWasmMod {
     pub(crate) fn equip_instance(&self) -> usize {
@@ -571,7 +690,7 @@ impl WeakWasmMod {
         &self,
         class: CallClass,
         frame: Frame,
-        id: u32,
+        id: u64,
         handler: Option<Id>,
         args: impl FnOnce(&mut Writer),
         reply: impl FnOnce(&mut Reader<'_>) -> Result<R, WireError>,
@@ -582,7 +701,7 @@ impl WeakWasmMod {
     pub(crate) fn call_payload<R>(
         &self,
         frame: Frame,
-        id: u32,
+        id: u64,
         handler: Option<Id>,
         args: impl FnOnce(&mut Writer),
         reply: impl FnOnce(&mut Reader<'_>) -> Result<R, WireError>,
@@ -604,6 +723,7 @@ impl WeakWasmMod {
         };
         Some(WasmMod {
             id: self.id.clone(),
+            slot: self.slot,
             running,
             input: self.input.clone(),
             hook: self.hook.clone(),
@@ -638,7 +758,7 @@ impl WasmHandler {
     pub fn belongs_to(&self, module: &WasmMod) -> bool {
         self.module.running.ptr_eq(&Arc::downgrade(&module.running))
     }
-    pub fn subscriptions(&self, owner: &'static str, export_id: u32) -> &'static [Option<HookId>] {
+    pub fn subscriptions(&self, owner: &'static str, export_id: u64) -> &'static [Option<HookId>] {
         if let Some(value) = self
             .module
             .subscriptions
@@ -723,9 +843,47 @@ impl Drop for Resumed {
     }
 }
 
+/// What an import of a call the game serves does.
+#[derive(Clone, Copy)]
+enum Served {
+    /// A host call: the generated function that decodes, serves and encodes it.
+    Call(crate::boundary::Invoke),
+    /// The guest lets go of an object it held.
+    Release,
+    /// The guest sends the game a message (a panic's text).
+    Log,
+}
+
+/// The function a module's import of `sunrise` name `name` is bound to, which [`crate::imports`]
+/// has already found the game serves.
+fn bind(store: &mut Store<State>, name: &str) -> Option<Extern> {
+    Some(Extern::Func(match resolve(name).ok()? {
+        Bound::Call(invoke) => Func::wrap(
+            store,
+            move |caller: Caller<'_, State>, ptr: u32, len: u32, out: u32, cap: u32| {
+                host(caller, Served::Call(invoke), ptr, len, out, cap)
+            },
+        ),
+        Bound::Release => Func::wrap(
+            store,
+            |caller: Caller<'_, State>, ptr: u32, len: u32, out: u32, cap: u32| {
+                host(caller, Served::Release, ptr, len, out, cap)
+            },
+        ),
+        Bound::Log => Func::wrap(
+            store,
+            |caller: Caller<'_, State>, ptr: u32, len: u32, out: u32, cap: u32| {
+                host(caller, Served::Log, ptr, len, out, cap)
+            },
+        ),
+        Bound::HostReply => Func::wrap(store, host_reply),
+        Bound::Mark => Func::wrap(store, || {}),
+    }))
+}
+
 fn host(
     mut caller: Caller<'_, State>,
-    id: u32,
+    served: Served,
     ptr: u32,
     len: u32,
     out: u32,
@@ -768,7 +926,7 @@ fn host(
         previous: LENT.get(),
     };
     LENT.set(&loan);
-    let result = if id == mod_api::wire::HOST_RELEASE {
+    let result = if matches!(served, Served::Release) {
         let mut reader = Reader::new(&input);
         let id = reader.take::<Id>()?;
         if !reader.rest().is_empty() {
@@ -779,7 +937,7 @@ fn host(
             .remove(id)
             .map(|_| ())
             .map_err(|e| wasmtime::Error::msg(format!("{e:?}")))
-    } else if id == mod_api::wire::HOST_LOG {
+    } else if matches!(served, Served::Log) {
         let mut reader = Reader::new(&input);
         let message: String = reader.take()?;
         if !reader.rest().is_empty() {
@@ -790,11 +948,13 @@ fn host(
             .ok_or_else(|| wasmtime::Error::msg("no calling module"))?;
         log::error!("wasm mod {module}: {message}");
         Ok(())
-    } else {
-        // SAFETY: Cx is boxed and stable; serve must release its frame borrows before
+    } else if let Served::Call(invoke) = served {
+        // SAFETY: Cx is boxed and stable; the call must release its frame borrows before
         // invoking native code that can synchronously reenter the guest.
-        unsafe { serve(id, cx, &input, &mut reply) }
+        unsafe { invoke(cx, &input, &mut reply) }
             .map_err(|e| wasmtime::Error::msg(format!("{e:?}")))
+    } else {
+        unreachable!("every served kind is handled")
     };
     drop(loan);
     drop(resources);
@@ -851,6 +1011,7 @@ impl WasmMod {
     pub(crate) fn downgrade(&self) -> WeakWasmMod {
         WeakWasmMod {
             id: self.id.clone(),
+            slot: self.slot,
             running: Arc::downgrade(&self.running),
             input: self.input.clone(),
             hook: self.hook.clone(),
@@ -868,6 +1029,15 @@ impl WasmMod {
     }
     pub(crate) fn is_stopped(&self) -> bool {
         self.running.poisoned.load(Ordering::Relaxed)
+    }
+    /// Re-arm a module its dependency group stopped, so the next test in the
+    /// same process gets a working fixture: the points table seals once per
+    /// process, so a test process cannot load a fresh instance instead. Test
+    /// support only — the game never re-enables a stopped group.
+    #[doc(hidden)]
+    #[cfg(feature = "runtime-fixture")]
+    pub fn rearm_after_a_test(&self) {
+        self.running.poisoned.store(false, Ordering::Relaxed);
     }
     pub(crate) fn disable(&self) {
         // Publish stop before destroying native resources. Never wait on a store
@@ -889,6 +1059,9 @@ impl WasmMod {
         cache: Option<&crate::module_cache::ModuleCache>,
     ) -> Result<Vec<Self>, Refusal> {
         sunrise_guest_stack::check_current().map_err(|error| Refusal::Runtime(error.into()))?;
+        // The table of what the mods use against the game's, before anything is compiled or run.
+        crate::imports::check(members)?;
+        let _ticking = Ticking::begin();
         std::sync::LazyLock::force(&EXPORT_NAMES);
         std::sync::LazyLock::force(&OUTSIDE_GUEST);
         let group: Vec<_> = members
@@ -913,11 +1086,7 @@ impl WasmMod {
             if module != "sunrise" {
                 return None;
             }
-            match name {
-                "host" => Some(Extern::Func(Func::wrap(store, host))),
-                "host_reply" => Some(Extern::Func(Func::wrap(store, host_reply))),
-                _ => None,
-            }
+            bind(store, name)
         })
         .map_err(Refusal::from_link)?;
         group.store.data_mut().memory = Some(group.memory);
@@ -925,42 +1094,12 @@ impl WasmMod {
         for (name, instance) in group.members.clone() {
             // The std member is a library, not a mod.
             if instance
-                .get_func(&mut group.store, "sunrise_layout")
+                .get_func(&mut group.store, "sunrise_hook")
                 .is_none()
             {
                 continue;
             }
             let load = |e: wasmtime::Error| Refusal::Runtime(format!("{e:#}"));
-            let layout = instance
-                .get_typed_func::<(), u64>(&mut group.store, "sunrise_layout")
-                .map_err(load)?
-                .call(&mut group.store, ())
-                .map_err(load)?;
-            if layout != *mod_api::wire::LAYOUT {
-                if layout == mod_api::wire_core_layout() {
-                    return Err(Refusal::Runtime("prepared can_equip ABI layout mismatch: guest carries the old unprepared layout; rebuild the wasm mod".into()));
-                }
-                return Err(Refusal::Layout {
-                    built: layout,
-                    game: *mod_api::wire::LAYOUT,
-                });
-            }
-            if instance
-                .get_func(&mut group.store, "sunrise_layout_ext")
-                .is_some()
-            {
-                let built = instance
-                    .get_typed_func::<(), u64>(&mut group.store, "sunrise_layout_ext")
-                    .map_err(load)?
-                    .call(&mut group.store, ())
-                    .map_err(load)?;
-                if built != mod_points::POINT_LAYOUT {
-                    return Err(Refusal::PointLayout {
-                        built,
-                        game: mod_points::POINT_LAYOUT,
-                    });
-                }
-            }
             let input = instance
                 .get_typed_func(&mut group.store, "sunrise_in")
                 .map_err(load)?;
@@ -977,6 +1116,13 @@ impl WasmMod {
             }
             exports.push((name, input, hook, Arc::new(prepared_entries)));
         }
+        // A member's slot in this table is what each crossing records; the names are
+        // resolved from it only when a depth refusal is built.
+        let names: Vec<Arc<str>> = exports
+            .iter()
+            .map(|(name, ..)| Arc::from(name.as_str()))
+            .collect();
+        group.store.data_mut().names = names.clone();
         let lending = group.store.data().lending.clone();
         let running = Arc::new(Running {
             lending,
@@ -993,8 +1139,11 @@ impl WasmMod {
             .group = Arc::as_ptr(&running) as usize;
         Ok(exports
             .into_iter()
-            .map(|(name, input, hook, prepared_entries)| Self {
-                id: name.into(),
+            .zip(names)
+            .enumerate()
+            .map(|(slot, ((_, input, hook, prepared_entries), id))| Self {
+                id,
+                slot,
                 running: running.clone(),
                 input,
                 hook,
@@ -1013,7 +1162,7 @@ impl WasmMod {
         &self,
         class: CallClass,
         frame: Frame,
-        id: u32,
+        id: u64,
         handler: Option<Id>,
         args: impl FnOnce(&mut Writer),
         reply: impl FnOnce(&mut Reader<'_>) -> Result<R, WireError>,
@@ -1027,7 +1176,7 @@ impl WasmMod {
         &self,
         mode: CallMode,
         frame: Frame,
-        id: u32,
+        id: u64,
         handler: Option<Id>,
         args: impl FnOnce(&mut Writer),
         reply: impl FnOnce(&mut Reader<'_>) -> Result<R, WireError>,
@@ -1046,6 +1195,16 @@ impl WasmMod {
         if let Err(error) = sunrise_guest_stack::check_current() {
             log::error!("wasm mod {}: {error}", self.mod_id());
             note(error.into());
+            return Ok(None);
+        }
+        // A tick phase's work runs off the tick's thread and in no fixed order: a group is
+        // single-threaded and its calls ordered, so it refuses such a caller by name.
+        if sunrise_core::tick_phase::in_tick_phase() {
+            log::error!(
+                "wasm mod {}: called inside a tick phase's work, which a wasm mod never runs in",
+                self.mod_id()
+            );
+            note("called inside a tick phase's work".into());
             return Ok(None);
         }
         if self.running.poisoned.load(Ordering::Relaxed) {
@@ -1107,13 +1266,12 @@ impl WasmMod {
                     }
                 }
                 if locked.is_some() {
+                    // Only what another thread cannot recover later is taken here: the mod,
+                    // the export id, the holding thread and the acquisition time. The printable
+                    // names stay resolved on demand.
                     *holder = Some(Holder {
                         module: self.id.clone(),
                         export: id,
-                        name: EXPORT_NAMES
-                            .get(&id)
-                            .unwrap_or(&OUTSIDE_GUEST.export)
-                            .clone(),
                         thread: THREAD_NAME.with(Arc::clone),
                         since: Instant::now(),
                     });
@@ -1126,6 +1284,8 @@ impl WasmMod {
         // Deferred releases run only on a top-level call: a resumed nested call is still
         // inside another export of the guest.
         let top = resumed.is_none();
+        // A resumed call runs inside the top-level call that lent it, which already ticks.
+        let _ticking = top.then(Ticking::begin);
         let mut store = match resumed.as_mut() {
             Some(resumed) => resumed.context(),
             None => {
@@ -1153,7 +1313,14 @@ impl WasmMod {
         let budget = store.data().epoch_budget;
         let depth = store.data().depth + 1;
         if depth > 64 {
-            let path = format!("{:?} -> ({}, {id}), limit 64", store.data().path, self.id);
+            let path = format!(
+                "{:?} -> ({}, {id}), limit 64",
+                DepthPath {
+                    path: &store.data().path,
+                    names: &store.data().names,
+                },
+                self.id
+            );
             if store.data_mut().refusals.insert(path.clone()) {
                 log::warn!("wasm depth refusal: {path}");
             }
@@ -1171,7 +1338,7 @@ impl WasmMod {
             store.data_mut().imports.resize_with(depth + 1, Vec::new);
         }
         store.data_mut().cx.frames.push(Frame::default());
-        store.data_mut().path.push((self.id.clone(), id));
+        store.data_mut().path.push((self.slot, id));
         // self remains borrowed until this call returns. FrameScope restores the
         // enclosing module before this borrow ends, including on error or unwind.
         let previous_module =
@@ -1299,7 +1466,7 @@ impl WasmMod {
     fn invoke(
         &self,
         store: &mut StoreContextMut<'_, State>,
-        id: u32,
+        id: u64,
         input: &Writer,
         output: &mut Vec<u8>,
     ) -> Result<(), CallError> {

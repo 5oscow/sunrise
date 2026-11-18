@@ -109,11 +109,10 @@ pub(crate) struct PickedPack {
 impl PickedPack {
     /// What it asks of the renderer's frame.
     pub(crate) fn frame(self) -> sunrise_client::gfx::FrameRequest {
-        sunrise_client::gfx::FrameRequest {
-            linear_pack: self.linear.is_some(),
-            linear_blend: self.linear == Some(sunrise_shader_api::Blend::Linear),
-            hdr_float: self.hdr_float,
-        }
+        sunrise_client::gfx::FrameRequest::new()
+            .with_linear_pack(self.linear.is_some())
+            .with_linear_blend(self.linear == Some(sunrise_shader_api::Blend::Linear))
+            .with_hdr_float(self.hdr_float)
     }
 }
 
@@ -1142,10 +1141,10 @@ mod native_pack_tests {
         remember(&path, fingerprint(&path), Some(Api::V0_2));
         let shape = picked_pack_shape(&settings);
         assert_eq!(shape.linear, switch.then_some(Blend::Linear));
-        assert_eq!(shape.frame().linear_blend, switch);
+        assert_eq!(shape.frame().linear_blend(), switch);
         std::fs::write(&manifest, text).unwrap();
         remember(&path, fingerprint(&path), Some(Api::V0_2));
-        assert!(!picked_pack_shape(&settings).frame().linear_blend);
+        assert!(!picked_pack_shape(&settings).frame().linear_blend());
         settings.mods.disabled.insert("frame_owner".into());
         let shape = picked_pack_shape(&settings);
         assert_eq!(shape.linear, None);

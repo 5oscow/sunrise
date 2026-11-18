@@ -88,6 +88,7 @@ fn slot_rules_read_a_mod_grid_slot_and_the_result() {
             _: &ItemStack,
             context: SlotContext<'_>,
             _: &mut bool,
+            _: &mut bool,
             _: &mut u32,
         ) {
             context.snapshot.unwrap().get_or_init(|| {
@@ -113,8 +114,8 @@ fn slot_rules_read_a_mod_grid_slot_and_the_result() {
         station.set_slot(env, 4, stack("oak_planks", 1));
         let planks = stack("oak_planks", 1).unwrap();
         // Menu slot 2 is grid slot 1; menu slot 0 is the result.
-        station.slot_rules(env, 2, &planks, true, CONTAINER_MAX);
-        station.slot_rules(env, 0, &planks, true, CONTAINER_MAX);
+        station.slot_rules(env, 2, &planks);
+        station.slot_rules(env, 0, &planks);
         let planks = Some(("minecraft:oak_planks".to_owned(), 1));
         let sticks = Some(("minecraft:stick".to_owned(), 4));
         assert_eq!(
@@ -126,7 +127,7 @@ fn slot_rules_read_a_mod_grid_slot_and_the_result() {
         );
         assert_eq!(rules.1.get(), 1);
         station.set_slot(env, 1, None);
-        station.slot_rules(env, 5, &stack("stick", 1).unwrap(), true, CONTAINER_MAX);
+        station.slot_rules(env, 5, &stack("stick", 1).unwrap());
         assert_eq!(
             rules.0.borrow()[2],
             (4, Grid, None, Some(("minecraft:oak_button".to_owned(), 1)))

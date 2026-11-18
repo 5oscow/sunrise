@@ -70,7 +70,7 @@ mod tests {
         assert!(Package::read(&root).unwrap().icon.is_none());
         let bytes = png(4, 4);
         std::fs::write(root.join("icon.png"), &bytes).unwrap();
-        let archive = root.join("example.hmod");
+        let archive = root.join("example.smod");
         std::fs::write(
             &archive,
             Package::write_files(manifest, &[("icon.png", &bytes)]).unwrap(),

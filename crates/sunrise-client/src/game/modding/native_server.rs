@@ -9,11 +9,17 @@
 //! server thread's), never on a client's.
 #[path = "native_server/argument_kinds.rs"]
 mod argument_kinds;
+#[cfg(test)]
+#[path = "native_server/provider_tests.rs"]
+mod provider_tests;
 #[path = "native_server/registered_commands.rs"]
 mod registered_commands;
 #[cfg(test)]
 #[path = "native_server/selector_tests.rs"]
 mod selector_tests;
+#[cfg(test)]
+#[path = "native_server/wasm_provider_tests.rs"]
+mod wasm_provider_tests;
 #[cfg(test)]
 #[path = "native_server/wasm_selector_tests.rs"]
 mod wasm_selector_tests;
@@ -73,6 +79,7 @@ const LEVELS: [&str; 5] = ["", "moderators", "gamemasters", "admins", "owners"];
 fn usage_nodes(
     usage: &str,
     custom: &CommandArguments,
+    client: bool,
 ) -> Result<Vec<(String, Value, bool)>, String> {
     let mut out = Vec::new();
     let mut optional_seen = false;
@@ -113,6 +120,15 @@ fn usage_nodes(
                 let Some(argument) = custom.get(kind) else {
                     return Err(format!("`{usage}`: unknown kind `{kind}`"));
                 };
+                // A declared provider answers on the server alone: whoever types the argument asks
+                // the server, and no mod code runs in a client. A client tree has no server behind
+                // it, so it refuses the usage by name rather than run the provider locally.
+                if client && declares_provider(kind, argument) {
+                    return Err(format!(
+                        "`{usage}`: argument type `{kind}` declares a suggestion provider, which \
+                         only a server command can offer; a client command completes without one"
+                    ));
+                }
                 let (properties, greedy) = match std::panic::catch_unwind(
                     std::panic::AssertUnwindSafe(|| argument.kind()),
                 )
@@ -165,11 +181,48 @@ pub(super) fn command_tree(
     vanilla: impl Fn(&str) -> bool,
     custom: &CommandArguments,
 ) -> (Value, HashMap<String, u8>, Vec<String>) {
+    command_tree_for(commands, vanilla, custom, false)
+}
+
+/// [`command_tree`] for the client's own commands: an argument type that declares a suggestion
+/// provider is refused by name, because that provider answers on the server alone and a client
+/// tree has no server behind it. Every other argument kind builds exactly as on the server.
+pub(super) fn client_command_tree(
+    commands: &[mod_api::Command],
+    vanilla: impl Fn(&str) -> bool,
+    custom: &CommandArguments,
+) -> (Value, HashMap<String, u8>, Vec<String>) {
+    command_tree_for(commands, vanilla, custom, true)
+}
+
+/// Whether `argument` declares a suggestion provider, read once per tree. A panic is logged and
+/// counts as no provider, as `argument_type` reads it when it builds the node.
+fn declares_provider(kind: &str, argument: &Arc<dyn mod_api::CommandArgumentType>) -> bool {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        argument.suggestion_provider()
+    })) {
+        Ok(provider) => provider.is_some(),
+        Err(_) => {
+            eprintln!(
+                "mod command argument type {kind} panicked declaring its suggestion provider; \
+                 its arguments complete by `suggest`"
+            );
+            false
+        }
+    }
+}
+
+fn command_tree_for(
+    commands: &[mod_api::Command],
+    vanilla: impl Fn(&str) -> bool,
+    custom: &CommandArguments,
+    client: bool,
+) -> (Value, HashMap<String, u8>, Vec<String>) {
     let mut root: Map<String, Value> = Map::new();
     let mut levels: HashMap<String, u8> = HashMap::new();
     let mut problems = Vec::new();
     for command in commands {
-        let nodes = match usage_nodes(&command.usage, custom) {
+        let nodes = match usage_nodes(&command.usage, custom, client) {
             Ok(n) => n,
             Err(e) => {
                 problems.push(e);
@@ -555,14 +608,24 @@ impl Game<'_> {
         {
             return Err(ActionRefused::InvalidSetup);
         }
+        let full_attack_charge = setup.full_attack_charge;
         let mut state = ScopedPlayerState::new(self.motion, self.items(), setup)?;
         let host = self.lan.as_mut().expect("validated fake's host");
         host.hub.guests.update(gi, |guest| state.swap(guest));
         let play = host.play.insert(conn, Default::default());
         let menus = host.menus.insert(conn, Default::default());
-        let outcome = self.perform_fake_action(gi, conn, action);
+        // In a turn, so the setup's stack in hand gives the attack speed the charge is for.
+        let charged = !full_attack_charge
+            || self
+                .as_guest_at(gi, conn, Game::charge_attack_fully)
+                .is_ok();
+        let outcome = if charged {
+            self.perform_fake_action(gi, conn, action)
+        } else {
+            Err(ActionRefused::Busy)
+        };
         let host = self.lan.as_mut().expect("guest turns retain the host");
-        let (held, other) = host.hub.guests.update(gi, |guest| {
+        let (held, other, position) = host.hub.guests.update(gi, |guest| {
             let held = guest
                 .inventory
                 .get_mut(guest.selected)
@@ -576,8 +639,9 @@ impl Game<'_> {
                 .filter_map(Option::take)
                 .filter(|s| s.count > 0)
                 .collect();
+            let position = guest.position;
             state.swap(guest);
-            (held, other)
+            (held, other, position)
         });
         host.menus.remove(&conn);
         if let Some(menus) = menus {
@@ -587,16 +651,26 @@ impl Game<'_> {
         if let Some(play) = play {
             host.play.insert(conn, play);
         }
-        outcome.map(|outcome| {
-            ScopedActionResult::new(
-                outcome,
-                held.try_into_api()
-                    .expect("action results use load-resolved item keys"),
-                other
-                    .try_into_api()
-                    .expect("action results use load-resolved item keys"),
-            )
-        })
+        // A stack the API can't represent (a saved item this build doesn't have, #1364) is never
+        // destroyed or replaced: it goes back into the world where the actor stood, with
+        // vanilla's default pickup delay so a repeating action doesn't take it again next tick.
+        // It joins as any drop does, so a join listener may keep it out; only the stacks that
+        // joined are counted.
+        let mut unrepresentable = 0;
+        let mut represent = |stack: sunrise_items::items::ItemStack| match stack.try_into_api() {
+            Ok(stack) => Some(stack),
+            Err(_) => {
+                // ItemEntity.setDefaultPickUpDelay.
+                self.push_item_entity(stack, position, None, 10, None);
+                if self.join_item_entity(self.next_entity, position) {
+                    unrepresentable += 1;
+                }
+                None
+            }
+        };
+        let held = held.and_then(&mut represent);
+        let other = other.into_iter().filter_map(&mut represent).collect();
+        outcome.map(|outcome| ScopedActionResult::new(outcome, held, other, unrepresentable))
     }
 
     fn fake_action_actor(
@@ -731,7 +805,7 @@ impl Game<'_> {
     /// Resolve a real online player by UUID, never a fake. A fake is reached
     /// through the handle returned by its factory. During a nested player swap,
     /// outer players whose records are displaced return None.
-    pub(super) fn player(&self, uuid: u128) -> Option<PlayerRef> {
+    pub(in crate::game) fn player(&self, uuid: u128) -> Option<PlayerRef> {
         let epoch = self.native_lifecycle.epoch()?;
         if let Some(remote) = self
             .remote
@@ -893,18 +967,19 @@ impl Game<'_> {
     }
     /// The local player's `Abilities` on a client: what its game mode gives
     /// (`GameType.updatePlayerAbilities`, `mayBuild` among them), then the
-    /// flags and speeds `ClientPacketListener.handlePlayerAbilities` took.
+    /// flags and speeds `ClientPacketListener.handlePlayerAbilities` took, except
+    /// flying, which follows the local body's prediction between packets.
     fn client_abilities(&self) -> PlayerAbilities {
         let mut a = PlayerAbilities::default();
         a.update_for_mode(self.mode_id());
         if let Some(p) = self.remote_abilities() {
             a.invulnerable = p.flags & 1 != 0;
-            a.flying = p.flags & 2 != 0;
             a.may_fly = p.flags & 4 != 0;
             a.instabuild = p.flags & 8 != 0;
             a.flying_speed = p.flying_speed;
             a.walking_speed = p.walking_speed;
         }
+        a.flying = self.player.as_ref().is_some_and(|body| body.flying);
         a
     }
 
@@ -1111,8 +1186,8 @@ impl Game<'_> {
         self.player_read_both(player)?.abilities()
     }
 
-    /// The players on this server, in the order they joined. Empty on a
-    /// client and in a world nobody else can join.
+    /// The real players on this server, in join order, including an integrated
+    /// server's own player even when the world is not open to LAN. Empty on a client.
     pub(super) fn native_server_players(&self) -> Vec<PlayerRef> {
         let Some(epoch) = self.native_lifecycle.epoch() else {
             return Vec::new();
@@ -1133,7 +1208,8 @@ impl Game<'_> {
             .collect()
     }
 
-    /// Find a connected player by their account name, case-insensitively.
+    /// Find a connected player by their account name, case-insensitively,
+    /// including an integrated server's own player.
     pub(super) fn native_player_by_name(&self, name: &str) -> Option<PlayerRef> {
         let epoch = self.native_lifecycle.epoch()?;
         let player = self
@@ -1370,6 +1446,10 @@ impl Game<'_> {
             self.clock.average_nanos() as f64 / 1_000_000.0,
         )
     }
+    /// `TickRateManager.isFrozen`; None on a client, which follows its server's.
+    pub(in crate::game) fn tick_rate_is_frozen(&self) -> Option<bool> {
+        self.is_logical_server().then(|| self.clock.frozen())
+    }
     /// A mod's `set_tick_rate`: `apply_tick_rate`, refused inside the `server_tick_rate_changed`
     /// hook so a listener can't fire it again without end.
     pub(in crate::game) fn set_tick_rate(&mut self, rate: f32) -> bool {
@@ -1535,7 +1615,7 @@ impl Game<'_> {
     /// a player made an operator meanwhile sees them again. Kept by UUID, even
     /// after this handle disconnects (the player rejoins hidden), until a mod sets it again
     /// or the server stops. Works inside a player's hook too; false for a stale
-    /// world epoch, on a client and in a world nobody else can join.
+    /// world epoch and on a client.
     pub(super) fn player_hide(&mut self, player: PlayerRef, level: Option<u8>) -> bool {
         if self.native_lifecycle.epoch() != Some(player.entity().epoch()) {
             return false;
@@ -4729,6 +4809,154 @@ pub(super) mod fake_action_tests {
                     .is_on_cooldown("minecraft:bucket")
             );
             assert_eq!(game.lan.as_ref().unwrap().hub.guests.len(), 2);
+        });
+    }
+
+    /// A scoped attack with `full_attack_charge` deals the sword's full damage, one without it
+    /// only the empty charge's share, and the fake's own ticker comes back after each.
+    #[test]
+    #[ignore = "daily"]
+    fn scoped_fake_attack_with_full_charge_deals_the_weapons_full_damage() {
+        use mod_api::PlayerActionSetup;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let (player, conn, _) = fake(game, None, 0);
+            game.as_guest(conn, |g| g.attack_ticks = 3).unwrap();
+            let charged = zombie(game, 5000, [2.0, 64.0, 0.5]);
+            // Out of a sweep's reach of the first.
+            let uncharged = zombie(game, 5001, [-1.5, 64.0, 0.5]);
+            let full = health(game, 5000);
+            let mut attack = |target, full_attack_charge| {
+                let mut setup = PlayerActionSetup::new(
+                    Some(crate::game::api_values::test_snapshot(&ItemStack::new(
+                        "minecraft:diamond_sword",
+                        1,
+                    ))),
+                    [0.5, 64.0 + f64::from(1.62_f32), 0.5],
+                    0.0,
+                    0.0,
+                    false,
+                );
+                setup.full_attack_charge = full_attack_charge;
+                let result = player
+                    .perform_action_scoped(game, PlayerAction::Attack { target }, setup)
+                    .unwrap();
+                assert_eq!(result.outcome, ActionOutcome::Consumed);
+                assert_eq!(
+                    game.as_guest(conn, |g| g.attack_ticks).unwrap(),
+                    3,
+                    "the fake's own ticker comes back"
+                );
+            };
+            attack(charged, true);
+            attack(uncharged, false);
+            // A diamond sword's 7, after a zombie's 2 armour (`getDamageAfterAbsorb`: the armour
+            // left is at least a fifth of it, 0.4).
+            let dealt = 7.0f32 * (1.0 - 0.4 / 25.0);
+            assert!((full - health(game, 5000) - dealt).abs() < 1e-4);
+            assert!(full - health(game, 5001) < dealt / 2.0);
+        });
+    }
+
+    /// An armor stand holding a saved item this build doesn't have hands it to a scoped action:
+    /// the stack can't cross, so it goes back into the world where the fake stood, unchanged,
+    /// with the default pickup delay, and the result counts it instead of panicking.
+    #[test]
+    #[ignore = "daily"]
+    fn scoped_fake_use_returns_an_unrepresentable_stack_to_the_world() {
+        use mod_api::PlayerActionSetup;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let (player, _, _) = fake(game, None, 0);
+            let mut stand = sunrise_client::entities::ArmorStand::new(
+                5001,
+                sunrise_core::geometry::Vec3::new(2.0, 64.0, 0.5),
+                0.0,
+            );
+            stand.equipment[0] = Some(ItemStack::new("test:missing", 1));
+            game.armor_stands.push(stand);
+            let target = game.entity(5001).unwrap();
+            let setup = PlayerActionSetup::new(
+                None,
+                [0.5, 64.0 + f64::from(1.62_f32), 0.5],
+                90.0,
+                0.0,
+                false,
+            );
+            let action = PlayerAction::InteractOn {
+                hand: Hand::Main,
+                target,
+                location: [0.0, 1.5, 0.0],
+            };
+            let dropped = game.dropped.len();
+            let result = player.perform_action_scoped(game, action, setup).unwrap();
+            assert_eq!(result.outcome, ActionOutcome::Consumed);
+            assert_eq!((result.held, result.other.len()), (None, 0));
+            assert_eq!(result.unrepresentable, 1);
+            assert_eq!(game.armor_stands.last().unwrap().equipment[0], None);
+            assert_eq!(game.dropped.len(), dropped + 1);
+            let item = game.dropped.last().unwrap();
+            assert_eq!(item.stack, ItemStack::new("test:missing", 1));
+            assert_eq!(item.pickup_delay, 10);
+            assert_eq!((item.position.x, item.position.z), (0.5, 0.5));
+        });
+    }
+
+    /// A join listener that keeps item entities out discards the returned stack as it would any
+    /// drop: no item entity is left, and the result does not count it.
+    #[test]
+    #[ignore = "daily"]
+    fn a_vetoed_return_is_not_counted() {
+        use mod_api::{EntityJoinLevelEvent, Flow, Hooks, PlayerActionSetup, ServerHost};
+        struct KeepItemsOut;
+        #[mod_api::__subscriptions]
+        impl Hooks for KeepItemsOut {
+            fn entity_join_level(
+                &self,
+                _: &mut dyn ServerHost,
+                event: &mut EntityJoinLevelEvent<'_>,
+            ) -> Flow {
+                if event.kind == "minecraft:item" {
+                    Flow::Cancel
+                } else {
+                    Flow::Continue
+                }
+            }
+        }
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "keep-items-out",
+            Box::new(KeepItemsOut),
+        )]
+        .into();
+        mod_platform::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                let (player, _, _) = fake(game, None, 0);
+                let mut stand = sunrise_client::entities::ArmorStand::new(
+                    5001,
+                    sunrise_core::geometry::Vec3::new(2.0, 64.0, 0.5),
+                    0.0,
+                );
+                stand.equipment[0] = Some(ItemStack::new("test:missing", 1));
+                game.armor_stands.push(stand);
+                let target = game.entity(5001).unwrap();
+                let setup = PlayerActionSetup::new(
+                    None,
+                    [0.5, 64.0 + f64::from(1.62_f32), 0.5],
+                    90.0,
+                    0.0,
+                    false,
+                );
+                let action = PlayerAction::InteractOn {
+                    hand: Hand::Main,
+                    target,
+                    location: [0.0, 1.5, 0.0],
+                };
+                let dropped = game.dropped.len();
+                let result = player.perform_action_scoped(game, action, setup).unwrap();
+                assert_eq!(result.outcome, ActionOutcome::Consumed);
+                assert_eq!((result.held, result.other.len()), (None, 0));
+                assert_eq!(result.unrepresentable, 0, "the vetoed stack is not counted");
+                assert_eq!(game.armor_stands.last().unwrap().equipment[0], None);
+                assert_eq!(game.dropped.len(), dropped, "no item entity is left");
+            });
         });
     }
 

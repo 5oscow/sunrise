@@ -2,6 +2,9 @@
 use super::*;
 
 #[cfg(test)]
+#[path = "payloads/group_tests.rs"]
+mod group_tests;
+#[cfg(test)]
 #[path = "payloads/tests.rs"]
 mod tests;
 #[cfg(test)]

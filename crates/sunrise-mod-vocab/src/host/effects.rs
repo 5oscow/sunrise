@@ -94,4 +94,18 @@ pub trait EffectsClientBackend {
     /// end. While the game is paused the fade waits, and an interface or music sound keeps playing.
     #[access(ClientSetup)]
     fn sound_fade(&self, sound: SoundRef, volume: f32, ticks: u32) -> bool;
+    /// Side: client.
+    /// Moves the playing sound to `position`, in blocks of the client's level, from the next
+    /// audio update: the same instance keeps playing, with no restart, and its distance
+    /// fading follows. A sound that plays at the listener (`SoundPlay::ui`) has no position to
+    /// move. False, changing nothing, for a position that isn't finite or lies past 30 million
+    /// blocks, and for a sound that is already over.
+    #[access(ClientSetup)]
+    fn sound_move_to(&self, sound: SoundRef, position: [f64; 3]) -> bool;
+    /// Side: client.
+    /// Sets the playing sound's pitch (1.0 unchanged) from the next audio update, on the same
+    /// instance with no restart. False, changing nothing, for a pitch that isn't a number at
+    /// or above 0, as `SoundPlay`'s, and for a sound that is already over.
+    #[access(ClientSetup)]
+    fn sound_set_pitch(&self, sound: SoundRef, pitch: f32) -> bool;
 }

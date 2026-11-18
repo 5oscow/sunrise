@@ -90,6 +90,8 @@ Answer on the client as well when prediction must stop the hand loop: an answer
 made only on the server cannot suppress an offhand attempt already predicted by
 the client.
 
+A client without this mod predicts vanilla here; the server corrects it.
+
 `Success`, `SuccessServer` and `Consume` consume the interaction and end the
 client's hand loop. Only `Success` swings on the client; `SuccessServer` swings
 on the server and `Consume` never swings. `Fail` ends block interaction only,
@@ -162,8 +164,8 @@ lookup.
   It is asked each client tick, for each hand, while the shown and held stacks differ; an empty hand isn't asked.
 - `ItemPart::should_cause_block_break_reset` is `IItemExtension.shouldCauseBlockBreakReset`: whether a break
   restarts because the main hand changed. `event.stack` is the stack the break began with and `event.held` the main
-  hand now. `event.reset` starts `true` when they aren't the same item with the same components (count and damage
-  left out). `false` keeps the break and its progress; `true` sends the abort and a new start, from 0. It is asked on
+  hand now. `event.reset` starts `true` when they aren't the same item with the same components (count left out, damage
+  compared). `false` keeps the break and its progress; `true` sends the abort and a new start, from 0. It is asked on
   each tick of a break of the same block, in single player and on a server's client. A `true` for an unchanged stack
   restarts the break every tick, so it never finishes.
 - `ItemPart::highlight_tip` is `IItemExtension.getHighlightTip`: the name drawn above the hotbar for the selected
@@ -178,6 +180,8 @@ Three methods answer item questions that vanilla asks inside its menus and recip
 sides, the server's menus and the client's own result display, so they take the loop `context` and no `Host`:
 answer from `event.stack` and `context` alone, and fast. Each `event` field arrives holding vanilla's answer, which
 the part may set either way, and an item with no such part costs one table lookup.
+
+A client without this mod predicts vanilla here; the server corrects it.
 
 - `ItemPart::can_grindstone_repair` is `IItemExtension.canGrindstoneRepair`. `event.can_repair` starts with
   whether the stack is damageable. It is asked for the top input when both grindstone inputs are single stacks of

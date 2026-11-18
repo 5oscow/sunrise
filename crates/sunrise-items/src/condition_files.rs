@@ -22,7 +22,7 @@ pub(crate) fn data_files(root: &Path, kind: &str, overlay: &PackOverlay) -> Hash
             files.insert(id.to_owned(), value);
         }
     }
-    files.retain(|id, value| overlay.conditions.admit_id(value, kind, id));
+    files.retain(|id, value| overlay.conditions.allows_id(value, kind, id));
     files
 }
 

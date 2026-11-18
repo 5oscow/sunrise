@@ -8,7 +8,19 @@ use crate::{
 };
 use std::rc::Rc;
 use std::sync::{Arc, Weak};
-use sunrise_world::{level::RandomTickMask, registry::BlockStateId};
+use sunrise_world::{
+    level::{Behaviours, RandomTickMask, StateFacts},
+    registry::BlockStateId,
+};
+
+/// The random-tick masks' phase input (`crate::parallel::phase`): each state's plain facts, read
+/// only for `StateFacts::random_tick_candidate`, its own flags and fluid. The phase reaches no
+/// hook, no mod state and no swappable table, so mods never make it serial.
+pub struct RandomTickView<'a> {
+    facts: &'a [StateFacts],
+}
+impl crate::parallel::sealed::Sealed for RandomTickView<'_> {}
+impl crate::parallel::PhaseView for RandomTickView<'_> {}
 
 /// A value snapshot, in ascending section order, with no per-chunk allocation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -127,7 +139,7 @@ impl RandomTickSections {
         keys: &[(i32, i32)],
         chunk_of: impl Fn((i32, i32)) -> Option<Arc<Chunk>>,
         facts: &BlockFacts,
-        candidate: &(impl Fn(u32) -> bool + Sync),
+        behaviours: &Behaviours,
     ) {
         let mut todo: Vec<((i32, i32), usize, Arc<Chunk>)> = Vec::new();
         for &key in keys {
@@ -143,12 +155,18 @@ impl RandomTickSections {
                 }
             }
         }
-        let masks = crate::parallel::par_map(&todo, 128, |part, out| {
-            out.extend(
-                (part.iter())
-                    .map(|(_, i, chunk)| Self::candidate_mask(&chunk.sections[*i], candidate)),
-            );
-        });
+        let masks = crate::parallel::phase(
+            &RandomTickView {
+                facts: behaviours.state_facts(),
+            },
+            &todo,
+            128,
+            |view, (_, i, chunk)| {
+                Self::candidate_mask(&chunk.sections[*i], |id| {
+                    view.facts[id as usize].random_tick_candidate()
+                })
+            },
+        );
         for ((key, i, _), mask) in todo.into_iter().zip(masks) {
             if let Some(cached) = self.chunks.get_mut(&key) {
                 cached.masks[i] = Some(Rc::new(mask));
@@ -647,12 +665,11 @@ mod tick_parity {
                 behaviours.tick_chunk_random_masked(&mut masked, &mut c, ChunkPos::new(x, z), next);
             }
             let keys = lit(&prepared);
-            let candidate = |id| behaviours.random_tick_candidate(BlockStateId(id));
             prep_cache.prepare_masks(
                 &keys,
                 |key| prepared.chunks.get(&key).cloned(),
                 &facts,
-                &candidate,
+                &behaviours,
             );
             for &(x, z) in &keys {
                 // Every ticking section's mask is there before the tick asks.
@@ -672,7 +689,13 @@ mod tick_parity {
                 let next = |level: &mut Level, from| {
                     let now = level.chunks[&(x, z)].clone();
                     prep_cache
-                        .next_masked((x, z), &now, &facts, candidate, from)
+                        .next_masked(
+                            (x, z),
+                            &now,
+                            &facts,
+                            |id| behaviours.random_tick_candidate(BlockStateId(id)),
+                            from,
+                        )
                         .map(|(y, mask)| (y, RandomTickMaskUpdate::Replace(Some(mask))))
                 };
                 behaviours.tick_chunk_random_masked(
