@@ -3825,9 +3825,8 @@ impl Game<'_> {
         else {
             return;
         };
-        let forward = glam::DVec3::from_array(super::view_vector(self.yaw, self.pitch));
-        let right = forward.cross(glam::DVec3::Y).normalize_or_zero();
-        let up = right.cross(forward).normalize_or_zero();
+        // DragonFireballRenderer.submit: turned by the camera's orientation.
+        let [right, up] = super::billboard_axes(self.camera_orientation());
         for b in self
             .creatures
             .projectiles
