@@ -1703,6 +1703,9 @@ fn check_block(file: &Block) -> Result<(), String> {
         light.check()?;
     }
     for (name, property) in &file.state_properties {
+        if name == "waterlogged" && !matches!(property, StateProperty::Boolean) {
+            return Err("state_properties.waterlogged must have type boolean".into());
+        }
         if !state_name(name) {
             return Err(format!(
                 "state property {name:?} is lower case letters, digits and underscores"
@@ -3088,6 +3091,27 @@ capabilities = ["registries"]
             let e = block(&json).unwrap_err();
             assert!(e.contains("block tag"), "{tag}: {e}");
         }
+    }
+
+    #[test]
+    fn declared_waterlogged_requires_a_boolean() {
+        let parse = |template: &str, property: &str| {
+            let json = format!(
+                r#"{{"template":"minecraft:{template}","state_properties":{{"waterlogged":{property}}}}}"#
+            );
+            smod(
+                "waterlogged",
+                MANIFEST_TEXT,
+                &[("data/ruby/sunrise/block/plant.json", json.as_bytes())],
+            )
+        };
+        assert!(parse("tall_grass", r#"{"type":"boolean"}"#).is_ok());
+        assert!(parse("stone", r#"{"type":"boolean"}"#).is_ok());
+        let error = parse("stone", r#"{"type":"enum","values":["false","true"]}"#).unwrap_err();
+        assert!(
+            error.contains("state_properties.waterlogged") && error.contains("plant.json"),
+            "{error}"
+        );
     }
 
     #[test]

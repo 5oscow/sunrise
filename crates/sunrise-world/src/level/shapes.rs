@@ -51,6 +51,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         {
             return new;
         }
+        if self.b.data(state).declared_waterlogged {
+            self.waterlogged_tick(state, pos);
+        }
         self.update_shape_at(0, state, pos, direction, neighbour_pos, neighbour)
     }
 

@@ -24,8 +24,8 @@ use std::{
 };
 
 const MAGIC: &[u8; 8] = b"HZBEHAV\0";
-const VERSION: u32 = 5;
-const FILE_NAME: &str = "behaviours-v5.bin";
+const VERSION: u32 = 6;
+const FILE_NAME: &str = "behaviours-v6.bin";
 const REGISTRY_MAGIC: &[u8; 8] = b"HZREGIS\0";
 const REGISTRY_VERSION: u32 = 1;
 const REGISTRY_FILE_NAME: &str = "registry-v1.bin";
@@ -128,6 +128,7 @@ struct Block {
     grow_probability: f64,
     growth_direction: u8,
     schedule_fluid_ticks: bool,
+    declared_waterlogged: bool,
     weather: u8,
     ignite_odds: i32,
     burn_odds: i32,
@@ -533,6 +534,7 @@ impl Snapshot {
                 grow_probability: block.grow_probability,
                 growth_direction: direction_index(block.growth_direction),
                 schedule_fluid_ticks: block.schedule_fluid_ticks,
+                declared_waterlogged: block.declared_waterlogged,
                 weather: block.weather,
                 ignite_odds: block.ignite_odds,
                 burn_odds: block.burn_odds,
@@ -715,6 +717,7 @@ impl Snapshot {
                     grow_probability: wire.grow_probability,
                     growth_direction: direction(wire.growth_direction)?,
                     schedule_fluid_ticks: wire.schedule_fluid_ticks,
+                    declared_waterlogged: wire.declared_waterlogged,
                     weather: wire.weather,
                     ignite_odds: wire.ignite_odds,
                     burn_odds: wire.burn_odds,

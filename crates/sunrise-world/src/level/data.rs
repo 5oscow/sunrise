@@ -226,6 +226,8 @@ pub struct BlockData {
     pub grow_probability: f64,
     pub growth_direction: Direction,
     pub schedule_fluid_ticks: bool,
+    /// A declared boolean waterlogged property adds placement and shape defaults.
+    pub declared_waterlogged: bool,
     pub weather: u8,
     pub ignite_odds: i32,
     pub burn_odds: i32,
@@ -1057,6 +1059,9 @@ fn build_with_gameplay<G: GameplayStateSource>(
                 .and_then(Value::as_f64)
                 .unwrap_or(0.0),
             growth_direction,
+            declared_waterlogged: field("declaredWaterlogged")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
             schedule_fluid_ticks: field("scheduleFluidTicks")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
