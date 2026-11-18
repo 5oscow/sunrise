@@ -69,6 +69,7 @@ impl Hooks for Mod {
             mod_api::MathProfile::CorrectlyRounded => 2.0,
             mod_api::MathProfile::Aarch64Fma => 3.0,
             mod_api::MathProfile::StrictMath => 4.0,
+            mod_api::MathProfile::HotSpotX86_64 => 5.0,
             _ => panic!("fixture does not support the new math profile"),
         };
     }
