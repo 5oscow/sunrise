@@ -670,17 +670,17 @@ impl Default for Maps {
         }
     }
 }
-/// `MapColor.getColorFromPackedId` as RGBA bytes (NONE is transparent).
-fn packed_rgba(packed: u8) -> [u8; 4] {
+/// `MapColor.getColorFromPackedId` as RGBA bytes (NONE and undefined IDs are transparent).
+pub(in crate::game) fn packed_rgba(packed: u8) -> [u8; 4] {
     let id = usize::from(packed >> 2);
-    if id == 0 || id >= MAP_COLORS.len() {
+    let Some(&col) = MAP_COLORS.get(id).filter(|_| id != 0) else {
         return [0; 4];
-    }
+    };
     let modifier = [180u32, 220, 255, 135][usize::from(packed & 3)];
-    let col = MAP_COLORS[id];
     let ch = |s: u32| ((col >> s & 255) * modifier / 255) as u8;
     [ch(16), ch(8), ch(0), 255]
 }
+
 /// `get(DataComponents.MAP_ID)`: the map id any stack carries. Filled maps
 /// (explorer maps included) carry one; a command can give it to any item.
 pub(super) fn map_id(stack: &ItemStack) -> Option<i32> {
@@ -1951,6 +1951,20 @@ mod save_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn packed_map_color_decodes_palette_and_shade() {
+        // Grass at each brightness, water at NORMAL, and glow lichen (last ID) at HIGH.
+        assert_eq!(packed_rgba(4), [89, 125, 39, 255]);
+        assert_eq!(packed_rgba(5), [109, 153, 48, 255]);
+        assert_eq!(packed_rgba(6), [127, 178, 56, 255]);
+        assert_eq!(packed_rgba(7), [67, 94, 29, 255]);
+        assert_eq!(packed_rgba(49), [55, 55, 220, 255]);
+        assert_eq!(packed_rgba(246), [127, 167, 150, 255]);
+        assert_eq!(packed_rgba(3), [0; 4]);
+        assert_eq!(packed_rgba(248), [0; 4]);
+        assert_eq!(packed_rgba(255), [0; 4]);
+    }
 
     #[test]
     fn painting_a_map_marks_only_what_changed_and_refuses_another_size() {

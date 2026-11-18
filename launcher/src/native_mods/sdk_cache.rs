@@ -26,9 +26,26 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use sunrise_launcher_release_verify::{PublicKey, SIGNATURE, SIGNATURE_V2, SUMS};
-use sunrise_mod_package::mod_surface;
-use sunrise_mod_package::sdk::{self, Asset, Index, Kind, Side, INDEX};
-use sunrise_native_build::prebuilt::{self, Package, Route};
+use sunrise_launcher_sdk::{self as sdk, Asset, Index, Kind, Side, INDEX};
+
+/// The SDK's three compiled slices of one build, each in its own folder (`runtime`, `api`, `engine`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Package {
+    pub runtime: PathBuf,
+    pub api: PathBuf,
+    pub engine: PathBuf,
+}
+
+impl Package {
+    /// The slices under the build folder `build`.
+    pub fn at(build: &Path) -> Self {
+        Self {
+            runtime: build.join("runtime"),
+            api: build.join("api"),
+            engine: build.join("engine"),
+        }
+    }
+}
 
 /// Replaces the base SDK releases are read from: a URL, or a folder holding `sdk-<build id>/`
 /// folders (and game releases' folders, for their build ids).
@@ -465,9 +482,8 @@ fn compare_versions(a: &str, b: &str) -> Option<std::cmp::Ordering> {
     Some(parts(a)?.cmp(&parts(b)?))
 }
 
-/// The surface of `sdk`'s build: the kept copy, else fetched from `base` and checked against the
-/// index, then kept. Small (under 1.5 MB) and kept, so a fit is told offline once a build was seen.
-pub(super) fn surface(sdk: &Sdk, base: &Base) -> Result<mod_surface::Surface, Refusal> {
+/// The kept `surface.json` of `sdk`'s build, else fetched from `base`, checked against the index and kept. Small (under 1.5 MB), so a fit is told offline once a build was seen.
+pub(super) fn surface_file(sdk: &Sdk, base: &Base) -> Result<PathBuf, Refusal> {
     const NAME: &str = "surface.json";
     let build = sdk.shown();
     let refused = |why: String| Refusal::Refused {
@@ -476,9 +492,9 @@ pub(super) fn surface(sdk: &Sdk, base: &Base) -> Result<mod_surface::Surface, Re
     };
     let kept = sdk.dir.join(NAME);
     let listed = sdk.index.asset(NAME).map_err(|r| refused(r.to_string()))?;
-    let bytes = match fs::read(&kept) {
+    match fs::read(&kept) {
         // Kept only once verified; a size that changed since is fetched again.
-        Ok(bytes) if bytes.len() as u64 == listed.size => bytes,
+        Ok(bytes) if bytes.len() as u64 == listed.size => {}
         _ => {
             let tag = tag(sdk.commit());
             let body = base
@@ -499,10 +515,9 @@ pub(super) fn surface(sdk: &Sdk, base: &Base) -> Result<mod_surface::Surface, Re
                 .verify(NAME, bytes.as_slice())
                 .map_err(|r| refused(r.to_string()))?;
             write_whole(&kept, &bytes)?;
-            bytes
         }
-    };
-    mod_surface::Surface::read(&bytes).map_err(|error| refused(error.to_string()))
+    }
+    Ok(kept)
 }
 
 /// The folder of `sdk`'s build data (`points.json`, `internals.json`, `loops.json`,
@@ -531,20 +546,78 @@ pub(super) fn slices(
     _lease: &crate::native_cache::Cache,
     sdk: &Sdk,
     base: &Base,
-    route: Route,
+    route: &str,
     target: Target,
     progress: &dyn Fn(Fetched),
 ) -> Result<Package, Refusal> {
     let host = rust_toolchain::host().ok_or(Refusal::Host)?;
-    let side = match target {
-        Target::Client => Side::Client,
-        Target::Server => Side::Server,
-    };
+    let side = side(target);
     let prebuilt = super::root().join("prebuilt");
     let package = slices_in(&prebuilt, sdk, base, route, host.target, side, progress)?;
     crate::storage::mark_used(&prebuilt.join(unit(sdk.commit(), host.target, side)))
         .map_err(|error| Refusal::Cache(super::cache_error(error)))?;
     Ok(package)
+}
+
+/// The SDK route (`api`, `engine`) a build route the tool names (`prebuilt-api`, `prebuilt`) fetches.
+fn route_inputs(route: &str) -> Option<&'static str> {
+    match route {
+        "prebuilt-api" => Some("api"),
+        "prebuilt" => Some("engine"),
+        _ => None,
+    }
+}
+
+/// The SDK's native build tool for this computer (its `tool` route), fetched beside the slices and kept: the program to run.
+pub(super) fn tool(sdk: &Sdk, base: &Base, progress: &dyn Fn(Fetched)) -> Result<PathBuf, Refusal> {
+    let host = rust_toolchain::host().ok_or(Refusal::Host)?;
+    let build = sdk.shown();
+    let refused = |why: String| Refusal::Refused {
+        build: build.clone(),
+        why,
+    };
+    let names = sdk
+        .index
+        .route_assets("tool", host.target, Side::Client)
+        .map_err(|r| match r {
+            sdk::Refusal::Missing(_) => Refusal::Host,
+            sdk::Refusal::Route(_) => {
+                refused(tr("its SDK has no native build tool: install a newer version").into())
+            }
+            other => refused(other.to_string()),
+        })?;
+    let into =
+        super::root()
+            .join("prebuilt")
+            .join(format!("{}-{}-tool", sdk.commit(), host.target));
+    let mut fetched = Fetched::default();
+    for name in &names {
+        if !stamp_holds(sdk, name, &into) {
+            fetched.total += sdk
+                .index
+                .asset(name)
+                .map_err(|r| refused(r.to_string()))?
+                .size;
+        }
+    }
+    progress(fetched);
+    for name in &names {
+        fetch_into(sdk, base, name, &into, &mut fetched, progress)?;
+    }
+    crate::storage::mark_used(&into).map_err(|error| Refusal::Cache(super::cache_error(error)))?;
+    Ok(into.join(super::tool::PROGRAM))
+}
+
+/// Names a developer's own `cargo-sunrise-mod`, built from the same checkout as [`DEVELOPER_SDK`]'s folder: the tool its builds run.
+pub(super) const DEVELOPER_TOOL: &str = "SUNRISE_LAUNCHER_DEVELOPER_TOOL";
+
+/// The tool [`DEVELOPER_TOOL`] names, honoured as the SDK key override is (a debug launcher), or for a developer base's own SDK.
+pub(super) fn developer_tool(developer_base: bool) -> Option<PathBuf> {
+    (cfg!(debug_assertions) || developer_base)
+        .then(|| std::env::var_os(DEVELOPER_TOOL))
+        .flatten()
+        .map(PathBuf::from)
+        .filter(|program| program.is_file())
 }
 
 /// Names the folder of a prebuilt game built from a developer install's checkout
@@ -555,15 +628,43 @@ pub(super) const DEVELOPER_SDK: &str = "SUNRISE_LAUNCHER_DEVELOPER_SDK";
 /// `revision`'s for this computer and `target`, then laid out afresh as its slices by links, so
 /// the developer's folder is never changed. A release's game comes from its SDK instead
 /// ([`slices`]).
-pub(super) fn developer(revision: &str, target: Target, local: &Path) -> Result<Package, String> {
+pub(super) fn developer(
+    program: &Path,
+    revision: &str,
+    target: Target,
+    local: &Path,
+) -> Result<Package, String> {
     let host = rust_toolchain::host().ok_or_else(|| Refusal::Host.to_string())?;
-    prebuilt::check_identity(local, revision, host.target, target)?;
-    let unit = unit(revision, host.target, prebuilt::side(target));
-    let build = super::root()
+    let unit = unit(revision, host.target, side(target));
+    let out = super::root()
         .join("prebuilt")
         .join(format!("{unit}.developer"));
-    let _ = fs::remove_dir_all(&build);
-    prebuilt::lay_out(local, &build, true)
+    let reply = super::tool::ask(
+        crate::process::command(program),
+        "native-layout",
+        &serde_json::json!({
+            "prebuilt": local, "build": revision, "host": host.target,
+            "target": target.name(), "out": out,
+        }),
+    )?;
+    let folder = |slice: &str| {
+        reply["package"][slice]
+            .as_str()
+            .map(PathBuf::from)
+            .ok_or_else(|| tr("The native build tool laid out no package.").to_owned())
+    };
+    Ok(Package {
+        runtime: folder("runtime")?,
+        api: folder("api")?,
+        engine: folder("engine")?,
+    })
+}
+
+fn side(target: Target) -> Side {
+    match target {
+        Target::Client => Side::Client,
+        Target::Server => Side::Server,
+    }
 }
 
 /// The folder a build's slices for `triple` and `side` are kept in.
@@ -578,7 +679,7 @@ fn slices_in(
     prebuilt: &Path,
     sdk: &Sdk,
     base: &Base,
-    route: Route,
+    route: &str,
     triple: &str,
     side: Side,
     progress: &dyn Fn(Fetched),
@@ -590,7 +691,7 @@ fn slices_in(
     };
     let names = sdk
         .index
-        .route_assets(route.inputs(), triple, side)
+        .route_assets(route_inputs(route).ok_or_else(|| refused(trf("its tool names the route {route}, which this launcher doesn't know: update the launcher", &[("route", route)])))?, triple, side)
         .map_err(|r| match r {
             sdk::Refusal::Missing(_) => Refusal::Host,
             other => refused(other.to_string()),

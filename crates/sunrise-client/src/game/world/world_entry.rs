@@ -188,12 +188,11 @@ impl Game<'_> {
     pub(super) fn items(&self) -> &Items {
         world_items!(self)
     }
-    pub(super) fn mob_suffocation(
+    /// The level's suffocation rules, for its mobs and its players.
+    pub(super) fn level_suffocation(
         &self,
     ) -> &sunrise_world::suffocation::SuffocationRegistry<'static> {
-        self.world_tables
-            .as_ref()
-            .map_or_else(|| self.res.suffocation(), |t| &t.suffocation)
+        level_suffocation_of(&self.world_tables, &self.res)
     }
     pub(super) fn recipes(&self) -> &Recipes {
         match &self.world_tables {
@@ -862,6 +861,7 @@ impl Game<'_> {
         api_values::install_block_states(&self.tick, prepared.block_states);
         native_world_read::install_block_tags(prepared.tags);
         api_values::install_resolved_parts(&self.tick, prepared.parts);
+        self.mark_collision_shape_states();
         self.resolve_block_paths();
         self.resolve_piston_reactions();
     }
@@ -887,4 +887,15 @@ impl Game<'_> {
             },
         );
     }
+}
+
+/// [`Game::level_suffocation`] from the fields it reads, for a caller that holds other fields: the
+/// world's own tables (its datapacks' `causes_suffocation`), else the built-in ones.
+pub(super) fn level_suffocation_of<'a>(
+    world_tables: &'a Option<WorldTables>,
+    res: &'a Resources,
+) -> &'a sunrise_world::suffocation::SuffocationRegistry<'static> {
+    world_tables
+        .as_ref()
+        .map_or_else(|| res.suffocation(), |t| &t.suffocation)
 }

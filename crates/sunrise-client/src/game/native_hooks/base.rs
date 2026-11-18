@@ -364,8 +364,9 @@ impl GameLevel<'_> {
         ground: BlockStateId,
         ground_pos: BlockPos,
         may: &mut Option<bool>,
+        inert: &mut bool,
     ) {
-        self.fire_may_place_on(dimension, state, ground, ground_pos, may);
+        self.fire_may_place_on(dimension, state, ground, ground_pos, may, inert);
     }
 
     /// An authoritative server's `ServerLevel.tickBlock` is about to run a
@@ -3141,9 +3142,15 @@ impl Game<'_> {
     /// it (`u32::MAX` keeps the text's own); `Text::legacy` reads `§` codes.
     /// The stack has its components (`stack.data()`). Asked each frame the
     /// tooltip shows, never for one the stack hides or a crossbow's loaded
-    /// projectile.
-    pub(in crate::game) fn native_tooltip(&self, stack: &ItemStack, lines: &mut Vec<(Text, u32)>) {
-        self.fire_tooltip(stack, lines);
+    /// projectile. `context` shares the player, flags and vanilla client-level
+    /// tick rate with component tooltip appenders.
+    pub(in crate::game) fn native_tooltip(
+        &self,
+        stack: &ItemStack,
+        context: &mod_api::TooltipAppendContext,
+        lines: &mut Vec<(Text, u32)>,
+    ) {
+        self.fire_tooltip(stack, context, lines);
     }
     /// Client-side image component for this stack's tooltip. Answer its width/height
     /// in GUI pixels; finite positive dimensions reserve space after text and any
@@ -3633,11 +3640,10 @@ impl Game<'_> {
     /// open went from `previous` to `viewers` (vanilla's
     /// `ContainerOpenersCounter`, as a barrel keeps it): 0 to more than 0 is
     /// `onOpen`, back to 0 is `onClose`, any change `openerCountChanged`, so a
-    /// block can show itself open while `viewers` is not 0. Counted every
-    /// tick from the players' open menus, so a player who leaves without
-    /// closing (a lost connection, death, another dimension, out of reach, the
-    /// block gone) is heard too (`recheckOpeners`). Once for each change, with
-    /// no player's state swapped in. Server-side.
+    /// block can show itself open while `viewers` is not 0. Synchronous with
+    /// non-spectator menu opens and closes, with that player's state in place;
+    /// scheduled rechecks run every five ticks while open and repair lost
+    /// openers. Also called by a recheck when the count is unchanged. Server-side.
     pub(in crate::game) fn native_mod_container_viewers(
         &mut self,
         dimension: &str,
@@ -3649,7 +3655,7 @@ impl Game<'_> {
     }
     /// `player` (`name`) opened a menu (NeoForge's `PlayerContainerEvent.Open`,
     /// posted when `ServerPlayer.openMenu` sets the new `containerMenu`): any
-    /// menu, vanilla or a mod's. `menu` is the menu type's name
+    /// menu, vanilla or a mod's. `menu_type` is the menu type's name
     /// (`minecraft:generic_9x3`, `minecraft:furnace`, `minecraft:merchant`,
     /// `minecraft:crafting`, `minecraft:lectern`, a mod's own), `pos` the
     /// block it is of in `dimension` (none for a trade, a vehicle's, a mod's
@@ -3664,10 +3670,11 @@ impl Game<'_> {
         player: u128,
         name: &str,
         dimension: &str,
-        menu: &str,
+        menu_type: &str,
         pos: Option<[i32; 3]>,
+        menu: Option<mod_api::MenuRef>,
     ) {
-        self.fire_player_container_open(player, name, dimension, menu, pos);
+        self.fire_player_container_open(player, name, dimension, menu_type, pos, menu);
     }
     /// `player` (`name`) closed the menu `native_player_container_open` told
     /// of (NeoForge's `PlayerContainerEvent.Close`, posted in
@@ -3684,10 +3691,10 @@ impl Game<'_> {
         player: u128,
         name: &str,
         dimension: &str,
-        menu: &str,
+        menu_type: &str,
         pos: Option<[i32; 3]>,
     ) {
-        self.fire_player_container_close(player, name, dimension, menu, pos);
+        self.fire_player_container_close(player, name, dimension, menu_type, pos);
     }
     /// A client started tracking an entity (NeoForge's
     /// `PlayerEvent.StartTracking`, posted at the end of
@@ -4067,39 +4074,8 @@ impl Game<'_> {
     pub(in crate::game) fn native_on_equip(&mut self, slot: &str, new: Option<&ItemStack>) {
         self.fire_on_equip(slot, new);
     }
-    /// `MobEffect.shouldApplyEffectTickThisTick` for a content mod's effect
-    /// `effect` (`ruby:bleeding`), each tick a player or a mob has it, in
-    /// `MobEffectInstance.tickServer` before it counts down: `tick_count` is
-    /// the ticks left (the entity's tick count when infinite). Set `apply`
-    /// and `native_apply_effect_tick` follows. Server-side.
-    pub(in crate::game) fn native_should_apply_effect_tick_this_tick(
-        &self,
-        mod_id: &str,
-        effect: EffectKey,
-        tick_count: i32,
-        amplifier: i32,
-        apply: &mut bool,
-    ) {
-        self.fire_should_apply_effect_tick_this_tick(mod_id, effect, tick_count, amplifier, apply);
-    }
-    /// `MobEffect.applyEffectTick`: the content mod's effect `effect` acts on
-    /// `entity` in `dimension` (`minecraft:overworld`). Clear `keep` and the
-    /// effect ends now, before it counts down. `entity` is a mob's
-    /// `Entity.getId`, None for a player (`native_acting_player` says who).
-    /// It runs inside the entity's tick: a mob's world borrows the game
-    /// there, so the game is read-only, and it does not hold the ticking
-    /// mobs, nor the player's effects. `holder` identifies the holder; Host
-    /// reads of a mob holder are unavailable while it is ticking. Queued
-    /// changes apply after the hook; clearing `keep` ends the effect.
-    /// Server-side.
-    pub(in crate::game) fn native_apply_effect_tick(
-        &self,
-        call: mod_api::__private::ApplyEffectTickCall<'_>,
-    ) {
-        self.fire_apply_effect_tick(call);
-    }
     /// `MobEffect.onEffectAdded`: `LivingEntity.addEffect` gave `entity`
-    /// (as in `native_apply_effect_tick`) the content mod's effect `effect`,
+    /// the content mod's effect `effect`,
     /// which it didn't have. Server-side.
     pub(in crate::game) fn native_on_effect_added(
         &mut self,
@@ -4844,8 +4820,9 @@ impl LevelView<'_> {
         pos: BlockPos,
         state: BlockStateId,
         survives: &mut Option<bool>,
+        inert: &mut bool,
     ) {
-        self.fire_can_survive(dimension, pos, state, survives);
+        self.fire_can_survive(dimension, pos, state, survives, inert);
     }
 
     /// A block is about to take the state it is placed in
