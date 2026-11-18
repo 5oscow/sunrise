@@ -500,6 +500,9 @@ impl mod_api::BlockPart for LiquidPart {
             signals
                 .push([SIGNAL_POS, LOOT_POS, [16, 65, 0]].map(|pos| level.container_signal(pos)));
         }
+        if event.fluid.fluid == key("minecraft:empty") {
+            return Some(false);
+        }
         let pos = [event.pos.x, event.pos.y, event.pos.z];
         let result = level.block_state_id("minecraft:emerald_block").unwrap();
         let changed = level.set_block(pos, result, mod_api::BlockUpdateFlags::CLIENTS);
@@ -795,6 +798,56 @@ fn liquid_hosts_read_the_same_comparator_signal_without_unpacking_loot() {
             calls.signals.lock().unwrap().as_deref(),
             Some(&[[Some(15), Some(0), None]; 2][..])
         );
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn live_structure_restores_fluid_directly_and_retries_with_a_neighbour_source() {
+    use sunrise_core::{nbt::parse_snbt, position::BlockPos};
+    use sunrise_world::worldgen::structure::{Mirror, Rotation, StructureTemplate};
+    with_liquid_part(|game, _, calls| {
+        let water = state(game, "minecraft:water");
+        let [x, y, z] = AT;
+        game.world.set(x, y, z, water).unwrap();
+        game.world.set(x + 2, y, z - 1, water).unwrap();
+        let (tag, _) = parse_snbt(r#"{size:[3,1,1],palette:[{Name:"minecraft:dandelion"}],blocks:[{pos:[0,0,0],state:0},{pos:[2,0,0],state:0}]}"#).unwrap();
+        let template = StructureTemplate::from_nbt(
+            &tag,
+            game.pack.assets.registry,
+            game.state_transforms().unwrap(),
+        );
+        let settings = sunrise_world::level::TemplateSettings {
+            mirror: Mirror::None,
+            rotation: Rotation::None,
+            pivot: [0; 3],
+            ignore_entities: true,
+            known_shape: true,
+            integrity: 1.0,
+            seed: 0,
+            flags: 2,
+        };
+        assert!(game.place_template_object(
+            &template,
+            BlockPos::new(x, y, z),
+            settings,
+            Mirror::None,
+            Rotation::None
+        ));
+        let emerald = state(game, "minecraft:emerald_block");
+        assert_eq!(block(game), emerald);
+        assert_eq!(game.world.block(x + 2, y, z), emerald);
+        assert!(calls.queried.lock().unwrap().is_empty());
+        let placed = calls.placed.lock().unwrap();
+        assert_eq!(
+            placed.iter().map(|fluid| fluid.fluid).collect::<Vec<_>>(),
+            [
+                key("minecraft:water"),
+                key("minecraft:empty"),
+                key("minecraft:water")
+            ]
+        );
+        assert!(placed[0].is_source() && placed[2].is_source());
     });
 }
 

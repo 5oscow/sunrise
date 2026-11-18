@@ -478,6 +478,10 @@ pub trait LevelAccess: BlockEntityNeighbors {
     ) -> Option<bool> {
         None
     }
+    /// Whether a block has a placement part even without vanilla waterlogging.
+    fn has_place_liquid_part(&self, _state: BlockStateId) -> bool {
+        false
+    }
     /// Replace the template's container write. Player bucket transactions call the
     /// part with their own journalled host before applying the planned write.
     fn place_liquid(

@@ -142,6 +142,10 @@ impl LevelAccess for GameLevel<'_> {
         self.native_can_place_liquid(pos, state, fluid, user, &mut answer);
         answer
     }
+    fn has_place_liquid_part(&self, state: BlockStateId) -> bool {
+        self.native_authoritative
+            && super::api_values::block_state::block_listens(mod_api::HookId::PlaceLiquid, state)
+    }
     fn place_liquid(
         &mut self,
         ticks: &mut Ticks,
@@ -149,10 +153,7 @@ impl LevelAccess for GameLevel<'_> {
         state: BlockStateId,
         fluid: sunrise_world::fluid::FluidState,
     ) -> Option<bool> {
-        if !self.native_authoritative
-            || !super::api_values::block_state::block_listens(mod_api::HookId::PlaceLiquid, state)
-            || !self.world.is_loaded_at(pos.x, pos.y, pos.z)
-        {
+        if !self.has_place_liquid_part(state) || !self.world.is_loaded_at(pos.x, pos.y, pos.z) {
             return None;
         }
         if self.liquid_transaction_open {
