@@ -5,9 +5,9 @@ is one of vanilla's `GuiGraphics` calls: `fill`, `text`, `sprite`, `item_stack` 
 takes a buffer of `GuiDraw` ops for the same calls, with `Push` / `Pop` for the pose. Native and wasm mods use
 the same methods and the same ops.
 
-`ClientHost::debug_overlay_visible()` reports whether the F3 debug overlay is toggled on. In `render_gui_post`,
-use it to leave space for the debug overlay. The read does not change when F1 temporarily hides the HUD or
-when the set of displayed debug entries changes. It is available only on the client host.
+`ClientHost::debug_overlay_visible()` reports whether the client draws its debug overlay this frame. In
+`render_gui_post`, use it to leave space for the overlay. Always-on debug entries can make it visible with
+F3 off. F1 hides the overlay unless a screen is open. The read is available only on the client host.
 
 ## Gradient fills
 

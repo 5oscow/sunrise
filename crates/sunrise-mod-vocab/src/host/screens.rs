@@ -147,8 +147,8 @@ pub trait ScreensClientHost {
     #[access(ClientSetup)]
     fn observed_screen_id(&self) -> Option<ScreenId>;
     /// Side: client.
-    /// Whether the F3 debug overlay is toggled on (`DebugScreenEntryList.isOverlayVisible`).
-    /// This is the toggle state, even if F1 hides the overlay or no debug entries draw.
+    /// Whether the client draws its debug overlay this frame. Always-on debug entries can
+    /// make it visible with F3 off. F1 hides the overlay unless a screen is open.
     #[access(ClientSetup)]
     fn debug_overlay_visible(&self) -> bool;
     /// Side: client.
