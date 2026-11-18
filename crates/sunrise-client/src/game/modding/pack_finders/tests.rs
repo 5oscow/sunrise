@@ -120,13 +120,7 @@ struct Finder {
 }
 #[mod_api::__subscriptions]
 impl Hooks for Finder {
-    fn add_pack_finders(&self, host: HostSide<'_>, event: &mut AddPackFindersEvent<'_>) {
-        let component = mod_api::Text::literal("Startup");
-        let resolved = match host {
-            HostSide::Client(host) => host.text_string(&component),
-            HostSide::Server(host) => host.text_string(&component),
-        };
-        assert_eq!(resolved, Err(mod_api::text::TextFormError::Unavailable));
+    fn add_pack_finders(&self, _host: HostSide<'_>, event: &mut AddPackFindersEvent<'_>) {
         for (kind, path) in [
             (PackType::ClientResources, ASSET_PACK),
             (PackType::ServerData, DATA_PACK),
@@ -165,6 +159,42 @@ fn with_finder_hidden(feature: bool, required: bool, hidden: bool, test: impl Fn
         )]
         .into(),
         test,
+    );
+}
+
+#[test]
+fn restricted_pack_discovery_refuses_game_text_reads() {
+    use std::sync::{Arc, Mutex};
+
+    struct Observe(Arc<Mutex<Vec<PackType>>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for Observe {
+        fn add_pack_finders(&self, host: HostSide<'_>, event: &mut AddPackFindersEvent<'_>) {
+            let component = mod_api::Text::literal("Startup");
+            let resolved = match host {
+                HostSide::Client(host) => host.text_string(&component),
+                HostSide::Server(host) => host.text_string(&component),
+            };
+            assert_eq!(resolved, Err(mod_api::text::TextFormError::Unavailable));
+            self.0.lock().unwrap().push(event.packs.pack_type());
+        }
+    }
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    with_mods(
+        vec![ModEntry::new(
+            "discovery_text",
+            Box::new(Observe(seen.clone())),
+        )]
+        .into(),
+        || {
+            let sources = ModsState::default();
+            assert!(discover(PackType::ClientResources, &sources).is_empty());
+            assert!(data_packs(&sources).is_empty());
+        },
+    );
+    assert_eq!(
+        *seen.lock().unwrap(),
+        [PackType::ClientResources, PackType::ServerData]
     );
 }
 

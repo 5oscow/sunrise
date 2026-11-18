@@ -939,7 +939,11 @@ pub fn get_or(key: &str, fallback: &str) -> String {
             l.get(key).map(str::to_owned).or_else(|| {
                 l.component(key)
                     .and_then(|component| {
-                        crate::text::resolve_lang_component(component, crate::text::Origin::Local)
+                        crate::text::resolve_lang_component(
+                            &l,
+                            component,
+                            crate::text::Origin::Local,
+                        )
                     })
                     .map(|text| text.plain())
             })
@@ -1043,12 +1047,9 @@ mod tests {
         let mods = assets(&[
             (
                 "assets/a/lang/en_us.json",
-                r#"{"test.text":"Mod text","test.order":"a"}"#,
+                r#"{"test.text":"Mod text","test.order":"a","test.priority":"Mod priority"}"#,
             ),
-            (
-                "assets/z/lang/en_us.json",
-                r#"{"test.order":"z","test.priority":"Mod priority"}"#,
-            ),
+            ("assets/z/lang/en_us.json", r#"{"test.order":"z"}"#),
         ]);
         let pack = assets(&[
             (
@@ -1093,15 +1094,16 @@ mod tests {
     #[test]
     fn server_language_only_elides_active_cycles() {
         let mut entries = serde_json::Map::new();
-        for n in 0..40 {
+        for n in 0..1024 {
             entries.insert(
                 format!("test.chain.{n}"),
                 serde_json::json!({"translate": format!("test.chain.{}", n + 1)}),
             );
         }
+        let literal = "z".repeat(70 * 1024);
         entries.insert(
-            "test.chain.40".into(),
-            serde_json::json!({"text":"endpoint"}),
+            "test.chain.1024".into(),
+            serde_json::json!({"text":literal}),
         );
         entries.insert(
             "test.repeat".into(),
@@ -1123,7 +1125,7 @@ mod tests {
             ))
         );
         scoped(language, || {
-            assert_eq!(get("test.chain.0"), "endpoint");
+            assert_eq!(get("test.chain.0"), literal);
             assert_eq!(get("test.repeat"), ".".repeat(160));
             assert_eq!(get("test.cycle.a"), "!");
         });

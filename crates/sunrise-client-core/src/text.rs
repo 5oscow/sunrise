@@ -1197,8 +1197,10 @@ pub(crate) fn format_translatable_origin(
     origin: Origin,
 ) -> Text {
     let language = lang::current();
-    if let Some(component) = language.as_ref().and_then(|l| l.component(key)) {
-        return resolve_lang_component(component, origin)
+    if let Some(language) = language.as_deref()
+        && let Some(component) = language.component(key)
+    {
+        return resolve_lang_component(language, component, origin)
             .unwrap_or_else(|| format_translation_origin(fallback.unwrap_or(key), args, origin));
     }
     let template = language
@@ -1213,84 +1215,26 @@ pub(crate) fn format_translatable_origin(
     format_translation_origin(template, args, origin)
 }
 
-/// Component-valued language entries replace the translation, not its template.
-/// Only an active re-entry contributes empty text. If an expansion can't be
-/// rendered within the traversal budget, the top-level lookup uses its fallback.
-pub(crate) fn resolve_lang_component(component: &Value, origin: Origin) -> Option<Text> {
-    struct Expansion {
-        active: Vec<usize>,
-        visits_left: usize,
-        spans: usize,
-        bytes: usize,
-        exhausted: bool,
-    }
-    thread_local! {
-        static EXPANSION: std::cell::RefCell<Expansion> = const {
-            std::cell::RefCell::new(Expansion {
-                active: Vec::new(), visits_left: 0, spans: 0, bytes: 0, exhausted: false,
-            })
-        };
-    }
-    struct Leave;
-    impl Drop for Leave {
-        fn drop(&mut self) {
-            EXPANSION.with_borrow_mut(|expansion| {
-                expansion.active.pop();
-            });
-        }
-    }
-    let id = std::ptr::from_ref(component) as usize;
-    let enter = EXPANSION.with_borrow_mut(|expansion| {
-        if expansion.active.is_empty() {
-            expansion.visits_left = MAX_TRANSLATION_SPANS;
-            expansion.spans = 0;
-            expansion.bytes = 0;
-            expansion.exhausted = false;
-        }
-        if expansion.active.contains(&id) {
-            return false;
-        }
-        // Each translated entry uses the recursive component renderer.
-        if expansion.exhausted || expansion.visits_left == 0 || expansion.active.len() == 128 {
-            expansion.exhausted = true;
-            return false;
-        }
-        expansion.visits_left -= 1;
-        expansion.active.push(id);
-        true
-    });
-    if !enter {
-        // At this point a parent still owns the traversal; it will handle a
-        // refused expansion rather than each reference appending its fallback.
-        return Some(Text::empty());
-    }
-    let _leave = Leave;
-    let text = crate::component::render_source(component, &|_| origin);
-    EXPANSION.with_borrow_mut(|expansion| {
-        expansion.spans += text.rendered.spans.len();
-        expansion.bytes += text
-            .rendered
-            .spans
-            .iter()
-            .map(|span| span.text.len())
-            .sum::<usize>();
-        expansion.exhausted |=
-            expansion.spans > MAX_TRANSLATION_SPANS || expansion.bytes > MAX_TRANSLATION_BYTES;
-        if expansion.exhausted {
-            (expansion.active.len() != 1).then(Text::empty)
-        } else {
-            Some(text)
-        }
-    })
+/// Component references expand on the component renderer's work stack, independently of
+/// the caller's Rust stack. Budget the rendered result, not each reference that leads to it.
+pub(crate) fn resolve_lang_component(
+    language: &lang::Language,
+    component: &Value,
+    origin: Origin,
+) -> Option<Text> {
+    let text = crate::component::render_lang_component(component, origin, language)?;
+    (text.rendered.spans.len() <= MAX_TRANSLATION_SPANS
+        && crate::component::rendered_bytes(&text) <= MAX_TRANSLATION_BYTES)
+        .then_some(text)
 }
 /// The most spans one translation expands to. Vanilla's `TranslatableContents.decompose` keeps
 /// references to its arguments, so its cost stays linear in the input; copying them here makes
 /// nested `%1$s` templates multiply (`k` references nested `D` deep: `k^D` copies), and a server's
 /// `fallback` template is any text it likes.
-const MAX_TRANSLATION_SPANS: usize = 1 << 15;
+pub(crate) const MAX_TRANSLATION_SPANS: usize = 1 << 15;
 /// The most text one translation expands to: one long argument referenced many times multiplies
 /// bytes, not spans.
-const MAX_TRANSLATION_BYTES: usize = 1 << 22;
+pub(crate) const MAX_TRANSLATION_BYTES: usize = 1 << 22;
 
 /// TranslatableContents.decomposeTemplate: `%s` takes the next argument,
 /// `%n$s` a numbered one and `%%` is a percent sign. Malformed templates are

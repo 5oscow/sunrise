@@ -26,6 +26,16 @@ impl Hooks for Observe {
         self.0.lock().unwrap().push("about");
     }
 
+    fn data_pack_files(&self, host: &mut dyn ServerHost, _: &mut mod_api::DataPackFilesEvent<'_>) {
+        let mut seen = self.0.lock().unwrap();
+        if !seen.contains(&"starting") {
+            assert_eq!(string(host, "language_test.value"), "language_test.value");
+            seen.push("data");
+        } else {
+            assert_eq!(string(host, "language_test.value"), "key.jump");
+        }
+    }
+
     fn server_starting(&self, host: &mut dyn ServerHost, _: &mut mod_api::ServerStartingEvent) {
         assert_eq!(string(host, "language_test.value"), "key.jump");
         assert_eq!(string(host, "language_test.number"), "1.50");
@@ -33,6 +43,7 @@ impl Hooks for Observe {
         assert_eq!(string(host, "language_test.unread"), "language_test.unread");
         assert_eq!(string(host, "language_test.next"), "language_test.next");
         assert_eq!(string(host, "language_test.off"), "language_test.off");
+        assert_eq!(string(host, "language_test.hover"), "lower hover value");
         self.0.lock().unwrap().push("starting");
     }
 }
@@ -81,6 +92,14 @@ fn dedicated_language_uses_the_opening_selection_once() {
         let pack = world.join("datapacks").join(name);
         write(&pack.join("pack.mcmeta"), &meta);
         write(&pack.join("assets/language_test/lang/en_us.json"), contents);
+        let hover = match name {
+            "low" => r#"{"language_test.hover":"lower hover value"}"#,
+            "high" => {
+                r#"{"language_test.hover":{"text":"bad override","hover_event":{"action":"show_item","id":"not an item id"}}}"#
+            }
+            _ => continue,
+        };
+        write(&pack.join("assets/tooltip_ns/lang/en_us.json"), hover);
     }
     write(
         &selection,
@@ -107,16 +126,16 @@ fn dedicated_language_uses_the_opening_selection_once() {
                 .unwrap();
                 request.save_root = world.to_owned();
                 let prepared = game.prepare_world_and_rules(request).unwrap();
-                let opening_packs = game.start_dedicated_world(&prepared).unwrap();
-                // If finishing the open rediscovered packs, it would adopt this selection instead.
+                game.native_server_about_to_start(true);
+                let opening_packs = game.finish_open_world(prepared).unwrap();
+                assert!(game.fns.enabled().iter().any(|id| id == "file/high"));
+                assert!(!game.fns.enabled().iter().any(|id| id == "file/off"));
+                // Publication must use what the world adopted, not a second discovery.
                 write(
                     &selection,
                     r#"{"enabled":["vanilla","file/off"],"disabled":["file/low","file/high","file/later"]}"#,
                 );
-                game.finish_open_world(prepared, Some(opening_packs))
-                    .unwrap();
-                assert!(game.fns.enabled().iter().any(|id| id == "file/high"));
-                assert!(!game.fns.enabled().iter().any(|id| id == "file/off"));
+                game.start_loaded_dedicated_world(&opening_packs);
                 game.reload_datapacks(true, &game.level.enabled_features.clone())
                     .unwrap();
                 assert!(game.fns.enabled().iter().any(|id| id == "file/off"));
@@ -125,5 +144,8 @@ fn dedicated_language_uses_the_opening_selection_once() {
             })
         },
     );
-    assert_eq!(*seen.lock().unwrap(), ["about", "starting"]);
+    let seen = seen.lock().unwrap();
+    assert_eq!(seen.first(), Some(&"about"));
+    assert_eq!(seen.last(), Some(&"starting"));
+    assert!(seen[1..seen.len() - 1].contains(&"data"));
 }

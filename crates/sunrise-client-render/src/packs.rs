@@ -1020,7 +1020,7 @@ pub fn resources(
     for (name, bytes) in merged {
         index.insert(name, Resource::bytes(bytes));
     }
-    let deprecated = "assets/minecraft/lang/deprecated.json";
+    let deprecated = VANILLA_LANG_DEPRECATIONS;
     // These renames come from the game, not its resource packs.
     if base.contains(deprecated) {
         index.insert(
@@ -1162,6 +1162,14 @@ fn build_overlay_uncached(
         }
         for name in names {
             let child = format!("{prefix}{name}");
+            if child == VANILLA_LANG_DEPRECATIONS {
+                let base = vanilla.join(&child);
+                if base.is_file() {
+                    dependencies.file(&base);
+                    link(&base, &out.join(&child))?;
+                }
+                continue;
+            }
             // Vanilla's files in one file: it describes vanilla's root, not this mirror.
             if hidden.contains(&child) || child == sunrise_core::prepared_files::FILE_NAME {
                 continue;
@@ -1411,9 +1419,11 @@ pub fn merge_stacks(name: &str) -> bool {
     merge_kind(name).is_some()
 }
 
+const VANILLA_LANG_DEPRECATIONS: &str = "assets/minecraft/lang/deprecated.json";
+
 fn merge_kind(name: &str) -> Option<Merge> {
     let (_, rest) = name.strip_prefix("assets/")?.split_once('/')?;
-    if name == "assets/minecraft/lang/deprecated.json" {
+    if name == VANILLA_LANG_DEPRECATIONS {
         return None;
     }
     if rest == "sounds.json" {
@@ -2452,6 +2462,14 @@ mod tests {
             fs::create_dir_all(root.join(path).parent().unwrap()).unwrap();
             fs::write(root.join(path), bytes).unwrap();
         }
+        for (root, bytes) in [
+            (&vanilla, br#"{"removed":["base.old"]}"#.as_slice()),
+            (&mod_b, br#"{"removed":["pack.old"]}"#.as_slice()),
+        ] {
+            let file = root.join(VANILLA_LANG_DEPRECATIONS);
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(file, bytes).unwrap();
+        }
         let layers = [
             Pack::mod_layer("jar-a".into(), Source::Zip(jar_a)),
             Pack::mod_layer("mod-a".into(), Source::Dir(mod_a)),
@@ -2463,6 +2481,10 @@ mod tests {
         assert_eq!(fs::read(out.join(path)).unwrap(), b"jar-b");
         build_overlay(&vanilla, &layers, &out).unwrap();
         assert_eq!(fs::read(out.join(path)).unwrap(), b"mod-b");
+        assert_eq!(
+            fs::read(out.join(VANILLA_LANG_DEPRECATIONS)).unwrap(),
+            br#"{"removed":["base.old"]}"#
+        );
         assert!(!out.join("data/shared/recipe/test.json").exists());
         assert!(!out.join("Example.class").exists());
         fs::remove_dir_all(base).unwrap();

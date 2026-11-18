@@ -252,9 +252,15 @@ pub fn to_text_with(
     resolve: &mut dyn FnMut(&str) -> Text,
     contents: &mut dyn FnMut(&serde_json::Map<String, Value>) -> Option<Text>,
 ) -> Text {
-    build(v, resolve, contents, Sourced(true, Origin::Remote), &|_| {
-        Origin::Remote
-    })
+    build(
+        v,
+        resolve,
+        contents,
+        Sourced(true, Origin::Remote),
+        &|_| Origin::Remote,
+        None,
+    )
+    .unwrap_or_default()
 }
 
 /// The spans of `v` alone, as [`to_text`] decodes them, with `v` itself as the text's
@@ -267,12 +273,29 @@ pub(crate) fn spans_of(v: Value) -> Text {
 }
 
 pub(crate) fn render_source(v: &Value, origin: &dyn Fn(&Value) -> Origin) -> Text {
+    build_source(v, origin, None).unwrap_or_default()
+}
+
+pub(crate) fn render_lang_component(
+    v: &Value,
+    origin: Origin,
+    language: &crate::lang::Language,
+) -> Option<Text> {
+    build_source(v, &|_| origin, Some(language))
+}
+
+fn build_source(
+    v: &Value,
+    origin: &dyn Fn(&Value) -> Origin,
+    language: Option<&crate::lang::Language>,
+) -> Option<Text> {
     build(
         v,
         &mut |s| Text::literal(s),
         &mut |_| None,
         Sourced(false, Origin::Remote),
         origin,
+        language,
     )
 }
 
@@ -307,8 +330,18 @@ impl Sourced {
             }
         }
     }
-    /// MutableComponent.append.
-    fn append(self, base: &mut Text, other: Text) {
+    /// MutableComponent.append. Don't allocate an oversized concatenation while
+    /// resolving pack entries. The remaining allowance is local to this output;
+    /// returning the same rendered text through references doesn't charge it again.
+    fn append(self, base: &mut Text, other: Text, remaining: &mut Option<usize>) -> Option<()> {
+        if let Some(bytes) = remaining {
+            if base.rendered.spans.len() + other.rendered.spans.len()
+                > crate::text::MAX_TRANSLATION_SPANS
+            {
+                return None;
+            }
+            *bytes = bytes.checked_sub(rendered_bytes(&other))?;
+        }
         match self.0 {
             true => base.push(other),
             false => {
@@ -317,6 +350,7 @@ impl Sourced {
                 crate::text::discard_text(other);
             }
         }
+        Some(())
     }
     fn styled(self, mut text: Text, style: &Style) -> Text {
         match self.0 {
@@ -351,6 +385,10 @@ impl Sourced {
     }
 }
 
+pub(crate) fn rendered_bytes(text: &Text) -> usize {
+    text.rendered.spans.iter().map(|span| span.text.len()).sum()
+}
+
 // Continuations preserve lazy content selection and callback order while keeping
 // every component relation off the call stack. Hover decoding has its own policy.
 fn build(
@@ -359,15 +397,24 @@ fn build(
     contents: &mut dyn FnMut(&serde_json::Map<String, Value>) -> Option<Text>,
     sourced: Sourced,
     origin: &dyn Fn(&Value) -> Origin,
-) -> Text {
-    use std::collections::HashMap;
+    language: Option<&crate::lang::Language>,
+) -> Option<Text> {
+    use std::collections::{HashMap, HashSet};
+    enum Content<'a> {
+        Decode(Option<Text>),
+        Replace(Option<&'a Value>),
+    }
     enum Work<'a> {
         Enter(&'a Value, bool),
         Styled(&'a Value, bool),
-        Content(&'a Value, bool, Style, Option<Text>),
+        Content(&'a Value, bool, Style, Content<'a>),
         Finish(&'a Value, bool, Style, Text),
     }
     let mut pending = vec![Work::Enter(v, false)];
+    let mut active = HashSet::new();
+    if language.is_some() {
+        active.insert(std::ptr::from_ref(v));
+    }
     let mut done = HashMap::<*const Value, (Text, Style)>::new();
     while let Some(work) = pending.pop() {
         match work {
@@ -385,10 +432,20 @@ fn build(
                     }
                 }
                 Value::Array(a) => {
-                    pending.push(Work::Content(value, hover, Style::default(), None));
+                    pending.push(Work::Content(
+                        value,
+                        hover,
+                        Style::default(),
+                        Content::Decode(None),
+                    ));
                     pending.extend(a.iter().rev().map(|v| Work::Enter(v, hover)));
                 }
-                _ => pending.push(Work::Content(value, hover, Style::default(), None)),
+                _ => pending.push(Work::Content(
+                    value,
+                    hover,
+                    Style::default(),
+                    Content::Decode(None),
+                )),
             },
             Work::Styled(value, hover) => {
                 let Value::Object(o) = value else {
@@ -405,13 +462,36 @@ fn build(
                 );
                 let overridden = if hover { None } else { contents(o) };
                 let needs_content = overridden.is_none();
-                pending.push(Work::Content(value, hover, style, overridden));
+                let translation = o.get("translate").and_then(Value::as_str).filter(|_| {
+                    needs_content && inline_object_fields(o).is_none() && !o.contains_key("text")
+                });
+                if let Some(replacement) = language.and_then(|lang| lang.component(translation?)) {
+                    // A replacement ignores the referring translation's arguments and fallback.
+                    // Remove the key when it returns so a sibling can expand the same entry.
+                    let replacement = active
+                        .insert(std::ptr::from_ref(replacement))
+                        .then_some(replacement);
+                    pending.push(Work::Content(
+                        value,
+                        hover,
+                        style,
+                        Content::Replace(replacement),
+                    ));
+                    if let Some(replacement) = replacement {
+                        pending.push(Work::Enter(replacement, false));
+                    }
+                    continue;
+                }
+                pending.push(Work::Content(
+                    value,
+                    hover,
+                    style,
+                    Content::Decode(overridden),
+                ));
                 if needs_content {
                     // inline_object evaluates its fallback before selecting the content.
                     // Arguments are evaluated only for the translation branch.
-                    if inline_object_fields(o).is_none()
-                        && !o.contains_key("text")
-                        && o.get("translate").is_some_and(Value::is_string)
+                    if translation.is_some()
                         && let Some(Value::Array(a)) = o.get("with")
                     {
                         pending.extend(a.iter().rev().map(|v| Work::Enter(v, hover)));
@@ -421,7 +501,7 @@ fn build(
                     }
                 }
             }
-            Work::Content(value, hover, mut style, overridden) => {
+            Work::Content(value, hover, mut style, content) => {
                 let mode = Sourced(sourced.0 || hover, origin(value));
                 if let Value::Array(a) = value
                     && let Some(first) = a.first()
@@ -440,11 +520,31 @@ fn build(
                 let mut literal = |s: &str| Text::literal(s);
                 let resolver: &mut dyn FnMut(&str) -> Text =
                     if hover { &mut literal } else { resolve };
-                let text = build_node(value, resolver, overridden, mode, &style, &mut |v| {
-                    done.remove(&(v as *const Value))
-                        .map(take_built_text)
-                        .unwrap_or_default()
-                });
+                let text = match content {
+                    Content::Decode(overridden) => build_node(
+                        value,
+                        resolver,
+                        overridden,
+                        mode,
+                        &style,
+                        &mut |v| {
+                            done.remove(&(v as *const Value))
+                                .map(take_built_text)
+                                .unwrap_or_default()
+                        },
+                        language.is_some(),
+                    )?,
+                    Content::Replace(replacement) => {
+                        let text = replacement
+                            .and_then(|v| {
+                                let key = std::ptr::from_ref(v);
+                                active.remove(&key);
+                                done.remove(&key).map(take_built_text)
+                            })
+                            .unwrap_or_default();
+                        mode.styled(text, &style)
+                    }
+                };
                 if let Value::Object(o) = value {
                     pending.push(Work::Finish(value, hover, style, text));
                     if let Some(Value::Array(a)) = o.get("extra") {
@@ -459,13 +559,20 @@ fn build(
                     unreachable!()
                 };
                 let mode = Sourced(sourced.0 || hover, origin(value));
-                if let Some(Value::Array(a)) = o.get("extra") {
+                if let Some(a) = o
+                    .get("extra")
+                    .and_then(Value::as_array)
+                    .filter(|a| !a.is_empty())
+                {
+                    let mut remaining = language.map(|_| {
+                        crate::text::MAX_TRANSLATION_BYTES.saturating_sub(rendered_bytes(&text))
+                    });
                     for v in a {
                         let extra = done
                             .remove(&(v as *const Value))
                             .map(take_built_text)
                             .unwrap_or_default();
-                        mode.append(&mut text, mode.styled(extra, &style));
+                        mode.append(&mut text, mode.styled(extra, &style), &mut remaining)?;
                     }
                 }
                 if mode.0
@@ -479,9 +586,11 @@ fn build(
             }
         }
     }
-    done.remove(&(v as *const Value))
-        .map(take_built_text)
-        .unwrap_or_default()
+    Some(
+        done.remove(&(v as *const Value))
+            .map(take_built_text)
+            .unwrap_or_default(),
+    )
 }
 
 fn take_built_text((text, style): (Text, Style)) -> Text {
@@ -496,22 +605,25 @@ fn build_node<'a>(
     sourced: Sourced,
     style: &Style,
     child: &mut dyn FnMut(&'a Value) -> Text,
-) -> Text {
-    match v {
+    budget_output: bool,
+) -> Option<Text> {
+    Some(match v {
         Value::String(s) => sourced.literal(s.clone()),
         Value::Number(n) => sourced.literal(n.to_string()),
         Value::Bool(b) => sourced.literal(b.to_string()),
         // A list is its first element with the rest as siblings.
         Value::Array(list) => {
             let Some((first, rest)) = list.split_first() else {
-                return Text::empty();
+                return Some(Text::empty());
             };
             let mut base = child(first);
             // The siblings take the first component's own style, even when
             // its text is empty.
+            let mut remaining = (budget_output && !rest.is_empty())
+                .then(|| crate::text::MAX_TRANSLATION_BYTES.saturating_sub(rendered_bytes(&base)));
             for sibling in rest {
                 let sibling = child(sibling);
-                sourced.append(&mut base, sourced.styled(sibling, style));
+                sourced.append(&mut base, sourced.styled(sibling, style), &mut remaining)?;
             }
             base
         }
@@ -554,7 +666,7 @@ fn build_node<'a>(
             sourced.styled(content, style)
         }
         Value::Null => Text::empty(),
-    }
+    })
 }
 
 fn plain_component(text: Text) -> String {

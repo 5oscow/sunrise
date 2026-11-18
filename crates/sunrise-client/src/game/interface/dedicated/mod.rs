@@ -745,24 +745,26 @@ impl std::fmt::Display for DatapacksRefused {
 impl std::error::Error for DatapacksRefused {}
 
 impl Game<'_> {
-    /// Keep the two startup notices at their established points. Only the
-    /// starting notice sees the English of the selection this world adopts.
-    fn start_dedicated_world(
-        &mut self,
-        prepared: &super::world_loading::PreparedWorld,
-    ) -> Result<super::functions::StagedPackStack> {
-        use sunrise_client::lang::{self, Language};
+    /// Add the adopted packs' English at the dedicated server-starting notice.
+    /// World and registry-load listeners still see only the built-in language.
+    fn start_loaded_dedicated_world(&mut self, packs: &super::functions::PackStack) {
+        use sunrise_client::lang::{self, Language, ResourceSource};
 
-        self.native_server_about_to_start(true);
-        let staged = self.stage_datapacks(&prepared.save_root, &prepared.level.enabled_features)?;
-        let language = Language::load_server(
-            &self.ui.vanilla_root,
-            staged.asset_layers(&self.pack),
-            |value| super::native_text_grammar::build(value, &self.ui.registries, false),
-        );
+        let layers = self
+            .pack
+            .mod_layers
+            .iter()
+            .chain(
+                packs
+                    .enabled_packs()
+                    .map(sunrise_client::datapack::DataPack::source),
+            )
+            .map(|source| source as &dyn ResourceSource);
+        let language = Language::load_server(&self.ui.vanilla_root, layers, |value| {
+            super::native_text_grammar::build(value, &self.ui.registries, false)
+        });
         lang::set(language);
         self.native_server_starting(true);
-        Ok(staged)
     }
 
     /// DedicatedServerProperties.createDimensions for a world that doesn't
@@ -1137,11 +1139,11 @@ impl Game<'_> {
             Arc::new(crate::game::api_values::game_rule_registry()),
         )?)?;
         *startup_began = true;
-        let opening_packs = self.start_dedicated_world(&prepared)?;
+        self.native_server_about_to_start(true);
         self.native_lifecycle_open_started();
         // The registries the server sends are read while the world prepares.
         let sync = super::lan::sync::preload_sync_data(&self.res.core.item_data);
-        self.finish_open_world(prepared, Some(opening_packs))?;
+        let opened_packs = self.finish_open_world(prepared)?;
         // WorldLoader: the world's packs must load before the server starts. The data store is read
         // now rather than at the first tick (reading parses functions; it runs none), and a broken
         // predicate graph stops the start before anything listens (a partial check: predicate_graph.rs).
@@ -1235,6 +1237,7 @@ impl Game<'_> {
                  turn on Velocity forwarding (forwarding.secret, docs/velocity-forwarding.md) or turn [transfer] off"
                 .into());
         }
+        self.start_loaded_dedicated_world(&opened_packs);
         let net = NetConfig {
             bind: (!props.server_ip.is_empty())
                 .then(|| props.server_ip.parse().ok())

@@ -46,8 +46,9 @@ string. Invalid components return the same boundary errors as the other text rea
 - **Client and integrated server:** both use the local player's selected language,
   active resource packs (including client mod translations) and key bindings.
   An integrated server does not resolve against a LAN guest's language.
-- **Dedicated server:** starts with built-in vanilla and Sunrise English. Just
-  before `server_starting`, it loads `assets/<namespace>/lang/en_us.json` from
+- **Dedicated server:** starts with built-in vanilla and Sunrise English; world
+  and data-load listeners still see those built-ins. Once the world has loaded,
+  just before `server_starting`, it loads `assets/<namespace>/lang/en_us.json` from
   enabled mods and the data packs selected for this world. Sunrise visits
   namespaces in lexical order and, within each namespace, reads the original
   files in pack priority order (mods first). Later values win. An invalid

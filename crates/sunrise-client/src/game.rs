@@ -6293,8 +6293,7 @@ impl Game<'_> {
     fn finish_open_world(
         &mut self,
         prepared: world_loading::PreparedWorld,
-        opening_packs: Option<functions::StagedPackStack>,
-    ) -> Result<()> {
+    ) -> Result<functions::PackStack> {
         self.reset_tutorial();
         // Another world: its generator, not the last one's Density line.
         self.debug_density.borrow_mut().clear();
@@ -6330,7 +6329,7 @@ impl Game<'_> {
         self.end.set_locator(locator);
         self.share_spawn_conditions();
         self.score = Default::default();
-        let stack = self.open_world_datapacks(&level.enabled_features, opening_packs)?;
+        let stack = self.open_world_datapacks(&level.enabled_features)?;
         let root = self.options.resources.clone();
         self.damage_tag_generation = self.damage_tag_generation.wrapping_add(1);
         self.resolve_parts()?;
@@ -6490,7 +6489,8 @@ impl Game<'_> {
             facts.cardinal_light == sunrise_world::dimension_type::CardinalLight::Nether;
         self.load_world_state()?;
         self.native_world_opened(dim);
-        self.open_saved_portal_levels()
+        self.open_saved_portal_levels()?;
+        Ok(stack)
     }
     fn finish_close_world(&mut self) -> Result<()> {
         self.ambience.clear(&mut self.audio);
