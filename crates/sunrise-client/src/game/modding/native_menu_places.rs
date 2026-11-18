@@ -140,12 +140,16 @@ impl Game<'_> {
             .as_ref()
             .filter(|old| old.window == window)
             .map_or(0, |old| old.places.len());
-        *entry = (count > 0).then_some(MenuSlotPlaces {
+        *entry = (count > 0).then(|| MenuSlotPlaces {
             window,
             places,
             locked,
             held,
-            noticed: false,
+            // A notice belongs to the window, not the backing that happened to queue it.
+            noticed: lan.hub.native_menu_events.iter().any(|event| {
+                matches!(event, NativeMenuEvent::PlacesChanged { uuid: owner, window: queued }
+                    if *owner == uuid && *queued == window)
+            }),
         });
         if let Some(index) = lan.hub.guests.connection_index(conn)
             && let Some(shown) = lan.hub.guests.native_menu_mut(index)
@@ -318,19 +322,15 @@ impl Game<'_> {
         let Some(conn) = self.native_conn(uuid) else {
             return;
         };
-        let Some((backed_window, ..)) = self.menu_places_of(conn) else {
-            return;
-        };
-        if let Some(backed) = self
+        let Some(backed) = self
             .lan
             .as_mut()
             .and_then(|lan| lan.menus.get_mut(&conn)?.slot_places.as_mut())
-        {
-            backed.noticed = false;
-        }
-        if backed_window != window {
+            .filter(|backed| backed.window == window)
+        else {
             return;
-        }
+        };
+        backed.noticed = false;
         match self.menu(uuid, window) {
             Some(menu) => {
                 self.refresh_menu_places(conn, uuid, menu);
@@ -832,6 +832,58 @@ mod tests {
                 slot: 9,
             };
             assert_eq!(carried.amount(host), 64);
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn rebinding_coalesces_notices_until_the_right_window_is_processed() {
+        with_game(|game| {
+            backpack_guest(game);
+            let (old, new) = game
+                .as_guest(1, |game| {
+                    let player = game.player(123).unwrap();
+                    let old = open_pack(game);
+                    game.player_back_mod_menu_slots(player, old, held_places(Hand::Main, 0..1))
+                        .unwrap();
+                    let new = open_pack(game);
+                    for places in [
+                        held_places(Hand::Main, 0..2),
+                        Vec::new(),
+                        held_places(Hand::Main, 1..2),
+                    ] {
+                        game.player_back_mod_menu_slots(player, new, places)
+                            .unwrap();
+                    }
+                    (old, new)
+                })
+                .unwrap();
+            // Deliver the old window's change as the event drain does, then write again.
+            game.menu_places_changed(123, old);
+            game.notice_menu_place_write(&held_slot(1));
+            let windows: Vec<_> = game
+                .lan
+                .as_ref()
+                .unwrap()
+                .hub
+                .native_menu_events
+                .iter()
+                .filter_map(|event| match event {
+                    NativeMenuEvent::PlacesChanged { uuid: 123, window } => Some(*window),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                windows,
+                [old, new],
+                "one notice per window, even across an unback"
+            );
+            game.run_native_menu_events();
+            game.notice_menu_place_write(&held_slot(1));
+            assert!(matches!(
+                game.lan.as_ref().unwrap().hub.native_menu_events.as_slice(),
+                [NativeMenuEvent::PlacesChanged { uuid: 123, window }] if *window == new
+            ));
         });
     }
 
