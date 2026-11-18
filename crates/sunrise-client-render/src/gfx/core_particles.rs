@@ -54,20 +54,20 @@ impl Other {
     }
 }
 
-/// A draw of this frame: a pipeline, its quads in the record buffer and how many times each.
+/// A draw of this frame: a pipeline and its quads in the record buffer.
 struct Draw {
     pipeline: usize,
     first: u32,
     quads: u32,
-    copies: u32,
 }
 
 pub(super) struct CoreParticles {
     /// By shader: `None` for one that doesn't build, or can't draw into this frame (logged once).
     pipelines: Vec<(Arc<GpuShader>, Option<Pipeline>)>,
     /// The frame the pipelines draw into: its format, and whether it holds linear light.
-    target: Option<(wgpu::TextureFormat, bool)>,
-    /// The batches the game handed over for the next frame (`Renderer::set_polytone_batches`).
+    target: (wgpu::TextureFormat, bool),
+    /// The batches the game handed over for the frame it builds
+    /// (`Renderer::set_polytone_batches`).
     batches: Vec<ShaderBatch>,
     vertices: wgpu::Buffer,
     heightmap: wgpu::Texture,
@@ -101,7 +101,7 @@ impl CoreParticles {
         let blank = texture(device, queue, 1, 1, &[255; 4]);
         Self {
             pipelines: Vec::new(),
-            target: Some(target),
+            target,
             batches: Vec::new(),
             vertices: vertex_buffer(device, 1 << 16),
             heightmap_view: heightmap.create_view(&Default::default()),
@@ -142,15 +142,45 @@ impl CoreParticles {
         );
     }
 
-    /// Takes the batches the game set into this frame (none on the title screen), into a frame
-    /// of `target` (format, linear light); `vanilla` gives the vanilla blocks as
-    /// `core_lines::uniforms` lays them out, when any is drawn.
-    pub(super) fn prepare_frame(
+    /// The renderer's verdict on `shaders` (the GPU particle types with live records) for the
+    /// frame about to be built, before its quads are: a shader whose pipeline builds for a
+    /// frame of `target` (format, linear light) is drawn, and its type leaves its quads out;
+    /// any other keeps them. Pipelines are built the first time; a verdict is given again every
+    /// frame, so a type's state is always this renderer's for this frame.
+    pub(super) fn decide(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         target: (wgpu::TextureFormat, bool),
         lightmap: (&wgpu::TextureView, &wgpu::Sampler),
+        shaders: &[Arc<GpuShader>],
+    ) {
+        if self.target != target {
+            self.pipelines.clear();
+            self.target = target;
+        }
+        // The shaders of packs no longer loaded: only this cache holds them.
+        self.pipelines.retain(|(s, _)| Arc::strong_count(s) > 1);
+        for shader in shaders {
+            let built = match self.pipelines.iter().find(|(s, _)| Arc::ptr_eq(s, shader)) {
+                Some((_, pipeline)) => pipeline.is_some(),
+                None => {
+                    let pipeline = self.pipeline(device, queue, lightmap, shader);
+                    let built = pipeline.is_some();
+                    self.pipelines.push((shader.clone(), pipeline));
+                    built
+                }
+            };
+            shader.set_drawn(built);
+        }
+    }
+
+    /// Takes the batches the game set into this frame (none on the title screen); `vanilla`
+    /// gives the vanilla blocks as `core_lines::uniforms` lays them out, when any is drawn.
+    pub(super) fn prepare_frame(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
         title: bool,
         vanilla: impl FnOnce() -> Vec<u8>,
     ) {
@@ -163,46 +193,34 @@ impl CoreParticles {
         } else {
             vanilla()
         };
-        self.prepare(device, queue, target, lightmap, &batches, &vanilla);
+        self.prepare(device, queue, &batches, &vanilla);
     }
 
-    /// This frame's batches: the pipelines they need, their uniforms and records uploaded, into
-    /// a frame of `target`. `vanilla` is the four vanilla blocks. A shader whose pipeline is
-    /// built in this frame draws from the next one on: its type drew its quads in this one.
+    /// This frame's batches, for the shaders [`Self::decide`] drew: their uniforms and records
+    /// uploaded. `vanilla` is the four vanilla blocks.
     fn prepare(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        target: (wgpu::TextureFormat, bool),
-        lightmap: (&wgpu::TextureView, &wgpu::Sampler),
         batches: &[ShaderBatch],
         vanilla: &[u8],
     ) {
         self.draws.clear();
-        if self.target != Some(target) {
-            // Pipelines for another frame: built again, and the refused ones tried again.
-            for (shader, _) in self.pipelines.drain(..) {
-                if shader.refused() {
-                    shader.set_drawn(None);
-                }
-            }
-            self.target = Some(target);
-        }
-        // The shaders of packs no longer loaded: only this cache holds them.
-        self.pipelines.retain(|(s, _)| Arc::strong_count(s) > 1);
         // The records a vertex buffer can hold at most.
         let stride = std::mem::size_of::<ShaderVertex>() as u64 * 4;
         let mut room = (device.limits().max_buffer_size / stride) as usize;
         let mut vertices: Vec<ShaderVertex> = Vec::new();
         for batch in batches {
-            let was_drawn = batch.shader.drawn();
-            let index = self.pipeline(device, queue, target, lightmap, &batch.shader);
+            let Some(index) = self
+                .pipelines
+                .iter()
+                .position(|(s, p)| Arc::ptr_eq(s, &batch.shader) && p.is_some())
+            else {
+                continue;
+            };
             let Some(pipeline) = &self.pipelines[index].1 else {
                 continue;
             };
-            if !was_drawn {
-                continue;
-            }
             let mut data = vec![0u8; OTHER_OFFSET as usize + 256 * pipeline.other.len()];
             let n = vanilla.len().min(OTHER_OFFSET as usize);
             data[..n].copy_from_slice(&vanilla[..n]);
@@ -231,7 +249,6 @@ impl CoreParticles {
                 pipeline: index,
                 first: (vertices.len() / 4) as u32,
                 quads: quads as u32,
-                copies: batch.copies.max(1),
             });
             vertices.extend_from_slice(&batch.vertices[..quads * 4]);
         }
@@ -254,9 +271,8 @@ impl CoreParticles {
     }
 
     /// Draw this frame's batches in the world pass with the renderer's quad indices (`indices`,
-    /// `index_quads` quads: two triangles over each four corners), which stay bound; each quad
-    /// once for every copy of its record. The caller then sets its own pipeline, vertex buffer
-    /// and group 0 again.
+    /// `index_quads` quads: two triangles over each four corners), which stay bound. The caller
+    /// then sets its own pipeline, vertex buffer and group 0 again.
     fn draw(&self, pass: &mut wgpu::RenderPass<'_>, indices: &wgpu::Buffer, index_quads: u32) {
         if index_quads == 0 {
             return;
@@ -273,43 +289,32 @@ impl CoreParticles {
             let mut done = 0;
             while done < draw.quads {
                 let n = (draw.quads - done).min(index_quads);
-                pass.draw_indexed(0..n * 6, ((draw.first + done) * 4) as i32, 0..draw.copies);
+                pass.draw_indexed(0..n * 6, ((draw.first + done) * 4) as i32, 0..1);
                 done += n;
             }
         }
     }
 
-    /// The pipeline for `shader`, built the first time a batch asks for it; its verdict goes to
-    /// the shader (`GpuShader::drawn`).
+    /// The pipeline for `shader` in this renderer's frame, or `None` (logged) when it can't
+    /// draw there.
     fn pipeline(
-        &mut self,
+        &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        (format, linear): (wgpu::TextureFormat, bool),
         lightmap: (&wgpu::TextureView, &wgpu::Sampler),
-        shader: &Arc<GpuShader>,
-    ) -> usize {
-        if let Some(i) = self
-            .pipelines
-            .iter()
-            .position(|(s, _)| Arc::ptr_eq(s, shader))
-        {
-            return i;
-        }
+        shader: &GpuShader,
+    ) -> Option<Pipeline> {
+        let (format, linear) = self.target;
         // A pack's GLSL writes vanilla's gamma: a frame of linear light keeps the type's quads,
         // as `Renderer::set_lines_shader` keeps the built-in outline.
-        let built = if linear {
+        if linear {
             log::info!(
                 "custom particle shader {} is not used on a frame of linear light",
                 shader.id
             );
-            None
-        } else {
-            self.build(device, queue, format, lightmap, shader)
-        };
-        shader.set_drawn(Some(built.is_some()));
-        self.pipelines.push((shader.clone(), built));
-        self.pipelines.len() - 1
+            return None;
+        }
+        self.build(device, queue, format, lightmap, shader)
     }
 
     fn build(
@@ -512,10 +517,24 @@ impl CoreParticles {
     }
 }
 
-/// The game's side: the batches and heightmap it hands over each frame, and the world frame's
-/// preparing and drawing of them.
+/// The game's side: the verdict it asks for before building the frame's quads, the batches and
+/// heightmap it hands over, and the world frame's preparing and drawing of them.
 impl super::Renderer {
-    /// The Polytone GPU particle batches drawn by their own shaders in the next frame
+    /// Decides, for the frame about to be built, which of `shaders` (the GPU particle types
+    /// with live records, `ParticleEngine::polytone_shaders`) this renderer draws: the others'
+    /// types draw their quads (`GpuShader::drawn`).
+    pub fn decide_polytone_shaders(&mut self, shaders: &[Arc<GpuShader>]) {
+        let frame = &self.output.frame;
+        self.core_particles.decide(
+            &self.device,
+            &self.queue,
+            (frame.format, frame.linear_light),
+            (&self.lightmap_view, &self.lightmap_sampler),
+            shaders,
+        );
+    }
+
+    /// The Polytone GPU particle batches drawn by their own shaders in the frame being built
     /// (`ParticleEngine::polytone_shader_batches`): the game sets them each frame.
     pub fn set_polytone_batches(&mut self, batches: Vec<ShaderBatch>) {
         self.core_particles.batches = batches;
@@ -527,15 +546,16 @@ impl super::Renderer {
         self.core_particles.set_heightmap(&self.queue, heights);
     }
 
-    /// Draws this frame's batches into the world pass; whether any drew (the caller then sets
-    /// its pipeline, vertex buffer and groups again).
-    pub(super) fn draw_core_particles(&self, pass: &mut wgpu::RenderPass<'_>) -> bool {
-        if !self.core_particles.drawing() {
-            return false;
-        }
+    /// Whether this frame has GPU particle batches to draw.
+    pub(super) fn core_particles_drawing(&self) -> bool {
+        self.core_particles.drawing()
+    }
+
+    /// Draws this frame's batches into the world pass (the caller then sets its pipeline,
+    /// vertex buffer and groups again).
+    pub(super) fn draw_core_particles(&self, pass: &mut wgpu::RenderPass<'_>) {
         self.core_particles
             .draw(pass, &self.indices, self.index_quads);
-        true
     }
 }
 

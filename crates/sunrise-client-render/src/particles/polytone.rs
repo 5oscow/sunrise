@@ -1440,38 +1440,63 @@ fn gpu_shader(
     use sunrise_polytone::gpu_particle::{GPU_BLOCK, GPU_PARTICLE_GLSL, GPU_PARTICLE_INCLUDE};
     let gpu = def.gpu.as_ref()?;
     let shader = def.gpu_shader()?;
-    let read = |path: &str| pack_root.read_to_string(path).ok();
-    let (Some(vertex), Some(fragment)) = (
-        read(&shader.stage_path("vsh")),
-        read(&shader.stage_path("fsh")),
-    ) else {
-        log::warn!("custom particle {id}: shader {} not found", shader.id());
-        return None;
+    let stage = |extension| read_shader_file(pack_root, &shader.stage_path(extension));
+    let (vertex, fragment) = match (stage("vsh"), stage("fsh")) {
+        (Ok(vertex), Ok(fragment)) => (vertex, fragment),
+        (Err(e), _) | (_, Err(e)) => {
+            log::warn!(
+                "custom particle {id}: shader {} is not used: {e}",
+                shader.id()
+            );
+            return None;
+        }
     };
     for (name, e) in &shader.refused {
         log::warn!("custom particle {id}: uniform {name}: {e}");
     }
+    // An include over the budget, or not text, is refused by name; a missing one the
+    // translator names.
+    let rejected = std::cell::RefCell::new(Vec::new());
     let include = |include: &str| {
         if include == GPU_PARTICLE_INCLUDE {
             return Some(GPU_PARTICLE_GLSL.to_owned());
         }
         let (namespace, path) = include.split_once(':')?;
-        read(&format!("assets/{namespace}/{path}"))
+        let path = format!("assets/{namespace}/{path}");
+        if !pack_root.contains(&path) {
+            return None;
+        }
+        read_shader_file(pack_root, &path)
+            .map_err(|e| rejected.borrow_mut().push(e))
+            .ok()
     };
     // Wiki "GPU Particles": each of `uniforms` is a block of its own with one float.
     let shader_id = shader.id();
+    let dir = shader.stage_dir();
     let uniforms = shader.uniforms;
     let provided = |name: &str| name == GPU_BLOCK || uniforms.iter().any(|(n, _)| n == name);
     // Pack GLSL is untrusted: a panic in the translator or naga refuses the shader too, with
     // no crash report.
+    // Quoted includes start from the stages' own folder.
+    let stages = crate::core_shader::Stages {
+        dir: &dir,
+        vertex: &vertex,
+        fragment: &fragment,
+    };
     let translated = crate::crash::contain(|| {
-        crate::core_shader::translate_core_with(&vertex, &fragment, &[], &include, &GLUE, &provided)
+        crate::core_shader::translate_core_at(&stages, &[], &include, &GLUE, &provided)
     })
     .and_then(|translated| translated);
     let program = match translated {
         Ok(program) => program,
         Err(e) => {
-            log::warn!("custom particle {id}: shader {shader_id} is not used: {e}");
+            let rejected = rejected.borrow();
+            let why = if rejected.is_empty() {
+                e
+            } else {
+                rejected.join("; ")
+            };
+            log::warn!("custom particle {id}: shader {shader_id} is not used: {why}");
             return None;
         }
     };
@@ -1490,6 +1515,19 @@ fn gpu_shader(
         def.render_type,
         uniforms,
     ))
+}
+
+/// A pack's shader file (a stage or an include), read only up to the translator's budget for
+/// a whole shader; the error names the file.
+fn read_shader_file(
+    pack_root: &sunrise_assets::resource_source::ResourceSource,
+    path: &str,
+) -> Result<String, String> {
+    let max = crate::core_shader::MAX_EXPANDED as u64;
+    let bytes = pack_root
+        .read_limited(path, max)
+        .map_err(|e| format!("{path}: {e}"))?;
+    String::from_utf8(bytes).map_err(|_| format!("{path}: not UTF-8 text"))
 }
 
 /// A particle modifier's `filter`: the blocks and items (an id or a list each) whose particles
@@ -1700,8 +1738,7 @@ impl ParticleEngine {
             _ => false,
         };
         if !same {
-            self.polytone_gpu.clear();
-            self.polytone_heightmap = None;
+            self.polytone_gpu = Default::default();
             self.polytone_overrides = registry
                 .iter()
                 .flat_map(|r| {
@@ -2276,17 +2313,20 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
-    /// A pack whose GPU particle type `test:rain` names its own shader (`test:rain`, a vertex
-    /// shader in the wiki's form and `fsh`) with `uniforms`, and whose players emit it.
+    /// A pack whose GPU particle type `test:rain` names its own shader `shader` (a vertex
+    /// shader in the wiki's form and `fsh`, in `assets/test/shaders/core/`) with `uniforms`,
+    /// with `extra` files, and whose players emit it. Its records live 40 ticks.
     fn shader_pack(
+        shader: &str,
         fsh: &str,
         uniforms: serde_json::Value,
+        extra: &[(&str, String)],
     ) -> sunrise_assets::resource_source::ResourceSource {
         use sunrise_assets::resource_source::{Resource, ResourceSource};
         let rain = serde_json::json!({
             "type": "gpu", "texture": "test:textures/particle/rain.png",
-            "render_type": "translucent", "shader": "test:rain", "uniforms": uniforms,
-            "initializer": {"lifetime": "3", "size": "0.5", "custom": "4"}
+            "render_type": "translucent", "shader": format!("test:{shader}"), "uniforms": uniforms,
+            "initializer": {"lifetime": "40", "size": "0.5", "custom": "4"}
         });
         let emitter = serde_json::json!({"emitters": [{"particle": "test:rain"}]});
         let vsh = "#version 330\n#moj_import <minecraft:dynamictransforms.glsl>\n\
@@ -2294,32 +2334,34 @@ mod tests {
             in vec3 Position;\nin vec4 Params;\nin vec4 Color;\nout vec4 vertexColor;\n\
             void main() {\n    gl_Position = ProjMat * ModelViewMat * vec4(Position + Origin, 1.0);\n\
                 vertexColor = Color * Params.x;\n}\n";
-        let files = [
+        let core = format!("assets/test/shaders/core/{shader}");
+        let mut files = vec![
             (
-                "assets/test/polytone/custom_particles/rain.json",
+                "assets/test/polytone/custom_particles/rain.json".to_owned(),
                 rain.to_string(),
             ),
             (
-                "assets/minecraft/polytone/entity_modifiers/player.json",
+                "assets/minecraft/polytone/entity_modifiers/player.json".to_owned(),
                 emitter.to_string(),
             ),
-            ("assets/test/shaders/core/rain.vsh", vsh.to_owned()),
-            ("assets/test/shaders/core/rain.fsh", fsh.to_owned()),
+            (format!("{core}.vsh"), vsh.to_owned()),
+            (format!("{core}.fsh"), fsh.to_owned()),
             (
-                "assets/minecraft/shaders/include/dynamictransforms.glsl",
+                "assets/minecraft/shaders/include/dynamictransforms.glsl".to_owned(),
                 "layout(std140) uniform DynamicTransforms {\n    mat4 ModelViewMat;\n    \
                  mat4 TextureMat;\n    vec4 ColorModulator;\n    vec3 ModelOffset;\n};\n"
                     .to_owned(),
             ),
             (
-                "assets/minecraft/shaders/include/projection.glsl",
+                "assets/minecraft/shaders/include/projection.glsl".to_owned(),
                 "layout(std140) uniform Projection {\n    mat4 ProjMat;\n};\n".to_owned(),
             ),
         ];
+        files.extend(extra.iter().map(|(p, t)| ((*p).to_owned(), t.clone())));
         ResourceSource::indexed(
             files
                 .into_iter()
-                .map(|(path, text)| (path.to_owned(), Resource::bytes(text.into_bytes())))
+                .map(|(path, text)| (path, Resource::bytes(text.into_bytes())))
                 .collect(),
         )
     }
@@ -2329,20 +2371,27 @@ mod tests {
         in vec4 vertexColor;\nout vec4 fragColor;\n\
         void main() {\n    fragColor = vertexColor * brightnessValue;\n}\n";
 
-    /// Spawns one `test:rain` from a player at (1, 64, 1): the batches the renderer gets and
-    /// the quads drawn on the CPU.
-    fn spawn_rain(
-        pack: &sunrise_assets::resource_source::ResourceSource,
-    ) -> (Vec<super::super::polytone_gpu::ShaderBatch>, usize) {
-        let blocks = blocks();
-        let scene = scene(blocks);
-        let level = ParticleLevel {
+    /// A fragment shader sampling the heightmap, `Sampler1`.
+    const HEIGHT_FSH: &str = "#version 330\nuniform sampler2D Sampler1;\n\
+        in vec4 vertexColor;\nout vec4 fragColor;\n\
+        void main() {\n    fragColor = vertexColor * texture(Sampler1, vec2(0.5)).r;\n}\n";
+
+    /// A scene to spawn in: its level borrows it.
+    fn level(scene: &Scene) -> ParticleLevel<'_> {
+        ParticleLevel {
             world: &scene.world,
             facts: &scene.facts,
             collision: &scene.collision,
             player: None,
             cached_chunk: std::cell::Cell::new(None),
-        };
+        }
+    }
+
+    /// An engine reading `pack`, with the rain's sprite in its atlas.
+    fn rain_engine(
+        pack: &sunrise_assets::resource_source::ResourceSource,
+        blocks: &'static BlockRegistry,
+    ) -> ParticleEngine {
         let mut engine = engine(Registry::read(pack, Default::default(), blocks));
         let rect = crate::hud::Rect {
             u0: 0.0,
@@ -2355,7 +2404,22 @@ mod tests {
         engine
             .atlas
             .insert("test:particle/rain".into(), (rect, true));
-        engine.polytone_entity(&level, "minecraft:player", [1.0, 64.0, 1.0]);
+        engine
+    }
+
+    /// Spawns one `test:rain` from a player at (1, 64, 1) and, as a renderer that draws every
+    /// shader does before the quads are built, draws its shader: the batches the renderer gets
+    /// and the quads drawn on the CPU.
+    fn spawn_rain(
+        pack: &sunrise_assets::resource_source::ResourceSource,
+    ) -> (Vec<super::super::polytone_gpu::ShaderBatch>, usize) {
+        let blocks = blocks();
+        let scene = scene(blocks);
+        let mut engine = rain_engine(pack, blocks);
+        engine.polytone_entity(&level(&scene), "minecraft:player", [1.0, 64.0, 1.0]);
+        for shader in engine.polytone_shaders() {
+            shader.set_drawn(true);
+        }
         let camera = DVec3::new(1.0, 70.0, 1.0);
         let batches = engine.polytone_shader_batches(camera, 0.0, &|_| 0xF0);
         let mut out = Vec::new();
@@ -2364,22 +2428,20 @@ mod tests {
     }
 
     /// Wiki "GPU Particles": a GPU type's own shader translates from the pack with the
-    /// `polytone:gpu_particle.glsl` block and one block per uniform; its records go to the
-    /// renderer with the initializer's `custom` and the uniforms' values this frame. Until the
-    /// renderer draws with the shader, the type keeps its quad.
+    /// `polytone:gpu_particle.glsl` block and one block per uniform; once the renderer draws
+    /// it, its records go to the renderer with the initializer's `custom` and the uniforms'
+    /// values this frame, and the type draws no quad.
     #[test]
     fn a_gpu_type_hands_its_records_and_uniforms_to_its_own_shader() {
-        let (batches, quads) = spawn_rain(&shader_pack(
-            BRIGHT_FSH,
-            serde_json::json!({"Brightness": "0.25 * 2"}),
-        ));
+        let uniforms = serde_json::json!({"Brightness": "0.25 * 2"});
+        let (batches, quads) = spawn_rain(&shader_pack("rain", BRIGHT_FSH, uniforms, &[]));
         assert_eq!(batches.len(), 1);
         let batch = &batches[0];
         assert_eq!(batch.shader.id, "test:rain");
         assert_eq!(batch.uniforms, [("Brightness".to_owned(), 0.5)]);
         assert_eq!(batch.vertices.len(), 4);
         assert_eq!(batch.vertices[0].params[..3], [0.5, 0.0, 4.0]);
-        assert_eq!(quads, 1);
+        assert_eq!(quads, 0);
     }
 
     /// A type's shader that reads a block it is not given (here `Brightness`, which its
@@ -2387,33 +2449,68 @@ mod tests {
     /// quad as before.
     #[test]
     fn a_shader_reading_a_block_it_is_not_given_keeps_the_types_quads() {
-        let (batches, quads) = spawn_rain(&shader_pack(BRIGHT_FSH, serde_json::json!({})));
+        let pack = shader_pack("rain", BRIGHT_FSH, serde_json::json!({}), &[]);
+        let (batches, quads) = spawn_rain(&pack);
         assert!(batches.is_empty());
         assert_eq!(quads, 1);
     }
 
+    /// A quoted include starts from the shader's own folder: `test:weather/rain`'s
+    /// `"common.glsl"` is `assets/test/shaders/core/weather/common.glsl`, not a file of
+    /// `minecraft:shaders/core/`.
+    #[test]
+    fn a_relative_include_is_read_beside_its_shader() {
+        let fsh = "#version 330\n#moj_import \"common.glsl\"\nin vec4 vertexColor;\n\
+                   out vec4 fragColor;\nvoid main() {\n    fragColor = vertexColor * half_bright();\n}\n";
+        let common = "float half_bright() {\n    return 0.5;\n}\n".to_owned();
+        let beside = [(
+            "assets/test/shaders/core/weather/common.glsl",
+            common.clone(),
+        )];
+        let pack = shader_pack("weather/rain", fsh, serde_json::json!({}), &beside);
+        assert_eq!(spawn_rain(&pack).0.len(), 1, "translated");
+        let vanillas = [("assets/minecraft/shaders/core/common.glsl", common)];
+        let pack = shader_pack("weather/rain", fsh, serde_json::json!({}), &vanillas);
+        assert!(
+            spawn_rain(&pack).0.is_empty(),
+            "not read from minecraft's folder"
+        );
+    }
+
+    /// A shader file is read only up to the translator's budget for a whole shader (1 MiB):
+    /// an include over it is refused, and so is the shader, naming the file.
+    #[test]
+    fn a_shader_file_over_the_budget_is_refused_by_name() {
+        let big = format!(
+            "// {}\nfloat half_bright() {{ return 0.5; }}\n",
+            "x".repeat(1 << 20)
+        );
+        let fsh = "#version 330\n#moj_import \"big.glsl\"\nin vec4 vertexColor;\n\
+                   out vec4 fragColor;\nvoid main() {\n    fragColor = vertexColor * half_bright();\n}\n";
+        let path = "assets/test/shaders/core/big.glsl";
+        let pack = shader_pack("rain", fsh, serde_json::json!({}), &[(path, big)]);
+        assert!(spawn_rain(&pack).0.is_empty());
+        let why = read_shader_file(&pack, path).unwrap_err();
+        assert!(why.starts_with(path), "{why}");
+        assert!(read_shader_file(&pack, "assets/test/shaders/core/rain.fsh").is_ok());
+    }
+
     /// Wiki "GPU Particles": the motion-blocking heights of the 128 by 128 columns around the
     /// camera, refilled every half second (10 ticks) or when the world's bottom changes, and only
-    /// while a type draws with its own shader.
+    /// while a type with live records draws with a shader that samples them (`Sampler1`).
     #[test]
-    fn the_heightmap_is_due_every_half_second_while_a_shader_reads_it() {
+    fn the_heightmap_is_due_every_half_second_while_a_shader_samples_it() {
         let blocks = blocks();
         let scene = scene(blocks);
-        let level = ParticleLevel {
-            world: &scene.world,
-            facts: &scene.facts,
-            collision: &scene.collision,
-            player: None,
-            cached_chunk: std::cell::Cell::new(None),
-        };
-        let due = |fsh_uniforms: serde_json::Value| {
-            let pack = shader_pack(BRIGHT_FSH, fsh_uniforms);
+        let level = level(&scene);
+        let due = |fsh: &str, uniforms: serde_json::Value| {
+            let pack = shader_pack("rain", fsh, uniforms, &[]);
             let mut engine = engine(Registry::read(&pack, Default::default(), blocks));
             engine.polytone_entity(&level, "minecraft:player", [1.0, 64.0, 1.0]);
             engine
         };
         let camera = DVec3::new(10.5, 70.0, -3.5);
-        let mut engine = due(serde_json::json!({"Brightness": "1"}));
+        let mut engine = due(HEIGHT_FSH, serde_json::json!({}));
         let area = engine.polytone_heightmap_due(camera, 128, -64).unwrap();
         assert_eq!(area.origin, [-54, -68]);
         assert_eq!((area.size, area.min_y), (128, -64));
@@ -2434,9 +2531,40 @@ mod tests {
             engine.tick(&level);
         }
         assert!(engine.polytone_heightmap_due(camera, 128, 0).is_some());
-        // A type whose shader was refused draws its quads and reads no heightmap.
-        let mut refused = due(serde_json::json!({}));
+        // The records' 40 ticks over: no live type reads it.
+        for _ in 0..20 {
+            engine.tick(&level);
+        }
+        assert_eq!(engine.polytone_gpu_records(), 0);
+        assert_eq!(engine.polytone_heightmap_due(camera, 128, 0), None);
+        // A shader that doesn't sample it, and a type whose shader was refused, read none.
+        let uniforms = serde_json::json!({"Brightness": "1"});
+        let mut unsampled = due(BRIGHT_FSH, uniforms);
+        assert_eq!(unsampled.polytone_heightmap_due(camera, 128, -64), None);
+        let mut refused = due(BRIGHT_FSH, serde_json::json!({}));
         assert_eq!(refused.polytone_heightmap_due(camera, 128, -64), None);
+    }
+
+    /// Clearing the particles (a mod's clear, a level left or switched) forgets the GPU
+    /// records and the heightmap too, even for a level with the same bottom.
+    #[test]
+    fn clearing_forgets_the_gpu_records_and_the_heightmap() {
+        let blocks = blocks();
+        let scene = scene(blocks);
+        let pack = shader_pack("rain", HEIGHT_FSH, serde_json::json!({}), &[]);
+        let mut engine = rain_engine(&pack, blocks);
+        engine.polytone_entity(&level(&scene), "minecraft:player", [1.0, 64.0, 1.0]);
+        let camera = DVec3::new(1.0, 70.0, 1.0);
+        assert!(engine.polytone_heightmap_due(camera, 128, -64).is_some());
+        assert_eq!(engine.polytone_gpu_records(), 1);
+        engine.clear();
+        assert_eq!(engine.polytone_gpu_records(), 0);
+        assert!(engine.polytone_shaders().is_empty());
+        engine.polytone_entity(&level(&scene), "minecraft:player", [1.0, 64.0, 1.0]);
+        assert!(
+            engine.polytone_heightmap_due(camera, 128, -64).is_some(),
+            "refilled at once for the new level"
+        );
     }
 
     #[test]

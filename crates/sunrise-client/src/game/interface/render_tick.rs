@@ -123,9 +123,9 @@ fn rains_at(world: &World, biomes: &Biomes, x: i32, y: i32, z: i32) -> bool {
 }
 
 impl Game<'_> {
-    /// Polytone GPU particles with their own shader: their heightmap (`Sampler1`) every half
-    /// second and this frame's records go to the renderer.
-    pub(super) fn polytone_gpu_particles(&mut self, camera: glam::DVec3, alpha: f64) {
+    /// Polytone GPU particles with their own shader, before the frame's quads are built: their
+    /// heightmap (`Sampler1`) every half second, and the renderer's verdict on each shader.
+    pub(super) fn polytone_gpu_decide(&mut self, camera: glam::DVec3) {
         let world = &self.world;
         if let Some(area) = self.particles.polytone_heightmap_due(
             camera,
@@ -145,6 +145,15 @@ impl Game<'_> {
                 renderer.set_polytone_heightmap(&heights);
             }
         }
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.decide_polytone_shaders(&self.particles.polytone_shaders());
+        }
+    }
+
+    /// After the frame's quads (and any clear in their extraction): the records of the types
+    /// the renderer draws with their own shader go to it.
+    pub(super) fn polytone_gpu_particles(&mut self, camera: glam::DVec3, alpha: f64) {
+        let world = &self.world;
         let batches = self
             .particles
             .polytone_shader_batches(camera, alpha as f32, &|b| world.light(b[0], b[1], b[2]));

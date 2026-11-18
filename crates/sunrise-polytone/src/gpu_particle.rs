@@ -23,6 +23,18 @@ impl ParticleShader {
         format!("{}:{}", self.namespace, self.name)
     }
 
+    /// The folder its stages are in, as a core shader's relative includes start from
+    /// (`ns:shaders/core/` and the folders of `name`).
+    pub fn stage_dir(&self) -> String {
+        let folders = self.name.rsplit_once('/').map_or("", |(dir, _)| dir);
+        let folders = if folders.is_empty() {
+            String::new()
+        } else {
+            format!("{folders}/")
+        };
+        format!("{}:shaders/core/{folders}", self.namespace)
+    }
+
     /// The pack file of one of its stages (`vsh` or `fsh`).
     pub fn stage_path(&self, extension: &str) -> String {
         format!(
@@ -105,20 +117,31 @@ pub struct HeightmapArea {
     pub min_y: i32,
 }
 
-/// The `polytone:gpu_particle.glsl` block for `gpu`: `origin` relative to the camera at
-/// `camera`, `time` on the records' clock, `billboard` (0 facing the camera, 1 around Y, 2 flat,
-/// 3 along its velocity), the camera's Y and the heightmap's place relative to the camera.
-#[allow(clippy::too_many_arguments)]
-pub fn gpu_block(
-    gpu: &Gpu,
-    render_type: RenderType,
-    billboard: i32,
-    random_sprite: bool,
-    origin: [f32; 3],
-    time: f32,
-    camera: [f64; 3],
-    heightmap: Option<HeightmapArea>,
-) -> [u8; GPU_BLOCK_SIZE] {
+/// What a frame adds to a type's knobs in its block.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct BlockFrame {
+    /// 0 facing the camera, 1 around Y, 2 flat, 3 along its velocity.
+    pub billboard: i32,
+    pub random_sprite: bool,
+    /// Where the records' positions start from, relative to the camera.
+    pub origin: [f32; 3],
+    /// The records' clock.
+    pub time: f32,
+    pub camera: [f64; 3],
+    /// The heightmap `Sampler1` holds, placed relative to the camera in the block.
+    pub heightmap: Option<HeightmapArea>,
+}
+
+/// The `polytone:gpu_particle.glsl` block for `gpu` drawn as `render_type` in `frame`.
+pub fn gpu_block(gpu: &Gpu, render_type: RenderType, frame: &BlockFrame) -> [u8; GPU_BLOCK_SIZE] {
+    let BlockFrame {
+        billboard,
+        random_sprite,
+        origin,
+        time,
+        camera,
+        heightmap,
+    } = *frame;
     let mut floats = [0f32; GPU_BLOCK_SIZE / 4];
     let int = |v: i32| f32::from_bits(v as u32);
     floats[..3].copy_from_slice(&origin);
@@ -224,8 +247,16 @@ mod tests {
         let mut refused: Vec<&str> = shader.refused.iter().map(|(n, _)| n.as_str()).collect();
         refused.sort_unstable();
         assert_eq!(refused, ["Bad", "Flag"]);
+        assert_eq!(shader.stage_dir(), "my_pack:shaders/core/");
         let plain = parse(json!({"shader": "rain"})).gpu_shader().unwrap();
         assert_eq!(plain.id(), "minecraft:rain");
+        let nested = parse(json!({"shader": "my_pack:weather/storm/rain"})).gpu_shader();
+        let nested = nested.unwrap();
+        assert_eq!(nested.stage_dir(), "my_pack:shaders/core/weather/storm/");
+        assert_eq!(
+            nested.stage_path("vsh"),
+            "assets/my_pack/shaders/core/weather/storm/rain.vsh"
+        );
         assert!(parse(json!({})).gpu_shader().is_none());
         // A custom (CPU) particle's `shader` is not a GPU particle's.
         let custom = CustomParticle::parse(&json!({"shader": "my_pack:rain"})).unwrap();
@@ -258,12 +289,14 @@ mod tests {
         let block = gpu_block(
             &knobs,
             RenderType::Opaque,
-            3,
-            true,
-            [-0.5, -0.25, -0.75],
-            12.5,
-            [10.5, 70.25, -3.75],
-            Some(heightmap),
+            &BlockFrame {
+                billboard: 3,
+                random_sprite: true,
+                origin: [-0.5, -0.25, -0.75],
+                time: 12.5,
+                camera: [10.5, 70.25, -3.75],
+                heightmap: Some(heightmap),
+            },
         );
         let f = floats(&block);
         let int = |i: usize| f[i].to_bits() as i32;
@@ -277,16 +310,7 @@ mod tests {
         assert_eq!(f[20..24], [1.0, 0.0, 0.0, 128.0 / 255.0]);
         assert_eq!(f[24..28], [-64.5, -64.25, 128.0, -64.0]);
         // No end colour, size or heightmap: their defaults.
-        let plain = gpu_block(
-            &gpu(0.0, 1.0),
-            RenderType::Opaque,
-            0,
-            false,
-            [0.0; 3],
-            0.0,
-            [0.0; 3],
-            None,
-        );
+        let plain = gpu_block(&gpu(0.0, 1.0), RenderType::Opaque, &BlockFrame::default());
         let f = floats(&plain);
         assert_eq!([f[5], f[8], f[16].to_bits() as f32], [0.0, -1.0, 0.0]);
         assert_eq!(f[20..28], [0.0; 8]);
@@ -298,16 +322,7 @@ mod tests {
     #[test]
     fn only_cutout_types_have_an_alpha_cutoff() {
         let cutoff = |render_type| {
-            let block = gpu_block(
-                &gpu(0.0, 1.0),
-                render_type,
-                0,
-                false,
-                [0.0; 3],
-                0.0,
-                [0.0; 3],
-                None,
-            );
+            let block = gpu_block(&gpu(0.0, 1.0), render_type, &BlockFrame::default());
             floats(&block)[10]
         };
         assert_eq!(cutoff(RenderType::Translucent), 0.0);

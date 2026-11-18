@@ -1311,17 +1311,11 @@ impl Renderer {
         }
         // Polytone GPU particles with their own shader: the vanilla blocks as the block outline's
         // (a particle's ModelViewMat is the camera's rotation, its positions camera relative).
-        self.core_particles.prepare_frame(
-            &self.device,
-            &self.queue,
-            (self.output.frame.format, self.output.frame.linear_light),
-            (&self.lightmap_view, &self.lightmap_sampler),
-            frame.title,
-            || {
+        self.core_particles
+            .prepare_frame(&self.device, &self.queue, frame.title, || {
                 let view = views.primary();
                 core_lines::uniforms(pack.globals, view, pose, jitter, 1.0, fog_color, pack.fog)
-            },
-        );
+            });
         let skin = frame.skin.filter(|skin| match &mut self.entity_skin {
             Some(skinner) => skinner.register(&self.device, &mut self.uploads, &mut encoder, skin),
             None => false,
@@ -3347,8 +3341,9 @@ impl Renderer {
             // Polytone GPU particles with their own shader (wiki "GPU Particles"): after the
             // world, the clouds and the weather, which would otherwise cover the ones that write
             // no depth.
-            if self.draw_core_particles(&mut pass) {
+            if self.core_particles_drawing() {
                 pass.stage(self.own_timing.as_mut(), "polytone particles");
+                self.draw_core_particles(&mut pass);
                 pass.set_bind_group(0, &self.group, &[]);
                 pack_frame(&mut pass);
             }
