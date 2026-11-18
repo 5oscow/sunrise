@@ -45,7 +45,7 @@ fn connect(game: &mut Game<'_>) -> sunrise_protocol::connection::Pipe {
 }
 
 fn tick(game: &mut Game<'_>) {
-    game.tick_local_player(Vec::new(), Vec3::ZERO, 7).unwrap();
+    game.tick_local_player(Vec::new(), 7).unwrap();
 }
 
 fn matrix(mods: mod_api::Mods) {

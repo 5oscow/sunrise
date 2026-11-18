@@ -53,7 +53,7 @@ fn a_riders_move_takes_the_look_of_the_tick_and_keeps_its_ground() {
                 game.yaw = yaw;
                 game.keys.clear();
                 game.keys.insert(KeyCode::KeyW);
-                game.tick_local_player(Vec::new(), Vec3::ZERO, 7).unwrap();
+                game.tick_local_player(Vec::new(), 7).unwrap();
                 let player = game.player.as_ref().unwrap();
                 collided.push(player.collision.horizontal);
                 assert!(
