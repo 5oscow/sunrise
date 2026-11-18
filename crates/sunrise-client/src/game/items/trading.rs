@@ -1094,7 +1094,9 @@ mod select_on_a_server_tests {
     use sunrise_protocol::packets::play::Serverbound as S;
 
     /// MerchantScreen.postButtonClick on a server: picking an offer moves its payment into
-    /// the menu on this client too (tryMoveItems), then tells the server (SelectTrade).
+    /// the menu on this client too (tryMoveItems), then tells the server (SelectTrade); the
+    /// click that then takes the result predicts the trade, and the merchant's effects are
+    /// left to the server (ClientSideMerchant).
     #[test]
     #[ignore = "daily"]
     fn picking_a_trade_on_a_server_moves_the_payment_here_too() {
@@ -1136,6 +1138,28 @@ mod select_on_a_server_tests {
                 }
             }
             assert_eq!(picked, [0]);
+            // The result, shift-clicked before the server answers: the click carries what this
+            // client's menu moved (payment and result emptied, the bread in the hotbar's last
+            // slot), and the merchant's own effects stay the server's (no orb, no trade stat).
+            let traded = game.stats.get("custom", "minecraft:traded_with_villager");
+            game.remote_menu_ops(&[(Some(2), 0, sunrise_client::menu::Input::QuickMove)]);
+            let mut changed = Vec::new();
+            while let Ok((id, bytes)) = peer.recv() {
+                if let Ok(S::ContainerClick(p)) = S::decode(id, &bytes) {
+                    changed.extend(
+                        p.changed
+                            .iter()
+                            .map(|(slot, stack)| (*slot, stack.is_some())),
+                    );
+                }
+            }
+            changed.sort();
+            assert_eq!(changed, [(0, false), (2, false), (38, true)]);
+            assert!(game.orbs.is_empty());
+            assert_eq!(
+                game.stats.get("custom", "minecraft:traded_with_villager"),
+                traded
+            );
         });
     }
 }
