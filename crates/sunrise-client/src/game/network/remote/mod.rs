@@ -6781,16 +6781,24 @@ impl Game<'_> {
             self.tick_remote_ominous_item_spawners();
         }
         // EntityTickEvent.Pre for the mobs and players this client ticks, once for the family
-        // before their tick, and the Post after it (below). A canceled one keeps its state.
+        // before their tick, and the Post after it (below). A canceled one keeps its state. One
+        // of a type a mod named is told alone, right before and right after its own turn below.
         let mut round = self.native_tick_round();
+        // The mount this client moves ticks in `remote_ride` instead, as its
+        // authoritative side (LivingEntity.tick with travelRidden).
+        let driven = self.driven_mount().map(|m| m.id);
+        let mut alone_any = false;
         if round.listening() {
-            let driven = self.driven_mount().map(|m| m.id);
             let players = self.remote.as_ref().map(|r| &r.level_players);
             for m in self.mobs.iter() {
                 let player = players.is_some_and(|p| p.contains_key(&(m.id as i32)));
                 if (running || player) && driven != Some(m.id) {
-                    let kind = crate::game::native_ticks::TickKind::Mob(m.kind.clone());
-                    round.add(m.id, kind);
+                    if round.alone_mob(&m.kind) {
+                        alone_any = true;
+                    } else {
+                        let kind = crate::game::native_ticks::TickKind::Mob(m.kind.clone());
+                        round.add(m.id, kind);
+                    }
                 }
             }
             self.native_tick_pre_batch(&mut round);
@@ -6844,29 +6852,21 @@ impl Game<'_> {
         // The window's own player already splashes from its motion tick.
         let own = self.remote.as_ref().map(|r| r.entity_id);
         for i in 0..self.mobs.len() {
-            if round.canceled(self.mobs[i].id) {
+            let (id, told_alone) = (
+                self.mobs[i].id,
+                alone_any && round.alone_mob(&self.mobs[i].kind),
+            );
+            // One told alone takes this step in its own turn, after its Pre (below).
+            if round.canceled(id) || told_alone && fluids[i].is_some() && driven != Some(id) {
                 continue;
             }
-            let m = &mut self.mobs[i];
-            let fluids = fluids[i].take();
-            let standing = standings[i].take();
-            if let Some(fluids) = fluids {
-                let was = m.fluids.in_water;
-                let first = m.first_tick;
-                // Entity.baseTick saves the preceding eye sample before the new fluid update.
-                m.was_eye_in_water = m.fluids.eye_in_water;
-                m.fluids = fluids;
-                // Entity.doWaterSplashEffect on the client copy. Particles
-                // only: ClientLevel draws addParticle, and playSeededSound
-                // drops Entity.playSound (the server broadcasts that).
-                if m.fluids.in_water && !was && !first && Some(m.id as i32) != own {
-                    sunrise_client::mobs::living::client_water_splash(m, &mut water_fx);
-                }
-                m.first_tick = false;
-            }
-            if let Some(name) = standing {
-                m.standing_on = Some(name);
-            }
+            client_fluid_step(
+                &mut self.mobs[i],
+                fluids[i].take(),
+                standings[i].take(),
+                own,
+                &mut water_fx,
+            );
         }
         let game_time = self.world.game_time;
         // `AbstractPiglin.isConverting`: the dimension is not piglin safe.
@@ -6929,9 +6929,6 @@ impl Game<'_> {
             });
             own.into_iter().chain(others).collect()
         };
-        // The mount this client moves ticks in `remote_ride` instead, as its
-        // authoritative side (LivingEntity.tick with travelRidden).
-        let driven = self.driven_mount().map(|m| m.id);
         // Cat.handleLieDown: the sleeping players (another's, drawn lying in
         // a bed, and this client's own) a lying cat can lie on top of.
         let sleepers: Vec<sunrise_core::geometry::Aabb> = self
@@ -6973,7 +6970,18 @@ impl Game<'_> {
         let mut mob_fx = water_fx;
         let tick_listened = mod_api::__private::listened(mod_api::HookId::PlayerTickPre)
             || mod_api::__private::listened(mod_api::HookId::PlayerTickPost);
-        for (i, rain) in rain.iter().copied().enumerate() {
+        // A mob told alone hears its hooks with the list in place: each slot's mob is kept by id,
+        // and where it is once a hook changed the list.
+        let slots: Vec<u32> = if alone_any {
+            self.mobs.iter().map(|m| m.id).collect()
+        } else {
+            Vec::new()
+        };
+        let mut places = None;
+        for (slot, rain) in rain.iter().copied().enumerate() {
+            let Some(mut i) = crate::game::native_ticks::slot_place(&places, &slots, slot) else {
+                continue;
+            };
             let id = self.mobs[i].id;
             let player = self
                 .remote
@@ -6983,6 +6991,29 @@ impl Game<'_> {
                 .contains_key(&(id as i32));
             if (!running && !player) || driven == Some(id) || round.canceled(id) {
                 continue;
+            }
+            // Of a type a mod named: its own Pre, then its fluid step and its tick.
+            let alone = (alone_any && round.alone_mob(&self.mobs[i].kind))
+                .then(|| std::sync::Arc::clone(&self.mobs[i].kind));
+            if let Some(kind) = &alone {
+                let stamp = self.mobs.stamp();
+                let ticks = self.native_tick_pre_one(&mut round, id, &kind.id);
+                if self.mobs.stamp() != stamp {
+                    places = Some(crate::game::native_ticks::places_of(
+                        self.mobs.iter().map(|m| m.id),
+                    ));
+                }
+                match crate::game::native_ticks::slot_place(&places, &slots, slot) {
+                    Some(at) if ticks => i = at,
+                    _ => continue,
+                }
+                client_fluid_step(
+                    &mut self.mobs[i],
+                    fluids[slot].take(),
+                    standings[slot].take(),
+                    own,
+                    &mut mob_fx,
+                );
             }
             let animation = if player && self.mobs[i].extra.using_item > 0 {
                 let extra = &self.mobs[i].extra;
@@ -7231,6 +7262,16 @@ impl Game<'_> {
             }
             if section_from != section_to {
                 self.remote_entity_section_step(section_id, section_from, section_to);
+            }
+            // Its own Post, right after its turn.
+            if let Some(kind) = &alone {
+                let stamp = self.mobs.stamp();
+                self.native_tick_post_one(&round, id, &kind.id);
+                if self.mobs.stamp() != stamp {
+                    places = Some(crate::game::native_ticks::places_of(
+                        self.mobs.iter().map(|m| m.id),
+                    ));
+                }
             }
         }
         self.native_tick_post_batch(round);
@@ -15110,6 +15151,34 @@ pub(crate) mod tests {
 
 #[cfg(test)]
 mod movement_input_tests;
+/// `Entity.baseTick`'s fluid update for a mob this window only displays (`fluids`, sampled before
+/// the tick), with the splash it draws, and the block it stands on.
+fn client_fluid_step(
+    m: &mut sunrise_client::mobs::Mob,
+    fluids: Option<sunrise_client::mobs::living::Fluids>,
+    standing: Option<String>,
+    own: Option<i32>,
+    fx: &mut Vec<sunrise_client::mobs::MobEvent>,
+) {
+    if let Some(fluids) = fluids {
+        let was = m.fluids.in_water;
+        let first = m.first_tick;
+        // Entity.baseTick saves the preceding eye sample before the new fluid update.
+        m.was_eye_in_water = m.fluids.eye_in_water;
+        m.fluids = fluids;
+        // Entity.doWaterSplashEffect on the client copy. Particles
+        // only: ClientLevel draws addParticle, and playSeededSound
+        // drops Entity.playSound (the server broadcasts that).
+        if m.fluids.in_water && !was && !first && Some(m.id as i32) != own {
+            sunrise_client::mobs::living::client_water_splash(m, fx);
+        }
+        m.first_tick = false;
+    }
+    if let Some(name) = standing {
+        m.standing_on = Some(name);
+    }
+}
+
 #[cfg(test)]
 #[path = "player_tick_tests.rs"]
 mod player_tick_tests;

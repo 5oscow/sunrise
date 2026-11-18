@@ -218,6 +218,9 @@ pub(super) struct Creatures {
     /// What a family's Pre and Post are told from, kept between ticks
     /// (game/modding/native_ticks.rs).
     pub tick_hooks: super::native_ticks::TickBuffers,
+    /// The guests (by connection) whose `ServerPlayer.tick` a mod's Pre canceled this tick:
+    /// every part of it skips them (game/network/lan_actions/tick.rs).
+    pub canceled_players: Vec<u32>,
     /// Wind bursts from a guest's turn, waiting for it to end (game/interface/wind.rs).
     pub wind_bursts: Vec<super::wind::Burst>,
     /// The wind charge whose burst is being handled, by entity id: which
@@ -294,6 +297,70 @@ fn pickable_projectile_hitboxes_into(
             .filter(|(j, q)| *j != skip && alive[*j] && super::deflect::redirectable(q))
             .map(|(j, q)| (Who::Mob(PICKABLE_PROJECTILE_IDS + j as u32), q.aabb())),
     );
+}
+
+/// What the server's projectile loop keeps to hand its list back for a projectile told alone,
+/// made only in a tick where a mod named a projectile type: each slot's projectile by id, the
+/// ids of the list's rows, where those are once a hook changed the list, and the projectile
+/// whose own Post is still to tell.
+struct ProjectileHandBack {
+    slots: Vec<u32>,
+    rows: Vec<u32>,
+    places: Option<sunrise_client::fast_hash::FxHashMap<u32, usize>>,
+    told: Option<(u32, &'static str)>,
+}
+
+impl ProjectileHandBack {
+    fn new(projectiles: &[Projectile]) -> Box<Self> {
+        let slots: Vec<u32> = projectiles.iter().map(|p| p.id).collect();
+        Box::new(Self {
+            rows: slots.clone(),
+            slots,
+            places: None,
+            told: None,
+        })
+    }
+
+    /// Where slot `slot`'s projectile is in the list now, if it is still there.
+    fn place(&self, slot: usize) -> Option<usize> {
+        super::native_ticks::slot_place(&self.places, &self.slots, slot)
+    }
+
+    /// After a hook told with the list handed back changed it (it wrote, added or removed a
+    /// projectile, or the tick's spawns went first on the hand-back): the loop's state of each
+    /// row follows it by id. A new row is kept, and an impact whose projectile a hook took out
+    /// is dropped with it.
+    fn follow(
+        &mut self,
+        projectiles: &[Projectile],
+        keep: &mut Vec<bool>,
+        impacts: &mut Vec<Impact>,
+    ) {
+        let places = super::native_ticks::places_of(projectiles.iter().map(|p| p.id));
+        let rows = &self.rows;
+        impacts.retain_mut(|impact| match places.get(&rows[impact.index]) {
+            Some(&i) => {
+                impact.index = i;
+                true
+            }
+            None => false,
+        });
+        let kept: sunrise_client::fast_hash::FxHashMap<u32, bool> = self
+            .rows
+            .iter()
+            .copied()
+            .zip(keep.iter().copied())
+            .collect();
+        self.rows.clear();
+        self.rows.extend(projectiles.iter().map(|p| p.id));
+        keep.clear();
+        keep.extend(
+            self.rows
+                .iter()
+                .map(|id| kept.get(id).copied().unwrap_or(true)),
+        );
+        self.places = Some(places);
+    }
 }
 
 #[cfg(test)]
@@ -4444,6 +4511,26 @@ impl Game<'_> {
         }
     }
 
+    /// Hands the tick's lifted projectiles back for a hook told about one of them, so its handles
+    /// read the live rows, and takes them again. Whether they came back as they went: the same
+    /// rows in the same order, unwritten (the list's write stamp), with no spawn of the tick put
+    /// before them.
+    fn projectiles_told(
+        &mut self,
+        projectiles: sunrise_client::join_seq::JoinList<Projectile, false>,
+        tell: impl FnOnce(&mut Self),
+    ) -> (sunrise_client::join_seq::JoinList<Projectile, false>, bool) {
+        let no_spawns = self.creatures.projectiles.is_empty();
+        self.creatures.projectiles.restore(
+            projectiles,
+            sunrise_client::join_seq::RestoreOrder::SpawnsFirst,
+        );
+        let restored = self.creatures.projectiles.stamp();
+        tell(self);
+        let same = no_spawns && self.creatures.projectiles.stamp() == restored;
+        (self.creatures.projectiles.lift(), same)
+    }
+
     pub(super) fn tick_projectiles_now(&mut self) -> Result<()> {
         if self.creatures.projectiles.is_empty() {
             self.flush_lan_explosions();
@@ -4455,18 +4542,26 @@ impl Game<'_> {
         // player's or a dispenser's, which join before the pass, tick now.
         let through = self.ticked_entities_through;
         // EntityTickEvent.Pre for the projectiles about to tick, once for the family before the
-        // loop holds them, and the Post once the hits of their ticks have landed.
+        // loop holds them, and the Post once the hits of their ticks have landed. A projectile
+        // of a type a mod named is told alone, right before and right after its own tick.
         let mut round = self.native_tick_round();
+        let mut alone_any = false;
         if round.listening() {
             for p in self.creatures.projectiles.iter() {
                 let at = p.position;
                 if p.id <= through && ticking(at.x.floor() as i32, at.z.floor() as i32) {
-                    round.add(p.id, super::native_ticks::TickKind::Fixed(p.entity_type()));
+                    if round.alone_kind(p.entity_type()) {
+                        alone_any = true;
+                    } else {
+                        round.add(p.id, super::native_ticks::TickKind::Fixed(p.entity_type()));
+                    }
                 }
             }
             self.native_tick_pre_batch(&mut round);
         }
         let mut projectiles = self.creatures.projectiles.lift();
+        // The tick's own projectiles: what joins during it (a hook's spawn) ticks from the next.
+        let last_ticked_join = projectiles.iter().map(|p| p.join).max();
         let mut hits = Vec::new();
         // The breezes that deflected a projectile, and where.
         let mut deflections: Vec<(u32, [f64; 3])> = Vec::new();
@@ -4482,43 +4577,28 @@ impl Game<'_> {
         let hear = self.native_hears_impacts();
         let mut impacts: Vec<Impact> = Vec::new();
         let mut vehicle_winds = self.vehicle_winds();
-        let targets = self.projectile_targets();
-        let breezes: Vec<u32> = self
-            .mobs
-            .iter()
-            .filter(|m| m.alive() && m.species() == Species::Breeze)
-            .map(|m| m.id)
-            .collect();
-        // Mobs' projectiles also hit the guests (game/network/lan_mobs.rs).
-        let guests = self.lan_projectile_targets();
-        let has_guests = !guests.is_empty();
-        let targets_guests = if has_guests {
-            let mut targets_guests = targets.clone();
-            targets_guests.extend(guests);
-            targets_guests
-        } else {
-            Vec::new()
-        };
+        // What the ticks read of the other entities (the mobs, the guests, the breezes), built
+        // again after a hook told in the loop changed it (`projectile_targets_read`).
+        let mut seen = self.projectile_tick_targets();
         let border = Some(self.border.bounds());
-        // Every guest, not only the ones a projectile can hit: a dead or
-        // spectating guest's pearl or arrow still resolves to them.
-        let guest_entities = self.lan_guest_entities();
         // ThrownEnderpearl.tick: a dead player's pearl is discarded in
         // place of its tick while ender_pearls_vanish_on_death is on.
         let vanish = self
             .ui
             .rules
             .bool_at(sunrise_client::gamerules::vanilla::ENDER_PEARLS_VANISH_ON_DEATH);
-        let host_dead = self.player_view().is_some_and(|p| !p.alive);
-        let dead_guests: Vec<u32> = self.lan.as_ref().map_or_else(Vec::new, |h| {
-            h.hub
-                .guests
-                .iter()
-                .filter(|g| g.dead)
-                .map(|g| g.conn)
-                .collect()
-        });
-        for i in 0..projectiles.len() {
+        // A projectile told alone hands the list back for its hooks, so their handles read the
+        // live rows. What that needs is made only when a mod named a projectile type this tick
+        // (`ProjectileHandBack`): with none, the loop is the family's own.
+        let mut hand_back = alone_any.then(|| ProjectileHandBack::new(&projectiles));
+        for slot in 0..projectiles.len() {
+            let i = match hand_back.as_deref() {
+                None => slot,
+                Some(back) => match back.place(slot) {
+                    Some(i) => i,
+                    None => continue,
+                },
+            };
             if projectiles[i].id > through {
                 continue;
             }
@@ -4529,6 +4609,38 @@ impl Game<'_> {
                 projectiles.update(i, |p| p.previous = at);
                 continue;
             }
+            // Of a type a mod named: its own Pre, with the list handed back.
+            let i = match hand_back.as_deref_mut() {
+                None => i,
+                Some(back) => {
+                    let (id, kind) = (projectiles[i].id, projectiles[i].entity_type());
+                    if !round.alone_kind(kind) {
+                        i
+                    } else {
+                        let mut ticks = true;
+                        let same;
+                        let read = self.projectile_targets_read();
+                        (projectiles, same) = self.projectiles_told(projectiles, |game| {
+                            ticks = game.native_tick_pre_one(&mut round, id, kind);
+                        });
+                        // A hook that wrote what the hit tests read: the next projectile sees
+                        // its writes.
+                        if self.projectile_targets_changed(&read, &seen) {
+                            seen = self.projectile_tick_targets();
+                        }
+                        if !same {
+                            back.follow(&projectiles, &mut keep_flags, &mut impacts);
+                        }
+                        match back.place(slot) {
+                            Some(at) if ticks => {
+                                back.told = Some((id, kind));
+                                at
+                            }
+                            _ => continue,
+                        }
+                    }
+                }
+            };
             // A mod canceled its tick: it stays as it is.
             if round.canceled(projectiles[i].id) {
                 continue;
@@ -4549,19 +4661,20 @@ impl Game<'_> {
                 let scene = self.arrow_scene(&rain);
                 let pw = ProjWorld {
                     w: &w,
-                    targets: &targets,
+                    targets: &seen.targets,
                     border,
                 };
                 let pw_guests = ProjWorld {
                     w: &w,
-                    targets: &targets_guests,
+                    targets: &seen.targets_guests,
                     border,
                 };
                 projectiles.update(i, |p| {
                     if vanish
                         && matches!(p.kind, ProjectileKind::EnderPearl)
                         && p.owner == Some(Who::Player)
-                        && p.guest.map_or(host_dead, |c| dead_guests.contains(&c))
+                        && p.guest
+                            .map_or(seen.host_dead, |c| seen.dead_guests.contains(&c))
                     {
                         keep_flags[i] = false;
                         return;
@@ -4577,12 +4690,12 @@ impl Game<'_> {
                     let shooter = p
                         .guest
                         .filter(|_| pvp)
-                        .and_then(|c| guest_entities.iter().find(|(g, _)| *g == c))
+                        .and_then(|c| seen.guest_entities.iter().find(|(g, _)| *g == c))
                         .map(|&(_, id)| Who::Mob(id));
                     if shooter.is_some() {
                         p.owner = shooter;
                     }
-                    let use_guests = (mob_shot || pvp) && has_guests;
+                    let use_guests = (mob_shot || pvp) && seen.has_guests;
                     let (keep, hit) = match (p.arrow.is_some(), use_guests, winds.is_empty()) {
                         (true, false, true) => sunrise_client::arrows::tick(p, &scene, pw.targets),
                         (true, true, true) => {
@@ -4671,7 +4784,7 @@ impl Game<'_> {
                         at,
                     } = hit
                         && !wind
-                        && breezes.contains(&id)
+                        && seen.breezes.contains(&id)
                     {
                         super::wind::reverse(p);
                         if p.arrow.is_some() {
@@ -4743,12 +4856,28 @@ impl Game<'_> {
                     at,
                     keep_flags[i],
                 );
+            // Its own Post, right after its tick, also when it ended in it. Its block effects and
+            // hits land after the family's ticks, as they do for every projectile.
+            if let Some(back) = hand_back.as_deref_mut()
+                && let Some((id, kind)) = back.told.take()
+            {
+                let same;
+                let read = self.projectile_targets_read();
+                (projectiles, same) = self.projectiles_told(projectiles, |game| {
+                    game.native_tick_post_one(&round, id, kind);
+                });
+                if self.projectile_targets_changed(&read, &seen) {
+                    seen = self.projectile_tick_targets();
+                }
+                if !same {
+                    back.follow(&projectiles, &mut keep_flags, &mut impacts);
+                }
+            }
         }
         self.creatures.pickable_projectile_targets = winds;
         for (block, position, movement) in snow_contacts {
             self.powder_snow_particle(block, position, movement);
         }
-        let last_ticked_join = projectiles.iter().map(|p| p.join).max();
         let listed = keep_flags.clone();
         let mut idx = 0;
         if impacts.is_empty() {

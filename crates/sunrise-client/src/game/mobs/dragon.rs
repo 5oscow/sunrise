@@ -1558,12 +1558,19 @@ impl Game<'_> {
             d.strafe_after_crystal(target.as_ref());
         }
     }
+    /// The boxes of the living dragon's parts a projectile can hit, in `getSubEntities` order.
+    pub(super) fn dragon_part_boxes(&self) -> Option<[Aabb; 8]> {
+        self.dragon
+            .as_ref()
+            .filter(|d| d.alive())
+            .map(|d| std::array::from_fn(|i| d.part_box(i)))
+    }
     /// Targets for projectiles: dragon parts and crystals.
     pub(super) fn special_targets(&self) -> Vec<(u32, Aabb)> {
         let mut out = Vec::new();
-        if let Some(d) = self.dragon.as_ref().filter(|d| d.alive()) {
-            for i in 0..8 {
-                out.push((SPECIAL + i as u32, d.part_box(i)));
+        if let Some(boxes) = self.dragon_part_boxes() {
+            for (i, part) in boxes.into_iter().enumerate() {
+                out.push((SPECIAL + i as u32, part));
             }
         }
         for (i, c) in self.crystals.iter().enumerate() {
