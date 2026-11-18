@@ -401,3 +401,72 @@ class StressSceneTests(unittest.TestCase):
                                 self.assertTrue(covered(x, y, z), (name, line))
                 elif words[0] == "setblock":
                     self.assertTrue(covered(*map(int, words[1:4])), (name, line))
+
+
+class CompareTests(unittest.TestCase):
+    def test_paired_matches_sunrise_bench(self):
+        from tools.perf_bench import paired
+        # crates/sunrise-bench's the_decided_vectors, value for value.
+        z = [0.0] * 8
+        up = [float(v) for v in range(1, 9)]
+        cases = [
+            (z, up, 4.5, [2.0, 7.0], 0.9609, "slower"),
+            (z, [-0.3, 0.2, -0.1, 0.4, -0.2, 0.1, 0.3, -0.4], 0.0, [-0.3, 0.3], 0.9609, "within_noise"),
+            ([0.0] * 5, up[:5], 3.0, None, None, "too_few_pairs"),
+            ([10.0] * 8, [10.0 + v / 100 for v in range(1, 9)], 0.045, [0.02, 0.07], 0.9609, "negligible"),
+            (up, z, -4.5, [-7.0, -2.0], 0.9609, "faster"),
+            ([0.0] * 10, [0.3, -0.1, 0.8, 0.2, -0.5, 0.6, 0.1, 0.4, 0.7, 0.05], 0.25, [-0.025, 0.55], 0.9512,
+             "within_noise"),
+        ]
+        for a, b, diff, ci, confidence, verdict in cases:
+            p = paired(list(zip(a, b)))
+            self.assertEqual((p["diff"], p["ci95"], p["confidence"], p["verdict"]), (diff, ci, confidence, verdict), b)
+
+    def test_judge_pairs_neighbouring_games_and_gates_on_the_budget(self):
+        from tools.perf_bench import ARMS, judge
+
+        def games(before, after, noise):
+            out = []
+            for i, n in enumerate(noise):
+                v = before if ARMS[i % 4] == "A" else after
+                out.append({"village": {"p50_ms": v + n, "cpu_p50_ms": v / 2}})
+            return out
+
+        noise = [0.02, -0.01, 0.03, -0.02, 0.01, 0.0, -0.03, 0.02, 0.01, -0.01, 0.02, -0.02]
+        same = {r["figure"]: r for r in judge(games(5.0, 5.0, noise), 3)}
+        self.assertEqual((same["p50_ms"]["verdict"], same["p50_ms"]["passed"]), ("within_noise", True))
+        self.assertEqual((same["cpu_p50_ms"]["gated"], same["cpu_p50_ms"]["passed"]), (False, None))
+        slower = {r["figure"]: r for r in judge(games(5.0, 5.25, noise), 3)}["p50_ms"]
+        self.assertEqual((slower["verdict"], slower["passed"]), ("slower", False), "5% over a 3% budget")
+        self.assertTrue({r["figure"]: r for r in judge(games(5.0, 5.25, noise), 8)}["p50_ms"]["passed"])
+        self.assertFalse(judge(games(5.0, 5.0, noise[:10]), 3)[0]["passed"], "five pairs give no interval")
+
+    def test_tick_query_percentiles(self):
+        from tools.perf_bench import parse_tick_query
+        lines = ["The game is running normally", "Target tick rate: 20.0 per second.\nAverage time per tick: 3.1ms (Target: 50.0ms)",
+                 "Percentiles: P50: 2.9ms P95: 4.2ms P99: 6.0ms. Sample: 100"]
+        self.assertEqual(parse_tick_query(lines), {"p50_ms": 2.9, "p95_ms": 4.2, "p99_ms": 6.0})
+        self.assertIsNone(parse_tick_query(["Unknown command"]))
+
+    def test_game_folder_gets_graphics_and_packs(self):
+        import argparse
+        import tempfile
+        from pathlib import Path
+        from tools.perf_bench import game_folder_extras
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            (tmp / "Relief").mkdir()
+            (tmp / "Relief" / "pack.mcmeta").write_text("{}")
+            (tmp / "golden").mkdir()
+            game = tmp / "game"
+            game.mkdir()
+            (game / "options.txt").write_text("renderDistance:8\n")
+            args = argparse.Namespace(graphics=["fog:false", "gpuCulling:true"], resource_pack=[str(tmp / "Relief")],
+                                      shader_pack=str(tmp / "golden"))
+            lines, env = game_folder_extras(args, game)
+            self.assertEqual((game / "sunrise-graphics.txt").read_text(), "fog:false\ngpuCulling:true\n")
+            self.assertEqual((game / "options.txt").read_text(), 'renderDistance:8\nresourcePacks:["vanilla","file/Relief"]\n')
+            self.assertEqual(lines, 'resourcePacks:["vanilla","file/Relief"]\n')
+            self.assertTrue((game / "resourcepacks/Relief/pack.mcmeta").exists())
+            self.assertTrue((game / "shaderpacks/golden").is_dir())
+            self.assertEqual(env, {"SUNRISE_SHADER_PACK": "golden"})
