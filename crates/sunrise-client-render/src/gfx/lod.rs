@@ -122,7 +122,138 @@ impl Bounds {
         if !frustum.intersects(min.as_vec3(), max.as_vec3()) {
             return None;
         }
-        Some(((min + max) * 0.5).length_squared().to_bits())
+        Some(self.distance(origin))
+    }
+
+    /// Its centre's squared distance, as bits: the order far tiles are drawn
+    /// in. The same whether its box was tested or its cell's was.
+    fn distance(self, origin: DVec3) -> u64 {
+        let min = origin + self.min.as_dvec3();
+        let max = origin + self.max.as_dvec3();
+        ((min + max) * 0.5).length_squared().to_bits()
+    }
+
+    /// The box in world coordinates, around the tile's own corner.
+    fn world(self, key: TileKey) -> (DVec3, DVec3) {
+        let origin = DVec3::from(key.origin().map(f64::from));
+        (origin + self.min.as_dvec3(), origin + self.max.as_dvec3())
+    }
+}
+
+/// The width of a cell in blocks, along x and z.
+const CELL: i32 = 128;
+
+/// Far tiles grouped by coarse cell: one frustum test per cell every frame
+/// covers the tiles in it, where each tile would take six planes of its own
+/// (thousands of them at long distances, against a frame budget of a fraction
+/// of a millisecond). A cell's box is the union of its tiles' world boxes, so
+/// it holds every tile in it: a cell out of view leaves all of them out, and
+/// one wholly in view saves each its own test (`Frustum::contains`).
+///
+/// Not a cache: it is kept in step with `Renderer::lods` by every method that
+/// changes it, so it is never a frame behind, and the camera moving changes
+/// nothing it holds.
+#[derive(Default)]
+pub(super) struct TileGrid {
+    cells: FxHashMap<(i32, i32), Cell>,
+}
+
+struct Cell {
+    /// The union of its tiles' world boxes.
+    min: DVec3,
+    max: DVec3,
+    /// Its tiles, and the boxes (tile-relative, as `Tile` keeps them) they
+    /// hold it at.
+    tiles: Vec<(TileKey, Bounds)>,
+}
+
+impl TileGrid {
+    /// The cell a tile sits in, from the corner its mesh is laid out at: a
+    /// tile's box can spill over, which only widens the cells it widens.
+    fn cell_of(key: TileKey) -> (i32, i32) {
+        let [x, _, z] = key.origin();
+        (x.div_euclid(CELL), z.div_euclid(CELL))
+    }
+
+    /// Puts a tile in its cell, in the place of the one it may have had
+    /// there: a tile meshed again can come back with other bounds.
+    fn insert(&mut self, key: TileKey, bounds: Bounds) {
+        self.remove(key);
+        let (min, max) = bounds.world(key);
+        let at = Self::cell_of(key);
+        if let Some(cell) = self.cells.get_mut(&at) {
+            cell.min = cell.min.min(min);
+            cell.max = cell.max.max(max);
+            cell.tiles.push((key, bounds));
+        } else {
+            self.cells.insert(
+                at,
+                Cell {
+                    min,
+                    max,
+                    tiles: vec![(key, bounds)],
+                },
+            );
+        }
+    }
+
+    /// Takes a tile out: its cell shrinks to the tiles left, and goes when
+    /// there are none.
+    fn remove(&mut self, key: TileKey) {
+        let at = Self::cell_of(key);
+        // Its box after the tile leaves: none when nothing is left in it.
+        let mut left: Option<(DVec3, DVec3)> = None;
+        if let Some(cell) = self.cells.get_mut(&at) {
+            let Some(slot) = cell.tiles.iter().position(|&(tile, _)| tile == key) else {
+                return;
+            };
+            cell.tiles.swap_remove(slot);
+            // A cell holds a handful of tiles: the union is built again from
+            // those left rather than kept with an edge count per tile.
+            for &(tile, bounds) in &cell.tiles {
+                let (min, max) = bounds.world(tile);
+                left = Some(match left {
+                    Some((low, high)) => (low.min(min), high.max(max)),
+                    None => (min, max),
+                });
+            }
+            if let Some((min, max)) = left {
+                cell.min = min;
+                cell.max = max;
+            }
+        }
+        if left.is_none() {
+            self.cells.remove(&at);
+        }
+    }
+
+    /// Every tile gone at once (`clear_lods`, `clear_sections`).
+    pub(super) fn clear(&mut self) {
+        self.cells.clear();
+    }
+
+    /// Calls `tile` for each tile whose cell meets `view`, with whether the
+    /// whole cell is inside it (then so is every tile's box).
+    pub(super) fn walk(&self, camera: DVec3, view: &Frustum, mut tile: impl FnMut(bool, TileKey)) {
+        for cell in self.cells.values() {
+            let min = (cell.min - camera).as_vec3();
+            let max = (cell.max - camera).as_vec3();
+            let inside = view.contains(min, max);
+            if !inside && !view.intersects(min, max) {
+                continue;
+            }
+            for &(key, _) in &cell.tiles {
+                tile(inside, key);
+            }
+        }
+    }
+
+    /// Each cell's place and box, for tests.
+    #[cfg(test)]
+    fn cells(&self) -> impl Iterator<Item = ((i32, i32), DVec3, DVec3)> + '_ {
+        self.cells
+            .iter()
+            .map(|(&at, cell)| (at, cell.min, cell.max))
     }
 }
 
@@ -188,6 +319,7 @@ impl Tile {
     pub fn meshes_mut(&mut self) -> impl Iterator<Item = &mut SectionGpu> {
         std::iter::once(&mut *self.mesh).chain(self.previous.as_deref_mut().map(|(mesh, _)| mesh))
     }
+    /// The tile as drawn this frame, if its own box is in view.
     pub fn visible(
         &self,
         key: TileKey,
@@ -195,15 +327,32 @@ impl Tile {
         frustum: &Frustum,
         now: Instant,
     ) -> Option<Visible> {
+        let at = DVec3::from(key.origin().map(f64::from)) - camera;
+        let mut visible = self.draw_state(key, at, now)?;
+        visible.distance = self.bounds.visible(at, frustum)?;
+        Some(visible)
+    }
+
+    /// `visible` for a tile whose cell is wholly in view (`TileGrid::walk`):
+    /// its own box is wholly in view too, so only its distance is left.
+    pub fn visible_inside(&self, key: TileKey, camera: DVec3, now: Instant) -> Option<Visible> {
+        let at = DVec3::from(key.origin().map(f64::from)) - camera;
+        let mut visible = self.draw_state(key, at, now)?;
+        visible.distance = self.bounds.distance(at);
+        Some(visible)
+    }
+
+    /// The tile as drawn this frame, short of its distance: none while it is
+    /// still fading in.
+    fn draw_state(&self, key: TileKey, at: DVec3, now: Instant) -> Option<Visible> {
         let fade = match self.dying {
             Some(since) if self.alone => fade_out_code(since, key.level, now),
             _ => fade_code(self.shown, key.level, now)?,
         };
-        let origin = DVec3::from(key.origin().map(f64::from)) - camera;
         Some(Visible {
             key,
-            distance: self.bounds.visible(origin, frustum)?,
-            origin: origin.as_vec3().to_array(),
+            distance: 0,
+            origin: at.as_vec3().to_array(),
             fade,
             old: self.dying.is_some() || self.previous.is_some(),
         })
@@ -211,6 +360,21 @@ impl Tile {
 }
 
 impl Renderer {
+    /// A far tile in, with its cell. `lods` and `lod_cells` change only here
+    /// and in `take_lod_tile`, so the cells never name a tile that is gone and
+    /// never miss one that is there (the frame walk trusts them).
+    fn add_lod_tile(&mut self, key: TileKey, tile: Tile) {
+        self.lod_cells.insert(key, tile.bounds);
+        self.lods.insert(key, tile);
+    }
+
+    /// A far tile out, with its cell.
+    fn take_lod_tile(&mut self, key: TileKey) -> Option<Tile> {
+        let tile = self.lods.remove(&key)?;
+        self.lod_cells.remove(key);
+        Some(tile)
+    }
+
     /// A tile meshed again (finer detail) takes its place at once, but for
     /// one meshed around near chunks or finer tiles that are new (`keep`):
     /// its old mesh stands in while they fade in. A new one waits for the rest of its job
@@ -220,7 +384,7 @@ impl Renderer {
             copies.tile(key, mesh);
         }
         let old_slot = self.lods.get(&key).map(|tile| tile.cull_slot);
-        let (shown, previous) = match self.lods.remove(&key) {
+        let (shown, previous) = match self.take_lod_tile(key) {
             Some(old) if old.dying.is_none() => match old.previous {
                 Some(previous) => {
                     self.release_mesh(*old.mesh);
@@ -246,7 +410,7 @@ impl Renderer {
                         self.lod_cull_next - 1
                     })
                 });
-                self.lods.insert(
+                self.add_lod_tile(
                     key,
                     Tile {
                         mesh: Box::new(mesh),
@@ -279,7 +443,7 @@ impl Renderer {
         if let Some(copies) = &mut self.capture_copies {
             copies.forget_tile(key);
         }
-        if let Some(tile) = self.lods.remove(&key) {
+        if let Some(tile) = self.take_lod_tile(key) {
             self.lod_cull_free.push(tile.cull_slot);
             self.release_tile(tile);
         }
@@ -303,6 +467,7 @@ impl Renderer {
         for (_, tile) in std::mem::take(&mut self.lods) {
             self.release_tile(tile);
         }
+        self.lod_cells.clear();
         self.lod_cull_free.clear();
         self.lod_cull_next = 0;
         self.set_lod_cutout(Default::default());
@@ -607,5 +772,115 @@ mod tests {
                 .is_none()
         );
         assert!(Bounds::mesh(&SectionMesh::default()).is_none());
+    }
+
+    /// The view the grid tests are written against: the camera at the origin,
+    /// looking down +z, as vanilla's `view_matrix(0, 0)` does.
+    fn camera_view() -> Frustum {
+        Frustum::from_planes(super::super::frustum(
+            super::super::world_projection(70.0, 16.0 / 9.0, 8192.0)
+                * crate::camera::view_matrix(0.0, 0.0),
+        ))
+    }
+
+    fn tile_box(min: [f32; 3], max: [f32; 3]) -> Bounds {
+        Bounds {
+            min: Vec3::from(min),
+            max: Vec3::from(max),
+        }
+    }
+
+    /// A tile its cell vouches for gets the same distance, and so the same
+    /// place in the draw order, as one tested on its own box.
+    #[test]
+    fn a_vouched_for_tile_takes_the_same_distance() {
+        let view = camera_view();
+        let bounds = tile_box([0.0, -64.0, 0.0], [1024.0, 120.0, 1024.0]);
+        for origin in [
+            DVec3::new(-1000.0, -80.0, -512.0),
+            DVec3::new(0.0, 100.0, 300.0),
+            DVec3::new(-64.0, 0.0, 0.0),
+        ] {
+            assert_eq!(bounds.visible(origin, &view), Some(bounds.distance(origin)));
+        }
+    }
+
+    /// A cell's box holds every tile in it (a tile it did not hold would be
+    /// dropped unseen), shrinks to the tiles left when one goes, and goes with
+    /// the last of them.
+    #[test]
+    fn a_cell_holds_the_boxes_of_its_tiles() {
+        let key = |x, z| TileKey { x, z, level: 0 };
+        let mut grid = TileGrid::default();
+        // Two level-0 tiles in the cell at (0, 0), 128 blocks wide: the second
+        // 16 along, its box reaching past its own corner.
+        grid.insert(key(0, 0), tile_box([0.0, -64.0, 0.0], [16.0, 120.0, 16.0]));
+        grid.insert(
+            key(1, 0),
+            tile_box([-2.0, -64.0, -2.0], [18.0, 320.0, 18.0]),
+        );
+        // A third in the next cell along.
+        grid.insert(key(8, 0), tile_box([0.0, -64.0, 0.0], [16.0, 64.0, 16.0]));
+        let box_of = |grid: &TileGrid, at: (i32, i32)| {
+            grid.cells()
+                .find(|&(cell, ..)| cell == at)
+                .map(|(_, min, max)| (min, max))
+        };
+        assert_eq!(
+            box_of(&grid, (0, 0)),
+            Some((DVec3::new(0.0, -64.0, -2.0), DVec3::new(34.0, 320.0, 18.0)))
+        );
+        assert_eq!(
+            box_of(&grid, (1, 0)),
+            Some((DVec3::new(128.0, -64.0, 0.0), DVec3::new(144.0, 64.0, 16.0)))
+        );
+        // The overflowing tile goes: the cell is the one left over.
+        grid.remove(key(1, 0));
+        assert_eq!(
+            box_of(&grid, (0, 0)),
+            Some((DVec3::new(0.0, -64.0, 0.0), DVec3::new(16.0, 120.0, 16.0)))
+        );
+        grid.remove(key(0, 0));
+        assert_eq!(box_of(&grid, (0, 0)), None, "the last tile takes it");
+        assert!(box_of(&grid, (1, 0)).is_some(), "another cell stays");
+    }
+
+    /// The frustum is asked once per cell: a cell wholly in view vouches for
+    /// its tiles, one that only crosses it hands them back for their own test,
+    /// and one it misses leaves them out.
+    #[test]
+    fn a_cell_is_tested_once_for_all_its_tiles() {
+        let key = |x, z| TileKey { x, z, level: 0 };
+        let view = camera_view();
+        let tile = tile_box([0.0, -64.0, 0.0], [16.0, 64.0, 16.0]);
+        let mut grid = TileGrid::default();
+        // On the axis 176 blocks in front of the camera.
+        let inside = key(-1, 11);
+        // Behind it.
+        let behind = key(-1, -4);
+        // Across the screen's right edge: 50 blocks out on its near side, 400
+        // on its far side, over 100 blocks of depth.
+        let crossing = key(3, 0);
+        let edge = tile_box([2.0, -64.0, 0.0], [352.0, 64.0, 100.0]);
+        grid.insert(inside, tile);
+        grid.insert(behind, tile);
+        grid.insert(crossing, edge);
+        let seen_box = |key: TileKey, bounds: Bounds| {
+            let (min, max) = bounds.world(key);
+            (min.as_vec3(), max.as_vec3())
+        };
+        let (min, max) = seen_box(inside, tile);
+        assert!(view.contains(min, max), "the box 176 in is wholly in view");
+        let (min, max) = seen_box(behind, tile);
+        assert!(!view.intersects(min, max), "the box behind is out of view");
+        let (min, max) = seen_box(crossing, edge);
+        assert!(
+            view.intersects(min, max) && !view.contains(min, max),
+            "the box across the edge is neither in nor out"
+        );
+        let mut seen = Vec::new();
+        grid.walk(DVec3::ZERO, &view, |inside, at| seen.push((inside, at)));
+        seen.sort_unstable();
+        assert_eq!(seen, [(false, crossing), (true, inside)]);
     }
 }
