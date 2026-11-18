@@ -288,6 +288,10 @@ impl Game<'_> {
         self.pack.assets.registry.state(state)?;
         Some(self.res.facts().get(state).solid_render)
     }
+    /// `BlockState.isRedstoneConductor` for a state alone, not a block in a level.
+    pub(super) fn block_state_is_redstone_conductor(&self, state: BlockStateId) -> Option<bool> {
+        self.res.behaviours().state_redstone_conductor(state)
+    }
     /// The immutable local ordinals of `block`, independent of current world ID order.
     pub(super) fn block_states_of(&self, block: BlockKey) -> Option<BlockStateRange> {
         mod_api::__private::block_state_range(block).ok()
@@ -1090,6 +1094,19 @@ mod facts_tests {
             assert_eq!(
                 facts.is_solid_render(state("minecraft:stone_slab")),
                 Some(false)
+            );
+            assert_eq!(facts.is_redstone_conductor(stone), Some(true));
+            assert_eq!(
+                facts.is_redstone_conductor(state("minecraft:glass")),
+                Some(false)
+            );
+            assert_eq!(
+                facts.is_redstone_conductor(state("minecraft:moving_piston")),
+                Some(false)
+            );
+            assert_eq!(
+                facts.is_redstone_conductor(state("minecraft:red_shulker_box")),
+                None
             );
             // SoundType.STONE: its break event, at volume and pitch 1.
             let sound = facts.sound(stone).unwrap();
