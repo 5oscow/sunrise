@@ -539,11 +539,10 @@ client they do nothing, and the readers give nothing). Each takes the `dimension
 place; `server_tick` does not define one, so name the dimension and expect a refusal there.
 
 - `LevelRef::spawn_entity(host, kind, pos, &spawn)` spawns a thrown projectile, a mob or a general row and returns an
-  `EntityRef`, or `None` when refused. `EntitySpawn` carries the velocity, rotation and owner it starts with, and its
-  `SpawnBody` the family's part: the thrown item, the mob's `SpawnReason`, or nothing for a general row. A mob is not
-  persistent, as for a natural spawn. Spawn limits and natural spawn rules do not apply, as for `/summon`. A kind of
-  another family, invalid or out-of-bounds position, unloaded chunk, stale or unavailable level or owner, or
-  cancellation during finalization or level entry refuses the spawn. `EntityRef::owner` reads the owner back.
+  `EntityRef`, or `None` when refused. `EntitySpawn` carries the starting velocity, rotation and owner (read back with
+  `EntityRef::owner`), and `SpawnBody` the thrown item, the mob's `SpawnReason`, or nothing for a general row. A mob is not
+  persistent; spawn limits and natural spawn rules do not apply, as for `/summon`. A kind of another family, a bad position,
+  an unloaded chunk, a stale level or owner, or cancellation during finalization or level entry refuses the spawn.
 - `native_mob(dimension, id)` and `native_mobs(dimension)` read the living mobs: id, dimension, kind, position, yaw, health and maximum health.
 - A mob's health is set with `living.set_health(host, health)` on its `LivingRef`.
 - `native_kill_mob(dimension, id)` kills as `/kill` does, with its loot. `EntityRef::discard` removes an entity without death or loot: from the call on selectors and handles no longer find it, its passengers are off and `entity_leave_level` has fired, in the same hook.
