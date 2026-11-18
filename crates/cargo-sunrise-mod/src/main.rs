@@ -13,6 +13,7 @@
 //! - `internals add <path>… [--kind <kind>]`: declare internals from the prebuilt catalog.
 //! - `build [--update-lock]`: the `.smod` in `target/sunrise-mod/`, with the mod's `assets/`
 //!   and `data/`; a native mod is then compiled too (`dev.rs`); with `--wasm`, a Rust mod built to `mod.wasm` first (`wasm.rs`).
+//! - `publish`: build, then write the registry entry, the staged file and the pull request text (`publish.rs`).
 //! - `wasm-std <out.wasm>`: the standard library member the game ships for wasm mods.
 //! - `run [--game <sunrise-client>] [--resources <folder>] [-- <game args>]`: build, then play with
 //!   the mod.
@@ -42,6 +43,7 @@ mod internals;
 mod jar;
 mod layouts;
 mod native_build;
+mod publish;
 mod registry;
 mod sdk_cmds;
 mod sdk_fetch;
@@ -54,7 +56,7 @@ use std::{
 };
 
 /// What `cargo sunrise-mod` prints with no command or `--help`, and after an unknown command.
-const USAGE: &str = "cargo sunrise-mod new <path> [--name \"Name\"] [--template content|native|wasm [--sunrise <build>]] | update [--sunrise <build>] | inject update [--accept <id>]… | inject sync --repo <game checkout> | inject add <at> --kind <kind> [--call <canonical callee>] [--nth N] [--with <fn>] | internals sync [--repo <path>] | internals add <path>… [--kind <kind>] | build [--wasm] [--update-lock] | wasm-std <out.wasm> | run [--game <sunrise-client>] [--resources <folder>] [-- <game args>] | check [--uses] | check <file> [--kind <kind>] [--key <public key> --signature <file.minisig>] [--json] | hooks <text> [--all] | sdk diff <build> <build> | fits [<file.smod>] [--build <name>]… | registry build|review|check|list | use-jar <path> | native-build < plan.json | native-check < plan.json | native-discover < plan.json | native-lock < plan.json | native-layout < plan.json";
+const USAGE: &str = "cargo sunrise-mod new <path> [--name \"Name\"] [--template content|native|wasm [--sunrise <build>]] | update [--sunrise <build>] | inject update [--accept <id>]… | inject sync --repo <game checkout> | inject add <at> --kind <kind> [--call <canonical callee>] [--nth N] [--with <fn>] | internals sync [--repo <path>] | internals add <path>… [--kind <kind>] | build [--wasm] [--update-lock] | wasm-std <out.wasm> | run [--game <sunrise-client>] [--resources <folder>] [-- <game args>] | publish [--out <dir>] [--registry <checkout>] [--summary <text>] [--owner <login>]… [--categories a,b] [--tags a,b] [--changelog <text>] [--key <public key> --signature <file.minisig>] [--wasm] | check [--uses] | check <file> [--kind <kind>] [--key <public key> --signature <file.minisig>] [--json] | hooks <text> [--all] | sdk diff <build> <build> | fits [<file.smod>] [--build <name>]… | registry build|review|check|list | use-jar <path> | native-build < plan.json | native-check < plan.json | native-discover < plan.json | native-lock < plan.json | native-layout < plan.json";
 
 fn is_compiler_wrapper(name: &str) -> bool {
     name.strip_suffix(".exe").unwrap_or(name).ends_with("rustc")
@@ -104,41 +106,9 @@ fn main() -> ExitCode {
             Some(dir) => fetched(&dir),
             None => Ok(()),
         }),
-        Some("build") if args.get(1).is_some_and(|a| a == "--wasm") => fetched(Path::new("."))
-            .and_then(|()| pinned_surface(Path::new(".")))
-            .and_then(|api| {
-                wasm::build(
-                    Path::new("."),
-                    flag(&args[2..], "--catalog").map(Path::new),
-                    &args[2..]
-                        .windows(2)
-                        .filter(|a| a[0] == "--with")
-                        .map(|a| PathBuf::from(&a[1]))
-                        .collect::<Vec<_>>(),
-                    api.as_ref(),
-                )
-            })
-            .and_then(|()| build(entry))
-            .map(|p| println!("Built {}", p.display())),
         Some("wasm-std") => wasm::wasm_std(&args[1..]),
-        Some("build") => {
-            let sdk = if code_project(Path::new(".")) {
-                fetched(Path::new("."))
-            } else {
-                Ok(())
-            };
-            sdk.and_then(|()| build(entry))
-                .map(|p| println!("Built {}", p.display()))
-                .and_then(|()| match dev::is_native(Path::new(".")) {
-                    Ok(true) => dev::build(
-                        Path::new("."),
-                        args[1..].iter().any(|a| a == "--update-lock"),
-                    )
-                    .map(drop),
-                    Ok(false) => Ok(()),
-                    Err(e) => Err(e),
-                })
-        }
+        Some("build") => build_command(entry, &args[1..]).map(drop),
+        Some("publish") => publish::run(entry, &args[1..]),
         Some("run") => run(&args[1..]).map_err(|e| e.to_string()),
         Some("check") if args.get(1).is_none_or(|a| a.starts_with("--")) => {
             sdk_cmds::check_mod(entry, &args[1..])
@@ -185,6 +155,41 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// `build [--wasm] [--update-lock]`: the package in `target/sunrise-mod/`, after a wasm mod's
+/// `mod.wasm` (with `--wasm`) and followed by a native mod's own compile. Also the first step of `publish`.
+fn build_command(
+    entry: mod_surface::child::ChildEntry,
+    args: &[String],
+) -> Result<PathBuf, String> {
+    let root = Path::new(".");
+    if args.first().is_some_and(|a| a == "--wasm") {
+        fetched(root)?;
+        let api = pinned_surface(root)?;
+        wasm::build(
+            root,
+            flag(&args[1..], "--catalog").map(Path::new),
+            &args[1..]
+                .windows(2)
+                .filter(|a| a[0] == "--with")
+                .map(|a| PathBuf::from(&a[1]))
+                .collect::<Vec<_>>(),
+            api.as_ref(),
+        )?;
+        let path = build(entry)?;
+        println!("Built {}", path.display());
+        return Ok(path);
+    }
+    if code_project(root) {
+        fetched(root)?;
+    }
+    let path = build(entry)?;
+    println!("Built {}", path.display());
+    if dev::is_native(root)? {
+        dev::build(root, args.iter().any(|a| a == "--update-lock"))?;
+    }
+    Ok(path)
 }
 
 /// Whether `dir` is a code mod's project: one with a `Cargo.toml`, which depends on the SDK.

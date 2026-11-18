@@ -27,7 +27,7 @@ entry leaves out.
     "versions": [{
       "version": "0.1.0", "published": "2026-10-24", "changelog": "",
       "api": "0.2", "side": "client", "capabilities": ["registries"], "game": "26.3",
-      "file": { "name": "coords_hud-0.1.0.smod", "url": "https://github.com/horizon-rust/horizon-mods/releases/download/...",
+      "file": { "name": "coords_hud-0.1.0.smod", "url": "https://github.com/sunrise-org/sunrise-mods/releases/download/...",
                 "size": 438, "sha256": "e113...", "signature": "untrusted comment: ...\n...\ntrusted comment: ...\n...\n" }
     }]
   }],
@@ -56,7 +56,7 @@ entry leaves out.
 | `side`, `capabilities` | A mod's, read from its manifest during validation. |
 | `game` | The Minecraft version it is for. |
 | `requires` | A modpack's mods: `{ id, version, sha256 }`, each a version in this index with that hash. |
-| `file` | A plain name with the kind's extension (`.smod`, `.spack`, `.zip`, `.sshader`), an `https://` URL (the registry's release `https://github.com/horizon-rust/horizon-mods/releases/download/<id>-<version>/<name>`, or an asset of the project's own repository, `https://github.com/<owner>/<repo>/releases/download/<tag>/<name>`: the launcher accepts exactly these shapes), the size (at most 64 MiB), the lowercase hex SHA-256, and the `.minisig` text when the project has a key. |
+| `file` | A plain name with the kind's extension (`.smod`, `.spack`, `.zip`, `.sshader`), an `https://` URL (the registry's release `https://github.com/sunrise-org/sunrise-mods/releases/download/<id>-<version>/<name>`, or an asset of the project's own repository, `https://github.com/<owner>/<repo>/releases/download/<tag>/<name>`: the launcher accepts exactly these shapes), the size (at most 64 MiB), the lowercase hex SHA-256, and the `.minisig` text when the project has a key. |
 | `revoked` | Files taken down: one file by `sha256`, or every version of `id` without it. The launcher refuses to install them and turns installed copies off with the reason. |
 
 Readers ignore fields they don't know, so an optional field can be added to schema 1. Renaming or removing a field, or
@@ -120,22 +120,59 @@ sits in a linked folder, refuses the import before anything is written.
 
 ## Submitting a project
 
-> **This book documents the fork's mod API.** A code mod (native or wasm) that uses it runs on the fork's builds, not on upstream Horizon, so do not submit it to the registry at playsunrise.net: the registry serves upstream's players, who could not load it. A content-only mod loads there only if it uses nothing the fork added. Until the mod API ships in a joint release, share the `.smod` file ([installing by hand](../start/installing.md)) or your mod's GitHub repository: the fork's launcher installs a native mod from it with **Add from GitHub** and marks it "Not reviewed by the Sunrise registry" ([Install from GitHub](../how-to/native-mods/08-install-from-github.md)).
-
-Submit through [playsunrise.net/mods/submit](https://playsunrise.net/mods/submit) ([Publishing your mod](../how-to/publish.md)); the service opens a pull request on
-[horizon-rust/horizon-mods](https://github.com/horizon-rust/horizon-mods). Your page needs:
+A project is a file `mods/<id>.toml` in [sunrise-org/sunrise-mods](https://github.com/sunrise-org/sunrise-mods),
+added by a pull request that a person reviews ([Publishing your mod](../how-to/publish.md) is the task page, and
+`cargo sunrise-mod publish` writes the entry). Its page needs:
 
 - A description of 50–10,000 characters after trimming.
 - 1–3 categories from your project kind’s list and up to 10 lowercase tags.
-- A square PNG icon, 64–1024 pixels and at most 256 KiB, stored in the registry.
-- Optionally, up to 8 PNG or JPEG screenshots stored in the registry.
+- A square PNG icon, 64–1024 pixels and at most 256 KiB, stored in the registry as `icons/<id>.png`.
+- Optionally, up to 8 PNG or JPEG screenshots stored in the registry as `screenshots/<id>/<name>.png|.jpg`.
 
-The generated index supplies HTTPS URLs for images. Unknown entry keys are refused.
-A project’s kind cannot change. If you set a minisign key, sign every version with it.
-For a repository-linked project, the submission service directs you to publish a GitHub
-release in that repository instead of accepting a file update.
+The generated index supplies HTTPS URLs for images. Unknown entry keys are refused. A project’s kind cannot change.
+If you set a minisign key, sign every version with it. The registry takes no new entry that follows a repository's
+releases (`repo = ...`): every version is listed as its own file.
 
-Check your package before submitting it:
+### The entry
+
+```toml
+id = "coords_hud"
+kind = "mod"                  # mod, native-mod, modpack, resourcepack, shader, shaderpack, datapack
+name = "Coordinates HUD"
+summary = "Shows where you are."                          # at most 160 characters
+description = "Markdown for the project's page, 50 to 10,000 characters."
+authors = ["Your Name"]
+owners = ["your-github-login"]  # who may publish updates
+license = "MIT"                 # an SPDX expression
+source = "https://github.com/you/coords_hud"
+icon = "icons/coords_hud.png"
+categories = ["utility"]        # 1 to 3 from your kind's list
+tags = ["hud"]                  # up to 10, lowercase
+# key = "RWT..."                # optional minisign public key: every version must then carry a signature
+
+[[versions]]                    # newest first
+version = "0.1.0"
+published = "2026-11-16"
+game = "26.3"
+file = "coords_hud-0.1.0.smod"  # the name players download, with the kind's extension
+sha256 = "<lowercase hex>"      # of that file
+# signature = """<the .minisig text>"""
+changelog = ""
+```
+
+A mod's API, side and capabilities are read from the file, not listed. A new version is a new `[[versions]]` table
+at the top; a listed one never changes, and `registry review` refuses a changed file or hash. The category lists are in
+`crates/sunrise-mod-package/src/index/page.rs`.
+
+### The files folder
+
+The registry's CI keeps every listed file in a folder named by hash, `files/<sha256>` (no extension), which
+`registry check` and `registry build` read with `--files`. A maintainer stages a submitted file as the asset
+`<sha256>.<extension>` of the registry's `staging` release, and the workflow fetches it from there; once merged it is
+published as the release `<id>-<version>`, asset `<file>`. `cargo sunrise-mod publish` writes the same layout, so its
+output folder can be checked with the CI's commands.
+
+Check a package on its own with:
 
 ```sh
 cargo sunrise-mod check my_mod.smod

@@ -20,6 +20,9 @@ pub const ENTRIES: &str = "mods";
 pub const REVOKED: &str = "revoked.toml";
 /// Ids the site uses for its own pages (`/mods/submit`).
 const RESERVED: [&str; 1] = ["submit"];
+/// What `cargo sunrise-mod publish` writes into a field it cannot fill from the manifest; an entry
+/// that still holds it is refused ([`Entry::check_fields`]).
+pub const TODO: &str = "TODO(publish)";
 /// The biggest icon, a PNG in `icons/`.
 const MAX_ICON: u64 = crate::icon::MAX_ICON as u64;
 
@@ -203,6 +206,25 @@ impl Entry {
             if value.trim().is_empty() {
                 errors.push(format!(
                     "{id}: has no {field} (in the entry, or in {PAGE_FILE} of its repo)"
+                ));
+            }
+        }
+        let unfinished = [
+            ("name", self.name.as_str()),
+            ("summary", &self.summary),
+            ("description", &self.description),
+            ("license", &self.license),
+            ("source", &self.source),
+        ]
+        .into_iter()
+        .chain(self.owners.iter().map(|o| ("owner", o.as_str())))
+        .chain(self.authors.iter().map(|a| ("author", a.as_str())))
+        .chain(self.categories.iter().map(|c| ("category", c.as_str())))
+        .chain(self.tags.iter().map(|t| ("tag", t.as_str())));
+        for (field, value) in unfinished {
+            if value.trim_start().starts_with(TODO) {
+                errors.push(format!(
+                    "{id}: the {field} is still the {TODO} that `cargo sunrise-mod publish` wrote: replace it with your own text in mods/{id}.toml"
                 ));
             }
         }

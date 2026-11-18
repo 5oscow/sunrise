@@ -1,5 +1,5 @@
 //! `cargo sunrise-mod registry build|review|check|list`: the registry repository's CI
-//! (`horizon-rust/horizon-mods`, docs/modding/src/reference/registry-index.md). Network-free: the
+//! (`sunrise-org/sunrise-mods`, docs/modding/src/reference/registry-index.md). Network-free: the
 //! workflow downloads the files and publishes what this writes.
 use std::path::Path;
 use sunrise_mod_package::index::{
@@ -8,7 +8,7 @@ use sunrise_mod_package::index::{
 };
 
 /// Where the registry's site is published (its icons).
-const SITE: &str = "https://horizon-rust.github.io/horizon-mods/";
+const SITE: &str = "https://sunrise-org.github.io/sunrise-mods/";
 
 const USAGE: &str = "usage: cargo sunrise-mod registry build <checkout> --files <dir> --out <index.json> [--release <url>] [--site <url>] [--generated <time>] [--counts <counts.json>]
        cargo sunrise-mod registry review <base checkout> <head checkout> --author <login> [--json]
