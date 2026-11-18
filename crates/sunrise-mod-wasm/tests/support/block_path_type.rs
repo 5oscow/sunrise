@@ -1,6 +1,4 @@
-use mod_api::{
-    BlockEntityRef, BlockPathTypeEvent, BlockState, Compound, LevelHost, PathType, Tag,
-};
+use mod_api::{BlockEntityRef, BlockPathTypeEvent, BlockState, Compound, LevelHost, PathType, Tag};
 use std::cell::RefCell;
 
 pub struct World {
@@ -55,6 +53,21 @@ impl World {
             part.block_path_type(self, &mut event),
             Some(PathType::Damaging)
         );
+        assert_eq!(*self.asked.borrow(), [[0, 64, 1]]);
+    }
+
+    /// The hook through the installed parts: a compiled guest part answers and
+    /// reads the neighbouring block entity through this same level.
+    pub fn dispatch(&self) {
+        self.asked.borrow_mut().clear();
+        let mut out = None;
+        mod_api::dispatch_block_path_type(
+            self,
+            mod_api::BlockPos::new(1, 64, 1),
+            self.state,
+            &mut out,
+        );
+        assert_eq!(out, Some(PathType::Damaging));
         assert_eq!(*self.asked.borrow(), [[0, 64, 1]]);
     }
 }

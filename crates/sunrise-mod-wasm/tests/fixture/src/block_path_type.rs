@@ -23,3 +23,13 @@ impl BlockPart for PathPart {
         Some(PathType::Damaging)
     }
 }
+
+/// Registered on `minecraft:stone` when the compiled-guest test asks for this part
+/// (`block_path_type_probe`), so the fixture's other guest tests are unaffected.
+pub fn register(r: &mut dyn mod_api::Registrar, cx: &mod_api::RegistrationContext) {
+    if cx.mods().get("block_path_type_probe").is_none() {
+        return;
+    }
+    let stone = r.block_key("minecraft:stone");
+    r.block_part(stone, PathPart);
+}

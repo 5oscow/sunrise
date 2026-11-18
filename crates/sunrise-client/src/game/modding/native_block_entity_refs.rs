@@ -10,7 +10,6 @@ use mod_api::{
 use sunrise_client::{
     block_entity_nbt,
     containers::{BlockEntity, ModBlockEntity},
-    lan::menu::{Menu, Slots},
     save,
     world::World,
 };
@@ -592,14 +591,15 @@ impl Game<'_> {
         }
         self.native_block_entity_target(entity)?;
         let epoch = self.native_lifecycle.epoch()?;
-        let level = entity.fields().level;
-        let [x, y, z] = entity.fields().position;
+        let fields = entity.fields();
+        let level = fields.level;
+        let [x, y, z] = fields.position;
         let key = (x, y, z);
         let mut viewers: Vec<PlayerRef> = self
             .lan
             .iter()
-            .flat_map(|host| host.hub.guests.simulation_iter())
-            .filter(|g| {
+            .flat_map(|host| host.hub.guests.simulation_iter().map(move |g| (host, g)))
+            .filter(|(host, g)| {
                 // The acting guest's mode is live in `Game` during its turn; the hub
                 // hears of a change only in `leave_guest`.
                 let spectator = if self.lan_acting_uuid == Some(g.uuid) {
@@ -611,9 +611,11 @@ impl Game<'_> {
                     && g.placed
                     && !spectator
                     && g.dimension == level.dimension_id()
-                    && g.menu.as_ref().is_some_and(|m| menu_holds(m, key))
+                    && host.menus.get(&g.conn).is_some_and(|menus| {
+                        menus.menu_holds(g.menu.as_ref(), key, fields.generation)
+                    })
             })
-            .filter_map(|g| {
+            .filter_map(|(_, g)| {
                 let id = u32::try_from(g.entity_id).ok()?;
                 Some(player_ref(mod_api::EntityRef::new(epoch, id), g.uuid))
             })
@@ -801,6 +803,50 @@ fn mod_item_slots(
     Ok(slots)
 }
 
+pub(super) fn part_snapshot(
+    world: &World,
+    level: Option<LevelRef>,
+    authoritative: bool,
+    index: Option<
+        &std::sync::Arc<
+            std::sync::Mutex<
+                sunrise_mod_runtime::attachments::index::AttachmentIndex<mod_api::AttachmentHolder>,
+            >,
+        >,
+    >,
+    entity: BlockEntityRef,
+    namespace: &str,
+    name: &str,
+) -> Result<mod_api::AttachmentBatch, mod_api::PartStateError> {
+    let fields = entity.fields();
+    if level != Some(fields.level) {
+        return Err(mod_api::PartStateError::OtherLevel);
+    }
+    let key = (fields.position[0], fields.position[1], fields.position[2]);
+    if !world.is_loaded_at(key.0, key.1, key.2)
+        || world.block_entities.generation(&key) != Some(fields.generation)
+    {
+        return Err(mod_api::PartStateError::Stale);
+    }
+    mod_api::__private::validate_attachment_use(namespace, name, false).map_err(|error| {
+        mod_api::PartStateError::Attachment {
+            namespace: "",
+            name: "",
+            error,
+        }
+    })?;
+    let empty = || sunrise_mod_runtime::attachments::AttachmentBatch::empty().into();
+    if !authoritative {
+        return Ok(empty());
+    }
+    Ok(index.map_or_else(empty, |index| {
+        sunrise_mod_runtime::attachments::AttachmentBatch::new(
+            index.lock().unwrap().snapshot_named(namespace, name),
+        )
+        .into()
+    }))
+}
+
 /// The handle of the loaded block entity at `pos`, without loading a chunk or taking one
 /// that is out of the world for its own tick.
 pub(super) fn world_block_entity(
@@ -825,24 +871,13 @@ fn loaded_block_entity(world: &World, [x, y, z]: [i32; 3]) -> Option<&BlockEntit
         .filter(|entity| !save::block_entity_placeholder(entity))
 }
 
-/// Whether an open menu holds the container at `key` (`isOwnContainer`): a double
-/// chest's holds both halves, an ender chest's the block it was opened from.
-fn menu_holds(menu: &Menu, key: (i32, i32, i32)) -> bool {
-    match menu.slots {
-        Slots::Block(at) => at == key,
-        Slots::Double(first, second) => first == key || second == key,
-        Slots::Ender => menu.pos == Some(key),
-        Slots::Native => false,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use mod_api::HostTransaction;
     use mod_api::ServerHost;
     use std::sync::Arc;
-    use sunrise_client::chunk::Chunk;
+    use sunrise_client::{chunk::Chunk, lan::menu::Slots};
     use sunrise_world::registry::BlockStateId;
 
     #[test]
@@ -882,6 +917,10 @@ mod tests {
             };
             game.world.block_entities.insert(pos, holder());
             let original = game.block_entity(level, [1, 64, 1]).unwrap();
+            assert_eq!(
+                original.merge_data(game, compound("{count:3}")),
+                Ok(true)
+            );
             game.with_level(|_, host, ticks| {
                 let wrapped = super::super::mod_api_host::LevelTicks::new(&*host, ticks);
                 assert_eq!(
@@ -895,6 +934,13 @@ mod tests {
                 assert_eq!(
                     mod_api::LevelHost::block_entity(&wrapped, [1, 400, 1]),
                     None,
+                );
+                // The ticks wrapper hands the same reads through, saved data included.
+                let data = mod_api::LevelHost::block_entity_data(&*host, original);
+                assert_eq!(data.as_ref().and_then(|data| data.get(&"count".into())), Some(&mod_api::Tag::Int(3)));
+                assert_eq!(
+                    mod_api::LevelHost::block_entity_data(&wrapped, original),
+                    data,
                 );
             });
             assert_eq!(original.set_data_slots(game, vec![7]), Ok(true));
@@ -1658,6 +1704,7 @@ mod tests {
             ));
 
             // A client's copy of the level is not the server's.
+            game.options.execution_role = crate::game::execution_role::ExecutionRole::Client;
             game.options.dedicated = None;
             assert!(!write(game, [0, 64, 0], api_stone, flags));
             assert_eq!(game.world.block(0, 64, 0), grown);

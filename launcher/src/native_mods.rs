@@ -10,20 +10,25 @@ use std::fs;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
-use sunrise_mod_package::dependencies;
-use sunrise_mod_package::mod_surface;
-pub use sunrise_native_build::Refusal;
-use sunrise_native_build::{api, internals, package, prebuilt, registry_generate};
-use sunrise_native_build::{bundle_files, is_revision, registry_rustc};
-pub use sunrise_native_build::{
-    bundle_in, bundles, cancel, check_cancelled, copy_bundle, digest, failure, mixins_from_source,
-    scan_bundles, source_digest, unpack_archive, Bundle, RegistryInventory, Target, CANCELLED,
+use sunrise_launcher_smod::dependencies;
+
+mod build_log;
+mod bundle;
+use build_log::log_warning;
+pub(crate) use build_log::root;
+pub use build_log::{
+    append_log, check_cancelled, clear_log, compiling as compiling_mod, failure, log_path, Refusal,
+    CANCELLED,
+};
+use bundle::{bundle_files, is_revision};
+pub use bundle::{
+    bundle_in, bundles, copy_bundle, digest, scan_bundles, source_digest, Bundle, Target,
     MIXINS_REV, NATIVE_MANIFEST,
 };
-
 mod planning;
 pub use planning::{routes, update_check, UpdateCheck};
 mod internals_sync;
+mod tool;
 pub use internals_sync::catalog;
 pub mod fit;
 mod isolate;
@@ -32,7 +37,8 @@ pub mod sdk_cache;
 
 pub use isolate::{LeftOut, Why};
 pub use picker::{Route, Routes};
-pub use sunrise_native_build::compiling as compiling_mod;
+pub use tool::Consent;
+mod uses;
 
 // Settings and logs are shared by native-build and diagnostics tests.
 #[cfg(test)]
@@ -90,49 +96,6 @@ impl Installed for Target {
             Self::Server => format!("sunrise-engine{}", std::env::consts::EXE_SUFFIX),
         }
     }
-}
-
-/// The native build's folder, under the launcher's build folder.
-pub(crate) fn root() -> PathBuf {
-    install_host();
-    sunrise_native_build::root()
-}
-
-/// The build's log, kept until the next build.
-pub fn log_path() -> PathBuf {
-    install_host();
-    sunrise_native_build::log_path()
-}
-
-/// Empties the build log for a new attempt.
-pub fn clear_log() -> Result<(), String> {
-    install_host();
-    sunrise_native_build::clear_log()
-}
-
-/// Appends `message` to the build log.
-pub fn append_log(message: &str) -> Result<(), String> {
-    install_host();
-    sunrise_native_build::append_log(message)
-}
-
-/// Appends `text` to the build log as a warning.
-fn log_warning(text: &str) {
-    install_host();
-    sunrise_native_build::log_warning(text)
-}
-
-/// Makes the launcher the native build's host: its language, its build folder, its network and cache stamps.
-pub fn install_host() {
-    sunrise_native_build::host::install(sunrise_native_build::host::Host {
-        tr: crate::i18n::tr,
-        root: || backend::build_dir().join("native"),
-        get: |url| {
-            Ok(backend::get_unless_missing(url)?
-                .map(|response| Box::new(response.into_reader()) as Box<dyn Read + Send>))
-        },
-        mark_used: |path| crate::storage::mark_used(path).map_err(cache_error),
-    });
 }
 
 /// The platform the game's source will be compiled for. On Windows this follows the installed
@@ -261,7 +224,6 @@ pub fn is_native(version: &str) -> bool {
 fn logged<T, E: std::fmt::Display + From<String>>(
     build: impl FnOnce(Result<&crate::native_cache::Cache, &str>) -> Result<T, E>,
 ) -> Result<T, E> {
-    install_host();
     // Another build or a cleanup holds the lease on the same target/: refuse. Any other
     // failure only stops cleanup for explicit builds. Automatic selection requires a held
     // cache for its catalog and can refuse instead of accessing an unsafe tree.
@@ -293,15 +255,47 @@ fn logged<T, E: std::fmt::Display + From<String>>(
     result
 }
 
-/// Dispatch Cargo's discovery-only rustc wrapper before normal launcher startup.
-pub fn internals_rustc_wrapper() -> Option<i32> {
-    registry_rustc::wrapper().or_else(sunrise_native_build::discover::rustc_wrapper)
+/// `native-build --mixins-from-source`: the build tool builds horizon-mixins from its pinned source.
+static MIXINS_FROM_SOURCE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Builds horizon-mixins from its pinned source instead of downloading its release, so CI keeps that path proven.
+pub fn mixins_from_source(on: bool) {
+    MIXINS_FROM_SOURCE.store(on, std::sync::atomic::Ordering::Relaxed);
 }
 
-pub fn sync_internals(
-    folder: &Path,
-) -> Result<Vec<sunrise_mod_package::internals::ListedInternal>, Failed> {
-    install_host();
+/// Stops the native build running: its tool and every compiler that started.
+pub fn cancel() {
+    build_log::cancel();
+    tool::stop();
+}
+
+/// The failed build's error, led by its blamed mod in the launcher's own words, as [`compile_failed_mod`] and [`refused_mod`] read it.
+fn blamed_text(failed: tool::Failure) -> String {
+    let lead = match failed.blame {
+        None => {
+            return trf(
+                "The native build failed: {error}",
+                &[("error", &failed.error)],
+            )
+        }
+        Some(tool::Blame {
+            mod_id,
+            kind: tool::BlameKind::Compile,
+        }) => failure(&compiling_mod(&mod_id), tr("see the build log"), &[], &[]),
+        Some(tool::Blame {
+            mod_id,
+            kind: tool::BlameKind::BuildScript,
+        }) => Refusal::BuildScript { mod_id }.to_string(),
+        Some(tool::Blame {
+            mod_id,
+            kind: tool::BlameKind::Features,
+        }) => Refusal::Features { mod_id }.to_string(),
+    };
+    format!("{lead}\n\n{}", failed.error)
+}
+
+pub fn sync_internals(folder: &Path) -> Result<serde_json::Value, Failed> {
     require_consent()?;
     internals_sync::check(folder).map_err(Failed::Other)
 }
@@ -332,7 +326,7 @@ pub fn cache_error(error: crate::storage::Error) -> String {
 
 /// Where an instance keeps the native mods installed from the registry, `<id>.smod`, each on or
 /// off in `sunrise-mods.txt` like any mod.
-pub const INSTALLED: &str = sunrise_mod_package::mod_list::NATIVE_DIR;
+pub const INSTALLED: &str = sunrise_launcher_smod::mod_list::NATIVE_DIR;
 
 /// The native mods turned on in the game folder `home`, unpacked into a folder [`build`] takes.
 /// Each flat `.smod` passes the registry's shared package boundary; no code is run.
@@ -347,7 +341,6 @@ pub fn installed_mods(home: &Path) -> Result<PathBuf, String> {
 
 /// [`installed_mods`] into `out`, which it empties first.
 pub(crate) fn stage_installed(home: &Path, out: PathBuf) -> Result<Option<PathBuf>, String> {
-    install_host();
     let _ = fs::remove_dir_all(&out);
     let mut paths: Vec<PathBuf> = fs::read_dir(home.join(INSTALLED))
         .map(|dir| dir.flatten().map(|e| e.path()).collect())
@@ -356,7 +349,7 @@ pub(crate) fn stage_installed(home: &Path, out: PathBuf) -> Result<Option<PathBu
     paths.sort();
     let mut count = 0;
     for path in paths {
-        let bundle = sunrise_mod_package::index::native::Bundle::read(&path)
+        let bundle = sunrise_launcher_smod::index::native::Bundle::read(&path)
             .map_err(|e| format!("{}: {e}", path.display()))?;
         if !crate::browser::java::is_enabled(home, &bundle.manifest.id) {
             continue;
@@ -390,13 +383,28 @@ pub(crate) fn stage_installed(home: &Path, out: PathBuf) -> Result<Option<PathBu
 
 /// Generate only registry pins; never compiles source or modifies manifests.
 pub fn registry_lock(folder: &Path, update: bool) -> Result<(), String> {
-    install_host();
-    let bundles = bundles(folder)?;
-    if bundles.len() != 1 {
+    if bundles(folder)?.len() != 1 {
         return Err("native-lock requires one mod folder".into());
     }
     fs::create_dir_all(root()).map_err(|e| e.to_string())?;
-    registry_generate::generate(|| rust_toolchain::install(|_| {}), &bundles[0], update)
+    internals_sync::lock(folder, update)
+}
+
+/// The native build tool for the mod in `folder`: a debug launcher's developer tool ([`sdk_cache::developer_tool`]), else the one its pinned build's SDK carries.
+fn tool_for(folder: &Path) -> Result<PathBuf, String> {
+    if let Some(program) = sdk_cache::developer_tool(false) {
+        return Ok(program);
+    }
+    let bundle = bundle_in(folder)?.ok_or_else(|| {
+        trf(
+            "{path} is not a native mod project.",
+            &[("path", &folder.display().to_string())],
+        )
+    })?;
+    let base = sdk_cache::Base::from_env();
+    let keys = sunrise_launcher_release_verify::sdk_keys_for(backend::REPO);
+    let sdk = sdk_cache::index(&base, &bundle.native().sunrise, &keys).map_err(refused)?;
+    sdk_cache::tool(&sdk, &base, &|_| {}).map_err(refused)
 }
 
 /// The one value the bundles pin for `which` (each mod's `get`), else `fallback`; mods that pin
@@ -918,10 +926,10 @@ impl Step {
     }
 }
 
-/// The mod among `ids` whose own compile `error` reports ([`failure`] led by `prebuilt::compiling`).
+/// The mod among `ids` whose own compile `error` reports ([`failure`] led by [`compiling_mod`]).
 pub fn compile_failed_mod<'a>(error: &str, ids: &'a [String]) -> Option<&'a String> {
     ids.iter()
-        .find(|id| error.contains(&format!("{} failed (", compiling_mod(id))))
+        .find(|id| error.contains(&format!("{} (", build_log::failed(&compiling_mod(id)))))
 }
 
 /// The mod among `ids` whose build script or features stopped the build `error` describes, and
@@ -964,7 +972,8 @@ pub enum Failed {
         error: String,
         compiling: bool,
     },
-    /// Every mod was left out.
+    /// The folder holds no mod to build: none has a `[native]` table (content and wasm mods
+    /// need no native build).
     Nothing,
     /// Mods this build can't use were saved into worlds: the player chooses (stay, or back the
     /// worlds up and build without them).
@@ -983,7 +992,7 @@ impl std::fmt::Display for Failed {
         match self {
             Self::Mods { error, .. } | Self::Other(error) => f.write_str(error),
             Self::Worlds(stake) => f.write_str(&stake.text),
-            Self::Nothing => Ok(()),
+            Self::Nothing => f.write_str(tr("Nothing to build: none of these mods has native code (a [native] table in sunrise-mod.toml). Content and wasm mods need no native build.")),
             Self::NoConsent => f.write_str(tr("Native mods run inside your game with your rights; mixins compile code into the game. Allow native mods in Settings, Storage, or pass --trust-native-code.")),
         }
     }
@@ -1009,7 +1018,7 @@ pub fn require_consent() -> Result<(), Failed> {
 struct BuildOptions<'a> {
     allow_jar_downloads: bool,
     skip: &'a [LeftOut],
-    registry_consent: Option<&'a dyn Fn(&RegistryInventory) -> bool>,
+    registry_consent: Option<&'a dyn Fn(&Consent) -> bool>,
     /// The game folder whose worlds a mod switched off for this build must not be lost from:
     /// the instance's ([`guard_worlds`]).
     worlds: Option<&'a Path>,
@@ -1039,43 +1048,74 @@ pub struct AtStake {
     pub base: String,
 }
 
-/// Each project's fit to `sdk`'s build, by mod id, in `projects`' order; the surface and build
-/// data are read only when a mod made for another build asks.
-fn judge_all(
-    projects: &[api::Project<'_>],
+/// What the SDK's tool said of a set of mods: each one's verdict or refusal, by id, and the route the usable ones take.
+#[derive(Default)]
+struct Checks {
+    verdicts: Vec<(String, fit::Verdict)>,
+    refusals: Vec<(String, String)>,
+    route: Option<String>,
+}
+
+/// The mods `ids` of `folder` checked against `sdk`'s build by its tool (`native-check`); the surface and build data are fetched only when a mod made for another build needs them.
+fn check_all(
+    folder: &Path,
+    ids: &[&str],
     sdk: &sdk_cache::Sdk,
     base: &sdk_cache::Base,
-) -> Result<Vec<(String, fit::Verdict)>, sdk_cache::Refusal> {
-    let mut surface: Option<std::rc::Rc<mod_surface::Surface>> = None;
-    let mut catalog: Option<std::rc::Rc<internals::Catalog>> = None;
-    let mut verdicts = Vec::new();
-    for project in projects {
-        let verdict = fit::judge(
-            project,
-            sdk.commit(),
-            &mut || {
-                if surface.is_none() {
-                    surface = Some(std::rc::Rc::new(sdk_cache::surface(sdk, base)?));
-                }
-                Ok(surface.clone().expect("read above"))
-            },
-            &mut || {
-                if catalog.is_none() {
-                    let dir = sdk_cache::build_data(sdk, base)?;
-                    let read = internals::Catalog::read(&dir).map_err(|why| {
-                        sdk_cache::Refusal::Refused {
-                            build: sdk.shown(),
-                            why,
-                        }
-                    })?;
-                    catalog = Some(std::rc::Rc::new(read));
-                }
-                Ok(catalog.clone().expect("read above"))
-            },
-        )?;
-        verdicts.push((project.bundle.manifest.id.clone(), verdict));
+) -> Result<Checks, sdk_cache::Refusal> {
+    if ids.is_empty() {
+        return Ok(Checks::default());
     }
-    Ok(verdicts)
+    let refused = |why: String| sdk_cache::Refusal::Refused {
+        build: sdk.shown(),
+        why,
+    };
+    let program = sdk_cache::tool(sdk, base, &|_| {})?;
+    let mut plan = serde_json::json!({"contract": 2, "mods": folder, "build": sdk.commit()});
+    let checked = loop {
+        let checked = tool::check(&program, &plan).map_err(refused)?;
+        let needs = |what: &str| {
+            checked
+                .mods
+                .iter()
+                .any(|m| m.needs.as_deref() == Some(what))
+        };
+        if needs("surface") && plan.get("surface").is_none() {
+            plan["surface"] = serde_json::json!(sdk_cache::surface_file(sdk, base)?);
+        } else if needs("build-data") && plan.get("build_data").is_none() {
+            plan["build_data"] = serde_json::json!(sdk_cache::build_data(sdk, base)?);
+        } else {
+            break checked;
+        }
+    };
+    checks_from(checked, ids).map_err(refused)
+}
+
+/// What the player reads of a mod the tool refuses (`why`, in the tool's words).
+fn refusal_text(id: &str, why: &str) -> String {
+    trf(
+        "{mod} can't be built here: {why}",
+        &[("mod", id), ("why", why)],
+    )
+}
+
+/// The checks of `ids` in the tool's reply; a reply without a `route` field comes from a tool older than this launcher.
+fn checks_from(checked: tool::Checked, ids: &[&str]) -> Result<Checks, String> {
+    let mut checks = Checks {
+        route: checked.route.ok_or_else(tool::too_old)?,
+        ..Checks::default()
+    };
+    for id in ids {
+        let Some(found) = checked.mods.iter().find(|m| m.id == *id) else {
+            continue;
+        };
+        if let Some(refusal) = &found.refusal {
+            checks.refusals.push((id.to_string(), refusal.clone()));
+        } else if let Some(verdict) = &found.verdict {
+            checks.verdicts.push((id.to_string(), verdict.clone()));
+        }
+    }
+    Ok(checks)
 }
 
 /// A build's refusal of the mod tools, as the player reads it. A refused signature is short on
@@ -1229,8 +1269,8 @@ fn pipeline(
         .cloned()
         .collect();
     let side = match target {
-        Target::Client => sunrise_mod_package::manifest::Side::Client,
-        Target::Server => sunrise_mod_package::manifest::Side::Server,
+        Target::Client => sunrise_launcher_smod::manifest::Side::Client,
+        Target::Server => sunrise_launcher_smod::manifest::Side::Server,
     };
     let declared: Vec<Vec<dependencies::Dependency>> = mods
         .iter()
@@ -1266,10 +1306,10 @@ fn pipeline(
     // an incomplete or reversed Cargo library graph.
     let instance = folder.parent().unwrap_or_else(|| Path::new("."));
     let overrides =
-        dependencies::Overrides::read(&instance.join(sunrise_mod_package::mod_list::DIR))?;
-    let settings = sunrise_mod_package::mod_list::ModList::load(instance);
+        dependencies::Overrides::read(&instance.join(sunrise_launcher_smod::mod_list::DIR))?;
+    let settings = sunrise_launcher_smod::mod_list::ModList::load(instance);
     let content: Vec<_> =
-        sunrise_mod_package::selection::content_packages(instance, &settings.enabled, &[])
+        sunrise_launcher_smod::selection::content_packages(instance, &settings.enabled, &[])
             .collect();
     let requested_ids: std::collections::HashSet<_> = requested
         .iter()
@@ -1295,11 +1335,7 @@ fn pipeline(
     let resolution = dependencies::resolve_links(&inputs)
         .map_err(|error| format!("code link requirements refused: {error}"))?;
     let ordered: Vec<Bundle> = resolution.order.iter().map(|&i| mods[i].clone()).collect();
-    let projects: Vec<_> = mods
-        .iter()
-        .map(api::Project::read)
-        .collect::<Result<_, _>>()
-        .map_err(|error| error.to_string())?;
+    let ids: Vec<&str> = mods.iter().map(|b| b.manifest.id.as_str()).collect();
     for bundle in &ordered {
         if !bundle.manifest.internals.is_empty() {
             let paths = bundle
@@ -1334,11 +1370,16 @@ fn pipeline(
         Some(sdk_cache::index(&sdk_base, &revision, &keys).map_err(refused)?)
     };
     let mut fitted: Vec<String> = Vec::new();
+    let mut route = None;
     if let Some(sdk) = &sdk {
-        progress(Step::Checking(projects.len()));
-        let verdicts = judge_all(&projects, sdk, &sdk_base).map_err(|r| r.to_string())?;
+        progress(Step::Checking(ids.len()));
+        let checks = check_all(&incoming, &ids, sdk, &sdk_base).map_err(|r| r.to_string())?;
+        if let Some((id, why)) = checks.refusals.first() {
+            return Err(refusal_text(id, why).into());
+        }
+        route = Some(checks.route);
         let mut unusable = Vec::new();
-        for (id, verdict) in verdicts {
+        for (id, verdict) in checks.verdicts {
             match verdict {
                 fit::Verdict::MadeFor => {}
                 fit::Verdict::Fits { .. } => fitted.push(id),
@@ -1392,15 +1433,9 @@ fn pipeline(
         }
     }
     if target == Target::Server {
-        let jars: Vec<(&str, Vec<_>)> = mods
-            .iter()
-            .map(|bundle| {
-                let jars = bundle.manifest.jar.iter().map(crate::jars::from_game);
-                Ok((bundle.manifest.id.as_str(), jars.collect::<Result<_, _>>()?))
-            })
-            .collect::<Result<_, String>>()?;
         let jars = sunrise_launcher_smod::manifest::collect_jar_requirements(
-            jars.iter().map(|(id, jars)| (*id, jars.as_slice())),
+            mods.iter()
+                .map(|bundle| (bundle.manifest.id.as_str(), bundle.manifest.jar.as_slice())),
         )
         .map_err(|error| crate::jars::LaunchError::Conflict(error).to_string())?;
         crate::jars::prepare(
@@ -1422,7 +1457,7 @@ fn pipeline(
     let blame = |e: String| -> Failed {
         let failed = fitted.iter().find_map(|id| {
             let bundle = mods.iter().find(|b| &b.manifest.id == id)?;
-            e.contains(&format!("{} failed", compiling_mod(id)))
+            e.contains(&build_log::failed(&compiling_mod(id)))
                 .then(|| LeftOut::new(bundle, isolate::Why::DidNotBuild))
         });
         let Some(left) = failed else {
@@ -1465,9 +1500,6 @@ fn pipeline(
         &requested,
     )?;
     let exists = target.directory(&version).join(".installed").is_file();
-    if let Some(reason) = prebuilt::refusal(&projects) {
-        return Err(reason.to_string().into());
-    }
     // The steps around the mods' compile, timed like each command (`run_checked`), so the log
     // accounts for the whole build.
     let timed = |step: &str, since: std::time::Instant| {
@@ -1490,7 +1522,18 @@ fn pipeline(
             .flatten()
             .map(PathBuf::from);
         let package = match (local, &sdk) {
-            (Some(local), _) => sdk_cache::developer(&revision, target, &local)?,
+            (Some(local), _) => {
+                let program = sdk_cache::developer_tool(true).ok_or_else(|| {
+                        trf(
+                            "A developer base's own SDK needs its own native build tool: build cargo-sunrise-mod from the same checkout and set {variable} to it.",
+                            &[("variable", sdk_cache::DEVELOPER_TOOL)],
+                        )
+                    })?;
+                (
+                    sdk_cache::developer(&program, &revision, target, &local)?,
+                    program,
+                )
+            }
             (None, sdk) => {
                 // A developer install without its own prebuilt game uses its commit's SDK
                 // release, when one is published.
@@ -1503,28 +1546,41 @@ fn pipeline(
                     }
                 };
                 let shown = sdk.shown();
-                sdk_cache::slices(
-                    lease,
-                    sdk,
-                    &sdk_base,
-                    prebuilt::Route::of(&projects),
-                    target,
-                    // Nothing to fetch (every slice kept from an earlier build) is said as such,
-                    // never as a download of nothing.
-                    &|got: sdk_cache::Fetched| {
-                        progress(match got.total {
-                            0 => Step::ToolsKept {
-                                build: shown.clone(),
-                            },
-                            total => Step::Tools {
-                                build: shown.clone(),
-                                done: got.done,
-                                total,
-                            },
-                        })
-                    },
-                )
-                .map_err(refused)?
+                // Nothing to fetch (every slice kept from an earlier build) is said as such,
+                // never as a download of nothing.
+                let fetched = |got: sdk_cache::Fetched| {
+                    progress(match got.total {
+                        0 => Step::ToolsKept {
+                            build: shown.clone(),
+                        },
+                        total => Step::Tools {
+                            build: shown.clone(),
+                            done: got.done,
+                            total,
+                        },
+                    })
+                };
+                let program = sdk_cache::tool(sdk, &sdk_base, &fetched).map_err(refused)?;
+                // A developer base using its commit's SDK release asks its route here: no fit was checked.
+                let route = match route.clone() {
+                    Some(route) => route,
+                    None => {
+                        let checks = check_all(&incoming, &ids, sdk, &sdk_base).map_err(refused)?;
+                        if let Some((id, why)) = checks.refusals.first() {
+                            return Err(refusal_text(id, why).into());
+                        }
+                        checks.route
+                    }
+                }
+                .ok_or_else(|| {
+                    trf(
+                        "No native mod here can be built on {build}.",
+                        &[("build", &sdk.shown())],
+                    )
+                })?;
+                let slices = sdk_cache::slices(lease, sdk, &sdk_base, &route, target, &fetched)
+                    .map_err(refused)?;
+                (slices, program)
             }
         };
         Some(package)
@@ -1554,8 +1610,11 @@ fn pipeline(
     };
     // The record carries each declaration's hash as the build checked it: an absent one from
     // the pinned catalog (`internals::Catalog::pinned`).
-    let about = |route: &str, catalog: &internals::Catalog| {
+    let about = |route: &str,
+                 internals: &std::collections::BTreeMap<String, serde_json::Value>,
+                 libraries: &serde_json::Value| {
         serde_json::json!({
+            "libraries": libraries,
             "base": origin,
             "sunrise": revision,
             "horizon_mixins": mixins,
@@ -1571,12 +1630,11 @@ fn pipeline(
             "rust_target": platform.target,
             "secs": started.elapsed().as_secs(),
             "mods": requested.iter().filter(|m| !left_out.iter().any(|l| l.id == m.manifest.id)).map(|m| {
-                let pinned = catalog.pinned(&m.manifest);
                 serde_json::json!({
                     "id": m.manifest.id,
                     "version": m.manifest.version,
                     "sha256": digests.get(&m.manifest.id).cloned().flatten(),
-                    "internals": pinned.internals,
+                    "internals": internals.get(&m.manifest.id).cloned().unwrap_or_else(|| serde_json::json!([])),
                 })
             }).collect::<Vec<_>>(),
         })
@@ -1587,28 +1645,33 @@ fn pipeline(
         Target::Client => rust_toolchain::linker(),
         Target::Server => rust_toolchain::linker_server(),
     };
-    if let Some(game) = &prebuilt {
+    if let Some((game, program)) = &prebuilt {
         let checking = std::time::Instant::now();
         linker()?;
         let rust = rust_toolchain::install(|f| progress(Step::Rust(f)))?;
         timed("Checking the Rust toolchain", checking)?;
         progress(Step::PrebuiltMods);
         let compiling = std::time::Instant::now();
-        let route = prebuilt::Route::of(&projects);
-        append_log(&trf(
-            "Native mods route: {route}.",
-            &[("route", route.name())],
-        ))
-        .map_err(blame)?;
-        let (binary, libraries) = prebuilt::compile(
+        // The tool compiles every mod in the folder it's given: exactly the staged copies of the ones this build keeps.
+        let compiled = root().join("mods.compile");
+        let _ = fs::remove_dir_all(&compiled);
+        for bundle in &mods {
+            copy_bundle(bundle, &compiled.join(&bundle.manifest.id))?;
+        }
+        let built = tool::build(
             &rust,
-            game,
-            &root().join("prebuilt-build"),
-            folder,
-            route,
-            &projects,
-            &declared,
-            &resolution,
+            program,
+            &tool::Plan {
+                work: &root(),
+                package: tool::Package {
+                    runtime: &game.runtime,
+                    api: &game.api,
+                    engine: &game.engine,
+                },
+                mods: &compiled,
+                server: target == Target::Server,
+                mixins_from_source: MIXINS_FROM_SOURCE.load(std::sync::atomic::Ordering::Relaxed),
+            },
             options.registry_consent,
             &|id, done, total| {
                 progress(Step::Mod {
@@ -1618,6 +1681,12 @@ fn pipeline(
                 })
             },
         )
+        .map_err(|failure| blame(blamed_text(failure)))?;
+        let _ = fs::remove_dir_all(&compiled);
+        append_log(&trf(
+            "Native mods route: {route}.",
+            &[("route", &built.route)],
+        ))
         .map_err(blame)?;
         // The whole step; the tool's own build and the function replacement have their lines.
         append_log(&trf(
@@ -1635,9 +1704,9 @@ fn pipeline(
             base,
             &version,
             target,
-            &binary,
-            &libraries,
-            &about(route.name(), &internals::Catalog::read(&game.api)?),
+            &built.binary,
+            &built.libraries,
+            &about(&built.route, &built.internals, &built.records),
             &ordered,
         )?;
         timed("Installing the build", installing)?;
@@ -1700,6 +1769,8 @@ fn isolated(
                 }
                 last = error;
             }
+            // Nothing was there to build: said as such, not as an empty failure.
+            Err(Failed::Nothing) if skip.is_empty() => return Err(Failed::Nothing),
             Err(Failed::Nothing) => return Err(said(&skip, last)),
             Err(Failed::NoConsent) => return Err(Failed::NoConsent),
             Err(Failed::Worlds(stake)) => return Err(Failed::Worlds(stake)),
@@ -1740,10 +1811,10 @@ pub fn build(
     profile: Option<Profile>,
     back_up: bool,
     progress: impl Fn(Step),
-    registry_consent: impl Fn(&RegistryInventory) -> bool,
+    registry_consent: impl Fn(&Consent) -> bool,
 ) -> Result<String, Failed> {
     require_consent()?;
-    sunrise_native_build::clear_cancel();
+    build_log::clear_cancel();
     if let Some(error) = backend::native_mod_architecture_error() {
         return Err(Failed::Other(error));
     }
@@ -1828,10 +1899,10 @@ pub fn build_server(
     profile: Option<Profile>,
     allow_jar_downloads: bool,
     progress: impl Fn(Step),
-    registry_consent: impl Fn(&RegistryInventory) -> bool,
+    registry_consent: impl Fn(&Consent) -> bool,
 ) -> Result<PathBuf, Failed> {
     require_consent()?;
-    sunrise_native_build::clear_cancel();
+    build_log::clear_cancel();
     logged(|cache| {
         if output.symlink_metadata().is_ok() {
             return Err(trf(
@@ -1944,7 +2015,7 @@ fn copy_runtime(from: &Path, to: &Path) -> std::io::Result<()> {
         if entry.file_type()?.is_dir() {
             copy_runtime(&entry.path(), &destination)?;
         } else {
-            sunrise_prepare::clone_or_copy(&entry.path(), &destination)?;
+            crate::preparer::clone_or_copy(&entry.path(), &destination)?;
             fs::set_permissions(&destination, entry.metadata()?.permissions())?;
         }
     }
@@ -1953,7 +2024,6 @@ fn copy_runtime(from: &Path, to: &Path) -> std::io::Result<()> {
 
 mod installation;
 use installation::install;
-use sunrise_native_build::library_record;
 
 /// Copies version folder `from` into `to` but for what a new build of `target` makes its own
 /// ([`carried_over`]), cloned where the disk can. Also an imported build's start (`build_import`).
@@ -1973,7 +2043,7 @@ pub(crate) fn copy_base(
             backend::copy_dir(&entry.path(), &to)
         } else {
             // A clone is a new file: sunrise-ctl and sunrise-server keep their permissions.
-            sunrise_prepare::clone_or_copy(&entry.path(), &to)
+            crate::preparer::clone_or_copy(&entry.path(), &to)
                 .and_then(|()| fs::set_permissions(&to, entry.metadata()?.permissions()))
         };
         copied.map_err(|e| format!("Could not copy {}: {e}", entry.path().display()))?;
@@ -1990,7 +2060,7 @@ fn carried_over(name: &std::ffi::OsStr, target: Target) -> bool {
         "Sunrise.app",
         "native-mods.json",
         "native-data",
-        sunrise_mod_package::mod_list::NATIVE_DIR,
+        sunrise_launcher_smod::mod_list::NATIVE_DIR,
     ]
     .iter()
     .map(|s| s.to_string())
@@ -2007,10 +2077,7 @@ fn carried_over(name: &std::ffi::OsStr, target: Target) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use sunrise_native_build::{apply, stage_mixins, sync};
-
     use super::*;
-    use crate::rust_toolchain::Toolchain;
     use std::io::Write;
     use std::process::{Command, Stdio};
 
@@ -2285,6 +2352,13 @@ mod tests {
     }
 
     #[test]
+    fn a_folder_with_nothing_native_says_so() {
+        let _guard = scratch_state();
+        let result = isolated(|_| Err(Failed::Nothing), &|_| {});
+        assert!(matches!(result, Err(Failed::Nothing)));
+    }
+
+    #[test]
     fn isolation_bounds_recompiles_and_keeps_the_failure() {
         let _guard = scratch_state();
         let mut attempts = 0;
@@ -2416,7 +2490,6 @@ mod tests {
     /// under the lib tests' scratch home, never a real install (no env changes: they race). A
     /// home the developer set with `SUNRISE_LAUNCHER_HOME` / `SUNRISE_HOME` is theirs to choose.
     pub(super) fn scratch_state() -> std::sync::MutexGuard<'static, ()> {
-        install_host();
         let scratch = crate::data_location::test_home();
         let set = |name| std::env::var_os(name).is_some();
         if !set("SUNRISE_LAUNCHER_HOME") {
@@ -2439,24 +2512,10 @@ mod tests {
     }
 
     pub(super) fn dir(name: &str) -> PathBuf {
-        install_host();
         let d = std::env::temp_dir().join(format!("sunrise-native-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
         d
-    }
-
-    /// The launcher's toolchain in `dir` for every host it ships one for: the build commands are
-    /// checked for each host on whichever machine runs the tests, not only for its own.
-    pub(super) fn toolchains(dir: impl Into<PathBuf>) -> Vec<Toolchain> {
-        let dir = dir.into();
-        rust_toolchain::hosts()
-            .iter()
-            .map(|host| Toolchain {
-                dir: dir.clone(),
-                host,
-            })
-            .collect()
     }
 
     fn project_manifest(id: &str, version: &str, sunrise: &str, mixins: &str) -> String {
@@ -2478,44 +2537,6 @@ mod tests {
         )
         .unwrap();
         fs::write(project.join("src/lib.rs"), helper).unwrap();
-    }
-
-    #[test]
-    fn horizon_mixins_finds_the_launchers_cargo() {
-        for rust in toolchains("/rust/1.99.1-x") {
-            horizon_mixins_finds(&rust);
-        }
-    }
-
-    fn horizon_mixins_finds(rust: &Toolchain) {
-        let cmd = apply(
-            rust,
-            Path::new("/tools/horizon-mixins"),
-            Path::new("/src"),
-            Path::new("/mods"),
-            Path::new("/out"),
-        );
-        let path = cmd
-            .get_envs()
-            .find(|(k, _)| *k == "PATH")
-            .and_then(|(_, v)| v)
-            .unwrap();
-        assert_eq!(
-            std::env::split_paths(path).next(),
-            Some(rust.dir.join("bin"))
-        );
-        assert_eq!(
-            cmd.get_args().collect::<Vec<_>>(),
-            [
-                "apply",
-                "--workspace",
-                "/src",
-                "--mods",
-                "/mods",
-                "--out",
-                "/out"
-            ]
-        );
     }
 
     #[test]
@@ -2660,27 +2681,6 @@ mod tests {
             fs::read(found[0].dir.join("src/lib.rs")).unwrap(),
             b"pub fn marker() {}\n"
         );
-        let injected = d.join("injected-project");
-        write_native(&injected, "injected", A, B);
-        fs::write(
-            injected.join(NATIVE_MANIFEST),
-            project_manifest("injected", "0.3.0", A, B)
-                + "[[native.module]]\nid='marker'\nfile='crates/sunrise-client/src/game.rs'\nname='marker'\nsource='src/lib.rs'\n",
-        )
-        .unwrap();
-        let mut mods = found.clone();
-        mods.push(bundle_in(&injected).unwrap().unwrap());
-        let staged = d.join("tool-input");
-        let tool_mods = stage_mixins(&mods, &staged).unwrap();
-        assert_eq!(tool_mods.len(), 1);
-        assert_eq!(tool_mods[0].manifest.id, "injected");
-        assert!(!staged.join("veinminer").exists());
-        assert!(staged.join("injected/horizon-mixin.toml").is_file());
-        assert_eq!(
-            fs::read(staged.join("injected/src/lib.rs")).unwrap(),
-            b"pub fn marker() {}\n"
-        );
-        assert!(!staged.join("injected/native").exists());
         assert_eq!(
             (
                 found[0].manifest.id.as_str(),
@@ -2819,36 +2819,6 @@ mod tests {
             assert!(!seen.contains(&now), "{file} is in the key");
             seen.push(now);
         }
-    }
-
-    #[test]
-    fn cached_mixin_output_isolated_from_next_build() {
-        let d = dir("injection-cache-stage");
-        let fresh = d.join("fresh");
-        let snapshot = d.join("snapshot");
-        let stage = d.join("stage");
-        let patched = Path::new("crates/sunrise-client/src/game.rs");
-        fs::create_dir_all(fresh.join(patched).parent().unwrap()).unwrap();
-        fs::write(fresh.join(patched), "patched by mixins").unwrap();
-        sync(&fresh, &snapshot).unwrap();
-        sync(&snapshot, &stage).unwrap();
-        assert_eq!(
-            fs::read_to_string(stage.join(patched)).unwrap(),
-            "patched by mixins"
-        );
-
-        // A later no-mixin build stages the clean source and removes stale cached files.
-        let source = d.join("source");
-        fs::create_dir_all(source.join(patched).parent().unwrap()).unwrap();
-        fs::write(source.join(patched), "clean source").unwrap();
-        fs::write(stage.join("stale.rs"), "stale").unwrap();
-        sync(&source, &stage).unwrap();
-        assert_eq!(
-            fs::read_to_string(stage.join(patched)).unwrap(),
-            "clean source"
-        );
-        assert!(!stage.join("stale.rs").exists());
-        fs::remove_dir_all(d).unwrap();
     }
 
     #[test]
@@ -3076,7 +3046,7 @@ mod tests {
         )
         .unwrap();
         fs::write(source.join(Target::Server.binary()), b"unmodded").unwrap();
-        let native_dir = sunrise_mod_package::mod_list::NATIVE_DIR;
+        let native_dir = sunrise_launcher_smod::mod_list::NATIVE_DIR;
         fs::create_dir_all(source.join(native_dir).join("stale")).unwrap();
         eprintln!("NATIVE_SERVER_EXPORT_STEP=prepare_package");
         let project = dir("server-runtime-project");
@@ -3158,19 +3128,28 @@ mod tests {
         assert!(!package.join("jars").exists());
         assert!(!output.join(native_dir).join("stale").exists());
         eprintln!("NATIVE_SERVER_EXPORT_STEP=load_runtime");
-        let runtime = sunrise_mod_package::runtime::Runtime::load(
+        let runtime = sunrise_launcher_smod::packages::adjacent_manifests(
             &output.join(Target::Server.binary()),
-            &[mod_vocab::__private::native::BuiltMod {
-                id: "exported",
-                version: "0.1.0",
-                side: mod_vocab::Side::Client,
-            }],
         )
         .unwrap();
         eprintln!("NATIVE_SERVER_EXPORT_STEP=verify_runtime");
-        assert_eq!(runtime.packages()[0].path, package);
+        let [found] = runtime.as_slice() else {
+            panic!("{runtime:?}")
+        };
+        assert_eq!(found.path, package);
+        assert_eq!(
+            (
+                found.manifest.id.as_str(),
+                found.manifest.version.as_str(),
+                found.manifest.side
+            ),
+            (
+                "exported",
+                "0.1.0",
+                sunrise_launcher_smod::manifest::Side::Client
+            )
+        );
         eprintln!("NATIVE_SERVER_EXPORT_STEP=cleanup");
-        drop(runtime);
         let _ = fs::remove_dir_all(source);
         println!("NATIVE_SERVER_EXPORT_COMPLETE");
     }
@@ -3258,6 +3237,85 @@ mod tests {
     }
 
     #[test]
+    fn a_reply_without_a_route_field_is_a_tool_too_old_and_a_null_route_keeps_every_answer() {
+        let reply = |route: &str, mods: &str| -> tool::Checked {
+            serde_json::from_str(&format!(r#"{{"contract":2,{route}"mods":[{mods}]}}"#)).unwrap()
+        };
+        let refused = r#"{"id":"scripted","refusal":"build scripts aren't allowed"}"#;
+        let unfit = r#"{"id":"old","verdict":{"kind":"exact","made_for":"b","why":"internals"}}"#;
+        let fine = r#"{"id":"fine","verdict":{"kind":"made-for"}}"#;
+        let older = checks_from(reply("", fine), &["fine"]).err().unwrap();
+        assert!(older.contains("too old"), "{older}");
+        let both = checks_from(
+            reply(r#""route":"prebuilt-api","#, &format!("{refused},{fine}")),
+            &["scripted", "fine"],
+        )
+        .unwrap();
+        assert_eq!(both.route.as_deref(), Some("prebuilt-api"));
+        assert!(matches!(&both.verdicts[..], [(id, fit::Verdict::MadeFor)] if id == "fine"));
+        assert_eq!(
+            both.refusals,
+            [(
+                "scripted".to_owned(),
+                "build scripts aren't allowed".to_owned()
+            )]
+        );
+        // Nothing usable: the tool sends `"route": null`, and every verdict and refusal still counts.
+        let all_refused = checks_from(reply(r#""route":null,"#, refused), &["scripted"]).unwrap();
+        assert_eq!((all_refused.route, all_refused.refusals.len()), (None, 1));
+        let all_unfit = checks_from(reply(r#""route":null,"#, unfit), &["old"]).unwrap();
+        assert!(all_unfit.route.is_none());
+        assert!(
+            matches!(&all_unfit.verdicts[..], [(id, fit::Verdict::Exact { .. })] if id == "old")
+        );
+        assert!(refusal_text("scripted", "no").contains("scripted"));
+    }
+
+    #[test]
+    fn an_update_leaves_out_unfit_mods_and_their_dependents_and_stops_on_a_refused_one() {
+        let root = dir("update-left-out");
+        let bundle = |id: &str, needs: &str| {
+            let folder = root.join(id);
+            write_bundle(&folder, id, "");
+            let manifest = folder.join(NATIVE_MANIFEST);
+            let mut text = fs::read_to_string(&manifest).unwrap();
+            if !needs.is_empty() {
+                text += &format!("[dependencies]\n{needs} = \"*\"\n");
+            }
+            fs::write(&manifest, text).unwrap();
+            bundle_in(&folder).unwrap().unwrap()
+        };
+        let found = [
+            bundle("fine", ""),
+            bundle("old", ""),
+            bundle("addon", "old"),
+            bundle("scripted", ""),
+        ];
+        let exact = fit::Verdict::Exact {
+            made_for: "b".into(),
+            why: "internals".into(),
+        };
+        let mut checks = Checks {
+            verdicts: vec![
+                ("fine".into(), fit::Verdict::MadeFor),
+                ("old".into(), exact),
+            ],
+            refusals: Vec::new(),
+            route: Some("prebuilt-api".into()),
+        };
+        let left = planning::update_left_out(&found, &checks).unwrap();
+        let ids: Vec<&str> = left.iter().map(|l| l.id.as_str()).collect();
+        assert_eq!(ids, ["old", "addon"]);
+        checks.refusals = vec![("scripted".into(), "build scripts aren't allowed".into())];
+        let stopped = planning::update_left_out(&found, &checks).err().unwrap();
+        assert!(
+            stopped.contains("scripted") && stopped.ends_with("build scripts aren't allowed"),
+            "{stopped}"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn folder_planning_reuses_the_build_snapshot_without_restaging_packages() {
         let _guard = scratch_state();
         let original = backend::Settings::load();
@@ -3274,11 +3332,12 @@ mod tests {
         let sentinel = preview.join("snapshot-sentinel");
         fs::write(&sentinel, b"retained").unwrap();
         let lease = crate::native_cache::Cache::acquire(&backend::build_dir()).unwrap();
-        let plan = planning::classify(&folder, None, &lease).unwrap();
-        assert_eq!(plan.mods.len(), 1);
-        assert_eq!(plan.mods[0].0, "snapshot");
+        // Its refusal is the SDK tool's to say (`native-check`); without an installed base none is asked.
+        let routes = planning::classify(&folder, None, &lease).unwrap();
         assert!(
-            matches!(&plan.mods[0].1, Route::Invalid { reason } if reason.contains("E_GAME_DEPENDENCY"))
+            matches!(&routes.mods[..], [(id, Route::Unchecked { reason })]
+                if id == "snapshot" && reason.contains("Install Sunrise first")),
+            "{routes:?}"
         );
         assert_eq!(fs::read(&sentinel).unwrap(), b"retained");
         fs::remove_file(sentinel).unwrap();
@@ -3458,18 +3517,45 @@ mod tests {
         let game = failure("Compiling the game", "exit status: 101", &[], &[]);
         assert_eq!(compile_failed_mod(&game, &ids), None);
     }
+
+    #[test]
+    fn the_tools_blamed_mod_reads_in_the_launchers_words_whatever_its_text() {
+        let ids = vec!["fast-ore".to_string(), "maps".to_string()];
+        let blamed = |kind| tool::Failure {
+            error: "a message in the tool's English".into(),
+            blame: Some(tool::Blame {
+                mod_id: "maps".into(),
+                kind,
+            }),
+        };
+        let compiled = blamed_text(blamed(tool::BlameKind::Compile));
+        assert_eq!(compile_failed_mod(&compiled, &ids), Some(&ids[1]));
+        assert!(compiled.ends_with("a message in the tool's English"));
+        let refused = blamed_text(blamed(tool::BlameKind::Features));
+        assert!(
+            matches!(refused_mod(&refused, &ids), Some((id, Refusal::Features { .. })) if id == "maps")
+        );
+        let none = blamed_text(tool::Failure::from("no mod named".to_string()));
+        assert_eq!(
+            (
+                compile_failed_mod(&none, &ids),
+                refused_mod(&none, &ids).is_none()
+            ),
+            (None, true)
+        );
+    }
 }
 
 #[cfg(test)]
 mod registry_binary_tests {
     #[test]
     fn source_preparation_lookup_requires_exact_build_and_target() {
-        let index = sunrise_mod_package::index::Index::parse(include_str!(
+        let index = sunrise_launcher_smod::index::Index::parse(include_str!(
             "../crates/smod/tests/index/index-v1.json"
         ))
         .unwrap();
         let mut version = index.project("coords_hud").unwrap().versions[0].clone();
-        version.native_binaries = vec![sunrise_mod_package::index::NativeBinary {
+        version.native_binaries = vec![sunrise_launcher_smod::index::NativeBinary {
             build: "exact-build".into(),
             target: "aarch64-apple-darwin".into(),
             file: version.file.clone(),

@@ -15,6 +15,7 @@ SAME_BYTES = (
     ("crates/sunrise-release-sign/tests/signed", "release-verify/tests/signed"),
     ("crates/sunrise-mod-package/tests/index", "smod/tests/index"),
     ("crates/sunrise-theme/tokens.css", "theme/tokens.css"),
+    ("tools/ci/rust-version", "../rust-version"),
     ("packaging/icons/hicolor/16x16/apps/sunrise.png", "../assets/icons/hicolor/16x16/apps/sunrise.png"),
     ("packaging/icons/hicolor/24x24/apps/sunrise.png", "../assets/icons/hicolor/24x24/apps/sunrise.png"),
     ("packaging/icons/hicolor/32x32/apps/sunrise.png", "../assets/icons/hicolor/32x32/apps/sunrise.png"),
@@ -30,6 +31,11 @@ SAME_BYTES = (
     ("docs/media/village.webp", "../assets/media/village.webp"),
     ("docs/media/underwater.webp", "../assets/media/underwater.webp"),
     ("docs/media/nether.webp", "../assets/media/nether.webp"),
+    ("crates/sunrise-mod-package/src/sdk/fixture.tar.xz", "sdk/src/sdk/fixture.tar.xz"),
+    ("crates/sunrise-mod-package/src/sdk/bomb.tar.xz", "sdk/src/sdk/bomb.tar.xz"),
+    ("crates/sunrise-mod-package/src/sdk/link.tar.xz", "sdk/src/sdk/link.tar.xz"),
+    ("crates/sunrise-mod-package/src/sdk/escape.tar.xz", "sdk/src/sdk/escape.tar.xz"),
+    ("crates/sunrise-mod-package/src/sdk/inputs.json", "sdk/src/sdk/inputs.json"),
     ("LICENSE", "../assets/LICENSE"),
     ("LICENSES/MIT-Horizon.txt", "../assets/LICENSES/MIT-Horizon.txt"),
     ("crates/sunrise-prepare/tests/support/java_probe.rs", "../tests/support/java_probe.rs"),
@@ -59,6 +65,9 @@ SAME_CODE = (
             }
         }"""),
     )),
+    ("crates/sunrise-mod-package/src/modpack.rs", "launcher/crates/smod/src/modpack.rs", (
+        ('#[cfg(feature = "index")] impl PackMod', "impl PackMod"),
+    )),
 )
 
 
@@ -79,6 +88,24 @@ MIRRORED = (
      "052665a32cf9980ffcd1d1cb51f72a918e6613d89fb2097562afb306ca4f4fe2", "launcher/src/browser/java.rs jar_title"),
     ("crates/sunrise-port-pack/src/jar.rs", "manifest_value",
      "8eba4a800351645479e1f2fc79c727bf2e3aee7bdcc97b27a3fa249791a2b33e", "launcher/src/browser/java.rs jar_title"),
+    ("crates/sunrise-native-build/src/lib.rs", "bundles",
+     "ce3f41468a62dd8889427d1a5ad7493a0d6d491bc5a5a1e7d69a52a833b2dd30", "launcher/src/native_mods/bundle.rs bundles"),
+    ("crates/sunrise-native-build/src/lib.rs", "scan_bundles",
+     "0186b6a99c78d6c3296063bc8d4c31134c035e787d25a146d7dc1839f20ae974",
+     "launcher/src/native_mods/bundle.rs scan_bundles"),
+    ("crates/sunrise-native-build/src/lib.rs", "log_warning",
+     "6e43ac4162a8696cf5dfb6acdb206f1b3446186c49fa9105c168f4a5418bf7ae",
+     "launcher/src/native_mods/build_log.rs log_warning"),
+    ("crates/sunrise-native-build/src/lib.rs", "failure",
+     "ce65c921695767d21d8c3047d36b48b58d843a78ac4b56d2f77117c68a016430", "launcher/src/native_mods/build_log.rs failure"),
+    ("crates/sunrise-native-build/src/lib.rs", "unpack_archive",
+     "08b67ddd8289e49ed1ce5c81ff77ee25bfca94a9d6cbf0b85df68a28e203eb0c", "launcher/src/github_mods.rs unpack_archive"),
+    ("crates/sunrise-native-build/src/package.rs", "read",
+     "8c016ff10236333a2e9fd2de5eabda8f26d4353088a290d5e5250d4dbb17148a",
+     "launcher/src/native_mods/bundle/package.rs read"),
+    ("crates/sunrise-native-build/src/package.rs", "copy_files",
+     "ea02d6cc0ec18a4fe33804e4ee67bd2fe49e6e6d410b30fd56872f9e0c2e317a",
+     "launcher/src/native_mods/bundle/package.rs copy_files"),
 )
 
 
@@ -114,6 +141,105 @@ def code(text: str) -> str:
     text = re.sub(r"^\s*//!.*$", "", text, flags=re.M)
     text = re.sub(r"^\s*(pub(\(crate\))? )?use [^;]*;", "", text, flags=re.M | re.S)
     return re.sub(r",([)\]}])", r"\1", re.sub(r"\s+", "", text))
+
+
+# (the game's file, the launcher's copy, the functions copied whole): compared as code, whole-line comments aside.
+SAME_FUNCTIONS = (
+    ("crates/sunrise-prepare/src/java.rs", "launcher/src/jdk.rs", (
+        "command", "executable", "real_path", "without_verbatim", "path_homes", "tool_major", "jdk_parents",
+        "installed_jdks", "find", "find_runtime", "find_tools", "home",
+    )),
+    ("crates/sunrise-mod-package/src/sdk.rs", "launcher/crates/sdk/src/lib.rs", (
+        "route", "to_json", "build_of", "schema", "read", "asset", "route_assets", "verify", "unpack", "lock",
+        "no_locks", "rename_retrying", "busy", "extract", "untar", "entry_target",
+    )),
+    ("crates/sunrise-native-build/src/lib.rs", "launcher/src/native_mods/bundle.rs", (
+        "bundle_in", "is_revision", "bundle_files", "digest", "source_digest", "copy_bundle",
+    )),
+    ("crates/sunrise-native-build/src/lib.rs", "launcher/src/native_mods/build_log.rs", (
+        "log_path", "clear_log", "append_log", "check_cancelled", "cancel", "clear_cancel", "mod_id_from_file",
+        "diagnostic",
+    )),
+    ("crates/sunrise-native-build/src/prebuilt.rs", "launcher/src/native_mods/build_log.rs", ("compiling",)),
+    ("crates/sunrise-native-build/src/prebuilt.rs", "launcher/src/native_mods/sdk_cache.rs", ("at",)),
+    ("crates/sunrise-native-build/src/lib.rs", "launcher/src/github_mods.rs", ("unpack_source",)),
+    ("crates/sunrise-native-build/src/rust.rs", "launcher/src/rust_toolchain.rs", ("scrubbed", "low_priority")),
+    ("crates/sunrise-mod-surface/src/uses.rs", "launcher/src/native_mods/uses.rs", ("item",)),
+    ("crates/sunrise-mod-surface/src/lib.rs", "launcher/src/native_mods/uses.rs", ("leaf",)),
+)
+
+# (the game's file, the launcher's copy, its edits, the types, impls and constants copied whole, by their head).
+SAME_ITEMS = (
+    ("crates/sunrise-mod-package/src/sdk.rs", "launcher/crates/sdk/src/lib.rs", (
+        ('#[cfg(feature = "prebuilt")]', ""),
+    ), (
+        "pub const INDEX", "pub const SCHEMA", "pub struct Index", "pub struct Build", "pub struct Toolchain",
+        "pub struct Surface", "pub struct ChangeNote", "pub enum Verdict", "pub struct Mixins", "pub struct Asset",
+        "pub enum Kind", "impl Kind", "pub enum Codec", "pub enum Side", "impl Asset", "pub struct Inputs",
+        "pub struct Route", "pub enum Refusal", "impl fmt::Display for Refusal", "impl std::error::Error for Refusal",
+        "struct Written", "struct WrittenAsset", "pub const DICTIONARY_LIMIT", "pub const EXTENSION_LIMIT",
+        "pub const LOCK_SUFFIX", "pub const PARTIAL_SUFFIX", "const PAX_KEYS", "struct Partial", "impl Partial",
+        "impl Drop for Partial",
+    )),
+    ("crates/sunrise-native-build/src/lib.rs", "launcher/src/native_mods/bundle.rs", (
+        ("sunrise_mod_package::", "sunrise_launcher_smod::"),
+        ("""pub fn needs_mixins(&self) -> bool {
+        !self.native().mixin.is_empty()
+            || !self.native().module.is_empty()
+            || !self.native().bridge.is_empty()
+            || !self.native().state.is_empty()
+    }""", ""),
+    ), ("pub enum Target", "impl Target", "pub const NATIVE_MANIFEST", "pub struct Bundle", "impl Bundle")),
+    ("crates/sunrise-native-build/src/lib.rs", "launcher/src/native_mods/build_log.rs", (), (
+        "pub const CANCELLED", "static CANCEL",
+    )),
+    ("crates/sunrise-native-build/src/prebuilt.rs", "launcher/src/native_mods/build_log.rs", (), (
+        "pub enum Refusal", "impl std::fmt::Display for Refusal", "impl Refusal",
+    )),
+    ("crates/sunrise-native-build/src/package.rs", "launcher/src/native_mods/bundle/package.rs", (
+        ("sunrise_mod_package::", "sunrise_launcher_smod::"), ("crate::host::trf", "trf"),
+    ), ("fn checked_files", "pub fn files", "pub fn copy", "pub fn checked_bundles")),
+    ("crates/sunrise-native-build/src/registry_inventory.rs", "launcher/src/native_mods/tool.rs", (
+        ("crate::host::", ""),
+    ), ("pub fn label", "pub fn detail")),
+    ("crates/sunrise-native-build/src/rust.rs", "launcher/src/rust_toolchain.rs", (), (
+        "pub const WINDOWS_X64_TARGET", "pub const SCRUBBED", "const IOPRIO_WHO_PROCESS", "const LOW_IO",
+    )),
+    ("crates/sunrise-mod-surface/src/uses.rs", "launcher/src/native_mods/uses.rs", (), ("pub enum ItemKind",)),
+)
+
+
+def item(path: str, head: str) -> str:
+    """The text of the item starting `head` in the Rust file at `path`, from its attributes to its end."""
+    source = (ROOT / path).read_text(encoding="utf-8")
+    found = re.search(rf"^[ \t]*{re.escape(head)}\b", source, re.M)
+    if not found:
+        raise AssertionError(f"{path} has no {head}")
+    start = found.start()
+    while (above := re.search(r"^[ \t]*(#\[.*\]|//.*)\n\Z", source[:start], re.M)) is not None:
+        start = above.start()
+    depth, at = 0, found.end()
+    while at < len(source):
+        rest = source[at:]
+        if rest.startswith("//"):
+            at = source.find("\n", at)
+        elif rest.startswith('"'):
+            at = re.compile(r'"(\\.|[^"\\])*"', re.S).match(source, at).end() - 1
+        elif rest[0] in "{[(":
+            depth += 1
+        elif rest[0] in "}])":
+            depth -= 1
+            if depth == 0 and rest[0] == "}":
+                return source[start:at + 1]
+        elif rest[0] == ";" and depth == 0:
+            return source[start:at + 1]
+        at += 1
+    raise AssertionError(f"{path}: {head} never closes")
+
+
+def uncommented(text: str) -> str:
+    """`text` without its whole-line comments: a copy may say less than the game's comments."""
+    return re.sub(r"^\s*//.*$", "", text, flags=re.M)
 
 
 def files(path: Path) -> dict:
@@ -179,13 +305,37 @@ class LauncherCopies(unittest.TestCase):
                 digest = hashlib.sha256(code(function(path, name)).encode()).hexdigest()
                 self.assertEqual(digest, pinned, f"{path}'s {name} changed: change {mirror} to match, then pin {digest}")
 
+    def test_functions_copied_whole_are_the_games(self):
+        for game, copy, names in SAME_FUNCTIONS:
+            for name in names:
+                with self.subTest(function=name):
+                    self.assertEqual(code(uncommented(function(copy, name))), code(uncommented(function(game, name))),
+                                     f"{copy}'s {name} differs from {game}'s: copy the change")
+
+    def test_items_copied_whole_are_the_games(self):
+        for game, copy, edits, heads in SAME_ITEMS:
+            for head in heads:
+                with self.subTest(item=head):
+                    original = code(uncommented(item(game, head)))
+                    for old, new in edits:
+                        original = original.replace(code(old), code(new))
+                    self.assertEqual(code(uncommented(item(copy, head))), original,
+                                     f"{copy}'s {head} differs from {game}'s: copy the change")
+
     def test_format_constants_match_the_games(self):
         package_format = int((ROOT / "crates/sunrise-mod-package/src/sdk/package-format").read_text().strip())
         self.assertEqual(constant("launcher/crates/smod/src/index/native.rs", "PACKAGE_FORMAT"), package_format)
+        self.assertEqual(constant("launcher/crates/sdk/src/lib.rs", "PACKAGE_FORMAT"), package_format)
         self.assertEqual(constant("launcher/crates/smod/src/manifest.rs", "USES_FILE"),
                          constant("crates/sunrise-mod-surface/src/uses.rs", "USES_FILE"))
         self.assertEqual(constant("launcher/crates/smod/src/manifest.rs", "MAX_USES"),
                          constant("crates/sunrise-mod-surface/src/uses.rs", "MAX_USES_BYTES"))
+        self.assertEqual(constant("launcher/src/preparer.rs", "DATA_FILE"),
+                         constant("crates/sunrise-core/src/prepared_files.rs", "FILE_NAME"))
+        self.assertEqual(constant("launcher/src/native_mods/bundle.rs", "MIXINS_REV"),
+                         constant("crates/sunrise-mod-package/src/mixins_tool.rs", "REV"))
+        self.assertEqual(constant("launcher/src/backend.rs", "PINNED_GAME"),
+                         constant("crates/sunrise-core/src/version.rs", "VERSION_ID"))
 
     def test_a_drifted_copy_is_caught(self):
         self.assertEqual(code("//! Doc.\nuse a::{b,\n c};\nfn f() { g( 1 ) }\n"), "fnf(){g(1)}")
@@ -195,6 +345,7 @@ class LauncherCopies(unittest.TestCase):
         self.assertEqual(value('"uses.json"'), "uses.json")
         with self.assertRaises(ValueError):
             value("mod_surface::uses::MAX_USES_BYTES as u64")
+        self.assertEqual(code(uncommented("fn f() {\n    // Why.\n    g(1)\n}")), "fn f(){g(1)}".replace(" ", ""))
 
 
 if __name__ == "__main__":

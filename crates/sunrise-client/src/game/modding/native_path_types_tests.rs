@@ -137,7 +137,17 @@ impl BlockPart for ChestReader {
         let outside_y = level.min_y() + level.height();
         assert!(level.block_entity([3, outside_y, 1]).is_none());
         assert!(level.block_entity([3, 400, 1]).is_none());
-        (items == 1).then_some(PathType::Walkable)
+        // Java's unchecked subtraction: a listener's `i32::MIN` darkening wraps
+        // instead of panicking under overflow checks, so block light still wins.
+        assert_eq!(
+            level.raw_brightness(pos, i32::MIN),
+            level.brightness(mod_api::LightLayer::Block, pos)
+        );
+        match items {
+            1 => Some(PathType::Walkable),
+            2 => Some(PathType::Damaging),
+            _ => None,
+        }
     }
 }
 struct ChestReaderMod;
@@ -149,32 +159,57 @@ impl Hooks for ChestReaderMod {
     }
 }
 
+/// A stone floor with a chest at `[3, 64, 1]` in the level in place, holding `items` diamonds.
+fn chest_level(game: &mut Game<'_>, items: usize) {
+    let registry = game.pack.assets.registry;
+    let stone = registry.default_state("minecraft:stone").unwrap();
+    let chest = registry.default_state("minecraft:chest").unwrap();
+    for x in 0..6 {
+        for z in 0..6 {
+            game.world.set(x, 64, z, stone).unwrap();
+        }
+    }
+    game.world.set(3, 64, 1, chest).unwrap();
+    let mut contents = vec![None; 27];
+    for slot in contents.iter_mut().take(items) {
+        *slot = Some(sunrise_client::items::ItemStack::new(
+            "minecraft:diamond",
+            3,
+        ));
+    }
+    game.world.block_entities.insert(
+        (3, 64, 1),
+        sunrise_client::containers::BlockEntity::Chest(contents),
+    );
+}
+
 #[test]
 #[ignore = "daily"]
 fn a_block_part_reads_a_block_entity_through_its_owning_level() {
     with_parts("chest-reader", ChestReaderMod, |game| {
-        let registry = game.pack.assets.registry;
-        let stone = registry.default_state("minecraft:stone").unwrap();
-        let chest = registry.default_state("minecraft:chest").unwrap();
-        for x in 0..6 {
-            for z in 0..6 {
-                game.world.set(x, 64, z, stone).unwrap();
-            }
-        }
-        game.world.set(3, 64, 1, chest).unwrap();
-        let mut contents = vec![None; 27];
-        contents[0] = Some(sunrise_client::items::ItemStack::new(
-            "minecraft:diamond",
-            3,
-        ));
-        game.world.block_entities.insert(
-            (3, 64, 1),
-            sunrise_client::containers::BlockEntity::Chest(contents),
-        );
-        let world = game.mob_world_base(&[]);
+        chest_level(game, 1);
         // The part answers from the chest's saved data, so the override reaches
         // past the chest's own vanilla Blocked type.
-        assert_eq!(world.path_type_from_state(3, 64, 1), PathType::Walkable);
+        assert_eq!(
+            game.mob_world_base(&[])
+                .path_type_from_state(3, 64, 1),
+            PathType::Walkable
+        );
+        // A second loaded dimension has a chest of its own at the same position:
+        // the level host answers from that level's block entity, not a fixed one.
+        let scratch = tempfile::tempdir().unwrap();
+        game.world_root = scratch.path().to_path_buf();
+        game.enter_level(crate::game::Dim::Nether).unwrap();
+        game.world.chunks.insert(
+            (0, 0),
+            std::sync::Arc::new(sunrise_client::chunk::Chunk::empty(0, 0)),
+        );
+        chest_level(game, 2);
+        assert_eq!(
+            game.mob_world_base(&[])
+                .path_type_from_state(3, 64, 1),
+            PathType::Damaging
+        );
     });
 }
 

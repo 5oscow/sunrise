@@ -34,6 +34,53 @@ Lookup keys may answer capabilities for vanilla and native types. `block_entity_
 native types and returns `BlockEntityPartError::VanillaType { kind }` immediately for a vanilla key. Native
 Parts are expanded after every mod has registered, so a Part can target a type declared later.
 
+## Attaching to another package's type
+
+A Part attaches by type id, whoever declared the type: `r.block_entity_type_key("owner:press")` then
+`r.block_entity_part(&press, MyPart)`. Only a package that lists the declaring package in its
+`[dependencies]` (required or optional) may do so. Otherwise load is refused by name, even when that
+package is installed:
+`mod b attached <Part> to block entity type owner:press, declared by package owner; declare owner as a dependency`.
+A type that no package declares keeps the refusal `mod b attached <Part> to undeclared native block entity type owner:press`;
+when `b` lists the installed package that owns the type's namespace (its id or one of its manifest `namespaces`) as a
+required dependency, the refusal says that dependency does not declare it. An optional dependency is recognised for an absent package by a type whose namespace is that package's id. Then the Part is skipped, without a refusal, when that package is not installed
+(a compatibility Part); when it is installed, the Part attaches.
+This keeps resolution independent of what else is installed. Parts of several packages on one type run in
+dispatch order (`mod_index`, then registration order), the same on every load.
+
+Declaring the type, `transform` and the type's initial data stay with the owner, and a vanilla type is still refused.
+Block entity types can only be declared by a package's code, not by content files.
+
+A `side = "server"` package whose Part on such a type listens to a client hook is refused like any other
+client-side Part.
+
+The Part's state (`block_entity_part_with_state`) is a key the attaching package declared with
+`register_attachment_type`, which accepts only that package's own namespace. It is saved in the block entity's
+attachment compound under that package's id, not under the owner's. A Part reaches the owner's state only through an
+attachment the owner declared (the public attachment API); a key nobody declared is refused at load, naming the
+package. When the attaching package is removed, what it saved stays in the block entity, unread (the saved
+attachment compound keeps entries it does not know on save), and is read again if the package comes back.
+
+## Removal side effects
+
+`pre_remove_side_effects` runs on the authoritative server while the block entity and its
+attachments are still readable, before removal's neighbor effects. The level host permits
+reads and random draws, not world writes. Flag 256 skips the call and its outputs.
+
+The engine applies the answers after the level write, in this order:
+
+1. Unless `keep_contents` is true, scatter the base container slots.
+2. Scatter `drops`, a list of `Option<ItemStack>` in slot order. `None` consumes the
+   three position draws of an empty `Containers.dropItemStack` slot but spawns nothing.
+3. Create `spawns`, each `(ItemStack, [f64; 3])`, at that exact position with the default
+   pickup delay (10 ticks), as a lectern or jukebox does.
+4. Award `experience`, each `(u32, [f64; 3])`, through the furnace's experience-orb path.
+
+Each list accepts at most 1024 entries; positions must be finite. Invalid list sizes or
+positions refuse the outputs. Stack writes use the usual checked item boundary. The same
+fields cross to native and wasm. A part that answers nothing consumes no random draws.
+Version 2 uses optional drops to represent empty slots; wrap a filled slot in `Some`.
+
 ## Part state
 
 A Part that keeps a value on each block entity of its type (a machine's progress, the last
@@ -90,7 +137,7 @@ let done = Press::edit_state(host, entity, |_, progress| {
   depth 512. The 2 MiB quota of a chunk packet's block entity data is a network limit and does not
   cap saved state.
 - Registration refuses a declaration that syncs, copies on death, lies outside the mod's namespaces
-  or reuses a key with a different Wire layout. It refuses a type whose Wire form holds a resource
+  or reuses a key with a type of another Rust type name. It refuses a type whose Wire form holds a resource
   handle (an erased handler such as `Arc<dyn BlockPart>`) on every target: such a value crosses
   only into one link group and cannot be saved. It also refuses a declaration without a codec from
   a mod the game loaded as wasm, whatever the module says of itself. The refusal names the Part,

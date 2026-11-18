@@ -311,16 +311,20 @@ impl Game<'_> {
             self.draw_debug_overlay_under(batch, size);
         }
     }
+    /// Whether this client's debug overlay passes the draw gate this frame.
+    pub(in crate::game) fn debug_overlay_visible(&self) -> bool {
+        let screen_open = self.title.is_some() || self.screen != Screen::Playing;
+        self.debug_entries
+            .any_enabled(self.debug, self.reduced_debug_info())
+            && (!self.ui.hide_gui || screen_open)
+    }
+
     /// `DebugScreenOverlay.extractRenderState`: the enabled entries' lines
     /// (`debug-profile.json`), at the debug GUI scale, and the charts while
     /// the overlay is open. F1 hides it unless a screen is open. Sunrise paints
     /// it 20 times a second and copies those vertices in between.
     pub(super) fn draw_debug_overlay_under(&self, batch: &mut HudBatch, size: [u32; 2]) {
-        let screen_open = self.title.is_some() || self.screen != Screen::Playing;
-        let reduced = self.reduced_debug_info();
-        if !self.debug_entries.any_enabled(self.debug, reduced)
-            || (self.ui.hide_gui && !screen_open)
-        {
+        if !self.debug_overlay_visible() {
             // Nothing reads the server's lines now: it stops computing them each tick.
             if let Some(server) = &self.integrated {
                 server.request_debug(None);
