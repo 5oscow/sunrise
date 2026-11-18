@@ -814,6 +814,27 @@ impl Title {
     pub fn take_requested(&mut self) -> Option<Mode> {
         self.requested.take()
     }
+    /// Opens the title screen `id` names (`title`, `world_select`,
+    /// `world_create`, `multiplayer`: the ones that take no arguments) at
+    /// once, past the gate: the screen a mod's `screen_opening` answer puts in
+    /// place of another, which fires nothing again. The world list opens as
+    /// Singleplayer does; the others fresh. Any other id changes nothing.
+    pub fn open_by_id(&mut self, id: &str) {
+        let gated = std::mem::replace(&mut self.gated, false);
+        match id {
+            "title" => self.set_mode(Mode::Main),
+            "world_select" => self.enter_singleplayer(),
+            "world_create" => {
+                self.create_return_to_main = true;
+                self.set_mode(self.new_world());
+            }
+            "multiplayer" => self.set_mode(Mode::Multiplayer(crate::multiplayer::Screen::list(
+                &self.saves,
+            ))),
+            _ => {}
+        }
+        self.gated = gated;
+    }
     /// Supply the installed definitions for world creation.
     pub fn set_rule_registry(&mut self, registry: std::sync::Arc<crate::gamerules::RuleRegistry>) {
         fn rebind(mode: &mut Mode, registry: &std::sync::Arc<crate::gamerules::RuleRegistry>) {

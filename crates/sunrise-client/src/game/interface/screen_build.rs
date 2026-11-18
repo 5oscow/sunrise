@@ -303,6 +303,9 @@ impl ScreenBuild {
 pub(super) struct ScreenState {
     pub(super) observed: Option<ObservedScreen>,
     pub(super) build: ScreenBuildState,
+    /// A mod's `ScreenOpening::Vanilla` answer is opening its screen: that
+    /// change fires no screen hook again.
+    pub(super) replacing: bool,
 }
 
 /// One frame's `RenderInventoryMobEffects` answer and what it was taken for.

@@ -4743,10 +4743,11 @@ impl Game<'_> {
         }
         self.tick_first_level()
     }
-    /// The title remains the no-level sentinel while debug options covers it.
-    /// Only UI dispatch ignores it; world loading and simulation still see it.
+    /// The title remains the no-level sentinel while debug options or a mod's
+    /// screen covers it. Only UI dispatch ignores it; world loading and
+    /// simulation still see it.
     fn title_input_active(&self) -> bool {
-        self.title.is_some() && self.screen != Screen::DebugOptions
+        self.title.is_some() && !matches!(self.screen, Screen::DebugOptions | Screen::Mod)
     }
     fn hud(&mut self, size: [u32; 2]) -> HudBatch {
         // Gui.extractRenderState passes integer coordinates to the HUD and screen. Keep
@@ -4860,11 +4861,14 @@ impl Game<'_> {
                 self.say_system_queued(&found);
             }
         }
-        if self.screen == Screen::DebugOptions && self.title.is_some() {
-            // DebugOptionsScreen replaces the title; no level HUD is behind it.
+        if matches!(self.screen, Screen::DebugOptions | Screen::Mod) && self.title.is_some() {
+            // DebugOptionsScreen or a mod's screen replaces the title; no level
+            // HUD is behind it.
             let drawn = self.draw_screen_with_pre_hook(&mut batch);
-            if drawn {
+            if drawn && self.screen == Screen::DebugOptions {
                 self.draw_debug_options(&mut batch);
+            } else if drawn {
+                self.draw_mod_screen(&mut batch);
             }
             self.draw_screen_with_post_hook(&mut batch);
             self.draw_toasts(&mut batch, false);
@@ -5214,16 +5218,7 @@ impl Game<'_> {
             Screen::Dead => self.draw_death_screen(&mut batch),
             Screen::Stats => self.draw_stats(&mut batch),
             Screen::Advancements => self.draw_advancements(&mut batch),
-            Screen::Mod => {
-                self.draw_screen_phase(
-                    &mut batch,
-                    sunrise_client::screen_draw::RenderPhase::Background,
-                );
-                self.draw_screen_phase(
-                    &mut batch,
-                    sunrise_client::screen_draw::RenderPhase::Foreground,
-                );
-            }
+            Screen::Mod => self.draw_mod_screen(&mut batch),
             Screen::WorldOptions => self.draw_world_options(&mut batch),
             Screen::Friends => self.draw_friends_screen(&mut batch),
             Screen::Social => self.draw_social_screen(&mut batch),

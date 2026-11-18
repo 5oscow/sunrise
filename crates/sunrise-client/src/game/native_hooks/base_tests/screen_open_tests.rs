@@ -427,6 +427,64 @@ fn a_title_screen_opens_through_screen_opening() {
     });
 }
 
+/// `Vanilla` opens another vanilla screen where it can: the death screen's
+/// way to the title ends on the server list, while the same title target
+/// asked for in the world keeps the screen asked for.
+#[test]
+#[ignore = "daily"]
+fn replacing_opening_opens_another_vanilla_screen_where_it_can() {
+    use mod_api::ScreenTarget;
+    run(|game, log, answer| {
+        let saves = std::env::temp_dir().join("sunrise-title-gate-test-no-saves");
+        game.title = None;
+        game.set_screen(Screen::Dead);
+        take(log);
+        *answer.lock().unwrap() = Some(ScreenOpening::Vanilla(ScreenTarget::Multiplayer));
+        // Leaving the world: no title screen opens in it.
+        game.set_screen(Screen::Playing);
+        assert_eq!(game.screen, Screen::Playing);
+        game.show_title(game.new_title(saves));
+        assert_eq!(game.title.as_ref().unwrap().mode.id(), "multiplayer");
+        // The replacement fires nothing again.
+        assert_eq!(
+            take(log),
+            [
+                "opening dead->playing",
+                "closing dead",
+                "opening playing->title"
+            ]
+        );
+    });
+}
+
+/// `ModScreen` opens the mod's screen over the title's screens with no world,
+/// and Escape returns to the title screen.
+#[test]
+#[ignore = "daily"]
+fn replacing_a_title_screen_opens_the_mods_screen_over_the_title() {
+    use sunrise_client::title::Mode;
+    run(|game, log, answer| {
+        let saves = std::env::temp_dir().join("sunrise-title-gate-test-no-saves");
+        game.player = None;
+        game.title = Some(game.new_title(saves));
+        game.settle_title_mode();
+        *answer.lock().unwrap() = Some(ScreenOpening::ModScreen);
+        game.title.as_mut().unwrap().set_mode(Mode::Select {
+            worlds: Vec::new(),
+            selected: None,
+        });
+        game.settle_title_mode();
+        assert_eq!(game.screen, Screen::Mod);
+        assert_eq!(game.mod_screen(), Some("screens"));
+        assert!(matches!(game.title.as_ref().unwrap().mode, Mode::Main));
+        assert_eq!(take(log), ["opening title->world_select", "closing title"]);
+        *answer.lock().unwrap() = None;
+        game.key_pressed(KeyCode::Escape, KeyCode::Escape).unwrap();
+        assert_eq!(game.screen, Screen::Playing);
+        assert!(matches!(game.title.as_ref().unwrap().mode, Mode::Main));
+    });
+}
+
 /// The title appearing (a world closed) and going (a world opened) fires
 /// `screen_opening`, then `screen_closing` for what it leaves, before the
 /// change, so the frame's observer has nothing left to announce. With no

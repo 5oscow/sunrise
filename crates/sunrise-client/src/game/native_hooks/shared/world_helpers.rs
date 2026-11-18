@@ -175,7 +175,8 @@ impl Game<'_> {
                 // `screen_opening` kept it open.
                 return;
             }
-            self.capture(true);
+            // Over the title, the title's screen shows again.
+            self.capture(self.title.is_none());
         }
         self.native_mod_screen = None;
     }
