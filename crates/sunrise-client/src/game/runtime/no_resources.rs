@@ -4,7 +4,7 @@
 //! crash report: nothing went wrong in the game.
 use super::*;
 use sunrise_client::no_resources::{Action, NoResources};
-use winit::event::MouseButton;
+use winit::{dpi::PhysicalPosition, event::MouseButton};
 
 struct Missing {
     window: Option<Arc<Window>>,
@@ -12,7 +12,7 @@ struct Missing {
     gui: UiResources,
     screen: NoResources,
     /// The pointer in physical pixels.
-    pointer: (f64, f64),
+    pointer: PhysicalPosition<f64>,
     api: sunrise_client::graphics::GraphicsApi,
     settings: Settings,
     error: Option<Box<dyn std::error::Error>>,
@@ -36,7 +36,7 @@ pub(super) fn show(looked_in: &std::path::Path, settings: &Settings) -> Result<(
             splashes: Arc::from(""),
         },
         screen: NoResources::new(looked_in, sunrise_hooks::engine::get_the_game()),
-        pointer: (0.0, 0.0),
+        pointer: PhysicalPosition::new(0.0, 0.0),
         api: settings.sunrise.api,
         settings: settings.clone(),
         error: None,
@@ -53,16 +53,20 @@ impl Missing {
             .map_or([1280, 720], |r| [r.config.width, r.config.height])
     }
 
+    fn projected_pointer(&self) -> sunrise_client::window::GuiPointer {
+        let inputs = self.settings.gui_scale_inputs();
+        let gui =
+            sunrise_client::window::GuiSize::new(self.size(), inputs.requested, inputs.unicode);
+        gui.project_pointer(self.pointer)
+    }
+
     /// `f` over a Ui of the window's size, the cursor where the pointer is.
     fn with_ui<R>(
         &self,
         batch: &mut HudBatch,
+        cursor: (f32, f32),
         f: impl FnOnce(&mut sunrise_client::ui_theme::Ui) -> R,
     ) -> R {
-        let cursor = (
-            self.pointer.0 as f32 / batch.scale,
-            self.pointer.1 as f32 / batch.scale,
-        );
         let mut ui = sunrise_client::ui_theme::Ui::new(&self.gui.atlas, batch, cursor);
         let result = f(&mut ui);
         ui.finish();
@@ -71,7 +75,9 @@ impl Missing {
 
     fn draw(&mut self) {
         let mut batch = HudBatch::new(self.size(), self.settings.gui_scale_inputs());
-        self.with_ui(&mut batch, |ui| self.screen.draw(ui));
+        self.with_ui(&mut batch, self.projected_pointer().pixel(), |ui| {
+            self.screen.draw(ui)
+        });
         let Some(renderer) = &mut self.renderer else {
             return;
         };
@@ -90,7 +96,9 @@ impl Missing {
 
     fn click(&mut self, event_loop: &ActiveEventLoop) {
         let mut batch = HudBatch::new(self.size(), self.settings.gui_scale_inputs());
-        match self.with_ui(&mut batch, |ui| self.screen.click(ui)) {
+        match self.with_ui(&mut batch, self.projected_pointer().subpixel(), |ui| {
+            self.screen.click(ui)
+        }) {
             Some(Action::Open(address)) => packs::open_uri(address),
             Some(Action::Quit) => event_loop.exit(),
             None => {}
@@ -148,7 +156,7 @@ impl ApplicationHandler for Missing {
             }
             WindowEvent::RedrawRequested => self.draw(),
             WindowEvent::CursorMoved { position, .. } => {
-                self.pointer = (position.x, position.y);
+                self.pointer = position;
                 window.request_redraw();
             }
             WindowEvent::MouseInput {

@@ -8,7 +8,7 @@ use sunrise_client::{
     options_ui::{Event, OptionsUi, Page},
     widgets::{Kind, Target},
 };
-use winit::{event::KeyEvent, keyboard::ModifiersState};
+use winit::{dpi::PhysicalPosition, event::KeyEvent, keyboard::ModifiersState};
 
 #[derive(Default)]
 pub(super) struct StartupMenu {
@@ -151,6 +151,9 @@ impl StartupMenu {
         game.perf = std::mem::take(&mut self.perf);
         game.mod_jobs = std::mem::take(&mut self.mod_jobs);
         game.cursor = self.cursor;
+        if self.key_focus.is_none() {
+            game.window_cursor = Some(PhysicalPosition::new(self.pointer.0, self.pointer.1));
+        }
         game.modifiers = self.modifiers;
         game.physical_keys = std::mem::take(&mut self.physical_keys);
         game.clipboard = std::mem::take(&mut self.clipboard);
@@ -522,12 +525,21 @@ impl Loading {
         self.update_menu_cursor();
     }
 
-    fn update_menu_cursor(&mut self) {
-        let batch = HudBatch::new(self.menu_size(), self.settings.gui_scale_inputs());
-        self.menu.cursor = (
-            self.menu.pointer.0 as f32 / batch.scale,
-            self.menu.pointer.1 as f32 / batch.scale,
+    fn projected_menu_pointer(&self) -> sunrise_client::window::GuiPointer {
+        let inputs = self.settings.gui_scale_inputs();
+        let gui = sunrise_client::window::GuiSize::new(
+            self.menu_size(),
+            inputs.requested,
+            inputs.unicode,
         );
+        gui.project_pointer(PhysicalPosition::new(
+            self.menu.pointer.0,
+            self.menu.pointer.1,
+        ))
+    }
+
+    fn update_menu_cursor(&mut self) {
+        self.menu.cursor = self.projected_menu_pointer().subpixel();
     }
 
     fn menu_size(&self) -> [u32; 2] {
@@ -1346,6 +1358,11 @@ impl Loading {
             sunrise_client::ui_theme::draw_boot(&self.boot, batch, &logs);
             return;
         };
+        let cursor = if self.menu.key_focus.is_some() {
+            self.menu.cursor
+        } else {
+            self.projected_menu_pointer().pixel()
+        };
         // `Gui.setScreen` clears the focus of the screen it leaves
         // (`Screen.clearFocus`): the title behind the options, and the one
         // that comes back, start with no button highlighted.
@@ -1389,10 +1406,8 @@ impl Loading {
                 .draw_background(&self.settings, output, batch, &gui.atlas);
             self.menu
                 .options
-                .draw_contents(&self.settings, batch, &gui.atlas, self.menu.cursor);
-            self.menu
-                .options
-                .draw_overlays(batch, &gui.atlas, self.menu.cursor);
+                .draw_contents(&self.settings, batch, &gui.atlas, cursor);
+            self.menu.options.draw_overlays(batch, &gui.atlas, cursor);
         } else if let Some(title) = &mut self.menu.title {
             title.poll_backup();
             if std::mem::take(&mut title.onboarding_finished) {
@@ -1414,7 +1429,7 @@ impl Loading {
                 &gui.atlas,
                 items,
                 batch,
-                self.menu.cursor,
+                cursor,
                 self.settings.file.bool("hideSplashTexts"),
                 self.settings.file.bool("hideServerAddress"),
                 &mut |_, _| {},

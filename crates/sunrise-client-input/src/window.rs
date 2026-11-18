@@ -3,6 +3,8 @@
 //! `FramerateLimiter`, the vsync present-mode choice and the fullscreen
 //! request/state pair.
 
+use winit::dpi::PhysicalPosition;
+
 /// `Window.calculateScale`: the largest scale that leaves at least 320x240
 /// GUI pixels, capped by `max_scale` (0 = automatic); an odd result is bumped
 /// to even when unicode is enforced.
@@ -34,6 +36,7 @@ pub fn gui_scaled_size(framebuffer: [i32; 2], gui_scale: i32) -> [i32; 2] {
 pub struct GuiSize {
     pub scale: u32,
     pub size: [u32; 2],
+    framebuffer: [i32; 2],
 }
 
 impl GuiSize {
@@ -43,7 +46,52 @@ impl GuiSize {
         Self {
             scale: scale as u32,
             size: gui_scaled_size(framebuffer, scale).map(|v| v as u32),
+            framebuffer,
         }
+    }
+
+    /// `MouseHandler` projects window coordinates before dispatching mouse input.
+    pub fn project_pointer(self, position: PhysicalPosition<f64>) -> GuiPointer {
+        GuiPointer(
+            scaled_pos(position.x, self.size[0] as i32, self.framebuffer[0]),
+            scaled_pos(position.y, self.size[1] as i32, self.framebuffer[1]),
+        )
+    }
+
+    /// The inverse for input given in GUI coordinates but sent as a window event.
+    pub fn window_pointer(self, (x, y): (f32, f32)) -> PhysicalPosition<f64> {
+        let physical = |pos: f32, axis: usize| {
+            let (screen, gui) = (self.framebuffer[axis], self.size[axis] as i32);
+            let raw = scaled_pos(f64::from(pos), screen, gui);
+            // At an exact pixel edge the inverse can round toward zero. Use the next
+            // representable physical position away from zero if the forward cast loses a pixel.
+            if (scaled_pos(raw, gui, screen) as i32).unsigned_abs() < (pos as i32).unsigned_abs() {
+                if raw.is_sign_negative() {
+                    raw.next_down()
+                } else {
+                    raw.next_up()
+                }
+            } else {
+                raw
+            }
+        };
+        PhysicalPosition::new(physical(x, 0), physical(y, 1))
+    }
+}
+
+/// A pointer projected into GUI coordinates, before consumer-specific rounding.
+#[derive(Clone, Copy, Debug)]
+pub struct GuiPointer(f64, f64);
+
+impl GuiPointer {
+    /// Mouse button, drag and wheel input retain their subpixel positions.
+    pub fn subpixel(self) -> (f32, f32) {
+        (self.0 as f32, self.1 as f32)
+    }
+
+    /// Screen and HUD rendering truncate the projected values, not the raw pointer.
+    pub fn pixel(self) -> (f32, f32) {
+        (self.0 as i32 as f32, self.1 as i32 as f32)
     }
 }
 
@@ -748,41 +796,32 @@ mod tests {
 
     #[test]
     fn shared_gui_size_applies_unicode_and_rounds_up() {
+        for (framebuffer, max, unicode, scale, size) in [
+            ([960, 720], 3, false, 3, [320, 240]),
+            ([960, 720], 3, true, 4, [240, 180]),
+            ([1921, 1081], 0, false, 4, [481, 271]),
+            ([853, 479], 0, true, 2, [427, 240]),
+            ([3840, 2160], 0, true, 10, [384, 216]),
+        ] {
+            let gui = GuiSize::new(framebuffer, max, unicode);
+            assert_eq!((gui.scale, gui.size), (scale, size));
+        }
+    }
+
+    #[test]
+    fn gui_pointer_projects_and_round_trips_at_odd_sizes() {
+        let gui = GuiSize::new([641, 481], 2, false);
         assert_eq!(
-            GuiSize::new([960, 720], 3, false),
-            GuiSize {
-                scale: 3,
-                size: [320, 240]
-            }
+            gui.project_pointer(PhysicalPosition::new(321.75, 231.75))
+                .pixel(),
+            (161.0, 116.0)
         );
-        assert_eq!(
-            GuiSize::new([960, 720], 3, true),
-            GuiSize {
-                scale: 4,
-                size: [240, 180]
-            }
-        );
-        assert_eq!(
-            GuiSize::new([1921, 1081], 0, false),
-            GuiSize {
-                scale: 4,
-                size: [481, 271]
-            }
-        );
-        assert_eq!(
-            GuiSize::new([853, 479], 0, true),
-            GuiSize {
-                scale: 2,
-                size: [427, 240]
-            }
-        );
-        assert_eq!(
-            GuiSize::new([3840, 2160], 0, true),
-            GuiSize {
-                scale: 10,
-                size: [384, 216]
-            }
-        );
+        // 67 and 17 are edges where the naive inverse rounds just below the target pixel.
+        for pixel in [(160.0, 115.0), (161.0, 116.0), (67.0, 17.0), (-67.0, -17.0)] {
+            let projected = gui.project_pointer(gui.window_pointer(pixel));
+            assert_eq!(projected.pixel(), pixel);
+            assert_eq!(projected.subpixel(), pixel);
+        }
     }
 
     #[test]

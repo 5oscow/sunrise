@@ -96,15 +96,19 @@ fn screen_draw_receives_open_blocks_position() {
                 extra: None,
             });
 
-            // No new motion: the resize allows the requested GUI scale of 2.
-            game.set_window_cursor(PhysicalPosition::new(321.75, 231.75), 1.0);
-            game.hud_layers([638, 478]);
-            game.hud_layers([640, 480]);
+            // No new motion: the odd-sized resize allows GUI scale 2.
+            let small = [638, 478];
+            game.set_window_cursor(
+                PhysicalPosition::new(321.75, 231.75),
+                game.gui_size_for(small),
+            );
+            game.hud(small);
+            game.hud([641, 481]);
 
             // A cursor supplied in GUI pixels directly still truncates toward zero.
             game.window_cursor = None;
             game.cursor = (-3.75, 129.75);
-            game.hud_layers([640, 480]);
+            game.hud([641, 481]);
             let seen = seen.lock().unwrap();
             assert_eq!(
                 seen.draw,
@@ -115,20 +119,20 @@ fn screen_draw_receives_open_blocks_position() {
                         origin: [231.0, 156.0],
                     },
                     Frame {
-                        pointer: [160, 115],
-                        size: [320, 240],
+                        pointer: [161, 116],
+                        size: [321, 241],
                         origin: [72.0, 37.0],
                     },
                     Frame {
                         pointer: [-3, 129],
-                        size: [320, 240],
+                        size: [321, 241],
                         origin: [72.0, 37.0],
                     },
                 ]
             );
             assert_eq!(
                 seen.tooltip_at,
-                [[90.75, 75.75], [88.875, 78.875], [-75.75, 92.75]]
+                [[90.0, 75.0], [89.0, 79.0], [-75.75, 92.75]]
             );
         });
     });

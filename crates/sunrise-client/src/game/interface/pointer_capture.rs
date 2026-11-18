@@ -193,7 +193,6 @@ impl Game<'_> {
         let warp = |window: &Window| {
             let _ = window.set_cursor_position(centre);
         };
-        let scale = HudBatch::new(size, self.settings.gui_scale_inputs()).scale;
         let was_grabbed = self.captured;
         if self.internal_grab() {
             // Its grab is internal (an agent turns the view with `mouse-move`). A grab the
@@ -255,20 +254,13 @@ impl Game<'_> {
         // the window's centre whenever the pointer's grab state changes, so
         // a screen opened from gameplay starts with the cursor in the middle
         // and the game starts with it away from the screen's last spot.
-        if let Some(pos) = sunrise_client::mouse::mouse_position_after_grab_change(
-            capture,
-            was_grabbed,
-            size,
-            scale,
-        ) {
-            self.cursor = pos;
-            self.window_cursor = Some((
-                winit::dpi::PhysicalPosition::new(centre.x - vx, centre.y - vy),
-                scale,
-            ));
-        }
         if !self.internal_grab() {
             window.set_cursor_visible(!self.captured);
+        }
+        if let Some(pos) =
+            sunrise_client::mouse::mouse_position_after_grab_change(capture, was_grabbed, size)
+        {
+            self.set_window_cursor(pos, self.gui_size_for(size));
         }
     }
     /// The game's pointer grab leaves the system pointer where the person at the computer has

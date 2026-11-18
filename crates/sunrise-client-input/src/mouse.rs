@@ -333,13 +333,10 @@ pub fn mouse_position_after_grab_change(
     grab: bool,
     was_grabbed: bool,
     size: [u32; 2],
-    scale: f32,
-) -> Option<(f32, f32)> {
-    if grab == was_grabbed {
-        None
-    } else {
-        Some((size[0] as f32 / 2.0 / scale, size[1] as f32 / 2.0 / scale))
-    }
+) -> Option<winit::dpi::PhysicalPosition<f64>> {
+    (grab != was_grabbed).then(|| {
+        winit::dpi::PhysicalPosition::new(f64::from(size[0]) / 2.0, f64::from(size[1]) / 2.0)
+    })
 }
 
 /// `MacosUtil.setCtrlClickEmulatesRightClick`: with the option on (and only on
@@ -531,20 +528,20 @@ mod tests {
         // the position at the window's centre (`MouseHandler.grabMouse`,
         // `MouseHandler.releaseMouse`).
         assert_eq!(
-            mouse_position_after_grab_change(true, false, [1920, 1080], 1.0),
-            Some((960.0, 540.0))
+            mouse_position_after_grab_change(true, false, [1920, 1080]),
+            Some(winit::dpi::PhysicalPosition::new(960.0, 540.0))
         );
         assert_eq!(
-            mouse_position_after_grab_change(false, true, [1920, 1080], 2.0),
-            Some((480.0, 270.0))
+            mouse_position_after_grab_change(false, true, [641, 481]),
+            Some(winit::dpi::PhysicalPosition::new(320.5, 240.5))
         );
         // Without a change of the grab state the position stays where it is.
         assert_eq!(
-            mouse_position_after_grab_change(false, false, [1920, 1080], 1.0),
+            mouse_position_after_grab_change(false, false, [1920, 1080]),
             None
         );
         assert_eq!(
-            mouse_position_after_grab_change(true, true, [1920, 1080], 1.0),
+            mouse_position_after_grab_change(true, true, [1920, 1080]),
             None
         );
     }

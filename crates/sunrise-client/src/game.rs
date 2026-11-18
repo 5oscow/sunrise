@@ -1081,8 +1081,8 @@ struct Game<'a> {
     left: bool,
     right: bool,
     cursor: (f32, f32),
-    /// The window pointer and the GUI scale last used to project it into `cursor`.
-    window_cursor: Option<(winit::dpi::PhysicalPosition<f64>, f32)>,
+    /// The raw window pointer; frames and input project it at the current GUI size.
+    window_cursor: Option<winit::dpi::PhysicalPosition<f64>>,
     /// The cursor icon the window shows (`widgets::take_cursor` each frame).
     cursor_icon: sunrise_client::widgets::Cursor,
     captured: bool,
@@ -4862,6 +4862,13 @@ impl Game<'_> {
         self.title.is_some() && self.screen != Screen::DebugOptions
     }
     fn hud(&mut self, size: [u32; 2]) -> HudBatch {
+        // Gui.extractRenderState passes integer coordinates to the HUD and screen. Keep
+        // the projected fractions for input, but draw and hit-test hover at the frame's pixel.
+        let input_cursor = self.window_cursor.map(|position| {
+            let pointer = self.gui_size_for(size).project_pointer(position);
+            self.cursor = pointer.pixel();
+            pointer.subpixel()
+        });
         // Off a world (title, options, Win, a prompt before joining) the HUD shows nothing to
         // keep clear of; `hud_layers` fills it in once the world's HUD draws.
         let gui = HudBatch::new(size, self.settings.gui_scale_inputs());
@@ -4894,14 +4901,14 @@ impl Game<'_> {
         self.frame_graph
             .draw(self.settings.sunrise.overlay, &mut batch, &self.gui.atlas);
         self.draw_pad_over_hud(&mut batch);
+        if let Some(pointer) = input_cursor {
+            self.cursor = pointer;
+        }
         batch
     }
     fn hud_layers(&mut self, size: [u32; 2]) -> HudBatch {
         self.input_hud_begin();
         let mut batch = HudBatch::new(size, self.settings.gui_scale_inputs());
-        if self.native_screen_shown() {
-            self.reproject_window_cursor(batch.scale);
-        }
         batch.glint_colour = self.pvp_glint_texel();
         // GlobalSettingsUniform's GameTime, for a resource pack's text shader.
         batch.game_time = ((self.world.game_time.rem_euclid(24000)) as f32
@@ -9057,17 +9064,30 @@ fn autosave_interval(rate: f32) -> i64 {
 /// winit's events for a window's game, with any loop: a headless client (#4951) has no
 /// winit loop and calls these from its own.
 impl Game<'_> {
-    fn set_window_cursor(&mut self, position: winit::dpi::PhysicalPosition<f64>, scale: f32) {
-        self.cursor = (position.x as f32 / scale, position.y as f32 / scale);
-        self.window_cursor = Some((position, scale));
+    fn gui_size_for(&self, framebuffer: [u32; 2]) -> sunrise_client::window::GuiSize {
+        let inputs = self.settings.gui_scale_inputs();
+        sunrise_client::window::GuiSize::new(framebuffer, inputs.requested, inputs.unicode)
     }
 
-    /// A resize or settings change can update the GUI scale without moving the mouse.
-    fn reproject_window_cursor(&mut self, scale: f32) {
-        if let Some((position, last_scale)) = self.window_cursor
-            && scale != last_scale
+    fn renderer_gui_size(&self) -> Option<sunrise_client::window::GuiSize> {
+        let r = self.renderer.as_ref()?;
+        Some(self.gui_size_for([r.config.width, r.config.height]))
+    }
+
+    fn set_window_cursor(
+        &mut self,
+        position: winit::dpi::PhysicalPosition<f64>,
+        gui: sunrise_client::window::GuiSize,
+    ) {
+        self.window_cursor = Some(position);
+        self.cursor = gui.project_pointer(position).subpixel();
+    }
+
+    fn refresh_window_cursor(&mut self) {
+        if let Some(position) = self.window_cursor
+            && let Some(gui) = self.renderer_gui_size()
         {
-            self.set_window_cursor(position, scale);
+            self.cursor = gui.project_pointer(position).subpixel();
         }
     }
 
@@ -9214,18 +9234,8 @@ impl Game<'_> {
             if !self.pad_synthetic_input() {
                 self.reassert_pointer_capture();
             }
-            // A click can arrive after a resize but before the first redraw at the new scale.
-            if self.native_screen_shown()
-                && let Some(r) = &self.renderer
-            {
-                let inputs = self.settings.gui_scale_inputs();
-                let gui = sunrise_client::window::GuiSize::new(
-                    [r.config.width, r.config.height],
-                    inputs.requested,
-                    inputs.unicode,
-                );
-                self.reproject_window_cursor(gui.scale as f32);
-            }
+            // A click can arrive before the first redraw at a changed GUI size.
+            self.refresh_window_cursor();
         }
         // The real mouse takes the pointer back from the keyboard's focus.
         self.key_focus_mouse(event_loop, &event);
@@ -9242,12 +9252,8 @@ impl Game<'_> {
             let upgrade = starting.handle.upgrade();
             match &event {
                 WindowEvent::CursorMoved { position, .. } => {
-                    if let Some(r) = &self.renderer {
-                        let b = HudBatch::new(
-                            [r.config.width, r.config.height],
-                            self.settings.gui_scale_inputs(),
-                        );
-                        self.set_window_cursor(*position, b.scale);
+                    if let Some(gui) = self.renderer_gui_size() {
+                        self.set_window_cursor(*position, gui);
                     }
                 }
                 WindowEvent::MouseInput {
@@ -9504,6 +9510,7 @@ impl Game<'_> {
                     if let Some(r) = &mut self.renderer {
                         r.resize(size.width, size.height);
                     }
+                    self.refresh_window_cursor();
                     self.observe_fullscreen();
                 }
                 WindowEvent::Focused(focused) => {
@@ -9547,13 +9554,12 @@ impl Game<'_> {
                 }
                 WindowEvent::CursorMoved { position, .. } => {
                     if let Some(r) = &self.renderer {
-                        let b = HudBatch::new(
-                            [r.config.width, r.config.height],
-                            self.settings.gui_scale_inputs(),
-                        );
+                        let size = [r.config.width, r.config.height];
+                        let gui = self.gui_size_for(size);
                         let previous = self.cursor;
-                        self.set_window_cursor(position, b.scale);
-                        if self.studio_mouse_dragged(b.width) {
+                        self.set_window_cursor(position, gui);
+                        let [w, h] = gui.size.map(|v| v as f32);
+                        if self.studio_mouse_dragged(w) {
                             return Ok(());
                         }
                         match self.screen_mouse_dragged(previous) {
@@ -9583,7 +9589,8 @@ impl Game<'_> {
                             self.world_options_drag();
                         }
                         if self.screen == Screen::Creative {
-                            let (_, oy) = Self::creative_origin(&b);
+                            let batch = HudBatch::new(size, self.settings.gui_scale_inputs());
+                            let (_, oy) = Self::creative_origin(&batch);
                             self.creative_screen.drag_scrollbar(self.cursor.1 - oy);
                         }
                         if self.screen == Screen::Inventory {
@@ -9596,11 +9603,10 @@ impl Game<'_> {
                         if self.title_input_active()
                             && let Some(title) = &mut self.title
                         {
-                            title.drag(self.cursor, (b.width, b.height));
+                            title.drag(self.cursor, (w, h));
                             title.drag_field(&self.gui.atlas, self.cursor.0);
                         }
                         if self.dragging && self.screen == Screen::Options {
-                            let _ = b;
                             self.options_drag()?;
                         }
                     }
