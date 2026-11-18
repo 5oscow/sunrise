@@ -1115,6 +1115,27 @@ impl Game<'_> {
         )?)?;
         *startup_began = true;
         self.native_server_about_to_start(true);
+        {
+            // Read the same world selection as opening the server data, but
+            // use its asset side just once before the starting listeners run.
+            use super::functions::pack_stack;
+            use sunrise_client::lang::{self, Language, ResourceSource};
+            let stack = pack_stack(
+                &prepared.save_root,
+                &self.options.resources,
+                &self.pack.data_source,
+                &self.pack.data_changes,
+                self.cmds.vanilla_disabled,
+                &prepared.level.enabled_features,
+                &self.pack.additional_data,
+            );
+            let layers = std::iter::once(&self.pack.source as &dyn ResourceSource).chain(
+                stack
+                    .enabled_packs()
+                    .map(|pack| pack.source() as &dyn ResourceSource),
+            );
+            lang::set(Language::load_server(&self.ui.vanilla_root, layers));
+        }
         self.native_server_starting(true);
         self.native_lifecycle_open_started();
         // The registries the server sends are read while the world prepares.

@@ -11378,17 +11378,22 @@ pub(crate) fn run_with(
         return run_loading(options, early_settings, vanilla_root, None, started);
     }
     let mut pack_error = None;
-    let selected_root = packs::startup_root(
-        &vanilla_root,
-        &early_settings.resource_packs,
-        &[],
-        &options.mods,
-    )
-    .or_else(|e| {
-        log::warn!("Sunrise: resource packs not applied: {e}");
-        pack_error = Some(e.to_string());
-        mods::content_root(&vanilla_root, &options.mods)
-    })?;
+    let selected_root = if options.execution_role.is_dedicated_server() {
+        // Dedicated startup sees enabled mod assets but no client's resource packs.
+        mods::content_root(&vanilla_root, &options.mods)?
+    } else {
+        packs::startup_root(
+            &vanilla_root,
+            &early_settings.resource_packs,
+            &[],
+            &options.mods,
+        )
+        .or_else(|e| {
+            log::warn!("Sunrise: resource packs not applied: {e}");
+            pack_error = Some(e.to_string());
+            mods::content_root(&vanilla_root, &options.mods)
+        })?
+    };
     let mut loaded = load_resources_for_mods(
         selected_root,
         pack_finders::data_packs(&options.mods),

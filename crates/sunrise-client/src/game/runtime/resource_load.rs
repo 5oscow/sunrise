@@ -760,11 +760,15 @@ pub(super) fn load_resources_for_mods(
     log::info!("load pack tables: {:.2}s", started.elapsed().as_secs_f32());
     progress.set(4);
     if !menu {
+        use sunrise_client::lang::{self, Language};
         sunrise_client::ui::load_metadata(resolved.source());
-        sunrise_client::lang::set(sunrise_client::lang::Language::load(
-            &[&pack.source],
-            &settings.language,
-        ));
+        // An integrated server shares the client's loaded resources and
+        // language; it doesn't run this loader in production.
+        lang::set(if role.is_dedicated_server() {
+            Language::load_default(&vanilla_root.to_path_buf())
+        } else {
+            Language::load(&[&pack.source], &settings.language)
+        });
     }
     progress.set(5);
     let suffocation =

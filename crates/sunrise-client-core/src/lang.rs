@@ -30,7 +30,10 @@ pub struct Language {
     /// `LanguageInfo.bidirectional`: text without a strong character reads
     /// right to left (`ClientLanguage.defaultRightToLeft`).
     bidirectional: bool,
+    /// The dedicated server never installs the client keybind resolver.
+    pub(crate) literal_keybinds: bool,
     map: HashMap<String, String>,
+    components: HashMap<String, serde_json::Value>,
     /// This language as vanilla's client loads it: the same sources and order without Sunrise's
     /// own (the engine's `sunrise` namespace and the crates'), built once with it. `None` when
     /// it has no strings of Sunrise's own to leave out.
@@ -105,7 +108,7 @@ pub fn install_crate_files(files: &'static [&'static [(&'static str, &'static st
 
 /// The crates' entries for language `code` (through [`bundled_code`]'s variants) that the
 /// engine's own `sunrise` file for it doesn't have: on a key both have, the engine wins.
-fn read_crate_files(files: &[&[(&str, &str)]], code: &str, map: &mut HashMap<String, String>) {
+fn read_crate_files(files: &[&[(&str, &str)]], code: &str, language: &mut Language) {
     if files.is_empty() {
         return;
     }
@@ -126,7 +129,8 @@ fn read_crate_files(files: &[&[(&str, &str)]], code: &str, map: &mut HashMap<Str
         }
         for (key, value) in theirs {
             if !own.contains_key(&key) {
-                map.insert(key, value);
+                language.components.remove(&key);
+                language.map.insert(key, value);
             }
         }
     }
@@ -445,7 +449,7 @@ impl ResourceSource for std::path::PathBuf {
 
 /// DeprecatedTranslationsInfo.applyToMap: drop removed keys, then move each
 /// renamed key's text to its new key (a missing old key removes the new one).
-pub fn apply_deprecated(map: &mut HashMap<String, String>, json: &[u8]) {
+pub fn apply_deprecated<T>(map: &mut HashMap<String, T>, json: &[u8]) {
     let Ok(info) = serde_json::from_slice::<serde_json::Value>(json) else {
         return;
     };
@@ -503,11 +507,110 @@ impl Language {
     pub fn of(code: &str, entries: impl IntoIterator<Item = (String, String)>) -> Self {
         Self {
             code: code.to_owned(),
-            bidirectional: false,
             map: entries.into_iter().collect(),
-            vanilla: None,
+            ..Self::default()
         }
     }
+
+    /// `Language.loadDefault`: the dedicated server's built-in English from
+    /// the unlayered prepared vanilla root, with deprecated keys applied.
+    pub fn load_default(source: &dyn ResourceSource) -> Self {
+        Self::load_server(source, std::iter::empty())
+    }
+
+    /// The dedicated server's English at startup. Later packs win; inside
+    /// one pack, namespaces are read in lexical order. Only the unlayered
+    /// vanilla root supplies deprecations, applied after all overrides.
+    pub fn load_server<'a>(
+        vanilla: &dyn ResourceSource,
+        packs: impl IntoIterator<Item = &'a dyn ResourceSource>,
+    ) -> Self {
+        let mut language = Self {
+            code: DEFAULT.to_owned(),
+            literal_keybinds: true,
+            ..Self::default()
+        };
+        if let Some(bytes) = vanilla.read("assets/minecraft/lang/en_us.json") {
+            read_lang_file(&bytes, &mut language.map);
+        }
+        for pack in packs {
+            let mut namespaces = pack.namespaces();
+            namespaces.sort_unstable();
+            for ns in namespaces {
+                if let Some(bytes) = pack.read(&format!("assets/{ns}/lang/en_us.json")) {
+                    language.overlay(&bytes);
+                }
+            }
+        }
+        if let Some(bytes) = vanilla.read("assets/minecraft/lang/deprecated.json") {
+            language.deprecate(&bytes);
+        }
+        for template in language.map.values_mut().filter(|s| s.contains('%')) {
+            // Language.loadFromJson normalizes Java's numeric placeholders to
+            // strings: %[n$][digits or dots][d or f] -> %[n$]s.
+            let mut out = String::new();
+            let mut start = 0;
+            for (at, _) in template.match_indices('%') {
+                let tail = &template[at + 1..];
+                let digits = tail.bytes().take_while(u8::is_ascii_digit).count();
+                let index = if digits != 0 && tail.as_bytes().get(digits) == Some(&b'$') {
+                    digits + 1
+                } else {
+                    0
+                };
+                let rest =
+                    tail[index..].trim_start_matches(|c: char| c.is_ascii_digit() || c == '.');
+                if rest.starts_with(['d', 'f']) {
+                    out.push_str(&template[start..at + 1 + index]);
+                    out.push('s');
+                    start = template.len() - rest.len() + 1;
+                }
+            }
+            if start != 0 {
+                out.push_str(&template[start..]);
+                *template = out;
+            }
+        }
+        language
+    }
+
+    fn overlay(&mut self, bytes: &[u8]) {
+        use serde_json::{Map, Value};
+        if let Ok(entries) = serde_json::from_slice::<Map<String, Value>>(bytes) {
+            for (key, value) in entries {
+                let template = match value {
+                    Value::String(value) => value,
+                    Value::Number(value) => value.to_string(),
+                    Value::Bool(value) => value.to_string(),
+                    value @ (Value::Object(_) | Value::Array(_)) => {
+                        self.map.remove(&key);
+                        self.components.insert(key, value);
+                        continue;
+                    }
+                    Value::Null => continue,
+                };
+                self.components.remove(&key);
+                self.map.insert(key, template);
+            }
+        } else {
+            let mut entries = HashMap::new();
+            read_lang_file(bytes, &mut entries);
+            for (key, value) in entries {
+                self.components.remove(&key);
+                self.map.insert(key, value);
+            }
+        }
+    }
+
+    fn deprecate(&mut self, bytes: &[u8]) {
+        apply_deprecated(&mut self.map, bytes);
+        apply_deprecated(&mut self.components, bytes);
+    }
+
+    pub(crate) fn component(&self, key: &str) -> Option<&serde_json::Value> {
+        self.components.get(key)
+    }
+
     /// ClientLanguage.loadFrom: en_us first, then the selected language, each
     /// from every namespace and every source in priority order (later sources
     /// override).
@@ -522,9 +625,9 @@ impl Language {
         code: &str,
         crate_files: &[&[(&str, &str)]],
     ) -> Self {
-        let mut map = HashMap::new();
+        let mut language = Self::of(code, []);
         // What vanilla's client would load from the same sources: everything but the engine's.
-        let mut vanilla = HashMap::new();
+        let mut vanilla = Self::of(code, []);
         let mut engine_keys = false;
         let mut codes = vec![DEFAULT];
         if code != DEFAULT {
@@ -546,15 +649,15 @@ impl Language {
                         if engine {
                             engine_keys = true;
                         } else {
-                            read_lang_file(&bytes, &mut vanilla);
+                            vanilla.overlay(&bytes);
                         }
-                        read_lang_file(&bytes, &mut map);
+                        language.overlay(&bytes);
                     }
                     // The crates' text right after the engine's own (`Bundled`, the first source).
                     if engine {
-                        let before = map.len();
-                        read_crate_files(crate_files, c, &mut map);
-                        engine_keys |= map.len() != before;
+                        let before = language.map.len();
+                        read_crate_files(crate_files, c, &mut language);
+                        engine_keys |= language.map.len() != before;
                     }
                 }
             }
@@ -565,25 +668,15 @@ impl Language {
             .iter()
             .find_map(|s| s.read("assets/minecraft/lang/deprecated.json"))
         {
-            apply_deprecated(&mut map, &bytes);
-            apply_deprecated(&mut vanilla, &bytes);
+            language.deprecate(&bytes);
+            vanilla.deprecate(&bytes);
         }
-        let bidirectional = available(sources)
+        language.bidirectional = available(sources)
             .iter()
             .any(|info| info.code == code && info.bidirectional);
-        Self {
-            code: code.to_owned(),
-            bidirectional,
-            map,
-            vanilla: engine_keys.then(|| {
-                Arc::new(Self {
-                    code: code.to_owned(),
-                    bidirectional,
-                    map: vanilla,
-                    vanilla: None,
-                })
-            }),
-        }
+        vanilla.bidirectional = language.bidirectional;
+        language.vanilla = engine_keys.then(|| Arc::new(vanilla));
+        language
     }
     pub fn get(&self, key: &str) -> Option<&str> {
         self.map.get(key).map(String::as_str)
@@ -594,10 +687,10 @@ impl Language {
         &self.map
     }
     pub fn len(&self) -> usize {
-        self.map.len()
+        self.map.len() + self.components.len()
     }
     pub fn is_empty(&self) -> bool {
-        self.map.is_empty()
+        self.map.is_empty() && self.components.is_empty()
     }
 }
 
@@ -771,7 +864,7 @@ pub fn returned_to_server<R>(f: impl FnOnce() -> R) -> R {
     }
 }
 /// `key` was asked for in a `scoped` language that has no text for it.
-fn missed(key: &str) {
+pub(crate) fn missed(key: &str) {
     SCOPE.with(|s| {
         if let Some(scope) = s.borrow_mut().as_mut()
             && !scope.missed.iter().any(|m| m == key)
@@ -793,24 +886,26 @@ pub fn code() -> String {
 }
 /// Language.getOrDefault: the translation, or the key itself.
 pub fn get(key: &str) -> String {
-    current()
-        .and_then(|l| l.get(key).map(str::to_owned))
-        .unwrap_or_else(|| {
-            missed(key);
-            key.to_owned()
-        })
+    get_or(key, key)
 }
 /// The translation, or `fallback` when the key is missing.
 pub fn get_or(key: &str, fallback: &str) -> String {
     current()
-        .and_then(|l| l.get(key).map(str::to_owned))
+        .and_then(|l| {
+            l.get(key).map(str::to_owned).or_else(|| {
+                l.component(key).map(|component| {
+                    crate::text::resolve_lang_component(component, crate::text::Origin::Local)
+                        .plain()
+                })
+            })
+        })
         .unwrap_or_else(|| {
             missed(key);
             fallback.to_owned()
         })
 }
 pub fn has(key: &str) -> bool {
-    current().is_some_and(|l| l.get(key).is_some())
+    current().is_some_and(|l| l.get(key).is_some() || l.component(key).is_some())
 }
 /// I18n.get with plain string arguments.
 pub fn tr(key: &str, args: &[&dyn std::fmt::Display]) -> String {
@@ -826,6 +921,116 @@ mod tests {
             self.0.get(path).cloned()
         }
     }
+    #[test]
+    fn dedicated_components_use_default_english_and_literal_keybind_ids() {
+        let source = Mem(HashMap::from([
+            (
+                "assets/minecraft/lang/en_us.json".into(),
+                br#"{"test.old":"Value: %2$s / %1$s","key.keyboard.space":"Space","test.removed":"Hidden"}"#.to_vec(),
+            ),
+            (
+                "assets/minecraft/lang/deprecated.json".into(),
+                br#"{"removed":["test.removed"],"renamed":{"test.old":"test.value"}}"#.to_vec(),
+            ),
+            (
+                "assets/example/lang/en_us.json".into(),
+                br#"{"test.mod":"Mod translation"}"#.to_vec(),
+            ),
+        ]));
+        scoped(Language::load_default(&source), || {
+            let text = crate::text::Text::from(serde_json::json!({
+                "translate": "test.value",
+                "with": ["name", {"keybind": "key.keyboard.space"}],
+                "extra": [
+                    " ",
+                    {"translate": "test.mod", "fallback": "fallback"},
+                    " ",
+                    {"translate": "test.removed"}
+                ]
+            }));
+            assert_eq!(
+                text.plain(),
+                "Value: key.keyboard.space / name fallback test.removed"
+            );
+        });
+    }
+
+    #[test]
+    fn server_starting_layers_pack_languages_and_resolves_component_values() {
+        use sunrise_assets::resource_source::{Resource, ResourceSource as Assets};
+
+        let base = Mem(HashMap::from([
+            (
+                "assets/minecraft/lang/en_us.json".into(),
+                br#"{"test.decimal":"%2$03d","test.removed":"old","test.text":"Base text"}"#
+                    .to_vec(),
+            ),
+            (
+                "assets/minecraft/lang/deprecated.json".into(),
+                br#"{"removed":["test.removed"]}"#.to_vec(),
+            ),
+        ]));
+        let assets = |files: &[(&str, &str)]| {
+            Assets::indexed(
+                files
+                    .iter()
+                    .map(|(path, file)| {
+                        (
+                            (*path).to_owned(),
+                            Resource::bytes(file.as_bytes().to_vec()),
+                        )
+                    })
+                    .collect(),
+            )
+        };
+        let mods = assets(&[
+            (
+                "assets/a/lang/en_us.json",
+                r#"{"test.text":"Mod text","test.order":"a"}"#,
+            ),
+            (
+                "assets/z/lang/en_us.json",
+                r#"{"test.order":"z","test.priority":"Mod priority"}"#,
+            ),
+        ]);
+        let pack = assets(&[
+            (
+                "assets/a/lang/en_us.json",
+                r#"{
+                "test.text": [{"translate":"test.priority"},{"text":"!"}],
+                "test.priority":"Pack priority",
+                "test.removed":"Do not revive",
+                "test.loop":{"translate":"test.loop","fallback":"Do not use"}
+            }"#,
+            ),
+            (
+                "assets/a/lang/fr_fr.json",
+                r#"{"test.order":"not English"}"#,
+            ),
+        ]);
+        let read = |key| {
+            crate::text::Text::from(serde_json::json!({
+                "translate":key,"fallback":"fallback","with":["first","second"]
+            }))
+            .plain()
+        };
+
+        scoped(Language::load_default(&base), || {
+            assert_eq!(read("test.text"), "Base text");
+            assert_eq!(read("test.priority"), "fallback");
+        });
+        scoped(
+            Language::load_server(&base, [&mods as &dyn ResourceSource, &pack]),
+            || {
+                assert_eq!(read("test.order"), "z");
+                assert_eq!(read("test.text"), "Pack priority!");
+                assert_eq!(read("test.decimal"), "second");
+                assert_eq!(read("test.removed"), "fallback");
+                assert_eq!(read("test.loop"), "");
+            },
+        );
+    }
+
     #[test]
     fn bundled_sunrise_strings_follow_the_language() {
         // No prepared resources at all: the namespace is compiled in.

@@ -1196,13 +1196,64 @@ pub(crate) fn format_translatable_origin(
     args: &[Text],
     origin: Origin,
 ) -> Text {
-    let template = match fallback {
-        Some(fallback) => lang::current()
-            .and_then(|language| language.get(key).map(str::to_owned))
-            .unwrap_or_else(|| fallback.to_owned()),
-        None => lang::get(key),
-    };
-    format_translation_origin(&template, args, origin)
+    let language = lang::current();
+    if let Some(component) = language.as_ref().and_then(|l| l.component(key)) {
+        return resolve_lang_component(component, origin);
+    }
+    let template = language
+        .as_ref()
+        .and_then(|l| l.get(key))
+        .unwrap_or_else(|| {
+            if fallback.is_none() {
+                lang::missed(key);
+            }
+            fallback.unwrap_or(key)
+        });
+    format_translation_origin(template, args, origin)
+}
+
+/// Component-valued language entries replace the translation, not its
+/// template. Refuse re-entry into the same entry, and bound expansion of
+/// an acyclic chain (pack data can repeat the same component in siblings).
+pub(crate) fn resolve_lang_component(component: &Value, origin: Origin) -> Text {
+    struct Expansion {
+        active: Vec<usize>,
+        remaining: usize,
+    }
+    thread_local! {
+        static EXPANSION: std::cell::RefCell<Expansion> = const {
+            std::cell::RefCell::new(Expansion { active: Vec::new(), remaining: 0 })
+        };
+    }
+    struct Leave;
+    impl Drop for Leave {
+        fn drop(&mut self) {
+            EXPANSION.with_borrow_mut(|expansion| {
+                expansion.active.pop();
+            });
+        }
+    }
+
+    let id = std::ptr::from_ref(component) as usize;
+    let allowed = EXPANSION.with_borrow_mut(|expansion| {
+        if expansion.active.is_empty() {
+            expansion.remaining = 128;
+        }
+        if expansion.remaining == 0
+            || expansion.active.len() == 32
+            || expansion.active.contains(&id)
+        {
+            return false;
+        }
+        expansion.remaining -= 1;
+        expansion.active.push(id);
+        true
+    });
+    if !allowed {
+        return Text::empty();
+    }
+    let _leave = Leave;
+    crate::component::render_source(component, &|_| origin)
 }
 /// The most spans one translation expands to. Vanilla's `TranslatableContents.decompose` keeps
 /// references to its arguments, so its cost stays linear in the input; copying them here makes

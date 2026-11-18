@@ -8,7 +8,6 @@ in client setup. Native and wasm mods use the same methods.
 | --- | --- |
 | `text_width(&Text)` | `Result<i32, TextFormError>`: styled width in GUI pixels. |
 | `text_split(&Text, i32)` | `Result<Vec<Text>, TextFormError>`: wrapped, styled lines. |
-| `text_string(&Text)` | `Result<String, TextFormError>`: resolved plain characters. |
 | `text_visual_order(&Text)` | `Result<Vec<VisualTextCharacter>, TextFormError>`: styled characters in display order. |
 
 Inside a drawing hook, `DrawContext::text_lines(&Text, max_width, TextAlign, scale)` wraps and
@@ -38,14 +37,31 @@ and do not expose a full rendering context.
 ## Resolved strings
 
 For vanilla `Component.getString()` behavior, use
-`ClientHost::text_string(&Text) -> Result<String, TextFormError>`. This client
-setup read also works outside drawing on native and wasm. It uses the same
-component conversion as measurement: translation arguments, key names and nested
-siblings resolve against the current language on every call. The result contains
-plain characters, not serialized JSON or translation keys. Styles do not add
-characters; literal legacy `§` formatting codes remain in the string, unlike the
-font's formatted rendering. Invalid components return the same boundary errors
-as the other text reads. Do not cache resolved strings across language changes.
+`host.text_string(&Text) -> Result<String, TextFormError>` on either side,
+including setup, on native and wasm. It uses the same component conversion as
+measurement: translation arguments, keybinds and siblings resolve on each call.
+Styles do not add characters; literal legacy `§` formatting codes remain in the
+string. Invalid components return the same boundary errors as the other text reads.
+
+- **Client and integrated server:** both use the local player's selected language,
+  active resource packs (including client mod translations) and key bindings.
+  An integrated server does not resolve against a LAN guest's language.
+- **Dedicated server:** starts with vanilla's built-in `en_us`. Just before
+  `server_starting`, it loads `assets/<namespace>/lang/en_us.json` from
+  enabled mods and data packs. The mod layer goes first, then the enabled
+  data packs in pack priority order. Within a layer, namespaces sort
+  lexically; the last value for a key wins. Vanilla's deprecated keys are
+  applied to the result. Neither client resource packs nor later server
+  data-pack reloads affect this language. Keybind components give their
+  literal IDs.
+
+A missing key uses its component fallback, or the key itself without a
+fallback. A language file may also supply an object or array representing a
+component: it replaces the whole translation, including its arguments and
+fallback. A recursive reference to the same language entry resolves to no text.
+
+Send an unresolved component to a player when the result should use that player's
+language. Do not cache resolved strings across language changes.
 
 ## Visual order
 

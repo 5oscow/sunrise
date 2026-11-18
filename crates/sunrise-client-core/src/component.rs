@@ -543,7 +543,11 @@ fn build_node<'a>(
             } else if let Some(sel) = o.get("selector").and_then(Value::as_str) {
                 Text::from(resolve(sel).component())
             } else if let Some(key) = o.get("keybind").and_then(Value::as_str) {
-                Text::from(crate::key_display::display_name(key).component())
+                if crate::lang::current().is_some_and(|lang| lang.literal_keybinds) {
+                    sourced.literal(key.to_owned())
+                } else {
+                    Text::from(crate::key_display::display_name(key).component())
+                }
             } else {
                 Text::empty()
             };
