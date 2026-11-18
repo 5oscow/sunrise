@@ -716,6 +716,7 @@ fn block_aliases_keep_the_original_item_in_placement_context() {
         fn before_state_for_placement(
             &self,
             _: &sunrise_world::level::Ticks,
+            _: Option<&sunrise_world::level::PreviewBlocks>,
             _: BlockStateId,
             c: &PlacementContext,
             _: sunrise_world::fluid::FluidState,

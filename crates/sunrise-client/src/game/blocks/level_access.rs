@@ -609,6 +609,7 @@ impl LevelAccess for GameLevel<'_> {
     fn before_state_for_placement(
         &self,
         ticks: &Ticks,
+        preview: Option<&sunrise_world::level::PreviewBlocks>,
         state: BlockStateId,
         context: &PlacementContext,
         fluid: FluidState,
@@ -616,33 +617,38 @@ impl LevelAccess for GameLevel<'_> {
     ) {
         // Asked on both sides: a client's placement prediction asks it too.
         if let Some(fluid) = native_world_read::api_fluid_state(fluid) {
-            self.view(ticks).native_state_for_placement(
-                self.dimension,
-                state,
-                context,
-                fluid,
-                answer,
-            );
+            self.view(ticks)
+                .previewing(preview)
+                .native_state_for_placement(self.dimension, state, context, fluid, answer);
         }
     }
     fn before_can_survive(
         &self,
         ticks: &Ticks,
+        preview: Option<&sunrise_world::level::PreviewBlocks>,
         pos: BlockPos,
         state: BlockStateId,
         survives: &mut Option<bool>,
     ) {
-        self.view(ticks)
-            .native_can_survive(self.dimension, pos, state, survives);
+        self.view(ticks).previewing(preview).native_can_survive(
+            self.dimension,
+            pos,
+            state,
+            survives,
+        );
     }
     fn before_can_sustain_plant(
         &self,
+        ticks: &Ticks,
+        preview: Option<&sunrise_world::level::PreviewBlocks>,
         state: BlockStateId,
         ground: BlockStateId,
         ground_pos: BlockPos,
         sustains: &mut Option<bool>,
     ) {
-        self.native_can_sustain_plant(self.dimension, state, ground, ground_pos, sustains);
+        self.view(ticks)
+            .previewing(preview)
+            .native_can_sustain_plant(self.dimension, state, ground, ground_pos, sustains);
     }
     fn asks_is_fertile(&self) -> bool {
         self.native_authoritative && mod_api::__private::has_scoped_hook(mod_api::HookId::IsFertile)
@@ -671,12 +677,20 @@ impl LevelAccess for GameLevel<'_> {
     }
     fn before_may_place_on(
         &self,
+        ticks: &Ticks,
+        preview: Option<&sunrise_world::level::PreviewBlocks>,
         state: BlockStateId,
         ground: BlockStateId,
         ground_pos: BlockPos,
         may: &mut Option<bool>,
     ) {
-        self.native_may_place_on(self.dimension, state, ground, ground_pos, may);
+        self.view(ticks).previewing(preview).native_may_place_on(
+            self.dimension,
+            state,
+            ground,
+            ground_pos,
+            may,
+        );
     }
     fn is_client_side(&self) -> bool {
         self.client_side

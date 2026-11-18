@@ -23,7 +23,7 @@ pub trait Hooks {
         out = "may",
         scope = "block",
         key = "state",
-        target = "sunrise_client::game::native_hooks::base::GameLevel<'_>::native_may_place_on",
+        target = "sunrise_client::game::native_hooks::base::LevelView<'_>::native_may_place_on",
         neoforge = "IBlockExtension.canSustainPlant"
     )]
     fn may_place_on();

@@ -22,7 +22,7 @@ pub trait Hooks {
         out = "sustains",
         scope = "block",
         key = "ground",
-        target = "sunrise_client::game::native_hooks::can_sustain_plant::GameLevel<'_>::native_can_sustain_plant",
+        target = "sunrise_client::game::native_hooks::can_sustain_plant::LevelView<'_>::native_can_sustain_plant",
         neoforge = "IBlockExtension.canSustainPlant"
     )]
     fn can_sustain_plant();

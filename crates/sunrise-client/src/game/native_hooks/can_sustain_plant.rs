@@ -1,6 +1,6 @@
 use super::*;
 
-impl GameLevel<'_> {
+impl LevelView<'_> {
     /// `IBlockExtension.canSustainPlant` for the soil `ground` at `ground_pos`
     /// and the plant `state` above it, asked before the plant answers its own
     /// `mayPlaceOn`: `Some(true)` lets the plant stand there, `Some(false)`

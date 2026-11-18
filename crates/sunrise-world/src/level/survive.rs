@@ -15,7 +15,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     pub fn can_survive(&self, state: BlockStateId, pos: BlockPos) -> bool {
         let mut survives = None;
         self.level
-            .before_can_survive(&*self.ticks, pos, state, &mut survives);
+            .before_can_survive(&*self.ticks, None, pos, state, &mut survives);
         survives.unwrap_or_else(|| self.can_survive_at(0, state, pos))
     }
     fn can_survive_at(&self, depth: usize, state: BlockStateId, pos: BlockPos) -> bool {
@@ -365,14 +365,20 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     ) -> bool {
         // NeoForge's `BushBlock.canSurvive`: the soil's answer first, the plant's second.
         let mut sustains = None;
-        self.level
-            .before_can_sustain_plant(state, ground, ground_pos, &mut sustains);
+        self.level.before_can_sustain_plant(
+            &*self.ticks,
+            None,
+            state,
+            ground,
+            ground_pos,
+            &mut sustains,
+        );
         if let Some(sustains) = sustains {
             return sustains;
         }
         let mut may = None;
         self.level
-            .before_may_place_on(state, ground, ground_pos, &mut may);
+            .before_may_place_on(&*self.ticks, None, state, ground, ground_pos, &mut may);
         if let Some(may) = may {
             return may;
         }

@@ -1463,8 +1463,9 @@ pub trait LevelHost {
     /// `LevelRef::signal` reads it. It writes nothing and draws nothing, so it leaves the
     /// call it is read in as it was, and it asks no placement or survival hook, so a read made
     /// inside `state_for_placement` or `can_survive` cannot re-enter them. None in a callback
-    /// whose level has no signal view: `state_for_placement`, `can_survive` and the level
-    /// tick and shape-update hooks have one.
+    /// whose level has no signal view: `state_for_placement`, `can_survive`, `may_place_on`,
+    /// `can_sustain_plant` and the level tick and shape-update hooks have one. None on a client
+    /// for a read that needs a comparator's output the client doesn't hold.
     fn signal(&self, _pos: [i32; 3], _direction: Direction) -> Option<i32> {
         None
     }

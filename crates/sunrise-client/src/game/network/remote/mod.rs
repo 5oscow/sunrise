@@ -8226,8 +8226,9 @@ impl Game<'_> {
             _ => Direction::East,
         };
         let player = self.use_context();
-        self.with_block_use_level(|b, level, _| {
+        self.with_block_use_level(|b, level, live| {
             let mut level = DryLevel::new(level);
+            level.reads = Some(live);
             let hit = sunrise_core::geometry::BlockHit {
                 block: sunrise_core::position::BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]),
                 direction: face,
@@ -8287,8 +8288,8 @@ impl Game<'_> {
         }
     }
 
-    /// Run BlockItem.place on a disposable level: where it placed and the
-    /// blocks it set. The real level supplies collision shapes and
+    /// Run BlockItem.place on a disposable level for a click: where it placed
+    /// and the blocks it set. The real level supplies collision shapes and
     /// building-blocking entities; random draws, scheduled ticks and events
     /// stay in the preview. `ItemStack.useOn` runs it in adventure mode only
     /// when the used stack's `can_place_on` names the clicked block.
@@ -8296,6 +8297,20 @@ impl Game<'_> {
         &mut self,
         hit: &super::Hit,
         stack: &ItemStack,
+    ) -> Option<DryPlace> {
+        self.remote_place_preview(hit, stack, true)
+    }
+    /// Whether a click would place `stack` (the controller guide's look): as
+    /// `remote_can_place`, by the templates' rules alone, so looking asks no
+    /// mod's placement or survival hook.
+    pub(super) fn remote_would_place(&mut self, hit: &super::Hit, stack: &ItemStack) -> bool {
+        self.remote_place_preview(hit, stack, false).is_some()
+    }
+    fn remote_place_preview(
+        &mut self,
+        hit: &super::Hit,
+        stack: &ItemStack,
+        asks_mods: bool,
     ) -> Option<DryPlace> {
         if !self.may_build() && !self.stack_can_place_on_in_adventure(stack, hit.pos) {
             return None;
@@ -8311,8 +8326,10 @@ impl Game<'_> {
             item: stack.item.to_string(),
             can_use_game_master_blocks: self.can_use_game_master_blocks(),
         };
-        self.with_level(|b, level, _| {
+        self.with_level(|b, level, ticks| {
             let mut level = DryLevel::new(level);
+            level.reads = Some(ticks);
+            level.asks_mods = asks_mods;
             match b.place_block(
                 &mut level,
                 &mut sunrise_world::level::Ticks::default(),

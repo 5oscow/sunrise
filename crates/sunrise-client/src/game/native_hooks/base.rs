@@ -349,25 +349,6 @@ impl GameLevel<'_> {
         self.fire_update_shape(ticks, call);
     }
 
-    /// `VegetationBlock.mayPlaceOn` for the plant `state` on `ground` at
-    /// `ground_pos`, before the plant answers it: the blocks a mod plant (one
-    /// whose template is a vanilla plant, such as a crop) can stand on. Its
-    /// template's `canSurvive` asks it, so the plant is refused there and pops
-    /// off when its ground changes to one it can't stand on. Answer only for your
-    /// own blocks. The level is read-only. Asked on both sides: a client asks it
-    /// from its placement prediction and its own shape updates.
-    #[inline(always)]
-    pub(in crate::game) fn native_may_place_on(
-        &self,
-        dimension: LevelDimension,
-        state: BlockStateId,
-        ground: BlockStateId,
-        ground_pos: BlockPos,
-        may: &mut Option<bool>,
-    ) {
-        self.fire_may_place_on(dimension, state, ground, ground_pos, may);
-    }
-
     /// An authoritative server's `ServerLevel.tickBlock` is about to run a
     /// due scheduled tick of the block `state` at `pos` (`BlockState.tick`):
     /// the block is still the one the tick was scheduled for. Change the
@@ -4817,9 +4798,11 @@ impl Game<'_> {
 
 /// The level a placement or survival question is asked of: the game's level with the
 /// simulation's ticks shared beside it, which a signal read needs (comparator outputs, moving
-/// pistons). The listener's `&dyn LevelHost` is this, so `state_for_placement` and `can_survive`
-/// can read redstone and shapes. A read goes only through `Signals`, which asks the signal hooks
-/// and never `state_for_placement` or `can_survive`: a listener cannot re-enter itself through it.
+/// pistons). The listener's `&dyn LevelHost` is this, so `state_for_placement`, `can_survive`,
+/// `may_place_on` and `can_sustain_plant` can read redstone and shapes; asked from a preview
+/// (a client's guess at a click), it reads over the blocks the preview set. A read goes only
+/// through `Signals`, which asks the signal hooks and never `state_for_placement` or
+/// `can_survive`: a listener cannot re-enter itself through it.
 pub(in crate::game) type LevelView<'a> =
     super::super::mod_api_host::LevelTicks<'a, &'a GameLevel<'a>, &'a Ticks>;
 impl GameLevel<'_> {
@@ -4829,6 +4812,25 @@ impl GameLevel<'_> {
     }
 }
 impl LevelView<'_> {
+    /// `VegetationBlock.mayPlaceOn` for the plant `state` on `ground` at
+    /// `ground_pos`, before the plant answers it: the blocks a mod plant (one
+    /// whose template is a vanilla plant, such as a crop) can stand on. Its
+    /// template's `canSurvive` asks it, so the plant is refused there and pops
+    /// off when its ground changes to one it can't stand on. Answer only for your
+    /// own blocks. The level is read-only. Asked on both sides: a client asks it
+    /// from its placement prediction and its own shape updates.
+    #[inline(always)]
+    pub(in crate::game) fn native_may_place_on(
+        &self,
+        dimension: LevelDimension,
+        state: BlockStateId,
+        ground: BlockStateId,
+        ground_pos: BlockPos,
+        may: &mut Option<bool>,
+    ) {
+        self.fire_may_place_on(dimension, state, ground, ground_pos, may);
+    }
+
     /// `BlockState.canSurvive` for `state` at `pos`
     /// (`BlockBehaviour.canSurvive`), before the block answers it: as it is
     /// placed (`BlockItem.canPlace`), from a shape update of a block whose
