@@ -271,3 +271,32 @@ fn shoot_sets_the_vanilla_rotation_of_its_motion() {
         [87.04267_f32, 4.1363425]
     );
 }
+
+/// A motion so large that its squared lengths overflow gives no finite target
+/// angle (`Mth.atan2` of an overflowed length). The turn is skipped: the
+/// rotation and the previous rotation it would interpolate from stay as they
+/// were, rather than becoming NaN or looping by whole turns towards an
+/// infinite angle. `[0, 1e200, 0]` leaves the yaw target finite (90) and only
+/// the pitch target NaN; the others make both non-finite.
+#[test]
+fn a_turn_towards_a_non_finite_angle_keeps_the_rotation() {
+    for v in [
+        Vec3::new(f64::MAX, f64::MAX, f64::MAX),
+        Vec3::new(f64::MAX, -f64::MAX, 0.0),
+        Vec3::new(1e160, 1e160, 1e160),
+        Vec3::new(0.0, 1e200, 0.0),
+    ] {
+        let mut p = Projectile::new(ProjectileKind::WindCharge, Vec3::new(0.5, 100.0, 0.5), None);
+        p.velocity = v;
+        p.yaw = 30.0;
+        p.pitch = -10.0;
+        p.previous_yaw = 25.0;
+        p.previous_pitch = -5.0;
+        p.rotate_towards_movement(0.2);
+        assert_eq!(
+            [p.yaw, p.pitch, p.previous_yaw, p.previous_pitch],
+            [30.0, -10.0, 25.0, -5.0],
+            "{v:?}"
+        );
+    }
+}

@@ -1144,6 +1144,12 @@ impl Projectile {
         let horizontal = (v.x * v.x + v.z * v.z).sqrt();
         let y_rot = sunrise_core::geometry::trig::atan2_degrees(v.z, v.x) + 90.0;
         let x_rot = sunrise_core::geometry::trig::atan2_degrees(horizontal, v.y) - 90.0;
+        // A motion whose squared lengths overflow gives no finite target:
+        // shifting by whole turns towards it would never end, so the turn is
+        // skipped and both rotations stay as they were.
+        if !x_rot.is_finite() || !y_rot.is_finite() {
+            return;
+        }
         // Shift the old angles by whole turns so the lerp takes the shortest
         // way; the shifted old angles are what rendering interpolates from.
         self.previous_pitch = shift_by_turns(self.previous_pitch, x_rot);
