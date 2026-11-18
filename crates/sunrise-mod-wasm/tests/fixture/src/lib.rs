@@ -321,6 +321,22 @@ impl Hooks for Mod {
         mod_api::Flow::Continue
     }
 
+    fn mob_split(
+        &self,
+        host: &mut dyn mod_api::ServerHost,
+        event: &mut mod_api::MobSplitEvent<'_>,
+    ) -> mod_api::Flow {
+        pending_children::mob_split(host, event)
+    }
+
+    fn baby_entity_spawn(
+        &self,
+        host: &mut dyn mod_api::ServerHost,
+        event: &mut mod_api::BabyEntitySpawnEvent<'_>,
+    ) -> mod_api::Flow {
+        pending_children::baby_entity_spawn(host, event)
+    }
+
     fn blocks(&self, _: &mod_api::RegistrationContext, event: &mut mod_api::BlocksEvent<'_>) {
         part_state::blocks(event);
     }

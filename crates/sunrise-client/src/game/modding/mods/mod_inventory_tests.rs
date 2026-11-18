@@ -208,11 +208,11 @@ fn code_only_reload_publishes_one_new_inventory_after_prepare_and_preserves_old_
                     ("loot_table", serde_json::json!({"pools":[]})),
                     (
                         "predicate",
-                        serde_json::json!({"condition":"minecraft:random_chance","chance":1}),
+                        serde_json::json!({"type":"minecraft:random_chance","chance":1}),
                     ),
                     (
                         "item_modifier",
-                        serde_json::json!({"function":"minecraft:set_count","count":1}),
+                        serde_json::json!({"type":"minecraft:set_count","count":1}),
                     ),
                     (
                         "jukebox_song",
