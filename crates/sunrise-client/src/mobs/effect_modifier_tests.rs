@@ -847,18 +847,14 @@ fn a_given_effect_replaces_a_mods_transient_modifier_with_its_id_everywhere() {
         Attr::SafeFallDistance,
         JUMP
     ));
-    assert!(
-        !m.extra
-            .live
-            .has_transient("minecraft:safe_fall_distance", JUMP)
-    );
     assert_eq!(finalize::value(&m, Attr::SafeFallDistance), 5.0);
-    m.extra.live.invalidate();
     assert_eq!(live_value(&m, "minecraft:safe_fall_distance"), 5.0);
     // A transient Absorption id the given effect replaced stays gone through
     // the clear; another mod modifier stays.
     finalize::add_transient_modifier(&mut m, Attr::MaxAbsorption, ABSORPTION, 4.0, Op::AddValue);
+    assert_eq!(live_value(&m, "minecraft:max_absorption"), 4.0);
     m.add_effect("minecraft:absorption", -1, 0);
+    assert_eq!(live_value(&m, "minecraft:max_absorption"), 4.0);
     finalize::add_transient_modifier(
         &mut m,
         Attr::SafeFallDistance,
@@ -867,12 +863,6 @@ fn a_given_effect_replaces_a_mods_transient_modifier_with_its_id_everywhere() {
         Op::AddValue,
     );
     assert!(m.retain_effects(|_| false));
-    assert!(
-        !m.extra
-            .live
-            .has_transient("minecraft:max_absorption", ABSORPTION)
-    );
-    m.extra.live.invalidate();
     assert_eq!(finalize::value(&m, Attr::SafeFallDistance), 4.0);
     assert_eq!(live_value(&m, "minecraft:safe_fall_distance"), 4.0);
     assert_eq!(live_value(&m, "minecraft:max_absorption"), 0.0);
@@ -881,8 +871,8 @@ fn a_given_effect_replaces_a_mods_transient_modifier_with_its_id_everywhere() {
 /// Clearing an Absorption effect that loaded without a modifier, while a
 /// mod's transient `minecraft:effect.absorption` (8.0) is on `max_absorption`:
 /// `removeModifier` finds that one, so the instance is dirty and the 8
-/// absorption are clamped to the maximum left, 0; the transient is gone from
-/// the live map's record too.
+/// absorption are clamped to the maximum left, 0; the live maximum reads 8
+/// before and 0 after.
 #[test]
 fn clearing_absorption_takes_a_mods_transient_off_and_clamps() {
     let tag = sunrise_core::nbt::parse_snbt(
@@ -893,17 +883,14 @@ fn clearing_absorption_takes_a_mods_transient_off_and_clamps() {
     let mut m = mob_from_nbt(&tag, &types(), 1, None).unwrap();
     finalize::add_transient_modifier(&mut m, Attr::MaxAbsorption, ABSORPTION, 8.0, Op::AddValue);
     assert_eq!(crate::mobs::armor::max_absorption(&m), 8.0);
+    assert_eq!(live_value(&m, "minecraft:max_absorption"), 8.0);
     assert!(m.retain_effects(|_| false));
     assert!(!finalize::has_transient_modifier(
         &m,
         Attr::MaxAbsorption,
         ABSORPTION
     ));
-    assert!(
-        !m.extra
-            .live
-            .has_transient("minecraft:max_absorption", ABSORPTION)
-    );
     assert_eq!(crate::mobs::armor::max_absorption(&m), 0.0);
+    assert_eq!(live_value(&m, "minecraft:max_absorption"), 0.0);
     assert_eq!(m.absorption, 0.0);
 }
