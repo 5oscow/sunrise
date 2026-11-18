@@ -6,17 +6,15 @@ use std::sync::{
 };
 
 fn registered(count: Arc<AtomicUsize>) -> LoadConditions {
-    LoadConditions::new(["testmod", "othermod"]).with_lookup(
-        BTreeMap::from([("testmod".into(), "testmod".into())]),
-        move |name, args| {
-            (name == "testmod:flag").then(|| {
-                count.fetch_add(1, Ordering::SeqCst);
-                args["value"]
-                    .as_bool()
-                    .ok_or_else(|| "value must be a boolean".into())
-            })
+    LoadConditions::new(["testmod", "othermod"]).with_lookup([(
+        "testmod:flag",
+        move |args: &Value| {
+            count.fetch_add(1, Ordering::SeqCst);
+            args["value"]
+                .as_bool()
+                .ok_or_else(|| "value must be a boolean".into())
         },
-    )
+    )])
 }
 fn variants(name: &str) -> Vec<Value> {
     let leaf = json!({"type":name});

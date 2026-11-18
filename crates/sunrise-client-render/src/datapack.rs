@@ -2018,15 +2018,12 @@ mod tests {
             std::fs::write(file, value.to_string()).unwrap();
         }
         let pack = DataPack::from_source("pack".into(), ResourceSource::directory(root.clone()));
-        let conditions = sunrise_world::conditions::LoadConditions::new([])
-            .with_diagnostics()
-            .with_lookup(std::collections::BTreeMap::new(), |_, _| None);
+        let conditions = sunrise_world::conditions::LoadConditions::new([]);
         let store = DataStore::load_with_conditions(&[&pack], &conditions);
         std::fs::remove_dir_all(&root).unwrap();
         assert_eq!(store.predicates.get("demo:entry"), Some(&predicate));
         assert_eq!(store.item_modifiers.get("demo:entry"), Some(&modifier));
-        assert_eq!(conditions.check_resource_errors("predicate"), Ok(()));
-        assert_eq!(conditions.check_resource_errors("item_modifier"), Ok(()));
+        assert_eq!(conditions.check_errors(), Ok(()));
     }
 
     #[test]
@@ -2210,7 +2207,7 @@ mod tests {
             ));
         }
         let refs = packs.iter().collect::<Vec<_>>();
-        let files = registry_files(&refs, &[("example", "spell")], true, |_, _, _| true).unwrap();
+        let files = registry_files(&refs, &[("example", "spell")], |_, _| true).unwrap();
         assert_eq!(
             files.keys().map(String::as_str).collect::<Vec<_>>(),
             [
@@ -2231,10 +2228,10 @@ mod tests {
         // only as the bounded refusal prefix, not as its full payload.
         let path = "data/example/example/spell/fire.json";
         std::fs::write(root.join("low").join(path), vec![b' '; 1_048_577]).unwrap();
-        let files = registry_files(&refs, &[("example", "spell")], true, |_, _, _| true).unwrap();
+        let files = registry_files(&refs, &[("example", "spell")], |_, _| true).unwrap();
         assert_eq!(files[path], vec![("high".to_owned(), b"high".to_vec())]);
         std::fs::write(root.join("high").join(path), vec![b' '; 1_048_578]).unwrap();
-        let files = registry_files(&refs, &[("example", "spell")], true, |_, _, _| true).unwrap();
+        let files = registry_files(&refs, &[("example", "spell")], |_, _| true).unwrap();
         assert_eq!(files[path].len(), 1);
         assert_eq!(files[path][0].1.len(), 1_048_577);
         let _ = std::fs::remove_dir_all(&root);

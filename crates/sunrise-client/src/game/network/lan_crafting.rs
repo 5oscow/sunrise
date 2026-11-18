@@ -2343,7 +2343,7 @@ mod empty_ingredient_placement_tests {
                     game.world_tables = game
                         .stage_world_tables(&stack, false, &resources)
                         .unwrap()
-                        .0;
+                        .tables;
                     game.build_registries();
                     {
                         // The generated Host entrypoint serves native and wasm callers;

@@ -2544,9 +2544,11 @@ mod tests {
                     .tags
                     .contains(&"test:feature_marker".to_owned())
             );
-            (game.world_tables, game.health_resources, _) = game
+            let staged = game
                 .stage_world_tables(&stack, false, &game.options.resources.clone())
                 .unwrap();
+            game.world_tables = staged.tables;
+            game.health_resources = staged.health;
             assert!(game.items().item_tags["test:sample"].contains("minecraft:diamond"));
         });
         std::fs::remove_dir_all(root).unwrap();

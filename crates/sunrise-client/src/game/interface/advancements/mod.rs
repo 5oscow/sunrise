@@ -3344,8 +3344,10 @@ mod structure_tag_tests {
             &[],
             &[],
         );
-        let (tables, _, _) = game.stage_world_tables(&stack, false, &root).unwrap();
-        game.world_tables = tables;
+        game.world_tables = game
+            .stage_world_tables(&stack, false, &root)
+            .unwrap()
+            .tables;
         assert!(game.world_tables.is_some());
         assert!(holds(&game, "#mypack:village", "minecraft:igloo"));
         assert!(holds(&game, "#mypack:village", "minecraft:village_plains"));

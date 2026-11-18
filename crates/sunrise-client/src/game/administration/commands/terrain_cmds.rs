@@ -1613,7 +1613,7 @@ mod loot_mine_location_tests {
             game.world_tables = game
                 .stage_world_tables(&stack, false, &game.options.resources.clone())
                 .unwrap()
-                .0;
+                .tables;
             assert!(game.world_tables.is_some());
             game.ensure_datapacks();
             assert!(game.run_command("scoreboard objectives add h079 dummy"));

@@ -17,8 +17,7 @@ fn a_recipe_keeps_an_ingredients_conditions_as_data() {
         "result": {"id": "minecraft:stone"}
     });
     std::fs::write(dir.join("tin.json"), recipe.to_string()).unwrap();
-    let conditions = sunrise_world::conditions::LoadConditions::new([])
-        .with_lookup(std::collections::BTreeMap::new(), |_, _| None);
+    let conditions = sunrise_world::conditions::LoadConditions::new([]);
     let overlay = PackOverlay {
         files: &[],
         conditions: &conditions,

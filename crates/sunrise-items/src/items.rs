@@ -3695,9 +3695,7 @@ mod tests {
         let file = json!({"description": "horn", "sounds": [
             {"id": "demo:a", "neoforge:conditions": [{"type": "absent:condition"}]}]});
         fs::write(dir.join("horn.json"), file.to_string()).unwrap();
-        let conditions = sunrise_world::conditions::LoadConditions::new([])
-            .with_diagnostics()
-            .with_lookup(std::collections::BTreeMap::new(), |_, _| None);
+        let conditions = sunrise_world::conditions::LoadConditions::new([]);
         let overlay = PackOverlay {
             files: &[],
             conditions: &conditions,
@@ -3705,7 +3703,7 @@ mod tests {
         let loaded = data_files(&root, "instrument", &overlay);
         fs::remove_dir_all(&root).unwrap();
         assert_eq!(loaded.get("demo:horn"), Some(&file));
-        assert_eq!(conditions.check_resource_errors("instrument"), Ok(()));
+        assert_eq!(conditions.check_errors(), Ok(()));
     }
 
     #[test]

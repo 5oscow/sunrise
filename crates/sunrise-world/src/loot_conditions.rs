@@ -29,17 +29,9 @@ mod tests {
         )
     }
 
-    /// Conditions that report an unknown condition kind as a load error of the
-    /// folder it is evaluated in, so a nested key that got evaluated shows.
-    fn strict() -> LoadConditions {
-        LoadConditions::new(["create"])
-            .with_diagnostics()
-            .with_lookup(std::collections::BTreeMap::new(), |_, _| None)
-    }
-
     fn read(kind: &str, value: Value) -> Value {
         let files = [file(kind, value)];
-        let conditions = strict();
+        let conditions = LoadConditions::new(["create"]);
         let overlay = PackOverlay {
             files: &files,
             conditions: &conditions,
@@ -48,7 +40,7 @@ mod tests {
         overlay_map(&overlay, kind, &mut out);
         // A nested key outside pool entries is never evaluated: its unknown
         // condition leaves no diagnostic.
-        assert_eq!(conditions.check_resource_errors(kind), Ok(()), "{kind}");
+        assert_eq!(conditions.check_errors(), Ok(()), "{kind}");
         out.remove("demo:file").expect("the file loads")
     }
 

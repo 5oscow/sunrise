@@ -787,9 +787,7 @@ mod tests {
 
     #[test]
     fn always_and_never_evaluate_without_a_registered_handler() {
-        let conditions = LoadConditions::new([]).with_lookup(BTreeMap::new(), |name, _| {
-            panic!("built-in condition {name} fell through to the mod lookup")
-        });
+        let conditions = LoadConditions::new([]);
         assert!(conditions.allows(&file(json!({"type": "neoforge:always"}))));
         assert!(!conditions.allows(&file(json!({"type": "neoforge:never"}))));
         assert!(conditions.allows(&file(
@@ -862,13 +860,13 @@ mod tests {
             assert!(conditions.allows(&file(json!({"type": "neoforge:not", "value": registered}))));
             assert!(!conditions.allows(&file(json!({"type": "neoforge:not", "value": empty}))));
         }
-        assert_eq!(conditions.check_resource_errors("recipe"), Ok(()));
+        assert_eq!(conditions.check_errors(), Ok(()));
     }
 
     #[test]
     fn a_retained_candidate_does_not_reuse_an_answer_across_tag_views() {
         let tin = file(json!({"type": "neoforge:tag_empty", "tag": "c:ingots/tin"}));
-        let candidate = LoadConditions::new([]).with_lookup(BTreeMap::new(), |_, _| None);
+        let candidate = LoadConditions::new([]).with_lookup([("test:flag", |_: &Value| Ok(true))]);
         let empty = candidate.with_tags([("minecraft:item", Vec::<&str>::new())]);
         let with_tin = candidate.with_tags([("minecraft:item", vec!["c:ingots/tin"])]);
         assert!(empty.allows_file(&tin, "data/a/recipe/b.json"));
@@ -895,7 +893,7 @@ mod tests {
                     .with_features(["vanilla"])
                     .with_tags([("item", Vec::<&str>::new())]);
                 assert!(!conditions.allows_file(&file(condition), "data/test/recipe/bad.json"));
-                assert!(conditions.check_resource_errors("recipe").is_err());
+                assert!(conditions.check_errors().is_err());
             }
         }
     }

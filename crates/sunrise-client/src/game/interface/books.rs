@@ -1827,7 +1827,10 @@ mod lectern_books_tag_tests {
         game.world_root = dir;
         let stack = game.reload_datapacks(false, &[]).unwrap();
         let root = game.options.resources.clone();
-        game.world_tables = game.stage_world_tables(&stack, false, &root).unwrap().0;
+        game.world_tables = game
+            .stage_world_tables(&stack, false, &root)
+            .unwrap()
+            .tables;
 
         let state = game
             .pack
