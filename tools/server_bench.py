@@ -379,9 +379,6 @@ def server_command(kind, directory, args):
     toml = directory / 'server.toml'
     # The same settings, without the web panel.
     toml.write_text(re.sub(r'(?m)^bind = "127\.0\.0\.1:8130"', 'bind = ""', toml.read_text()))
-    if args.dab:
-        # Mob AI far from players (docs/hosting.md): the defaults of Pufferfish's DAB.
-        toml.write_text(toml.read_text() + '\n[entities]\ndab = true\n')
     return [server, '--dir', directory, 'run']
 
 
@@ -477,7 +474,7 @@ def run_once(kind, bots, behaviour, args, out):
             server.console('gamerule ' + rule.replace('=', ' '))
         if args.farm:
             # A farm of mobs ~100 blocks east of the spawn, inside the simulation distance and far from
-            # the bots: the mobs a player is not near, which DAB slows. Cows and villagers (zombies would burn in daylight), two blocks apart so cramming leaves them be.
+            # the bots: the mobs a player is not near. Cows and villagers (zombies would burn in daylight), two blocks apart so cramming leaves them be.
             for i in range(args.farm):
                 x, z = 90 + i % 40 * 2, -80 + i // 40 * 2
                 kind = 'minecraft:villager' if i % 2 else 'minecraft:cow'
@@ -644,10 +641,8 @@ def main():
     parser.add_argument('--heap', default='4g', help='the Java heap, -Xms and -Xmx (vanilla, Paper, Fabric)')
     parser.add_argument('--out', type=Path, default=None, help='the report (JSON)')
     parser.add_argument('--nice', type=int, default=0, help='run the servers under nice -n N')
-    parser.add_argument('--dab', action='store_true',
-                        help="turn Sunrise's mob AI throttling on (server.toml [entities] dab); Sunrise only")
     parser.add_argument('--farm', type=int, default=0,
-                        help='summon this many mobs ~100 blocks from the spawn, away from the bots (the DAB fixture)')
+                        help='summon this many mobs ~100 blocks from the spawn, away from the bots')
     parser.add_argument('--ground', action='store_true',
                         help='a flat survival world, the bots walking on its ground and saying so in every move')
     parser.add_argument('--bots-via', default='', help="a command prefix to run the bots elsewhere ('ssh host')")

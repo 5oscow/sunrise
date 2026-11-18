@@ -808,33 +808,6 @@ and caps but not the random draws of one vanilla level, so a world does not spaw
 It stays on one thread while a native mod listens to spawns, with fewer than 512 chunks to try (about two players' worth) and
 on a machine with one core ([how it works](parallel-natural-spawning.md)).
 
-### Mob AI far from players: `[entities] dab`
-
-Off by default, because it is not vanilla's behaviour: mobs far from every player react more slowly. It is
-Pufferfish's "dynamic activation of brain", with the same names and defaults. Add the section to `server.toml`:
-
-```toml
-[entities]
-dab = true                    # false (the default): every mob thinks every tick, as in vanilla
-dab_start_distance = 12       # blocks; a mob this close to the nearest player is never slowed
-dab_max_tick_freq = 20        # ticks; the longest wait between two AI ticks
-dab_activation_dist_mod = 8   # raise it to slow far mobs less, lower it to slow them more
-```
-
-A mob farther than `dab_start_distance` from the nearest player (squared distance `d²`) runs its AI on the ticks where
-`age % interval == 0`, with `interval = clamp(d² >> dab_activation_dist_mod, 1, dab_max_tick_freq)`: 14 ticks at
-60 blocks with the defaults, 20 from about 71 blocks. Only the decisions wait: goals and targets, the brains of villagers,
-piglins, axolotls and the like, and each species' `customServerAiStep`. A far mob still moves (its navigation, move,
-look and jump controls run), falls, floats, is pushed, takes damage and effects, and its despawn check runs.
-
-Never slowed: withers and wardens; a mob with a target or anger, or hurt in the last two seconds; raiders in a raid; a
-mob that is ridden, riding, carrying a passenger or on a lead; a tamed mob that is not sitting.
-
-Unlike Pufferfish, it applies to every mob (Pufferfish limits the brain part to villagers, axolotls, hoglins,
-zombified piglins and goats and has an entity blacklist), and a level with no player counts as far away. It applies at
-the next start, and is the same switch as the environment variables `SUNRISE_DAB=1`, `SUNRISE_DAB_START_DISTANCE`,
-`SUNRISE_DAB_MAX_TICK_FREQ` and `SUNRISE_DAB_ACTIVATION_DIST_MOD`.
-
 ## When something goes wrong
 
 - **"no prepared game files"**: `init` and `run` list the folders they looked in. Prepare (step 2), or set
