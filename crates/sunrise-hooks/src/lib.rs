@@ -227,8 +227,8 @@ thread_local! {
     static SEAT: Cell<usize> = const { Cell::new(0) };
 }
 
-/// The current thread's local-player index, zero by default.
-/// Per-player settings or UI state can use it as an index.
+/// The local-instance index of the `Game` whose call runs on this thread: 0 for the
+/// process's first `Game`, and outside any `Game` call.
 pub fn seat() -> usize {
     SEAT.get()
 }
@@ -237,8 +237,7 @@ pub fn seat() -> usize {
 pub mod engine {
     use super::*;
 
-    /// Set this thread's local-player scope ([`seat`]). The engine's scoped entry points
-    /// planned in #2498 will drive it; the stock runtime leaves it at zero.
+    /// Engine-only: sets this thread's [`seat`] for a `Game` call.
     pub fn set_seat(seat: usize) {
         SEAT.set(seat);
     }
