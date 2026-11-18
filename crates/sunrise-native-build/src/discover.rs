@@ -240,7 +240,7 @@ fn prepare_stage(game: &Path, stage: &Path) -> Result<(), String> {
     } else {
         fs::copy(game.join("Cargo.toml"), stage.join("Cargo.toml")).map_err(|e| e.to_string())?;
     }
-    for relative in ["native-api", "native-internals", "crates/native-game"] {
+    for relative in ["native-api", "native-internals"] {
         let path = stage.join(relative);
         if path.exists() {
             fs::remove_dir_all(path).map_err(|e| e.to_string())?;
