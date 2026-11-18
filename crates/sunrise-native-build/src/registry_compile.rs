@@ -99,8 +99,8 @@ pub fn compile(
     let mut members = Vec::new();
     let mut wrapper_deps = toml::Table::new();
     let deps = game.join("deps");
-    // Linked like a mod: not with the game executable's link policy, and with the library's own
-    // folder on its search path.
+    // A mod library's link arguments: only the rpath ones, putting the library's own folder on
+    // its search path (not the game executable's link policy).
     let mod_link_args = || {
         let mut link_args = Vec::new();
         if cfg!(target_os = "linux") {
@@ -112,7 +112,8 @@ pub fn compile(
         }
         link_args
     };
-    let mut shared = registry_shared::Shared::default();
+    // Each mod's staged folder and library root, for the shared registry library.
+    let mut mod_dirs = BTreeMap::new();
     let mut mod_roots = BTreeMap::new();
     let packages: BTreeMap<_, _> = projects
         .iter()
@@ -223,9 +224,9 @@ pub fn compile(
                     source.push_str(prebuilt::WASMTIME_LINK);
                 }
                 fs::write(&root, source).map_err(|e| e.to_string())?;
+                mod_dirs.insert(id.clone(), dest.clone());
                 mod_roots.insert(id.clone(), root);
             }
-            shared.add(id, &manifest);
             fs::write(path, manifest.to_string()).map_err(|e| e.to_string())?;
         }
         let mut externs: BTreeMap<String, PathBuf> = BTreeMap::from([
@@ -314,36 +315,6 @@ pub fn compile(
             },
         );
         members.push(relative);
-    }
-    // When two or more mods use registry crates, those crates come from one library, so a mod
-    // depending on several mods doesn't reach a copy of each through each of them
-    // (`registry_shared`).
-    let shared_users = shared.write(out)?;
-    for (id, root) in &mod_roots {
-        if !shared_users.contains(id) {
-            continue;
-        }
-        let path = out.join("native-api").join(id).join("Cargo.toml");
-        let mut manifest: toml::Table = fs::read_to_string(&path)
-            .map_err(|e| e.to_string())?
-            .parse()
-            .map_err(|e| format!("Cargo.toml: {e}"))?;
-        let mut source = fs::read_to_string(root).map_err(|e| e.to_string())?;
-        registry_shared::link(&mut manifest, &mut source).map_err(|e| format!("{id}: {e}"))?;
-        fs::write(&path, manifest.to_string()).map_err(|e| e.to_string())?;
-        fs::write(root, source).map_err(|e| e.to_string())?;
-    }
-    if !shared_users.is_empty() {
-        // Bindings with no `--extern`, so the compiler wrapper still gives it the mods' dynamic
-        // linking and the SDK's arguments.
-        bindings.insert(
-            out.join(registry_shared::RELATIVE),
-            registry_rustc::Bindings {
-                externs: BTreeMap::new(),
-                link_args: mod_link_args(),
-            },
-        );
-        members.push(registry_shared::RELATIVE.into());
     }
     // `[[native.mixin]]` rows: the patched crates join the workspace beside the mods, whose
     // crates their helpers call, and compile against the SDK like a mod.
@@ -461,8 +432,54 @@ pub fn compile(
     )
     .map_err(|e| e.to_string())?;
     plan.fetch_with_patches(rust, out, &patches)?;
-    let metadata = super::registry_inventory::read(rust, out)
+    let mut metadata = super::registry_inventory::read(rust, out)
         .map_err(|error| plan.explain_resolution(error))?;
+    // When two or more mods link registry crates, those crates, as cargo just resolved them, come
+    // from one library, so a mod depending on several mods doesn't reach a copy of each through
+    // each of them (`registry_shared`). The mods' manifests were checked above without it; it adds
+    // no package cargo hasn't already resolved and locked.
+    let shared = registry_shared::Shared::select(metadata.runtime_uses(out, &mod_dirs)?);
+    if let Some(shared) = &shared {
+        shared.check_name(&metadata.packages, out)?;
+        shared.write(out)?;
+        for id in &shared.users {
+            let path = mod_dirs[id].join("Cargo.toml");
+            let mut manifest: toml::Table = fs::read_to_string(&path)
+                .map_err(|e| e.to_string())?
+                .parse()
+                .map_err(|e| format!("Cargo.toml: {e}"))?;
+            let root = &mod_roots[id];
+            let mut source = fs::read_to_string(root).map_err(|e| e.to_string())?;
+            registry_shared::link(&mut manifest, &mut source).map_err(|e| format!("{id}: {e}"))?;
+            fs::write(&path, manifest.to_string()).map_err(|e| e.to_string())?;
+            fs::write(root, source).map_err(|e| e.to_string())?;
+        }
+        let path = out.join("Cargo.toml");
+        let mut manifest: toml::Table = fs::read_to_string(&path)
+            .map_err(|e| e.to_string())?
+            .parse()
+            .map_err(|e| format!("Cargo.toml: {e}"))?;
+        manifest
+            .get_mut("workspace")
+            .and_then(|workspace| workspace.get_mut("members"))
+            .and_then(toml::Value::as_array_mut)
+            .ok_or("generated workspace")?
+            .push(registry_shared::RELATIVE.into());
+        fs::write(&path, manifest.to_string()).map_err(|e| e.to_string())?;
+        // Bindings with no `--extern`, so the compiler wrapper still links it like a mod: dynamic
+        // linking, and the mods' rpath arguments.
+        bindings.insert(
+            out.join(registry_shared::RELATIVE),
+            registry_rustc::Bindings {
+                externs: BTreeMap::new(),
+                link_args: mod_link_args(),
+            },
+        );
+        // Cargo records the new local package in the lock, offline: every crate it names is
+        // already resolved there, at that exact version.
+        metadata = super::registry_inventory::read(rust, out)
+            .map_err(|error| plan.explain_resolution(error))?;
+    }
     plan.allowed
         .check_pins(&super::registry_lock::RegistryLock::parse(
             &super::read_lock(out)?,
@@ -559,7 +576,7 @@ pub fn compile(
         )?;
         runtime.push(library);
     }
-    if !shared_users.is_empty() {
+    if shared.is_some() {
         // Installed beside the mods with no identity record: a library they load, not a mod.
         let library = release.join(prebuilt::dylib_name(registry_shared::CRATE));
         super::library_record::validate_exports(&library, registry_shared::CRATE)?;

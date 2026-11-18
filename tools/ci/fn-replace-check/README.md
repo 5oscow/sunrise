@@ -14,6 +14,7 @@ its own that counts only those.
 takes the API route: the package's prebuilt API executable with the launcher's `sunrise_native_mods` library. In the
 main set, beside mods with `[[native.mixin]]` rows (`FNR_ROUTE=prebuilt`), the whole set takes the engine route.
 
-`shared_tip` depends on `shared_left` and `shared_right`, and all three use `itoa`. Each mod is a dylib, so the tip
-links only because the launcher builds the mods' registry crates once, into a library they all depend on
-(sunrise-org/sunrise#1379); it prints `fnr: shared_tip left 1 right 2 own 3` when the server starts.
+`shared_left`, `shared_right` and `shared_tip` are their own set: the tip depends on the other two, and all three use
+`itoa`. Each mod is a dylib, so the tip links only because the launcher builds the mods' registry crates once, into a
+library they all depend on (sunrise-org/sunrise#1379). The check finds that library in the export, recorded as no
+mod's, and with resources the server prints `fnr: shared_tip left 1 right 2 own 3`.
