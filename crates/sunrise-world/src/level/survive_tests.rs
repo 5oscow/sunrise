@@ -199,6 +199,8 @@ fn piston_settlement_keeps_a_plant_with_an_inert_support_part() {
         }
         fn before_can_sustain_plant(
             &self,
+            _: &Ticks,
+            _: Option<&PreviewBlocks>,
             state: BlockStateId,
             ground: BlockStateId,
             _: BlockPos,
@@ -208,6 +210,8 @@ fn piston_settlement_keeps_a_plant_with_an_inert_support_part() {
         }
         fn before_may_place_on(
             &self,
+            _: &Ticks,
+            _: Option<&PreviewBlocks>,
             state: BlockStateId,
             _: BlockStateId,
             _: BlockPos,
