@@ -159,7 +159,7 @@ A proxy handing players over between servers (docs/server.md). Not vanilla's acc
 
 | Key | Default | In `server.properties` | What it does |
 | --- | --- | --- | --- |
-| `enabled` | `false` |  | true: take a proxy's player-* requests; needs Velocity forwarding (forwarding.secret) |
+| `enabled` | `false` |  | true: take a proxy's player-* requests; refused at start since Velocity forwarding was removed |
 | `expect_seconds` | `10` |  | how long a player the proxy announced is waited for, when it names no time |
 | `max_expect_seconds` | `60` |  | the longest the proxy may ask for |
 | `max_expected` | `64` |  | players waited for at once |

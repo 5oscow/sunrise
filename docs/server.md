@@ -95,7 +95,7 @@ inventory is `{"mods":[]}`. The supervisor's `GET /api/v1/mods` uses this query,
 
 ```toml
 [transfer]
-enabled = false              # true: take a proxy's player-* requests; needs Velocity forwarding (forwarding.secret)
+enabled = false              # true: take a proxy's player-* requests; refused at start since Velocity forwarding was removed
 expect_seconds = 10          # how long a player the proxy announced is waited for, when it names no time
 max_expect_seconds = 60      # the longest the proxy may ask for
 max_expected = 64            # players waited for at once
@@ -110,10 +110,9 @@ with vanilla's `accepts-transfers`, which is about the transfer packet a server 
 every `player-*` request and `transfer-status` are answered `{"error": "transfers are off on this server"}`, the
 engine keeps no table and does nothing for transfers on a tick.
 
-With it on, the engine refuses to start unless Velocity forwarding is on (`forwarding.secret`,
-[velocity-forwarding.md](velocity-forwarding.md)). The proxy must be the only way in: a player who joined a
-source server directly would find there the older copy of itself that a hand-over left behind, and items would
-double.
+With it on, the engine refuses to start. The proxy must be the only way in: a player who joined a source server
+directly would find there the older copy of itself that a hand-over left behind, and items would double. Velocity
+forwarding made sure of that, and Sunrise no longer has it.
 
 **Who can ask.** The requests do not widen who can reach the engine: they use the control endpoint, a Unix socket
 or TCP on 127.0.0.1 only (sunrise-server starts it on TCP with a token). A proxy on another machine needs
@@ -358,7 +357,7 @@ byte of the hand-over, calls `player-drop` and the target is as it was. A proxy 
 player that is dropped by itself after `max_hold_seconds`, with a warning in the log.
 
 **A hand-over, in order.** A proxy moving a player from server A to server B, without a loading screen. Both run
-with `[transfer]` on and behind the proxy's Velocity forwarding:
+with `[transfer]` on:
 
 1. `player-expect <uuid>` on B: B holds the player's next login.
 2. `player-export <uuid> freeze` on A: the record and its `handover` id, and A stops acting on the player's inputs.

@@ -12,7 +12,6 @@ use super::config_payloads::ConfigIo;
 use super::{
     Body, Joined, NetEvent, Out, Shared,
     data::{CORE_PACK, SyncData},
-    forwarding,
     io_pool::{self, Session as _},
 };
 use crate::raw_payloads::{Side, Transport};
@@ -768,17 +767,9 @@ fn serve_connection(
     let e = |e: sunrise_protocol::Error| e.to_string();
     c.reader.set_read_timeout(Some(LOGIN_TIMEOUT)).map_err(e)?;
     let (id, payload) = c.recv().map_err(e)?;
-    // Proxy forwarding carries data after the host (for example Floodgate's).
-    let forwarding = shared.config.forwarding_secret.is_some()
-        && shared.config.online.is_none()
-        && !c.is_memory();
-    let intention = if forwarding {
-        handshake::decode_intention(id, &payload, handshake::PROXY_HOST_LIMIT).map_err(e)?
-    } else {
-        match handshake::Serverbound::decode(id, &payload).map_err(e)? {
-            handshake::Serverbound::Intention(i) => i,
-            _ => return Err("expected a handshake".into()),
-        }
+    let intention = match handshake::Serverbound::decode(id, &payload).map_err(e)? {
+        handshake::Serverbound::Intention(i) => i,
+        _ => return Err("expected a handshake".into()),
     };
     match intention.intent {
         // ServerHandshakePacketListenerImpl: a server that does not reply
@@ -1027,26 +1018,17 @@ fn serve_login(
         );
         return Ok(());
     }
-    let (mut name, mut address) = (hello.name.clone(), address);
-    let user_of = |name: &str, address| {
-        shared
-            .config
-            .log
-            .as_ref()
-            .map(|log| user_name(name, address, log))
-            .unwrap_or_default()
-    };
-    let mut user = user_of(&name, address);
+    let mut name = hello.name.clone();
+    let user = shared
+        .config
+        .log
+        .as_ref()
+        .map(|log| user_name(&name, address, log))
+        .unwrap_or_default();
     // handleHello: online mode authenticates first; offline mode, and the
     // integrated server's own player through memory, derive the profile
-    // from the name. Behind a Velocity proxy (forwarding.secret) the proxy has
-    // authenticated the player and the profile is the one it forwards.
+    // from the name.
     let online = shared.config.online.as_ref().filter(|_| !c.is_memory());
-    let forwarding = shared
-        .config
-        .forwarding_secret
-        .as_deref()
-        .filter(|_| online.is_none() && !c.is_memory());
     // `ServerLoginPacketListenerImpl.handleHello`: the integrated server's own player
     // (the name matches `getSingleplayerProfile`) logs in as that profile — the account's
     // UUID — never as an offline profile made from the name. Other memory logins stay offline.
@@ -1057,44 +1039,11 @@ fn serve_login(
         .as_ref()
         .filter(|(owner_name, _)| c.is_memory() && hello.name.eq_ignore_ascii_case(owner_name))
         .map(|(owner_name, uuid)| (owner_name.clone(), *uuid));
-    let (uuid, properties) = match (online, forwarding) {
-        (Some(online), _) => {
-            match authenticate(&mut c, shared, online, &hello.name, address, &user) {
-                Ok(Ok(profile)) => profile,
-                Ok(Err(refused)) => {
-                    lost(shared, &user, &refused);
-                    return Ok(());
-                }
-                Err(err) => {
-                    lost(shared, &user, "Disconnected");
-                    return Err(err);
-                }
-            }
-        }
-        (None, Some(secret)) => match forward(&mut c, secret) {
-            Ok(Ok(forwarded)) => {
-                (name, address) = (
-                    forwarded.name,
-                    std::net::SocketAddr::new(forwarded.address, address.port()),
-                );
-                user = user_of(&name, address);
-                (forwarded.uuid, forwarded.properties)
-            }
-            Ok(Err(reason)) => {
-                let text = "This server is behind a proxy: join through the proxy.";
-                let json = format!("{{\"text\":\"{text}\"}}");
-                let _ = c.send(
-                    &login::Clientbound::Disconnect(login::Disconnect { reason_json: json })
-                        .encode(),
-                );
-                if let Some(log) = &shared.config.log {
-                    (log.write)(
-                        "Server thread",
-                        "WARN",
-                        &format!("Refused {user}: {reason}"),
-                    );
-                }
-                lost(shared, &user, text);
+    let (uuid, properties) = match online {
+        Some(online) => match authenticate(&mut c, shared, online, &hello.name, address, &user) {
+            Ok(Ok(profile)) => profile,
+            Ok(Err(refused)) => {
+                lost(shared, &user, &refused);
                 return Ok(());
             }
             Err(err) => {
@@ -1102,7 +1051,7 @@ fn serve_login(
                 return Err(err);
             }
         },
-        (None, None) => match singleplayer {
+        None => match singleplayer {
             Some((owner_name, owner_uuid)) => {
                 name = owner_name;
                 let properties = shared
@@ -1163,36 +1112,6 @@ fn serve_login(
             lost(shared, &profile, "Disconnected");
             Err(err)
         }
-    }
-}
-
-/// Asks the proxy for the player's forwarded information (login plugin channel `velocity:player_info`) and
-/// checks it against the shared secret. The outer error is the connection failing; the inner one is a refusal
-/// (the client isn't a proxy, or signed with another secret), with the reason for the log.
-fn forward(
-    c: &mut Connection,
-    secret: &[u8],
-) -> Result<Result<forwarding::Forwarded, String>, String> {
-    const TRANSACTION: i32 = 1;
-    let e = |e: sunrise_protocol::Error| e.to_string();
-    c.send(
-        &login::Clientbound::CustomQuery(login::CustomQuery {
-            transaction: TRANSACTION,
-            channel: forwarding::CHANNEL.into(),
-            data: forwarding::request(),
-        })
-        .encode(),
-    )
-    .map_err(e)?;
-    let (id, payload) = c.recv().map_err(e)?;
-    match login::Serverbound::decode(id, &payload).map_err(e)? {
-        login::Serverbound::CustomQueryAnswer(answer) if answer.transaction == TRANSACTION => {
-            Ok(match answer.payload {
-                Some(data) => forwarding::verify(secret, &data),
-                None => Err("the client didn't answer the forwarding request".into()),
-            })
-        }
-        _ => Err("unexpected packet during login".into()),
     }
 }
 

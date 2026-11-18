@@ -7,8 +7,7 @@ use crate::*;
 #[sunrise_mod_api_macros::host_area]
 pub trait PlayerSessionBackend {
     /// Side: server.
-    /// The IP address the player connects from, without the port (behind a
-    /// Velocity proxy, the address the proxy forwards). Displaced connected
+    /// The IP address the player connects from, without the port. Displaced connected
     /// players keep their address; an acting player with no known connection
     /// has an empty address. None for a stale or unavailable player.
     #[access(WorldOnly)]

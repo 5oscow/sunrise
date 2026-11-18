@@ -41,8 +41,8 @@ runs). To run a command in another level, do it from a moment in that level or f
 
 Read identity through `player.uuid()`, `player.name(host)`,
 `player.permission_level(host)` and `player.address(host)`. The address is the
-connection IP without a port, including the forwarded address behind a Velocity
-proxy. An acting player without a known connection has an empty address.
+connection IP without a port. An acting player without a known connection has
+an empty address.
 
 The online list includes connected players during nested player turns. Name,
 permission and address reads work for connected players whose bodies are displaced
