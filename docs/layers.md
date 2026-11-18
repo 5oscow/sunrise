@@ -293,7 +293,7 @@ build pays nothing.
 
 The hooks today: `started` (once, when someone plays: not a dedicated server, a benchmark or an automated run),
 `published` (the world opened to or closed from LAN or friends, on change), `shutdown` (the window closed, the
-world saved) and `tunnel` (the resolver of `friend:` addresses, Play with Friends') and `captures` (Open and Share for saved performance captures, `sunrise-perf-share`: with none registered the game offers neither). **A hook you need and don't find:** add a method with an empty default to `Hooks` and a function in
+world saved) and `tunnel` (the resolver of `friend:` addresses, Play with Friends') and `captures` (Open and Share for saved performance captures, `sunrise-perf-share`: with none registered the game offers neither) and `client_identity` (how the client presents itself to the server it joins: the brand of vanilla's `ClientBrandRetriever.getClientModName`, and the custom payloads it sends in the configuration phase after it. It gets the address as typed, before SRV or DNS resolution; the first answer wins, and none gives `vanilla` with no payloads. It runs on the network thread, once per join, so it must not touch game state. `sunrise-official` answers for the official Horizon server, which requires its brand and an empty payload offer). **A hook you need and don't find:** add a method with an empty default to `Hooks` and a function in
 `sunrise_hooks::engine` that the engine calls where vanilla does the matching thing; give it plain data or a type
 the engine owns, never one from above. A hook that needs engine types the platform doesn't expose yet (a draw
 context for HUD and chat overlays, a settings page) comes with that type's platform API (M6). An extension point
@@ -633,6 +633,7 @@ Sunrise's own and third-party addresses (Sunrise layer):
 | `horizon-rust.github.io/horizon-mods`, `github.com/horizon-rust/horizon-mods` | Horizon's mod registry, index and files: the registry tool's defaults and the submission service's | `sunrise-mods/src/index*.rs`, `cargo-sunrise-mod`, `sunrise-mod-registry` |
 | `api.modrinth.com`, `cdn.modrinth.com` | the in-game resource pack browser, modpack porting | `pack_browser.rs`, `sunrise-port-pack` |
 | `github.com`, `raw.githubusercontent.com`, `gitlab.com`, `maven.neoforged.net` | modpack porting's sources | `sunrise-port-pack` |
+| `play.playhorizon.dev` | the official Horizon server, which the client identity hook answers for | `sunrise-addresses`, `sunrise-official` |
 | `playsunrise.net` | the download link shown with no resources | `no_resources.rs` |
 | `api.github.com`, `discord.com` | hosting: updates, Discord webhooks | `sunrise-server` |
 | `api.github.com`, `uploads.github.com`, `playsunrise.net` | the registry's submission service | `sunrise-mod-registry` |

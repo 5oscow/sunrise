@@ -77,3 +77,8 @@ pub const SDK_RELEASES: &str = "https://github.com/sunrise-org/sunrise/releases/
 /// The fork's newest releases, which `cargo sunrise-mod` reads to find the one SDK a short sha names.
 pub const SDK_RELEASE_LIST: &str =
     "https://api.github.com/repos/sunrise-org/sunrise/releases?per_page=100";
+
+/// The official Horizon Minecraft server's host, as a player types it to join (its SRV record
+/// leads to port 24454). Reached by name, never by IP address, which can shift. The Sunrise layer
+/// presents the client identity the server requires (`sunrise-official`).
+pub const HORIZON_SERVER: &str = "play.playhorizon.dev";
