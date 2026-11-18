@@ -46,8 +46,8 @@ it, and `--prebuilt FILE -p PACKAGE TARGET... -- ARGUMENTS` runs those targets' 
 for a job's other tests (the wasm fixture job: one build with one feature resolution instead of one per command).
 `--daily-tests PACKAGE TARGET` prints the tests one target's daily rows list, one per line (the Windows daily job
 runs sunrise-mod-package's with `-- --ignored --exact`).
-`--windows-rows` prints every `windows` daily row as `PACKAGE TARGET TEST`, one per line (launcher-windows-check.yml
-runs each by name on Windows: its target compiles only there, so no Linux leg runs or expects it).
+`--windows-rows` prints every `windows` daily row as `PACKAGE TARGET TEST`, one per line. With `--run`, it runs
+those rows by exact name, one Cargo process per row (launcher-windows-check.yml). No Linux leg runs or expects them.
 `--report FILE` also writes the run's verdict as JSON for the daily run's summary (tools/ci/daily_summary.py): each
 problem's package, test identity, kind, panic location and policy file, the tests that passed, and the runs that
 did not complete with why (stopped()). It is written before each run too, naming that run as in progress, so a job
@@ -294,9 +294,9 @@ def kept_out(row):
 
 
 def windows_rows():
-    """(package, target, test) of every `windows` daily row, sorted: what the Windows job runs, each by name."""
-    return sorted((row.package, row.reference, row.test) for row in listed_entries()
-                  if row.mark == "daily" and row.reason == WINDOWS_REASON)
+    """The `windows` daily rows, in package, target and test order: what the Windows job runs by name."""
+    return sorted((row for row in listed_entries() if row.mark == "daily" and row.reason == WINDOWS_REASON),
+                  key=lambda row: (row.package, row.reference, row.test))
 
 
 def daily_tests(package, target):
@@ -430,22 +430,8 @@ def run_one_process_each(variable, jobs=None, report=None, binaries=None):
     for command in needs_commands(variable, jobs):
         # needs_commands ends each command with the test's exact name, after `-p PACKAGE`.
         entry = {"package": command[command.index("-p") + 1], "test": safe_identity(command[-1])}
-        package, targets, rest = cargo_targets(command[2:])
-        if binaries and all((package, target) in binaries for target in targets):
-            print(f"$ {shlex.join(command)}  (from the workspace build)", flush=True)
-            done = run_binaries(package, {target: binaries[package, target] for target in targets}, rest,
-                                dict(os.environ))
-            print(done.stdout, end="", flush=True)
-            code, lines = done.returncode, done.stdout.splitlines()
-        else:
-            print(f"$ {shlex.join(command)}", flush=True)
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                                       errors="replace")
-            lines = []
-            for line in process.stdout:
-                print(line, end="", flush=True)
-                lines.append(line)
-            code = process.wait()
+        code, output = run_exact_command(command, binaries=binaries, show_output=True)
+        lines = output.splitlines()
         passed = any(line.startswith("test result: ok. 1 passed;") for line in lines)
         if code or not passed:
             print(f"::error::expected 1 passing test from: {shlex.join(command)}", flush=True)
@@ -456,6 +442,58 @@ def run_one_process_each(variable, jobs=None, report=None, binaries=None):
     write_report(report, verdict)
     print(f"{variable}: {len(failed)} of the runs failed" if failed else f"{variable}: every run passed its one test")
     return 1 if failed else 0
+
+
+def run_exact_command(command, *, binaries=None, show_output=False):
+    """Run one exact selection and return its exit status and combined output, optionally streaming it."""
+    print(f"$ {shlex.join(command)}", flush=True)
+    if binaries:
+        package, targets, rest = cargo_targets(command[2:])
+        if all((package, target) in binaries for target in targets):
+            print("  (from the workspace build)", flush=True)
+            done = run_binaries(package, {target: binaries[package, target] for target in targets}, rest,
+                                dict(os.environ))
+            if show_output:
+                print(done.stdout, end="", flush=True)
+            return done.returncode, done.stdout
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
+    lines = []
+    for line in process.stdout:
+        if show_output:
+            print(line, end="", flush=True)
+        lines.append(line)
+    return process.wait(), "".join(lines)
+
+
+def run_windows_rows(report=None):
+    """Run every Windows-only row alone. Report named failures separately from build or process failures."""
+    verdict = {"windows_rows": True, "problems": [], "passed": [], "incomplete": []}
+    for row in windows_rows():
+        command = ["cargo", "test", "--no-fail-fast", "--release", "--locked", "-p", row.package,
+                   "--test", row.reference.removeprefix("test:"), "--", "--ignored", "--exact", row.test]
+        code, output = run_exact_command(command)
+        entry = {"package": row.package, "test": safe_identity(row.test)}
+        lines = output.splitlines()
+        results = [match[2] for line in lines if (match := RESULT.fullmatch(line)) and match[1] == row.test]
+        if code == 0 and results == ["ok"] and any(line.startswith("test result: ok. 1 passed;") for line in lines):
+            verdict["passed"].append(entry)
+            print(f"{row.package} {entry['test']}: passed")
+        elif "FAILED" in results:
+            _panic_locations.clear()
+            failure_diagnostics(output)
+            verdict["problems"].append({**entry, "kind": "failed", "panic": _panic_locations.get(row.test),
+                                        "policy": row.file})
+            print(f"::error::{row.package} {entry['test']}: test failed (cargo exit {code})")
+        elif code == 0:
+            verdict["problems"].append({**entry, "kind": "no-longer-runs", "panic": None, "policy": row.file})
+            print(f"::error::{row.package} {entry['test']}: expected one passing test, but it did not report a pass")
+        else:
+            reason = "failed without a failed test"
+            verdict["incomplete"].append({"shard": row.package, "reason": reason, "cargo_exit": code})
+            print(f"::error::{row.package} {entry['test']}: {reason} (cargo exit {code})")
+            compile_diagnostics(output)
+    write_report(report, verdict)
+    return int(bool(verdict["problems"] or verdict["incomplete"]))
 
 
 # Budgets include UTF-8 newlines; summary metadata is outside the payload budget.
@@ -684,7 +722,8 @@ def failure_diagnostics(output):
             # game-discovery emits canonical absolute #[path] declarations. Only
             # this checkout's exact resolved prefix is authoritative; never guess
             # another checkout's prefix or search for a matching path suffix.
-            prefix = str(Path(__file__).resolve().parents[2]) + os.sep
+            path = path.replace(os.sep, "/")
+            prefix = ROOT.as_posix() + "/"
             if path.startswith(prefix):
                 path = path[len(prefix):]
             # Rust cross-crate source paths can contain lexical ../ segments.
@@ -1314,11 +1353,16 @@ if __name__ == "__main__":
                         help="print the daily rows' tests of one package's target, one per line")
     parser.add_argument("--windows-rows", action="store_true",
                         help="print the `windows` daily rows as `PACKAGE TARGET TEST`, one per line")
+    parser.add_argument("--run", action="store_true", help="execute --windows-rows instead of printing them")
     args = parser.parse_args()
+    if args.run and not args.windows_rows:
+        parser.error("--run requires --windows-rows")
     if args.build_tests:
         sys.exit(write_built(args.build_tests))
     if args.windows_rows:
-        sys.stdout.write("".join(f"{package} {target} {test}\n" for package, target, test in windows_rows()))
+        if args.run:
+            sys.exit(run_windows_rows(args.report))
+        sys.stdout.write("".join(f"{row.package} {row.reference} {row.test}\n" for row in windows_rows()))
     elif args.daily_tests:
         # Nothing at all for no rows: an empty line would read as one empty name.
         sys.stdout.write("".join(f"{test}\n" for test in daily_tests(*args.daily_tests)))

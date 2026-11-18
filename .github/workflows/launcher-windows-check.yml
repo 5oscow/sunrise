@@ -113,26 +113,15 @@ jobs:
       - name: The Windows-only daily rows
         working-directory: .
         shell: bash
-        run: |
-          listed=$(python tools/ci/ignored_tests.py --windows-rows | tr -d '\r')
-          if [ -z "$listed" ]; then
-            echo "no windows daily rows: nothing to run"
-            exit 0
-          fi
-          failed=0
-          while read -r package target test; do
-            kind=${target%%:*}
-            select=(--lib)
-            if [ "$kind" != lib ]; then select=("--$kind" "${target#*:}"); fi
-            log=$(mktemp)
-            cargo test --no-fail-fast --release --locked -p "$package" "${select[@]}" \
-              -- --ignored --exact "$test" 2>&1 | tee "$log" || failed=1
-            if ! grep -q '^test result: ok. 1 passed' "$log"; then
-              echo "::error::$package $test: did not run and pass"
-              failed=1
-            fi
-          done <<< "$listed"
-          exit $failed
+        run: python tools/ci/ignored_tests.py --windows-rows --run --report "$RUNNER_TEMP/daily-report.json"
+      - name: Upload the Windows-only daily rows' report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-report-windows-rows
+          path: ${{ runner.temp }}/daily-report.json
+          if-no-files-found: ignore
+          retention-days: 7
 
   launcher-processes:
     # The tests/ targets that start the debug launcher binary (the test job runs every other target).

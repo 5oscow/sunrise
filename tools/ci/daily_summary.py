@@ -72,8 +72,9 @@ PART_OF = {"sdk-windows-macos": "sdk"}
 # The one green skip: the SDK build skips when sdk-<sha> already exists, which `sdk / fresh` found (it
 # succeeded). Any other skip of an expected job is red.
 FRESH = "sdk / fresh"
-# The wasm fixture job's steps whose failures its verdict file names test by test: the fixture's own tests
-# (tools/ci/cargo_test_verdict.py) and the client tests that load it (ignored_tests.py --needs).
+# Steps whose reports name failing tests. Failures outside those steps still need a job-level issue.
+WINDOWS_ROWS_JOB = "windows-runtime-leases / runtime-leases"
+WINDOWS_ROWS_STEP = "The Windows-only daily rows"
 FIXTURE_TESTS_STEPS = ("Validate and load the fixture", "Run the client tests that load the compiled fixture")
 MERGE = re.compile(r"^Merge pull request #(\d+) from ")
 # A pull request merged on its own (`Merge pull request #N from`) or as a rollup's member (`Merge #N at <sha>`).
@@ -189,11 +190,12 @@ def failed_steps(job):
 
 
 def report_for(job, reports):
-    """The verdict a leg job wrote: a shard's file names its shard; the fixture job's files (its own tests' and the
-    client tests') name their `needs` variable, and together are its verdict."""
+    """Match a verdict to its job by shard, by the Windows rows marker, or by the fixture's `needs` variable."""
     name = job["name"]
     for report in reports:
         if any(name.endswith(f"({shard})") for shard in report.get("shards", ())):
+            return report
+        if name == WINDOWS_ROWS_JOB and report.get("windows_rows") is True:
             return report
     fixture = [report for report in reports if report.get("needs")] if name == "wasm-mods / fixture" else []
     if not fixture:
@@ -296,14 +298,17 @@ def verdicts(jobs, reports, results):
                           if report["incomplete"] else
                           "failed tests whose names are withheld" if problems else "failed outside its tests")
                 unfinished.append((job["name"], job["conclusion"], steps, reason))
-        elif job["name"] == "wasm-mods / fixture" and len(steps) == 1 and steps[0] in FIXTURE_TESTS_STEPS and (
-                by_name or (report or {}).get("incomplete")):
+        elif ((job["name"] == "wasm-mods / fixture" and len(steps) == 1 and steps[0] in FIXTURE_TESTS_STEPS)
+              or (job["name"] == WINDOWS_ROWS_JOB and WINDOWS_ROWS_STEP in steps)) and (
+                  by_name or (report or {}).get("incomplete")):
             tests += by_name
             # A command that failed without naming a test (a build failure beside a named one) is the leg's item too.
             if report["incomplete"] or len(by_name) < len(problems):
                 unfinished.append((job["name"], job["conclusion"], steps, "a test run did not complete: " + ". ".join(
                     stopped_text(entry if isinstance(entry, dict) else {}) for entry in report["incomplete"])
                     if report["incomplete"] else "failed tests whose names are withheld"))
+            elif job["name"] == WINDOWS_ROWS_JOB and (outside := [step for step in steps if step != WINDOWS_ROWS_STEP]):
+                unfinished.append((job["name"], job["conclusion"], outside, "failed outside its tests"))
         else:
             unfinished.append((job["name"], job["conclusion"], steps, "failed at the steps named"))
     for job in jobs:
