@@ -2799,10 +2799,6 @@ impl SaveDir {
             .map_err(|_| ())?;
         Ok(Some(chunk))
     }
-    /// Chunks queued for the writer thread and not yet in their region files.
-    pub fn pending_writes(&self) -> usize {
-        self.pending.lock().map_or(0, |p| p.len())
-    }
     /// A proto chunk saved before it became final (`decode_proto`).
     pub fn load_proto(
         &self,

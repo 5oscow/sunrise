@@ -666,15 +666,40 @@ impl Default for Backups {
     }
 }
 
-/// `text` without `server.max_view_distance`, which every `init` wrote before the far ring was
-/// removed, or `None` when it has none.
-fn without_far_ring(text: &str) -> Option<String> {
+/// Keys no longer read, as (section, field, the server.properties key they wrote).
+pub const RETIRED: [(&str, &str, &str); 1] =
+    [("server", "max_view_distance", "sunrise-max-view-distance")];
+
+/// The `section.field` names of `RETIRED` keys that `text` still sets.
+pub fn retired_in(text: &str) -> Vec<String> {
+    let Ok(doc) = text.parse::<toml_edit::DocumentMut>() else {
+        return Vec::new();
+    };
+    RETIRED
+        .iter()
+        .filter(|(section, field, _)| doc.get(section).and_then(|s| s.get(field)).is_some())
+        .map(|(section, field, _)| format!("{section}.{field}"))
+        .collect()
+}
+
+/// Whether a `section.field=value` change names a retired key, typed or as its property.
+pub fn retired_change(change: &str) -> bool {
+    let key = change.split_once('=').map_or(change, |(key, _)| key).trim();
+    RETIRED.iter().any(|(section, field, property)| {
+        key == format!("{section}.{field}") || key == format!("properties.{property}")
+    })
+}
+
+/// `text` without its `RETIRED` keys, or `None` when it has none.
+fn without_retired(text: &str) -> Option<String> {
     let mut doc: toml_edit::DocumentMut = text.parse().ok()?;
-    doc.get_mut("server")?
-        .as_table_like_mut()?
-        .remove("max_view_distance")?;
-    eprintln!("server.toml: server.max_view_distance is no longer read; view_distance reaches 32");
-    Some(doc.to_string())
+    let mut removed = false;
+    for (section, field, _) in RETIRED {
+        if let Some(table) = doc.get_mut(section).and_then(|s| s.as_table_like_mut()) {
+            removed |= table.remove(field).is_some();
+        }
+    }
+    removed.then(|| doc.to_string())
 }
 
 fn text_or_number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
@@ -692,7 +717,7 @@ fn text_or_number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::E
 
 impl Config {
     pub fn parse(text: &str) -> Result<Self, String> {
-        let config: Self = match without_far_ring(text) {
+        let config: Self = match without_retired(text) {
             Some(text) => toml::from_str(&text),
             None => toml::from_str(text),
         }
@@ -834,7 +859,9 @@ impl Config {
         keys.sort();
         for key in keys {
             let value = parsed.raw.get(key).unwrap_or_default();
-            if TYPED.iter().any(|t| t.2 == key) || defaults.raw.get(key) == Some(value) {
+            if TYPED.iter().chain(&RETIRED).any(|t| t.2 == key)
+                || defaults.raw.get(key) == Some(value)
+            {
                 continue;
             }
             extra.insert(key.clone(), loose_value(value));
@@ -1102,6 +1129,8 @@ mod tests {
         );
         assert_ne!(old, TEMPLATE);
         assert_eq!(Config::parse(&old).unwrap(), Config::default());
+        assert_eq!(retired_in(&old), ["server.max_view_distance"]);
+        assert!(retired_in(TEMPLATE).is_empty());
     }
 
     /// `[transfer]` is off by default, passes nothing to the game then, and is checked when it is read.
@@ -1296,6 +1325,7 @@ mod tests {
             ("spawn-protection", "0"),
             ("allow-flight", "false"),
             ("rate-limit", "10"),
+            ("sunrise-max-view-distance", "24"),
         ]);
         let c = Config::import(&source).unwrap();
         assert_eq!(c.server.motd, "Hello");
@@ -1303,7 +1333,7 @@ mod tests {
         assert!(!c.server.whitelist);
         assert_eq!(c.world.game_mode, "creative");
         assert_eq!(c.world.seed, "12345");
-        // allow-flight=false is vanilla's default: dropped.
+        // allow-flight=false is vanilla's default, and sunrise-max-view-distance is retired: dropped.
         assert_eq!(
             c.properties,
             BTreeMap::from([
