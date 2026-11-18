@@ -372,29 +372,30 @@ impl References<'_> {
         Ok(())
     }
 
-    /// A tag file, `tag` being its path under `tags/`: the registry (one folder, or two under
-    /// `worldgen/`) and the tag's own path.
+    /// Resolve nested tags only where the full registry folder is known. For a registry
+    /// declared in code, the folder is `<registry namespace>/<registry path>`, and the tag's
+    /// own id can also contain slashes. The file path alone cannot tell where the folder ends.
     fn tag(&mut self, name: &str, tag: &str) -> Result<(), String> {
-        let split = match tag.strip_prefix("worldgen/") {
-            Some(rest) => rest
-                .split_once('/')
-                .map(|(kind, path)| (format!("worldgen/{kind}"), path)),
-            None => tag
-                .split_once('/')
-                .map(|(registry, path)| (registry.to_owned(), path)),
-        };
-        let Some((registry, _)) = split else {
-            return Ok(());
-        };
+        let registry = [
+            "block/",
+            "item/",
+            "fluid/",
+            "entity_type/",
+            "worldgen/biome/",
+            "worldgen/structure/",
+        ]
+        .into_iter()
+        .find(|folder| tag.starts_with(folder))
+        .map(|folder| folder.trim_end_matches('/'));
         let Some(value) = self.data(name)? else {
             return Ok(());
         };
         let Some(Value::Array(values)) = value.get("values") else {
             return Ok(());
         };
-        for entry in values {
-            let id = match entry {
-                Value::String(id) => id,
+        for (index, entry) in values.iter().enumerate() {
+            let (id, field) = match entry {
+                Value::String(id) => (id, format!("values[{index}]")),
                 // `{"id": ..., "required": false}` is allowed to name nothing, and
                 // `{"id": ..., "remove": true}` takes an entry out.
                 Value::Object(object)
@@ -402,23 +403,36 @@ impl References<'_> {
                         && object.get("remove").and_then(Value::as_bool) != Some(true) =>
                 {
                     match object.get("id") {
-                        Some(Value::String(id)) => id,
+                        Some(Value::String(id)) => (id, format!("values[{index}].id")),
                         _ => continue,
                     }
                 }
                 _ => continue,
             };
             if let Some(tag) = id.strip_prefix('#') {
-                self.tag_reference(name, id, tag, &registry);
-            } else {
-                self.id_in_registry(name, id, &registry, "the tag value");
+                self.tag_reference(name, &field, id, tag, registry);
+            } else if let Some(registry) = registry {
+                self.id_in_registry(name, id, registry, &format!("the tag value at {field}"));
             }
         }
         Ok(())
     }
 
-    fn tag_reference(&mut self, name: &str, id: &str, tag: &str, registry: &str) {
+    fn tag_reference(
+        &mut self,
+        name: &str,
+        field: &str,
+        id: &str,
+        tag: &str,
+        registry: Option<&str>,
+    ) {
         let Some((namespace, path)) = self.own(tag) else {
+            return;
+        };
+        let Some(registry) = registry else {
+            self.findings.warnings.push(format!(
+                "{name}: cannot verify the tag {id} at {field} offline because its registry folder is unknown. Check that the tag file is in the registered folder."
+            ));
             return;
         };
         let file = format!("data/{namespace}/tags/{registry}/{path}.json");
@@ -433,10 +447,10 @@ impl References<'_> {
         };
         match other {
             None => self.findings.errors.push(format!(
-                "{name}: the tag {id} is not a tag file of this mod (expected {file}), so the tag does not load. Add the file or fix the id."
+                "{name}: the tag {id} at {field} is not a tag file of this mod (expected {file}), so the tag does not load. Add the file or fix the id."
             )),
             Some(other) => self.findings.warnings.push(format!(
-                "{name}: could not find the tag {id} in this mod (expected {file}); if {other} supplies it, ignore this. Otherwise add the file or fix the id."
+                "{name}: could not find the tag {id} at {field} in this mod (expected {file}); if {other} supplies it, ignore this. Otherwise add the file or fix the id."
             )),
         }
     }
@@ -988,8 +1002,10 @@ mod tests {
             r##"{"values":["gb:nope","#gb:other"]}"##,
         )]);
         assert_eq!(e.len(), 2, "{e:?}");
-        assert!(e[0].contains("the tag value gb:nope is not an item"));
-        assert!(e[1].contains("the tag #gb:other is not a tag file"));
+        assert!(e[0].contains("values[0]"));
+        assert!(e[0].contains("gb:nope is not an item"));
+        assert!(e[1].contains("values[1]"));
+        assert!(e[1].contains("#gb:other"));
         // A vanilla tag file lists this mod's blocks; a block tag checks blocks.
         let e = errors(&[(
             "data/minecraft/tags/block/slabs.json",
@@ -1082,6 +1098,29 @@ mod tests {
             e[0].contains("expected data/gb/tags/worldgen/biome/warm.json"),
             "{e:?}"
         );
+    }
+
+    #[test]
+    fn tags_of_an_offline_unknown_registry_do_not_fail_on_a_guessed_folder() {
+        // A code mod can declare the registry `magic:spells/elemental`.
+        let containing = "data/gb/tags/magic/spells/elemental/strong/fire.json";
+        let member = "data/gb/tags/magic/spells/elemental/common/fire.json";
+        let value = r##"{"values":[{"id":"#gb:common/fire"}]}"##;
+        let f = findings(
+            MANIFEST,
+            &[(containing, value), (member, r#"{"values":[]}"#)],
+        );
+        assert!(f.errors.is_empty(), "{f:?}");
+        assert_eq!(f.warnings.len(), 1, "{f:?}");
+        assert!(f.warnings[0].starts_with(containing));
+        assert!(f.warnings[0].contains("unknown"));
+        assert!(f.warnings[0].contains("values[0].id"));
+
+        let known = "data/gb/tags/worldgen/structure/strong/fire.json";
+        let e = errors(&[(known, value)]);
+        assert_eq!(e.len(), 1, "{e:?}");
+        assert!(e[0].starts_with(known));
+        assert!(e[0].contains("data/gb/tags/worldgen/structure/common/fire.json"));
     }
 
     /// 3. A `[[jar]]` layer may supply what the files lack: a warning that says so.
