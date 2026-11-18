@@ -309,6 +309,7 @@ enum Fit {
     Yes,
     Revoked,
     WrongGame,
+    WrongSunrise,
 }
 
 struct Range<'a> {
@@ -399,10 +400,10 @@ impl<'a> Catalog<'a> {
                             number: parse_version(&v.version).ok(),
                             fit: if index.revoked(&p.id, &v.file.sha256).is_some() {
                                 Fit::Revoked
-                            } else if !v.fits_game(game)
-                                || (p.kind == Kind::NativeMod && !native_fits(p, v))
-                            {
+                            } else if !v.fits_game(game) {
                                 Fit::WrongGame
+                            } else if p.kind == Kind::NativeMod && !native_fits(p, v) {
+                                Fit::WrongSunrise
                             } else {
                                 Fit::Yes
                             },
@@ -467,12 +468,19 @@ impl<'a> Catalog<'a> {
                 describe()
             ));
         }
-        let fits: Vec<_> = unrevoked.filter(|c| c.fit == Fit::Yes).collect();
-        if fits.is_empty() {
+        let mut game_fits = unrevoked.filter(|c| c.fit != Fit::WrongGame).peekable();
+        if game_fits.peek().is_none() {
             return Err(format!(
                 "{}: no matching version fits this instance (Minecraft {})",
                 describe(),
                 self.game
+            ));
+        }
+        let fits: Vec<_> = game_fits.filter(|c| c.fit == Fit::Yes).collect();
+        if fits.is_empty() {
+            return Err(format!(
+                "{}: no matching native version fits this Sunrise build",
+                describe()
             ));
         }
         Ok(fits)

@@ -54,7 +54,7 @@
       "side": "client",
       "native_fits": {"native_lib": {"1.0.0": false, "1.1.0": false}},
       "expected": {},
-      "refusals": {"add_on": ["native_lib", "add_on", "^1", "no matching version fits"]}
+      "refusals": {"add_on": ["native_lib", "add_on", "^1", "no matching native version", "fits this Sunrise build"]}
     },
     {
       "name": "the dedicated server skips the client dependency",
@@ -72,7 +72,7 @@
       "side": "client",
       "native_fits": {"native_lib": {"1.0.0": false, "1.1.0": false}},
       "expected": {},
-      "refusals": {"needs_missing": ["needs_missing", "missing", "^1", "no such mod"], "needs_revoked": ["needs_revoked", "revoked", "^1", "taken down"], "unknown_capability": ["unknown_capability", "no matching version fits"], "wrong_game": ["wrong_game", "no matching version fits", "26.3"], "loop_a": ["cycle", "loop_a", "loop_b"]}
+      "refusals": {"needs_missing": ["needs_missing", "missing", "^1", "no such mod"], "needs_revoked": ["needs_revoked", "revoked", "^1", "taken down"], "unknown_capability": ["unknown_capability", "no matching version fits"], "wrong_game": ["wrong_game", "no matching version fits", "Minecraft 26.3"], "loop_a": ["cycle", "loop_a", "loop_b"]}
     },
     {
       "name": "a malformed range is refused by name",
