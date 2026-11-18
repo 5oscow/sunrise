@@ -565,6 +565,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "daily"]
     fn sync_stops_before_discovery_when_the_mod_names_no_internals() {
         let project = Scratch::new("sync-nothing");
         let text = format!(
@@ -578,7 +579,7 @@ mod tests {
             "[package]\nname = 'example'\nversion = '0.1.0'\n[dependencies]\nsunrise-mod-api = { path = 'x' }\n",
         )
         .unwrap();
-        // No launcher is run and nothing is written: a launcher call would fail in a test box.
+        // Discovery is not started and nothing is written: starting it would fail in a test box.
         sync(&project).unwrap();
         assert_eq!(fs::read_to_string(project.join(MANIFEST)).unwrap(), text);
     }
