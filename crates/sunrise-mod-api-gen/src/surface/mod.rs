@@ -212,20 +212,31 @@ impl Export {
     }
 }
 
-/// Exports the surface of the source tree at `root`.
+/// Exports the surface of the source tree at `root`, with each record's `call` name.
 pub fn export(root: &Path) -> Result<Export, String> {
+    export_with(root, true)
+}
+
+/// Exports the surface of a tree that predates the call names, so records carry none: the old
+/// side of a comparison across the change that introduced them. A tree this reads that does
+/// declare how every type crosses is exported by [`export`].
+pub fn export_without_calls(root: &Path) -> Result<Export, String> {
+    export_with(root, false)
+}
+
+fn export_with(root: &Path, calls: bool) -> Result<Export, String> {
     // The wire index's resolver recurses through the API's types: give it a deep stack.
     std::thread::scope(|scope| {
         std::thread::Builder::new()
             .stack_size(64 << 20)
-            .spawn_scoped(scope, || export_here(root))
+            .spawn_scoped(scope, || export_here(root, calls))
             .map_err(|e| e.to_string())?
             .join()
             .map_err(|_| "the surface export panicked".to_string())?
     })
 }
 
-fn export_here(root: &Path) -> Result<Export, String> {
+fn export_here(root: &Path, named: bool) -> Result<Export, String> {
     let catalog = Catalog::load(root).map_err(|e| e.to_string())?;
     let generated = crate::sources(root, crate::FillMode::Require)?;
     let included = [
@@ -239,10 +250,16 @@ fn export_here(root: &Path) -> Result<Export, String> {
     // A listed boundary trait an older tree lacks is noted by `Roles::resolve`, not refused.
     let mut wire = crate::wire::surface_reading(root, &with_providers, Some(&mut Vec::new()))?;
     let boundary = Boundary::from_wire(&wire);
-    let calls = crate::wire::exported_calls(&mut wire, &catalog.hooks)?;
+    let calls = if named {
+        Some(crate::wire::exported_calls(&mut wire, &catalog.hooks)?)
+    } else {
+        None
+    };
     let mut index = wire.types.index;
     let mut export = build(root, &mut index, &catalog.hooks, &boundary)?;
-    name_calls(&mut export.surface, &calls);
+    if let Some(calls) = &calls {
+        name_calls(&mut export.surface, calls);
+    }
     Ok(export)
 }
 

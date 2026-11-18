@@ -288,9 +288,7 @@ pub fn access_allowed(operation: &str, access: LoadAccess) -> bool {
 }
 
 /// Whether a package contains compiled code or content alone.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PackageKind {
     /// The package carries compiled code.
@@ -300,9 +298,7 @@ pub enum PackageKind {
 }
 
 /// Read-only package metadata available during registration.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
-#[derive(Clone)]
+#[derive(sunrise_mod_api_macros::Wire, Clone)]
 #[non_exhaustive]
 pub struct PackageInfo {
     pub(crate) id: String,

@@ -148,9 +148,7 @@ impl Wire for Ident {
 /// A name that crosses as a string.
 pub struct Name(String);
 impl Wire for Name {
-    fn layout(visiting: &mut Vec<&'static str>) -> u64 {
-        String::layout(visiting)
-    }
+    layout_via!(String);
 }
 /// Context that crosses by a hand-written impl alone.
 pub struct Context;
@@ -901,7 +899,7 @@ fn how_a_type_crosses_changes_its_shape_and_not_its_hash() {
             (
                 LIB,
                 "/// A name that crosses as a string.",
-                "impl Wire for Text {\n    fn layout(visiting: &mut Vec<&'static str>) -> u64 {\n        String::layout(visiting)\n    }\n}\n/// A name that crosses as a string.",
+                "impl Wire for Text {\n    layout_via!(String);\n}\n/// A name that crosses as a string.",
             ),
         ],
         HOOKS,
@@ -911,6 +909,49 @@ fn how_a_type_crosses_changes_its_shape_and_not_its_hash() {
     assert_eq!(via.hash, before.hash);
     assert!(before.shape.is_some() && via.shape.is_some());
     assert_ne!(via.shape, before.shape);
+}
+
+/// A tree from before `layout_via!` declared a forwarding impl by a method returning the other
+/// type's layout: it reads as the same `via:` form, and exports without call names, so a
+/// comparison across the change never skips the old side.
+#[test]
+fn a_baseline_forwarding_its_layout_reads_as_the_declared_via_form() {
+    let text = |export: &Export| {
+        export
+            .surface
+            .types
+            .iter()
+            .find(|t| t.id == "type:Text")
+            .cloned()
+            .unwrap()
+    };
+    let old = [
+        (
+            LIB,
+            "#[derive(Clone, Debug, Wire)]\npub struct Text",
+            "#[derive(Clone, Debug)]\npub struct Text",
+        ),
+        (
+            LIB,
+            "/// A name that crosses as a string.",
+            "impl Wire for Text {\n    fn layout(visiting: &mut Vec<&'static str>) -> u64 {\n        <String as Wire>::layout(visiting)\n    }\n}\n/// A name that crosses as a string.",
+        ),
+    ];
+    let forwarded = text(&export_fixture(&old, HOOKS));
+    assert_eq!(forwarded.contract.wire_form.as_deref(), Some("via:String"));
+    let declared = text(&export_fixture(
+        &[
+            old[0],
+            (
+                LIB,
+                "/// A name that crosses as a string.",
+                "impl Wire for Text {\n    layout_via!(String);\n}\n/// A name that crosses as a string.",
+            ),
+        ],
+        HOOKS,
+    ));
+    assert_eq!(forwarded.hash, declared.hash);
+    assert_eq!(forwarded.shape, declared.shape);
 }
 
 #[test]
