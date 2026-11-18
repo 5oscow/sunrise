@@ -334,9 +334,6 @@ pub struct Renderer {
     offscreen: Option<wgpu::Texture>,
     /// Offscreen submissions still on the GPU: at most two frames run ahead.
     in_flight: std::collections::VecDeque<wgpu::SubmissionIndex>,
-    /// Splitscreen: the caller waits for the GPU once every player has submitted
-    /// (`wait_in_flight`), so one player's work overlaps the GPU drawing another's.
-    pub paced_elsewhere: bool,
     /// Which steps of the first frame on this device still go to the log
     /// (see `startup_step`).
     first_frame: FirstFrame,
@@ -1145,7 +1142,6 @@ impl Renderer {
                 color_space: wgpu::SurfaceColorSpace::default(),
             };
             let hdr_output = hdr::offscreen_output();
-            // Only where one is named: splitscreen's views draw offscreen too.
             if let Some(output) = hdr_output
                 && previous.is_none()
             {
@@ -3223,7 +3219,6 @@ impl Renderer {
             spare_surface: std::sync::Mutex::new(None),
             offscreen,
             in_flight: std::collections::VecDeque::new(),
-            paced_elsewhere: false,
             first_frame: if previous.is_none() {
                 FirstFrame::Acquire
             } else {

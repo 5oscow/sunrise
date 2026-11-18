@@ -1536,10 +1536,6 @@ pub enum Page {
     Skin,
     /// OnlineOptionsScreen: server listing, Realms and friends notifications.
     Online,
-    /// Splitscreen: the profile another player joins as (`split_profiles`).
-    SplitProfiles,
-    /// Splitscreen: the monitor map and draft window arrangement.
-    SplitSetup,
     /// The built-in music tracks, by situation: play one, turn any off
     /// (vanilla's `minecraft:audio/background_music` pools).
     Music,
@@ -1855,12 +1851,10 @@ pub struct OptionsUi {
     /// (the game fills them beside `pack_infos`).
     pack_options: shell::Shell<crate::pack_options_ui::PackOptionsScreen>,
     pub pack_configs: std::collections::BTreeMap<String, sunrise_polytone::pack::Configs>,
-    pub split_profiles: crate::split_profiles::SplitProfiles,
     /// HDR calibration while its page is open.
     pub calibration: Option<crate::hdr_calibration::Calibration>,
     /// The window as calibration found it before making it fullscreen (the game keeps it).
     pub calibration_window: Option<crate::hdr_calibration::WindowState>,
-    pub split_setup: crate::split_ui::SplitUi,
     pub studio: crate::studio_ui::StudioUi,
     /// The AI Agent page's status lines (set by the game while it shows).
     pub agent_status: Vec<String>,
@@ -1880,9 +1874,6 @@ pub struct OptionsUi {
     pub size: (f32, f32),
     /// The current window framebuffer dimensions [w, h].
     pub framebuffer: [i32; 2],
-    /// Splitscreen: another player's options. Language and resource packs are the whole
-    /// process's (every player's text and textures), so they're P1's to change.
-    pub split_guest: bool,
     /// The list's rows as last laid out: each row's top and bottom (GUI
     /// pixels), for the narration's row under the mouse.
     row_bands: Vec<[f32; 2]>,
@@ -1954,10 +1945,8 @@ impl Default for OptionsUi {
             shader: Default::default(),
             pack_options: Default::default(),
             pack_configs: Default::default(),
-            split_profiles: Default::default(),
             calibration: None,
             calibration_window: None,
-            split_setup: Default::default(),
             studio: Default::default(),
             agent_status: Vec::new(),
             agent_recording: false,
@@ -1967,7 +1956,6 @@ impl Default for OptionsUi {
             can_change_value: false,
             size: (427.0, 240.0),
             framebuffer: [1280, 720],
-            split_guest: false,
             row_bands: Vec::new(),
             wide_extras: Vec::new(),
             rev: 0,
@@ -2442,12 +2430,6 @@ impl OptionsUi {
         if let Some(at) = Self::controller_page(page) {
             self.controller.show(at);
         }
-        if page == Page::SplitSetup {
-            self.split_setup.reset();
-        }
-        if page == Page::SplitProfiles {
-            self.split_profiles.reset();
-        }
         if page == Page::Studio {
             self.studio.refresh();
         }
@@ -2507,8 +2489,6 @@ impl OptionsUi {
             Page::Sunrise => "sunrise.pages.settings",
             Page::Studio => "sunrise.pages.studio",
             Page::Agent => "sunrise.pages.agent",
-            Page::SplitProfiles => "sunrise.pages.split_profiles",
-            Page::SplitSetup => "sunrise.pages.split_setup",
             Page::Music => "sunrise.pages.music",
         }
     }
@@ -2727,7 +2707,6 @@ impl OptionsUi {
 
     fn list_rows(&self, s: &Settings) -> Vec<Row> {
         match self.page() {
-            Page::SplitSetup => Vec::new(),
             Page::Pvp => {
                 // Each section's switches two to a row, as vanilla's
                 // OptionsList.addSmall lays out an options screen; one whose label would run
@@ -3162,41 +3141,6 @@ impl OptionsUi {
             }
             return Vec::new();
         }
-        if self.page() == Page::SplitSetup {
-            use crate::split_ui::Click;
-            if right {
-                return Vec::new();
-            }
-            self.split_setup.on = s.extras.splitscreen;
-            return match self.split_setup.click((x, y), size, drag) {
-                Click::Nothing => Vec::new(),
-                Click::Pressed => vec![Event::ButtonClick],
-                Click::Switch => {
-                    crate::extras::Item::Splitscreen.cycle(&mut s.extras, false);
-                    vec![Event::ButtonClick, Event::Changed]
-                }
-                Click::Done => {
-                    let mut events = vec![Event::ButtonClick];
-                    events.extend(self.back(s));
-                    events
-                }
-            };
-        }
-        if self.page() == Page::SplitProfiles {
-            use crate::split_profiles::Click;
-            if right || drag {
-                return Vec::new();
-            }
-            return match self.split_profiles.click(atlas, (x, y), size) {
-                Click::Nothing => Vec::new(),
-                Click::Pressed => vec![Event::ButtonClick],
-                Click::Done => {
-                    let mut events = vec![Event::ButtonClick];
-                    events.extend(self.back(s));
-                    events
-                }
-            };
-        }
         if self.page() == Page::Studio {
             if right || drag {
                 return Vec::new();
@@ -3568,7 +3512,6 @@ impl OptionsUi {
         let slider = self.dragging.take().is_some();
         let shell_slider = self.shell_mut().and_then(|shell| shell.release());
         let calibration_slider = self.calibration.as_mut().is_some_and(|c| c.release());
-        let split_drop = self.split_setup.release();
         if slider || shell_slider.is_some() || calibration_slider {
             let mut events = vec![Event::ButtonClick, Event::Changed];
             // What the screen does once a drag ends: a shader pack's option is saved, and the
@@ -3579,8 +3522,6 @@ impl OptionsUi {
                 _ => None,
             }));
             events
-        } else if split_drop {
-            vec![Event::ButtonClick]
         } else {
             Vec::new()
         }
@@ -3991,8 +3932,6 @@ impl OptionsUi {
             self.language_search.insert_text(text);
             self.scroll = 0.0;
             self.relayout();
-        } else if self.page() == Page::SplitProfiles {
-            self.split_profiles.type_text(text);
         } else if self.page() == Page::ControllerRadialName {
             self.type_radial_name(text);
         } else if let Some(shell) = self.shell_mut() {
@@ -4035,9 +3974,6 @@ impl OptionsUi {
             // Select all, copy, paste and cut: the box's text is a layout input.
             self.relayout();
             return true;
-        }
-        if self.page() == Page::SplitProfiles {
-            return self.split_profiles.shortcut(shortcut, clipboard);
         }
         if self.page() == Page::ControllerRadialName {
             return self.radial_name_shortcut(shortcut, clipboard);
@@ -4228,9 +4164,6 @@ impl OptionsUi {
                     .to_owned()
             };
             return self.bind_key(s, value);
-        }
-        if self.page() == Page::SplitProfiles && self.split_profiles.key(key, text) {
-            return Vec::new();
         }
         if self.page() == Page::ControllerRadialName {
             return self.radial_name_key(s, key, text);
@@ -5315,13 +5248,11 @@ mod tests {
         })
     }
 
-    /// Sunrise's own options pages said "Splitscreen...", "Hide block-break particles" and
-    /// "Hotbar: Previous Slot" in every language (#1927).
+    /// Settings and controller labels follow the selected language (#1927).
     #[test]
     fn sunrise_option_pages_follow_the_language() {
         let (texts, missed) = page_texts("de_de", &[Page::Sunrise, Page::Extras, Page::PadBinds]);
         for want in [
-            "Splitscreen …",
             "Weicher Chat: Aus",
             "Nachrichtenmarkierung: An",
             "Kanäle für UI-Töne: Aus",
@@ -5727,8 +5658,6 @@ mod tests {
             Page::PackOptions,
             Page::Mods,
             Page::Packs,
-            Page::SplitSetup,
-            Page::SplitProfiles,
             Page::Studio,
         ] {
             let mut ui = OptionsUi::default();
@@ -7665,7 +7594,6 @@ mod tests {
             [
                 Page::Extras,
                 Page::Pvp,
-                Page::SplitSetup,
                 Page::Studio,
                 Page::Agent,
                 Page::ModBrowser,

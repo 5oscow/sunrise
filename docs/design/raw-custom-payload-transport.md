@@ -90,7 +90,7 @@ Preserve order with ordinary gameplay ingress. Default handlers run on the logic
 receiving main thread. IPayloadContext supplies player, reply, disconnect and
 enqueueWork. Root transaction commit publishes sends; abort publishes none. Replies
 cannot execute inline across the connection and are received on a subsequent turn.
-Single-player and split-screen use their real connect_local sessions, not direct
+Single-player uses its real connect_local session, not direct
 callback shortcuts.
 
 `IPayloadHandler::handle` returns `Result<(), PayloadHandleError>`, with explicit
@@ -123,7 +123,7 @@ Backpressure, bounded flood memory and progress for more than 32 legal messages.
 Its registered-body limit wording must distinguish discard limits from the actual
 connection framing bounds above.
 
-Exercise integrated single-player, split-screen, two remote players, LAN and
+Exercise integrated single-player, two remote players, LAN and
 dedicated paths. Check sender attribution, ordering, next-turn replies, rollback,
 epoch invalidation, optional vanilla admission, required mismatch, duplicate load
 refusal, generic-send bypass and named decode failures. Native and wasm must both

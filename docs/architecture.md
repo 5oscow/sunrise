@@ -84,5 +84,5 @@ same live TNT do not clear the flag, as in 26.3.
 Construction/join callback regressions also cover nested spawns and logically
 removed incoming or neighbouring items, before the native removal sweep.
 
-Controller glyphs (`R/pad_glyph.rs`, drawn by the gameplay guide, notices, splitscreen prompts and declared
+Controller glyphs (`R/pad_glyph.rs`, drawn by the gameplay guide, notices and declared
 buttons) are part of the same kit: [ui-kit.md](ui-kit.md) says how to ask for one and how to test it.
