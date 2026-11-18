@@ -43,8 +43,8 @@ impl Mob {
 pub(super) fn resolve(m: &mut Mob, source: &Damage, attack: &crate::health::Attack) {
     let Some(who) = source.attacker else { return };
     if !matches!(source.kind, DamageKind::MobAttackNoAggro) {
-        let uuid = match who {
-            Who::Mob(id) if attack.attacker == id as i32 => attack.attacker_uuid,
+        let uuid = match (who, attack.attacker_uuid) {
+            (Who::Mob(id), Some((named, uuid))) if named == id => Some(uuid),
             _ => None,
         };
         m.ai.hurt_by(who, uuid, m.age as i32);

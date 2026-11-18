@@ -1566,7 +1566,7 @@ impl Game<'_> {
         };
         let attacker_uuid = u32::try_from(attacker)
             .ok()
-            .and_then(|id| self.known_entity_uuid(id));
+            .and_then(|id| Some((id, self.known_entity_uuid(id)?)));
         Attack {
             attacker,
             held,

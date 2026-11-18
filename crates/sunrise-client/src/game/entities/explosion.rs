@@ -1106,11 +1106,17 @@ impl Game<'_> {
         // `VehicleEntity.hurtServer` credits its ENTITY_DAMAGE to
         // `DamageSource.getEntity`, which for a blast is its indirect source.
         let blast_by = self.explosion_kill_credit();
-        // The blast cause's UUID, for the mob victims' kill credit: the hits
-        // land in the enclosing attack, which need not name the cause.
-        let cause_uuid = attacker
+        // The mob victims' hits land in the enclosing attack, which need not
+        // name the blast's cause: it carries the live cause's UUID for their
+        // kill credit, made now if the cause has none yet (a built wither).
+        let mut mob_attack = self.combat.attack().clone();
+        if let Some(id) = attacker
             .as_ref()
-            .and_then(|&(id, _)| self.known_entity_uuid(id));
+            .map(|&(id, _)| id)
+            .filter(|&id| self.mobs.iter().any(|m| m.id == id && !m.removed))
+        {
+            mob_attack.attacker_uuid = Some((id, self.uuid_for(id)));
+        }
         let mut destroyed_contents = Vec::new();
         macro_rules! blocked_damage {
             ($id:expr, $kind:expr) => {{
@@ -1226,23 +1232,12 @@ impl Game<'_> {
                         // ravagers are pushed.
                         let victim = m.id;
                         let hurt = hurt_mob(
-                            crate::game::entity::damage_level_of!(
-                                self,
-                                self.combat.attack(),
-                                no_push,
-                                None
-                            ),
+                            crate::game::entity::damage_level_of!(self, &mob_attack, no_push, None),
                             m,
                             hurtable,
                             cause,
                             (amount, source),
                         );
-                        if hurt
-                            && let Some(Who::Mob(_)) = source.attacker
-                            && self.mobs[i].ai.last_hurt_by == source.attacker
-                        {
-                            self.mobs[i].ai.last_hurt_by_uuid = cause_uuid;
-                        }
                         if hurt {
                             if source.attacker == Some(Who::Player) {
                                 let guest = self.combat.blast_guest;
