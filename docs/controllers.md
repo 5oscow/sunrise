@@ -303,7 +303,7 @@ registers nothing, unless its allowlist names it.
 It works the same on a focus screen and a pointer screen (Statistics, Advancements, packs, books).
 The hint is the glyph on the declared button, in that player's pad's style and view; nothing draws
 in a corner. It shows while the pad drives; the mouse or a focus key hides it, and a button too small
-for it, or running off a split view, goes without it and keeps its pad button. What a screen declared
+for it goes without it and keeps its pad button. What a screen declared
 stops counting as soon as another screen is drawn over it (`widgets::begin_screen`: a popup's buried
 buttons can't be pressed) or takes its place. While a key row waits for its key nothing is declared and only B and Start act:
 they are Escape, which unbinds. A row on Controller Settings > Bindings takes the next button pressed
