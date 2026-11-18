@@ -2151,6 +2151,7 @@ mod liquid_container_tests {
         container: BlockStateId,
         accepts: Option<FluidKind>,
         filled: BlockStateId,
+        replace_on_fill: Option<(BlockPos, BlockStateId)>,
     }
 
     impl BlockEntityNeighbors for ContainerLevel {}
@@ -2193,8 +2194,17 @@ mod liquid_container_tests {
             state: BlockStateId,
             fluid: FluidState,
         ) -> Option<bool> {
-            (state == self.container && self.accepts == Some(fluid.kind()) && fluid.is_source())
-                .then(|| self.set_raw(pos, self.filled).is_some())
+            if state != self.container
+                || !self
+                    .accepts
+                    .is_some_and(|kind| kind.same_family(fluid.kind()))
+            {
+                return None;
+            }
+            if let Some((neighbour, replacement)) = self.replace_on_fill {
+                self.set_raw(neighbour, replacement);
+            }
+            Some(self.set_raw(pos, self.filled).is_some())
         }
     }
 
@@ -2214,6 +2224,7 @@ mod liquid_container_tests {
             container: stone,
             accepts: Some(FluidKind::Lava),
             filled: emerald,
+            replace_on_fill: None,
         };
         level.set_raw(at, stone);
         assert!(b.bucket_can_fill(&level, at, stone, FluidKind::Lava, LiquidUser::default()));
@@ -2251,6 +2262,7 @@ mod liquid_container_tests {
                 container: plant,
                 accepts,
                 filled: plant,
+                replace_on_fill: None,
             };
             level.set_raw(source, water);
             level.set_raw(at, plant);
@@ -2265,6 +2277,35 @@ mod liquid_container_tests {
                 );
             }
         }
+    }
+    #[test]
+    #[ignore = "daily"]
+    fn lateral_flow_does_not_destroy_a_target_changed_by_an_earlier_container() {
+        let fixture = tests::fixture().expect("prepared block facts for daily fixture");
+        let b = &fixture.behaviours;
+        let state = |name| fixture.registry.default_state(name).unwrap();
+        let source = BlockPos::new(0, 65, 0);
+        let north = source.offset(0, 0, -1);
+        let south = source.offset(0, 0, 1);
+        let container = state("minecraft:dandelion");
+        let stone = state("minecraft:stone");
+        let filled = state("minecraft:emerald_block");
+        let mut level = ContainerLevel {
+            base: TestLevel::new(b),
+            container,
+            accepts: Some(FluidKind::FlowingWater),
+            filled,
+            replace_on_fill: Some((south, stone)),
+        };
+        level.set_raw(source, state("minecraft:water"));
+        level.set_raw(source.offset(0, -1, 0), stone);
+        level.set_raw(source.offset(-1, 0, 0), stone);
+        level.set_raw(source.offset(1, 0, 0), stone);
+        level.set_raw(north, container);
+        // The other open side is equally close to a hole, but is applied second.
+        b.scheduled_fluid_tick(&mut level, &mut Ticks::default(), source);
+        assert_eq!(level.block_state(north), filled);
+        assert_eq!(level.block_state(south), stone);
     }
 }
 

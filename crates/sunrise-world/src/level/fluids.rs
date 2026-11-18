@@ -814,28 +814,22 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         if neighbour > 0 {
             for (direction, new_fluid, tested, container) in self.spread_targets(kind, pos, state) {
                 let neighbour_pos = rel(pos, direction);
-                let neighbour_state = self.state(neighbour_pos);
-                // An earlier neighbour update can replace a later target. A
-                // part's answer is for that tested block, not its replacement.
-                let container = if neighbour_state == tested {
-                    container
-                } else {
-                    match self.spread_container(neighbour_pos, neighbour_state, new_fluid.kind()) {
-                        Some(false) if self.level.has_liquid_container_part(neighbour_state) => {
-                            continue;
-                        }
-                        Some(_) => true,
-                        None => false,
-                    }
-                };
-                self.spread_to(
-                    kind,
-                    neighbour_pos,
-                    neighbour_state,
-                    direction,
-                    new_fluid,
-                    container,
-                );
+                // An earlier placement part or neighbour update can invalidate a
+                // later target. Apply the saved arrival only to the tested states;
+                // don't ask a replacement block for a new container decision.
+                if self.state(pos) != state
+                    || self.state(neighbour_pos) != tested
+                    || !self.can_pass_through_wall(direction, pos, state, tested)
+                    || !self.can_be_replaced_with(
+                        self.b.fluid(tested),
+                        neighbour_pos,
+                        new_fluid.kind(),
+                        direction,
+                    )
+                {
+                    continue;
+                }
+                self.spread_to(kind, neighbour_pos, tested, direction, new_fluid, container);
             }
         }
     }
