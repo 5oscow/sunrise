@@ -7,11 +7,9 @@ use wasmparser::{Parser, Payload, TypeRef};
 #[test]
 #[ignore = "daily"]
 fn every_import_of_a_built_greeter_is_an_export_of_the_std_member() {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../target")
-        .join(format!("wasm-std-symbols-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+    // Outside the checkout: a project inside it would believe it is in the game's workspace.
+    let scratch = tempfile::tempdir().unwrap();
+    let dir = scratch.path();
     let tool = |current: &Path, args: &[&str]| {
         let out = Command::new(env!("CARGO_BIN_EXE_cargo-sunrise-mod"))
             .current_dir(current)
@@ -25,8 +23,8 @@ fn every_import_of_a_built_greeter_is_an_export_of_the_std_member() {
         );
     };
     let std_member = dir.join("std.wasm");
-    tool(&dir, &["wasm-std", std_member.to_str().unwrap()]);
-    tool(&dir, &["new", "greeter", "--template", "wasm"]);
+    tool(dir, &["wasm-std", std_member.to_str().unwrap()]);
+    tool(dir, &["new", "greeter", "--template", "wasm"]);
     let greeter = dir.join("greeter");
     tool(&greeter, &["build", "--wasm"]);
 
@@ -41,7 +39,7 @@ fn every_import_of_a_built_greeter_is_an_export_of_the_std_member() {
     let mut checked = 0;
     for payload in Parser::new(0).parse_all(&std::fs::read(member).unwrap()) {
         if let Payload::ImportSection(section) = payload.unwrap() {
-            for import in section.into_iter().map(Result::unwrap) {
+            for import in section.into_imports().map(Result::unwrap) {
                 // Memory, table and stack pointer come from the group's linker, not from a member.
                 if import.module == "env" && matches!(import.ty, TypeRef::Func(_)) {
                     checked += 1;
@@ -54,5 +52,4 @@ fn every_import_of_a_built_greeter_is_an_export_of_the_std_member() {
     }
     assert!(checked > 0, "the greeter imports nothing from std");
     assert!(missing.is_empty(), "not exported by std: {missing:?}");
-    std::fs::remove_dir_all(dir).unwrap();
 }
