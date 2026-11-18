@@ -156,10 +156,10 @@ pub trait PlayerInteractionBackendMut {
     /// not "as player" in the sense of a use-on. The state is written as given. Refuses, writing
     /// nothing, with `PlayerWorldRefusal`: `Client`, `Stale`, `Dead`, `StaleLevel`, `OtherLevel`
     /// (not the level in place, where the player is), `UnknownState`, `OutOfWorld`, `NotLoaded`,
-    /// `Fenced` (a cell the placement writes is held by a carrier transfer), `InTransaction`
-    /// (a completed wither pattern in an open Host transaction), and `Unchanged` (that state already stands
-    /// there, or the write was refused as
-    /// `level_set_block` returns false).
+    /// `Fenced` (the origin or a direct companion or callback write is held by a carrier transfer),
+    /// `InTransaction` (a completed wither pattern in an open Host transaction), and `Unchanged`
+    /// (that state already stands there, or `level_set_block` returns false). Neighbour updates
+    /// follow the level's normal rules.
     #[access(WorldOnly)]
     fn player_place_block(
         &mut self,

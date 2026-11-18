@@ -44,7 +44,7 @@ pub enum PlayerWorldRefusal {
     },
     /// `place_block` of the state already standing there: `setBlock` writes nothing.
     Unchanged,
-    /// A cell the placement would write is held by a carrier transfer.
+    /// The origin or a cell the placement would write directly is held by a carrier transfer.
     Fenced,
     /// This placement completes a wither pattern and cannot run inside a Host transaction.
     InTransaction,

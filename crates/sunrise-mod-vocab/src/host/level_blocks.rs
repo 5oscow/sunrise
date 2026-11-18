@@ -94,8 +94,10 @@ pub trait LevelBlocksBackendMut {
     /// `update_neighbour_shapes` is false; without it the neighbours' shapes update, so fences
     /// and walls connect). `setPlacedBy` gets no placer and no item. Nothing else of
     /// `BlockItem.place` runs: no survival or obstruction check, item placement sound, placement
-    /// game event or advancement. Also returns `Ok(false)` if a callback write is fenced,
-    /// and `LevelWriteError::InTransaction` for a completed wither pattern in an open Host transaction.
+    /// game event or advancement. A carrier-transfer fence can refuse a direct placement write
+    /// (the origin, a companion or a callback write) with `Ok(false)`; neighbour updates follow
+    /// the level's normal rules. A completed wither pattern in an open Host transaction returns
+    /// `LevelWriteError::InTransaction`.
     #[access(WorldOnly)]
     fn level_place_block(
         &mut self,
@@ -109,7 +111,9 @@ pub trait LevelBlocksBackendMut {
     /// a detached item value (`None` is the empty stack); the block may inspect its components.
     /// Write the initial state and load any block entity data before calling. The callback can
     /// write companion cells and produce block-specific effects, but will not load stack NBT.
-    /// `Ok(false)` at an unloaded or out-of-height origin, or for a fenced callback write.
+    /// `Ok(false)` at an unloaded or out-of-height origin or on carrier-transfer refusal.
+    /// The fence check covers the origin and cells the callback writes directly, including
+    /// companions; neighbour updates follow the level's normal rules.
     /// Stale or unavailable levels and invalid stacks return typed errors before any effects.
     /// A placement that would summon a wither is refused while a Host transaction is open.
     #[access(WorldOnly)]
