@@ -5125,6 +5125,8 @@ use death_render::{dissolve_color, dissolve_mask};
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn dragon_search_preserves_equal_cost_heap_order() {
         let xz = [
@@ -5158,12 +5160,10 @@ mod tests {
             75, 77,
         ];
         let nodes = std::array::from_fn(|i| [xz[i][0], heights[i], xz[i][1]]);
-        let path = super::search_dragon_path(&nodes, 18, 6, 0, None).unwrap();
+        let path = search_dragon_path(&nodes, 18, 6, 0, None).unwrap();
         // With crystals alive, the ruled array heap visits node 16 before 7 at a tie.
         assert_eq!(path.nodes, [nodes[18], nodes[17], nodes[16], nodes[6]]);
     }
-
-    use super::*;
 
     #[test]
     #[ignore = "daily"]
