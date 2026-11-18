@@ -162,6 +162,10 @@ when the client level is replaced or the client disconnects; a same-level respaw
 keeps its epoch. Unlike `view_hit` and `raycast`, this does not return a block
 behind a targeted entity.
 
+`ClientHost::view_hit()` and `raycast(distance)` cast their own ray along the view, up
+to 1024 blocks, and hit blocks in loaded chunks only: far terrain is never hit. Both
+return `None` on a miss.
+
 A client `EntityRef` supports `bounding_box(host)`, `eye_height(host)` and
 `eye_position(host)`. For the local player these use the current predicted body and pose;
 for a tracked target they use the client's displayed body. End crystals expose their 2 x 2 box;
