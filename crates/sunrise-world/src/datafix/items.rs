@@ -6,7 +6,6 @@ use super::dynamic::{
 };
 use super::json;
 use sunrise_core::nbt::{JavaString, Tag};
-use sunrise_core::random::java_string_hash;
 
 /// `V704.ITEM_TO_BLOCKENTITY`.
 const ITEM_TO_BLOCK_ENTITY: &[(&str, &str)] = &[
@@ -1137,19 +1136,34 @@ fn fix_profile_properties(v: Option<&Tag>) -> Option<Tag> {
 }
 
 /// Iteration order of a `java.util.HashMap`/`HashSet` built by inserting the
-/// items in order (default capacity, string keys, no tree bins).
+/// items in order with the default capacity. Later values replace earlier ones.
 pub(super) fn java_hash_order<T>(items: Vec<T>, key: impl Fn(&T) -> String) -> Vec<T> {
-    let mut capacity = 16usize;
-    while items.len() as f64 > capacity as f64 * 0.75 {
-        capacity *= 2;
+    let mut map = sunrise_core::java_hash_map::JavaHashMap::default();
+    let mut items: Vec<_> = items.into_iter().map(Some).collect();
+    for (i, item) in items.iter().enumerate() {
+        map.put(key(item.as_ref().expect("not moved yet")), i);
     }
-    let spread = |h: i32| (h ^ ((h as u32) >> 16) as i32) as u32 as usize;
-    let mut buckets: Vec<Vec<T>> = (0..capacity).map(|_| Vec::new()).collect();
-    for item in items {
-        let index = spread(java_string_hash(key(&item).encode_utf16())) & (capacity - 1);
-        buckets[index].push(item);
-    }
-    buckets.into_iter().flatten().collect()
+    map.entries()
+        .map(|(_, &i)| items[i].take().expect("one index per key"))
+        .collect()
+}
+
+#[cfg(test)]
+#[test]
+fn datafix_names_follow_java_hashmap_tree_order() {
+    let keys: Vec<String> = (0..16)
+        .map(|i| {
+            (0..4)
+                .map(|b| if i & (1 << b) == 0 { "Aa" } else { "BB" })
+                .collect()
+        })
+        .collect();
+    let ordered = java_hash_order((0..16).collect(), |&i| keys[i].clone());
+    // Temurin 25.0.5, HashMap populated by putting keys 0 through 15.
+    assert_eq!(
+        ordered,
+        [1, 0, 2, 3, 13, 4, 12, 5, 6, 14, 7, 15, 11, 8, 9, 10]
+    );
 }
 
 // ------------------------------------------------------------------ particles
