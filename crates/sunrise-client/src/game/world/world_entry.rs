@@ -731,10 +731,9 @@ impl Game<'_> {
     pub(super) fn prepare_parts(&self, items: &Items) -> Result<PreparedParts> {
         // Some unit fixtures construct the Part tables without loading game content.
         #[cfg(not(test))]
-        debug_assert!(
-            mod_api::__private::content_owners_published(),
-            "admitted ownership must be published before caching the block Part owner slots"
-        );
+        if !mod_api::__private::content_owners_published() {
+            return Err("Mod parts refused: content ownership has not been published".into());
+        }
         let registry = self.pack.assets.registry;
         let block_tags = &items.block_tags;
         let tags = self.block_tag_sets(items);
