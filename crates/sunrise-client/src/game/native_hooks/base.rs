@@ -4575,14 +4575,9 @@ impl Game<'_> {
             return;
         }
         let [x, y] = at;
-        batch.text_styled(
-            &self.gui.atlas,
-            &Text::literal(text),
-            x,
-            y,
-            rgba(r, g, b, a),
-            shadow,
-        );
+        self.gui.plain_texts.with(text, |text| {
+            batch.text_styled(&self.gui.atlas, text, x, y, rgba(r, g, b, a), shadow)
+        });
     }
     /// The clock of the world this window shows, for client mods: its game
     /// time and time of day as the server last sent them

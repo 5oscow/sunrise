@@ -1428,10 +1428,11 @@ impl Game<'_> {
             {
                 continue;
             }
-            let drawn = self.world.random.next_int_bound(100_000).unwrap_or(0);
+            let (drawn, uuid) = Crystal::own_draws();
             let time = Crystal::start_time(at, drawn, self.clock.still());
             // EndCrystal's constructor takes an id from the entity counter.
             self.next_entity += 1;
+            self.persist.uuids.insert(self.next_entity, uuid);
             self.crystals.push(Crystal {
                 attachment_lifetime: Default::default(),
                 join: Default::default(),
@@ -4530,7 +4531,7 @@ impl Game<'_> {
         let at = Vec3::new(f64::from(cx) + 0.5, f64::from(h + 1), f64::from(cz) + 0.5);
         self.crystals
             .retain(|c| c.position.distance_squared(at) > 0.01);
-        let drawn = self.world.random.next_int_bound(100_000).unwrap_or(0);
+        let (drawn, _) = Crystal::own_draws();
         let time = Crystal::start_time(at, drawn, self.clock.still());
         self.crystals.push(Crystal {
             beam: Some([0, 128, 0]),
