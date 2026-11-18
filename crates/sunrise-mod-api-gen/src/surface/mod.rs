@@ -4,6 +4,7 @@
 //! of `sunrise-mod-api` and the vocabulary it re-exports.
 pub mod behaviours;
 mod expand;
+pub mod extension_tags;
 pub mod notes;
 mod rust;
 #[cfg(test)]
@@ -831,7 +832,8 @@ pub(crate) fn build(
             parts,
             capabilities,
         )
-        .with_behaviours(behaviours),
+        .with_behaviours(behaviours)
+        .with_extension_tags(extension_tags::read(root)?),
         notes,
     })
 }
