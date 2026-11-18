@@ -6400,12 +6400,16 @@ def check_frames(host, guest, out):
             server_reply(other, f'data get entity {selector} CustomName', name)
             # NameTagItem shrinks the copy Player.interactOn hands it with infinite materials: in
             # creative the tag is kept.
+            # A new name, so a click that does nothing can't pass.
+            creative_name = f'{label} Ann'
             player('command', command='gamemode creative')
             player('command', command='item replace entity @s weapon.mainhand with '
-                   f'minecraft:name_tag[minecraft:custom_name="{name}"] 3')
+                   f'minecraft:name_tag[minecraft:custom_name="{creative_name}"] 3')
             player.wait(5)
             player.raw('mouse', 'right', 'click')
             player.wait(10)
+            server_reply(player, f'data get entity {selector} CustomName', creative_name)
+            server_reply(other, f'data get entity {selector} CustomName', creative_name)
             assert player('inventory')['counts'].get('minecraft:name_tag') == 3, 'creative tag was consumed'
             player('command', command='gamemode survival')
             result[label] = {'frame': 'diamond, turned', 'stand': 'helmet on and off; named tag consumed'}
@@ -7449,9 +7453,10 @@ def run(ctl, out, resources, checks):
                     assert state.get('player') is not None, f'{game.name} lost its session before {name}: {state}'
                     if state.get('screen') == 'dead' or state['player']['health'] <= 0:
                         game.raw('respawn')
-                        game.until(lambda: game('state'),
-                                   lambda s: s.get('screen') == 'playing' and s['player']['health'] > 0,
-                                   ticks=40)
+                        # Where the respawn put it decides whether the reset below changes dimension.
+                        state = game.until(lambda: game('state'),
+                                           lambda s: s.get('screen') == 'playing' and s['player']['health'] > 0,
+                                           ticks=40)
                     # Where the players stood once joined (the guest 3 blocks east of the host), as a run
                     # of the check alone starts: cases move them, to platforms in the sky and arenas, and
                     # a later case's floor, reach or spawned mobs must not depend on where one ended.
@@ -7459,7 +7464,9 @@ def run(ctl, out, resources, checks):
                     x += 3 if game is guest else 0
                     game('command', command=f'execute in {OVERWORLD} run tp @s {x:.2f} {y:.2f} {z:.2f}')
                     if state.get('dimension') != OVERWORLD:
-                        wait_dimension(game, OVERWORLD, 400)
+                        state = wait_dimension(game, OVERWORLD, 400)
+                        assert state.get('dimension') == OVERWORLD and state.get('player'), \
+                            f'{game.name} did not return to the Overworld before {name}: {state}'
                 # And facing each other, as after joining.
                 face_each_other(host, guest)
                 detail = CHECK_FNS[name](host, guest, out)
