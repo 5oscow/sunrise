@@ -1296,7 +1296,9 @@ mod tests {
         };
         let table =
             ResolvedProfessions::prepare(vec![("test".into(), engineer)], |_, _| true).unwrap();
-        let registered = table.state(table.resolve("test:engineer").unwrap()).unwrap();
+        let registered = table
+            .state(table.resolve("test:engineer").unwrap())
+            .unwrap();
         assert!(matches!(registered, ProfessionState::Registered { .. }));
         assert!(
             !opaque_villager(&table, Species::Villager, &registered),
