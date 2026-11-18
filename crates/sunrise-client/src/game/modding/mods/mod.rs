@@ -711,7 +711,7 @@ fn refuse_primary_namespace_claims(
             .find(|ns| primary.contains(ns.as_str()))
         {
             return Err(format!(
-                "mod {} claims namespace {namespace}, which is the primary namespace of mod {namespace}",
+                "mod {} claims namespace {namespace}, which is the primary namespace of mod {namespace}; turn one of them off",
                 manifest.id,
             ).into());
         }
@@ -2094,7 +2094,7 @@ mod tests {
                 refuse_primary_namespace_claims(&layers)
                     .unwrap_err()
                     .to_string(),
-                "mod claimant claims namespace owner, which is the primary namespace of mod owner"
+                "mod claimant claims namespace owner, which is the primary namespace of mod owner; turn one of them off"
             );
         }
     }
