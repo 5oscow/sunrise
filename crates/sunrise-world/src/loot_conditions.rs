@@ -9,6 +9,10 @@ pub(super) fn overlay_map(overlay: &PackOverlay, kind: &str, out: &mut HashMap<S
         };
         out.insert(id.to_owned(), v);
     }
+    retain_admitted(overlay, kind, out);
+}
+
+pub(super) fn retain_admitted(overlay: &PackOverlay, kind: &str, out: &mut HashMap<String, Value>) {
     // Only a loot table's pools carry their own conditions (#1381).
     out.retain(|id, value| match kind {
         "loot_table" => overlay.conditions.admit_loot_table(value, id),

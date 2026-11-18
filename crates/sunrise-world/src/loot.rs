@@ -715,6 +715,10 @@ pub fn shared_tables(root: &Path, overlay: &PackOverlay) -> io::Result<Arc<LootT
         use std::hash::{DefaultHasher, Hash, Hasher};
         let mut hasher = DefaultHasher::new();
         root.hash(&mut hasher);
+        if let Ok(metadata) = root.join("registries.json").metadata() {
+            metadata.len().hash(&mut hasher);
+            metadata.modified().ok().hash(&mut hasher);
+        }
         overlay.conditions.hash(&mut hasher);
         let data = root.join("data");
         let mut namespaces: Vec<_> = fs::read_dir(&data)
@@ -742,9 +746,7 @@ pub fn shared_tables(root: &Path, overlay: &PackOverlay) -> io::Result<Arc<LootT
     if let Some(tables) = held(&mut LOADED.lock().unwrap_or_else(|e| e.into_inner())) {
         return Ok(tables);
     }
-    let mut tables = HashMap::new();
-    load_kind(&root.join("data"), "loot_table", &mut tables)?;
-    overlay_map(overlay, "loot_table", &mut tables);
+    let tables = load_resources::load_ordered_kind(root, overlay, "loot_table")?;
     let tables: LootTables = tables.into_iter().collect();
     let mut loaded = LOADED.lock().unwrap_or_else(|e| e.into_inner());
     // Another thread may have loaded the same tables meanwhile: keep one.
@@ -792,9 +794,7 @@ impl LootData {
     ) -> io::Result<Self> {
         let all = root.join("data");
         let tables = shared_tables(root, overlay)?;
-        let mut modifiers = HashMap::new();
-        load_kind(&all, "item_modifier", &mut modifiers)?;
-        overlay_map(overlay, "item_modifier", &mut modifiers);
+        let modifiers = load_resources::load_ordered_kind(root, overlay, "item_modifier")?;
         let predicates = load_predicates(root, overlay)?;
         let items = defaults
             .entries()
@@ -1961,7 +1961,9 @@ impl<R: RandomSource> Context<'_, R> {
                         continue;
                     };
                     let id = format!("{prefix}{id}");
-                    let tag = if value.is_null() {
+                    let tag = if prefix == "!" {
+                        Some(Tag::Compound(Default::default()))
+                    } else if value.is_null() {
                         None
                     } else {
                         // CustomData uses TagParser's lenient codec: an SNBT
@@ -2504,6 +2506,63 @@ mod namespace_tests {
                 ("test:value".into(), Some(Tag::List(vec![Tag::Byte(7)]))),
             ]
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn component_aliases_and_removals_follow_json_member_order() {
+        let root =
+            std::env::temp_dir().join(format!("sunrise-ordered-loot-patch-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("items.json"), r#"{"minecraft:bread":{}}"#).unwrap();
+        fs::write(
+            root.join("registries.json"),
+            r#"{"minecraft:data_component_type":{"entries":{"minecraft:villager_food":{}}}}"#,
+        )
+        .unwrap();
+        let defaults = crate::item_defaults::read(&root).unwrap();
+        let load = |patch| {
+            let files = [("loot_table/test:meal".to_owned(), vec![format!(r#"{{"pools":[{{"rolls":1,"entries":[{{"type":"minecraft:item","name":"minecraft:bread","modifier":{{"type":"minecraft:set_components","components":{{{patch}}}}}}}]}}]}}"#).into_bytes()])];
+            LootData::load(&root, &PackOverlay::new(&files), &defaults)
+        };
+        let roll = |patch| {
+            let data = load(patch).unwrap();
+            data.roll("test:meal", &mut LegacyRandom::new(1), 0.0, None, None)[0]
+                .components
+                .clone()
+        };
+        let food = (
+            "minecraft:villager_food".into(),
+            Some(Tag::compound([("nutrition", Tag::Byte(7))])),
+        );
+        let removal = (
+            "!minecraft:villager_food".into(),
+            Some(Tag::Compound(Default::default())),
+        );
+        assert_eq!(
+            roll(r#""minecraft:villager_food":{"nutrition":7},"!villager_food":{}"#),
+            [removal]
+        );
+        assert_eq!(
+            roll(r#""!villager_food":{},"minecraft:villager_food":{"nutrition":7}"#),
+            [food]
+        );
+        for (patch, expected) in [
+            (
+                r#""!villager_food":0"#,
+                "removal of minecraft:villager_food requires an object",
+            ),
+            (
+                r#""other:unknown":{}"#,
+                "unknown component ID other:unknown",
+            ),
+        ] {
+            let error = load(patch)
+                .err()
+                .expect("the malformed patch must refuse loading")
+                .to_string();
+            assert!(error.contains(expected), "{error}");
+        }
         fs::remove_dir_all(root).unwrap();
     }
 
