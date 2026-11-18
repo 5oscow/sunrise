@@ -127,9 +127,9 @@ dispatches it (`-f commit=<sha>`, `-f dry_run=false` to write). One run runs and
 dispatch replaces an older waiting one. The schedule stops when main's head already has a completed real daily run;
 a hand dispatch never does, so it retries a run whose tag move, issues or nightly failed. Its legs are the workflows that left main pushes:
 the ignored-tests data shards (`ignored-tests.yml`), the wasm fixture and guest stacks (`wasm-mods.yml`),
-`fn-replace-check.yml`, the game's Windows runtime-lease tests (`windows-runtime-leases.yml`), the machine sample
-built against the commit's mod API (`machine-sample.yml`) and the prebuilt SDK of the commit
-(`prebuilt-game-build.yml`; each leg packs its slices after the checks, including the [native linkage probe](native-dylib-probe.md)
+`fn-replace-check.yml`, the game's Windows runtime-lease tests (`windows-runtime-leases.yml`), the wasm std member's
+names built on Linux and on Windows (`wasm-std-names.yml`), the machine sample built against the commit's mod API
+(`machine-sample.yml`) and the prebuilt SDK of the commit (`prebuilt-game-build.yml`; each leg packs its slices after the checks, including the [native linkage probe](native-dylib-probe.md)
 on the Linux and Windows client builds. `sdk-publish` signs and publishes the slices as the mod SDK's
 release `sdk-<sha>` (`sdk-publish.yml`) only when its own legs are green on a real run on main, before the Nightly that
 needs them; a failed publish files one issue, `Daily: sdk-publish did not complete`), each called

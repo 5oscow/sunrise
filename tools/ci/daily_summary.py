@@ -65,7 +65,8 @@ PARITY = "parity"
 # parity job is infrastructure — a share that wrote its verdict and then died still has to be visible beside a
 # harness failure from another share.
 PARITY_RESULT_STEPS = ("Run every automatic harness", "Fail unless every share reported and no harness failed")
-LEGS = ("shards", "wasm-mods", "fn-replace-check", "windows-runtime-leases", "machine-sample", "sdk", PARITY)
+LEGS = ("shards", "wasm-mods", "fn-replace-check", "windows-runtime-leases", "wasm-std-names", "machine-sample",
+        "sdk", PARITY)
 # The legs sdk-publish waits for (output sdk_green) until a runner with prepared data exists (owner, 2026-11-16).
 SDK_LEGS = ("sdk", "machine-sample", "fn-replace-check")
 # Legs whose red is an action for someone, not a break: their one issue is titled as the action, and says what to do.
