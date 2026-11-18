@@ -8,12 +8,14 @@
 //! - `atan2`, `atan`, `asin`, `acos` and `hypot` are `StrictMath`'s (fdlibm)
 //!   everywhere.
 //! - On x86-64, `sin`, `cos`, `tan`, `exp`, `log`, `log10` and `pow` are
-//!   Intel's libm stubs, which round like glibc for nearly every argument;
-//!   there they use the platform libm, as before. Windows' libm (Microsoft's)
-//!   rounds `sin` and `cos` differently for about 3% of arguments, and `log`
-//!   for about 0.15%, so there they are correctly rounded instead
-//!   ([`exact`]), as Intel's stubs are for all but about 0.1% of `sin` and
-//!   `cos` and about 0.002% of `log`.
+//!   Intel's libm stubs. `log`'s is correctly rounded except where the
+//!   logarithm lies within a hair of a rounding tie (about 6 in 100,000
+//!   arguments near 1, 2 in 10 million over its usual range), so `log` is
+//!   [`exact`]'s, which glibc's misses by far more.
+//!   The others use the platform libm, which rounds like the stubs for nearly
+//!   every argument; Windows' libm (Microsoft's) rounds `sin` and `cos`
+//!   differently for about 3% of arguments, so there they are correctly
+//!   rounded instead ([`exact`]), as Intel's stubs are for all but about 0.1%.
 //! - On AArch64 only `sin` and `cos` are intrinsics, which compute fdlibm's
 //!   `sin` and `cos` with fused multiply-adds ([`aarch64`]). Everything else
 //!   is `StrictMath`, which the Java SE API defines as fdlibm 5.3's results
@@ -101,8 +103,7 @@ pub fn exp(x: f64) -> f64 {
 pub fn log(x: f64) -> f64 {
     match PLATFORM {
         Platform::Aarch64 => fdlibm::log(x),
-        Platform::Windows => exact::log(x),
-        Platform::Libm => x.ln(),
+        Platform::Windows | Platform::Libm => exact::log(x),
     }
 }
 
@@ -549,6 +550,28 @@ pub mod exact {
 
 #[cfg(test)]
 mod tests {
+    /// `Math.log` on HotSpot 25.0.4.1 (x86-64) where glibc's `log` rounds the other way: input and result bits.
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn log_is_hotspots() {
+        for (x, expected) in [
+            (0x412a_badc_a4af_f660u64, 0x402b_5db1_12eb_912fu64),
+            (0x4026_dd35_597e_cafc, 0x4003_7dca_168f_0f95),
+            (0x4115_58ee_1c12_eeb4, 0x4029_87ac_babe_d7dd),
+            (0x412b_66ab_a16c_ea93, 0x402b_6a63_5b18_0af3),
+            (0x412b_415a_3059_0bbe, 0x402b_67a8_3094_a876),
+            (0x3fd1_7712_1504_076e, 0xbff4_c761_e7a0_5a8a),
+            (0x4014_e408_aa4e_067d, 0x3ffa_72bd_31f6_36cb),
+            (0x4126_ba36_cc00_cfe8, 0x402b_0aa3_87f6_c594),
+        ] {
+            assert_eq!(
+                super::log(f64::from_bits(x)).to_bits(),
+                expected,
+                "log({x:#x})"
+            );
+        }
+    }
+
     #[test]
     fn pow_matches_java_special_cases() {
         let inf = f64::INFINITY;
