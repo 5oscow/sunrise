@@ -735,7 +735,7 @@ mod tests {
             for t in 0..=40u64 {
                 let f = t as f64;
                 straight.record(t, Frame::translation(Vec3::new(1.0, 64.0, 2.0 * f)));
-                let half = (0.05 * f).sin() / 2.0;
+                let half = crate::jmath::sin(0.05 * f) / 2.0;
                 turning.record(
                     t,
                     Frame::from_quaternion(
