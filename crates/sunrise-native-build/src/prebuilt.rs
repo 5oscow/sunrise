@@ -616,6 +616,25 @@ fn registry_dependency(project: &api::Project<'_>) -> bool {
     })
 }
 
+/// Creates `out`, a build folder directly under `builds`, refusing one that is a link (a symlink
+/// or a Windows junction) or that resolves outside `builds`: the build clears folders inside it,
+/// and must never reach a folder elsewhere through it.
+fn own_folder(builds: &Path, out: &Path) -> Result<(), String> {
+    fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
+    let meta = fs::symlink_metadata(out).map_err(|e| format!("{}: {e}", out.display()))?;
+    let inside = || -> std::io::Result<bool> {
+        Ok(fs::canonicalize(out)?.parent() == Some(fs::canonicalize(builds)?.as_path()))
+    };
+    if meta.file_type().is_symlink() || !meta.is_dir() || !inside().unwrap_or(false) {
+        return Err(format!(
+            "{}: not a folder of its own under {}; remove it and build again",
+            out.display(),
+            builds.display()
+        ));
+    }
+    Ok(())
+}
+
 /// Compiles the mods (`resolution`'s order, each with its installed mod dependencies) and the
 /// launcher's executable against the prebuilt game `package`, by `route` ([`Route::of`] the same
 /// `projects`), under `builds` (`native/prebuilt-build`), in folders keyed by the SDK's inputs
@@ -701,7 +720,7 @@ pub fn compile(
     for project in projects {
         catalog.log_mixins(&project.bundle.manifest)?;
     }
-    fs::create_dir_all(out).map_err(|e| e.to_string())?;
+    own_folder(builds, out)?;
     crate::host::mark_used(out)?;
     let deps = game.join("deps");
     let sdk = identity(game)?;
@@ -1180,6 +1199,32 @@ pub fn runtime_libraries(
 
 #[cfg(test)]
 mod tests {
+    /// A build folder that is a link to a folder elsewhere is refused before anything inside it is
+    /// cleared, so the build never deletes the other folder's `patch-applied`.
+    #[test]
+    fn a_build_folder_linked_elsewhere_is_refused_and_the_other_folder_kept() {
+        let builds = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let out = builds.path().join("rustc-key");
+        super::own_folder(builds.path(), &out).unwrap();
+        super::own_folder(builds.path(), &out).unwrap();
+        fs::remove_dir(&out).unwrap();
+
+        let stale = outside.path().join("patch-applied");
+        fs::create_dir_all(&stale).unwrap();
+        fs::write(stale.join("keep"), "kept").unwrap();
+        #[cfg(unix)]
+        let linked = std::os::unix::fs::symlink(outside.path(), &out);
+        #[cfg(windows)]
+        let linked = std::os::windows::fs::symlink_dir(outside.path(), &out);
+        // Windows grants symlinks only to developer mode or an administrator.
+        if linked.is_ok() {
+            let refused = super::own_folder(builds.path(), &out).unwrap_err();
+            assert!(refused.contains("not a folder of its own"), "{refused}");
+        }
+        assert_eq!(fs::read_to_string(stale.join("keep")).unwrap(), "kept");
+    }
+
     #[test]
     fn library_names_are_case_insensitive_and_entry_lints_are_checked() {
         let mut names = std::collections::HashSet::new();

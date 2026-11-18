@@ -618,13 +618,16 @@ pub fn prepare<'a>(
     }))
 }
 
-/// The game's features as the `--cfg` flags the patch library is compiled with. The compile and
-/// the `--print cfg` that the tool plans against both take them from here, so they cannot drift.
-/// Removes the last build's output at `path`: a folder, a file, or a symlink in its place, never
-/// what a link points at (`remove_dir_all` takes the link itself). Nothing there is fine; any
-/// other failure stops the build with its own error.
+/// Removes the last build's output at `path`: a folder, a file, or a link in its place, never what
+/// a link points at. A link is unlinked: a file symlink with `remove_file`, a directory symlink or
+/// a Windows junction with `remove_dir`. Nothing there is fine; any other failure stops the build
+/// with its own error. `path`'s folder is the build's own ([`super::prebuilt`] refuses a link
+/// there), so nothing outside the build is reached through it.
 fn remove_previous_output(path: &Path) -> Result<(), String> {
     let removed = match fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            fs::remove_file(path).or_else(|_| fs::remove_dir(path))
+        }
         Ok(meta) if meta.is_file() => fs::remove_file(path),
         Ok(_) => fs::remove_dir_all(path),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -633,6 +636,8 @@ fn remove_previous_output(path: &Path) -> Result<(), String> {
     removed.map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// The game's features as the `--cfg` flags the patch library is compiled with. The compile and
+/// the `--print cfg` that the tool plans against both take them from here, so they cannot drift.
 fn game_cfg(cmd: &mut std::process::Command, sdk: &Identity) {
     for feature in sdk.game_features() {
         cmd.arg("--cfg").arg(format!("feature=\"{feature}\""));
@@ -655,31 +660,51 @@ fn build_cfg(printed: &str) -> Vec<String> {
 #[cfg(test)]
 mod refusal_tests {
     /// A rebuild in the same folder starts with no applied-patch output, whether the last build
-    /// left a folder or a symlink there; the link's target is untouched.
+    /// left a folder, a file or a link there; a link's target is untouched.
     #[test]
     fn the_last_builds_applied_output_is_removed_and_a_links_target_kept() {
         use super::remove_previous_output;
         use std::fs;
-        let root = std::env::temp_dir().join(format!("sunrise-applied-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        let applied = root.join("patch-applied");
+        use std::path::Path;
+        let build = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let applied = build.path().join("patch-applied");
         fs::create_dir_all(applied.join("crate/src")).unwrap();
         fs::write(applied.join("crate/src/lib.rs"), "stale").unwrap();
         remove_previous_output(&applied).unwrap();
         assert!(fs::symlink_metadata(&applied).is_err());
         remove_previous_output(&applied).unwrap();
+        fs::write(&applied, "stale").unwrap();
+        remove_previous_output(&applied).unwrap();
+        assert!(fs::symlink_metadata(&applied).is_err());
 
+        let target = outside.path().join("patch-applied");
+        fs::create_dir_all(&target).unwrap();
+        fs::write(target.join("keep"), "kept").unwrap();
+        let file = outside.path().join("file");
+        fs::write(&file, "kept").unwrap();
         #[cfg(unix)]
-        {
-            let target = root.join("elsewhere");
-            fs::create_dir_all(&target).unwrap();
-            fs::write(target.join("keep"), "kept").unwrap();
-            std::os::unix::fs::symlink(&target, &applied).unwrap();
+        let (link_dir, link_file) = (
+            |to: &Path, at: &Path| std::os::unix::fs::symlink(to, at),
+            |to: &Path, at: &Path| std::os::unix::fs::symlink(to, at),
+        );
+        #[cfg(windows)]
+        let (link_dir, link_file) = (
+            |to: &Path, at: &Path| std::os::windows::fs::symlink_dir(to, at),
+            |to: &Path, at: &Path| std::os::windows::fs::symlink_file(to, at),
+        );
+        // Windows grants symlinks only to developer mode or an administrator: a link it refuses
+        // is skipped.
+        if link_dir(&target, &applied).is_ok() {
             remove_previous_output(&applied).unwrap();
             assert!(fs::symlink_metadata(&applied).is_err());
-            assert_eq!(fs::read_to_string(target.join("keep")).unwrap(), "kept");
         }
-        fs::remove_dir_all(root).unwrap();
+        if link_file(&file, &applied).is_ok() {
+            remove_previous_output(&applied).unwrap();
+            assert!(fs::symlink_metadata(&applied).is_err());
+        }
+        assert_eq!(fs::read_to_string(target.join("keep")).unwrap(), "kept");
+        assert_eq!(fs::read_to_string(&file).unwrap(), "kept");
     }
 
     #[test]
