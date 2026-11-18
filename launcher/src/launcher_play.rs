@@ -243,10 +243,10 @@ impl Launcher {
             let log = |line: String| {
                 let _ = tx.send(Msg::Line(Job::Client, line));
             };
-            let cmd = backend::java_game(&instance, server.as_deref(), &log).map(|mut cmd| {
+            let cmd = backend::java_game(&instance, server.as_deref(), &log).and_then(|mut cmd| {
                 let vars = instance.vars(cmd.get_program());
                 cmd.envs(vars.iter().map(|(k, v)| (k, v)));
-                (sunrise_launcher::launch::wrap(cmd, &instance.launch), vars)
+                Ok((sunrise_launcher::launch::wrap(cmd, &instance.launch)?, vars))
             });
             let _ = tx.send(Msg::JavaGame(instance.id, instance.home, cmd));
         });
