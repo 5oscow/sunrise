@@ -324,7 +324,7 @@ index bca7938..2f2eb44 100644
 +    assert!(e.message.contains("selected site contains `?`"), "{e}");
 +}
 diff --git a/crates/horizon-mixins-cli/tests/integration.rs b/crates/horizon-mixins-cli/tests/integration.rs
-index fcf5a46..8401672 100644
+index fcf5a46..bbf431a 100644
 --- a/crates/horizon-mixins-cli/tests/integration.rs
 +++ b/crates/horizon-mixins-cli/tests/integration.rs
 @@ -697,14 +697,14 @@ fn cfg_attributes_shared_module_sources_and_shadowing_fail_closed() {
@@ -346,7 +346,7 @@ index fcf5a46..8401672 100644
              "E_UNSUPPORTED_CONTROL_FLOW",
          ),
          (
-@@ -890,3 +890,554 @@ fn production_test_cfg_modules_are_indexed_and_applied() {
+@@ -890,3 +890,645 @@ fn production_test_cfg_modules_are_indexed_and_applied() {
      let error = build_plan(&f.root, &f.mods).unwrap_err();
      assert!(format!("{error:?}").contains("E_TARGET_NOT_FOUND"));
  }
@@ -901,8 +901,99 @@ index fcf5a46..8401672 100644
 +        }
 +    }
 +}
++
++mod unit_wrap {
++    use super::*;
++
++    /// A fixture with `engine` as the engine library, `driver` as the driver's, and a mod with the `injections`.
++    fn fixture(engine: &str, driver: &str, injections: &str, helpers: &[(&str, &str)]) -> Fixture {
++        let f = Fixture::new();
++        fs::remove_dir_all(&f.mods).unwrap();
++        fs::create_dir_all(f.mods.join("alpha")).unwrap();
++        fs::write(f.root.join("engine/src/lib.rs"), engine).unwrap();
++        fs::write(f.root.join("driver/src/lib.rs"), driver).unwrap();
++        fs::write(
++            f.mods.join("alpha/horizon-mixin.toml"),
++            format!("[mod]\nid=\"alpha\"\nversion=\"1\"\n{injections}"),
++        )
++        .unwrap();
++        for (name, text) in helpers {
++            fs::write(f.mods.join("alpha").join(name), text).unwrap();
++        }
++        f
++    }
++
++    const UNIT_ENGINE: &str = r#"
++pub static LOG: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
++pub fn mark(what: &'static str) { LOG.lock().unwrap().push(what); }
++pub struct Counter(pub i32);
++impl Counter { pub fn bump(&mut self) { self.0 += 1; mark("bump"); } }
++pub fn ping() { mark("ping"); }
++pub fn run_function() { mark("start"); ping(); mark("end"); }
++pub fn run_method(counter: &mut Counter) { mark("start"); counter.bump(); mark("end"); }
++"#;
++
++    #[test]
++    fn wrap_operation_treats_a_callee_without_a_return_type_as_unit() {
++        let f = fixture(
++            UNIT_ENGINE,
++            r#"
++#[test]
++fn wrapped_unit_calls_run_around_the_original() {
++    use fixture_game::{run_function, run_method, Counter, LOG};
++    run_function();
++    assert_eq!(*LOG.lock().unwrap(), ["start", "around", "ping", "around", "end"]);
++    LOG.lock().unwrap().clear();
++    let mut counter = Counter(0);
++    run_method(&mut counter);
++    assert_eq!(counter.0, 1);
++    assert_eq!(*LOG.lock().unwrap(), ["start", "around", "bump", "around", "end"]);
++}
++"#,
++            r#"
++[[injection]]
++id="function"
++target="fixture_game::run_function"
++kind="WRAP_OPERATION"
++selector="ping"
++require=1
++ordinal=0
++helper="function.rs"
++bindings=[{name="original",ty="impl FnOnce()",value="$operation"}]
++
++[[injection]]
++id="method"
++target="fixture_game::run_method"
++kind="WRAP_OPERATION"
++selector="counter.bump"
++require=1
++ordinal=0
++helper="method.rs"
++bindings=[{name="counter",ty="&mut Counter",value="$receiver"},{name="original",ty="impl FnOnce(&mut Counter) -> ()",value="$operation"}]
++"#,
++            &[
++                (
++                    "function.rs",
++                    "fn wrap(original: impl FnOnce()) { crate::mark(\"around\"); original(); crate::mark(\"around\"); }",
++                ),
++                (
++                    "method.rs",
++                    "fn wrap(counter: &mut Counter, original: impl FnOnce(&mut Counter) -> ()) { crate::mark(\"around\"); original(counter); crate::mark(\"around\"); }",
++                ),
++            ],
++        );
++        let report = f.run("check");
++        assert!(
++            report["cargo_stdout"]
++                .as_str()
++                .unwrap()
++                .contains("1 passed"),
++            "{report}"
++        );
++    }
++}
 diff --git a/crates/horizon-mixins-core/src/helpers.rs b/crates/horizon-mixins-core/src/helpers.rs
-index 55a9372..e11c750 100644
+index 55a9372..f6b548d 100644
 --- a/crates/horizon-mixins-core/src/helpers.rs
 +++ b/crates/horizon-mixins-core/src/helpers.rs
 @@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
@@ -1025,7 +1116,21 @@ index 55a9372..e11c750 100644
      {
          let why = if cancellable {
              "cancellable hook helper must return core::ops::ControlFlow<TargetResult>"
-@@ -528,3 +609,70 @@ fn binding_expr(expr: &Expr, parameters: &std::collections::BTreeSet<String>) ->
+@@ -439,7 +520,13 @@ pub fn validate_helper(
+                     let output = parse_type(&op.output)?;
+                     let expected: Type =
+                         syn::parse2(quote!(impl FnOnce(#(#inputs),*) -> #output)).unwrap();
++                    // A call whose callee declares no return type returns `()`: the operation
++                    // may be written `impl FnOnce(A)` as well as `impl FnOnce(A) -> ()`.
++                    let unit: Type = syn::parse_quote!(());
++                    let shorthand: Option<Type> = (normalize_type(&output) == normalize_type(&unit))
++                        .then(|| syn::parse2(quote!(impl FnOnce(#(#inputs),*))).unwrap());
+                     normalize_type(&ty) == normalize_type(&expected)
++                        || shorthand.is_some_and(|short| normalize_type(&ty) == normalize_type(&short))
+                 } else {
+                     binding.value == "$receiver"
+                         || binding
+@@ -528,3 +615,70 @@ fn binding_expr(expr: &Expr, parameters: &std::collections::BTreeSet<String>) ->
          _ => false,
      }
  }
