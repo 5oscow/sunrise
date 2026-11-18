@@ -195,7 +195,13 @@ fn build_command(
     let path = build(entry)?;
     println!("Built {}", path.display());
     if dev::is_native(root)? {
+        let lock = || std::fs::read(root.join("Cargo.lock")).ok();
+        let before = lock();
         dev::build(root, args.iter().any(|a| a == "--update-lock"))?;
+        // The package carries the lock the build used: packed again when the build wrote one.
+        if lock() != before {
+            build(entry)?;
+        }
     }
     Ok(path)
 }

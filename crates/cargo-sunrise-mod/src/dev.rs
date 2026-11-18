@@ -387,7 +387,9 @@ pub(crate) fn run(project: &Path, resources: Option<&str>, args: &[String]) -> R
         .arg("--resources")
         .arg(&resources)
         .args(args)
-        .env("SUNRISE_HOME", &home);
+        .env("SUNRISE_HOME", &home)
+        // A session file handed to this process is the caller's: the game would read and delete it.
+        .env_remove("SUNRISE_SESSION_FILE");
     #[cfg(target_os = "linux")]
     command.env("LD_LIBRARY_PATH", &app);
     let status = command

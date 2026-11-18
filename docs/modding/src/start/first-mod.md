@@ -114,7 +114,7 @@ cargo sunrise-mod run --resources <folder> -- --world Greeter --creative
 
 `run` builds, stages the game with your mod in `target/sunrise-mod/run/` and starts it, with its game folder and its
 logs inside that folder, so nothing of a player's is touched. Everything after `--` goes to the game. The game needs
-resources prepared from your own Minecraft: play 26.3 once in your launcher, then make them with
+resources prepared from your own Minecraft: play 26.3 once in Minecraft's own launcher, then make them with
 `sunrise-prepare --prepare --output <folder>` (`sunrise-prepare` is in the game's download; `--help` lists where it
 reads your copy). The tool never downloads or bundles Mojang's files. Join a world; the greeting appears in chat, and
 the mod is listed on the game's **Mods** screen. On Linux without a display, start `run` under `xvfb-run`.
