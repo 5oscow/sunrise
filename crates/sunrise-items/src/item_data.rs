@@ -1914,26 +1914,37 @@ fn villager_food_stack_override_and_removal() {
         .clone();
     info.villager_food = Some(4);
     let info = Some(&info);
-    let mut stack = ItemStack::new("test:meal", 3);
+    use sunrise_world::loot::{LootData, PackOverlay};
+    let root = std::env::temp_dir().join(format!("sunrise-villager-food-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("items.json"), r#"{"test:meal":{}}"#).unwrap();
+    let table = br#"{"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"test:meal","modifier":[
+        {"type":"minecraft:set_components","components":{"minecraft:villager_food":{"nutrition":7}}},
+        {"type":"minecraft:set_components","components":{"!villager_food":{}}},
+        {"type":"minecraft:set_components","components":{"villager_food":{"nutrition":9}}}
+    ]}]}]}"#;
+    let files = [("loot_table/test:meal".into(), vec![table.to_vec()])];
+    let defaults = sunrise_world::item_defaults::read(&root).unwrap();
+    let loot = LootData::load(&root, &PackOverlay::new(&files), &defaults).unwrap();
+    let rolled = loot.roll_split("test:meal", &mut sunrise_core::random::LegacyRandom::new(7));
+    std::fs::remove_dir_all(root).unwrap();
+    let [rolled] = rolled.as_slice() else {
+        panic!("one meal should be rolled");
+    };
+
+    let mut stack = ItemStack::new(&rolled.item, rolled.count as u32);
     let id = "minecraft:villager_food";
-    let set =
-        Some(sunrise_core::json_nbt::json_to_tag(&serde_json::json!({"nutrition": 7})).unwrap());
     assert_eq!(stack.villager_food(info), Some(4));
-    stack.data_mut().set_loot_component(id, &set);
-    assert_eq!(stack.villager_food(info), Some(7));
-    assert!(stack.carries_component(None, id));
-    stack
-        .data_mut()
-        .set_loot_component("!minecraft:villager_food", &None);
-    assert_eq!(stack.villager_food(info), None);
-    assert!(!stack.carries_component(None, id));
-    stack.data_mut().set_loot_component(id, &set);
-    assert_eq!(stack.villager_food(info), Some(7));
-    assert!(stack.carries_component(None, id));
+    assert_eq!(rolled.components.len(), 3);
+    for ((key, tag), expected) in rolled.components.iter().zip([Some(7), None, Some(9)]) {
+        stack.data_mut().set_loot_component(key, tag);
+        assert_eq!(stack.villager_food(info), expected, "after {key}");
+        assert_eq!(stack.carries_component(None, id), expected.is_some());
+    }
     let saved = components_tag(0, stack.data()).unwrap();
     assert!(saved.get("!minecraft:villager_food").is_none());
     stack.extra = decode_components(Some(&saved)).1;
-    assert_eq!(stack.villager_food(info), Some(7));
+    assert_eq!(stack.villager_food(info), Some(9));
 }
 
 #[cfg(test)]

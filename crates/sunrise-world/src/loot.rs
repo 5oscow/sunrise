@@ -26,7 +26,10 @@ use std::{
     path::Path,
     sync::{Arc, Mutex, Weak},
 };
-use sunrise_core::random::{LegacyRandom, RandomSource};
+use sunrise_core::{
+    identifier::Identifier,
+    random::{LegacyRandom, RandomSource},
+};
 use {
     crate::{lazy_json::LazyJson, native_load_context::LoadContext},
     sunrise_core::nbt::Tag,
@@ -1949,7 +1952,15 @@ impl<R: RandomSource> Context<'_, R> {
             // SetComponentsFunction: the patch's components, applied when the
             // stack becomes an item (trim on worn armour, see `mobs::finalize`).
             "minecraft:set_components" => {
-                for (id, value) in f["components"].as_object().into_iter().flatten() {
+                for (key, value) in f["components"].as_object().into_iter().flatten() {
+                    // DataComponentPatch parses the identifier after peeling off `!`.
+                    let (prefix, name) = key
+                        .strip_prefix('!')
+                        .map_or(("", key.as_str()), |name| ("!", name));
+                    let Ok(id) = Identifier::parse(name) else {
+                        continue;
+                    };
+                    let id = format!("{prefix}{id}");
                     let tag = if value.is_null() {
                         None
                     } else {
@@ -1965,7 +1976,7 @@ impl<R: RandomSource> Context<'_, R> {
                         };
                         Some(tag)
                     };
-                    stack.components.push((id.clone(), tag));
+                    stack.components.push((id, tag));
                 }
             }
             // A mod's own kind: the hook changes the stack.
