@@ -19,19 +19,17 @@ ROOT = Path(__file__).resolve().parents[2]
 # The repository root, appended so a script run finds `tools` without shadowing anything already importable.
 sys.path.append(str(ROOT))
 from tools import release_train  # noqa: E402
+from tools.ci.pr_files import commit_ids, repo_path  # noqa: E402
 
 # The root workspace's manifest and toolchain files: the launcher's path crates inherit from them.
 ROOT_RUST = {"Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "rustfmt.toml", "clippy.toml"}
-# The check itself: a change to it runs it.
-LAUNCHER_CHECK = {".github/workflows/ci.yml", ".github/workflows/dyna-ci.yml",
-                  "tools/ci/rust_changes.py", "tools/release_train.py"}
-
-
 # The Python under tools/ and tests/: verify's Python steps and the parity jobs run it, and no Rust build or test reads
 # it (Rust does read tools/native-hook-fragments/*.json and tools/ci/*.sh, so those still count). The scripts a step
 # gated on this selection runs are its inputs all the same (gated_by). This script and the module it imports decide
 # whether Rust runs at all, so a change to them runs it.
-RUST_DECIDES = {"tools/ci/rust_changes.py", "tools/release_train.py"}
+RUST_DECIDES = {"tools/ci/rust_changes.py", "tools/ci/pr_files.py", "tools/release_train.py"}
+LAUNCHER_CHECK = RUST_DECIDES | {".github/workflows/ci.yml", ".github/workflows/dyna-ci.yml",
+                                "launcher/docs/launcher-commands.md"}
 # Cargo's own inputs, wherever they are: a manifest, lock file, build script, toolchain or lint setting, or a Rust
 # source. Deleted or renamed ones count too, so a package under docs/ that loses its manifest still runs Rust.
 CARGO_NAMES = {"Cargo.toml", "Cargo.lock", "build.rs", "rust-toolchain", "rust-toolchain.toml", "rustfmt.toml",
@@ -134,8 +132,8 @@ def include_arguments(text):
 def resolve_include(source, crate, argument):
     """("exact", paths) for an include whose argument is a literal, or a concat! of literals after an optional
     env!("CARGO_MANIFEST_DIR") (env!("OUT_DIR") names a file the build makes: no repository path); else
-    ("pattern", regex) over the paths it could name: its literal pieces in order, the first resolved from where the
-    include resolves when the argument starts with it."""
+    ("suffix", string) for an unresolved target. Only a literal filename suffix can rule out a changed file:
+    a macro argument can contain `../` and escape any literal directory prefix. An empty suffix rules out nothing."""
     folder = posixpath.dirname(source)
     if len(argument) == 1 and argument[0][0] == "str":
         literal = argument[0][1]
@@ -152,9 +150,9 @@ def resolve_include(source, crate, argument):
         if pieces[at:at + 3] == [("ident", "env"), ("punct", "!"), ("punct", "(")] and at + 4 < len(pieces) \
                 and pieces[at + 3][0] == "str" and pieces[at + 4] == ("punct", ")"):
             name = pieces[at + 3][1]
-            if name == "OUT_DIR":
+            if name == "OUT_DIR" and at == 0:
                 return "exact", set()
-            if name == "CARGO_MANIFEST_DIR" and not parts and crate is not None:
+            if name == "CARGO_MANIFEST_DIR" and at == 0 and crate is not None:
                 base = crate + "/"
             else:
                 known = False
@@ -176,33 +174,26 @@ def resolve_include(source, crate, argument):
         if literal.startswith("/") and base == folder:
             return "exact", set()
         return "exact", {posixpath.normpath(posixpath.join(base, under(literal)))}
-    fragments = []
-    for part in parts:
-        if part is not None and fragments and fragments[-1] is not None:
-            fragments[-1] += part
-        else:
-            fragments.append(part)
-    if not fragments or fragments[0] is None:
-        pattern = ""
-    else:
-        first = fragments.pop(0)
-        resolved = posixpath.normpath(posixpath.join(base, under(first)))
-        pattern = "^" + re.escape(resolved + ("/" if first.endswith("/") else ""))
-    for fragment in fragments:
-        pattern += ".*" if fragment is None else ".*" + re.escape(fragment)
-    return "pattern", re.compile(pattern)
+    tail = []
+    if concat:
+        for part in reversed(parts):
+            if part is None:
+                break
+            tail.append(part)
+    suffix = posixpath.basename("".join(reversed(tail)))
+    return "suffix", "" if suffix in {".", ".."} else suffix
 
 
 @functools.lru_cache(maxsize=None)
 def rust_includes():
-    """(the files this checkout's Rust includes by name, [(source, regex)] for the includes whose path is assembled
-    from something other than literals); None if the sources can't be read."""
+    """(the files Rust includes by name, suffixes of unresolved includes); None if the sources can't be read."""
     scanned = rust_literals()
-    listed = git("grep", "-l", "-z", "-E", r"include(_str|_bytes)?!|#\[path", "--", "*.rs")
+    # The name and bang can be separated by whitespace, comments or even a newline.
+    listed = git("grep", "-l", "-z", "-E", r"\binclude(_str|_bytes)?\b|#[[:space:]]*\[[[:space:]]*path", "--", "*.rs")
     if scanned is None or listed.returncode not in (0, 1):
         return None
     manifests = scanned[0]
-    exact, patterns = set(), []
+    exact, suffixes = set(), set()
     for source in filter(None, listed.stdout.decode("utf-8").split("\0")):
         try:
             text = (ROOT / source).read_text(encoding="utf-8", errors="replace")
@@ -219,16 +210,15 @@ def rust_includes():
             if kind == "exact":
                 exact |= found
             else:
-                patterns.append((source, found))
-    return exact, patterns
+                suffixes.add(found)
+    return exact, tuple(suffixes)
 
 
-# The selection outputs a workflow step or job can be gated on, by the decision behind them.
-GATES = {"rust": ("rust_required", "steps.rust.outputs.", "outputs.server_build"),
-         "launcher": ("launcher_required", "steps.launcher.outputs.")}
+# Selection outputs a workflow step or job can be gated on, by the decision behind them.
+GATES = {"rust": "rust_required", "launcher": "launcher_required"}
 # A repository file a step's commands name that the Rust-free rule could miss: Python under tools/ or tests/, or
 # anything under docs/ (a folder when it ends in "/" or is one).
-HELPER = re.compile(r"(?<![\w./-])((?:tools|tests)/[\w./-]+\.py|docs/[\w./-]+)")
+HELPER = re.compile(r"(?<![\w./-])((?:\.\.?/)*(?:(?:tools|tests)/[\w./-]+\.py|docs/[\w./-]+))")
 # The same, in a string literal of a helper's code: a file or folder it reads or runs.
 QUOTED = re.compile(r"""["']((?:tools|tests)/[\w./-]+\.py|docs/[\w./-]+)""")
 IMPORT = re.compile(r"^[ \t]*(?:from[ \t]+([\w.]+)[ \t]+import[ \t]+(\([^)]*\)|[\w \t,]+)|import[ \t]+([\w. \t,]+))",
@@ -274,7 +264,9 @@ def gated_blocks(text):
         items = [index for index in items if len(body[index]) - len(body[index].lstrip()) == indent]
         for item, begin in enumerate(items):
             step = body[begin:items[item + 1] if item + 1 < len(items) else len(body)]
-            yield header + " " + condition(step), "\n".join(step)
+            directory = next((match[1] for line in step if (match := re.fullmatch(
+                " " * indent + r"(?:  |- )working-directory:\s*['\"]?([\w./-]+)['\"]?\s*", line))), "")
+            yield header + " " + condition(step), "\n".join(step), directory
 
 
 def helper_closure(paths):
@@ -321,10 +313,14 @@ def gated_helpers():
         return None
     named = {decision: set() for decision in GATES}
     for text in texts:
-        for gate, body in gated_blocks(text):
-            for decision, outputs in GATES.items():
-                if any(output in gate for output in outputs):
-                    named[decision] |= set(filter(None, map(helper_path, HELPER.findall(body))))
+        for gate, body, directory in gated_blocks(text):
+            for decision, output in GATES.items():
+                if output in gate:
+                    # Normalize lexically: the working directory can have been deleted from this checkout.
+                    for match in HELPER.findall(body):
+                        if path := helper_path(match):
+                            resolved = posixpath.normpath(posixpath.join(directory, path))
+                            named[decision].add(resolved + ("/" if path.endswith("/") else ""))
     return {decision: helper_closure(paths) for decision, paths in named.items()}
 
 
@@ -347,8 +343,7 @@ def rust_reads(paths):
     - or a literal with a folder names a folder holding the file, below the top level and not a crate's own folder
       (that crate's sources count already);
     - or an include!, include_str!, include_bytes! or #[path] names it, also in a literal with spaces or escapes or
-      a concat! of literals; one whose path is assembled from anything else (a macro's argument, a constant) counts
-      for every file its literal pieces could name, in order, and for every file when it has none;
+      a concat! of literals; an unresolved include counts whenever its filename suffix cannot rule out the change;
     - or the file belongs to a Cargo package under docs/ (the book's examples), other than its *.md.
     A deleted file still counts when a literal names it. If the sources can't be read, every path counts."""
     paths = set(paths)
@@ -357,7 +352,7 @@ def rust_reads(paths):
     if scanned is None or included is None:
         return paths
     manifests, by_name = scanned
-    exact, patterns = included
+    exact, suffixes = included
     folders = {}
     for path in paths:
         parts = path.split("/")
@@ -377,7 +372,7 @@ def rust_reads(paths):
                 elif "/" in literal and target in folders and target not in manifests:
                     read |= folders[target]
     read |= paths & exact
-    read |= {path for path in paths for _, pattern in patterns if pattern.search(path)}
+    read |= {path for path in paths if path.endswith(suffixes)}
     packages = tuple(folder + "/" for folder in manifests if folder.startswith("docs/"))
     return read | {path for path in paths if path.startswith(packages) and not path.endswith(".md")}
 
@@ -403,6 +398,8 @@ def needs_server_build(paths):
 
 
 def needs_launcher(paths):
+    # The CLI reference is compared with generated text by the launcher's tests, even though editing it doesn't
+    # warrant a release. Treat deletion as a change too, without requiring launcher/ to exist in the checkout.
     return any(path in ROOT_RUST or path in LAUNCHER_CHECK or (
         path.startswith(tuple(release_train.LAUNCHER_PATHS))
         and not path.startswith(tuple(release_train.LAUNCHER_IGNORED))
@@ -497,39 +494,64 @@ def needs_tooling(changes):
 
 def selections(changes):
     paths = [path for _, path in changes]
+    # Don't narrow any checks based on the name of a file an unresolved include could read.
+    candidates = [path for path in paths if rust_free_by_name(path)]
+    if candidates:
+        included = rust_includes()
+        if included is None or any(path.endswith(included[1]) for path in candidates):
+            return dict.fromkeys(("rust_required", "launcher_required", "tooling_required"), True)
     return {"rust_required": needs_rust(paths),
             "launcher_required": needs_launcher(paths),
             "tooling_required": needs_tooling(changes)}
 
 
-def changed_entries(base, head):
-    # Disable rename folding: retain both deleted and added paths, including source moved into docs.
-    command = ["git", "diff", "--name-status", "--no-renames", "-z", f"{base}...{head}", "--"]
-    for fetch_base in (False, True):
-        # The event's base can be newer than the checked-out history (main moved on): fetch it once.
-        if fetch_base:
-            subprocess.run(["git", "fetch", "-q", "--no-tags", "origin", base], check=False,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        diff = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False)
-        if diff.returncode == 0:
-            fields = diff.stdout.decode("utf-8").split("\0")[:-1]
-            return list(zip(fields[::2], fields[1::2]))
-    # Never an error and never "nothing changed": assume everything did.
-    print(f"rust_changes: no diff for {base}...{head}; treating everything as changed", file=sys.stderr)
-    return [("?", UNKNOWN_CHANGE)]
+def parse_listing(data):
+    """Read a complete, nonempty `git diff --name-status --no-renames -z` listing, or return None."""
+    *fields, end = data.decode("utf-8").split("\0")
+    if end or not fields or len(fields) % 2:
+        return None
+    pairs = list(zip(fields[::2], fields[1::2]))
+    if any(status not in {"A", "D", "M", "T"} or not repo_path(path) for status, path in pairs):
+        return None
+    return pairs if len({path for _, path in pairs}) == len(pairs) else None
 
 
 def listed_entries(path):
-    """The (status, path) pairs of a `git diff --name-status -z` listing saved in a file (tools/ci/pr_files.py)."""
-    fields = Path(path).read_bytes().decode("utf-8").split("\0")[:-1]
-    return list(zip(fields[::2], fields[1::2]))
+    """Read the comparison saved by tools/ci/pr_files.py instead of asking git."""
+    return parse_listing(Path(path).read_bytes())
+
+
+def changed_entries(base, head, listing=None):
+    # In particular, Git substitutes the checkout's HEAD for an empty endpoint, silently allowing an empty diff.
+    if commit_ids(base, head):
+        try:
+            if listing is not None:
+                if entries := listed_entries(listing):
+                    return entries
+            else:
+                # Disable rename folding: retain both deleted and added paths, including source moved into docs.
+                command = ["git", "diff", "--name-status", "--no-renames", "-z", f"{base}...{head}", "--"]
+                for fetch_base in (False, True):
+                    # The base can be newer than the checkout's history: fetch it once.
+                    if fetch_base:
+                        subprocess.run(["git", "fetch", "-q", "--no-tags", "origin", base], check=False,
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    diff = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False)
+                    if diff.returncode == 0:
+                        if entries := parse_listing(diff.stdout):
+                            return entries
+                        break
+        except (OSError, UnicodeError) as error:
+            print(f"rust_changes: cannot read the comparison: {error}", file=sys.stderr)
+    print("rust_changes: no complete, nonempty comparison; treating everything as changed", file=sys.stderr)
+    return [("?", UNKNOWN_CHANGE)]
 
 
 def changed_paths(base, head):
     return [path for _, path in changed_entries(base, head)]
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("base")
     parser.add_argument("head")
@@ -539,13 +561,19 @@ if __name__ == "__main__":
     parser.add_argument("--files", metavar="LIST", help="read base...head's changes from this listing (pr_files.py) "
                         "instead of git")
     args = parser.parse_args()
-    changes = listed_entries(args.files) if args.files else changed_entries(args.base, args.head)
-    paths = [path for _, path in changes]
-    if args.all:
-        for name, required in selections(changes).items():
-            print(f"{name}={str(required).lower()}")
-    else:
-        needs = needs_launcher if args.launcher else needs_rust
-        print(f"required={str(needs(paths)).lower()}")
-        print(f"sample={str(needs_sample(paths)).lower()}")
-        print(f"server_build={str(needs_server_build(paths)).lower()}")
+    changes = changed_entries(args.base, args.head, args.files)
+    try:
+        selected = selections(changes)
+    except Exception as error:  # noqa: BLE001 - a parser error must not leave any check ruled out
+        print(f"rust_changes: selection failed ({type(error).__name__}: {error}); running all checks", file=sys.stderr)
+        changes = [("?", UNKNOWN_CHANGE)]
+        selected = selections(changes)
+    if not args.all:
+        paths = [path for _, path in changes]
+        selected = {"required": selected["launcher_required" if args.launcher else "rust_required"],
+                    "sample": needs_sample(paths), "server_build": needs_server_build(paths)}
+    print("\n".join(f"{name}={str(required).lower()}" for name, required in selected.items()))
+
+
+if __name__ == "__main__":
+    main()

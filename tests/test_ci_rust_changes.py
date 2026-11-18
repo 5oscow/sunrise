@@ -2,6 +2,7 @@ import contextlib
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -10,6 +11,9 @@ from tools.ci.rust_changes import (
     UNKNOWN_CHANGE, changed_entries, changed_paths, needs_launcher, needs_rust, needs_server_build, needs_tooling,
     selections,
 )
+
+FULL_SELECTION = dict.fromkeys(("rust_required", "launcher_required", "tooling_required"), "true")
+SELECTOR = Path(__file__).resolve().parents[1] / "tools/ci/rust_changes.py"
 
 
 @contextlib.contextmanager
@@ -29,7 +33,7 @@ def fixture_repository(files):
         for cache in caches:
             cache.cache_clear()
         try:
-            yield
+            yield Path(directory)
         finally:
             rust_changes.ROOT = root
             for cache in caches:
@@ -115,7 +119,7 @@ class RustChangesTests(unittest.TestCase):
             previous = Path.cwd()
             try:
                 os.chdir(directory)
-                paths = changed_paths(base, "HEAD")
+                paths = changed_paths(base, git("rev-parse", "HEAD").decode().strip())
             finally:
                 os.chdir(previous)
             self.assertIn("source.rs", paths)
@@ -186,7 +190,6 @@ class RustChangesTests(unittest.TestCase):
         self.assertFalse(selections([("M", "crates/sunrise-mod-api/README.md")])["rust_required"])
 
     def test_git_status_and_cli_selections_for_actual_documentation_changes(self):
-        selector = Path(__file__).resolve().parents[1] / "tools/ci/rust_changes.py"
         with tempfile.TemporaryDirectory() as directory:
             def git(*args):
                 return subprocess.check_output(["git", "-C", directory, *args])
@@ -212,16 +215,16 @@ class RustChangesTests(unittest.TestCase):
             previous = Path.cwd()
             try:
                 os.chdir(directory)
-                entries = changed_entries(base, "HEAD")
+                entries = changed_entries(base, git("rev-parse", "HEAD").decode().strip())
             finally:
                 os.chdir(previous)
             self.assertEqual(set(entries), {
                 ("M", "docs/modified.md"), ("D", "docs/deleted.md"), ("D", "docs/old.md"),
                 ("A", "docs/renamed.md"), ("A", "docs/added.md"), ("T", "docs/type.md"),
             })
-            import sys
             output = subprocess.check_output(
-                [sys.executable, str(selector), "--all", base, "HEAD"], cwd=directory, text=True,
+                [sys.executable, str(SELECTOR), "--all", base, git("rev-parse", "HEAD").decode().strip()],
+                cwd=directory, text=True,
             )
             self.assertEqual(dict(line.split("=") for line in output.splitlines()), {
                 "rust_required": "false", "launcher_required": "false",
@@ -265,6 +268,50 @@ class RustChangesTests(unittest.TestCase):
             source = Path(rust_changes.ROOT, "crates/demo/src/lib.rs").read_text()
             self.assertEqual(len(list(rust_changes.include_arguments(source))), 3)
 
+    def test_unresolved_include_can_escape_its_literal_prefix(self):
+        with fixture_repository({
+            "src/lib.rs": 'macro_rules! text { ($name:literal) => { '
+                          'include_str!(concat!("../inside/", $name, ".md")) }; } '
+                          'const ESCAPED: &str = text!("../docs/outside");',
+            "inside/.keep": "", "docs/outside.md": "input\n",
+        }):
+            self.assertEqual(selections([("M", "docs/outside.md")]), dict.fromkeys(FULL_SELECTION, True))
+
+    def test_include_name_and_bang_can_be_on_separate_lines(self):
+        with fixture_repository({"src/lib.rs": 'const C: &str = include_str /*comment*/\n!'
+                                               '("../docs/a\\x20page.md");'}):
+            self.assertTrue(selections([("M", "docs/a page.md")])["rust_required"])
+
+    def test_tokenizer_error_emits_a_complete_full_selection(self):
+        with fixture_repository({"src/lib.rs": r'const C: &str = include_str!("\u{110000}");'}) as root:
+            # Run the CLI in this fixture, with a valid docs-only listing and an invalid Unicode escape in Rust.
+            (root / "listing").write_bytes(b"M\0docs/page.md\0")
+            script = ("from pathlib import Path; from tools.ci import rust_changes; "
+                      "rust_changes.ROOT = Path.cwd(); rust_changes.main()")
+            result = subprocess.run([sys.executable, "-c", script, "--all", "--files", "listing", "a" * 40, "b" * 40],
+                                    cwd=root, env=dict(os.environ, PYTHONPATH=str(SELECTOR.parents[2])),
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.splitlines(), [f"{key}=true" for key in FULL_SELECTION])
+
+    def test_launcher_helpers_are_relative_to_the_step_even_without_a_launcher_tree(self):
+        with fixture_repository({
+            ".github/workflows/ci.yml": (
+                "jobs:\n  launcher:\n    if: needs.changes.outputs.launcher_required != 'false'\n"
+                "    steps:\n      - working-directory: launcher\n        run: |\n"
+                "          python3 ../tools/ci/ignored_shards.py\n          python3 ../tools/ci/check_warnings.py\n"),
+            "tools/ci/ignored_shards.py": "", "tools/ci/check_warnings.py": "",
+            "docs/plain.md": "file\n",
+        }):
+            for name in ("ignored_shards", "check_warnings"):
+                with self.subTest(name=name):
+                    self.assertTrue(selections([("M", f"tools/ci/{name}.py")])["launcher_required"])
+            self.assertFalse(any(selections([("M", "docs/plain.md")]).values()))
+            self.assertTrue(selections([("M", "crates/sunrise-theme/src/lib.rs")])["launcher_required"])
+
+    def test_launcher_reference_is_a_test_input_not_a_release_input(self):
+        self.assertTrue(selections([("M", "launcher/docs/launcher-commands.md")])["launcher_required"])
+
     def test_helpers_of_gated_steps_count_as_their_inputs(self):
         workflow = (
             "on: pull_request\njobs:\n"
@@ -276,8 +323,7 @@ class RustChangesTests(unittest.TestCase):
             "    runs-on: ubuntu-latest\n    steps:\n"
             "      - run: python3 tools/ci/launcher_check.py\n"
             "  test:\n    runs-on: ubuntu-latest\n    steps:\n"
-            "      - id: rust\n        run: python3 tools/ci/rust_changes.py a b\n"
-            "      - if: steps.rust.outputs.required != 'false'\n"
+            "      - if: needs.changes.outputs.rust_required != 'false'\n"
             "        run: |\n          python3 tools/ci/shards.py --prepare\n"
         )
         with fixture_repository({
@@ -306,6 +352,37 @@ class RustChangesTests(unittest.TestCase):
                 self.assertTrue(selections([("M", path)])["rust_required"])
         self.assertFalse(selections([("M", "tools/parity.py")])["rust_required"])
 
+    def test_pr_files_alone_selects_rust_formatting_and_checks(self):
+        self.assertTrue(all(selections([("M", "tools/ci/pr_files.py")]).values()))
+
+    def test_incomplete_saved_listings_cannot_produce_a_partial_selection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            listing = Path(directory, "files")
+            for data in (b"", b"M\0docs/setup.md", b"M\0docs/setup.md\0A\0", b"M\0\0",
+                         b"U\0docs/setup.md\0", b"M\0../docs/setup.md\0", b"M\0docs/\xff.md\0"):
+                with self.subTest(data=data):
+                    listing.write_bytes(data)
+                    output = subprocess.check_output(
+                        [sys.executable, str(SELECTOR), "--all", "--files", listing, "a" * 40, "b" * 40], text=True)
+                    self.assertEqual(dict(line.split("=") for line in output.splitlines()), FULL_SELECTION)
+
+    def test_missing_or_invalid_endpoints_and_empty_git_diffs_select_everything(self):
+        with fixture_repository({"docs/setup.md": "content\n"}) as root:
+            subprocess.check_call(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false",
+                                   "commit", "-qm", "fixture"], cwd=root)
+            sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+            for base, head in (("", sha), (sha, ""), ("HEAD", sha), (sha, "HEAD"), (sha, sha)):
+                with self.subTest(base=base, head=head):
+                    output = subprocess.check_output([sys.executable, str(SELECTOR), "--all", base, head],
+                                                     cwd=root, text=True)
+                    self.assertEqual(dict(line.split("=") for line in output.splitlines()), FULL_SELECTION)
+            (root / "files").write_bytes(b"M\0docs/setup.md\0")
+            for base, head in (("", sha), (sha, "not-a-sha")):
+                with self.subTest(base=base, head=head, listing=True):
+                    output = subprocess.check_output([sys.executable, str(SELECTOR), "--all", "--files", "files",
+                                                      base, head], cwd=root, text=True)
+                    self.assertEqual(dict(line.split("=") for line in output.splitlines()), FULL_SELECTION)
+
     def test_a_base_missing_from_the_checkout_means_everything_changed(self):
         with tempfile.TemporaryDirectory() as directory:
             subprocess.check_call(["git", "-C", directory, "init", "--quiet"])
@@ -317,7 +394,8 @@ class RustChangesTests(unittest.TestCase):
             try:
                 os.chdir(directory)
                 # A base newer than the checked-out history, as when main moved after the PR event.
-                paths = changed_paths("a" * 40, "HEAD")
+                head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+                paths = changed_paths("a" * 40, head)
             finally:
                 os.chdir(previous)
             self.assertEqual(paths, [UNKNOWN_CHANGE])
