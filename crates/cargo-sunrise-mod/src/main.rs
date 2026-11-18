@@ -146,23 +146,22 @@ fn main() -> ExitCode {
         Some("native-layout") => return native_build::layout(&args[1..]),
         Some("internals") => internals::run(&args[1..]),
         Some("inject") => inject::run(&args[1..]),
-        Some("update") => pins_a_build(Path::new("."))
-            .and_then(|()| {
-                sdk_cmds::update_report(entry, Path::new("."), flag(&args[1..], "--sunrise"))
-            })
-            .and_then(|()| {
-                update(
-                    Path::new("."),
-                    &sdk_fetch::fetch_build,
-                    flag(&args[1..], "--sunrise"),
-                    &args[1..]
-                        .windows(2)
-                        .filter(|pair| pair[0] == "--accept")
-                        .map(|pair| pair[1].as_str())
-                        .collect::<Vec<_>>(),
-                )
-            })
-            .map(|()| println!("Run `cargo sunrise-mod check`.")),
+        Some("update") => {
+            sdk_cmds::update_report(entry, Path::new("."), flag(&args[1..], "--sunrise"))
+                .and_then(|()| {
+                    update(
+                        Path::new("."),
+                        &sdk_fetch::fetch_build,
+                        flag(&args[1..], "--sunrise"),
+                        &args[1..]
+                            .windows(2)
+                            .filter(|pair| pair[0] == "--accept")
+                            .map(|pair| pair[1].as_str())
+                            .collect::<Vec<_>>(),
+                    )
+                })
+                .map(|()| println!("Run `cargo sunrise-mod check`."))
+        }
         None | Some("--help" | "-h") => {
             print!("{}", help::short());
             Ok(())
@@ -371,9 +370,6 @@ fn pin(sunrise: Option<&str>) -> Result<String, String> {
     )
 }
 
-/// Repins the mod. A native mod's declared internals and injects are checked against the new
-/// build first, reporting signature changes before writing; a wasm mod has none, so only its pin
-/// moves. `Cargo.toml` names the SDK by path, so the next command fetches the new one.
 /// `update` in a content mod: it pins no game build, so there is nothing to repin.
 fn refuse_content_update(dir: &Path, manifest: &Manifest) -> Result<(), String> {
     // A wasm project has no `[wasm]` table until its first `build --wasm`: its Cargo.toml says it is code.
@@ -385,13 +381,9 @@ fn refuse_content_update(dir: &Path, manifest: &Manifest) -> Result<(), String> 
     Ok(())
 }
 
-/// Refuses `update` before anything runs when the mod in `dir` is a content mod.
-fn pins_a_build(dir: &Path) -> Result<(), String> {
-    let path = dir.join(MANIFEST);
-    let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    refuse_content_update(dir, &Manifest::parse(&text)?)
-}
-
+/// Repins the mod. A native mod's declared internals and injects are checked against the new
+/// build first, reporting signature changes before writing; a wasm mod has none, so only its pin
+/// moves. `Cargo.toml` names the SDK by path, so the next command fetches the new one.
 fn update(
     dir: &Path,
     fetch: FetchSdk,
@@ -399,7 +391,7 @@ fn update(
     accept: &[&str],
 ) -> Result<(), String> {
     let path = dir.join(MANIFEST);
-    let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let text = bounded::read(&path, bounded::MAX_MANIFEST)?;
     let manifest = Manifest::parse(&text)?;
     refuse_content_update(dir, &manifest)?;
     let sunrise = pin(sunrise)?;
@@ -793,7 +785,6 @@ mod tests {
         new(&[path.display().to_string()], &offline).unwrap();
         let error = update(&path, &offline, None, &[]).unwrap_err();
         assert!(error.contains("pins no game build"), "{error}");
-        assert!(pins_a_build(&path).is_err());
     }
 
     #[test]

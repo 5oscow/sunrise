@@ -253,7 +253,7 @@ fn package_subject(path: &Path) -> Result<Subject, String> {
             .as_ref()
             .map_or("a build", |native| native.sunrise.as_str());
         return Ok(Subject::NotApplicable(format!(
-            "{name} pins build {pin} and its package carries no list of what it uses, so it can't be shown to fit another build. Pack it with `cargo sunrise-mod build`, which writes the list, or repin it with `cargo sunrise-mod update --sunrise <build>` first."
+            "{name} pins build {pin} and its package carries no list of what it uses, so it can't be shown to fit another build. Pack it with `cargo sunrise-mod build`, which writes the list when the mod's code can be read, or repin it with `cargo sunrise-mod update --sunrise <build>` first."
         )));
     };
     let table = UsesTable::read(&bytes).map_err(|e| format!("{USES_FILE}: {e}"))?;
