@@ -1,5 +1,6 @@
 //! `cargo sunrise-mod publish` prepares a local submission. It uploads nothing, opens no pull request,
-//! and needs no registry access. It runs `build`, which may download the SDK, toolchain and dependencies.
+//! and needs no registry access. An unsigned submission runs `build`, which may download the SDK,
+//! toolchain and dependencies; a signed submission uses the package already built and signed.
 //!
 //! The output holds the entry, a new project's icon if supplied, the new package under its release name
 //! and SHA-256, and `PULL_REQUEST.md`. It is not a complete registry checkout.
@@ -286,13 +287,18 @@ fn pull_request(entry: &Entry, v: &EntryVersion, size: u64, first: bool) -> (Str
     } else {
         "unsigned"
     };
+    let submitted = if first && entry.icon.is_some() {
+        "entry and icon are"
+    } else {
+        "entry is"
+    };
     let body = format!(
         "{title}\n\n\
          - Project: `{id}` ({}), version {}, for Minecraft {}\n\
          - File: `{}`, {size} bytes, {signed}\n\
          - Artifact URL: {TODO}: paste the address of `{}` (a release asset of your repository works)\n\
          - SHA-256: `{}`\n\n\
-         The entry and the icon are in this pull request; the file's facts (API, side, capabilities) are read from the file.\n\n\
+         The {submitted} in this pull request; the file's facts (API, side, capabilities) are read from the file.\n\n\
          For the maintainer: copy the file from the artifact URL to this repository's `staging` release as `{}`, check that its SHA-256 is the one above, and let the `check` workflow run. After the merge, `publish` releases it as `{id}-{}`.\n",
         entry.kind.name(),
         v.version,
@@ -437,8 +443,12 @@ pub fn run(entry_point: mod_surface::child::ChildEntry, args: &[String]) -> Resu
         return Err("--out is the registry checkout: choose a separate output folder so the original entry stays available for registry check".into());
     }
 
-    let build_args: Vec<String> = o.wasm.then(|| "--wasm".to_owned()).into_iter().collect();
-    let package = crate::build_command(entry_point, &build_args)?;
+    let package = if signature.is_some() {
+        root.join("target/sunrise-mod").join(format!("{id}.smod"))
+    } else {
+        let args: Vec<String> = o.wasm.then(|| "--wasm".to_owned()).into_iter().collect();
+        crate::build_command(entry_point, &args)?
+    };
     let package_bytes = read_binary(&package, index::MAX_FILE).map_err(|e| {
         format!("{e}: build a regular .smod within the registry's size limit with `cargo sunrise-mod build` and sign it again if needed")
     })?;
@@ -553,14 +563,18 @@ pub fn run(entry_point: mod_surface::child::ChildEntry, args: &[String]) -> Resu
             println!("  - {r}");
         }
     }
+    // Prefix relative paths so even --out/--registry values starting with '-' are positional.
+    // Use single-quoted arguments for the POSIX shell (PowerShell on Windows).
+    let quote = |path: &Path| {
+        let path = root.join(path);
+        let escape = if cfg!(windows) { "''" } else { "'\\''" };
+        format!("'{}'", path.to_string_lossy().replace('\'', escape))
+    };
     println!(
-        "\nNext, check the result as the registry's CI does:\n  cargo sunrise-mod registry check {} {} --files {}\n  cargo sunrise-mod registry build {} --files {} --out {}",
-        base.display(),
-        out.display(),
-        out.join("files").display(),
-        out.display(),
-        out.join("files").display(),
-        out.join("index.json").display(),
+        "\nCheck the new file locally (registry CI checks the whole index):\n  cargo sunrise-mod registry check {} {} --files {}",
+        quote(&base),
+        quote(&out),
+        quote(&files),
     );
     println!("\nPull request: {title}\n\n{body}");
     Ok(())
