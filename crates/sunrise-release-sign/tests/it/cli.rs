@@ -277,3 +277,67 @@ fn publishing_never_bypasses_signatures_for_fork_or_unknown_repositories() {
     }
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+fn verifier(args: &[&str], paths: &[&Path]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_sunrise-verify"))
+        .args(args)
+        .args(paths)
+        .output()
+        .unwrap()
+}
+
+#[test]
+#[ignore = "daily"]
+fn the_verifier_takes_no_option_that_changes_who_is_trusted() {
+    // With the `test-key` feature (the install tests' build) `--key` is how the test key arrives.
+    if cfg!(feature = "test-key") {
+        return;
+    }
+    let dir = folder("verifier-options");
+    let (key, _) = SigningKey::generate().unwrap();
+    let sums = std::fs::read(dir.join(SUMS)).unwrap();
+    std::fs::write(dir.join(SIGNATURE), key.sign(TAG, &sums) + "\n").unwrap();
+    let public = key.public_base64();
+    // The same call `sunrise-release-sign` accepts is refused here, naming the option.
+    assert!(verify(&dir, &["--key", &public]).status.success());
+    for extra in [
+        &["--key", public.as_str()][..],
+        &["--repository", "someone/else"],
+        &["--publishing"],
+    ] {
+        let mut args = vec!["verify", "--tag", TAG];
+        args.extend(extra);
+        let out = verifier(&args, &[&dir]);
+        assert!(!out.status.success());
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains(extra[0]),
+            "{extra:?}"
+        );
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+#[ignore = "daily"]
+fn the_verifier_runs_only_verify_with_the_built_in_keys() {
+    let dir = folder("verifier-only");
+    assert!(
+        String::from_utf8_lossy(&verifier(&["keygen", "--public-out"], &[&dir.join("k")]).stderr)
+            .contains("usage: sunrise-verify")
+    );
+    // Signed by a key that is not release-keys.txt's, a folder is refused; and so is one with no signature.
+    let (key, _) = SigningKey::generate().unwrap();
+    let sums = std::fs::read(dir.join(SUMS)).unwrap();
+    std::fs::write(dir.join(SIGNATURE), key.sign(TAG, &sums) + "\n").unwrap();
+    if !cfg!(feature = "test-key") {
+        assert!(
+            !verifier(&["verify", "--tag", TAG], &[&dir])
+                .status
+                .success()
+        );
+    }
+    std::fs::remove_file(dir.join(SIGNATURE)).unwrap();
+    let out = verifier(&["verify", "--tag", TAG], &[&dir]);
+    assert!(!out.status.success());
+    std::fs::remove_dir_all(dir).unwrap();
+}

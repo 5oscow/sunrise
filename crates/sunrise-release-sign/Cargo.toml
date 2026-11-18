@@ -11,5 +11,18 @@ description = "Signed release checksums: release.yml signs SHA256SUMS, the launc
 ring = "0.17"
 base64 = "0.22"
 
+[features]
+# The install scripts' tamper tests (tests/install_sh_signature.sh): sunrise-verify also trusts the key in
+# SUNRISE_VERIFY_TEST_KEY. Never enabled for a release build.
+test-key = []
+
+[[bin]]
+name = "sunrise-release-sign"
+path = "src/main.rs"
+
+[[bin]]
+name = "sunrise-verify"
+path = "src/bin/sunrise-verify.rs"
+
 [lints]
 workspace = true
