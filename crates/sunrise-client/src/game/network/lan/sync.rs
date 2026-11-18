@@ -2,6 +2,7 @@
 use super::Game;
 use std::sync::{Arc, Mutex};
 use sunrise_client::{
+    advancements::Tree,
     crafting::ResolvedSources,
     lan::data::{FrozenDamage, SyncData},
 };
@@ -181,12 +182,14 @@ pub(super) struct Synced {
 pub(in crate::game) struct SyncCache {
     pub(super) data: Option<Synced>,
     pub(super) damage: Option<FrozenDamage>,
+    pub(super) advancements: Option<Arc<Tree>>,
     pub(super) world_packs: bool,
 }
 
 static SYNC: Mutex<SyncCache> = Mutex::new(SyncCache {
     data: None,
     damage: None,
+    advancements: None,
     world_packs: false,
 });
 
@@ -215,7 +218,7 @@ pub(super) fn cached_sync_data(
     {
         sync.data = None;
     }
-    let load = || {
+    let load = |advancements| {
         let sources =
             server_sources(root, item_data, overlay).map_err(|error| error.to_string())?;
         match &sync.damage {
@@ -225,6 +228,7 @@ pub(super) fn cached_sync_data(
                 damage,
                 item_data.defaults(),
                 &sources,
+                advancements,
             ),
             None => SyncData::load(root, overlay, item_data.defaults(), &sources),
         }
@@ -232,14 +236,15 @@ pub(super) fn cached_sync_data(
     };
     // A late vanilla preload must not replace a packed world's lazy snapshot.
     if sync.data.is_none() && sync.world_packs && !packs {
-        return load();
+        return load(None);
     }
+    let advancements = sync.advancements.as_ref();
     sync.data
         .get_or_insert_with(|| Synced {
             root: root.to_owned(),
             with_packs: packs,
             generation,
-            result: load(),
+            result: load(advancements),
         })
         .result
         .clone()
@@ -252,9 +257,11 @@ pub(in crate::game) fn prepare_world_sync_data(
     item_data: &ItemData,
     overlay: &sunrise_world::loot::PackOverlay,
     damage: &sunrise_world::damage_source::Catalog,
+    advancements: Arc<Tree>,
 ) -> std::result::Result<SyncCache, String> {
     let mut staged = SyncCache {
         data: SYNC.lock().unwrap_or_else(|e| e.into_inner()).data.clone(),
+        advancements: Some(advancements),
         ..Default::default()
     };
     initialize_world_sync_data(&mut staged, root, overlay, damage, item_data)?;
@@ -328,8 +335,17 @@ pub(in crate::game) fn prepare_wire_reload(
     overlay: &sunrise_world::loot::PackOverlay,
     kept: &SyncData,
     sources: &ResolvedSources,
+    advancements: &Arc<Tree>,
 ) -> std::result::Result<Arc<SyncData>, String> {
-    SyncData::reload(root, overlay, kept, item_data.defaults(), sources).map(|mut sync| {
+    SyncData::reload(
+        root,
+        overlay,
+        kept,
+        item_data.defaults(),
+        sources,
+        advancements,
+    )
+    .map(|mut sync| {
         sync.features.clone_from(&kept.features);
         Arc::new(sync)
     })
@@ -340,11 +356,13 @@ pub(in crate::game) fn install_wire_reload(
     item_data: &ItemData,
     overlay: &sunrise_world::loot::PackOverlay,
     sync: Option<Arc<SyncData>>,
+    advancements: Arc<Tree>,
 ) {
     // Kept pack dialogs count as packs: a world opened without packs after
     // a `/reload` that dropped them must read its own registries again.
     let mut cache = SYNC.lock().unwrap_or_else(|e| e.into_inner());
     cache.world_packs = !overlay.files.is_empty();
+    cache.advancements = Some(advancements);
     cache.data = sync.map(|sync| Synced {
         root: root.to_owned(),
         with_packs: !overlay.files.is_empty() || sync.has_pack_entries(),

@@ -641,6 +641,7 @@ impl Game<'_> {
             &self.res.core.item_data,
             &self.pack_files(),
             wire.clone(),
+            advancements.clone(),
         );
         if self.lan.is_some()
             && let Some(sync) = wire
@@ -825,6 +826,7 @@ impl Game<'_> {
                     &overlay,
                     &kept,
                     &sources,
+                    &advancements,
                 )
                 .map_err(|error| format!("wire reload: {error}"))?,
             )

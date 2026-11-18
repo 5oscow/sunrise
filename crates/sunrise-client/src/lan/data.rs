@@ -2,11 +2,12 @@
 //! network order, with their data for clients that do not know the vanilla
 //! pack) and the tags of every registry, loaded from the prepared resources
 //! (`data/minecraft/...`) and the registries report.
-use crate::chunk::LevelShapes;
+use crate::{advancements::Tree, chunk::LevelShapes};
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     path::{Path, PathBuf},
+    sync::Arc,
 };
 use sunrise_core::nbt::{JavaString, Tag};
 use sunrise_protocol::{
@@ -418,15 +419,27 @@ impl SyncData {
         Self::load_with_kept(resources, overlay, biomes, None, defaults, sources)
     }
 
-    /// Reload tags and reloadable data against the registries frozen at open.
+    /// Reload tags and reloadable data against the registries frozen at open,
+    /// using the same advancement snapshot as the owning world's reload.
     pub fn reload(
         resources: &Path,
         overlay: &sunrise_world::loot::PackOverlay,
         kept: &Self,
         defaults: &sunrise_world::item_defaults::ItemDefaults,
         sources: &crate::crafting::ResolvedSources,
+        advancements: &Arc<Tree>,
     ) -> Result<Self, String> {
-        Self::load_with_kept(resources, overlay, None, Some(kept), defaults, sources)
+        Self::load_with_frozen(
+            resources,
+            overlay,
+            None,
+            Some(kept),
+            None,
+            false,
+            defaults,
+            sources,
+            Some(advancements),
+        )
     }
 
     /// Load reloadable data with frozen synchronized registries; an explicit
@@ -440,7 +453,7 @@ impl SyncData {
         sources: &crate::crafting::ResolvedSources,
     ) -> Result<Self, String> {
         Self::load_with_frozen(
-            resources, overlay, biomes, kept, None, false, defaults, sources,
+            resources, overlay, biomes, kept, None, false, defaults, sources, None,
         )
     }
 
@@ -464,17 +477,19 @@ impl SyncData {
             true,
             defaults,
             sources,
+            None,
         )
     }
 
-    /// First lazy load after world entry: damage definitions are the same
-    /// snapshot gameplay uses, even if `/reload` happened before the first hub.
+    /// First wire load after world entry: use the damage snapshot frozen at
+    /// open and the staged advancement tree, which `/reload` can replace.
     pub fn load_with_frozen_damage(
         resources: &Path,
         overlay: &sunrise_world::loot::PackOverlay,
         damage: &FrozenDamage,
         defaults: &sunrise_world::item_defaults::ItemDefaults,
         sources: &crate::crafting::ResolvedSources,
+        advancements: Option<&Arc<Tree>>,
     ) -> Result<Self, String> {
         Self::load_with_frozen(
             resources,
@@ -485,6 +500,7 @@ impl SyncData {
             false,
             defaults,
             sources,
+            advancements,
         )
     }
 
@@ -497,6 +513,7 @@ impl SyncData {
         same_files: bool,
         defaults: &sunrise_world::item_defaults::ItemDefaults,
         sources: &crate::crafting::ResolvedSources,
+        advancements: Option<&Arc<Tree>>,
     ) -> Result<Self, String> {
         use crate::spans::startup;
         // The recipe book, the recipe sync and the advancements read the
@@ -713,9 +730,10 @@ impl SyncData {
                     })
                     .map_err(|error| error.to_string())?;
                     startup::time("sync.advancements", || {
-                        super::advancements::ServerAdvancements::load(
-                            resources, overlay, recipes, groups,
-                        )
+                        let tree = advancements
+                            .cloned()
+                            .unwrap_or_else(|| Tree::shared(&resources.join("data"), overlay));
+                        super::advancements::ServerAdvancements::from_tree(tree, recipes, groups)
                     })
                 }
             },
@@ -1308,6 +1326,43 @@ mod tests {
     }
 
     #[test]
+    fn wire_reload_uses_the_staged_advancement_generation() {
+        use sunrise_world::loot::PackOverlay;
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path();
+        let data = root.join("data");
+        std::fs::create_dir(&data).unwrap();
+        for name in ["items.json", "registries.json"] {
+            std::fs::write(root.join(name), "{}").unwrap();
+        }
+        let files = |trigger: &str| {
+            vec![(
+                "advancement/test:staged".into(),
+                vec![
+                    serde_json::json!({"criteria":{"fixture":{"trigger":trigger}}})
+                        .to_string()
+                        .into_bytes(),
+                ],
+            )]
+        };
+        let tree = Arc::new(Tree::load_with(
+            &data,
+            &PackOverlay::new(&files("minecraft:tick")),
+        ));
+        let reloaded = SyncData::reload(
+            root,
+            &PackOverlay::new(&files("minecraft:impossible")),
+            &SyncData::empty(),
+            &sunrise_world::item_defaults::read(root).unwrap(),
+            &crate::crafting::ResolvedSources::default(),
+            &tree,
+        )
+        .unwrap();
+        let advancement = reloaded.advancements.definition("test:staged").unwrap();
+        assert_eq!(advancement.criteria[0].trigger, "minecraft:tick");
+    }
+
+    #[test]
     #[ignore = "daily"]
     fn datapack_damage_registry_reload_keeps_wire_ids_and_reloads_tags_before_future_join() {
         use sunrise_world::loot::PackOverlay;
@@ -1366,6 +1421,10 @@ mod tests {
             &open,
             &sunrise_world::item_defaults::read(&root).unwrap(),
             &crate::crafting::ResolvedSources::default(),
+            &Arc::new(Tree::load_with(
+                &root.join("data"),
+                &PackOverlay::new(&changed),
+            )),
         )
         .unwrap();
         assert_eq!(

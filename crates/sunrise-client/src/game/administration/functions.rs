@@ -290,6 +290,7 @@ impl Game<'_> {
                 &self.res.core.item_data,
                 &super::pack_files(&tables.tables),
                 &tables.health.damage,
+                tables.advancements.clone(),
             )
             .map_err(|error| ReloadStageError::DataSource(format!("world registries: {error}")))?;
             Some((tables, wire))
