@@ -43,17 +43,24 @@ cargo sunrise-mod check target/sunrise-mod/my_mod.smod   # the registry's checks
   `--dev-mod target/sunrise-mod/<id>.smod`, always on. Arguments after `--` go to the game. The game reads content once
   at start, so rebuild and run again after an edit.
 - `check` in a project folder runs the package rules, the render pipeline shaders and the reference checks, in
-  well under a second for a content mod. An **error** (exit 1) is something the game would draw broken or drop:
-  a blockstate, model parent or item definition naming a model file the mod lacks; a model naming a texture file it
-  lacks; a block with no blockstate (declare `render_shape` `INVISIBLE` for one that draws nothing); a recipe, a tag
-  or a loot entry naming an item, block, fluid or entity type of the mod's own namespaces that it does not declare;
-  a `#tag` of the mod that has no file; a JSON file that does not parse. A **warning** (printed, exit 0) is legal
-  but almost certainly a mistake: a block with no loot table, a block or item with no name in `en_us.json` or no
-  item definition, and registry content in a package whose `side` is `client` (the default when the line is
-  missing), which breaks joining a server. Each message names the file, the id and what to do, with a near
-  miss from the declared ids. Ids in vanilla's namespace (items, blocks, block templates, loot function names) are
-  not checked: the tool has no list of them, and a wrong one is met when the game loads the mod. A mod with
-  code, or with `[[jar]]` layers, skips the checks that need every declared id or every asset in the files.
+  well under a second for a content mod. It reads each file as the game does (a byte-order mark and comments are
+  fine) and only the fields its format treats as references; payloads only a mod reads (a recipe type's own fields,
+  `components`, custom data, a mod's blockstate or item model type) and files that `neoforge:conditions` may disable
+  are left alone, as are tag entries that are `required: false` or removed. One rule sets the severity. An **error**
+  (exit 1) is a finding where the tool sees everything that decides the answer and the game would drop or draw the
+  thing broken: a blockstate, model parent or item definition naming a model file the mod lacks; a model naming a
+  texture file it lacks (one a model built on it overrides does not count); a block that declares `render_shape`
+  `MODEL` with no blockstate; a recipe, a tag or a loot entry naming an item, block, fluid (a world fluid's
+  `flowing_` form too) or entity type of the mod's own namespaces that it does not declare; a `#tag` of the mod that
+  has no file; a JSON file that does not parse. A **warning** (printed, exit 0) is a finding where something else
+  could supply the thing, worded "could not find ... in this mod; if X supplies it, ignore this": a `[[jar]]` layer or a declared dependency's jar (the tool fetches none),
+  an atlas source of the mod (it renames sprites and reads directories), or a block whose template draws without a
+  block model (a chest, a sign) and declares no `render_shape`; or a legal mistake: a block with no loot table, a
+  block or item with no name in `en_us.json` or no item definition, and registry content in a package whose `side`
+  is `client` (the default when the line is missing), which breaks joining a server. What the tool cannot judge is
+  dropped without a word: the ids a mod's code declares (a mod with `native` or `wasm` is not asked for them) and
+  ids in vanilla's namespace, whose tables the tool does not have. Each message names the file, the id and what to
+  do, with a near miss from the declared ids.
 - `check <file>` runs what the registry runs: the file's size and SHA-256, its manifest and content, and a signature
   with `--key <public key> --signature <file>.minisig`. It reads `.smod`, `.spack`, resource pack `.zip`
   and `.sshader` files.
