@@ -1045,7 +1045,8 @@ struct Game<'a> {
     craft_table: Option<[i32; 3]>,
     /// A quick craft drag over inventory slots: (button, game slots so far).
     inv_drag: Option<(i32, Vec<usize>)>,
-    inv_held: bool,
+    /// The mouse buttons whose press a container hook took: their release is the hooks' too.
+    container_buttons: HashSet<MouseButton>,
     /// `AbstractContainerScreen`'s quick craft and skip-release state.
     inv_clicks: sunrise_client::container_screen::Clicks,
     /// The Mouse Tweaks extra's drag and wheel (`tweaks`).
@@ -9057,6 +9058,7 @@ impl Game<'_> {
             self.physical_keys.clear();
             self.physical_buttons.clear();
             self.drag_button = None;
+            self.container_buttons.clear();
         }
         if let WindowEvent::ModifiersChanged(m) = &event {
             self.update_modifiers(m.state());
@@ -9316,7 +9318,10 @@ impl Game<'_> {
                 typed = key_event.text.take().map(|text| text.to_string());
             }
             let canceled = match key_event.physical_key {
-                PhysicalKey::Code(key) => self.screen_key_pressed(key, key_event.repeat),
+                PhysicalKey::Code(key) => {
+                    self.screen_key_pressed(key, key_event.repeat)
+                        || (!key_event.repeat && self.container_key(key))
+                }
                 PhysicalKey::Unidentified(_) => false,
             };
             if self.screen_hooks_open()
@@ -9402,8 +9407,17 @@ impl Game<'_> {
             // focus made up is not the mouse: it fires nothing.
             if let WindowEvent::MouseInput { state, button, .. } = &event
                 && !self.pad_synthetic_input()
+                && self.screen_view_now().is_none()
+                && *state == ElementState::Released
+                && self.container_release_elsewhere(*button)
+            {
+                return Ok(());
+            }
+            if let WindowEvent::MouseInput { state, button, .. } = &event
+                && !self.pad_synthetic_input()
                 && let Some(screen) = self.screen_view_now()
             {
+                let (pressed, winit_button) = (*state == ElementState::Pressed, *button);
                 let (button, modifiers) = (glfw_button(*button), glfw_modifiers(self.modifiers));
                 let mut canceled = false;
                 if *state == ElementState::Pressed {
@@ -9422,6 +9436,9 @@ impl Game<'_> {
                     );
                 }
                 if canceled {
+                    return Ok(());
+                }
+                if self.container_mouse(winit_button, pressed) {
                     return Ok(());
                 }
                 mouse_post = Some(native_hooks::ScreenMousePost::Button {
@@ -9509,7 +9526,12 @@ impl Game<'_> {
                         }
                         match self.screen_mouse_dragged(previous) {
                             native_hooks::ScreenMousePre::Canceled => return Ok(()),
-                            native_hooks::ScreenMousePre::Passed(post) => mouse_post = Some(post),
+                            native_hooks::ScreenMousePre::Passed(post) => {
+                                if self.container_drag() {
+                                    return Ok(());
+                                }
+                                mouse_post = Some(post);
+                            }
                             native_hooks::ScreenMousePre::NotFired => {}
                         }
                         if self.dialog_open() {
@@ -9592,6 +9614,9 @@ impl Game<'_> {
                             &mut canceled,
                         );
                         if canceled {
+                            return Ok(());
+                        }
+                        if self.container_wheel(d) {
                             return Ok(());
                         }
                         mouse_post = Some(native_hooks::ScreenMousePost::Scroll([
@@ -9685,7 +9710,6 @@ impl Game<'_> {
                     if self.screen == Screen::Inventory
                         && d != 0.0
                         && !bundle
-                        && !self.container_wheel(d)
                         && !self.tweak_scroll(d, self.inventory_target().0)
                     {
                         self.station_scroll(d);
@@ -9851,8 +9875,7 @@ impl Game<'_> {
                         return Ok(());
                     }
                     if pressed
-                        && (self.container_mouse(button)
-                            || self.sort_mouse_press(button)
+                        && (self.sort_mouse_press(button)
                             || self.hud_editor_key_press(&sunrise_client::keybinds::mouse_name(
                                 button,
                             )))
@@ -10721,7 +10744,7 @@ impl<'a> Game<'a> {
             craft_size: 2,
             craft_table: None,
             inv_drag: None,
-            inv_held: false,
+            container_buttons: HashSet::new(),
             tweaks: Default::default(),
             bundle_mouse: Default::default(),
             inv_clicks: Default::default(),
