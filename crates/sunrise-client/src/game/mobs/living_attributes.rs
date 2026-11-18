@@ -5,7 +5,7 @@ use super::Game;
 use super::commands::Target;
 use std::convert::Infallible;
 use std::sync::Arc;
-use sunrise_client::living_attributes::EquipmentChanges;
+use sunrise_client::living_attributes::{ModifierChanges, ModifierSnapshot};
 use sunrise_client::mobs::{
     Mob,
     finalize::{self, Attr, Op},
@@ -20,22 +20,13 @@ use sunrise_world::attributes::{
 /// the map holds swaps the old stack's attribute modifiers for the new one's,
 /// full stacks with their components compared, as the tick's pass and a write
 /// both run it. The map is taken out so the seed can read the mob.
-pub(in crate::game) fn collect_equipment(
-    catalog: &Arc<Catalog>,
-    items: &Items,
-    m: &mut Mob,
-    changes: Option<&mut EquipmentChanges>,
-) {
+pub(in crate::game) fn collect_equipment(catalog: &Arc<Catalog>, items: &Items, m: &mut Mob) {
     sunrise_client::mobs::armor::prepare(m, catalog);
     let mut live = std::mem::take(&mut m.extra.live);
-    let changed = live.collect_equipment_recorded(
-        catalog,
-        &m.kind.id,
-        &m.extra.equipment,
-        items,
-        || equipment_seed(m),
-        changes,
-    );
+    let changed =
+        live.collect_equipment_changes(catalog, &m.kind.id, &m.extra.equipment, items, || {
+            equipment_seed(m)
+        });
     warn_failed(m.id, &m.kind.id, changed);
     m.extra.live = live;
 }
@@ -47,9 +38,9 @@ fn equipment_seed(m: &Mob) -> Vec<sunrise_core::nbt::Tag> {
         .collect()
 }
 
-pub(super) fn undo_equipment(catalog: &Arc<Catalog>, m: &mut Mob, changes: EquipmentChanges) {
+pub(super) fn undo_mob_modifiers(catalog: &Arc<Catalog>, m: &mut Mob, changes: ModifierChanges) {
     let mut live = std::mem::take(&mut m.extra.live);
-    let result = live.undo_equipment_changes(catalog, &m.kind.id, changes, || equipment_seed(m));
+    let result = live.undo_modifier_changes(catalog, &m.kind.id, changes, || equipment_seed(m));
     warn_failed(m.id, &m.kind.id, result);
     m.extra.live = live;
 }
@@ -86,7 +77,7 @@ pub(in crate::game) fn write_unspawned_attribute(
     write: AttributeWrite,
 ) -> Option<bool> {
     let done = write_own_attribute(m, own_attribute(m, name)?, write);
-    collect_equipment(catalog, items, m, None);
+    collect_equipment(catalog, items, m);
     Some(done)
 }
 
@@ -106,7 +97,7 @@ impl Game<'_> {
             if m.extra.equipment.is_empty() && !m.extra.live.has_worn() {
                 continue;
             }
-            collect_equipment(&catalog, items, m, None);
+            collect_equipment(&catalog, items, m);
         }
         for a in self.armor_stands.iter_mut() {
             if a.equipment.is_empty() && !a.live.has_worn() {
@@ -135,11 +126,24 @@ impl Game<'_> {
         }
     }
 
-    /// `collectEquipmentChanges` of the mob `id` right away: equipment a mod
-    /// wrote through a handle takes its attribute modifiers on the live map
-    /// at once — its armor and the reads of #940 — not at the tick's pass.
-    /// The tick's own pass remains the safety net for the other writers.
-    pub(super) fn collect_mob_equipment_attributes(&mut self, id: u32, record: bool) {
+    /// Snapshot before any write that can refresh or invalidate the live map.
+    /// The non-transactional paths never read or allocate a modifier snapshot.
+    pub(super) fn snapshot_mob_modifiers(&self, id: u32) -> Option<ModifierSnapshot> {
+        if self.transactions.is_empty() {
+            return None;
+        }
+        let mob = self.mobs.iter().find(|m| m.id == id && !m.removed)?;
+        snapshot(&self.motion.attributes, mob)
+    }
+
+    /// Refresh equipment immediately, keeping the live diff if the caller took
+    /// a transaction snapshot. The ordinary tick remains the other writers' safety net.
+    pub(super) fn collect_mob_equipment_attributes(
+        &mut self,
+        id: u32,
+        before: Option<ModifierSnapshot>,
+        explicit: Option<(&str, &str)>,
+    ) {
         if self.remote.is_some() || self.options.execution_role.is_client() {
             return;
         }
@@ -148,12 +152,27 @@ impl Game<'_> {
         let Some(m) = self.mobs.iter_mut().find(|m| m.id == id && !m.removed) else {
             return;
         };
-        let changes = if record {
-            self.transactions.equipment_changes(id)
-        } else {
+        collect_equipment(&catalog, items, m);
+        if let Some(before) = before
+            && let Some(after) = snapshot(&catalog, m)
+            && let Some(changes) = before.diff(after, explicit)
+        {
+            self.transactions.journal_modifier_changes(id, changes);
+        }
+    }
+}
+
+fn snapshot(catalog: &Arc<Catalog>, mob: &Mob) -> Option<ModifierSnapshot> {
+    match mob
+        .extra
+        .live
+        .modifier_snapshot(catalog, &mob.kind.id, || equipment_seed(mob))
+    {
+        Ok(snapshot) => Some(snapshot),
+        Err(error) => {
+            warn_failed(mob.id, &mob.kind.id, Err(error));
             None
-        };
-        collect_equipment(&catalog, items, m, changes);
+        }
     }
 }
 
@@ -340,6 +359,10 @@ impl Game<'_> {
         name: &str,
         write: AttributeWrite,
     ) -> Option<bool> {
+        let before = match t {
+            Target::Mob(id) => self.snapshot_mob_modifiers(id),
+            _ => None,
+        };
         let explicit = if self.transactions.is_empty() || !matches!(t, Target::Mob(_)) {
             None
         } else {
@@ -351,11 +374,15 @@ impl Game<'_> {
         // once, so the next read — a hit's armor, the attribute sync — sees
         // them (#941).
         if let Target::Mob(id) = t {
-            if done && let Some(modifier) = explicit {
+            let explicit = explicit
+                .as_deref()
+                .filter(|_| done)
+                .map(|modifier| (name, modifier));
+            if let Some((attribute, modifier)) = explicit {
                 self.transactions
-                    .keep_explicit_modifier_write(id, name, &modifier);
+                    .keep_explicit_modifier_write(id, attribute, modifier);
             }
-            self.collect_mob_equipment_attributes(id, false);
+            self.collect_mob_equipment_attributes(id, before, explicit);
         }
         Some(done)
     }

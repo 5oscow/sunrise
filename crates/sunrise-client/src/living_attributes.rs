@@ -7,7 +7,7 @@
 //! (an item with attribute modifiers, a read through a `LivingRef`, the save),
 //! because most mobs never need one and a map costs a few KiB.
 use crate::Result;
-use std::{cell::OnceCell, convert::Infallible, fmt, io, sync::Arc};
+use std::{cell::OnceCell, collections::BTreeMap, convert::Infallible, fmt, io, sync::Arc};
 use sunrise_client_core::nbt_value::{float, string, text};
 use sunrise_items::{
     equipment::Equipment,
@@ -74,18 +74,6 @@ pub fn set_modifier(
     operation: &str,
     present: bool,
 ) -> Result<()> {
-    set_modifier_recorded(attributes, attribute, id, amount, operation, present, None)
-}
-
-fn set_modifier_recorded(
-    attributes: &mut Live,
-    attribute: &str,
-    id: &str,
-    amount: f64,
-    operation: &str,
-    present: bool,
-    changes: Option<&mut EquipmentChanges>,
-) -> Result<()> {
     let Some(key) = attributes.key(attribute) else {
         return Ok(());
     };
@@ -98,23 +86,6 @@ fn set_modifier_recorded(
     let modifier = Modifier::new(id, amount, operation_named(operation))?;
     attributes
         .edit(&handle, |value, observer| {
-            if let Some(changes) = changes {
-                let before = value.modifier(modifier.id()).cloned().map(|prior| {
-                    let permanent = value
-                        .permanent_modifiers()
-                        .iter()
-                        .any(|m| m.id() == prior.id());
-                    (prior, permanent)
-                });
-                if before.is_some() || present {
-                    changes.modifiers.push(ModifierChange {
-                        attribute: attribute.to_owned(),
-                        id: modifier.id().to_owned(),
-                        before,
-                        added: present.then(|| modifier.clone()),
-                    });
-                }
-            }
             value.remove(modifier.id(), observer)?;
             if present {
                 value.add_transient(modifier, observer)?;
@@ -295,22 +266,41 @@ impl fmt::Debug for LivingAttributes {
             .finish()
     }
 }
-/// Before-images of the live modifier rows an equipment collection actually
-/// changes. One transaction keeps the first detection cache and every edit in order.
+/// A snapshot of the modifier rows and equipment detection cache, independent
+/// of base values. An invalidated map still has its current seed values.
+pub struct ModifierSnapshot {
+    worn: Option<Box<Equipment>>,
+    rows: BTreeMap<(String, String), ModifierState>,
+}
+
+struct ModifierState {
+    modifier: Modifier,
+    permanent: bool,
+}
+
+impl PartialEq for ModifierState {
+    fn eq(&self, other: &Self) -> bool {
+        self.permanent == other.permanent
+            && self.modifier.operation() == other.modifier.operation()
+            && self.modifier.amount().to_bits() == other.modifier.amount().to_bits()
+    }
+}
+
+/// The live modifier edits that a transaction owns, in refresh order.
 #[derive(Default)]
-pub struct EquipmentChanges {
-    worn_before: Option<Box<Equipment>>,
+pub struct ModifierChanges {
+    worn_before: Option<Option<Box<Equipment>>>,
     modifiers: Vec<ModifierChange>,
 }
 
 struct ModifierChange {
     attribute: String,
     id: String,
-    before: Option<(Modifier, bool)>,
-    added: Option<Modifier>,
+    before: Option<ModifierState>,
+    after: Option<ModifierState>,
 }
 
-impl EquipmentChanges {
+impl ModifierChanges {
     pub fn merge(&mut self, child: Self) {
         if self.worn_before.is_none() {
             self.worn_before = child.worn_before;
@@ -323,6 +313,41 @@ impl EquipmentChanges {
     pub fn keep_explicit_write(&mut self, attribute: &str, id: &str) {
         self.modifiers
             .retain(|m| m.attribute != attribute || m.id != id);
+    }
+}
+
+impl ModifierSnapshot {
+    /// Keep only the rows a refresh actually changed. An explicit modifier
+    /// write has its own lifetime and is not reverted with the refresh.
+    pub fn diff(self, mut after: Self, explicit: Option<(&str, &str)>) -> Option<ModifierChanges> {
+        let mut changes = ModifierChanges {
+            worn_before: (self.worn != after.worn).then_some(self.worn),
+            ..Default::default()
+        };
+        for ((attribute, id), before) in self.rows {
+            let key = (attribute, id);
+            let after = after.rows.remove(&key);
+            let (attribute, id) = key;
+            if explicit != Some((&attribute, &id)) && Some(&before) != after.as_ref() {
+                changes.modifiers.push(ModifierChange {
+                    attribute,
+                    id,
+                    before: Some(before),
+                    after,
+                });
+            }
+        }
+        for ((attribute, id), after) in after.rows {
+            if explicit != Some((&attribute, &id)) {
+                changes.modifiers.push(ModifierChange {
+                    attribute,
+                    id,
+                    before: None,
+                    after: Some(after),
+                });
+            }
+        }
+        (changes.worn_before.is_some() || !changes.modifiers.is_empty()).then_some(changes)
     }
 }
 
@@ -531,18 +556,6 @@ impl LivingAttributes {
         items: &Items,
         seed: impl FnOnce() -> Vec<Tag>,
     ) -> Result<()> {
-        self.collect_equipment_recorded(catalog, entity, equipment, items, seed, None)
-    }
-
-    pub fn collect_equipment_recorded(
-        &mut self,
-        catalog: &Arc<Catalog>,
-        entity: &str,
-        equipment: &Equipment,
-        items: &Items,
-        seed: impl FnOnce() -> Vec<Tag>,
-        mut changes: Option<&mut EquipmentChanges>,
-    ) -> Result<()> {
         let item = |slot: usize| equipment.get(slot);
         let mut changed = 0u8;
         for slot in 0..8 {
@@ -559,11 +572,6 @@ impl LivingAttributes {
         if changed == 0 {
             return Ok(());
         }
-        if let Some(changes) = &mut changes {
-            changes
-                .worn_before
-                .get_or_insert_with(|| self.worn.clone().unwrap_or_default());
-        }
         let mut seed = Some(seed);
         let mut worn = self.worn.take().unwrap_or_default();
         // `stopLocationBasedEffects`: the old items' modifiers go first.
@@ -575,7 +583,7 @@ impl LivingAttributes {
                 worn[slot] = None;
                 continue;
             };
-            apply_item(map, &old, slot, items, false, changes.as_deref_mut())?;
+            apply_item(map, &old, slot, items, false)?;
         }
         for slot in 0..8 {
             if changed & (1 << slot) == 0 {
@@ -594,28 +602,64 @@ impl LivingAttributes {
                 self.map.get_or_init(|| Box::new(built));
             }
             if let Some(map) = self.map.get_mut() {
-                apply_item(map, new, slot, items, true, changes.as_deref_mut())?;
+                apply_item(map, new, slot, items, true)?;
             }
         }
         self.worn = Some(worn);
         Ok(())
     }
 
+    /// Read the real live rows, not what a new item query would return.
+    /// A lazy map contributes its seed rows without making the cache live.
+    pub fn modifier_snapshot(
+        &self,
+        catalog: &Arc<Catalog>,
+        entity: &str,
+        seed: impl FnOnce() -> Vec<Tag>,
+    ) -> Result<ModifierSnapshot> {
+        let seeded;
+        let map = if let Some(map) = self.built() {
+            map
+        } else {
+            seeded = self.build(catalog, entity, seed())?;
+            &seeded
+        };
+        let rows = map
+            .instances()
+            .flat_map(|(_, key, value)| {
+                value.modifiers().iter().map(move |modifier| {
+                    let id = modifier.id();
+                    (
+                        (key.name().to_owned(), id.to_owned()),
+                        ModifierState {
+                            modifier: modifier.clone(),
+                            permanent: value.permanent_modifiers().iter().any(|m| m.id() == id),
+                        },
+                    )
+                })
+            })
+            .collect();
+        Ok(ModifierSnapshot {
+            worn: self.worn.clone(),
+            rows,
+        })
+    }
+
     /// Restores the recorded live rows, not the current answers to item queries.
     /// If an independent write discarded the map, its current seed still wins.
-    pub fn undo_equipment_changes(
+    pub fn undo_modifier_changes(
         &mut self,
         catalog: &Arc<Catalog>,
         entity: &str,
-        changes: EquipmentChanges,
+        changes: ModifierChanges,
         seed: impl FnOnce() -> Vec<Tag>,
     ) -> Result<()> {
-        let EquipmentChanges {
+        let ModifierChanges {
             worn_before,
             modifiers,
         } = changes;
         if let Some(worn) = worn_before {
-            self.worn = Some(worn);
+            self.worn = worn;
         }
         if modifiers.is_empty() {
             return Ok(());
@@ -632,7 +676,7 @@ impl LivingAttributes {
             attribute,
             id,
             before,
-            added,
+            after,
         } in modifiers.into_iter().rev()
         {
             let Some(key) = map.key(&attribute) else {
@@ -642,26 +686,22 @@ impl LivingAttributes {
                 continue;
             };
             map.edit(&handle, |value, observer| {
-                // Never replace a later write. A rebuilt gear modifier can have
-                // a new identity even though its operation and amount match.
-                if value.permanent_modifiers().iter().any(|m| m.id() == id) {
+                let current = value.modifier(&id).map(|modifier| ModifierState {
+                    modifier: modifier.clone(),
+                    permanent: value.permanent_modifiers().iter().any(|m| m.id() == id),
+                });
+                // Leave a later, independent modifier intact. The semantic
+                // row comparison also works when an explicit write has rebuilt
+                // the cache with new modifier identities.
+                if current != after {
                     return Ok(());
                 }
-                match (value.modifier(&id), added) {
-                    (None, _) => {}
-                    (Some(now), Some(added))
-                        if now.amount().to_bits() == added.amount().to_bits()
-                            && now.operation() == added.operation() =>
-                    {
-                        value.remove(&id, observer)?;
-                    }
-                    _ => return Ok(()),
-                }
-                if let Some((modifier, permanent)) = before {
-                    if permanent {
-                        value.add_permanent(modifier, observer)?;
+                value.remove(&id, observer)?;
+                if let Some(before) = before {
+                    if before.permanent {
+                        value.add_permanent(before.modifier, observer)?;
                     } else {
-                        value.add_transient(modifier, observer)?;
+                        value.add_transient(before.modifier, observer)?;
                     }
                 }
                 Ok(())
@@ -699,7 +739,6 @@ fn apply_item(
     slot: usize,
     items: &Items,
     present: bool,
-    mut changes: Option<&mut EquipmentChanges>,
 ) -> Result<()> {
     let slot_name = sunrise_items::equipment::SLOT_NAMES[slot];
     for sunrise_items::item_data::ModifierRow {
@@ -711,15 +750,7 @@ fn apply_item(
     } in crate::item_attributes::attribute_modifiers(stack, items).iter()
     {
         if modifier_applies(group, slot_name) {
-            set_modifier_recorded(
-                map,
-                attribute,
-                id,
-                *amount,
-                operation,
-                present,
-                changes.as_deref_mut(),
-            )?;
+            set_modifier(map, attribute, id, *amount, operation, present)?;
         }
     }
     Ok(())

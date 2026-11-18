@@ -429,6 +429,21 @@ impl StackData {
         }
         self.other.iter().find(|(k, _)| k == id).map(|(_, v)| v)
     }
+    /// A preserved value as serialized, including components represented by
+    /// the compact raid patch. Modeled fields such as layers have typed accessors.
+    pub fn saved_other(&self, id: &str) -> Option<&Tag> {
+        self.implicit_banner_values()
+            .find_map(|(key, value)| (*key == id).then_some(value))
+            .or_else(|| self.other(id))
+    }
+
+    fn implicit_banner_values(&self) -> impl Iterator<Item = &(&'static str, Tag)> {
+        self.ominous_banner
+            .then(ominous_banner_components)
+            .into_iter()
+            .flatten()
+    }
+
     /// Whether the stack's own data sets component `id`, read from the live fields: the same
     /// components `components_tag` saves, plus the transient ones it leaves out
     /// (`map_post_processing`), without encoding anything.
@@ -1760,9 +1775,8 @@ fn components_tag_inner(
         if let Some(id) = d.map_id {
             entries.push(("minecraft:map_id", Tag::Int(id)));
         }
-        if d.ominous_banner {
-            entries.extend(ominous_banner_components().iter().cloned());
-        } else if !d.banner_layers().is_empty() || d.banner_patterns_set {
+        entries.extend(d.implicit_banner_values().cloned());
+        if !d.ominous_banner && (!d.banner_layers().is_empty() || d.banner_patterns_set) {
             entries.push((
                 "minecraft:banner_patterns",
                 crate::banner_layer::layers_to_nbt(d.banner_layers()),

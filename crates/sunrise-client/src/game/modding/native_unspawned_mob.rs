@@ -514,7 +514,7 @@ impl UnspawnedMobEdits for Edits<'_, '_> {
             if !m.set_equipment_stack(slot as usize, stack) {
                 return Err(UnspawnedMobError::Unsupported);
             }
-            collect_equipment(&game.motion.attributes, world_items!(game), m, None);
+            collect_equipment(&game.motion.attributes, world_items!(game), m);
             Ok(())
         })
     }

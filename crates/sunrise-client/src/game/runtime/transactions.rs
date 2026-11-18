@@ -30,7 +30,7 @@ use super::{BlockEntity, BlockStateId, Game, machines::HopperState, maps::MapDat
 use mod_api::{Transaction, TransactionLifecycle, TransactionSeal};
 use std::collections::{BTreeMap, HashMap};
 use sunrise_client::{
-    items::ItemStack, living_attributes::EquipmentChanges, world::BlockEntityExtras,
+    items::ItemStack, living_attributes::ModifierChanges, world::BlockEntityExtras,
 };
 use sunrise_core::position::BlockPos;
 use sunrise_mod_runtime::attachments::{Attachments, Holder};
@@ -71,22 +71,16 @@ pub(super) struct OpenTransactions {
 }
 
 impl OpenTransactions {
-    pub(super) fn equipment_changes(&mut self, id: u32) -> Option<&mut EquipmentChanges> {
-        match self.last_mut()?.equipment.get_mut(&id)? {
-            KeptEquipment::Mob {
-                attribute_changes, ..
-            } => Some(attribute_changes),
-            KeptEquipment::Stand(_) => None,
+    pub(super) fn journal_modifier_changes(&mut self, id: u32, changes: ModifierChanges) {
+        if let Some(level) = self.last_mut() {
+            level.modifier_changes.entry(id).or_default().merge(changes);
         }
     }
 
     pub(super) fn keep_explicit_modifier_write(&mut self, mob: u32, attribute: &str, id: &str) {
         for level in self.iter_mut() {
-            if let Some(KeptEquipment::Mob {
-                attribute_changes, ..
-            }) = level.equipment.get_mut(&mob)
-            {
-                attribute_changes.keep_explicit_write(attribute, id);
+            if let Some(changes) = level.modifier_changes.get_mut(&mob) {
+                changes.keep_explicit_write(attribute, id);
             }
         }
     }
@@ -164,6 +158,8 @@ pub(super) struct Level {
     /// Each mob's or armor stand's equipment before this transaction first
     /// wrote it (#932), told apart for the way back.
     equipment: HashMap<u32, KeptEquipment>,
+    /// Live modifier diffs, also kept for rebuilds that write no slot.
+    modifier_changes: HashMap<u32, ModifierChanges>,
     /// Each chested mob's item list's length before `entity_slots` first grew it to its slots
     /// in this transaction.
     mob_lengths: HashMap<u32, usize>,
@@ -285,10 +281,7 @@ struct KeptPlayer {
 /// A mob's or an armor stand's equipment as a transaction first wrote it
 /// (#932): the same eight slots, restored their own way.
 enum KeptEquipment {
-    Mob {
-        stacks: Vec<Option<ItemStack>>,
-        attribute_changes: EquipmentChanges,
-    },
+    Mob(Vec<Option<ItemStack>>),
     Stand(Vec<Option<ItemStack>>),
 }
 
@@ -568,26 +561,10 @@ impl Game<'_> {
                     outer.entities.entry(id).or_insert(kept);
                 }
                 for (id, kept) in level.equipment {
-                    use std::collections::hash_map::Entry;
-                    match outer.equipment.entry(id) {
-                        Entry::Vacant(entry) => {
-                            entry.insert(kept);
-                        }
-                        Entry::Occupied(mut entry) => {
-                            if let (
-                                KeptEquipment::Mob {
-                                    attribute_changes, ..
-                                },
-                                KeptEquipment::Mob {
-                                    attribute_changes: child,
-                                    ..
-                                },
-                            ) = (entry.get_mut(), kept)
-                            {
-                                attribute_changes.merge(child);
-                            }
-                        }
-                    }
+                    outer.equipment.entry(id).or_insert(kept);
+                }
+                for (id, changes) in level.modifier_changes {
+                    outer.modifier_changes.entry(id).or_default().merge(changes);
                 }
                 if outer.board.is_none() {
                     outer.board = level.board;
@@ -993,10 +970,7 @@ impl Game<'_> {
         }
         let mob = || self.mobs.iter().find(|m| m.id == id && !m.removed);
         let kept = if let Some(mob) = mob() {
-            KeptEquipment::Mob {
-                stacks: mob.equipment_stacks().iter().cloned().collect(),
-                attribute_changes: EquipmentChanges::default(),
-            }
+            KeptEquipment::Mob(mob.equipment_stacks().iter().cloned().collect())
         } else if let Some(stand) = self.armor_stands.iter().find(|a| a.id == id) {
             KeptEquipment::Stand(stand.equipment.iter().cloned().collect())
         } else {
@@ -1219,21 +1193,13 @@ impl Game<'_> {
         let equipment = std::mem::take(&mut level.equipment);
         for (id, kept) in equipment {
             match kept {
-                KeptEquipment::Mob {
-                    stacks,
-                    attribute_changes,
-                } => {
+                KeptEquipment::Mob(stacks) => {
                     let Some(mob) = self.mobs.iter_mut().find(|m| m.id == id && !m.removed) else {
                         continue;
                     };
                     for (slot, stack) in stacks.into_iter().enumerate() {
                         mob.set_equipment_stack(slot, stack);
                     }
-                    super::living_attributes::undo_equipment(
-                        &self.motion.attributes,
-                        mob,
-                        attribute_changes,
-                    );
                 }
                 // An armor stand keeps no live attribute map of its gear; the
                 // plain write puts its slots back as they were.
@@ -1245,6 +1211,12 @@ impl Game<'_> {
                         stand.equipment.set(slot, stack);
                     }
                 }
+            }
+        }
+
+        for (id, changes) in std::mem::take(&mut level.modifier_changes) {
+            if let Some(mob) = self.mobs.iter_mut().find(|m| m.id == id && !m.removed) {
+                super::living_attributes::undo_mob_modifiers(&self.motion.attributes, mob, changes);
             }
         }
 

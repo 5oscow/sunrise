@@ -1845,26 +1845,27 @@ pub(super) fn network_stack(
                 sunrise_protocol::item::Component::BannerPatterns(layers),
             ));
         }
-        // The raid captain's banner: `Raid.getBannerComponentPatch` gives it
-        // the ominous name, rarity and hidden layers, which `StackData` keeps
-        // as `ominous_banner` rather than in `other` (#12530).
-        if d.ominous_banner {
-            stack.added.push((
-                sunrise_protocol::item::component::ITEM_NAME,
-                sunrise_protocol::item::Component::Text(sunrise_core::nbt::Tag::compound([(
-                    "translate",
-                    sunrise_core::nbt::Tag::String("block.minecraft.ominous_banner".into()),
-                )])),
-            ));
-            stack.added.push((
-                sunrise_protocol::item::component::RARITY,
-                sunrise_protocol::item::Component::Int(1),
-            ));
+        if let Some(display @ sunrise_core::nbt::Tag::Compound(_)) =
+            d.saved_other("minecraft:tooltip_display")
+        {
+            let hidden = match display.get("hidden_components") {
+                Some(sunrise_core::nbt::Tag::List(entries)) => entries
+                    .iter()
+                    .filter_map(|tag| {
+                        let name = crate::save::text(Some(tag))?;
+                        synced_id("minecraft:data_component_type", &name)
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            };
             stack.added.push((
                 sunrise_protocol::item::component::TOOLTIP_DISPLAY,
                 sunrise_protocol::item::Component::TooltipDisplay {
-                    hide: false,
-                    hidden: vec![sunrise_protocol::item::component::BANNER_PATTERNS],
+                    hide: display
+                        .get("hide_tooltip")
+                        .and_then(crate::item_data::component_bool)
+                        .unwrap_or(false),
+                    hidden,
                 },
             ));
         }
@@ -2110,7 +2111,7 @@ pub(super) fn network_stack(
         stack.removed.push(sunrise_protocol::item::component::LORE);
     }
     // The stack's custom rarity ("common", "uncommon", "rare", "epic" or 0..=3).
-    if let Some(r) = s.data().and_then(|d| d.other("minecraft:rarity")) {
+    if let Some(r) = s.data().and_then(|d| d.saved_other("minecraft:rarity")) {
         let index = match r {
             sunrise_core::nbt::Tag::String(s) => match &*s.to_string_lossy() {
                 "common" => Some(0),
@@ -2156,7 +2157,7 @@ pub(super) fn network_stack(
         ));
     }
     // The component as loaded, so a translatable name stays one.
-    if let Some(name) = s.data().and_then(|d| d.other("minecraft:item_name")) {
+    if let Some(name) = s.data().and_then(|d| d.saved_other("minecraft:item_name")) {
         stack.added.push((
             sunrise_protocol::item::component::ITEM_NAME,
             sunrise_protocol::item::Component::Text(name.clone()),

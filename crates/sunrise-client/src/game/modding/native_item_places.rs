@@ -1412,6 +1412,66 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "daily"]
+    fn equipment_rollback_undoes_a_rebuild_after_a_quiet_edit() {
+        use mod_api::{EquipmentSlot, Tag};
+
+        with_game(|game| {
+            let entity = zombie(game);
+            let living = game.living(game.entity(entity).unwrap()).unwrap();
+            let slot = EquipmentSlot::Chest;
+            let place = ItemPlace::Equipment { entity, slot };
+            assert!(game.living_set_equipment(
+                living,
+                slot,
+                Some(ItemStack::new("minecraft:diamond_chestplate", 1))
+            ));
+            let before = place.resource(game).unwrap();
+            let armor =
+                |host: &dyn ServerHost| living.attribute_value(host, "minecraft:armor").unwrap();
+            let worn_armor = armor(game);
+            assert!(worn_armor >= 8.0);
+            let result = game.transaction(|host, tx| {
+                place
+                    .edit(host, tx, |stack| {
+                        stack
+                            .apply_components(
+                                &[(
+                                    "!minecraft:attribute_modifiers".into(),
+                                    Tag::Compound(Default::default()),
+                                )]
+                                .into(),
+                            )
+                            .unwrap();
+                    })
+                    .unwrap();
+                assert_eq!(
+                    armor(host),
+                    worn_armor,
+                    "the quiet edit does not refresh armor"
+                );
+                assert!(living.set_attribute_base(host, "minecraft:max_health", 32.0));
+                assert!(
+                    armor(host) < worn_armor,
+                    "the rebuild sees the tentative edit"
+                );
+                Err::<(), ()>(())
+            });
+            assert_eq!(result, Err(()));
+            assert_eq!(place.resource(game), Some(before));
+            assert_eq!(
+                armor(game),
+                worn_armor,
+                "rollback restores the pre-rebuild live modifiers"
+            );
+            assert_eq!(
+                living.attribute_base(game, "minecraft:max_health"),
+                Some(32.0)
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
     fn equipment_rollback_keeps_a_later_permanent_modifier_with_the_same_id() {
         use mod_api::{
             AttributeModifier, AttributeOperation, EquipmentSlot, Identifier, ModifierLifetime, Tag,
