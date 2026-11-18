@@ -816,6 +816,43 @@ fn wire_loopback_checked_append_is_atomic_and_bit_exact() {
     });
 }
 #[test]
+fn wire_loopback_attach_mob_effect_part_refuses_unresolved_effect_key_on_decode() {
+    mod_api::__private::initialize().unwrap();
+    let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::Registration);
+    mod_api::__private::resolve_effects(["wire_test:tick"], |_| Some(0)).unwrap();
+    let valid = mod_api::__private::effect_key_by_index(0).unwrap();
+    let mut encoded = Writer::new();
+    encoded.put(&mod_api::MobEffectPartError::InvalidKey { effect: valid });
+    assert_eq!(
+        Reader::decode::<mod_api::MobEffectPartError>(encoded.bytes()),
+        Ok(mod_api::MobEffectPartError::InvalidKey { effect: valid })
+    );
+    let invalid = mod_api::__private::parts_installation::effect_key(u32::MAX);
+    let mut encoded_invalid = Writer::new();
+    encoded_invalid.put(&mod_api::MobEffectPartError::InvalidKey { effect: invalid });
+    assert_eq!(
+        Reader::decode::<mod_api::MobEffectPartError>(encoded_invalid.bytes()),
+        Err(WireError::Invalid("unknown EffectKey slot"))
+    );
+    let id = boundary::import_id("Registrar", "attach_mob_effect_part").unwrap();
+    let handler = guest::add_handler(vec![guest::view::<dyn mod_api::MobEffectPart>(Arc::new(
+        apply_effect_tick_hook::ApplyEffectTickHooks,
+    ))]);
+    let mut cx = boundary::Cx::default();
+    let mut input = Writer::new();
+    input.put(&invalid);
+    input.put(&"wire_test::Part");
+    input.put(&handler);
+    let mut out = Writer::new();
+    assert!(matches!(
+        unsafe { boundary::serve(id, &mut cx, input.bytes(), &mut out) },
+        Err(boundary::ServeError::Decode(WireError::Invalid(
+            "unknown EffectKey slot"
+        )))
+    ));
+    assert!(out.bytes().is_empty());
+}
+#[test]
 fn wire_loopback_optional_borrowed_render_record() {
     mod_api::__private::initialize().unwrap();
     let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
