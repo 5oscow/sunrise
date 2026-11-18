@@ -266,7 +266,7 @@ struct KeptPlayer {
 enum KeptEquipment {
     Mob {
         stacks: Vec<Option<ItemStack>>,
-        attributes_changed: bool,
+        live_before_refresh: Option<Box<sunrise_client::living_attributes::LivingAttributes>>,
     },
     Stand(Vec<Option<ItemStack>>),
 }
@@ -319,6 +319,8 @@ pub(super) enum After {
     Spawn([f64; 3], ItemStack),
     /// The item entity with this id was emptied: removed, unless it holds items again.
     Emptied(u32),
+    /// A component-only mob equipment write must reach the normal tracker even if the mob is idle.
+    EquipmentSync(u32),
     /// `LivingEntity.onEquipItem`'s sound and equip/unequip game event, at the entity `who`
     /// is: what an equipment write through a transaction tells the world only at the root
     /// commit, so an abort stays quiet (#932).
@@ -545,18 +547,27 @@ impl Game<'_> {
                     outer.entities.entry(id).or_insert(kept);
                 }
                 for (id, kept) in level.equipment {
-                    let changed = matches!(
-                        kept,
-                        KeptEquipment::Mob {
-                            attributes_changed: true,
-                            ..
+                    use std::collections::hash_map::Entry;
+                    match outer.equipment.entry(id) {
+                        Entry::Vacant(entry) => {
+                            entry.insert(kept);
                         }
-                    );
-                    if let KeptEquipment::Mob {
-                        attributes_changed, ..
-                    } = outer.equipment.entry(id).or_insert(kept)
-                    {
-                        *attributes_changed |= changed;
+                        Entry::Occupied(mut entry) => {
+                            if let (
+                                KeptEquipment::Mob {
+                                    live_before_refresh,
+                                    ..
+                                },
+                                KeptEquipment::Mob {
+                                    live_before_refresh: child,
+                                    ..
+                                },
+                            ) = (entry.get_mut(), kept)
+                                && live_before_refresh.is_none()
+                            {
+                                *live_before_refresh = child;
+                            }
+                        }
                     }
                 }
                 if outer.board.is_none() {
@@ -952,25 +963,30 @@ impl Game<'_> {
             level.board = Some(self.score.board.clone());
         }
     }
-    /// Keeps mob `id`'s equipment as it is, if a transaction is open and hasn't yet (#932).
-    /// An abort puts every slot back and refreshes attributes only after a normal slot write.
-    pub(super) fn journal_equipment(&mut self, id: u32, reapplies_attributes: bool) {
+    /// Keeps the equipment at the first slot write, and the independent live attribute map
+    /// at the first equipment refresh. A quiet edit can make those two snapshots disagree.
+    pub(super) fn journal_equipment(&mut self, id: u32, refreshes_attributes: bool) {
         let Some(level) = self.transactions.last_mut() else {
             return;
         };
+        let mob = || self.mobs.iter().find(|m| m.id == id && !m.removed);
         if let Some(kept) = level.equipment.get_mut(&id) {
             if let KeptEquipment::Mob {
-                attributes_changed, ..
+                live_before_refresh,
+                ..
             } = kept
+                && refreshes_attributes
+                && live_before_refresh.is_none()
+                && let Some(mob) = mob()
             {
-                *attributes_changed |= reapplies_attributes;
+                *live_before_refresh = Some(Box::new(mob.extra.live.clone()));
             }
             return;
         }
-        let kept = if let Some(mob) = self.mobs.iter().find(|m| m.id == id && !m.removed) {
+        let kept = if let Some(mob) = mob() {
             KeptEquipment::Mob {
                 stacks: mob.equipment_stacks().iter().cloned().collect(),
-                attributes_changed: reapplies_attributes,
+                live_before_refresh: refreshes_attributes.then(|| Box::new(mob.extra.live.clone())),
             }
         } else if let Some(stand) = self.armor_stands.iter().find(|a| a.id == id) {
             KeptEquipment::Stand(stand.equipment.iter().cloned().collect())
@@ -1100,6 +1116,11 @@ impl Game<'_> {
                     self.remove_dropped(i);
                 }
             }
+            After::EquipmentSync(id) => {
+                if let Some(mob) = self.mobs.iter_mut().find(|m| m.id == id && !m.removed) {
+                    mob.needs_sync = true;
+                }
+            }
             After::Equip {
                 at,
                 sound,
@@ -1184,14 +1205,14 @@ impl Game<'_> {
         self.scratch_roll_back(std::mem::take(&mut level.scratch_kept));
         // Discard deferred effects before undoing tentative action storage.
         level.after.clear();
-        // Each mob's equipment goes back as it was, and the attribute map is
-        // made over it again (#932).
+        // Restore the live attribute state, not the state a new collection from the
+        // rolled-back equipment would create (the slot may have had a quiet edit).
         let equipment = std::mem::take(&mut level.equipment);
         for (id, kept) in equipment {
             match kept {
                 KeptEquipment::Mob {
                     stacks,
-                    attributes_changed,
+                    live_before_refresh,
                 } => {
                     let Some(mob) = self.mobs.iter_mut().find(|m| m.id == id && !m.removed) else {
                         continue;
@@ -1199,8 +1220,8 @@ impl Game<'_> {
                     for (slot, stack) in stacks.into_iter().enumerate() {
                         mob.set_equipment_stack(slot, stack);
                     }
-                    if attributes_changed {
-                        self.collect_mob_equipment_attributes(id);
+                    if let Some(live) = live_before_refresh {
+                        mob.extra.live = *live;
                     }
                 }
                 // An armor stand keeps no live attribute map of its gear; the

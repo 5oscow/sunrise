@@ -89,9 +89,11 @@ boundary may nest at most 15 wrappers deep, and a deeper one is refused there.
 
 To change components on the **whole stack**, use `place.edit(host, tx, |stack| { ... })`
 with a server host. A player's slot (including the armour and off-hand slots supplied
-by `inventory_tick`), hand or cursor, and a mob's or armour stand's `ItemPlace::Equipment`,
-update in place: no equip sound, equip event or immediate attribute reapplication. The
-usual slot sync sends the changed stack. Other places use their exchange rules.
+by `inventory_tick`), hand, and a mob's or armour stand's `ItemPlace::Equipment` update
+only the changed components in place: no equip sound, equip event or immediate attribute
+reapplication. The usual slot sync sends the changed stack. `Strict` keeps this behavior.
+Cursors, `OneByOne` and `InfiniteMaterials` return `ItemPlaceEditError::UnsupportedPlace`
+instead of editing a partial, virtual or unsynced stack. Other places use their exchange rules.
 `ItemPlaceEditError::NotHeld`, `ItemChanged` and `CountChanged` name refusals that leave
 the place unchanged. Successful edits are part of the current transaction and roll back
 with it. `stack.set` and `stack.remove` edit typed overrides; `get` then

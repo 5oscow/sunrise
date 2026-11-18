@@ -171,44 +171,23 @@ impl Game<'_> {
     pub(super) fn game_edit_stack(
         &mut self,
         place: &ItemPlace,
-        mut stack: ItemStack,
+        stack: ItemStack,
+        changed: &[String],
         tx: &Transaction,
     ) -> Result<(), ItemPlaceEditError> {
         if !self.places_simulated() || !self.transaction_holds(tx) {
             return Err(ItemPlaceEditError::Unavailable);
         }
-        let update = |held: &mut ItemStack| {
-            // The API snapshot is based on the persistent component codec, which leaves out
-            // transient map processing and the bundle's current selection.
-            if let Some(data) = held.data() {
-                if let Some(directive) = data.map_post_processing
-                    && stack.data().is_none_or(|d| {
-                        d.map_post_processing.is_none()
-                            && d.other("!minecraft:map_post_processing").is_none()
-                    })
-                {
-                    stack.data_mut().map_post_processing = Some(directive);
-                }
-                if data.bundle_selected != Default::default()
-                    && stack
-                        .data()
-                        .is_some_and(|d| d.bundle_contents == data.bundle_contents)
-                {
-                    stack.data_mut().bundle_selected = data.bundle_selected;
-                }
-            }
-            held.damage = stack.damage;
-            held.extra = stack.extra;
-        };
         if let ItemPlace::Equipment { entity, slot } = *place {
             let mut held = self
                 .equipment_stack(entity, slot)
                 .flatten()
                 .ok_or(ItemPlaceEditError::NotHeld)?;
-            update(&mut held);
+            held.copy_changed_components_from(stack, changed);
             self.journal_equipment(entity, false);
             if let Some(mob) = self.mobs.iter_mut().find(|m| m.id == entity && !m.removed) {
                 mob.set_equipment_stack(slot as usize, Some(held));
+                self.after_commit(After::EquipmentSync(entity));
             } else if let Some(stand) = self.armor_stands.iter_mut().find(|a| a.id == entity) {
                 stand.equipment.set(slot as usize, Some(held));
             }
@@ -220,7 +199,7 @@ impl Game<'_> {
             self.native_as_player(player, |game| {
                 game.journal_player(player);
                 if let Some(held) = game.player_place(place).and_then(Option::as_mut) {
-                    update(held);
+                    held.copy_changed_components_from(stack, changed);
                     written = true;
                 }
             });
@@ -1073,15 +1052,43 @@ pub(super) mod tests {
     #[ignore = "daily"]
     fn worn_component_edit_is_quiet_and_reaches_tracking() {
         use mod_api::EquipmentSlot;
-        use sunrise_client::lan::entity::States;
+        use sunrise_client::lan::Out;
+        use sunrise_protocol::{buf::Reader, packets::play::Clientbound};
+
         with_game(|game| {
             open_to_lan(game);
+            let (tx, rx) = mpsc::channel();
+            let mut viewer = guest(1);
+            viewer.sender = PlayerSender::new(tx, Arc::default());
+            viewer.position = [0.5, 64.0, 1.5];
+            viewer.dimension = "minecraft:overworld".into();
+            viewer.loaded = true;
+            viewer.load_timeout = 0;
+            viewer.sent_chunks.insert((0, 0));
+            game.lan.as_mut().unwrap().hub.guests.push(viewer);
+
             let id = zombie(game);
             let living = game.living(game.entity(id).unwrap()).unwrap();
             let slot = EquipmentSlot::Chest;
             let armor = ItemStack::new("minecraft:diamond_chestplate", 1);
             assert!(game.living_set_equipment(living, slot, Some(armor)));
             game.mobs[0].first_tick = false;
+            // Track once to pair, again to cache a full idle state, then confirm it can go bare.
+            for _ in 0..3 {
+                game.level_pass.packets_drained = true;
+                game.mobs[0].needs_sync = false;
+                game.tick_lan(false);
+            }
+            let host = game.lan.as_ref().unwrap();
+            assert!(host.hub.guests[0].tracker.is_tracking(id as i32));
+            assert!(
+                host.states
+                    .as_slice()
+                    .iter()
+                    .any(|state| state.id == id as i32 && state.bare)
+            );
+            rx.try_iter().for_each(drop);
+
             game.audio.capture = Some(Vec::new());
             let place = ItemPlace::Equipment { entity: id, slot };
             super::super::dispense_fixture::start_recording();
@@ -1090,23 +1097,202 @@ pub(super) mod tests {
             assert!(game.audio.capture.as_ref().unwrap().is_empty());
             assert!(super::super::dispense_fixture::stop_recording().is_empty());
 
-            let mut tracked = States::default();
-            game.lan_entities(&mut tracked, false, 0, None);
-            let mob = tracked
-                .as_slice()
-                .iter()
-                .find(|state| state.id == id as i32)
-                .unwrap();
-            let (_, network) = mob
-                .equipment
-                .iter()
-                .find(|(i, _)| *i == slot as u8)
-                .unwrap();
+            game.level_pass.packets_drained = true;
+            game.tick_lan(false);
             let hub = &game.lan.as_ref().unwrap().hub;
-            let received = hub.stack_from_network(network.as_ref().unwrap());
+            let received = rx
+                .try_iter()
+                .flat_map(|message| match message {
+                    Out::Packet(body) => vec![body],
+                    Out::Packets(bodies) => bodies,
+                    Out::Disconnect(reason) => panic!("tracking viewer disconnected: {reason:?}"),
+                })
+                .find_map(|body| {
+                    let mut reader = Reader::new(&body);
+                    let packet = reader.varint().ok()?;
+                    let Clientbound::SetEquipment(equipment) =
+                        Clientbound::decode(packet, reader.rest()).ok()?
+                    else {
+                        return None;
+                    };
+                    if equipment.id != id as i32 {
+                        return None;
+                    }
+                    let (_, stack) = equipment
+                        .slots
+                        .into_iter()
+                        .find(|(at, _)| *at == slot as u8)?;
+                    Some(hub.stack_from_network(&stack?))
+                })
+                .expect("the existing viewer receives the idle mob's equipment edit");
             assert_eq!(received.item.as_ref(), "minecraft:diamond_chestplate");
             assert_eq!(received.count, 1);
             assert_eq!(received.damage, 7);
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn virtual_wrappers_and_cursors_refuse_a_whole_stack_edit() {
+        super::super::native_guest_turn_tests::with_guests(|game| {
+            let stick = ItemStack::new("minecraft:stick", 32);
+            let cursor_stack = ItemStack::new("minecraft:paper", 1);
+            game.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
+                guest.game_mode = 1;
+                guest.inventory[0] = Some(stick.clone());
+                guest.carried = Some(cursor_stack.clone());
+            });
+            let player = game.player(12).unwrap();
+            let menu = game.player_container_menu(player).unwrap();
+            let hand = ItemPlace::PlayerHand {
+                player: player.uuid(),
+                hand: mod_api::Hand::Main,
+            };
+            for place in [
+                ItemPlace::Strict(Box::new(ItemPlace::InfiniteMaterials {
+                    player: player.uuid(),
+                    inner: Box::new(hand.clone()),
+                })),
+                ItemPlace::OneByOne(Box::new(hand)),
+                menu.cursor(),
+            ] {
+                assert_eq!(
+                    game.transaction(|host, tx| {
+                        place.edit(host, tx, |_| panic!("a refused place ran its editor"))
+                    }),
+                    Err(ItemPlaceEditError::UnsupportedPlace)
+                );
+            }
+            let guest = &game.lan.as_ref().unwrap().hub.guests[0];
+            assert_eq!(guest.inventory[0].as_ref(), Some(&stick));
+            assert_eq!(guest.carried.as_ref(), Some(&cursor_stack));
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn component_edit_preserves_live_nested_data_and_applies_a_removal() {
+        use mod_api::Tag;
+
+        with_game(|game| {
+            open_to_lan(game);
+            let mut player = guest(1);
+            let mut map = ItemStack::new("minecraft:filled_map", 1);
+            map.data_mut().map_id = Some(27);
+            map.data_mut().map_post_processing = Some(1);
+            let mut bundle = ItemStack::new("minecraft:bundle", 1);
+            let data = bundle.data_mut();
+            data.bundle_contents.push(map);
+            data.bundle_selected = sunrise_items::item_data::BundleSelected(0);
+            data.custom_name = Some(Tag::String("keep my contents".into()));
+            player.inventory[3] = Some(bundle);
+            let place = ItemPlace::PlayerSlot {
+                player: 123,
+                slot: 3,
+            };
+            game.lan.as_mut().unwrap().hub.guests.push(player);
+
+            game.transaction(|host, tx| {
+                place.edit(host, tx, |stack| {
+                    stack
+                        .apply_components(
+                            &[(
+                                "!minecraft:custom_name".into(),
+                                Tag::compound(Vec::<(&str, Tag)>::new()),
+                            )]
+                            .into(),
+                        )
+                        .unwrap();
+                })
+            })
+            .unwrap();
+            let bundle = game.lan.as_ref().unwrap().hub.guests[0].inventory[3]
+                .as_ref()
+                .unwrap()
+                .data()
+                .unwrap();
+            assert!(bundle.custom_name.is_none());
+            assert!(bundle.other("!minecraft:custom_name").is_some());
+            assert_eq!(bundle.bundle_selected.0, 0);
+            let map = bundle.bundle_contents[0].data().unwrap();
+            assert_eq!(map.map_id, Some(27));
+            assert_eq!(map.map_post_processing, Some(1));
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn nested_equipment_rollback_restores_the_live_modifiers_not_the_quiet_stack() {
+        use mod_api::{EquipmentSlot, Tag};
+
+        with_game(|game| {
+            let id = zombie(game);
+            let living = game.living(game.entity(id).unwrap()).unwrap();
+            let slot = EquipmentSlot::Chest;
+            let place = ItemPlace::Equipment { entity: id, slot };
+            assert!(game.living_set_equipment(
+                living,
+                slot,
+                Some(ItemStack::new("minecraft:diamond_chestplate", 1))
+            ));
+            let armor = |host: &dyn mod_api::ServerHost| {
+                living.attribute_value(host, "minecraft:armor").unwrap()
+            };
+            let before = armor(game);
+            assert!(before >= 8.0);
+            for commit_child in [false, true] {
+                let rolled_back = game.transaction(|host, tx| {
+                    place
+                        .edit(host, tx, |stack| {
+                            stack
+                                .apply_components(
+                                    &[(
+                                        "!minecraft:attribute_modifiers".into(),
+                                        Tag::compound(Vec::<(&str, Tag)>::new()),
+                                    )]
+                                    .into(),
+                                )
+                                .unwrap();
+                        })
+                        .unwrap();
+                    assert_eq!(
+                        armor(host),
+                        before,
+                        "quiet edit must not recollect the worn stack"
+                    );
+                    let taken = place.resource(host).unwrap();
+                    let child = host.transaction(|host, tx| {
+                        assert_eq!(place.extract(host, tx, &taken, 1), 1);
+                        assert!(armor(host) < before);
+                        commit_child.then_some(()).ok_or(())
+                    });
+                    assert_eq!(child.is_ok(), commit_child);
+                    if !commit_child {
+                        assert_eq!(
+                            armor(host),
+                            before,
+                            "child abort restores the still-active modifiers"
+                        );
+                        assert_eq!(place.resource(host), Some(taken));
+                    }
+                    Err::<(), ()>(())
+                });
+                assert_eq!(rolled_back, Err(()));
+                assert_eq!(
+                    armor(game),
+                    before,
+                    "parent abort restores the original modifiers"
+                );
+                assert_eq!(
+                    game.mobs[0]
+                        .equipment_stacks()
+                        .get(slot as usize)
+                        .unwrap()
+                        .item
+                        .as_ref(),
+                    "minecraft:diamond_chestplate"
+                );
+            }
         });
     }
 

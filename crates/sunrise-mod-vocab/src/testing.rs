@@ -772,6 +772,7 @@ impl crate::prelude::ItemsBackendMut for FakeHost {
         &mut self,
         place: &ItemPlace,
         stack: ItemStack,
+        _changed: &[String],
         _: &Transaction,
     ) -> Result<(), crate::ItemPlaceEditError> {
         let (player, slot) = self

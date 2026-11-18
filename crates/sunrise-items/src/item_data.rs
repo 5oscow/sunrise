@@ -818,6 +818,81 @@ impl ItemStack {
     pub fn data_mut(&mut self) -> &mut StackData {
         self.extra.get_or_insert_with(Box::default)
     }
+    /// Copy only the named component overrides from a decoded snapshot of this same item.
+    /// The other fields stay live: copying an unchanged serialized component can lose
+    /// runtime data, including in nested stacks. The caller supplies the changed names
+    /// (without the removal prefix) and owns item/count validation.
+    pub fn copy_changed_components_from(&mut self, snapshot: ItemStack, changed: &[String]) {
+        let replacement = snapshot.extra.map_or_else(StackData::default, |data| *data);
+        let prior_ominous_banner = self.data().is_some_and(|data| data.ominous_banner);
+        let damage_changed = changed.iter().any(|id| id == "minecraft:damage");
+        if damage_changed {
+            self.damage = snapshot.damage;
+        }
+        let data = self.data_mut();
+        let mut replacement = replacement;
+        macro_rules! replace_fields {
+            ($($field:ident),+) => {{ $(data.$field = std::mem::take(&mut replacement.$field);)+ }};
+        }
+        for id in changed {
+            match id.as_str() {
+                "minecraft:damage" => replace_fields!(damage_set, explicit_zero_damage),
+                "minecraft:enchantments" => replace_fields!(enchantments),
+                "minecraft:stored_enchantments" => replace_fields!(stored_enchantments),
+                "minecraft:repair_cost" => replace_fields!(repair_cost),
+                "minecraft:custom_name" => replace_fields!(custom_name),
+                "minecraft:potion_contents" => replace_fields!(potion, potion_extra),
+                "minecraft:death_protection" => replace_fields!(death_protection),
+                "minecraft:consumable" => replace_fields!(consumable),
+                "minecraft:kinetic_weapon" => replace_fields!(kinetic_weapon),
+                "minecraft:map_id" => replace_fields!(map_id),
+                "minecraft:banner_patterns" => {
+                    replace_fields!(banner_patterns, banner_patterns_set)
+                }
+                "minecraft:base_color" => replace_fields!(base_color),
+                "minecraft:writable_book_content" => replace_fields!(writable_pages),
+                "minecraft:written_book_content" => replace_fields!(written),
+                "minecraft:fireworks" => replace_fields!(fireworks),
+                "minecraft:firework_explosion" => replace_fields!(firework_explosion),
+                "minecraft:dyed_color" => replace_fields!(dyed_color),
+                "minecraft:pot_decorations" => replace_fields!(pot_decorations),
+                "minecraft:bundle_contents" => replace_fields!(bundle_contents, bundle_selected),
+                "minecraft:suspicious_stew_effects" => replace_fields!(stew_effects),
+                "minecraft:map_post_processing" => replace_fields!(map_post_processing),
+                "minecraft:charged_projectiles" => replace_fields!(charged),
+                "minecraft:container" => replace_fields!(container),
+                "minecraft:ominous_bottle_amplifier" => replace_fields!(ominous_amplifier),
+                "minecraft:trim" => replace_fields!(trim),
+                _ => {}
+            };
+        }
+        // These components may be represented by a derived flag instead of opaque entries.
+        // If that representation changed, take those entries from the same decoded snapshot.
+        if changed.iter().any(|id| {
+            matches!(
+                id.as_str(),
+                "minecraft:banner_patterns" | "minecraft:item_name"
+            )
+        }) {
+            data.ominous_banner = replacement.ominous_banner;
+        }
+        let banner_changed = prior_ominous_banner != data.ominous_banner;
+        let edited = |key: &str| {
+            let id = key.strip_prefix('!').unwrap_or(key);
+            changed.iter().any(|entry| entry == id)
+                || (banner_changed
+                    && matches!(
+                        id,
+                        "minecraft:item_name" | "minecraft:rarity" | "minecraft:tooltip_display"
+                    ))
+        };
+        data.other.retain(|(key, _)| !edited(key));
+        data.other
+            .extend(replacement.other.into_iter().filter(|(key, _)| edited(key)));
+        data.other.sort_by(|a, b| a.0.cmp(&b.0));
+        self.tidy();
+    }
+
     /// Drops an all-default component box so equal stacks compare equal.
     pub fn tidy(&mut self) {
         if self.extra.as_ref().is_some_and(|d| d.is_empty()) {

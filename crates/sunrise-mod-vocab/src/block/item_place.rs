@@ -284,6 +284,8 @@ pub enum ItemPlaceEditError {
     ItemChanged,
     /// The editor changed the count. Use a slot write to change it.
     CountChanged,
+    /// The place has no whole-stack edit (a cursor or a virtual transfer wrapper).
+    UnsupportedPlace,
     /// The backend, transaction or storage refused the write.
     Unavailable,
     /// The updated stack did not pass the game's write validation.
@@ -621,18 +623,29 @@ impl ItemPlace {
     }
 
     /// Edit the components of the whole stack here, keeping its item and count. Player
-    /// slots (including armour and the off hand), hands and cursors, and a mob's or armour
-    /// stand's equipment, update in place like `ItemStack.set`: no equip effects or attribute
-    /// reapplication, and the usual slot sync sends the new stack. Other places write through
-    /// their usual exchange rules. A refusal leaves the place unchanged; aborting `tx` restores
-    /// a successful write.
+    /// slots (including armour and the off hand), hands, and a mob's or armour stand's equipment
+    /// update only the changed components in place, like `ItemStack.set`: no equip effects or
+    /// attribute reapplication. The usual slot sync sends the new stack. `Strict` preserves this
+    /// contract. Cursors, `OneByOne` and `InfiniteMaterials` refuse the edit because they do not
+    /// provide a synced whole-stack write. Other places use their usual exchange rules. A refusal
+    /// leaves the place unchanged; aborting `tx` restores a successful write.
     pub fn edit(
         &self,
         host: &mut dyn ServerHost,
         tx: &Transaction,
         edit: impl FnOnce(&mut ItemStack),
     ) -> Result<(), ItemPlaceEditError> {
-        let before = self.stack(host).ok_or(ItemPlaceEditError::NotHeld)?;
+        let mut place = self;
+        while let Self::Strict(inner) = place {
+            place = inner;
+        }
+        if matches!(
+            place,
+            Self::PlayerCursor { .. } | Self::OneByOne(_) | Self::InfiniteMaterials { .. }
+        ) {
+            return Err(ItemPlaceEditError::UnsupportedPlace);
+        }
+        let before = place.stack(host).ok_or(ItemPlaceEditError::NotHeld)?;
         let mut stack = before.clone();
         edit(&mut stack);
         if stack.item() != before.item() {
@@ -644,20 +657,30 @@ impl ItemPlace {
         if stack == before {
             return Ok(());
         }
-        let mut place = self;
-        while let Self::Strict(inner) = place {
-            place = inner;
-        }
         if matches!(
             place,
-            Self::PlayerSlot { .. }
-                | Self::PlayerHand { .. }
-                | Self::PlayerCursor { .. }
-                | Self::Equipment { .. }
+            Self::PlayerSlot { .. } | Self::PlayerHand { .. } | Self::Equipment { .. }
         ) {
+            let old = before.components().map(crate::Components::as_nbt);
+            let new = stack.components().map(crate::Components::as_nbt);
+            let mut changed: Vec<_> = old
+                .into_iter()
+                .flat_map(|patch| patch.keys())
+                .chain(new.into_iter().flat_map(|patch| patch.keys()))
+                .filter(|&key| old.and_then(|p| p.get(key)) != new.and_then(|p| p.get(key)))
+                .map(|key| {
+                    let key = key.to_string_lossy();
+                    key.strip_prefix('!').map(str::to_owned).unwrap_or(key)
+                })
+                .collect();
+            if before.damage_component() != stack.damage_component() {
+                changed.push("minecraft:damage".into());
+            }
+            changed.sort_unstable();
+            changed.dedup();
             return backend_mut_of(host)
                 .ok_or(ItemPlaceEditError::Unavailable)?
-                .game_edit_stack(place, stack, tx);
+                .game_edit_stack(place, stack, &changed, tx);
         }
         let count = stack.count();
         if self.exchange(host, tx, &ItemResource::of(&stack), count) == count {
