@@ -351,7 +351,8 @@ with the release key for the tag `mod-tool` (message `horizon release mod-tool\n
 signed too; `sunrise-release-sign verify --tag mod-tool` checks it, and `signed_digest` refuses the tag as a game release.
 Why it exists: the tool shipped only inside each `sdk-<commit>`, so a tool fix reached modders with the next Nightly.
 
-- When: on a push to main and by dispatch, never on a pull request. `decide` builds only when a file of the tool changed
+- When: after dyna-checks finishes a main push (so the gate's result exists when it is read) and by dispatch, never on
+  a pull request. `decide` builds only when a file of the tool changed
   since the commit `mod-tool` holds (`tools/ci/mod_tool.py crates` lists the folders: the workspace crates
   `cargo-sunrise-mod` depends on, from `cargo metadata`, plus the lock, the compiler pin and the files that build and sign
   it) and dyna-checks' gate is green on the commit, as for a snapshot. It refuses a commit not on main and one that does
