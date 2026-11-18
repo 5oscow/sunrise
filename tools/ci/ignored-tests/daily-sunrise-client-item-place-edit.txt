@@ -1,0 +1,1 @@
+sunrise-client game::native_item_places::tests::worn_component_edit_is_quiet_and_reaches_tracking lib daily resources

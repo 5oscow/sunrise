@@ -46,8 +46,9 @@ normalized just like `set_components`; malformed damage leaves the entire stack 
 including explicit zero damage. If `other` has no override, the target inherits too:
 no effective prototype value is materialized. `get` followed by `set` covers `update`.
 These owned-value operations require no host. To persist them on a whole stack, use
-server-side `ItemPlace::edit` inside a transaction; it preserves item/count and rolls
-back with its parent transaction instead of splitting one item off.
+server-side `ItemPlace::edit` inside a transaction. It preserves item/count, rolls
+back with its parent transaction and updates a held or worn stack without equipping it
+again. Use a normal slot write if you need to replace the item or change its count.
 
 `ItemResource::with_component` is also fallible for raw component values. Its default-value
 elision and `without_component` preserve the normal prototype-plus-patch semantics. The latter

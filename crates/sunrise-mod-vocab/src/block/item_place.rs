@@ -11,8 +11,8 @@
 use crate::HostTransaction;
 use crate::{
     BundleItems, Capability, Direction, ENTITY_ITEMS, EquipmentSlot, Hand, ITEMS, ItemResource,
-    ItemStack, LevelRef, MenuRef, MenuSlotBacking, ResourceHandler, ServerHost, Transaction,
-    backend_mut_of, backend_of,
+    ItemStack, LevelRef, MenuRef, MenuSlotBacking, ResourceHandler, ServerHost, StackWriteError,
+    Transaction, backend_mut_of, backend_of,
 };
 use std::{fmt::Debug, marker::PhantomData};
 
@@ -271,6 +271,34 @@ impl Drop for ItemPlace {
             let next = std::mem::replace(inner, Box::new(Self::Scratch(0)));
             current = next;
         }
+    }
+}
+
+/// Why [`ItemPlace::edit`] could not update a stack's components.
+#[derive(Clone, Debug, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
+#[non_exhaustive]
+pub enum ItemPlaceEditError {
+    /// The place is empty or cannot be reached.
+    NotHeld,
+    /// The editor changed the item. Use a slot write to replace it.
+    ItemChanged,
+    /// The editor changed the count. Use a slot write to change it.
+    CountChanged,
+    /// The backend, transaction or storage refused the write.
+    Unavailable,
+    /// The updated stack did not pass the game's write validation.
+    Stack(StackWriteError),
+}
+
+impl From<StackWriteError> for ItemPlaceEditError {
+    fn from(error: StackWriteError) -> Self {
+        Self::Stack(error)
+    }
+}
+
+impl crate::NoBackend for ItemPlaceEditError {
+    fn no_backend() -> Self {
+        Self::Unavailable
     }
 }
 
@@ -592,26 +620,51 @@ impl ItemPlace {
             .game_on_crafted_by(self, tx, amount)
     }
 
-    /// Edit the whole stack here, keeping its item and count. Unlike exchanging one,
-    /// this changes every item in the slot together, without splitting off a copy.
-    /// A missing stack, changed item/count or refused exchange returns false without
-    /// changing the place. Successful writes are journaled in `tx` like [`Self::exchange`].
+    /// Edit the components of the whole stack here, keeping its item and count. Player
+    /// slots (including armour and the off hand), hands and cursors, and a mob's or armour
+    /// stand's equipment, update in place like `ItemStack.set`: no equip effects or attribute
+    /// reapplication, and the usual slot sync sends the new stack. Other places write through
+    /// their usual exchange rules. A refusal leaves the place unchanged; aborting `tx` restores
+    /// a successful write.
     pub fn edit(
         &self,
         host: &mut dyn ServerHost,
         tx: &Transaction,
         edit: impl FnOnce(&mut ItemStack),
-    ) -> bool {
-        let Some(mut stack) = self.stack(host) else {
-            return false;
-        };
-        let item = stack.item();
-        let count = stack.count();
+    ) -> Result<(), ItemPlaceEditError> {
+        let before = self.stack(host).ok_or(ItemPlaceEditError::NotHeld)?;
+        let mut stack = before.clone();
         edit(&mut stack);
-        if stack.item() != item || stack.count() != count {
-            return false;
+        if stack.item() != before.item() {
+            return Err(ItemPlaceEditError::ItemChanged);
         }
-        self.exchange(host, tx, &ItemResource::of(&stack), count) == count
+        if stack.count() != before.count() {
+            return Err(ItemPlaceEditError::CountChanged);
+        }
+        if stack == before {
+            return Ok(());
+        }
+        let mut place = self;
+        while let Self::Strict(inner) = place {
+            place = inner;
+        }
+        if matches!(
+            place,
+            Self::PlayerSlot { .. }
+                | Self::PlayerHand { .. }
+                | Self::PlayerCursor { .. }
+                | Self::Equipment { .. }
+        ) {
+            return backend_mut_of(host)
+                .ok_or(ItemPlaceEditError::Unavailable)?
+                .game_edit_stack(place, stack, tx);
+        }
+        let count = stack.count();
+        if self.exchange(host, tx, &ItemResource::of(&stack), count) == count {
+            Ok(())
+        } else {
+            Err(ItemPlaceEditError::Unavailable)
+        }
     }
 
     /// `insert` or `extract`: the wrappers undone, outermost first, in a loop rather than by

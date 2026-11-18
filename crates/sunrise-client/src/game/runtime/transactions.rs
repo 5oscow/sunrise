@@ -264,7 +264,10 @@ struct KeptPlayer {
 /// (#932): the same eight slots, restored their own way.
 #[derive(Clone)]
 enum KeptEquipment {
-    Mob(Vec<Option<ItemStack>>),
+    Mob {
+        stacks: Vec<Option<ItemStack>>,
+        attributes_changed: bool,
+    },
     Stand(Vec<Option<ItemStack>>),
 }
 
@@ -542,7 +545,19 @@ impl Game<'_> {
                     outer.entities.entry(id).or_insert(kept);
                 }
                 for (id, kept) in level.equipment {
-                    outer.equipment.entry(id).or_insert(kept);
+                    let changed = matches!(
+                        kept,
+                        KeptEquipment::Mob {
+                            attributes_changed: true,
+                            ..
+                        }
+                    );
+                    if let KeptEquipment::Mob {
+                        attributes_changed, ..
+                    } = outer.equipment.entry(id).or_insert(kept)
+                    {
+                        *attributes_changed |= changed;
+                    }
                 }
                 if outer.board.is_none() {
                     outer.board = level.board;
@@ -937,17 +952,26 @@ impl Game<'_> {
             level.board = Some(self.score.board.clone());
         }
     }
-    /// Keeps mob `id`'s equipment as it is, if a transaction is open and hasn't yet (#932):
-    /// an abort puts every slot back and makes the attribute map over again.
-    pub(super) fn journal_equipment(&mut self, id: u32) {
+    /// Keeps mob `id`'s equipment as it is, if a transaction is open and hasn't yet (#932).
+    /// An abort puts every slot back and refreshes attributes only after a normal slot write.
+    pub(super) fn journal_equipment(&mut self, id: u32, reapplies_attributes: bool) {
         let Some(level) = self.transactions.last_mut() else {
             return;
         };
-        if level.equipment.contains_key(&id) {
+        if let Some(kept) = level.equipment.get_mut(&id) {
+            if let KeptEquipment::Mob {
+                attributes_changed, ..
+            } = kept
+            {
+                *attributes_changed |= reapplies_attributes;
+            }
             return;
         }
         let kept = if let Some(mob) = self.mobs.iter().find(|m| m.id == id && !m.removed) {
-            KeptEquipment::Mob(mob.equipment_stacks().iter().cloned().collect())
+            KeptEquipment::Mob {
+                stacks: mob.equipment_stacks().iter().cloned().collect(),
+                attributes_changed: reapplies_attributes,
+            }
         } else if let Some(stand) = self.armor_stands.iter().find(|a| a.id == id) {
             KeptEquipment::Stand(stand.equipment.iter().cloned().collect())
         } else {
@@ -1165,14 +1189,19 @@ impl Game<'_> {
         let equipment = std::mem::take(&mut level.equipment);
         for (id, kept) in equipment {
             match kept {
-                KeptEquipment::Mob(stacks) => {
+                KeptEquipment::Mob {
+                    stacks,
+                    attributes_changed,
+                } => {
                     let Some(mob) = self.mobs.iter_mut().find(|m| m.id == id && !m.removed) else {
                         continue;
                     };
                     for (slot, stack) in stacks.into_iter().enumerate() {
                         mob.set_equipment_stack(slot, stack);
                     }
-                    self.collect_mob_equipment_attributes(id);
+                    if attributes_changed {
+                        self.collect_mob_equipment_attributes(id);
+                    }
                 }
                 // An armor stand keeps no live attribute map of its gear; the
                 // plain write puts its slots back as they were.

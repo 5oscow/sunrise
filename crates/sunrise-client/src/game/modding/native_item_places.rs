@@ -6,7 +6,10 @@
 use super::Game;
 use super::transactions::{After, DeferredEffect};
 use mod_api::__private::game::*;
-use mod_api::{CraftedByError, EquipmentSlot, ItemPlace, LivingRef, MenuSlotBacking, Transaction};
+use mod_api::{
+    CraftedByError, EquipmentSlot, ItemPlace, ItemPlaceEditError, LivingRef, MenuSlotBacking,
+    Transaction,
+};
 use sunrise_client::{first_person::Hand, items::ItemStack, menu::Menu};
 
 impl Game<'_> {
@@ -79,7 +82,7 @@ impl Game<'_> {
             _ => None,
         }
     }
-    /// All player place mutations use the command/host slot writer (and its journal).
+    /// Player place insert and extract use the command/host slot writer (and its journal).
     fn write_player_place(&mut self, place: &ItemPlace, stack: Option<ItemStack>) {
         use super::commands::items::Slot;
         let slot = match place {
@@ -164,6 +167,71 @@ impl Game<'_> {
         }
         self.unscoped_game_stack(place)
     }
+    /// Component-only write, without going through an equipment setter or stopping item use.
+    pub(super) fn game_edit_stack(
+        &mut self,
+        place: &ItemPlace,
+        mut stack: ItemStack,
+        tx: &Transaction,
+    ) -> Result<(), ItemPlaceEditError> {
+        if !self.places_simulated() || !self.transaction_holds(tx) {
+            return Err(ItemPlaceEditError::Unavailable);
+        }
+        let update = |held: &mut ItemStack| {
+            // The API snapshot is based on the persistent component codec, which leaves out
+            // transient map processing and the bundle's current selection.
+            if let Some(data) = held.data() {
+                if let Some(directive) = data.map_post_processing
+                    && stack.data().is_none_or(|d| {
+                        d.map_post_processing.is_none()
+                            && d.other("!minecraft:map_post_processing").is_none()
+                    })
+                {
+                    stack.data_mut().map_post_processing = Some(directive);
+                }
+                if data.bundle_selected != Default::default()
+                    && stack
+                        .data()
+                        .is_some_and(|d| d.bundle_contents == data.bundle_contents)
+                {
+                    stack.data_mut().bundle_selected = data.bundle_selected;
+                }
+            }
+            held.damage = stack.damage;
+            held.extra = stack.extra;
+        };
+        if let ItemPlace::Equipment { entity, slot } = *place {
+            let mut held = self
+                .equipment_stack(entity, slot)
+                .flatten()
+                .ok_or(ItemPlaceEditError::NotHeld)?;
+            update(&mut held);
+            self.journal_equipment(entity, false);
+            if let Some(mob) = self.mobs.iter_mut().find(|m| m.id == entity && !m.removed) {
+                mob.set_equipment_stack(slot as usize, Some(held));
+            } else if let Some(stand) = self.armor_stands.iter_mut().find(|a| a.id == entity) {
+                stand.equipment.set(slot as usize, Some(held));
+            }
+        } else {
+            let player = self
+                .place_player(place)
+                .ok_or(ItemPlaceEditError::NotHeld)?;
+            let mut written = false;
+            self.native_as_player(player, |game| {
+                game.journal_player(player);
+                if let Some(held) = game.player_place(place).and_then(Option::as_mut) {
+                    update(held);
+                    written = true;
+                }
+            });
+            if !written {
+                return Err(ItemPlaceEditError::NotHeld);
+            }
+        }
+        self.notice_menu_place_write(place);
+        Ok(())
+    }
+
     /// Runs the vanilla `ItemStack.onCraftedBy` effects for a stack a mod-delivered menu result
     /// owns. The stack mutation is journaled through the caller's transaction and the statistic
     /// is deferred until its root commit.
@@ -358,7 +426,7 @@ impl Game<'_> {
             let written = held.filter(|h| h.count > 0);
             // The journal keeps what was, only for a write that really lands:
             // a refused one (a client's copy, no epoch) moved nothing.
-            self.journal_equipment(*entity);
+            self.journal_equipment(*entity, true);
             if !self.write_entity_equipment(*entity, *slot, written) {
                 return 0;
             }
@@ -481,7 +549,7 @@ impl Game<'_> {
                 .as_ref()
                 .map(|held| left(held, took))
                 .filter(|kept| kept.count > 0);
-            self.journal_equipment(*entity);
+            self.journal_equipment(*entity, true);
             if !self.write_entity_equipment(*entity, *slot, kept) {
                 return 0;
             }
@@ -508,10 +576,6 @@ impl Game<'_> {
         });
         took
     }
-    /// Writes mob `entity`'s equipment `slot` (#932): the same write
-    /// `native_living_set_equipment` makes — stack, attribute map, equip sound and game event
-    /// — with the effects waiting for the root commit of the open transaction, so an abort of
-    /// it is quiet. The equipment goes back then too (`journal_equipment`).
     /// The equipment `slot` of living entity `entity` (#932): a mob's
     /// (`equipment_stacks`, the worn stacks overlaid) or an armor stand's
     /// own, `None` where the slot is empty. None where neither kind is
@@ -563,7 +627,8 @@ pub(super) mod tests {
     use mod_api::HostTransaction;
     use mod_api::ServerHost;
     use mod_api::{
-        CraftedByError, ENTITY_AUTOMATION, ENTITY_ITEMS, ItemPlace, ItemResource, MenuRef,
+        CraftedByError, ENTITY_AUTOMATION, ENTITY_ITEMS, ItemPlace, ItemPlaceEditError,
+        ItemResource, MenuRef,
     };
     use std::sync::{Arc, atomic::AtomicI32, mpsc};
     use sunrise_client::{
@@ -655,7 +720,7 @@ pub(super) mod tests {
                         .unwrap();
                 }))
             });
-            assert_eq!(result, Ok(true));
+            assert_eq!(result, Ok(Ok(())));
             assert_eq!(game.dropped.len(), dropped_before);
             assert_eq!(
                 inventory(game),
@@ -669,7 +734,7 @@ pub(super) mod tests {
                 game.transaction(|host, tx| {
                     Ok::<_, ()>(slot.edit(host, tx, |stack| stack.set_count(15).unwrap()))
                 }),
-                Ok(false)
+                Ok(Err(ItemPlaceEditError::CountChanged))
             );
             assert_eq!(inventory(game), expected);
             let stone = ItemStack::new("minecraft:stone", 16)
@@ -679,7 +744,7 @@ pub(super) mod tests {
                 game.transaction(|host, tx| {
                     Ok::<_, ()>(slot.edit(host, tx, |stack| *stack = stone))
                 }),
-                Ok(false)
+                Ok(Err(ItemPlaceEditError::ItemChanged))
             );
             assert_eq!(inventory(game), expected);
             assert_eq!(game.inventory, host_before);
@@ -692,7 +757,7 @@ pub(super) mod tests {
                 game.transaction(|host, tx| {
                     Ok::<_, ()>(empty.edit(host, tx, |_| panic!("empty place ran editor")))
                 }),
-                Ok(false)
+                Ok(Err(ItemPlaceEditError::NotHeld))
             );
             assert_eq!(inventory(game), expected);
             assert_eq!(game.dropped.len(), dropped_before);
@@ -725,9 +790,12 @@ pub(super) mod tests {
             let original_stack = before[3].as_ref().unwrap().try_into_api().unwrap();
             assert_eq!(
                 game.transaction(|host, tx| {
-                    assert!(slot.edit(host, tx, |stack| {
-                        stack.copy_component_from(&source, "minecraft:custom_name");
-                    }));
+                    assert!(
+                        slot.edit(host, tx, |stack| {
+                            stack.copy_component_from(&source, "minecraft:custom_name");
+                        })
+                        .is_ok()
+                    );
                     assert_eq!(slot.stack(host), Some(expected_stack.clone()));
                     Err::<(), ()>(())
                 }),
@@ -739,9 +807,12 @@ pub(super) mod tests {
             assert_eq!(
                 game.transaction(|host, _| {
                     let child = host.transaction(|host, tx| {
-                        assert!(slot.edit(host, tx, |stack| {
-                            stack.copy_component_from(&source, "minecraft:custom_name");
-                        }));
+                        assert!(
+                            slot.edit(host, tx, |stack| {
+                                stack.copy_component_from(&source, "minecraft:custom_name");
+                            })
+                            .is_ok()
+                        );
                         Err::<(), ()>(())
                     });
                     assert_eq!(child, Err(()));
@@ -996,6 +1067,47 @@ pub(super) mod tests {
             0.0,
         ));
         30
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn worn_component_edit_is_quiet_and_reaches_tracking() {
+        use mod_api::EquipmentSlot;
+        use sunrise_client::lan::entity::States;
+        with_game(|game| {
+            open_to_lan(game);
+            let id = zombie(game);
+            let living = game.living(game.entity(id).unwrap()).unwrap();
+            let slot = EquipmentSlot::Chest;
+            let armor = ItemStack::new("minecraft:diamond_chestplate", 1);
+            assert!(game.living_set_equipment(living, slot, Some(armor)));
+            game.mobs[0].first_tick = false;
+            game.audio.capture = Some(Vec::new());
+            let place = ItemPlace::Equipment { entity: id, slot };
+            super::super::dispense_fixture::start_recording();
+            game.transaction(|host, tx| place.edit(host, tx, |stack| stack.set_damage(7)))
+                .unwrap();
+            assert!(game.audio.capture.as_ref().unwrap().is_empty());
+            assert!(super::super::dispense_fixture::stop_recording().is_empty());
+
+            let mut tracked = States::default();
+            game.lan_entities(&mut tracked, false, 0, None);
+            let mob = tracked
+                .as_slice()
+                .iter()
+                .find(|state| state.id == id as i32)
+                .unwrap();
+            let (_, network) = mob
+                .equipment
+                .iter()
+                .find(|(i, _)| *i == slot as u8)
+                .unwrap();
+            let hub = &game.lan.as_ref().unwrap().hub;
+            let received = hub.stack_from_network(network.as_ref().unwrap());
+            assert_eq!(received.item.as_ref(), "minecraft:diamond_chestplate");
+            assert_eq!(received.count, 1);
+            assert_eq!(received.damage, 7);
+        });
     }
 
     /// A living entity's [`ENTITY_ITEMS`] is its equipment (#932): seven slots by
