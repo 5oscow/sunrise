@@ -108,6 +108,19 @@ TOOL = "cargo-sunrise-mod"
 TOOL_PROGRAM = TOOL + (".exe" if sys.platform == "win32" else "")
 
 
+LAUNCHER_FILES = ("src/game_app.rs", "assets/icons/sunrise.icns")  # game_app.rs include_bytes!es the icon
+
+
+def fetch_launcher_files(destination: Path, pin: str, fetch=lambda url: urllib.request.urlopen(url, timeout=60).read()) -> Path:
+    """The files of the bundle preparation at the sunrise-launcher commit `pin`, in their own layout under `destination`
+    (game_app.rs reads the icon by the relative path ../assets/icons/)."""
+    for name in LAUNCHER_FILES:
+        target = destination / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(fetch(f"https://raw.githubusercontent.com/sunrise-org/sunrise-launcher/{pin}/{name}"))
+    return destination
+
+
 def run(command: list[str], **kwargs) -> str:
     print("+", " ".join(command), flush=True)
     return subprocess.run(command, check=True, text=True, stdout=subprocess.PIPE, **kwargs).stdout
@@ -792,10 +805,7 @@ def start(out: Path) -> None:
                 # sunrise-launcher commit pinned in tools/ci/launcher-pin.
                 bundle_source = scratch / "bundle.rs"
                 pin = (ROOT / "tools/ci/launcher-pin").read_text().strip()
-                game_app = scratch / "game_app.rs"
-                game_app.write_bytes(urllib.request.urlopen(
-                    f"https://raw.githubusercontent.com/sunrise-org/sunrise-launcher/{pin}/src/game_app.rs",
-                    timeout=60).read())
+                game_app = fetch_launcher_files(scratch / "launcher", pin) / "src/game_app.rs"
                 module = json.dumps(str(game_app))
                 bundle_source.write_text(
                     'mod i18n { pub fn tr(s: &str) -> &str { s } }\n'

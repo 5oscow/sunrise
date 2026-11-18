@@ -798,6 +798,14 @@ if __name__ == "__main__":
 
 
 class SmokeStartTests(unittest.TestCase):
+    def test_launcher_files_fetched_at_the_pin_keep_the_layout_that_includes_the_icon(self):
+        urls = []
+        with tempfile.TemporaryDirectory() as directory:
+            root = prebuilt_game.fetch_launcher_files(Path(directory), "a" * 40, lambda url: urls.append(url) or b"x")
+            self.assertTrue((root / "src/game_app.rs").is_file())
+            self.assertTrue((root / "src/../assets/icons/sunrise.icns").is_file())
+        self.assertTrue(all("/sunrise-launcher/" + "a" * 40 + "/" in url for url in urls))
+
     def test_only_expected_missing_resources_exit_is_accepted_and_homes_are_scratch(self):
         from types import SimpleNamespace
         for code in (1, 0, 2, 3221225477):
