@@ -34,7 +34,6 @@ whitelist = true             # only whitelisted players and operators can join
 enforce_whitelist = false    # kick online players taken off the whitelist
 view_distance = 10           # chunks sent around each player
 simulation_distance = 10     # chunks around each player where mobs, crops and redstone tick
-max_view_distance = 0        # past view_distance, saved chunks only, up to this (never generated; 0: off)
 max_viewed_loaded_chunks = 2048             # chunks a mod may keep loaded for one player in another level (0: none; at most 4489, higher values lowered with a warning; an older Sunrise client gets at most 2048)
 max_viewed_ticking_chunks = 441             # of them, ticking (one player's simulation area at distance 10)
 max_viewed_loaded_chunks_per_level = 16384  # the same for all players together, per level
@@ -109,7 +108,6 @@ pub const TYPED: [(&str, &str, &str); 20] = [
     ("server", "enforce_whitelist", "enforce-whitelist"),
     ("server", "view_distance", "view-distance"),
     ("server", "simulation_distance", "simulation-distance"),
-    ("server", "max_view_distance", "sunrise-max-view-distance"),
     (
         "server",
         "max_viewed_loaded_chunks",
@@ -240,8 +238,6 @@ pub struct Server {
     pub enforce_whitelist: bool,
     pub view_distance: u32,
     pub simulation_distance: u32,
-    /// Sunrise's far ring (docs/hosting.md): saved chunks sent past `view_distance`, up to this; 0 is off.
-    pub max_view_distance: u32,
     /// Viewed levels (docs/hosting.md): the chunks mods may keep loaded for one player in one other
     /// level (at most 4489 columns; a higher value is lowered with a warning, and an older
     /// Sunrise client gets at most 2048), the ticking ones among them, and the same for all
@@ -512,7 +508,6 @@ impl Default for Server {
             enforce_whitelist: false,
             view_distance: 10,
             simulation_distance: 10,
-            max_view_distance: 0,
             max_viewed_loaded_chunks: 2048,
             max_viewed_ticking_chunks: 441,
             max_viewed_loaded_chunks_per_level: 2048 * 8,
@@ -553,6 +548,17 @@ impl Default for Backups {
     }
 }
 
+/// `text` without `server.max_view_distance`, which every `init` wrote before the far ring was
+/// removed, or `None` when it has none.
+fn without_far_ring(text: &str) -> Option<String> {
+    let mut doc: toml_edit::DocumentMut = text.parse().ok()?;
+    doc.get_mut("server")?
+        .as_table_like_mut()?
+        .remove("max_view_distance")?;
+    eprintln!("server.toml: server.max_view_distance is no longer read; view_distance reaches 32");
+    Some(doc.to_string())
+}
+
 fn text_or_number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
     #[derive(Deserialize)]
     #[serde(untagged)]
@@ -584,6 +590,8 @@ const ENTITIES_REMOVED: &str = "the mob settings dab, villager_lobotomize and ma
 
 impl Config {
     pub fn parse(text: &str) -> Result<Self, String> {
+        let stripped = without_far_ring(text);
+        let text = stripped.as_deref().unwrap_or(text);
         let config: Self = toml::from_str(text).map_err(|e| {
             let table = toml::from_str::<toml::Table>(text).unwrap_or_default();
             REMOVED_SECTIONS
@@ -1078,6 +1086,17 @@ mod tests {
         assert_eq!(render(&Config::default()), TEMPLATE);
     }
 
+    /// A server.toml from before the far ring was removed still loads, its `max_view_distance` unread.
+    #[test]
+    fn an_old_max_view_distance_is_ignored() {
+        let old = TEMPLATE.replace(
+            "simulation_distance = 10 ",
+            "max_view_distance = 24\nsimulation_distance = 10 ",
+        );
+        assert_ne!(old, TEMPLATE);
+        assert_eq!(Config::parse(&old).unwrap(), Config::default());
+    }
+
     /// `[transfer]` is off by default, passes nothing to the game then, and is checked when it is read.
     #[test]
     fn transfers_are_off_by_default_and_checked() {
@@ -1313,8 +1332,8 @@ keep_files = ["sunrise-smp/claims.json", "sunrise-smp/places.json"]
             ServerProperties::new(Properties::default(), &mut SystemEntropy::default()).unwrap();
         for (key, value) in Config::default().vanilla() {
             // Sunrise's own, which vanilla doesn't have: their defaults behave as vanilla does
-            // (the far ring off, operators told of each other's commands, and caps on viewed areas,
-            // which only a mod asks for).
+            // (operators told of each other's commands, and caps on viewed areas, which only a
+            // mod asks for).
             if key.starts_with("sunrise-") {
                 let vanilla_like = match key.as_str() {
                     "sunrise-admin-feedback-to-ops" => "true",
