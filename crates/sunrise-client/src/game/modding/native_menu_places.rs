@@ -378,6 +378,10 @@ impl Game<'_> {
         if !(pickup || mode == 1) || (count..size).contains(&at) || at >= size + 36 {
             return false;
         }
+        // Backing handles can still address hidden slots; an engine click cannot.
+        if hidden.contains(&at) {
+            return true;
+        }
         let inventory = native_menu_inventory_slot(size, slot);
         // The held backpack's own slot takes no click, so it can't go into itself.
         if inventory.is_none() || inventory != locked {
@@ -851,6 +855,7 @@ mod tests {
 
     /// #1172: a menu `player_open_mod_menu` opens keeps its handle and backing, and a
     /// shift-click on the server passes over the slot its screen hid at open.
+    /// Neither pickup nor shift-click can move an item out of the hidden slot.
     #[test]
     #[ignore = "daily"]
     fn a_code_opened_menus_shift_click_skips_the_slots_its_screen_hides() {
@@ -932,5 +937,28 @@ mod tests {
         assert_eq!(held_slot(0).amount(host), 0);
         assert_eq!(held_slot(1).amount(host), 64);
         assert_eq!(ItemPlace::MenuSlot { menu, slot: 1 }.amount(host), 64);
+
+        // A deliberate write through the menu handle still reaches its hidden backing.
+        let hidden = ItemPlace::MenuSlot { menu, slot: 0 };
+        let stone = ItemPlace::MenuSlot { menu, slot: 1 }
+            .resource(host)
+            .unwrap();
+        assert_eq!(
+            host.transaction(|host, tx| Ok::<_, ()>(hidden.insert(host, tx, &stone, 5))),
+            Ok(5)
+        );
+        assert_eq!(held_slot(0).amount(host), 5);
+        let contents = |game: &mut Game<'_>| {
+            (0..45)
+                .map(|slot| ItemPlace::MenuSlot { menu, slot }.stack(game))
+                .collect::<Vec<_>>()
+        };
+        let before = contents(game);
+        for mode in [0, 1] {
+            assert!(game.place_menu_click(123, window, 0, 0, mode));
+            assert_eq!(contents(game), before);
+            assert_eq!(menu.cursor().stack(game), None);
+            assert_eq!(held_slot(0).amount(game), 5);
+        }
     }
 }
