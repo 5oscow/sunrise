@@ -1,4 +1,12 @@
 use super::*;
+
+pub(super) struct StagedWorldTables {
+    pub(super) tables: Option<WorldTables>,
+    pub(super) advancements: Arc<sunrise_client::advancements::Tree>,
+    pub(super) health: sunrise_client::health::HealthResources,
+    pub(super) datapack_registries: Option<mod_api::DatapackRegistrySet>,
+}
+
 pub(super) struct PreparedWorldReload {
     pub(super) structure_spawns: sunrise_client::mobs::spawn_selection::StructureSpawns,
     pub(super) advancements: Arc<sunrise_client::advancements::Tree>,
@@ -9,35 +17,6 @@ pub(super) struct PreparedWorldReload {
     pub(super) datapack_registries: Option<mod_api::DatapackRegistrySet>,
 }
 
-pub(super) fn registry_versions(
-    versions: Vec<(String, Vec<u8>)>,
-    conditions: &sunrise_world::conditions::LoadConditions,
-    path: &str,
-) -> Vec<(String, Vec<u8>)> {
-    // Keep the existing built-in-only selection behavior. Registered callbacks
-    // must never run on losing ordinary registry definitions.
-    let versions = if conditions.has_registered() {
-        versions.into_iter().next_back().into_iter().collect()
-    } else {
-        versions
-    };
-    versions
-        .into_iter()
-        .filter_map(|(pack, bytes)| {
-            // The candidate refuses oversized entries without parsing them.
-            if bytes.len() > mod_api::MAX_DATAPACK_ENTRY_BYTES {
-                return Some((pack, bytes));
-            }
-            let Ok(json) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
-                return Some((pack, bytes));
-            };
-            if !conditions.allows_file(&json, path) {
-                return None;
-            }
-            Some((pack, bytes))
-        })
-        .collect()
-}
 #[cfg(test)]
 mod tests {
     use super::*;

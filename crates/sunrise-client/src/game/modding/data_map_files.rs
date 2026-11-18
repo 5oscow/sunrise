@@ -115,7 +115,7 @@ fn decode<T>(
     let mut values = Vec::new();
     for (key, raw) in raw.values {
         let key = Key::decode(&key)?;
-        if !conditions.allows_file(&raw, context) {
+        if !conditions.allows_file_isolated(&raw, context)? {
             continue;
         }
         if let Some(value) = value(&raw)? {
@@ -155,15 +155,20 @@ fn merge_versions<T: Clone>(
     let wanted = format!("data_maps/{namespace}:{directory}/{path}");
     let mut applied = false;
     if let Some((_, versions)) = overlay.files.iter().find(|(key, _)| *key == wanted) {
-        for bytes in versions {
-            let prepared = prepare(bytes, &wanted);
-            match prepared {
+        for (layer, bytes) in versions.iter().enumerate() {
+            let source = format!(
+                "data/{namespace}/data_maps/{directory}/{path}.json (layer {})",
+                layer + 1
+            );
+            match prepare(bytes, &source) {
                 Ok(Some(file)) => {
-                    file.apply(&mut map, tags, &known, &wanted);
+                    file.apply(&mut map, tags, &known, &source);
                     applied = true;
                 }
                 Ok(None) => {}
-                Err(error) => log::warn!("Sunrise: {id} ({directory}): file skipped: {error}"),
+                Err(error) => log::error!(
+                    "Sunrise: data map {id} on minecraft:{directory}: {source}: file skipped: {error}"
+                ),
             }
         }
     }
@@ -217,7 +222,7 @@ fn allows_raw(
         return Ok(true);
     };
     let value: Value = serde_json::from_str(raw.get()).map_err(|error| error.to_string())?;
-    Ok(conditions.allows_file(&serde_json::json!({"neoforge:conditions": value}), context))
+    conditions.allows_file_isolated(&serde_json::json!({"neoforge:conditions": value}), context)
 }
 fn scalar(raw: Box<RawValue>, field: &str) -> Result<Box<RawValue>, String> {
     if !raw.get().trim_start().starts_with('{') {

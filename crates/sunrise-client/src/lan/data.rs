@@ -206,6 +206,25 @@ fn walk(dir: &Path, out: &mut BTreeMap<String, Value>, enchantment: bool) {
     }
 }
 
+fn synchronized_root_entries(
+    root: &Path,
+    resources: &Path,
+    key: &str,
+) -> Vec<((String, String), Value, bool)> {
+    let path = key.trim_start_matches("minecraft:");
+    let enchantments = key == "minecraft:enchantment";
+    let mut found = BTreeMap::new();
+    walk(&root.join(path), &mut found, enchantments);
+    let mut entries: Vec<_> = found
+        .into_iter()
+        .map(|(id, value)| (("minecraft".to_owned(), id), value, false))
+        .collect();
+    if enchantments {
+        mod_entries(resources, path, &mut entries);
+    }
+    entries
+}
+
 /// A synchronized registry's entries from the world's data packs (`<dir>/`
 /// files, the top pack's for each id) over the game's own. Each entry is
 /// ((namespace, path), JSON, from a pack); `file_order` sorts them.
@@ -313,6 +332,22 @@ pub fn component_nbt(v: &Value) -> Tag {
 }
 
 impl SyncData {
+    /// Accumulate the lazy synchronized registries' condition errors during
+    /// world staging, not on the first connection. Enchantments are checked by
+    /// the world table loader.
+    pub fn stage_pack_conditions(resources: &Path, overlay: &sunrise_world::loot::PackOverlay<'_>) {
+        let root = resources.join("data/minecraft");
+        for &key in PACK_REGISTRIES {
+            if key == "minecraft:enchantment" {
+                continue;
+            }
+            let path = key.trim_start_matches("minecraft:");
+            let mut entries = synchronized_root_entries(&root, resources, key);
+            pack_entries(path, overlay, &mut entries);
+            condition_filter::filter(&mut entries, false, overlay.conditions, path);
+        }
+    }
+
     /// No registries, tags or recipes: enough for tests of the login phase.
     pub fn empty() -> Self {
         Self {
@@ -480,19 +515,7 @@ impl SyncData {
                 continue;
             }
             let path = key.trim_start_matches("minecraft:");
-            let mut found = BTreeMap::new();
-            walk(
-                &root.join(path),
-                &mut found,
-                *key == "minecraft:enchantment",
-            );
-            let mut entries: Vec<_> = found
-                .into_iter()
-                .map(|(p, v)| (("minecraft".to_owned(), p), v, false))
-                .collect();
-            if *key == "minecraft:enchantment" {
-                mod_entries(resources, path, &mut entries);
-            }
+            let mut entries = synchronized_root_entries(&root, resources, key);
             let mut damage_entries = None;
             if *key == "minecraft:damage_type" {
                 // Validate the actual resource bytes before publishing any
@@ -684,6 +707,7 @@ impl SyncData {
                 &sources.property_additions,
             )
         });
+        overlay.conditions.check_errors()?;
         Ok(sync)
     }
 

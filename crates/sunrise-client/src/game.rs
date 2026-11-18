@@ -6408,7 +6408,8 @@ impl Game<'_> {
         self.end.set_locator(locator);
         self.share_spawn_conditions();
         self.score = Default::default();
-        let stack = self.open_world_datapacks(&level.enabled_features)?;
+        reset_world_progress(&mut self.adv, &mut self.stats);
+        self.open_world_datapacks(&level.enabled_features)?;
         let root = self.options.resources.clone();
         self.damage_tag_generation = self.damage_tag_generation.wrapping_add(1);
         self.resolve_parts()?;
@@ -6441,8 +6442,6 @@ impl Game<'_> {
         self.announce_data_bound(mod_api::TagsUpdateCause::ServerDataLoad { reload: false });
         self.announce_data_maps_updated(mod_api::DataMapsUpdateCause::ServerReload);
         self.sync_recipe_content();
-        reset_world_progress(&mut self.adv, &mut self.stats);
-        self.prefetch_advancement_tree(&stack);
         self.restore_player_state = true;
         self.rand_sequences = rand_sequences;
         // ServerLevel.getWorldBorder: the level in place reads its own saved

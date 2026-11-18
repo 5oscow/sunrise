@@ -279,6 +279,16 @@ impl Game<'_> {
         } else {
             None
         };
+        let initial = if opening_world {
+            // This load warns again about saved attribute bases clamped to their bounds (#3728).
+            sunrise_client::living_attributes::LOAD_CLAMPS.begin_load();
+            Some(
+                self.stage_world_tables(&stack, false, &resources)
+                    .map_err(|error| ReloadStageError::DataSource(error.to_string()))?,
+            )
+        } else {
+            None
+        };
         if let Some(world) = &world {
             prepared.bind_loot(world);
         }
@@ -305,8 +315,8 @@ impl Game<'_> {
         // also install its tables before function admission validates inline holders.
         if let Some(world) = world {
             self.install_world_tables(world);
-        } else if opening_world {
-            self.open_world_tables(&stack, &resources)
+        } else if let Some(initial) = initial {
+            self.open_world_tables(initial)
                 .map_err(|error| ReloadStageError::DataSource(error.to_string()))?;
         }
         self.build_native_commands(enabled_features);

@@ -768,13 +768,12 @@ fn resource_id(file: &str, kind: &str, ext: &str) -> Option<String> {
 pub fn registry_files(
     packs: &[&DataPack],
     registries: &[(&str, &str)],
-    fallback: bool,
-    mut accepts: impl FnMut(&str, &str, &[u8]) -> bool,
+    mut accepts: impl FnMut(&str, &[u8]) -> bool,
 ) -> Result<BTreeMap<String, Vec<(String, Vec<u8>)>>, Box<mod_api::DatapackLoadError>> {
     let mut kinds: Vec<&str> = registries.iter().map(|(namespace, _)| *namespace).collect();
     kinds.sort_unstable();
     kinds.dedup();
-    let mut sources: BTreeMap<String, Vec<&DataPack>> = BTreeMap::new();
+    let mut sources = BTreeMap::new();
     for pack in packs {
         for file in pack.list_kinds(&kinds) {
             let in_registry = file
@@ -790,54 +789,49 @@ pub fn registry_files(
                         })
                 });
             if in_registry {
-                sources.entry(file).or_default().push(pack);
+                sources.insert(file, pack);
             }
         }
     }
     let mut files = BTreeMap::new();
     let mut total = 0;
-    for (file, packs) in sources {
-        for pack in packs.into_iter().rev() {
-            // Read at most the custom-registry limit plus a refusal byte, including
-            // decompressed output. No losing payload remains resident.
-            let bytes = pack
-                .source
-                .read_head(&file, mod_api::MAX_DATAPACK_ENTRY_BYTES as u64 + 1)
-                .unwrap_or_default();
-            let oversized = bytes.len() > mod_api::MAX_DATAPACK_ENTRY_BYTES;
-            if oversized || accepts(&file, &pack.id, &bytes) {
-                total += bytes.len();
-                if !oversized && total > mod_api::MAX_SNAPSHOT_BYTES {
-                    let (namespace, path) = registries
-                        .iter()
-                        .find(|(namespace, path)| {
-                            file.splitn(3, '/').nth(2).is_some_and(|rest| {
-                                rest.starts_with(&format!("{namespace}/{path}/"))
-                            })
-                        })
-                        .expect("listed custom registry file");
-                    let rest = file.strip_prefix("data/").unwrap();
-                    let (entry_namespace, rest) = rest.split_once('/').unwrap();
-                    let entry = rest
-                        .strip_prefix(&format!("{namespace}/{path}/"))
-                        .unwrap()
-                        .strip_suffix(".json")
-                        .unwrap();
-                    return Err(Box::new(mod_api::DatapackLoadError {
-                        registry: format!("{namespace}:{path}"),
-                        entry: format!("{entry_namespace}:{entry}"),
-                        file,
-                        pack: pack.id.clone(),
-                        reason: mod_api::DatapackLoadReason::CandidateTooLarge,
-                    }));
-                }
-                files.insert(file.clone(), vec![(pack.id.clone(), bytes)]);
-                break;
-            }
-            if !fallback {
-                break;
-            }
+    for (file, pack) in sources {
+        // Read at most the custom-registry limit plus a refusal byte, including
+        // decompressed output. A rejected winner never reveals a lower file.
+        let bytes = pack
+            .source
+            .read_head(&file, mod_api::MAX_DATAPACK_ENTRY_BYTES as u64 + 1)
+            .unwrap_or_default();
+        let oversized = bytes.len() > mod_api::MAX_DATAPACK_ENTRY_BYTES;
+        if !oversized && !accepts(&file, &bytes) {
+            continue;
         }
+        total += bytes.len();
+        if !oversized && total > mod_api::MAX_SNAPSHOT_BYTES {
+            let (namespace, path) = registries
+                .iter()
+                .find(|(namespace, path)| {
+                    file.splitn(3, '/')
+                        .nth(2)
+                        .is_some_and(|rest| rest.starts_with(&format!("{namespace}/{path}/")))
+                })
+                .expect("listed custom registry file");
+            let rest = file.strip_prefix("data/").unwrap();
+            let (entry_namespace, rest) = rest.split_once('/').unwrap();
+            let entry = rest
+                .strip_prefix(&format!("{namespace}/{path}/"))
+                .unwrap()
+                .strip_suffix(".json")
+                .unwrap();
+            return Err(Box::new(mod_api::DatapackLoadError {
+                registry: format!("{namespace}:{path}"),
+                entry: format!("{entry_namespace}:{entry}"),
+                file,
+                pack: pack.id.clone(),
+                reason: mod_api::DatapackLoadReason::CandidateTooLarge,
+            }));
+        }
+        files.insert(file, vec![(pack.id.clone(), bytes)]);
     }
     Ok(files)
 }

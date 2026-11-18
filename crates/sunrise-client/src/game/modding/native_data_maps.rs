@@ -186,20 +186,20 @@ fn full_id(id: &str) -> String {
 /// carry `neoforge:conditions` (`WithConditions`): a value whose conditions
 /// fail is no value. `replace` only matters to mergers, which types don't have
 /// yet: a newer value overrides.
-fn entry_value(
-    raw: &Value,
+fn entry_value<'a>(
+    raw: &'a Value,
     conditions: &sunrise_world::conditions::LoadConditions,
     path: &str,
-) -> Option<Value> {
+) -> Result<Option<&'a Value>, String> {
     if let Value::Object(map) = raw
         && let Some(value) = map.get("value")
         && map.iter().all(|(k, v)| {
             k == "value" || k == "neoforge:conditions" || (k == "replace" && v.is_boolean())
         })
     {
-        return conditions.allows_file(raw, path).then(|| value.clone());
+        return Ok(conditions.allows_file_isolated(raw, path)?.then_some(value));
     }
-    (!raw.is_null()).then(|| raw.clone())
+    Ok((!raw.is_null()).then_some(raw))
 }
 
 /// One file over what earlier files made of the type: `replace` clears it,
@@ -212,13 +212,18 @@ fn apply_file(
     registries: &dyn MapRegistries,
     conditions: &sunrise_world::conditions::LoadConditions,
     path: &str,
-) -> bool {
-    let (Some(root), Some(values)) = (file.as_object(), file.get("values")) else {
-        return false;
-    };
-    let Some(values) = values.as_object() else {
-        return false;
-    };
+) -> Result<(), String> {
+    let root = file.as_object().ok_or("not a data map object")?;
+    let values = file["values"]
+        .as_object()
+        .ok_or("missing data map values")?;
+    // Finish decoding the entire layer before replace, removals or inserts.
+    let mut decoded = Vec::new();
+    for (key, raw) in values {
+        if let Some(value) = entry_value(raw, conditions, path)? {
+            decoded.push((key, value));
+        }
+    }
     if root.get("replace").and_then(Value::as_bool) == Some(true) {
         map.clear();
     }
@@ -247,10 +252,7 @@ fn apply_file(
             }
         }
     };
-    for (key, raw) in values {
-        let Some(value) = entry_value(raw, conditions, path) else {
-            continue;
-        };
+    for (key, value) in decoded {
         for entry in members(key) {
             map.insert(entry, value.clone());
         }
@@ -273,7 +275,7 @@ fn apply_file(
             unknown.into_iter().collect::<Vec<_>>().join(", ")
         );
     }
-    true
+    Ok(())
 }
 
 impl DataMaps {
@@ -326,25 +328,32 @@ impl DataMaps {
                 continue;
             }
             let (ns, path) = ty.id.split_once(':').unwrap_or_default();
-            let wanted = format!("data_maps/{ns}:{}/{path}", folder(&ty.registry));
+            let directory = folder(&ty.registry);
+            let wanted = format!("data_maps/{ns}:{directory}/{path}");
             let mut map = BTreeMap::new();
             if let Some((_, versions)) = overlay.files.iter().find(|(k, _)| *k == wanted) {
-                for bytes in versions {
-                    let file = serde_json::from_slice::<Value>(bytes).ok();
-                    let applied = file.is_some_and(|file| {
-                        apply_file(
-                            &mut map,
-                            &file,
-                            &ty.registry,
-                            registries,
-                            overlay.conditions,
-                            &wanted,
-                        )
-                    });
-                    if !applied {
-                        log::warn!(
-                            "Sunrise: a data map file of {} is not a data map, skipped",
-                            ty.id
+                for (layer, bytes) in versions.iter().enumerate() {
+                    let source = format!(
+                        "data/{ns}/data_maps/{directory}/{path}.json (layer {})",
+                        layer + 1
+                    );
+                    let prepared = serde_json::from_slice::<Value>(bytes)
+                        .map_err(|error| error.to_string())
+                        .and_then(|file| {
+                            apply_file(
+                                &mut map,
+                                &file,
+                                &ty.registry,
+                                registries,
+                                overlay.conditions,
+                                &source,
+                            )
+                        });
+                    if let Err(error) = prepared {
+                        log::error!(
+                            "Sunrise: data map {} on {}: {source}: file skipped: {error}",
+                            ty.id,
+                            ty.registry
                         );
                     }
                 }

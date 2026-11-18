@@ -277,6 +277,7 @@ pub(super) fn load_world_rest(
             }),
         )
     };
+    conditions.check_errors()?;
     let (items, recipes, stations) = items?;
     let (animate, fog) = animate?;
     let (mob_types, mob_data) = mobs?;

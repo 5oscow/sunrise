@@ -226,11 +226,7 @@ impl Game<'_> {
         stack: &functions::PackStack,
         reload: bool,
         root: &std::path::Path,
-    ) -> Result<(
-        Option<WorldTables>,
-        sunrise_client::health::HealthResources,
-        Option<mod_api::DatapackRegistrySet>,
-    )> {
+    ) -> Result<super::condition_reload_state::StagedWorldTables> {
         let phase = self.mod_phase.clone();
         let _reload = phase
             .reloading()
@@ -271,7 +267,6 @@ impl Game<'_> {
             self.res.item_defaults(),
         )?;
         class_tags::install(&mut items, self.res.facts());
-        api_values::resolve_enchantment_registry(&items)?;
         // Item damage predicates use the same frozen registry as player hurt.
         Arc::make_mut(&mut items.enchantments).bind_damage_catalog(&health.damage);
         items.bind_component_damage_catalog(&health.damage);
@@ -288,6 +283,10 @@ impl Game<'_> {
             conditions: &conditions,
             files: &files,
         };
+        if !reload {
+            // These synchronized registries are normally decoded only when a peer joins.
+            sunrise_client::lan::data::SyncData::stage_pack_conditions(root, &overlay);
+        }
         // The recipe tables, the stations and the recipe book read one folder:
         // hold its files so it is read once.
         let _recipe_files = sunrise_client::json_folder::read(&root.join("data/minecraft/recipe"));
@@ -438,6 +437,14 @@ impl Game<'_> {
             &overlay,
             self.res.core.item_data.defaults(),
         )?;
+        let advancements = Arc::new(sunrise_client::advancements::Tree::load_with(
+            &root.join("data"),
+            &overlay,
+        ));
+        conditions.check_errors()?;
+        // The API's key order is live state as well: do not change it for a
+        // candidate refused by the condition readers.
+        api_values::resolve_enchantment_registry(&items)?;
         let context = lan::sync::server_data_load(root, &self.res.core.item_data)?;
         if !mod_api::__private::mods().is_empty() {
             loot.apply_native_table_loads(&context)?;
@@ -453,10 +460,9 @@ impl Game<'_> {
         )?;
         loot.set_global_modifiers(modifiers);
         items.set_loot_data(&loot);
-        conditions.check_errors()?;
         let loot = Arc::new(loot);
-        Ok((
-            Some(WorldTables {
+        Ok(super::condition_reload_state::StagedWorldTables {
+            tables: Some(WorldTables {
                 conditions,
                 suffocation,
                 files,
@@ -469,9 +475,10 @@ impl Game<'_> {
                 data_maps,
                 pack_tags,
             }),
+            advancements,
             health,
             datapack_registries,
-        ))
+        })
     }
     /// The entries of the mods' datapack registries in the winning pack files: decoded with
     /// each registry's schema and checked as one candidate, so a bad entry fails the load
@@ -495,27 +502,20 @@ impl Game<'_> {
         let packs: Vec<_> = std::iter::once(&stack.content)
             .chain(stack.enabled_packs())
             .collect();
-        let files: Vec<_> = sunrise_client::datapack::registry_files(
-            &packs,
-            &keys,
-            !conditions.has_registered(),
-            |path, pack, bytes| {
-                !super::condition_reload_state::registry_versions(
-                    vec![(pack.to_owned(), bytes.to_vec())],
-                    conditions,
-                    path,
+        let files: Vec<_> =
+            sunrise_client::datapack::registry_files(&packs, &keys, |path, bytes| {
+                // Malformed JSON is kept for the registry's own decode diagnostic.
+                serde_json::from_slice::<serde_json::Value>(bytes)
+                    .map_or(true, |json| conditions.allows_file(&json, path))
+            })
+            .map_err(|error| {
+                format!(
+                    "datapack registry {} entry {} (pack {}, file {}): {:?}",
+                    error.registry, error.entry, error.pack, error.file, error.reason
                 )
-                .is_empty()
-            },
-        )
-        .map_err(|error| {
-            format!(
-                "datapack registry {} entry {} (pack {}, file {}): {:?}",
-                error.registry, error.entry, error.pack, error.file, error.reason
-            )
-        })?
-        .into_iter()
-        .collect();
+            })?
+            .into_iter()
+            .collect();
         mod_api::DatapackCandidate::build(declarations, &files)
             .map(Some)
             .map_err(|error| {
@@ -529,15 +529,13 @@ impl Game<'_> {
     /// A world open's tables, and the first generation of the registries the mods declared.
     pub(super) fn open_world_tables(
         &mut self,
-        stack: &functions::PackStack,
-        root: &std::path::Path,
+        staged: super::condition_reload_state::StagedWorldTables,
     ) -> Result<()> {
-        // A new world load: a saved base clamped into its bounds warns again (#3728).
-        sunrise_client::living_attributes::LOAD_CLAMPS.begin_load();
-        let (tables, health, registries) = self.stage_world_tables(stack, false, root)?;
-        self.world_tables = tables;
-        self.health_resources = health;
-        self.mods.datapack_registries = registries.map(Arc::new);
+        self.world_tables = staged.tables;
+        self.health_resources = staged.health;
+        self.mods.datapack_registries = staged.datapack_registries.map(Arc::new);
+        self.adv.tree = staged.advancements;
+        self.adv.reset_tree();
         self.load_server_loot();
         self.data_map_registries = self
             .world_tables
@@ -776,7 +774,12 @@ impl Game<'_> {
         stack: &functions::PackStack,
         root: &std::path::Path,
     ) -> Result<PreparedWorldReload> {
-        let (tables, health, datapack_registries) = self.stage_world_tables(stack, true, root)?;
+        let super::condition_reload_state::StagedWorldTables {
+            tables,
+            advancements,
+            health,
+            datapack_registries,
+        } = self.stage_world_tables(stack, true, root)?;
         let items = tables
             .as_ref()
             .map_or_else(|| self.res.items(), |tables| &tables.items);
@@ -816,10 +819,6 @@ impl Game<'_> {
         } else {
             None
         };
-        let advancements = Arc::new(sunrise_client::advancements::Tree::load_with(
-            &root.join("data"),
-            &overlay,
-        ));
         overlay.conditions.check_errors()?;
         Ok(PreparedWorldReload {
             advancements,
