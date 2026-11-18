@@ -77,9 +77,13 @@ class LauncherStandalone(unittest.TestCase):
                                  '    let up = PathBuf::from("assets").join("../../README.md");\n'
                                  '    let read = std::fs::read(std::path::PathBuf::new().join("../README.md"));\n'
                                  '    let here = PathBuf::new().join("assets").join("icon.png");\n}\n',
+            "launcher/crates/b/Cargo.toml": "[package]\nname = 'b'\n",
+            "launcher/crates/b/build.rs": 'fn main() {\n    println!("cargo:rerun-if-changed=..\\\\..\\\\..\\\\README.md");\n}\n',
             "launcher/src/lib.rs": 'const I: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "\\\\assets\\\\icon.png"));\n',
         })
-        self.assertEqual(sorted(problem.split(":")[1] for problem in found), ["4", "5", "6", "7"], found)
+        self.assertEqual(sorted(problem.split(":")[1] for problem in found if "crates/b" not in problem),
+                         ["4", "5", "6", "7"], found)
+        self.assertTrue(any(p.startswith("launcher/crates/b/build.rs:2:") for p in found), found)
 
     def test_this_repository_launcher_builds_from_its_own_files(self):
         self.assertEqual(guard.problems(guard.ROOT, guard.tracked(guard.ROOT)), [])
