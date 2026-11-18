@@ -310,7 +310,6 @@ impl StatType {
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 pub struct ItemFished {
     /// The bobber's entity id and position.
     pub hook: u32,
@@ -321,7 +320,6 @@ pub struct ItemFished {
 /// The slots an item's attribute modifier applies in (vanilla's
 /// `EquipmentSlotGroup`).
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum EquipmentSlotGroup {
@@ -353,7 +351,6 @@ pub enum EquipmentSlotGroup {
 /// `ItemAttributeModifiers.Entry`): the attribute (`minecraft:armor`), the
 /// modifier, and the slots it applies in.
 #[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq)]
 pub struct ItemAttributeModifier {
@@ -384,9 +381,7 @@ impl ItemAttributeModifier {
 /// edits them (`ItemAttributeModifierEvent`'s list). It starts as the
 /// stack's own `minecraft:attribute_modifiers`, or its item's, in order.
 // exhaustive: its fields are private, so mods only edit it through its methods
-#[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Debug, Default, PartialEq)]
 pub struct ItemAttributeModifiers {
     pub(crate) entries: Vec<ItemAttributeModifier>,
     pub(crate) changed: bool,
@@ -477,9 +472,7 @@ impl ItemAttributeModifiers {
 /// (`minecraft:sharpness`) with its level, in order. Private fields, edited
 /// through methods, so the game knows whether a mod changed them.
 // exhaustive: its fields are private, so mods only edit it through its methods
-#[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Debug, Default, PartialEq, Eq)]
 pub struct ItemEnchantments {
     pub(crate) entries: Vec<(Identifier, u32)>,
     pub(crate) changed: bool,
