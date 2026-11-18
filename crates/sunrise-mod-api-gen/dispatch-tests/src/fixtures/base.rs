@@ -773,7 +773,6 @@ mod stubs {
     pub(super) struct MusicLayer;
     pub(super) struct BlockRim;
     pub(super) struct ColoredLight;
-    pub(super) struct Minimap;
     pub(super) struct PanelEvent;
     pub(super) struct Screen;
     pub(super) struct ModContainer;

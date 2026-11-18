@@ -1690,7 +1690,7 @@ struct Game<'a> {
     pending_bench: Option<(Instant, std::sync::mpsc::Sender<String>, bool)>,
     /// Recent frame times for the performance overlay.
     frame_graph: sunrise_client::perf_overlay::FrameGraph,
-    /// Sunrise's extras (minimap, auto-reconnect; mods' counters): `game/interface/extras.rs`.
+    /// Sunrise's extras (auto-reconnect; mods' counters): `game/interface/extras.rs`.
     extras: extras::ExtrasState,
     /// The PvP & HUD options' state (`game/entities/pvp.rs`).
     pvp: pvp::PvpState,

@@ -3559,16 +3559,6 @@ impl Game<'_> {
         self.native_shader_params(partial, &mut params);
         finite_params(params)
     }
-    /// The minimap a native mod shows.
-    pub(super) fn native_minimap_now(&self) -> Option<mod_api::Minimap> {
-        let mut minimap = None;
-        self.native_minimap(&mut minimap);
-        minimap.map(|m| mod_api::Minimap {
-            size: finite(m.size, 16.0, 256.0),
-            blocks_per_pixel: finite(m.blocks_per_pixel, 0.5, 4.0),
-            ..m
-        })
-    }
 }
 
 /// Whether F3's debug screen, open when `debug`, covers `corner`
