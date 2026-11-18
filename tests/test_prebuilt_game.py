@@ -39,6 +39,31 @@ def write_build_data(root: Path, identity: dict | None = None, commit: str = COM
 
 
 class StageToolTests(unittest.TestCase):
+    def test_stage_sync_only_rewrites_different_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, stage = root / "next", root / "stage"
+            before = {"same": b"unchanged\r\n", "nested/changed": b"old", "stale/removed": b"old",
+                      "file-to-dir": b"old", "dir-to-file/old": b"old"}
+            after = {"same": b"unchanged\r\n", "nested/changed": b"new", "nested/added": b"new",
+                     "file-to-dir/new": b"new", "dir-to-file": b"new"}
+            for folder, files, mtime in ((stage, before, 1000), (source, after, 2000)):
+                for name, data in files.items():
+                    path = folder / name
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(data)
+                    os.utime(path, (mtime, mtime))
+            same, changed = stage / "same", stage / "nested/changed"
+            same_mtime, changed_mtime = same.stat().st_mtime_ns, changed.stat().st_mtime_ns
+
+            prebuilt_game.sync_stage(source, stage)
+
+            self.assertEqual(same.stat().st_mtime_ns, same_mtime)
+            self.assertNotEqual(changed.stat().st_mtime_ns, changed_mtime)
+            self.assertEqual(sorted(prebuilt_game.tree(stage)), sorted(prebuilt_game.tree(source)))
+            self.assertEqual({path.relative_to(stage).as_posix(): path.read_bytes()
+                              for path in stage.rglob("*") if path.is_file()}, after)
+
     def test_prebuilt_tool_stages_fresh_tracked_copy_without_cargo(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -66,23 +91,38 @@ class StageToolTests(unittest.TestCase):
             def capture(command, **kwargs):
                 if command[0] == "git":
                     return real_run(command, **kwargs)
-                calls.append(command)
-                self.assertEqual(command, [str(tool.resolve()), str(target / "stage"),
-                                          str(target / "stage/points.json"),
-                                          str(target / "stage/internals.json"), commit])
-                self.assertEqual(kwargs["cwd"], target / "stage")
+                scratch = kwargs["cwd"]
+                self.assertEqual(scratch.parent, target)
+                self.assertNotEqual(scratch, target / "stage")
+                if command[:2] == ["cargo", "metadata"]:
+                    return json.dumps({"packages": [{"id": "wasm", "name": "sunrise-mod-wasm",
+                        "manifest_path": str(scratch / manifest.relative_to(source)), "targets": [{"kind": ["lib"]}]}],
+                        "resolve": {"nodes": []}})
+                calls.append(scratch)
+                self.assertEqual(command, [str(tool.resolve()), str(scratch), str(scratch / "points.json"),
+                                          str(scratch / "internals.json"), commit])
                 self.assertIsNone(kwargs["env"])
-                self.assertEqual((target / "stage/tracked.rs").read_bytes(), committed)
-                self.assertFalse((target / "stage/untracked.rs").exists())
-                (target / "stage/tracked.rs").write_text("staged")
+                self.assertEqual((scratch / "tracked.rs").read_bytes(), committed)
+                self.assertFalse((scratch / "untracked.rs").exists())
+                (scratch / "tracked.rs").write_text("staged")
                 return "staged fixture\n"
 
             with patch.object(prebuilt_game, "ROOT", source), \
                  patch.object(prebuilt_game, "run", side_effect=capture):
-                prebuilt_game.stage(target, stage_tool=tool)
-                # A second call must replace the mutated stage with fresh tracked source.
-                prebuilt_game.stage(target, stage_tool=tool)
+                staged = prebuilt_game.stage(target, stage_tool=tool)
+                self.assertEqual(staged, target / "stage")
+                staged_manifest = staged / manifest.relative_to(source)
+                self.assertEqual(staged_manifest.read_text(),
+                                 "[package]\nname = 'fixture'\n\n[lib]\ncrate-type = [\"rlib\", \"dylib\"]\n")
+                # Both the stage tool and the manifest rewrite start over, but their output stays in place.
+                mtimes = {}
+                for file in (staged / "tracked.rs", staged_manifest):
+                    os.utime(file, (1000, 1000))
+                    mtimes[file] = file.stat().st_mtime_ns
+                self.assertEqual(prebuilt_game.stage(target, stage_tool=tool), staged)
+                self.assertEqual({file: file.stat().st_mtime_ns for file in mtimes}, mtimes)
             self.assertEqual(len(calls), 2)
+            self.assertTrue(all(not scratch.exists() for scratch in calls))
             self.assertTrue((source / "tracked.rs").read_bytes().endswith(b"fn edited() {}\r\n"))
 
 
