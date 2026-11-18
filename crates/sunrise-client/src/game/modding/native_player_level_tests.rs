@@ -69,9 +69,7 @@ fn a_give_to_a_player_in_another_level_fills_their_inventory_and_returns_the_res
             let host: &mut dyn ServerHost = game;
             assert_eq!(player.give_stack(host, diamond.clone()), Ok(None), "{case}");
             let given = host
-                .transaction(|host, _| {
-                    Ok::<_, ()>(player.give_stack(host, diamond.clone()))
-                })
+                .transaction(|host, _| Ok::<_, ()>(player.give_stack(host, diamond.clone())))
                 .unwrap();
             assert_eq!(given, Ok(None), "{case}");
             assert_eq!(diamonds(game, conn), 2, "{case}");
