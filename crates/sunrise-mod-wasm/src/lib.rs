@@ -1111,7 +1111,7 @@ mod tests {
             {import}
             (func (export "sunrise_in") (param i32) (result i32) i32.const 0)
             (func (export "sunrise_hook") (param i64) (result i64) i64.const 0))"#,
-            mod_surface::call::protocol_name("log", mod_surface::call::SHARED_PROTOCOL).text()
+            mod_call::protocol_name("log", mod_call::SHARED_PROTOCOL).text()
         ))
         .unwrap()
     }
@@ -1132,7 +1132,7 @@ mod tests {
                 {import}
                 (func (export "sunrise_in") (param i32) (result i32) i32.const 0)
                 (func (export "sunrise_hook") (param i64) (result i64) i64.const 0))"#,
-                mod_surface::call::protocol_name("log", mod_surface::call::SHARED_PROTOCOL).text()
+                mod_call::protocol_name("log", mod_call::SHARED_PROTOCOL).text()
             ))
             .unwrap()
         };

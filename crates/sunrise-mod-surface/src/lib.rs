@@ -72,7 +72,6 @@
 //! typed [`ReadError`], and ignores fields it does not know. It does not recompute record
 //! hashes: a newer writer may hash contract fields this reader does not know, and the file's
 //! integrity is the signature's job.
-pub mod call;
 pub mod child;
 pub mod diff;
 pub mod records;
@@ -152,7 +151,7 @@ impl std::error::Error for ReadError {}
 /// of the contract's compact JSON (fields in declaration order, absent optional fields left out).
 pub fn contract_hash<T: Serialize>(contract: &T) -> String {
     let text = serde_json::to_string(contract).expect("contracts serialize");
-    shape::digest(&text)
+    mod_call::digest(&text)
 }
 
 /// The identifier a mod writes for an id: the last path segment, or the field or variant name.
@@ -301,7 +300,7 @@ pub fn fields_hash_of<'a>(fields: impl IntoIterator<Item = (&'a str, &'a str)>) 
         .map(|(name, ty)| format!("{name}: {ty}\n"))
         .collect();
     lines.sort();
-    shape::digest(&lines.concat())
+    mod_call::digest(&lines.concat())
 }
 
 impl Trait {
@@ -563,7 +562,7 @@ impl Surface {
             text.push_str(hash);
             text.push('\n');
         }
-        shape::digest(&text)
+        mod_call::digest(&text)
     }
 
     /// The identifiers a mod's source may contain for each id: its [`leaf`], and a capability

@@ -1,4 +1,4 @@
-//! The names of the calls a wasm mod makes and answers (`mod_surface::call`), from the one
+//! The names of the calls a wasm mod makes and answers (`mod_call`), from the one
 //! shape function: a call is a record of its parameters and answer, applied to the arguments of
 //! its trait, so every type it carries counts through its fields and no type's path does.
 //!
@@ -8,8 +8,8 @@ use super::rust::GameWires;
 use super::walk::Walker;
 use super::{API_CRATES, expand, wire_forms};
 use crate::index::Index;
+use mod_call::{Kind, Name, Spec};
 use mod_source::layouts::Layouts;
-use mod_surface::call::{Kind, Name, Spec};
 use mod_surface::shape::{Body, Definition, Shape, Shapes};
 
 /// One method whose name is wanted: the types as written, in the module that wrote them.

@@ -3,12 +3,12 @@
 //! A built wasm mod's imports of module `sunrise` are the exact list of what it uses of the game:
 //! each host call it keeps, each hook, Part or handler method and point it implements, and the
 //! shared protocol, named `<kind>:<owner>::<method>[@<version>]#<hash>`
-//! (`mod_surface::call`). The game's table is generated from the same source by the same
+//! (`mod_call`). The game's table is generated from the same source by the same
 //! function, so loading is a comparison of names: a name the game has binds, one it has with
 //! another hash is a changed item, one it lacks is a removed item. Nothing is hashed here and no
 //! guest code has run when [`check`] answers.
 use crate::boundary::{CALLS, EXPORT_CALLS};
-use mod_surface::call::{Kind, MODULE, Name, SHARED_PROTOCOL, protocol_name};
+use mod_call::{Kind, MODULE, Name, SHARED_PROTOCOL, protocol_name};
 use std::fmt;
 
 /// How many mismatches a refusal shows a player before it counts the rest; the log lists all.
@@ -541,7 +541,7 @@ mod tests {
 #[cfg(any(test, feature = "runtime-fixture"))]
 pub(crate) mod fixtures {
     use crate::boundary::CALLS;
-    use mod_surface::call::{SHARED_PROTOCOL, protocol_name};
+    use mod_call::{SHARED_PROTOCOL, protocol_name};
 
     /// The id `$host` releases an object by.
     #[cfg(test)]

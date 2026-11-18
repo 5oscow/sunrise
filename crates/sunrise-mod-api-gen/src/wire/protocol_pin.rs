@@ -1,6 +1,6 @@
 //! The shared protocol's number guards what no declared shape covers. This test hashes the items
 //! that define it, as the source writes them, so changing one without bumping
-//! [`mod_surface::call::SHARED_PROTOCOL`] fails here.
+//! [`mod_call::SHARED_PROTOCOL`] fails here.
 use quote::ToTokens;
 use std::path::Path;
 use syn::Item;
@@ -104,9 +104,9 @@ fn text(root: &Path) -> String {
 #[ignore = "daily"]
 fn the_shared_protocols_items_are_pinned_to_its_number() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let hash = mod_surface::shape::digest(&text(&root));
+    let hash = mod_call::digest(&text(&root));
     assert_eq!(
-        mod_surface::call::SHARED_PROTOCOL,
+        mod_call::SHARED_PROTOCOL,
         PINNED.0,
         "update PINNED beside SHARED_PROTOCOL"
     );
