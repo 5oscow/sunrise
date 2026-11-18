@@ -1616,12 +1616,7 @@ mod upgrade_tests {
         region.write(pos, &record).unwrap();
         drop(region);
 
-        let progress = UpgradeProgress::new();
-        let run = Progress {
-            progress: &progress,
-            cancelable: true,
-        };
-        upgrade_regions_with_threads(&dir, &run, fix_overworld_chunk, 1).unwrap();
+        upgrade(&dir, fix_overworld_chunk).unwrap();
         let mut region = RegionFile::open(dir.join("r.0.0.mca")).unwrap();
         let chunk = region
             .read(pos)
@@ -1675,18 +1670,13 @@ mod upgrade_tests {
             };
             (data_version(&tag, -1), items)
         };
-        let progress = UpgradeProgress::new();
-        let run = Progress {
-            progress: &progress,
-            cancelable: true,
-        };
         // A folder where the staged `.mcc` goes makes the writer fail.
         fs::create_dir_all(dir.join(".datafix/c.0.0.mcc")).unwrap();
-        upgrade_regions_with_threads(&dir, &run, fix_overworld_chunk, 1).unwrap_err();
+        upgrade(&dir, fix_overworld_chunk).unwrap_err();
         assert_eq!(read(&dir), (4000, 1_100_000));
 
         fs::remove_dir(dir.join(".datafix/c.0.0.mcc")).unwrap();
-        upgrade_regions_with_threads(&dir, &run, fix_overworld_chunk, 1).unwrap();
+        upgrade(&dir, fix_overworld_chunk).unwrap();
         assert!(!dir.join(".datafix").exists());
         assert_eq!(read(&dir), (CURRENT, 1_100_000));
         let _ = fs::remove_dir_all(&dir);
