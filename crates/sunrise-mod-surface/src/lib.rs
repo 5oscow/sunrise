@@ -72,6 +72,7 @@
 //! typed [`ReadError`], and ignores fields it does not know. It does not recompute record
 //! hashes: a newer writer may hash contract fields this reader does not know, and the file's
 //! integrity is the signature's job.
+pub mod call;
 pub mod child;
 pub mod diff;
 pub mod records;
@@ -189,7 +190,7 @@ macro_rules! sealed {
 }
 
 sealed!(
-    Method(MethodContract) { wasm_reason },
+    Method(MethodContract) { wasm_reason, call },
     Function(FunctionContract) { wasm_reason, paths },
     Macro(MacroContract) { paths },
     Field(FieldContract) {},
@@ -266,6 +267,7 @@ impl Hook {
             doc: doc.into(),
             engine,
             counterparts,
+            call: None,
             contract,
             fields,
         }
