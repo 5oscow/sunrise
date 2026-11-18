@@ -6,4 +6,4 @@ extern crate alloc;
 
 pub mod frustum;
 
-pub use frustum::Frustum;
+pub use frustum::{Cull, Frusta, Frustum, JoinedFrusta, MAX_WORLD_VIEWS};
