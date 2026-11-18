@@ -1618,14 +1618,17 @@ impl Game<'_> {
             .then_some(0)
     }
     /// The permission level `player_hide` set, `Some(None)` when shown. None for a stale world
-    /// epoch, on a client and in a world nobody else can join.
+    /// epoch, on a client and in a world nobody else can join (an unpublished single-player
+    /// world runs a hub for its owner too).
     pub(super) fn player_hidden(&self, player: PlayerRef) -> Option<Option<u8>> {
         (self.native_lifecycle.epoch()? == player.entity().epoch()).then_some(())?;
+        self.open_to_others().then_some(())?;
         Some(self.lan.as_ref()?.hub.hidden.get(&player.uuid()).copied())
     }
     /// The name `player_set_nickname` set, `Some(None)` when there is none. None for a stale
-    /// or offline player, or without a server list.
+    /// or offline player, or without a server list (also an unpublished single-player world's).
     pub(super) fn player_nickname(&self, player: PlayerRef) -> Option<Option<String>> {
+        self.open_to_others().then_some(())?;
         let uuid = self.message_player_uuid(player)?;
         let hub = &self.lan.as_ref()?.hub;
         hub.online_players().any(|g| g.uuid == uuid).then_some(())?;
