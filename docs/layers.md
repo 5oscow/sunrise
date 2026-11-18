@@ -303,7 +303,7 @@ same shape: registered before the game runs, read-only after.
 **What players get.** The release builds (`game-build.yml`, so the nightly and the release; `tools/ci/build-musl.sh`)
 build `sunrise-official` and ship it as `sunrise-client`, the name the launcher and players know. The launcher's
 native-mod builds of the game do the same, and its generated executable for trait mods calls
-`sunrise_official::register()` (`https://github.com/sunrise-org/sunrise-launcher/blob/main/src/native_mods/api.rs`). The dedicated server build (`sunrise-engine`)
+`sunrise_official::register()` (the launcher's native mod build). The dedicated server build (`sunrise-engine`)
 stays sunrise-client's, with no Sunrise part. sunrise-client's own executable, the one `cargo run -p
 sunrise-client`, the harnesses and sunrise-plain build, has none either. The first part that moved this way is the
 "I'm playing" ping (`sunrise-heartbeat`).

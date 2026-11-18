@@ -9,7 +9,7 @@ and every launcher and `sunrise-server update` install it ([Nightly only](#night
 ## Pull request checks
 
 Rollups, syncs and main's pushes are checked by one gate, `dyna-checks` (`.github/workflows/dyna-ci.yml`: `lint`,
-`verify`, `verify-static`, `launcher`); a plain pull request gets its cheap checks there (`format`, `verify-static`)
+`verify`, `verify-static`); a plain pull request gets its cheap checks there (`format`, `verify-static`)
 ([CONTRIBUTING.md](../CONTRIBUTING.md#ci-tiers)). The `checks` workflow (`.github/workflows/ci.yml`) adds a free
 full `verify` on GitHub's runners for a fork's pull request only (opened, pushed to or reopened; labels never start
 it): this repository's own pull requests get the cheap checks alone, and their rollups the heavy gate. It also runs
@@ -84,7 +84,7 @@ Three kinds of game build (CI tiers, owner 2026-11-13):
 
 | Build | Who starts it | What it needs | Published as |
 |---|---|---|---|
-| [Snapshot](#snapshot) | root, by dispatching `release.yml -f kind=snapshot -f dry_run=false` on main | the gate (`lint`, `verify`, `verify-static`, `launcher`) green on that commit | pre-release `snapshot-<date>-<short>`; no launcher offers it |
+| [Snapshot](#snapshot) | root, by dispatching `release.yml -f kind=snapshot -f dry_run=false` on main | the gate (`lint`, `verify`, `verify-static`) green on that commit | pre-release `snapshot-<date>-<short>`; no launcher offers it |
 | Nightly | dispatch, or the [daily run](#daily-run) | main’s head or an explicit commit of main, with its dyna-checks gate green and its SDK published first | pre-release `nightly`, every launcher's update |
 | Release (`v*`) | by hand, from a Nightly | | the release |
 

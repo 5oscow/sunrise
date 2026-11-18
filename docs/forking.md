@@ -11,7 +11,7 @@ ads. No Cargo feature restores them. CI's public-tree check
 (`tools/check_public_tree.py`, run by `verify-static`) fails a branch that
 brings back `crates/sunrise-cosmetics`, `crates/sunrise-official-servers`, the
 launcher's `partner`, `shop`, `wardrobe` and `wardrobe_page` sources, or
-`https://github.com/sunrise-org/sunrise-launcher/tree/main/assets/sculk-*`. It looks at the current tree, not at history, so the
+the launcher's `sculk-*` assets (in sunrise-launcher, which has its own check). It looks at the current tree, not at history, so the
 commits from before the removal stay allowed. The Mods and
 Sunrise Settings pages remain available independently of the client's default
 features; disabling audio or controllers does not hide mod management.
