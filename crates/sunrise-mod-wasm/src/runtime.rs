@@ -182,6 +182,17 @@ pub(crate) fn test_engine() -> Engine {
     Engine::new(without_threads(&mut wasmtime::Config::new())).unwrap()
 }
 
+/// A fixture build may name the Wasmtime target in `SUNRISE_FIXTURE_TARGET` (a Pulley one), so a
+/// host with a Cranelift backend can run the interpreter's path. Game builds never read it.
+fn fixture_target(config: &mut wasmtime::Config) {
+    #[cfg(feature = "runtime-fixture")]
+    if let Ok(target) = std::env::var("SUNRISE_FIXTURE_TARGET") {
+        config.target(&target).expect("a Wasmtime target");
+    }
+    #[cfg(not(feature = "runtime-fixture"))]
+    let _ = config;
+}
+
 /// Whether mod code runs as native code or in Pulley, read from the engine the settings below
 /// build (Wasmtime picks Pulley where Cranelift has no backend for the host, as on 32-bit).
 /// This is the one place the guest stack policy is decided: the workers' reservation, the stack
@@ -193,6 +204,7 @@ pub fn guest_engine() -> sunrise_guest_stack::GuestEngine {
     *DECIDED.get_or_init(|| {
         let mut config = wasmtime::Config::new();
         without_threads(&mut config);
+        fixture_target(&mut config);
         // A host that cannot build the engine refuses at `engine()` with the reason.
         match Engine::new(&config) {
             Ok(engine) if engine.is_pulley() => GuestEngine::Interpreter,
@@ -212,6 +224,7 @@ pub(crate) fn engine_config() -> wasmtime::Config {
     let policy = guest_engine();
     let mut config = wasmtime::Config::new();
     without_threads(&mut config);
+    fixture_target(&mut config);
     config.epoch_interruption(ENGINE_CONFIG.1);
     // Native: the thread's own stack, bounded below its reservation. Pulley: its heap stack.
     config.max_wasm_stack(policy.wasm_stack());
@@ -221,7 +234,11 @@ pub(crate) fn engine_config() -> wasmtime::Config {
     config
 }
 
+/// The one place an engine for mod code is built: the process's stack policy is settled here, from
+/// the engine itself, before any worker or guest check can settle it as native code. A policy
+/// decided differently earlier refuses by name.
 pub(crate) fn engine() -> wasmtime::Result<Engine> {
+    install_stack_policy().map_err(wasmtime::Error::msg)?;
     let config = engine_config();
     let engine = Engine::new(&config)?;
     let ticker = TICKER
