@@ -121,7 +121,10 @@ jobs:
         timeout-minutes: 11
         env:
           FETCH_STEP: Fetch this commit's history for selection
-        # On our runners the slot's history mirror makes this a short fetch (tools/ci/history_fetch.sh).
+          # Selection diffs the base against the head (their merge base and two trees), so it takes the commits
+          # alone, and Git fetches the trees the diff reads. The whole history took 80 to 220 s on a slot whose
+          # mirror was cold, and every gate job waits for this one.
+          HISTORY_FILTER: tree:0
         run: bash tools/ci/history_fetch.sh
       - name: Select checks once for this pull request
         if: github.event_name == 'pull_request'
