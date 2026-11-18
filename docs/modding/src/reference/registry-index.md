@@ -120,6 +120,8 @@ review and history; it is not a candidate for installation.
    refusal for each request in that group (for example, name both requests and the conflicting ranges); an
    independent group can still install. A plan gives each request's outcome and version or refusal reason,
    lists what to install, keep or update, and identifies which requests need each dependency. Lists are ordered by id.
+   An update with `downgrade: true` moves to a lower SemVer; the installer names that downgrade in its status line
+   (for example, “Downgraded Sunrise Creatures from 0.2.0 to 0.1.3”).
 5. Before removing a mod, use its id and the installed versions to find the known installed mods that require
    it directly or through another mod. Optional dependencies do not block removal.
 

@@ -32,6 +32,9 @@ pub struct Update {
     pub id: String,
     pub from: String,
     pub to: String,
+    /// The replacement has lower SemVer precedence than the installed version.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub downgrade: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -221,10 +224,23 @@ pub fn install(
                             }
                         }
                         Some(old) => {
+                            let downgrade = candidate
+                                .number
+                                .as_ref()
+                                .zip(
+                                    catalog.mods[id]
+                                        .iter()
+                                        .find(|c| c.version == *old)
+                                        .and_then(|c| c.number.as_ref()),
+                                )
+                                .is_some_and(|(next, previous)| {
+                                    next.cmp_precedence(previous).is_lt()
+                                });
                             plan.update.push(Update {
                                 id: id.into(),
                                 from: (*old).into(),
                                 to: version.into(),
+                                downgrade,
                             });
                             RequestResult::Installable {
                                 version: version.into(),
