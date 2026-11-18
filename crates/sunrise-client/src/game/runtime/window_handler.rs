@@ -197,6 +197,10 @@ impl Game<'_> {
             } else {
                 self.physical_buttons.remove(button);
             }
+            // A container hook's press latch ends here, before any hook can cancel the release.
+            self.container_owned_up = *state == ElementState::Released
+                && !self.pad_synthetic_input()
+                && self.container_button_up(*button);
         }
         let mouse = if !self.pad_synthetic_input()
             && let WindowEvent::MouseInput { state, button, .. } = &event

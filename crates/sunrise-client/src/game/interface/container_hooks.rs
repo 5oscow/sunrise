@@ -11,7 +11,7 @@ use crate::game::{Game, Screen};
 use std::cell::RefCell;
 use std::hash::{Hash, Hasher};
 use sunrise_client::{
-    containers::{BlockEntity, FurnaceKind},
+    containers::{BlockEntity, FurnaceKind, ModMenuType},
     hud::{HudAtlas, HudBatch, rgba},
     items::ItemStack,
     menu::Input,
@@ -95,6 +95,18 @@ fn kind_of(stack: &ItemStack) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     (&*stack.item, stack.damage, stack.data()).hash(&mut hasher);
     hasher.finish()
+}
+
+/// The role of game slot `slot` in mod menu `menu`, whose slots are game slots 300 and up however
+/// many it has: `None` outside them.
+fn mod_menu_role(menu: &ModMenuType, slot: usize) -> Option<Role> {
+    let index = slot.checked_sub(300).filter(|&i| i < menu.slots)?;
+    Some(match menu.crafting {
+        Some(c) if c.result == index => Role::Result,
+        Some(c) if c.grid_slots().contains(&index) => Role::Input,
+        _ if menu.results.contains(&index) => Role::Result,
+        _ => Role::Storage,
+    })
 }
 
 /// `0xAARRGGBB` as the batch's colour.
@@ -289,6 +301,12 @@ impl<'g> Game<'g> {
     }
     /// What a game slot is for in the open menu.
     pub(in crate::game) fn container_role(&self, slot: usize) -> Role {
+        if let Some(role) = self
+            .shown_mod_menu_type()
+            .and_then(|menu| mod_menu_role(menu, slot))
+        {
+            return role;
+        }
         match slot {
             0..9 => Role::Hotbar,
             9..36 => Role::Inventory,
@@ -298,7 +316,6 @@ impl<'g> Game<'g> {
             s if (stations::INPUT..stations::RESULT).contains(&s) => Role::Input,
             s if (mount_menu::CHEST..mount_menu::CHEST + 15).contains(&s) => Role::Storage,
             300..500 => match self.container_kind() {
-                Some(BlockEntity::Mod(_)) => self.mod_menu_role(slot - 300),
                 Some(BlockEntity::Furnace(_)) if slot == 302 => Role::Result,
                 Some(BlockEntity::Crafter(_)) if slot == 309 => Role::Result,
                 Some(
@@ -309,20 +326,13 @@ impl<'g> Game<'g> {
             _ => Role::Other,
         }
     }
-    /// A mod menu's slot `index`, by its declared results and crafting grid.
-    fn mod_menu_role(&self, index: usize) -> Role {
-        let Some(menu) = self
-            .remote_menu_type()
-            .and_then(sunrise_client::containers::mod_menu_type)
-        else {
-            return Role::Storage;
-        };
-        match menu.crafting {
-            Some(c) if c.result == index => Role::Result,
-            Some(c) if c.grid_slots().contains(&index) => Role::Input,
-            _ if menu.results.contains(&index) => Role::Result,
-            _ => Role::Storage,
+    /// The open mod menu's type, when a mod's menu is open.
+    fn shown_mod_menu_type(&self) -> Option<&'static ModMenuType> {
+        if !matches!(self.container_kind(), Some(BlockEntity::Mod(_))) {
+            return None;
         }
+        self.remote_menu_type()
+            .and_then(sunrise_client::containers::mod_menu_type)
     }
     /// The panel's corner, which slot positions are from, and its size, as `batch`'s frame lays
     /// the screen out.
@@ -591,16 +601,29 @@ mod tests {
     }
     static TAKE_RELEASE: TakeRelease = TakeRelease;
 
-    /// Reads slots no menu has, and takes the press only if they read as nothing.
-    struct ReadFar;
-    impl ContainerHooks for ReadFar {
-        fn press(&self, c: &mut dyn Container, _: Option<SlotId>, _: Button) -> bool {
-            let far = [SlotId(36), SlotId(9999)];
-            !far.iter()
-                .all(|&s| c.stack(s).is_none() && c.name(s).is_none())
+    /// Reads slots no menu has, counting each call whose reads all come back empty.
+    struct ReadFar(std::sync::atomic::AtomicUsize);
+    impl ReadFar {
+        fn read(&self, c: &dyn Container) -> bool {
+            let far = [SlotId(36), SlotId(500), SlotId(9999)];
+            let empty = far
+                .iter()
+                .all(|&s| c.stack(s).is_none() && c.name(s).is_none());
+            if empty {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+            empty
         }
     }
-    static READ_FAR: ReadFar = ReadFar;
+    impl ContainerHooks for ReadFar {
+        fn press(&self, c: &mut dyn Container, _: Option<SlotId>, _: Button) -> bool {
+            self.read(c)
+        }
+        fn draw(&self, c: &dyn Container, _: &mut dyn hud::Canvas) {
+            self.read(c);
+        }
+    }
+    static READ_FAR: ReadFar = ReadFar(std::sync::atomic::AtomicUsize::new(0));
 
     /// Takes nothing.
     struct Pass;
@@ -647,6 +670,23 @@ mod tests {
             local_menu_id(Local::Mount).as_deref(),
             Some("sunrise:mount_inventory")
         );
+    }
+
+    #[test]
+    fn a_mod_menus_result_past_slot_199_is_a_result() {
+        let menu = ModMenuType {
+            id: "test:big",
+            slots: 201,
+            data_slots: 0,
+            results: vec![200],
+            links: None,
+            crafting: None,
+        };
+        // Game slot 500 is past the vanilla container range: the mod's own slot 200.
+        assert_eq!(mod_menu_role(&menu, 500), Some(Role::Result));
+        assert_eq!(mod_menu_role(&menu, 300), Some(Role::Storage));
+        assert_eq!(mod_menu_role(&menu, 501), None);
+        assert_eq!(mod_menu_role(&menu, 9), None);
     }
 
     #[test]
@@ -726,9 +766,15 @@ mod tests {
         let mut resources = None;
         let mut game = server_game(&mut resources);
         game.screen = Screen::Inventory;
+        let reads = || READ_FAR.0.load(std::sync::atomic::Ordering::Relaxed);
+        // The press is taken only when the hook ran and every far read came back empty.
         with_registrants(&[&READ_FAR], || {
-            assert!(!game.container_mouse(MouseButton::Left, true, false))
+            assert!(game.container_mouse(MouseButton::Left, true, false))
         });
+        assert_eq!(reads(), 1);
+        let mut batch = HudBatch::new([854, 480], game.settings.gui_scale_inputs());
+        with_registrants(&[&READ_FAR], || game.draw_container_hooks(&mut batch));
+        assert_eq!(reads(), 2, "the draw view reads nothing there either");
     }
 
     #[test]

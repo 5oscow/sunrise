@@ -134,6 +134,15 @@ impl Game<'_> {
         let Some(mut drag) = self.tweaks.drag.take() else {
             return false;
         };
+        // A drag whose button went up unseen (another handler took its release) is over.
+        let button = if drag.right {
+            winit::event::MouseButton::Right
+        } else {
+            winit::event::MouseButton::Left
+        };
+        if !self.physical_buttons.contains(&button) {
+            return false;
+        }
         let active = drag.active;
         let entered =
             slot.filter(|s| *s != 200 && *s < Creative::DISPLAY && !drag.visited.contains(s));
@@ -284,5 +293,32 @@ impl Game<'_> {
                 self.slot_put(source, false);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::game_tests::tests::server_game;
+
+    #[test]
+    #[ignore = "daily"]
+    fn a_drag_whose_button_went_up_unseen_moves_nothing_and_ends() {
+        let mut resources = None;
+        let mut game = server_game(&mut resources);
+        game.screen = Screen::Inventory;
+        let stone = ItemStack::new("minecraft:stone", 5);
+        game.carried = Some(stone.clone());
+        game.tweaks.drag = Some(Drag {
+            right: true,
+            held: Some(stone.clone()),
+            active: true,
+            visited: vec![9],
+        });
+        // No button is held: another handler took the release this drag never heard.
+        assert!(!game.tweak_drag_move(Some(10)));
+        assert!(game.tweaks.drag.is_none());
+        assert!(game.inventory[10].is_none());
+        assert_eq!(game.carried, Some(stone));
     }
 }

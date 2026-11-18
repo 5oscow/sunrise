@@ -1047,6 +1047,8 @@ struct Game<'a> {
     inv_drag: Option<(i32, Vec<usize>)>,
     /// The mouse buttons whose press a container hook took: their release is the hooks' too.
     container_buttons: HashSet<MouseButton>,
+    /// This mouse event's button-up ended a container hook's press latch (`container_button_up`).
+    container_owned_up: bool,
     /// `AbstractContainerScreen`'s quick craft and skip-release state.
     inv_clicks: sunrise_client::container_screen::Clicks,
     /// The Mouse Tweaks extra's drag and wheel (`tweaks`).
@@ -9405,15 +9407,9 @@ impl Game<'_> {
             // arms below (which hold the container hotkey and the sort and
             // header buttons too) see it. A click the pad or the keyboard's
             // focus made up is not the mouse: it fires nothing.
-            // A real button-up ends a container hook's press latch before any hook can cancel it.
-            let owned_release = match &event {
-                WindowEvent::MouseInput {
-                    state: ElementState::Released,
-                    button,
-                    ..
-                } if !self.pad_synthetic_input() => self.container_button_up(*button),
-                _ => false,
-            };
+            // Set by the outer handler at the physical button-up (`container_owned_up`).
+            let owned_release = matches!(&event, WindowEvent::MouseInput { .. })
+                && std::mem::take(&mut self.container_owned_up);
             if let WindowEvent::MouseInput { state, button, .. } = &event
                 && !self.pad_synthetic_input()
                 && let Some(screen) = self.screen_view_now()
@@ -10749,6 +10745,7 @@ impl<'a> Game<'a> {
             craft_table: None,
             inv_drag: None,
             container_buttons: HashSet::new(),
+            container_owned_up: false,
             tweaks: Default::default(),
             bundle_mouse: Default::default(),
             inv_clicks: Default::default(),
