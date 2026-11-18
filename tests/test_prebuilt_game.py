@@ -797,6 +797,26 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class LauncherPinTests(unittest.TestCase):
+    def test_only_a_full_lowercase_sha_is_accepted_by_the_script_and_the_smoke(self):
+        script = prebuilt_game.ROOT / "tools/ci/launcher_pin.sh"
+        pin = prebuilt_game.ROOT / "tools/ci/launcher-pin"
+        original = pin.read_text()
+        try:
+            for value, accepted in (("a" * 40, True), ("A" * 40, False), ("a" * 39, False), ("main", False), ("a" * 41, False)):
+                pin.write_text(value + "\n")
+                shell = subprocess.run([str(script)], capture_output=True, text=True)
+                self.assertEqual(shell.returncode == 0, accepted, value)
+                if accepted:
+                    self.assertEqual(prebuilt_game.launcher_pin(), value)
+                else:
+                    with self.assertRaises(SystemExit):
+                        prebuilt_game.launcher_pin()
+        finally:
+            pin.write_text(original)
+        self.assertEqual(subprocess.run([str(script)], capture_output=True, text=True).stdout.strip(), original.strip())
+
+
 class SmokeStartTests(unittest.TestCase):
     def test_launcher_files_fetched_at_the_pin_keep_the_layout_that_includes_the_icon(self):
         urls = []

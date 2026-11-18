@@ -111,6 +111,13 @@ TOOL_PROGRAM = TOOL + (".exe" if sys.platform == "win32" else "")
 LAUNCHER_FILES = ("src/game_app.rs", "assets/icons/sunrise.icns")  # game_app.rs include_bytes!es the icon
 
 
+def launcher_pin() -> str:
+    pin = (ROOT / "tools/ci/launcher-pin").read_text().strip()
+    if not re.fullmatch(r"[0-9a-f]{40}", pin):
+        sys.exit("tools/ci/launcher-pin must be a full 40-character lowercase commit SHA")
+    return pin
+
+
 def fetch_launcher_files(destination: Path, pin: str, fetch=lambda url: urllib.request.urlopen(url, timeout=60).read()) -> Path:
     """The files of the bundle preparation at the sunrise-launcher commit `pin`, in their own layout under `destination`
     (game_app.rs reads the icon by the relative path ../assets/icons/)."""
@@ -804,7 +811,7 @@ def start(out: Path) -> None:
                 # Use the launcher's actual bundle preparation, not a second list of libraries: its source from the
                 # sunrise-launcher commit pinned in tools/ci/launcher-pin.
                 bundle_source = scratch / "bundle.rs"
-                pin = (ROOT / "tools/ci/launcher-pin").read_text().strip()
+                pin = launcher_pin()
                 game_app = fetch_launcher_files(scratch / "launcher", pin) / "src/game_app.rs"
                 module = json.dumps(str(game_app))
                 bundle_source.write_text(

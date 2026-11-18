@@ -63,7 +63,7 @@ jobs:
           CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: true
         run: |
           git clone --quiet https://github.com/sunrise-org/sunrise-launcher "$RUNNER_TEMP/sunrise-launcher"
-          git -C "$RUNNER_TEMP/sunrise-launcher" checkout --quiet "$(cat tools/ci/launcher-pin)"
+          git -C "$RUNNER_TEMP/sunrise-launcher" checkout --quiet "$(tools/ci/launcher_pin.sh)"
           rustup toolchain install "$(cat tools/ci/rust-version)-x86_64-pc-windows-msvc" --profile minimal
           (cd "$RUNNER_TEMP/sunrise-launcher" && cargo +"$(cat "$GITHUB_WORKSPACE/tools/ci/rust-version")-x86_64-pc-windows-msvc" build --release --locked)
           echo "LAUNCHER=$RUNNER_TEMP/sunrise-launcher/target/release/sunrise-launcher.exe" >> "$GITHUB_ENV"
