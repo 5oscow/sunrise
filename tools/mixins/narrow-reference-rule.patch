@@ -1,5 +1,5 @@
 diff --git a/crates/horizon-mixins-cli/src/main.rs b/crates/horizon-mixins-cli/src/main.rs
-index ac813ca..4701add 100644
+index ac813ca..8018725 100644
 --- a/crates/horizon-mixins-cli/src/main.rs
 +++ b/crates/horizon-mixins-cli/src/main.rs
 @@ -1,7 +1,9 @@
@@ -13,7 +13,7 @@ index ac813ca..4701add 100644
  use serde_json::json;
  use std::{
      path::{Path, PathBuf},
-@@ -45,6 +47,19 @@ struct Common {
+@@ -45,6 +47,24 @@ struct Common {
      mods: PathBuf,
      #[arg(long)]
      out: PathBuf,
@@ -23,17 +23,22 @@ index ac813ca..4701add 100644
 +    /// not listed is off. Without it only `cfg(test)` items are dropped.
 +    #[arg(long = "cfg")]
 +    cfg: Vec<String>,
++    /// The workspace package the `feature="x"` options belong to (the game crate's features).
++    /// `feature` predicates are decided only in that package's files and stay refused in any
++    /// other, whose resolved features the options do not describe.
++    #[arg(long)]
++    features_of: Option<String>,
 +}
 +impl Common {
 +    fn cfg_set(&self) -> Result<Option<CfgSet>> {
-+        (!self.cfg.is_empty())
-+            .then(|| CfgSet::parse(&self.cfg))
++        (!self.cfg.is_empty() || self.features_of.is_some())
++            .then(|| CfgSet::parse(&self.cfg, self.features_of.as_deref()))
 +            .transpose()
 +    }
  }
  fn main() -> ExitCode {
      let cli = Cli::parse();
-@@ -68,7 +83,7 @@ fn run(cli: Cli) -> Result<serde_json::Value> {
+@@ -68,7 +88,7 @@ fn run(cli: Cli) -> Result<serde_json::Value> {
              protect(&root, &out)?;
              let mods = common.mods.canonicalize().map_err(io)?;
              protect(&mods, &out)?;
@@ -42,7 +47,7 @@ index ac813ca..4701add 100644
              let mut bytes = serde_json::to_vec_pretty(&plan)
                  .map_err(|e| Diagnostic::new("E_JSON", e.to_string()))?;
              bytes.push(b'\n');
-@@ -117,7 +132,7 @@ fn run(cli: Cli) -> Result<serde_json::Value> {
+@@ -117,7 +137,7 @@ fn run(cli: Cli) -> Result<serde_json::Value> {
          protect(&out, target)?;
      }
      let _stage_lock = staging::lock(&out, "stage")?;
@@ -324,7 +329,7 @@ index bca7938..2f2eb44 100644
 +    assert!(e.message.contains("selected site contains `?`"), "{e}");
 +}
 diff --git a/crates/horizon-mixins-cli/tests/integration.rs b/crates/horizon-mixins-cli/tests/integration.rs
-index fcf5a46..01b5554 100644
+index fcf5a46..7c66d8e 100644
 --- a/crates/horizon-mixins-cli/tests/integration.rs
 +++ b/crates/horizon-mixins-cli/tests/integration.rs
 @@ -697,14 +697,14 @@ fn cfg_attributes_shared_module_sources_and_shadowing_fail_closed() {
@@ -346,7 +351,7 @@ index fcf5a46..01b5554 100644
              "E_UNSUPPORTED_CONTROL_FLOW",
          ),
          (
-@@ -890,3 +890,668 @@ fn production_test_cfg_modules_are_indexed_and_applied() {
+@@ -890,3 +890,709 @@ fn production_test_cfg_modules_are_indexed_and_applied() {
      let error = build_plan(&f.root, &f.mods).unwrap_err();
      assert!(format!("{error:?}").contains("E_TARGET_NOT_FOUND"));
  }
@@ -805,11 +810,22 @@ index fcf5a46..01b5554 100644
 +    7
 +"#;
 +
++    /// `action` with the build's cfg options, whose features belong to the game crate.
 +    fn with_cfg(f: &Fixture, action: &str, cfg: &[&str]) -> std::process::Output {
++        with_features_of(f, action, cfg, "fixture-game")
++    }
++
++    fn with_features_of(
++        f: &Fixture,
++        action: &str,
++        cfg: &[&str],
++        package: &str,
++    ) -> std::process::Output {
 +        let mut command = f.command(action);
 +        for option in cfg {
 +            command.arg("--cfg").arg(option);
 +        }
++        command.arg("--features-of").arg(package);
 +        command.output().unwrap()
 +    }
 +
@@ -853,10 +869,13 @@ index fcf5a46..01b5554 100644
 +        let plan = ::horizon_mixins_core::build_plan_with(
 +            &f.root,
 +            &f.mods,
-+            Some(&::horizon_mixins_core::cfg::CfgSet::parse(&["unix".into()]).unwrap()),
++            Some(&::horizon_mixins_core::cfg::CfgSet::parse(&["unix".into()], Some("fixture-game")).unwrap()),
 +        )
 +        .unwrap();
-+        assert_eq!(plan.cfg.as_deref(), Some(&["unix".to_string()][..]));
++        let planned = plan.cfg.unwrap();
++        assert_eq!(planned.options, ["unix"]);
++        assert_eq!(planned.features_of.as_deref(), Some("fixture-game"));
++        assert_eq!(planned.feature_files, ["engine/src/lib.rs"]);
 +    }
 +
 +    #[test]
@@ -907,6 +926,33 @@ index fcf5a46..01b5554 100644
 +            "{}",
 +            String::from_utf8_lossy(&output.stderr)
 +        );
++    }
++
++    #[test]
++    fn a_feature_is_decided_only_in_the_package_it_belongs_to() {
++        // The set's features are the game crate's. In another package's files a `feature`
++        // predicate stays undecided and refused, while `unix` and `test` are global.
++        let f = cfg_fixture(TEST_ONLY_BODY);
++        let output = with_features_of(&f, "apply", &["unix", "feature=\"x\""], "fixture-driver");
++        assert!(!output.status.success());
++        let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
++        assert_eq!(error["code"], "E_UNSUPPORTED_CFG", "{error}");
++        let f = cfg_fixture(
++            "#[cfg(test)] mark(\"test only\"); #[cfg(unix)] mark(\"feature on\"); mark(\"body\"); 7",
++        );
++        let output = with_features_of(&f, "apply", &["unix"], "fixture-driver");
++        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
++        let staged = fs::read_to_string(f.out.join("engine/src/lib.rs")).unwrap();
++        assert!(!staged.contains("test only") && !staged.contains("cfg"), "{staged}");
++        // The same feature cfg in the game crate is decided.
++        let f = cfg_fixture(TEST_ONLY_BODY);
++        let output = with_cfg(&f, "apply", &["unix", "feature=\"x\""]);
++        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
++        // A feature option with no package to belong to is malformed.
++        let mut command = f.command("apply");
++        let output = command.arg("--cfg").arg("feature=\"x\"").output().unwrap();
++        let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
++        assert_eq!(error["code"], "E_CFG", "{error}");
 +    }
 +
 +    #[test]
@@ -1243,7 +1289,7 @@ index 55a9372..45c0638 100644
 +    }
 +}
 diff --git a/crates/horizon-mixins-core/src/index.rs b/crates/horizon-mixins-core/src/index.rs
-index 740c0dc..98b4541 100644
+index 740c0dc..94df671 100644
 --- a/crates/horizon-mixins-core/src/index.rs
 +++ b/crates/horizon-mixins-core/src/index.rs
 @@ -1,4 +1,4 @@
@@ -1252,15 +1298,19 @@ index 740c0dc..98b4541 100644
  use quote::ToTokens;
  use std::{
      collections::{BTreeMap, BTreeSet},
-@@ -27,6 +27,7 @@ pub struct Index {
+@@ -27,6 +27,11 @@ pub struct Index {
      /// its items are indexed under.
      pub(crate) crate_aliases: BTreeMap<String, BTreeSet<String>>,
      pub(crate) standard_macro_aliases: BTreeMap<String, BTreeSet<String>>,
 +    cfg: Option<CfgSet>,
++    /// Whether the package being read is the one whose features the cfg set carries.
++    features_scope: bool,
++    /// The files read from that package: where `feature` predicates are decided.
++    pub feature_files: BTreeSet<String>,
      pub functions: Vec<Function>,
      pub types: Vec<TypeDefinition>,
      pub blocked: BTreeSet<String>,
-@@ -147,6 +148,12 @@ pub fn macro_attributes(attrs: &[Attribute]) -> bool {
+@@ -147,6 +152,12 @@ pub fn macro_attributes(attrs: &[Attribute]) -> bool {
  
  impl Index {
      pub fn load(root: &Path) -> Result<Self> {
@@ -1273,15 +1323,26 @@ index 740c0dc..98b4541 100644
          // Cargo canonicalizes what it reports (`\\?\C:\…` on Windows, a resolved junction on
          // macOS), so the root is compared and stripped in the same form.
          let root = root.canonicalize().map_err(io)?;
-@@ -194,6 +201,7 @@ impl Index {
+@@ -194,6 +205,9 @@ impl Index {
              }
          }
          let mut index = Self {
 +            cfg: cfg.cloned(),
++            features_scope: false,
++            feature_files: BTreeSet::new(),
              crate_aliases: BTreeMap::new(),
              standard_macro_aliases: BTreeMap::new(),
              functions: Vec::new(),
-@@ -289,8 +297,12 @@ impl Index {
+@@ -223,6 +237,8 @@ impl Index {
+                 .ok_or_else(|| Diagnostic::new("E_INVALID_PATH", "non UTF-8 manifest path"))?
+                 .replace('\\', "/");
+             index.packages.insert(package.name.to_string(), manifest);
++            index.features_scope =
++                cfg.is_some_and(|c| c.features_of() == Some(package.name.as_str()));
+             for target in &package.targets {
+                 if target.kind.contains(&cargo_metadata::TargetKind::Bin) {
+                     index.bins.insert(target.name.clone());
+@@ -289,8 +305,15 @@ impl Index {
              .to_str()
              .ok_or_else(|| Diagnostic::new("E_INVALID_PATH", "non UTF-8 module path"))?
              .replace('\\', "/");
@@ -1289,18 +1350,21 @@ index 740c0dc..98b4541 100644
 -            .map_err(|e| Diagnostic::new("E_RUST_SYNTAX", e.to_string()).file(&path))?;
 +        let text = fs::read_to_string(&path).map_err(io)?;
 +        let tree = match &self.cfg {
-+            Some(cfg) => cfg.parse_file(&text),
++            Some(cfg) => cfg.parse_file(&text, self.features_scope),
 +            None => syn::parse_file(&text),
 +        }
 +        .map_err(|e| Diagnostic::new("E_RUST_SYNTAX", e.to_string()).file(&path))?;
++        if self.features_scope {
++            self.feature_files.insert(file.clone());
++        }
          let file_cfg = cfg_status(&tree.attrs);
          if file_cfg == CfgStatus::Inactive {
              active.remove(&path);
 diff --git a/crates/horizon-mixins-core/src/lib.rs b/crates/horizon-mixins-core/src/lib.rs
-index 5bac667..dddc795 100644
+index 5bac667..1a48889 100644
 --- a/crates/horizon-mixins-core/src/lib.rs
 +++ b/crates/horizon-mixins-core/src/lib.rs
-@@ -1,4 +1,391 @@
+@@ -1,4 +1,410 @@
  pub mod bridges;
 +pub mod cfg {
 +    //! The `cfg` set of the build a workspace is compiled in, and the pass that applies it.
@@ -1326,6 +1390,7 @@ index 5bac667..dddc795 100644
 +    #[derive(Debug, Clone, Default, PartialEq, Eq)]
 +    pub struct CfgSet {
 +        options: BTreeSet<String>,
++        features_of: Option<String>,
 +    }
 +
 +    #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1337,7 +1402,7 @@ index 5bac667..dddc795 100644
 +
 +    impl CfgSet {
 +        /// Parses options in rustc's `--cfg` spelling.
-+        pub fn parse(options: &[String]) -> Result<Self> {
++        pub fn parse(options: &[String], features_of: Option<&str>) -> Result<Self> {
 +            let mut set = BTreeSet::new();
 +            for option in options {
 +                let meta = syn::parse_str::<Meta>(option).map_err(|e| {
@@ -1356,7 +1421,16 @@ index 5bac667..dddc795 100644
 +                    }
 +                });
 +            }
-+            Ok(Self { options: set })
++            if features_of.is_none() && set.iter().any(|option| option.starts_with("feature=")) {
++                return Err(Diagnostic::new(
++                    "E_CFG",
++                    "a `feature` option belongs to one package's features: name it with --features-of",
++                ));
++            }
++            Ok(Self {
++                options: set,
++                features_of: features_of.map(str::to_owned),
++            })
 +        }
 +
 +        /// The options in a form [`CfgSet::parse`] reads back, sorted.
@@ -1364,10 +1438,16 @@ index 5bac667..dddc795 100644
 +            self.options.iter().cloned().collect()
 +        }
 +
-+        fn eval(&self, meta: &Meta) -> Truth {
++        /// The package whose own files decide `feature` predicates; in any other, they stay undecided.
++        pub fn features_of(&self) -> Option<&str> {
++            self.features_of.as_deref()
++        }
++
++        fn eval(&self, meta: &Meta, features: bool) -> Truth {
 +            match meta {
 +                Meta::Path(path) if path.is_ident("true") => Truth::Yes,
 +                Meta::Path(path) if path.is_ident("false") => Truth::No,
++                Meta::NameValue(nv) if !features && nv.path.is_ident("feature") => Truth::Unknown,
 +                Meta::Path(_) | Meta::NameValue(_) => match option_key(meta) {
 +                    Some(key) if self.options.contains(&key) => Truth::Yes,
 +                    Some(_) => Truth::No,
@@ -1382,7 +1462,7 @@ index 5bac667..dddc795 100644
 +                    let fold = |decisive: Truth, otherwise: Truth| {
 +                        let mut unknown = false;
 +                        for meta in &inner {
-+                            match self.eval(meta) {
++                            match self.eval(meta, features) {
 +                                truth if truth == decisive => return decisive,
 +                                Truth::Unknown => unknown = true,
 +                                _ => {}
@@ -1395,7 +1475,7 @@ index 5bac667..dddc795 100644
 +                    } else if list.path.is_ident("any") {
 +                        fold(Truth::Yes, Truth::No)
 +                    } else if list.path.is_ident("not") && inner.len() == 1 {
-+                        match self.eval(&inner[0]) {
++                        match self.eval(&inner[0], features) {
 +                            Truth::Yes => Truth::No,
 +                            Truth::No => Truth::Yes,
 +                            Truth::Unknown => Truth::Unknown,
@@ -1408,15 +1488,15 @@ index 5bac667..dddc795 100644
 +        }
 +
 +        /// Reads a source file under this set: see the module documentation.
-+        pub fn parse_file(&self, source: &str) -> syn::Result<syn::File> {
++        pub fn parse_file(&self, source: &str, features: bool) -> syn::Result<syn::File> {
 +            let mut file = syn::parse_file(source)?;
-+            match self.apply_attrs(&mut file.attrs) {
++            match self.apply_attrs(&mut file.attrs, features) {
 +                // An inactive file compiles to nothing.
 +                Truth::No => {
 +                    file.items.clear();
 +                    file.attrs.clear();
 +                }
-+                _ => Reduce(self).visit_file_mut(&mut file),
++                _ => Reduce(self, features).visit_file_mut(&mut file),
 +            }
 +            Ok(file)
 +        }
@@ -1424,14 +1504,14 @@ index 5bac667..dddc795 100644
 +        /// Applies the `cfg` and `cfg_attr` attributes in `attrs`: whether the node they sit on is
 +        /// compiled (`Yes`, with the attributes rewritten), is not (`No`), or cannot be told
 +        /// (`Unknown`, the undecided attributes kept).
-+        fn apply_attrs(&self, attrs: &mut Vec<Attribute>) -> Truth {
++        fn apply_attrs(&self, attrs: &mut Vec<Attribute>, features: bool) -> Truth {
 +            let mut result = Truth::Yes;
 +            let mut out = Vec::with_capacity(attrs.len());
 +            let mut pending: Vec<Attribute> = std::mem::take(attrs);
 +            pending.reverse();
 +            while let Some(attr) = pending.pop() {
 +                if attr.path().is_ident("cfg") {
-+                    match attr.parse_args::<Meta>().map(|m| self.eval(&m)) {
++                    match attr.parse_args::<Meta>().map(|m| self.eval(&m, features)) {
 +                        Ok(Truth::Yes) => {}
 +                        Ok(Truth::No) => {
 +                            result = Truth::No;
@@ -1456,7 +1536,7 @@ index 5bac667..dddc795 100644
 +                        out.push(attr);
 +                        continue;
 +                    };
-+                    match self.eval(&args[0]) {
++                    match self.eval(&args[0], features) {
 +                        Truth::No => {}
 +                        Truth::Yes => {
 +                            let style = attr.style;
@@ -1483,8 +1563,8 @@ index 5bac667..dddc795 100644
 +
 +        /// Whether a node with these attributes stays: it does unless a `cfg` turns it off. The
 +        /// attributes are rewritten on the way.
-+        fn keep(&self, attrs: &mut Vec<Attribute>) -> bool {
-+            self.apply_attrs(attrs) != Truth::No
++        fn keep(&self, attrs: &mut Vec<Attribute>, features: bool) -> bool {
++            self.apply_attrs(attrs, features) != Truth::No
 +        }
 +    }
 +
@@ -1506,23 +1586,23 @@ index 5bac667..dddc795 100644
 +        }
 +    }
 +
-+    struct Reduce<'a>(&'a CfgSet);
++    struct Reduce<'a>(&'a CfgSet, bool);
 +
 +    impl VisitMut for Reduce<'_> {
 +        fn visit_file_mut(&mut self, file: &mut syn::File) {
 +            file.items
-+                .retain_mut(|item| item_attrs(item).is_none_or(|attrs| self.0.keep(attrs)));
++                .retain_mut(|item| item_attrs(item).is_none_or(|attrs| self.keep(attrs)));
 +            visit_mut::visit_file_mut(self, file);
 +        }
 +        fn visit_item_mod_mut(&mut self, module: &mut syn::ItemMod) {
 +            if let Some((_, items)) = &mut module.content {
-+                items.retain_mut(|item| item_attrs(item).is_none_or(|attrs| self.0.keep(attrs)));
++                items.retain_mut(|item| item_attrs(item).is_none_or(|attrs| self.keep(attrs)));
 +            }
 +            visit_mut::visit_item_mod_mut(self, module);
 +        }
 +        fn visit_item_impl_mut(&mut self, item: &mut syn::ItemImpl) {
 +            item.items.retain_mut(|member| {
-+                self.0.keep(match member {
++                self.keep(match member {
 +                    syn::ImplItem::Const(i) => &mut i.attrs,
 +                    syn::ImplItem::Fn(i) => &mut i.attrs,
 +                    syn::ImplItem::Type(i) => &mut i.attrs,
@@ -1534,7 +1614,7 @@ index 5bac667..dddc795 100644
 +        }
 +        fn visit_item_trait_mut(&mut self, item: &mut syn::ItemTrait) {
 +            item.items.retain_mut(|member| {
-+                self.0.keep(match member {
++                self.keep(match member {
 +                    syn::TraitItem::Const(i) => &mut i.attrs,
 +                    syn::TraitItem::Fn(i) => &mut i.attrs,
 +                    syn::TraitItem::Type(i) => &mut i.attrs,
@@ -1546,7 +1626,7 @@ index 5bac667..dddc795 100644
 +        }
 +        fn visit_block_mut(&mut self, block: &mut syn::Block) {
 +            block.stmts.retain_mut(|stmt| {
-+                self.0.keep(match stmt {
++                self.keep(match stmt {
 +                    syn::Stmt::Local(s) => &mut s.attrs,
 +                    syn::Stmt::Item(i) => match item_attrs(i) {
 +                        Some(attrs) => attrs,
@@ -1569,7 +1649,7 @@ index 5bac667..dddc795 100644
 +            let variants = std::mem::take(&mut item.variants);
 +            item.variants = variants
 +                .into_iter()
-+                .filter_map(|mut v| self.0.keep(&mut v.attrs).then_some(v))
++                .filter_map(|mut v| self.keep(&mut v.attrs).then_some(v))
 +                .collect();
 +            for variant in &mut item.variants {
 +                self.fields(&mut variant.fields);
@@ -1577,14 +1657,14 @@ index 5bac667..dddc795 100644
 +            visit_mut::visit_item_enum_mut(self, item);
 +        }
 +        fn visit_expr_match_mut(&mut self, expr: &mut syn::ExprMatch) {
-+            expr.arms.retain_mut(|arm| self.0.keep(&mut arm.attrs));
++            expr.arms.retain_mut(|arm| self.keep(&mut arm.attrs));
 +            visit_mut::visit_expr_match_mut(self, expr);
 +        }
 +        fn visit_expr_struct_mut(&mut self, expr: &mut syn::ExprStruct) {
 +            let fields = std::mem::take(&mut expr.fields);
 +            expr.fields = fields
 +                .into_iter()
-+                .filter_map(|mut f| self.0.keep(&mut f.attrs).then_some(f))
++                .filter_map(|mut f| self.keep(&mut f.attrs).then_some(f))
 +                .collect();
 +            visit_mut::visit_expr_struct_mut(self, expr);
 +        }
@@ -1597,7 +1677,7 @@ index 5bac667..dddc795 100644
 +                        syn::FnArg::Receiver(r) => &mut r.attrs,
 +                        syn::FnArg::Typed(t) => &mut t.attrs,
 +                    };
-+                    self.0.keep(attrs).then_some(arg)
++                    self.keep(attrs).then_some(arg)
 +                })
 +                .collect();
 +            visit_mut::visit_signature_mut(self, sig);
@@ -1605,12 +1685,15 @@ index 5bac667..dddc795 100644
 +    }
 +
 +    impl Reduce<'_> {
++        fn keep(&self, attrs: &mut Vec<Attribute>) -> bool {
++            self.0.keep(attrs, self.1)
++        }
 +        fn fields(&self, fields: &mut syn::Fields) {
 +            let drop_inactive = |list: &mut Punctuated<syn::Field, Token![,]>| {
 +                let old = std::mem::take(list);
 +                *list = old
 +                    .into_iter()
-+                    .filter_map(|mut f| self.0.keep(&mut f.attrs).then_some(f))
++                    .filter_map(|mut f| self.keep(&mut f.attrs).then_some(f))
 +                    .collect();
 +            };
 +            match fields {
@@ -1692,7 +1775,7 @@ index 5bac667..dddc795 100644
  pub mod diagnostic;
  pub mod helpers;
  pub mod index;
-@@ -10,7 +397,9 @@ pub mod sites;
+@@ -10,7 +416,9 @@ pub mod sites;
  pub mod slices;
  pub mod source;
  pub use diagnostic::{Diagnostic, Result};
@@ -1704,7 +1787,7 @@ index 5bac667..dddc795 100644
  pub mod modules;
  
 diff --git a/crates/horizon-mixins-core/src/plan.rs b/crates/horizon-mixins-core/src/plan.rs
-index 848dcc0..8fe99db 100644
+index 848dcc0..c8020cc 100644
 --- a/crates/horizon-mixins-core/src/plan.rs
 +++ b/crates/horizon-mixins-core/src/plan.rs
 @@ -1,5 +1,6 @@
@@ -1720,11 +1803,28 @@ index 848dcc0..8fe99db 100644
      pub rustc: String,
 +    /// The cfg options of the build the plan was made for; absent when none was given.
 +    #[serde(default, skip_serializing_if = "Option::is_none")]
-+    pub cfg: Option<Vec<String>>,
++    pub cfg: Option<PlannedCfg>,
      pub inputs: BTreeMap<String, String>,
      pub injections: Vec<PlannedInjection>,
      #[serde(default, skip_serializing_if = "Vec::is_empty")]
-@@ -314,8 +318,20 @@ pub fn rustc(root: &Path) -> Result<String> {
+@@ -42,6 +46,16 @@ pub struct Plan {
+ }
+ /// The current plan schema: 6 adds named hooks, bundle crates, data and post-build steps.
+ pub const SCHEMA: u32 = 6;
++/// The cfg set a plan was made for, and the files its `feature` options were decided in.
++#[derive(Debug, Clone, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct PlannedCfg {
++    pub options: Vec<String>,
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub features_of: Option<String>,
++    #[serde(default, skip_serializing_if = "Vec::is_empty")]
++    pub feature_files: Vec<String>,
++}
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+ #[serde(deny_unknown_fields)]
+ pub struct PlannedModule {
+@@ -314,8 +328,20 @@ pub fn rustc(root: &Path) -> Result<String> {
  pub fn build_plan(workspace: &Path, mods: &Path) -> Result<Plan> {
      build_staged(workspace, mods).map(|(plan, _)| plan)
  }
@@ -1745,7 +1845,7 @@ index 848dcc0..8fe99db 100644
      let root = workspace.canonicalize().map_err(io)?;
      let mut mods = manifest::load(mods)?;
      let inputs: BTreeMap<String, String> = source::files(&root)?
-@@ -323,7 +339,7 @@ pub fn build_staged(workspace: &Path, mods: &Path) -> Result<(Plan, crate::nativ
+@@ -323,7 +349,7 @@ pub fn build_staged(workspace: &Path, mods: &Path) -> Result<(Plan, crate::nativ
          .map(|(name, bytes)| (name, source::fingerprint(bytes)))
          .collect();
      crate::native::resolve_hooks(&root, &mut mods)?;
@@ -1754,7 +1854,7 @@ index 848dcc0..8fe99db 100644
      let native = crate::native::plan(&root, &index.packages, &index.bins, &inputs, &mods)?;
      let mut injections = Vec::new();
      let mut planned_bridges = Vec::new();
-@@ -604,7 +620,17 @@ pub fn build_staged(workspace: &Path, mods: &Path) -> Result<(Plan, crate::nativ
+@@ -604,7 +630,17 @@ pub fn build_staged(workspace: &Path, mods: &Path) -> Result<(Plan, crate::nativ
                          .collect()
                  };
                  if matches.len() != injection.require.unwrap() {
@@ -1773,7 +1873,7 @@ index 848dcc0..8fe99db 100644
                  }
                  let ordinal = injection.ordinal.unwrap();
                  let site = matches.get(ordinal).ok_or_else(|| {
-@@ -633,6 +659,39 @@ pub fn build_staged(workspace: &Path, mods: &Path) -> Result<(Plan, crate::nativ
+@@ -633,6 +669,39 @@ pub fn build_staged(workspace: &Path, mods: &Path) -> Result<(Plan, crate::nativ
                  {
                      return Err(context(Diagnostic::new("E_UNSUPPORTED_SITE", "the selected site contains a closure, which this hook would move into generated code").file(&f.file)));
                  }
@@ -1813,15 +1913,19 @@ index 848dcc0..8fe99db 100644
                  if (injection.kind == Kind::BeforeCall
                      || (injection.kind == Kind::AfterCall && injection.cancellable))
                      && !site.whole_expression
-@@ -924,6 +983,7 @@ pub fn build_staged(workspace: &Path, mods: &Path) -> Result<(Plan, crate::nativ
+@@ -924,6 +993,11 @@ pub fn build_staged(workspace: &Path, mods: &Path) -> Result<(Plan, crate::nativ
          schema: SCHEMA,
          transformer: env!("CARGO_PKG_VERSION").into(),
          rustc: rustc(&root)?,
-+        cfg: cfg.map(CfgSet::options),
++        cfg: cfg.map(|cfg| PlannedCfg {
++            options: cfg.options(),
++            features_of: cfg.features_of().map(str::to_owned),
++            feature_files: index.feature_files.iter().cloned().collect(),
++        }),
          inputs,
          injections,
          bridges: planned_bridges,
-@@ -979,6 +1039,9 @@ pub(crate) fn validate_target_with(
+@@ -979,6 +1053,9 @@ pub(crate) fn validate_target_with(
          // are checked in those values only ([`exit_value_error`]). MODIFY_VARIABLE likewise
          // replaces only the value it selects ([`modified_value_error`]).
          rewrites_body: !matches!(kind, Kind::Return | Kind::ModifyVariable),
@@ -1831,7 +1935,7 @@ index 848dcc0..8fe99db 100644
          // A `?` is an exit RETURN would miss; MODIFY_VARIABLE leaves one outside its value alone.
          try_outside_value: kind == Kind::ModifyVariable,
          body_macros: false,
-@@ -1005,7 +1068,10 @@ pub(crate) fn validate_target_with(
+@@ -1005,7 +1082,10 @@ pub(crate) fn validate_target_with(
      // any exit or expression inside a macro, just like ordinary HEAD.
      safety.body_macros = safety.boundary;
      safety.in_body = true;
@@ -1843,7 +1947,7 @@ index 848dcc0..8fe99db 100644
      if safety.error.is_none() && kind == Kind::Return {
          safety.error = exit_value_error(&f.block);
      }
-@@ -1173,6 +1239,7 @@ struct Safety {
+@@ -1173,6 +1253,7 @@ struct Safety {
      error: Option<(&'static str, &'static str)>,
      boundary: bool,
      rewrites_body: bool,
@@ -1851,7 +1955,7 @@ index 848dcc0..8fe99db 100644
      try_outside_value: bool,
      body_macros: bool,
      relaxed: bool,
-@@ -1237,6 +1304,9 @@ impl<'ast> Visit<'ast> for Safety {
+@@ -1237,6 +1318,9 @@ impl<'ast> Visit<'ast> for Safety {
              // RETURN never rewrites inside a closure; what is inside is still checked.
              Expr::Closure(c) if (!self.rewrites_body || self.relaxed) && c.asyncness.is_none() => {}
              Expr::Try(_) if self.try_outside_value => {}
@@ -1861,7 +1965,7 @@ index 848dcc0..8fe99db 100644
              Expr::Closure(_)
              | Expr::Async(_)
              | Expr::Await(_)
-@@ -1247,7 +1317,10 @@ impl<'ast> Visit<'ast> for Safety {
+@@ -1247,7 +1331,10 @@ impl<'ast> Visit<'ast> for Safety {
              | Expr::Const(_) => self.error = Some(CLOSURES_ETC),
              // Calls under a reference can depend on temporary lifetime extension.
              Expr::Reference(r)
@@ -1873,7 +1977,7 @@ index 848dcc0..8fe99db 100644
              {
                  self.error = Some(REFERENCED_CALL)
              }
-@@ -1346,6 +1419,23 @@ impl<'ast> Visit<'ast> for Safety {
+@@ -1346,6 +1433,23 @@ impl<'ast> Visit<'ast> for Safety {
          }
      }
  }
@@ -1897,7 +2001,7 @@ index 848dcc0..8fe99db 100644
  fn contains_call(expr: &Expr) -> bool {
      struct Find(bool);
      impl<'ast> Visit<'ast> for Find {
-@@ -1395,11 +1485,14 @@ fn validate_operation_site(
+@@ -1395,11 +1499,14 @@ fn validate_operation_site(
                  }
              }
          }
@@ -2052,7 +2156,7 @@ index 47fee7d..1d3220c 100644
  }
  
 diff --git a/crates/horizon-mixins-transform/src/lib.rs b/crates/horizon-mixins-transform/src/lib.rs
-index f4edd3d..8014fdc 100644
+index f4edd3d..1db86d6 100644
 --- a/crates/horizon-mixins-transform/src/lib.rs
 +++ b/crates/horizon-mixins-transform/src/lib.rs
 @@ -1,5 +1,6 @@
@@ -2062,37 +2166,46 @@ index f4edd3d..8014fdc 100644
      index::{Function, tokens},
      manifest::Kind,
      plan, sites, source,
-@@ -37,6 +38,11 @@ pub fn transform(root: &Path, plan: &Plan) -> Result<BTreeMap<String, Vec<u8>>>
+@@ -37,6 +38,17 @@ pub fn transform(root: &Path, plan: &Plan) -> Result<BTreeMap<String, Vec<u8>>>
              "workspace no longer matches planned inputs; regenerate plan",
          ));
      }
-+    let cfg = plan.cfg.as_deref().map(CfgSet::parse).transpose()?;
-+    let parse = |text: &str| match &cfg {
-+        Some(cfg) => cfg.parse_file(text),
-+        None => syn::parse_file(text),
++    let cfg = plan
++        .cfg
++        .as_ref()
++        .map(|c| CfgSet::parse(&c.options, c.features_of.as_deref()))
++        .transpose()?;
++    let parse = |text: &str, file: &str| match (&cfg, &plan.cfg) {
++        (Some(cfg), Some(planned)) => {
++            cfg.parse_file(text, planned.feature_files.iter().any(|f| f == file))
++        }
++        _ => syn::parse_file(text),
 +    };
      let mut groups: BTreeMap<(&str, &[usize]), Vec<&PlannedInjection>> = BTreeMap::new();
      for patch in &plan.injections {
          groups
-@@ -59,7 +65,7 @@ pub fn transform(root: &Path, plan: &Plan) -> Result<BTreeMap<String, Vec<u8>>>
+@@ -59,7 +71,7 @@ pub fn transform(root: &Path, plan: &Plan) -> Result<BTreeMap<String, Vec<u8>>>
                  .map_err(|e| Diagnostic::new("E_RUST_SYNTAX", e.to_string()))?;
              trees.insert(
                  file.to_string(),
 -                syn::parse_file(text)
-+                parse(text)
++                parse(text, file)
                      .map_err(|e| Diagnostic::new("E_RUST_SYNTAX", e.to_string()).file(file))?,
              );
          }
-@@ -71,7 +77,7 @@ pub fn transform(root: &Path, plan: &Plan) -> Result<BTreeMap<String, Vec<u8>>>
+@@ -71,7 +83,10 @@ pub fn transform(root: &Path, plan: &Plan) -> Result<BTreeMap<String, Vec<u8>>>
                  .ok_or_else(|| Diagnostic::new("E_STALE_SOURCE", "bridge file is absent"))?;
              let text = std::str::from_utf8(bytes)
                  .map_err(|e| Diagnostic::new("E_RUST_SYNTAX", e.to_string()))?;
 -            trees.insert(bridge.file.clone(), syn::parse_file(text).map_err(syntax)?);
-+            trees.insert(bridge.file.clone(), parse(text).map_err(syntax)?);
++            trees.insert(
++                bridge.file.clone(),
++                parse(text, &bridge.file).map_err(syntax)?,
++            );
          }
          let original = bridges::item(&trees[&bridge.file].items, &bridge.node)?;
          if source::fingerprint(tokens(original)) != bridge.fingerprint {
-@@ -88,7 +94,7 @@ pub fn transform(root: &Path, plan: &Plan) -> Result<BTreeMap<String, Vec<u8>>>
+@@ -88,9 +103,10 @@ pub fn transform(root: &Path, plan: &Plan) -> Result<BTreeMap<String, Vec<u8>>>
                  .ok_or_else(|| Diagnostic::new("E_PLAN_SITE", "state file absent"))?;
              trees.insert(
                  s.file.clone(),
@@ -2100,17 +2213,23 @@ index f4edd3d..8014fdc 100644
 +                parse(
                      std::str::from_utf8(bytes)
                          .map_err(|e| Diagnostic::new("E_RUST_SYNTAX", e.to_string()))?,
++                    &s.file,
                  )
-@@ -111,7 +117,7 @@ pub fn transform(root: &Path, plan: &Plan) -> Result<BTreeMap<String, Vec<u8>>>
+                 .map_err(syntax)?,
+             );
+@@ -111,7 +127,10 @@ pub fn transform(root: &Path, plan: &Plan) -> Result<BTreeMap<String, Vec<u8>>>
                  .ok_or_else(|| Diagnostic::new("E_STALE_SOURCE", "module destination absent"))?;
              let text = std::str::from_utf8(bytes)
                  .map_err(|e| Diagnostic::new("E_RUST_SYNTAX", e.to_string()))?;
 -            trees.insert(module.file.clone(), syn::parse_file(text).map_err(syntax)?);
-+            trees.insert(module.file.clone(), parse(text).map_err(syntax)?);
++            trees.insert(
++                module.file.clone(),
++                parse(text, &module.file).map_err(syntax)?,
++            );
          }
          let tree = &trees[&module.file];
          if source::fingerprint(tokens(tree)) != module.fingerprint {
-@@ -343,6 +349,26 @@ pub fn transform(root: &Path, plan: &Plan) -> Result<BTreeMap<String, Vec<u8>>>
+@@ -343,6 +362,26 @@ pub fn transform(root: &Path, plan: &Plan) -> Result<BTreeMap<String, Vec<u8>>>
      }
      Ok(files)
  }
@@ -2137,7 +2256,7 @@ index f4edd3d..8014fdc 100644
  fn syntax(e: syn::Error) -> Diagnostic {
      Diagnostic::new("E_TRANSFORM", e.to_string())
  }
-@@ -516,6 +542,7 @@ fn wrap_operation(call: &Expr, wrappers: &[&PlannedInjection]) -> Result<Expr> {
+@@ -516,6 +555,7 @@ fn wrap_operation(call: &Expr, wrappers: &[&PlannedInjection]) -> Result<Expr> {
  
      let mut original = call.clone();
      let mut arguments: Vec<Expr>;
@@ -2145,7 +2264,7 @@ index f4edd3d..8014fdc 100644
      match &mut original {
          Expr::Call(c) => {
              arguments = c.args.iter().cloned().collect();
-@@ -523,16 +550,52 @@ fn wrap_operation(call: &Expr, wrappers: &[&PlannedInjection]) -> Result<Expr> {
+@@ -523,16 +563,52 @@ fn wrap_operation(call: &Expr, wrappers: &[&PlannedInjection]) -> Result<Expr> {
          }
          Expr::MethodCall(c) => {
              let receiver = &c.receiver;
@@ -2208,7 +2327,7 @@ index f4edd3d..8014fdc 100644
              };
              arguments = vec![receiver_arg];
              arguments.extend(c.args.iter().cloned());
-@@ -541,6 +604,36 @@ fn wrap_operation(call: &Expr, wrappers: &[&PlannedInjection]) -> Result<Expr> {
+@@ -541,6 +617,36 @@ fn wrap_operation(call: &Expr, wrappers: &[&PlannedInjection]) -> Result<Expr> {
          }
          _ => return Err(Diagnostic::new("E_PLAN_SITE", "wrapper site is not a call")),
      }

@@ -136,7 +136,7 @@ These functions are refused:
 
 The one generic function you can target is a [published loop's body](3-loops.md#mixins-on-the-loop).
 
-The tool plans against what the signed game compiles. The launcher gives it the build's cfg set (the target's options and the features the prebuilt game was built with), and it drops the items, statements, fields, variants, parameters and match arms under an inactive `cfg` and expands `cfg_attr`. A function with an inner `#[cfg(test)] fn helper()` or a `#[cfg(feature = "x")]` statement takes its mixins like any other. A `cfg` the set cannot decide (`version(..)`, `accessible(..)`, an expression-level attribute) is refused with `E_UNSUPPORTED_CFG`.
+The tool plans against what the patch library compiles. The launcher gives it the build's cfg set (the target's options and the features the prebuilt game was built with), and it drops the items, statements, fields, variants, parameters and match arms under an inactive `cfg` and expands `cfg_attr`. A function with an inner `#[cfg(test)] fn helper()` or a `#[cfg(feature = "x")]` statement takes its mixins like any other. The features are the game crate's: a `feature` predicate is decided only in the game crate's own functions. In a function of a crate below it (`sunrise_world`, say) it stays undecided, since that crate's resolved features are not the game's, and is refused. `unix`, `target_os` and the other options hold for every crate. A `cfg` the set cannot decide (`version(..)`, `accessible(..)`, an expression-level attribute, a `feature` outside the game crate) is refused with `E_UNSUPPORTED_CFG`.
 
 ## With other mods
 

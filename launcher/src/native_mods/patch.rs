@@ -544,8 +544,8 @@ pub(super) fn prepare<'a>(
     // With no rows (only modules or bridges), the crate compiles as generated.
     let patched = if let Some(tool) = &tool {
         let patched = out.join("patch-applied");
-        // The tool plans against what the signed game compiles: this computer's cfg set under the
-        // flags the patch library is compiled with (the prebuilt game's target is this computer's,
+        // The tool plans against what the patch library compiles: this computer's cfg set under the
+        // flags it is compiled with (the prebuilt game's target is this computer's,
         // `check_identity`), and the features the game was built with.
         let mut print = super::prebuilt::rustc_with(rust, &[], "2024");
         print.args(["--print", "cfg"]);
@@ -560,6 +560,9 @@ pub(super) fn prepare<'a>(
         ) {
             cmd.arg("--cfg").arg(option);
         }
+        // The features are the game crate's: the tool decides `feature` predicates only in its
+        // copies, and refuses them in the copies of the crates below it.
+        cmd.arg("--features-of").arg(CRATE);
         super::run(cmd, "Applying the mixins to their functions", |_| {})?;
         patched
     } else {
