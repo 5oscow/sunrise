@@ -232,6 +232,126 @@ fn a_predicted_break_reconciles_its_neighbour_s_shape_change() {
     });
 }
 
+#[test]
+#[ignore = "daily"]
+fn a_denied_break_restores_wall_sign_text_and_synced_attachments() {
+    use mod_api::{AttachmentCodec, AttachmentType, Host};
+    use sunrise_mod_runtime::attachments::AttachmentSync;
+    use sunrise_protocol::attachment_sync::{Message, encode};
+
+    static VALUE: AttachmentType<i32> = AttachmentType {
+        namespace: "break_test",
+        name: "wall_sign",
+        default: || 0,
+        codec: Some(AttachmentCodec {
+            encode: |n| Ok([("n".into(), Tag::Int(*n))].into()),
+            decode: |c| match c.get(&"n".into()) {
+                Some(Tag::Int(n)) => Ok(*n),
+                _ => Err(mod_api::AttachmentError::Decode),
+            },
+        }),
+        copy_on_death: false,
+        sync: true,
+    };
+    on_a_client(mod_api::Mods::default(), |game| {
+        let spawn = play::SpawnInfo {
+            dimension_type: 0,
+            dimension: "minecraft:overworld".into(),
+            seed: 0,
+            game_type: 0,
+            previous_game_type: None,
+            debug: false,
+            flat: true,
+            last_death: None,
+            portal_cooldown: 0,
+            sea_level: 63,
+        };
+        game.enter_remote_dimension(&spawn, false, sunrise_client::level_loading::Reason::Other);
+        game.remote.as_mut().unwrap().logged_in = true;
+        game.world
+            .chunks
+            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+        game.sync_tick_chunks();
+
+        let registry = game.pack.assets.registry;
+        let support = registry.default_state("minecraft:cobblestone").unwrap();
+        let wall_sign = |name: &str| {
+            registry
+                .resolve(&sunrise_world::chunk::BlockState {
+                    name: name.into(),
+                    properties: [
+                        ("facing".into(), "west".into()),
+                        ("waterlogged".into(), "false".into()),
+                    ]
+                    .into_iter()
+                    .collect(),
+                })
+                .unwrap()
+        };
+        let oak = wall_sign("minecraft:oak_wall_sign");
+        let spruce = wall_sign("minecraft:spruce_wall_sign");
+        let pos = (0, 65, 0);
+        let holder = Holder::BlockEntity([0, 65, 0]);
+        let attachment_values = |game: &Game<'_>| {
+            let host: &dyn Host = game;
+            host.attachment_query(VALUE.namespace, VALUE.name)
+                .unwrap()
+                .query(&VALUE)
+                .unwrap()
+                .iter()
+                .map(|row| *row.unwrap().value)
+                .collect::<Vec<_>>()
+        };
+        game.world.set(1, 65, 0, support).unwrap();
+        game.server_block([0, 65, 0], oak.0 as i32);
+        let Some(BlockEntity::Sign(sign)) = game.world.block_entities.get_mut(&pos) else {
+            panic!("wall sign was not created");
+        };
+        sign.front.lines[0] = "North entrance".into();
+        sign.back.lines[3] = "Keep this side clear".into();
+        sign.waxed = true;
+        let original = sign.clone();
+        game.remote_attachment_sync(
+            &encode(&Message {
+                holder,
+                replace: true,
+                changes: vec![AttachmentSync {
+                    namespace: VALUE.namespace.into(),
+                    name: VALUE.name.into(),
+                    value: Some([("n".into(), Tag::Int(41))].into()),
+                }],
+            })
+            .unwrap(),
+        );
+        assert_eq!(attachment_values(game), [41]);
+
+        game.predict_break([1, 65, 0], support, 7);
+        assert_eq!(game.world.block(0, 65, 0), game.world.air);
+        assert!(game.world.block_entities.get(&pos).is_none());
+        assert!(attachment_values(game).is_empty());
+        // A denied break need not come with block or block entity packets.
+        game.end_predictions(7);
+        assert_eq!(game.world.block(0, 65, 0), oak);
+        let Some(BlockEntity::Sign(restored)) = game.world.block_entities.get(&pos) else {
+            panic!("wall sign was not restored");
+        };
+        assert_eq!(restored, &original);
+        assert_eq!(attachment_values(game), [41]);
+
+        // A different authoritative block must not inherit the old data, even if
+        // its block entity has the same type.
+        game.predict_break([1, 65, 0], support, 8);
+        game.server_block([0, 65, 0], spruce.0 as i32);
+        game.end_predictions(8);
+        assert_eq!(game.world.block(0, 65, 0), spruce);
+        let Some(BlockEntity::Sign(replacement)) = game.world.block_entities.get(&pos) else {
+            panic!("replacement wall sign was not created");
+        };
+        assert_eq!(replacement, &Default::default());
+        assert!(attachment_values(game).is_empty());
+    });
+}
+
 static GUIDE_ASKS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 struct Counted;
