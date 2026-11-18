@@ -159,10 +159,7 @@ Minecraft's inventory rather than a document. Its colours are `sunrise_theme::Bl
 `--panel`, `--raised`, `--button`, `--well`, `--bevel`, `--lip`, `--outline` and the `--face`
 of the main action. The game's other menus keep `LIGHT` and `DARK`.
 
-In the game these settings screens draw the Blocks palette in GUI pixels, lighter than the
-website's blocks so the world stays in view: square panels of the page colour, see-through, with a
-1 px edge and no bevel or lip, flat controls, the violet face on Done, and vanilla's font rather
-than Pixelify. Hover and focus are vanilla's white edge.
+The game's settings screens don't use Blocks: they draw vanilla's widgets (see **Game** above).
 
 - **Pixel type for what names and what you act on.** Headings, navigation, buttons and the
   wordmark use Pixelify Sans (OFL; Medium, SemiBold, Bold); paragraphs and numbers stay in Geist

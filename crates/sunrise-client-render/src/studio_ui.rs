@@ -242,8 +242,8 @@ impl StudioUi {
         let panel_y = 42.0;
         let panel_h = (h - 76.0).max(100.0);
 
-        // Glass panel backdrop for recordings list
-        style::panel(batch, atlas, [panel_x, panel_y, panel_w, panel_h], true);
+        // The recordings list's panel, in a world or over the title screen as the backdrop is
+        style::panel(batch, atlas, [panel_x, panel_y, panel_w, panel_h], in_world);
         [panel_x, panel_y, panel_w, panel_h]
     }
     pub(crate) fn draw_contents(
@@ -316,7 +316,7 @@ impl StudioUi {
                 } else if is_hovered {
                     style::fill(batch, atlas, rect, style::hover());
                 } else {
-                    style::well(batch, atlas, rect);
+                    style::well(batch, atlas, rect, false);
                 }
 
                 let border_color = if is_selected {
@@ -395,13 +395,9 @@ impl StudioUi {
         // Button 3: Open the selected recording for playback.
         let e_btn = [panel_x + panel_w - 180.0, btn_y, 110.0, btn_h];
         let e_hover = ui::hovered(cursor, e_btn[0], e_btn[1], e_btn[2], e_btn[3]);
-        style::button(
-            batch,
-            atlas,
-            e_btn,
-            &Text::tr("sunrise.studio.open_replay", &[]),
-            (e_hover, true, false),
-        );
+        let label = Text::tr("sunrise.studio.open_replay", &[]);
+        crate::widgets::record(&label.plain(), e_btn, true);
+        style::button(batch, atlas, e_btn, &label, (e_hover, true, false));
 
         // Button 3: Done / Back (Right)
         let d_btn = [panel_x + panel_w - 64.0, btn_y, 64.0, btn_h];

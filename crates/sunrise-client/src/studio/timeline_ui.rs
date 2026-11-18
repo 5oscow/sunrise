@@ -396,7 +396,7 @@ impl TimelineUi {
         w: f32,
     ) {
         let ruler_rect = [start_x, y, w, 16.0];
-        style::well(batch, atlas, ruler_rect);
+        style::well(batch, atlas, ruler_rect, false);
 
         // Draw second tick marks and labels
         let sec_step = 1.0; // 1s ticks
