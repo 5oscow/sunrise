@@ -48,7 +48,9 @@ impl Game<'_> {
         self.lod_level = None;
         let dim = self.dim;
         let source = match (&self.integrated, self.server_far_terrain(), &self.remote) {
-            (Some(server), ..) => server.call(move |game| game.lod_source_in(dim)).flatten(),
+            (Some(server), ..) => server
+                .ask(|reply| super::owner_link::OwnerRequest::LodSource(dim, reply))
+                .flatten(),
             (None, Some(offer), Some(remote)) => {
                 let states = self.res.facts().states.len() as u32;
                 let biomes = self.res.biomes().index.clone();
@@ -56,15 +58,12 @@ impl Game<'_> {
                     remote.session.far_terrain(offer, biomes, states);
                 Some(source)
             }
-            // A friend's world (a new code at every share) or a splitscreen
-            // guest's (the player's own world, its other guests writing the
-            // same folder): nothing to keep.
+            // A friend's world has a new code at every share: nothing to keep.
             (None, None, Some(remote))
-                if self.options.split_guest
-                    || remote
-                        .session
-                        .address
-                        .starts_with(sunrise_client::net::FRIEND) =>
+                if remote
+                    .session
+                    .address
+                    .starts_with(sunrise_client::net::FRIEND) =>
             {
                 None
             }

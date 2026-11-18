@@ -17,6 +17,7 @@ use model_reducing::reducible_model_sprites;
 mod animate;
 pub mod cit_glint;
 mod clip_corner;
+pub mod dynamic_textures;
 mod gui_sprite;
 pub use gui_sprite::atlas_key_of_gui_sprite;
 mod menu_pictures;
@@ -126,6 +127,9 @@ pub struct HudAtlas {
     pub material_maps: std::sync::Arc<[Option<crate::paged_maps::PagedMap>; 2]>,
     /// The white texel flat fills sample (also `hud_kit::shapes`).
     pub(crate) white: Rect,
+    /// Where the slots of client mods' dynamic textures lie, when the atlas packed them
+    /// ([`HudAtlas::build_over_with_dynamic_textures`]); their names are not among `sprites`.
+    pub dynamic_texture_pool: Option<dynamic_textures::Pool>,
 }
 /// Atlas rows reserved for glyphs rasterized at run time.
 pub const GLYPH_ROWS: u32 = 512;
@@ -143,12 +147,6 @@ pub fn map_slot_sprite(slot: usize) -> Option<&'static str> {
         std::sync::LazyLock::new(|| (0..MAP_SLOTS).map(|i| format!("sunrise/map{i}")).collect());
     NAMES.get(slot).map(String::as_str)
 }
-/// The atlas slot the minimap extra draws into.
-pub const MINIMAP_SPRITE: &str = "sunrise/minimap";
-/// A mod's own image (`mod_image`), drawn with `native_sprite`; big
-/// enough for a world map's 1024 blocks at a block a pixel.
-pub const MOD_IMAGE_SPRITE: &str = "sunrise/modimage";
-pub const MOD_IMAGE_SIZE: u32 = 1024;
 /// Atlas slots for downloaded player skins (`skins/<sha1>`), 64x64 each.
 /// Vanilla registers a texture per skin. Here the slots are shared
 /// (`skins::SkinSlots`): skins drawn in the last frame keep theirs, and a
@@ -869,18 +867,20 @@ impl HudAtlas {
     /// The atlas of a resource root that layers packs over `defaults` (the
     /// game's own resources), whose textures give the sprites' GUI sizes.
     pub fn build_over(root: &ResourceSource, defaults: &ResourceSource) -> Result<Self> {
-        Self::build_over_with_image(root, defaults, false)
+        Self::build_over_with_dynamic_textures(root, defaults, false)
     }
-    /// The atlas above, with a slot for a client mod's own image
-    /// (`sunrise/modimage`) only when `mod_image` says a client mod is loaded,
-    /// native or wasm: the slot costs 4 MiB of pixels, so a game without
-    /// mods holds none of them.
-    pub fn build_over_with_image(
+    /// The atlas above, with the pool of slots for client mods' dynamic textures
+    /// (`dynamic_textures::DYNAMIC_TEXTURE_SLOTS` of each class, 10.5 MiB of texels) only when
+    /// `pool` says a client mod is loaded, native or wasm: a game without mods packs no slot
+    /// and its atlas does not grow.
+    pub fn build_over_with_dynamic_textures(
         root: &ResourceSource,
         defaults: &ResourceSource,
-        mod_image: bool,
+        pool: bool,
     ) -> Result<Self> {
-        let mut atlas = Self::pack(root, defaults, WALKED_TEXTURE_FOLDERS, true, mod_image)?;
+        let mut atlas = Self::pack(root, defaults, WALKED_TEXTURE_FOLDERS, true, pool)?;
+        atlas.dynamic_texture_pool =
+            dynamic_textures::Pool::take(&mut atlas.sprites, atlas.width, atlas.height);
         pack_text::load_shaders(&mut atlas, root, defaults);
         atlas.sprite_modifiers = std::sync::Arc::new(sprite_modifiers::SpriteModifiers::read(
             root,
@@ -888,31 +888,25 @@ impl HudAtlas {
         ));
         Ok(atlas)
     }
-    /// Empty slots written at run time: map textures (game/blocks/maps/mod.rs), the
-    /// minimap, a native mod's own image, downloaded skins, world and pack
-    /// icons and the on-screen keyboard's text. Their pixels are already zero
-    /// in the destination atlas, so keep the source buffers empty and avoid
-    /// duplicating the atlas-sized allocation during packing.
-    fn slots(images: &mut Vec<PackedImage>, trim: (u32, u32), mod_image: bool) {
+    /// Empty slots written at run time: map textures (game/blocks/maps/mod.rs),
+    /// client mods' dynamic textures (only with `pool`), downloaded skins, world
+    /// and pack icons and the on-screen keyboard's text. Their pixels are already zero in
+    /// the destination atlas, so keep the source buffers empty and avoid duplicating the
+    /// atlas-sized allocation during packing.
+    fn slots(images: &mut Vec<PackedImage>, trim: (u32, u32), pool: bool) {
         for i in 0..MAP_SLOTS {
             let name = map_slot_sprite(i).unwrap_or_default();
             images.push((name.into(), 128, 128, Vec::new()));
         }
-        // The minimap extra's image (game/interface/extras.rs).
-        images.push((
-            MINIMAP_SPRITE.into(),
-            crate::minimap::SIZE as u32,
-            crate::minimap::SIZE as u32,
-            Vec::new(),
-        ));
-        // A mod's own image (`mod_image`), only when a client mod is loaded.
-        if mod_image {
-            images.push((
-                MOD_IMAGE_SPRITE.into(),
-                MOD_IMAGE_SIZE,
-                MOD_IMAGE_SIZE,
-                Vec::new(),
-            ));
+        // The pool of client mods' dynamic textures, only when a client mod is loaded.
+        if pool {
+            let classes = mod_api::DYNAMIC_TEXTURE_CLASSES;
+            for (class, slots) in dynamic_textures::DYNAMIC_TEXTURE_SLOTS.iter().enumerate() {
+                for slot in 0..*slots {
+                    let (name, side) = (dynamic_textures::slot_sprite(class, slot), classes[class]);
+                    images.push((name, side, side, Vec::new()));
+                }
+            }
         }
         // Downloaded skins (game/interface/scoreboard/mod.rs).
         for i in 0..SKIN_SLOTS {
@@ -974,6 +968,7 @@ impl HudAtlas {
             emissive: Arc::default(),
             blinks: Default::default(),
             white,
+            dynamic_texture_pool: None,
         })
     }
     /// The boot screen's atlas, before any pack loads: the theme's run-time
@@ -1042,6 +1037,7 @@ impl HudAtlas {
             random_textures: Default::default(),
             emissive: Default::default(),
             blinks: Default::default(),
+            dynamic_texture_pool: None,
         }
     }
     /// Shelf placements of `images` (tallest first) in the narrowest atlas
@@ -1111,7 +1107,7 @@ impl HudAtlas {
         defaults: &ResourceSource,
         folders: &[&str],
         full: bool,
-        mod_image: bool,
+        pool: bool,
     ) -> Result<Self> {
         let textures = "assets/minecraft/textures";
         let mut files = Vec::new();
@@ -1349,15 +1345,6 @@ impl HudAtlas {
                 images.push(image);
             }
         }
-        // The title screen's "JAVA EDITION" banner reads "RUST EDITION".
-        if let Some(edition) = images
-            .iter_mut()
-            .find(|i| i.0 == crate::title_edition::SPRITE)
-            && let Some(pixels) =
-                crate::title_edition::rust_edition(edition.1, edition.2, &edition.3)
-        {
-            edition.3 = pixels;
-        }
         images.push(("sunrise/white".into(), 4, 4, vec![255; 64]));
         // The main menu's Mods button, unless a pack brought its own icon.
         let mods_icon = crate::mods_screen::icon_image();
@@ -1377,7 +1364,7 @@ impl HudAtlas {
                 let (width, height, rgba) = decode_bytes(png)?;
                 images.push((format!("sunrise/jei/{name}"), width, height, rgba));
             }
-            Self::slots(&mut images, crate::trims::slot_size(root), mod_image);
+            Self::slots(&mut images, crate::trims::slot_size(root), pool);
             // MissingTextureAtlasSprite.generateMissingImage: 16x16, magenta
             // and black quarters.
             let missing = (0..256)
@@ -1552,6 +1539,7 @@ impl HudAtlas {
             blinks,
             font,
             white,
+            dynamic_texture_pool: None,
         })
     }
     /// `misc/<name>.png` on its own, or a transparent texel if the resource
@@ -1639,6 +1627,9 @@ pub struct HudBatch {
     pub height: f32,
     /// Glyph pixels to upload into the atlas before drawing.
     pub patches: Vec<crate::font::Patch>,
+    /// Client mods' dynamic textures to upload into their atlas slots before drawing, sharing
+    /// the pixels the game keeps of them.
+    pub image_patches: Vec<dynamic_textures::ImagePatch>,
     /// Vertex ranges with another blend or depth/scissor state, in order.
     pub blends: Vec<(std::ops::Range<u32>, Blend)>,
     /// The textures and time of the `Blend::EndPortal` runs.
@@ -1711,6 +1702,7 @@ impl HudBatch {
             width: gui.size[0] as f32,
             height: gui.size[1] as f32,
             patches: Vec::new(),
+            image_patches: Vec::new(),
             blends: Vec::new(),
             end_portal: EndPortalFill::default(),
             glint_alpha: 0.75,
@@ -2843,35 +2835,41 @@ impl HudRenderer {
             pack_text::PackText::new(device, self.format, &self.atlas_view, shader, self.coverage)
         });
     }
-    /// Stage `patches` into the shared atlas texture.
+    /// Stage the batch's `patches` and `image_patches` (client mods' dynamic textures) into
+    /// the shared atlas texture.
     pub fn upload_patches(
         &self,
         uploads: &mut crate::gfx::upload::Uploads,
         encoder: &mut wgpu::CommandEncoder,
-        patches: &[crate::font::Patch],
+        batch: &HudBatch,
     ) {
-        if let Some(texture) = &self.atlas_texture {
-            for p in patches {
-                if p.x.saturating_add(p.width) <= texture.width()
-                    && p.y.saturating_add(p.height) <= texture.height()
-                {
-                    uploads.texture(
-                        encoder,
-                        wgpu::TexelCopyTextureInfo {
-                            texture,
-                            mip_level: 0,
-                            origin: wgpu::Origin3d {
-                                x: p.x,
-                                y: p.y,
-                                z: 0,
-                            },
-                            aspect: wgpu::TextureAspect::All,
-                        },
-                        p.width,
-                        p.height,
-                        &p.rgba,
-                    );
-                }
+        let Some(texture) = &self.atlas_texture else {
+            return;
+        };
+        let glyphs = batch
+            .patches
+            .iter()
+            .map(|p| ([p.x, p.y], [p.width, p.height], &p.rgba[..]));
+        let images = batch
+            .image_patches
+            .iter()
+            .map(|p| (p.origin, p.size, &p.rgba[..]));
+        for ([x, y], [width, height], rgba) in glyphs.chain(images) {
+            if x.saturating_add(width) <= texture.width()
+                && y.saturating_add(height) <= texture.height()
+            {
+                uploads.texture(
+                    encoder,
+                    wgpu::TexelCopyTextureInfo {
+                        texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d { x, y, z: 0 },
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    width,
+                    height,
+                    rgba,
+                );
             }
         }
     }
@@ -2886,7 +2884,7 @@ impl HudRenderer {
         size: [u32; 2],
     ) {
         self.prepare_pictures(device, uploads, encoder, batch);
-        self.upload_patches(uploads, encoder, &batch.patches);
+        self.upload_patches(uploads, encoder, batch);
         if batch.vertices.is_empty() || size.contains(&0) {
             return;
         }
@@ -3117,22 +3115,41 @@ mod tests {
         assert!(atlas.object_skins.is_empty());
     }
 
-    /// The mod image slot is paid only by a game with a client mod loaded.
+    /// The pool of dynamic texture slots is paid only by a game with a client mod loaded: with
+    /// none, the atlas packs no slot and does not grow. The slots' names leave the sprites, so
+    /// no mod draws a slot another mod's image holds.
     #[test]
-    fn the_mod_image_slot_exists_only_when_a_mod_is_loaded() {
-        let root = Path::new("/nonexistent/sunrise-test-assets");
-        let plain = HudAtlas::build(&sunrise_assets::resource_source::ResourceSource::directory(
-            root.to_path_buf(),
-        ))
-        .unwrap();
-        assert!(!plain.sprites.contains_key(MOD_IMAGE_SPRITE));
-        let with_mod = HudAtlas::build_over_with_image(
-            &sunrise_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
-            &sunrise_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
-            true,
-        )
-        .unwrap();
-        assert!(with_mod.sprites.contains_key(MOD_IMAGE_SPRITE));
+    fn the_dynamic_texture_pool_exists_only_when_a_mod_is_loaded() {
+        let root = sunrise_assets::resource_source::ResourceSource::directory(
+            Path::new("/nonexistent/sunrise-test-assets").to_path_buf(),
+        );
+        let plain = HudAtlas::build(&root).unwrap();
+        let without = HudAtlas::build_over_with_dynamic_textures(&root, &root, false).unwrap();
+        assert!(plain.dynamic_texture_pool.is_none() && without.dynamic_texture_pool.is_none());
+        assert_eq!((without.width, without.height), (plain.width, plain.height));
+        let with = HudAtlas::build_over_with_dynamic_textures(&root, &root, true).unwrap();
+        let pool = with.dynamic_texture_pool.as_ref().expect("the pool");
+        assert_eq!(pool.slots(), dynamic_textures::DYNAMIC_TEXTURE_SLOTS);
+        assert!(
+            !with
+                .sprites
+                .keys()
+                .any(|name| name.starts_with("sunrise/dynamic-texture/"))
+        );
+        // Every slot lies whole in the atlas, apart from every other slot.
+        let mut slots = Vec::new();
+        for (class, side) in mod_api::DYNAMIC_TEXTURE_CLASSES.into_iter().enumerate() {
+            for slot in 0..pool.slots()[class] {
+                let [x, y] = pool.origin(class, slot);
+                assert!(x + side <= with.width && y + side <= with.height);
+                slots.push([x, y, x + side, y + side]);
+            }
+        }
+        for (i, a) in slots.iter().enumerate() {
+            for b in &slots[i + 1..] {
+                assert!(a[2] <= b[0] || b[2] <= a[0] || a[3] <= b[1] || b[3] <= a[1]);
+            }
+        }
     }
 
     #[test]
@@ -5231,6 +5248,7 @@ texture=wide",
                 width: width as f32,
                 height: height as f32,
                 patches: Vec::new(),
+                image_patches: Vec::new(),
                 blends: Vec::new(),
                 end_portal: EndPortalFill::default(),
                 glint_alpha: 0.75,

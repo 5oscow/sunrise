@@ -1553,44 +1553,47 @@ impl Game<'_> {
         food: Option<PlayerFood>,
         active_effects: impl Iterator<Item = usize>,
     ) -> (bool, Vec<EffectTickChange>) {
-        let resolved = index.and_then(|index| {
-            Some((
-                mod_api::__private::effect_key_by_index(index)?,
-                sunrise_client_core::potions::effect_by_index(index)?.owner?,
-            ))
-        });
-        let Some((effect, mod_id)) = resolved else {
+        if !mod_api::__private::has_part_hook(mod_api::HookId::ShouldApplyEffectTickThisTick) {
+            return (true, Vec::new());
+        }
+        let Some(effect) = index.and_then(mod_api::__private::effect_key_by_index) else {
             static MISSING_EFFECT: std::sync::Once = std::sync::Once::new();
             MISSING_EFFECT.call_once(|| {
                 log::debug!("Skipping mod effect tick: missing registry key or declaring mod for index {index:?}");
             });
             return (true, Vec::new());
         };
-        let mut apply = false;
-        self.native_should_apply_effect_tick_this_tick(
-            mod_id, effect, tick_count, amplifier, &mut apply,
-        );
         let mut keep = true;
         let mut changes = Vec::new();
-        if apply {
-            let mut keys = self.potions.tick_keys.borrow_mut();
-            keys.clear();
-            keys.extend(active_effects.filter_map(mod_api::__private::effect_key_by_index));
-            self.native_apply_effect_tick(mod_api::__private::ApplyEffectTickCall {
-                mod_id,
-                effect,
-                dimension: self.dim.id(),
-                entity,
-                amplifier,
-                holder,
-                health,
-                max_health,
-                food,
-                active_effects: &keys,
-                changes: &mut changes,
-                keep: &mut keep,
-            });
-        }
+        let keys = std::cell::OnceCell::new();
+        let (keep_out, changes_out) = (&mut keep, &mut changes);
+        mod_api::__private::dispatch_mob_effect_tick(
+            self,
+            tick_count,
+            effect,
+            amplifier,
+            |effect, amplifier| {
+                let keys = keys.get_or_init(|| {
+                    let mut keys = self.potions.tick_keys.borrow_mut();
+                    keys.clear();
+                    keys.extend(active_effects.filter_map(mod_api::__private::effect_key_by_index));
+                    keys
+                });
+                mod_api::__private::ApplyEffectTickCall {
+                    effect,
+                    dimension: self.dim.id(),
+                    entity,
+                    amplifier,
+                    holder,
+                    health,
+                    max_health,
+                    food,
+                    active_effects: keys,
+                    changes: changes_out,
+                    keep: keep_out,
+                }
+            },
+        );
         (keep, changes)
     }
     /// The effects' attribute modifiers, armor protection and status flags
@@ -2945,9 +2948,16 @@ mod tests {
         });
     }
 
+    #[derive(Clone)]
     struct FoodEffectMod(std::sync::Arc<std::sync::atomic::AtomicBool>);
     #[mod_api::__subscriptions]
     impl mod_api::Hooks for FoodEffectMod {
+        fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+            for id in ["test:comfort", "test:nourishment"] {
+                let key = r.effect_key(id);
+                r.mob_effect_part(&key, self.clone()).unwrap();
+            }
+        }
         fn mob_effect_expired(
             &self,
             _: &dyn mod_api::Host,
@@ -2961,10 +2971,13 @@ mod tests {
                 mod_api::Flow::Continue
             }
         }
+    }
+    #[mod_api::sunrise_part]
+    impl mod_api::MobEffectPart for FoodEffectMod {
         fn should_apply_effect_tick_this_tick(
             &self,
             _: &dyn mod_api::Host,
-            event: &mut mod_api::ShouldApplyEffectTickThisTickEvent<'_>,
+            event: &mut mod_api::ShouldApplyEffectTickThisTickEvent,
         ) {
             let comfort = mod_api::__private::effect_key("test:comfort").unwrap();
             event.apply = event.effect != comfort || event.tick_count % 80 == 0;
@@ -3005,10 +3018,17 @@ mod tests {
     struct OtherEffectMod;
     #[mod_api::__subscriptions]
     impl mod_api::Hooks for OtherEffectMod {
+        fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+            let effect = r.effect_key("other-mod:foreign");
+            r.mob_effect_part(&effect, OtherEffectMod).unwrap();
+        }
+    }
+    #[mod_api::sunrise_part]
+    impl mod_api::MobEffectPart for OtherEffectMod {
         fn should_apply_effect_tick_this_tick(
             &self,
             _: &dyn mod_api::Host,
-            _: &mut mod_api::ShouldApplyEffectTickThisTickEvent<'_>,
+            _: &mut mod_api::ShouldApplyEffectTickThisTickEvent,
         ) {
             panic!("another mod's shouldApply listener must not run");
         }
@@ -3042,12 +3062,17 @@ mod tests {
             ]),
             || {
                 assert!(brewing::register_mod_effects(
-                    ["test:comfort", "test:nourishment"].map(|id| (
+                    [
+                        ("test:comfort", "effect-owner"),
+                        ("test:nourishment", "effect-owner"),
+                        ("other-mod:foreign", "other-mod"),
+                    ]
+                    .map(|(id, owner)| (
                         id.into(),
                         0,
                         brewing::Category::Beneficial,
                         None,
-                        "effect-owner".into(),
+                        owner.into(),
                     ))
                 ));
                 super::super::native_entity_refs::tests::with_game(|game| {
@@ -3223,6 +3248,13 @@ mod tests {
         struct TestMod;
         #[mod_api::__subscriptions]
         impl Hooks for TestMod {
+            fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+                let key = r.effect_key("test:effect");
+                r.mob_effect_part(&key, TestMod).unwrap();
+            }
+        }
+        #[mod_api::sunrise_part]
+        impl MobEffectPart for TestMod {
             fn should_apply_effect_tick_this_tick(
                 &self,
                 _: &dyn Host,

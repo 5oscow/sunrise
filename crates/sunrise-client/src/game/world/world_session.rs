@@ -24,8 +24,6 @@ impl Game<'_> {
         action: Action,
     ) -> Result<()> {
         match action {
-            // A splitscreen player's title never ends the process (P1's does).
-            Action::Quit if self.options.split_guest => {}
             Action::Quit => event_loop.exit(),
             Action::Options => self.open_options(true),
             Action::Accessibility => {
@@ -193,10 +191,6 @@ impl Game<'_> {
     /// menu items go back (Player.closeContainer), then the world is saved,
     /// once.
     pub(super) fn finish_perf(&mut self) {
-        // One session per computer: P1's (a splitscreen player's would count it again).
-        if self.options.split_guest {
-            return;
-        }
         let s = &self.settings;
         let settings = sunrise_telemetry::payload::Settings {
             render_distance: s.render_distance.clamp(0, 255) as u8,

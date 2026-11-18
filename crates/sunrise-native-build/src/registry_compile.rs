@@ -202,6 +202,9 @@ pub fn compile(
                 let mut source = fs::read_to_string(&root).map_err(|e| e.to_string())?;
                 prebuilt::check_entry_root(&source, id)?;
                 source.push_str("\n#[allow(unsafe_code)]\n#[path = \"__sunrise_entry.rs\"] mod __sunrise_entry;\n");
+                if project.uses_wasmtime() {
+                    source.push_str(prebuilt::WASMTIME_LINK);
+                }
                 fs::write(root, source).map_err(|e| e.to_string())?;
             }
             fs::write(path, manifest.to_string()).map_err(|e| e.to_string())?;
@@ -212,6 +215,12 @@ pub fn compile(
         ]);
         for (name, path) in &externs {
             prebuilt::refuse_closure_rlib(id, name, path)?;
+        }
+        if project.uses_wasmtime() {
+            externs.insert(
+                "sunrise_mod_wasm".into(),
+                prebuilt::library(&deps, "sunrise_mod_wasm")?,
+            );
         }
         for (name, package) in project.api_dependencies() {
             if package != "internals" {
@@ -278,7 +287,7 @@ pub fn compile(
                 toml::toml! { path = facade_relative package = facade_package }.into(),
             );
         }
-        let mut link_args = sdk.link_args.clone();
+        let mut link_args = Vec::new();
         if cfg!(target_os = "linux") {
             link_args.push("-Wl,--disable-new-dtags".into());
             link_args.push("-Wl,-rpath,$ORIGIN".into());
@@ -410,10 +419,10 @@ pub fn compile(
     plan.check_mods(&super::registry_lock::RegistryLock::parse(
         &super::read_lock(out)?,
     )?)?;
-    plan.allowed.check_partial_resolution(
-        &super::registry_lock::RegistryLock::parse(&super::read_lock(out)?)?,
-        &plan.game,
-    )?;
+    plan.allowed
+        .check_pins(&super::registry_lock::RegistryLock::parse(
+            &super::read_lock(out)?,
+        )?)?;
     let mut game_names = plan.game.game_package_names();
     for registry in patches.values() {
         for name in registry.as_table().expect("validated SDK patches").keys() {
@@ -430,7 +439,7 @@ pub fn compile(
     for (name, path) in &externs {
         prebuilt::refuse_closure_rlib("sunrise_patch", name, path)?;
     }
-    let mut link_args = sdk.link_args.clone();
+    let mut link_args = Vec::new();
     if cfg!(target_os = "linux") {
         link_args.push("-Wl,--disable-new-dtags".into());
         link_args.push("-Wl,-rpath,$ORIGIN".into());

@@ -18,9 +18,7 @@ pub trait Component {
 }
 
 /// An owned component patch, independent of the engine's component representation.
-#[derive(sunrise_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(sunrise_mod_api_macros::Wire, Clone, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Components {
     patch: Compound,
@@ -135,6 +133,23 @@ impl From<crate::text::TextFormError> for StackWriteError {
 }
 
 impl crate::NoBackend for StackWriteError {
+    fn no_backend() -> Self {
+        Self::Unavailable
+    }
+}
+
+/// Why an [`ItemPlace`](crate::ItemPlace) could not run the item's crafted-by processing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+#[derive(sunrise_mod_api_macros::Wire)]
+pub enum CraftedByError {
+    /// The place is not a menu slot or the carried stack, or it no longer holds a stack.
+    NotHeld,
+    /// The host has no server game backend, or the transaction or place is no longer usable.
+    Unavailable,
+}
+
+impl crate::NoBackend for CraftedByError {
     fn no_backend() -> Self {
         Self::Unavailable
     }

@@ -41,7 +41,7 @@ Benchmarks (`--benchmark`) never load mods.
 
 ## The Mods screen
 
-The **Mods** button on the title screen (also **Options > Mods**) lists Minecraft and Sunrise first, then each
+The **Mods** button on the title screen (also **Options > Mods**) lists Minecraft first (and Sunrise, in the official game with its Sunrise layer on), then each
 installed mod with its icon, name and version. Search the list and sort it A–Z or Z–A. Select a mod to read its
 id, version, license, authors, credits and description:
 
@@ -61,8 +61,7 @@ Sunrise's optional extras are native mods in
 | FPS Counter | `native/fps-overlay` | The frame rate on screen |
 | Keystrokes | `native/keystrokes` | The movement and mouse keys you press |
 | Zoom | `native/zoom` | A zoom key |
-| Minimap | `native/minimap` | A minimap |
 | Recipes | `native/recipes` | An item panel and recipe pages |
 | Coordinates HUD | `native/coords-hud` | Position and facing, `/where` and `/coords`: a small example mod |
 
-The game keeps the parts that must be fast, such as drawing the minimap's map, and the mod chooses the options.
+The game keeps the parts that must be fast, such as applying the zoom to the view, and the mod chooses the options.

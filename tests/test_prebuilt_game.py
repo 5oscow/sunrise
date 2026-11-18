@@ -39,6 +39,31 @@ def write_build_data(root: Path, identity: dict | None = None, commit: str = COM
 
 
 class StageToolTests(unittest.TestCase):
+    def test_stage_sync_only_rewrites_different_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, stage = root / "next", root / "stage"
+            before = {"same": b"unchanged\r\n", "nested/changed": b"old", "stale/removed": b"old",
+                      "file-to-dir": b"old", "dir-to-file/old": b"old"}
+            after = {"same": b"unchanged\r\n", "nested/changed": b"new", "nested/added": b"new",
+                     "file-to-dir/new": b"new", "dir-to-file": b"new"}
+            for folder, files, mtime in ((stage, before, 1000), (source, after, 2000)):
+                for name, data in files.items():
+                    path = folder / name
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(data)
+                    os.utime(path, (mtime, mtime))
+            same, changed = stage / "same", stage / "nested/changed"
+            same_mtime, changed_mtime = same.stat().st_mtime_ns, changed.stat().st_mtime_ns
+
+            prebuilt_game.sync_stage(source, stage)
+
+            self.assertEqual(same.stat().st_mtime_ns, same_mtime)
+            self.assertNotEqual(changed.stat().st_mtime_ns, changed_mtime)
+            self.assertEqual(sorted(prebuilt_game.tree(stage)), sorted(prebuilt_game.tree(source)))
+            self.assertEqual({path.relative_to(stage).as_posix(): path.read_bytes()
+                              for path in stage.rglob("*") if path.is_file()}, after)
+
     def test_prebuilt_tool_stages_fresh_tracked_copy_without_cargo(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -61,28 +86,51 @@ class StageToolTests(unittest.TestCase):
             target = root / "output"
             tool = root / "unused" / ".." / "sunrise-stage"
             calls = []
+            metadata_calls = []
             real_run = prebuilt_game.run
 
             def capture(command, **kwargs):
                 if command[0] == "git":
                     return real_run(command, **kwargs)
-                calls.append(command)
-                self.assertEqual(command, [str(tool.resolve()), str(target / "stage"),
-                                          str(target / "stage/points.json"),
-                                          str(target / "stage/internals.json"), commit])
-                self.assertEqual(kwargs["cwd"], target / "stage")
+                scratch = kwargs["cwd"]
+                self.assertEqual(scratch.parent, target)
+                self.assertNotEqual(scratch, target / "stage")
+                if command[:2] == ["cargo", "metadata"]:
+                    metadata_calls.append(scratch)
+                    package = {"id": "wasm", "name": "sunrise-mod-wasm",
+                               "manifest_path": str(scratch / manifest.relative_to(source)),
+                               "targets": [{"kind": ["lib"]}]}
+                    return json.dumps({"packages": [package], "resolve": {"nodes": []}})
+                calls.append(scratch)
+                self.assertEqual(command, [str(tool.resolve()), str(scratch), str(scratch / "points.json"),
+                                          str(scratch / "internals.json"), commit])
                 self.assertIsNone(kwargs["env"])
-                self.assertEqual((target / "stage/tracked.rs").read_bytes(), committed)
-                self.assertFalse((target / "stage/untracked.rs").exists())
-                (target / "stage/tracked.rs").write_text("staged")
+                self.assertEqual((scratch / "tracked.rs").read_bytes(), committed)
+                self.assertFalse((scratch / "untracked.rs").exists())
+                (scratch / "tracked.rs").write_text("staged")
                 return "staged fixture\n"
 
             with patch.object(prebuilt_game, "ROOT", source), \
                  patch.object(prebuilt_game, "run", side_effect=capture):
-                prebuilt_game.stage(target, stage_tool=tool)
-                # A second call must replace the mutated stage with fresh tracked source.
-                prebuilt_game.stage(target, stage_tool=tool)
-            self.assertEqual(len(calls), 2)
+                staged = prebuilt_game.stage(target, stage_tool=tool)
+                self.assertEqual(staged, target / "stage")
+                staged_manifest = staged / manifest.relative_to(source)
+                self.assertEqual(staged_manifest.read_bytes(), manifest.read_bytes())
+                self.assertEqual(metadata_calls, [])
+
+                self.assertEqual(prebuilt_game.stage(target, stage_tool=tool, sdk_dylibs=True), staged)
+                self.assertEqual(staged_manifest.read_text(),
+                                 "[package]\nname = 'fixture'\n\n[lib]\ncrate-type = [\"rlib\", \"dylib\"]\n")
+                # Both the stage tool and the manifest rewrite start over, but their output stays in place.
+                mtimes = {}
+                for file in (staged / "tracked.rs", staged_manifest):
+                    os.utime(file, (1000, 1000))
+                    mtimes[file] = file.stat().st_mtime_ns
+                self.assertEqual(prebuilt_game.stage(target, stage_tool=tool, sdk_dylibs=True), staged)
+                self.assertEqual({file: file.stat().st_mtime_ns for file in mtimes}, mtimes)
+            self.assertEqual(len(calls), 3)
+            self.assertEqual(metadata_calls, calls[1:])
+            self.assertTrue(all(not scratch.exists() for scratch in calls))
             self.assertTrue((source / "tracked.rs").read_bytes().endswith(b"fn edited() {}\r\n"))
 
 
@@ -167,7 +215,7 @@ class SdkAssetTests(unittest.TestCase):
             os.utime(path, (mtime, mtime))
         return out
 
-    def pack(self, out: Path, dist: Path) -> None:
+    def pack(self, out: Path, dist: Path, **options) -> None:
         def run(command, **kwargs):
             self.assertEqual(command[-3:], ["surface", str(prebuilt_game.ROOT), str(dist / "surface.json")])
             (dist / "surface.json").write_text('{"hash": "ab"}')
@@ -176,7 +224,7 @@ class SdkAssetTests(unittest.TestCase):
         (built / prebuilt_game.TOOL_PROGRAM).write_bytes(b"tool")
         with patch.object(prebuilt_game, "head", return_value=COMMIT), patch.object(prebuilt_game, "run", side_effect=run), \
                 patch.object(prebuilt_game, "tool", return_value=built):
-            prebuilt_game.pack(out, dist, stage_tool=Path("sunrise-stage"))
+            prebuilt_game.pack(out, dist, stage_tool=Path("sunrise-stage"), **options)
 
     def test_pack_writes_three_archives_that_split_the_package_and_the_same_every_run(self):
         import lzma
@@ -301,6 +349,19 @@ class SdkAssetTests(unittest.TestCase):
         nodes[1]["deps"].append({"pkg": "sunrise-mod-wasm", "dep_kinds": [{"kind": None}]})
         with self.assertRaisesRegex(SystemExit, "sunrise-mod-wasm"):
             prebuilt_game.slices(metadata, copied, ["bin/sunrise-client"])
+
+    def test_a_server_leg_packs_the_tool_only_when_asked(self):
+        for with_tool in (False, True):
+            with self.subTest(with_tool=with_tool), tempfile.TemporaryDirectory() as directory, \
+                    patch.object(sys, "platform", "linux"):
+                root = Path(directory)
+                out = self.out(root / "server", 1000)
+                identity = json.loads((out / prebuilt_game.IDENTITY).read_text())
+                identity["side"] = "server"
+                (out / prebuilt_game.IDENTITY).write_text(json.dumps(identity))
+                self.pack(out, root / "dist", with_tool=with_tool)
+                names = {path.name for path in (root / "dist").iterdir()}
+                self.assertEqual("tool-x86_64-unknown-linux-gnu.tar.xz" in names, with_tool)
 
     def test_gather_takes_every_legs_archives_once_and_one_build_data_that_all_copies_match(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(sys, "platform", "linux"):
@@ -749,7 +810,67 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class LauncherPinTests(unittest.TestCase):
+    def test_only_a_full_lowercase_sha_is_accepted_by_the_script_and_the_smoke(self):
+        script = prebuilt_game.ROOT / "tools/ci/launcher_pin.sh"
+        pin = prebuilt_game.ROOT / "tools/ci/launcher-pin"
+        original = pin.read_text()
+        try:
+            for value, accepted in (("a" * 40, True), ("A" * 40, False), ("a" * 39, False), ("main", False), ("a" * 41, False)):
+                pin.write_text(value + "\n")
+                shell = subprocess.run([str(script)], capture_output=True, text=True)
+                self.assertEqual(shell.returncode == 0, accepted, value)
+                if accepted:
+                    self.assertEqual(prebuilt_game.launcher_pin(), value)
+                else:
+                    with self.assertRaises(SystemExit):
+                        prebuilt_game.launcher_pin()
+        finally:
+            pin.write_text(original)
+        self.assertEqual(subprocess.run([str(script)], capture_output=True, text=True).stdout.strip(), original.strip())
+
+
+class LauncherCheckoutTests(unittest.TestCase):
+    def test_checks_out_the_pinned_commit_detached_and_refuses_an_unfetchable_pin(self):
+        script = prebuilt_game.ROOT / "tools/ci/launcher_checkout.sh"
+        pin_file = prebuilt_game.ROOT / "tools/ci/launcher-pin"
+        original = pin_file.read_text()
+        git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.com"]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            subprocess.run(git + ["init", "-q", str(source)], check=True)
+            commits = []
+            for name in ("one", "two"):
+                (source / "file").write_text(name)
+                subprocess.run(git + ["-C", str(source), "add", "file"], check=True)
+                subprocess.run(git + ["-C", str(source), "commit", "-q", "-m", name], check=True)
+                commits.append(subprocess.run(["git", "-C", str(source), "rev-parse", "HEAD"], check=True,
+                                              capture_output=True, text=True).stdout.strip())
+            env = {**os.environ, "LAUNCHER_URL": source.as_uri(), "GIT_CONFIG_GLOBAL": os.devnull}
+            try:
+                pin_file.write_text(commits[0] + "\n")
+                done = subprocess.run([str(script), str(root / "out")], env=env, capture_output=True, text=True)
+                self.assertEqual(done.returncode, 0, done.stderr)
+                self.assertEqual((root / "out/file").read_text(), "one")
+                state = subprocess.run(["git", "-C", str(root / "out"), "symbolic-ref", "-q", "HEAD"], capture_output=True)
+                self.assertNotEqual(state.returncode, 0)  # detached
+                pin_file.write_text("f" * 40 + "\n")
+                done = subprocess.run([str(script), str(root / "out2")], env=env, capture_output=True, text=True)
+                self.assertNotEqual(done.returncode, 0)
+            finally:
+                pin_file.write_text(original)
+
+
 class SmokeStartTests(unittest.TestCase):
+    def test_launcher_files_fetched_at_the_pin_keep_the_layout_that_includes_the_icon(self):
+        urls = []
+        with tempfile.TemporaryDirectory() as directory:
+            root = prebuilt_game.fetch_launcher_files(Path(directory), "a" * 40, lambda url: urls.append(url) or b"x")
+            self.assertTrue((root / "src/game_app.rs").is_file())
+            self.assertTrue((root / "src/../assets/icons/sunrise.icns").is_file())
+        self.assertTrue(all("/sunrise-launcher/" + "a" * 40 + "/" in url for url in urls))
+
     def test_only_expected_missing_resources_exit_is_accepted_and_homes_are_scratch(self):
         from types import SimpleNamespace
         for code in (1, 0, 2, 3221225477):

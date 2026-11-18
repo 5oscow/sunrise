@@ -22,6 +22,8 @@ pub mod stack_dump;
 /// Alt+Space and a bare Alt never open the window's system menu, as in GLFW.
 #[cfg(target_os = "windows")]
 pub mod system_menu;
+#[cfg(feature = "test-game-dir")]
+pub mod test_game_dir;
 pub mod unwind;
 pub mod work;
 
@@ -923,10 +925,13 @@ mod tests {
         .unwrap();
     }
 
-    /// The option set is the purge delay: mimalloc v3's default for it is
-    /// 1000 ms, and it is 0 once configured.
+    /// Configured, the allocator purges at once (the purge delay: mimalloc v3's
+    /// default for it is 1000 ms, and it is 0 once configured) and, on Linux, the
+    /// process takes no transparent huge pages, whatever the system's setting.
+    /// One test: the options are process-wide, so a second test configuring the
+    /// allocator in parallel would change the default the first one reads.
     #[test]
-    fn configuring_the_allocator_purges_at_once() {
+    fn configuring_the_allocator_purges_at_once_and_takes_no_huge_pages() {
         // SAFETY: reads and sets one integer option.
         let get = || unsafe { libmimalloc_sys::mi_option_get(super::PURGE_DELAY) };
         if std::env::var_os("MIMALLOC_PURGE_DELAY").is_none() {
@@ -934,24 +939,19 @@ mod tests {
         }
         super::configure_allocator();
         assert_eq!(get(), 0);
-    }
-
-    /// Configured, the process takes no transparent huge pages, whatever the
-    /// system's setting.
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn configuring_the_allocator_turns_transparent_huge_pages_off() {
-        super::configure_allocator();
-        // SAFETY: reads this process's flag.
-        assert_eq!(
-            unsafe { libc::prctl(libc::PR_GET_THP_DISABLE, 0, 0, 0, 0) },
-            1
-        );
-        // SAFETY: reads one integer option.
-        assert_eq!(
-            unsafe { libmimalloc_sys::mi_option_get(super::ALLOW_THP) },
-            0
-        );
+        #[cfg(target_os = "linux")]
+        {
+            // SAFETY: reads this process's flag.
+            assert_eq!(
+                unsafe { libc::prctl(libc::PR_GET_THP_DISABLE, 0, 0, 0, 0) },
+                1
+            );
+            // SAFETY: reads one integer option.
+            assert_eq!(
+                unsafe { libmimalloc_sys::mi_option_get(super::ALLOW_THP) },
+                0
+            );
+        }
     }
 }
 

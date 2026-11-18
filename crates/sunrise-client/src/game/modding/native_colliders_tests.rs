@@ -221,6 +221,59 @@ fn each_level_collides_with_its_own_colliders() {
     });
 }
 
+/// A call into the level in place, made while another level's colliders are in scope (a hook of
+/// one level reaching into another), reads the level in place's colliders, and the caller's
+/// are back afterwards.
+#[test]
+#[ignore = "daily"]
+fn a_call_into_another_level_reads_that_levels_colliders_and_restores_the_callers() {
+    use sunrise_core::geometry::Aabb;
+    use sunrise_world::entity_obstruction::EntityIdentity;
+    with_world(|game| {
+        let (spot, other) = ([1.5, 70.0, 1.5], [10.5, 70.0, 10.5]);
+        stand(game, spot).set_collider(game, Some(deck())).unwrap();
+        game.enter_level(Dim::Nether).unwrap();
+        game.native_level_opened(Dim::Nether);
+        game.world
+            .chunks
+            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+        game.streaming.forced.insert((0, 0));
+        stand(game, other).set_collider(game, Some(deck())).unwrap();
+        // Each level ticks once, so each has recorded its colliders.
+        tick_level(game);
+        game.enter_level(Dim::Overworld).unwrap();
+        tick_level(game);
+        let meets = |at: [f64; 3]| {
+            let mut found = Vec::new();
+            let bounds = Aabb::new(
+                Vec3::new(at[0] - 0.5, 69.2, at[2] - 0.5),
+                Vec3::new(at[0] + 0.5, 69.8, at[2] + 0.5),
+            );
+            sunrise_client_render::moving_colliders::near(EntityIdentity(0), bounds, &mut found);
+            found.len()
+        };
+        // The overworld's colliders are the caller's scope.
+        let placed = game.placed_moving_colliders();
+        sunrise_client_render::moving_colliders::in_level(placed, || {
+            assert_eq!((meets(spot), meets(other)), (1, 0));
+            game.enter_level(Dim::Nether).unwrap();
+            game.in_this_levels_colliders(|_| {
+                assert_eq!(
+                    (meets(spot), meets(other)),
+                    (0, 1),
+                    "the level in place's colliders, not the caller's"
+                );
+            });
+            assert_eq!(
+                (meets(spot), meets(other)),
+                (1, 0),
+                "the caller's colliders are back"
+            );
+            game.enter_level(Dim::Overworld).unwrap();
+        });
+    });
+}
+
 /// A game that simulates its overworld, with the chunk the tests build on loaded.
 fn with_world(test: impl FnOnce(&mut Game<'_>)) {
     super::native_entity_refs::tests::with_game(|game| {
@@ -238,8 +291,19 @@ fn with_world(test: impl FnOnce(&mut Game<'_>)) {
 
 /// One tick of the level in place, as `tick_server` runs it: with the level's colliders placed.
 fn tick_level(game: &mut Game<'_>) {
+    tick_level_moving(game, |_| {});
+}
+
+/// [`tick_level`] with a mod moving its colliders during the tick, after the colliders were
+/// placed and the movers ran, which is when a mod's own tick moves them.
+fn tick_level_moving(game: &mut Game<'_>, moving: impl FnOnce(&mut Game<'_>)) {
     let placed = game.placed_moving_colliders();
-    sunrise_client_render::moving_colliders::in_level(placed, || game.tick_world(true).unwrap());
+    sunrise_client_render::moving_colliders::in_level(placed.clone(), || {
+        game.tick_world(true).unwrap()
+    });
+    moving(game);
+    // Then the bodies on a collider that moved are carried with it, as the level's tick does.
+    game.carry_pass(&placed);
 }
 
 /// A collider goes with its entity through a dimension change: the same collider reads back
@@ -417,9 +481,10 @@ fn siblings_riding_one_vehicle_share_a_stack() {
 }
 
 /// What a level's tick costs with 200 items over a collider at the box cap: with no collider,
-/// with one that stays, and with one that moves every tick (Create's normal case), each timed
-/// over the same ticks. The numbers go to stderr (`--nocapture`); the test holds the
-/// outcome: the items rest on the capped collider, moving or not.
+/// with one that stays, with one rebuilt every tick but moved before it begins, and with one
+/// that moves during the tick and carries all 200 (Create's normal case), each timed over the
+/// same ticks. The numbers go to stderr (`--nocapture`); the test holds the outcome: the items
+/// rest on the capped collider, moving or not, and go with it when it moves.
 #[test]
 #[ignore = "daily"]
 fn two_hundred_items_over_a_capped_collider_rest_and_the_tick_is_timed() {
@@ -491,8 +556,441 @@ fn two_hundred_items_over_a_capped_collider_rest_and_the_tick_is_timed() {
         };
         let moving = time(game, 40, Some(&mut step));
         assert_eq!(rests(game), 200, "and they still rest on it while it moves");
+        // The collider moves during the tick, after the bodies were placed, so the carry pass
+        // carries all 200 items (the phase above moves it before the tick: its pass sees none).
+        let from: Vec<f64> = on.iter().map(|id| item_at(game, *id).x).collect();
+        let began = Instant::now();
+        for _ in 0..40 {
+            tick_level_moving(game, |g| {
+                g.mobs.update(index, |m| m.position.x += 0.05);
+            });
+        }
+        let carried = began.elapsed().as_secs_f64() * 1000.0 / 40.0;
+        assert_eq!(rests(game), 200, "and they are carried with it");
+        for (id, x) in on.iter().zip(&from) {
+            let carried_by = item_at(game, *id).x - x;
+            assert!(
+                (carried_by - 2.0).abs() < 0.05,
+                "item {id} moved {carried_by} with a collider that moved 2.0"
+            );
+        }
         eprintln!(
-            "tick of the level, 200 items, ms per tick: no collider {open:.3}, capped collider still {still:.3}, capped collider moving {moving:.3}"
+            "tick of the level, 200 items, ms per tick: no collider {open:.3}, capped collider still {still:.3}, capped collider moved before the tick {moving:.3}, carried {carried:.3}"
         );
+    });
+}
+
+// Carrying: the bodies standing on a collider move with it.
+
+/// Where an item is.
+fn item_at(game: &Game<'_>, id: u32) -> Vec3 {
+    game.dropped
+        .iter()
+        .find(|i| i.id == id)
+        .map(|i| i.position)
+        .expect("an item")
+}
+
+/// A different stack from `drop_item`'s, so two items never merge.
+fn drop_dirt(game: &mut Game<'_>, at: [f64; 3]) -> u32 {
+    game.next_entity += 1;
+    let id = game.next_entity;
+    game.dropped.push(ItemEntity::new(
+        id,
+        ItemStack::new("minecraft:dirt", 1),
+        Vec3::new(at[0], at[1] + 2.0, at[2]),
+        Vec3::ZERO,
+        0.0,
+    ));
+    id
+}
+
+/// Moves the pig that holds a collider, as a mod's own tick would.
+fn shift_stand(game: &mut Game<'_>, id: u32, by: Vec3) {
+    let index = game.mobs.iter().position(|m| m.id == id).expect("a pig");
+    game.mobs.update(index, |m| {
+        m.position = Vec3::new(
+            m.position.x + by.x,
+            m.position.y + by.y,
+            m.position.z + by.z,
+        );
+    });
+}
+
+fn settle(game: &mut Game<'_>) {
+    for _ in 0..25 {
+        tick_level(game);
+    }
+}
+
+fn near(a: Vec3, b: Vec3, within: f64) -> bool {
+    (a.x - b.x).abs() <= within && (a.y - b.y).abs() <= within && (a.z - b.z).abs() <= within
+}
+
+/// A body resting on a collider that moves is carried by what the contact point moves; one off
+/// the deck is not, and the collider is never stopped by the body.
+#[test]
+#[ignore = "daily"]
+fn a_body_on_a_moving_collider_is_carried() {
+    with_world(|game| {
+        let (holder, holder_ref) = stand_with_id(game, [8.0, 70.0, 8.0]);
+        holder_ref.set_collider(game, Some(deck())).unwrap();
+        let rider = drop_item(game, [8.5, 70.0, 8.0]);
+        // Beside the deck, on nothing: it keeps falling and is not carried with the deck.
+        let beside = drop_dirt(game, [12.0, 70.0, 8.0]);
+        settle(game);
+        let from = item_at(game, rider);
+        assert!(
+            near(from, Vec3::new(8.5, 70.0, 8.0), 0.2),
+            "rests on the deck: {from:?}"
+        );
+        let beside_x = item_at(game, beside).x;
+        for _ in 0..20 {
+            tick_level_moving(game, |g| shift_stand(g, holder, Vec3::new(0.1, 0.0, 0.05)));
+        }
+        let to = item_at(game, rider);
+        assert!(
+            near(to, Vec3::new(from.x + 2.0, from.y, from.z + 1.0), 0.05),
+            "carried by the deck's 2 x 1: {from:?} -> {to:?}"
+        );
+        assert!(
+            (item_at(game, beside).x - beside_x).abs() < 0.05,
+            "an item off the deck stays"
+        );
+        // The deck stops: so does the rider.
+        for _ in 0..5 {
+            tick_level(game);
+        }
+        assert!(
+            near(item_at(game, rider), to, 0.02),
+            "a still deck carries nothing"
+        );
+    });
+}
+
+/// A collider that turns carries the body at a distance from its origin along the arc, the
+/// contact point's own displacement: yaw, and roll (a deck that tilts under the body).
+#[test]
+#[ignore = "daily"]
+fn a_turning_collider_carries_the_body_along_the_arc() {
+    with_world(|game| {
+        let (_, holder_ref) = stand_with_id(game, [8.0, 70.0, 8.0]);
+        holder_ref.set_collider(game, Some(deck())).unwrap();
+        let rider = drop_item(game, [9.0, 70.0, 8.0]);
+        settle(game);
+        let yaw = |degrees: f32| {
+            let half = degrees.to_radians() / 2.0;
+            [0.0, half.sin(), 0.0, half.cos()]
+        };
+        // Nine turns of 10 degrees: a quarter turn. Local +x (1 block out) goes to -z.
+        for step in 1..=9 {
+            tick_level_moving(game, |g| {
+                holder_ref
+                    .set_collider_transform(g, yaw(10.0 * step as f32))
+                    .unwrap()
+            });
+        }
+        let at = item_at(game, rider);
+        assert!(
+            near(at, Vec3::new(8.0, 70.0, 7.0), 0.06),
+            "a quarter turn about the deck's centre: {at:?}"
+        );
+    });
+}
+
+/// A deck that rises carries the body up with it, at 0.3 blocks a tick.
+#[test]
+#[ignore = "daily"]
+fn a_rising_collider_carries_the_body_up() {
+    with_world(|game| {
+        let (holder, holder_ref) = stand_with_id(game, [8.0, 70.0, 8.0]);
+        holder_ref.set_collider(game, Some(deck())).unwrap();
+        let rider = drop_item(game, [8.5, 70.0, 8.0]);
+        settle(game);
+        let from = item_at(game, rider);
+        for _ in 0..10 {
+            tick_level_moving(game, |g| shift_stand(g, holder, Vec3::new(0.0, 0.3, 0.0)));
+        }
+        let to = item_at(game, rider);
+        assert!(
+            near(to, Vec3::new(from.x, from.y + 3.0, from.z), 0.05),
+            "up 3 blocks: {from:?} -> {to:?}"
+        );
+    });
+}
+
+/// A deck tilting under a body (roll about z) lifts it by the contact point's rise.
+#[test]
+#[ignore = "daily"]
+fn a_tilting_collider_lifts_the_body_by_its_contact_point() {
+    with_world(|game| {
+        let (_, holder_ref) = stand_with_id(game, [8.0, 70.0, 8.0]);
+        holder_ref.set_collider(game, Some(deck())).unwrap();
+        let rider = drop_item(game, [9.0, 70.0, 8.0]);
+        settle(game);
+        let roll = 15.0_f32.to_radians() / 2.0;
+        tick_level_moving(game, |g| {
+            holder_ref
+                .set_collider_transform(g, [0.0, 0.0, roll.sin(), roll.cos()])
+                .unwrap()
+        });
+        // The contact point 1 block out along local x rises by sin 15 and moves out by cos 15.
+        let want = Vec3::new(
+            8.0 + 15.0_f64.to_radians().cos(),
+            70.0 + 15.0_f64.to_radians().sin(),
+            8.0,
+        );
+        let at = item_at(game, rider);
+        assert!(near(at, want, 0.1), "{at:?} vs {want:?}");
+    });
+}
+
+/// A body is carried into a wall never through it, and the collider is not stopped.
+#[test]
+#[ignore = "daily"]
+fn a_carried_body_stops_at_a_wall_and_the_collider_goes_on() {
+    with_world(|game| {
+        let stone = game
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:stone")
+            .unwrap();
+        for y in 70..=72 {
+            for z in 6..=10 {
+                game.world.set(10, y, z, stone).unwrap();
+            }
+        }
+        let (holder, holder_ref) = stand_with_id(game, [8.0, 70.0, 8.0]);
+        holder_ref.set_collider(game, Some(deck())).unwrap();
+        let rider = drop_item(game, [8.5, 70.0, 8.0]);
+        settle(game);
+        for _ in 0..15 {
+            tick_level_moving(game, |g| shift_stand(g, holder, Vec3::new(0.1, 0.0, 0.0)));
+        }
+        let at = item_at(game, rider);
+        assert!(at.x < 10.0, "never through the wall: {at:?}");
+        assert!(at.x > 9.8, "carried up to it: {at:?}");
+        let moved = game
+            .mobs
+            .iter()
+            .find(|m| m.id == holder)
+            .unwrap()
+            .position
+            .x;
+        assert!(
+            (moved - 9.5).abs() < 1.0e-6,
+            "the collider is not stopped: {moved}"
+        );
+    });
+}
+
+/// A collider standing on a collider is carried first, and its riders take its whole
+/// displacement.
+#[test]
+#[ignore = "daily"]
+fn a_collider_on_a_collider_passes_the_displacement_on() {
+    with_world(|game| {
+        let (c1, c1_ref) = stand_with_id(game, [8.0, 70.0, 8.0]);
+        c1_ref.set_collider(game, Some(deck())).unwrap();
+        // The second collider's holder rests on the first deck, with a small deck above it.
+        let c2 = drop_item(game, [8.5, 70.0, 8.0]);
+        game.entity(c2)
+            .unwrap()
+            .set_collider(
+                game,
+                Some(Collider {
+                    boxes: vec![ColliderBox {
+                        min: [-0.5, 0.0, -0.5],
+                        max: [0.5, 0.2, 0.5],
+                    }],
+                    rotation: [0.0, 0.0, 0.0, 1.0],
+                }),
+            )
+            .unwrap();
+        // And a body on that.
+        let rider = drop_dirt(game, [8.5, 70.2, 8.0]);
+        settle(game);
+        let (from_c2, from) = (item_at(game, c2), item_at(game, rider));
+        assert!(
+            from.y > 70.1,
+            "the rider stands on the small deck: {from:?}"
+        );
+        for _ in 0..10 {
+            tick_level_moving(game, |g| shift_stand(g, c1, Vec3::new(0.1, 0.0, 0.0)));
+        }
+        let (to_c2, to) = (item_at(game, c2), item_at(game, rider));
+        assert!(
+            near(
+                to_c2,
+                Vec3::new(from_c2.x + 1.0, from_c2.y, from_c2.z),
+                0.05
+            ),
+            "{to_c2:?}"
+        );
+        assert!(
+            near(to, Vec3::new(from.x + 1.0, from.y, from.z), 0.05),
+            "{from:?} -> {to:?}"
+        );
+    });
+}
+
+/// A carry is an `entity_move` with the cause `Carried`: a listener hears it with the contact
+/// point's displacement, and cancelling it leaves the body where it stood.
+#[test]
+#[ignore = "daily"]
+fn a_listener_hears_a_carry_and_may_cancel_it() {
+    use mod_api::{EntityMoveEvent, Flow, Hooks, LoopContext, MoveCause};
+    use std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    };
+    struct Listener(Arc<AtomicBool>, Arc<Mutex<Vec<(u32, MoveCause, [f64; 3])>>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for Listener {
+        fn entity_move(&self, _: &dyn LoopContext, event: &mut EntityMoveEvent<'_>) -> Flow {
+            if event.cause == MoveCause::Carried {
+                self.1
+                    .lock()
+                    .unwrap()
+                    .push((event.entity, event.cause, *event.delta));
+                if self.0.load(Ordering::Relaxed) {
+                    return Flow::Cancel;
+                }
+            }
+            Flow::Continue
+        }
+    }
+    let cancel = Arc::new(AtomicBool::new(true));
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+        "carry_listener",
+        Box::new(Listener(cancel.clone(), heard.clone())),
+    )]
+    .into();
+    with_world(|game| {
+        let (holder, holder_ref) = stand_with_id(game, [8.0, 70.0, 8.0]);
+        holder_ref.set_collider(game, Some(deck())).unwrap();
+        let rider = drop_item(game, [8.5, 70.0, 8.0]);
+        settle(game);
+        let from = item_at(game, rider);
+        mod_platform::testing::with_mods(mods, || {
+            // Cancelled: heard, and the body does not move.
+            tick_level_moving(game, |g| shift_stand(g, holder, Vec3::new(0.5, 0.0, 0.0)));
+            assert!(
+                near(item_at(game, rider), from, 0.01),
+                "a cancelled carry moves nothing"
+            );
+            let first = heard.lock().unwrap().clone();
+            assert_eq!(first.len(), 1, "{first:?}");
+            assert_eq!(first[0].0, rider);
+            assert!(
+                (first[0].2[0] - 0.5).abs() < 1.0e-6,
+                "the contact point's 0.5: {first:?}"
+            );
+            // Allowed: the same carry goes through.
+            cancel.store(false, Ordering::Relaxed);
+            tick_level_moving(game, |g| shift_stand(g, holder, Vec3::new(0.5, 0.0, 0.0)));
+            assert!(
+                near(
+                    item_at(game, rider),
+                    Vec3::new(from.x + 0.5, from.y, from.z),
+                    0.02
+                ),
+                "{:?}",
+                item_at(game, rider)
+            );
+        });
+    });
+}
+
+/// A carried vehicle takes its passenger and that passenger's own passenger with it: all three
+/// move by the same displacement, the riders seated by the one rider positioning the tick uses.
+#[test]
+#[ignore = "daily"]
+fn a_carried_vehicle_takes_its_passengers_and_theirs_with_it() {
+    with_world(|game| {
+        let (holder, holder_ref) = stand_with_id(game, [8.0, 70.0, 8.0]);
+        holder_ref.set_collider(game, Some(deck())).unwrap();
+        let (vehicle, _) = stand_with_id(game, [8.5, 70.0, 8.0]);
+        let (middle, _) = stand_with_id(game, [8.5, 71.0, 8.0]);
+        let (top, _) = stand_with_id(game, [8.5, 72.0, 8.0]);
+        let update = |game: &mut Game<'_>, id: u32, f: &dyn Fn(&mut sunrise_client::mobs::Mob)| {
+            let at = game.mobs.iter().position(|m| m.id == id).expect("a pig");
+            game.mobs.update(at, |m| f(m));
+        };
+        update(game, vehicle, &|m| m.on_ground = true);
+        update(game, middle, &|m| m.extra.mount = Some(vehicle));
+        update(game, top, &|m| m.extra.mount = Some(middle));
+        game.position_riders();
+        let position = |game: &Game<'_>, id: u32| {
+            game.mobs
+                .iter()
+                .find(|m| m.id == id)
+                .map(|m| m.position)
+                .expect("a pig")
+        };
+        let before = [vehicle, middle, top].map(|id| position(game, id));
+        assert!(
+            before[1].y > before[0].y && before[2].y > before[1].y,
+            "{before:?}"
+        );
+        tick_level_moving(game, |g| shift_stand(g, holder, Vec3::new(0.5, 0.0, 0.0)));
+        for (id, was) in [vehicle, middle, top].into_iter().zip(before) {
+            let now = position(game, id);
+            assert!(
+                near(now, Vec3::new(was.x + 0.5, was.y, was.z), 0.02),
+                "{id}: {was:?} -> {now:?}"
+            );
+        }
+    });
+}
+
+/// The level records its colliders as each of its ticks begins, so a report that arrives in a
+/// tick is judged against the transforms of the ticks before it: age 0 is where the collider
+/// was when this tick began, age n where it was n ticks earlier; and a level with no collider
+/// keeps nothing.
+#[test]
+#[ignore = "daily"]
+fn the_level_records_its_colliders_as_each_tick_begins() {
+    with_world(|game| {
+        let (holder, holder_ref) = stand_with_id(game, [8.0, 70.0, 8.0]);
+        holder_ref.set_collider(game, Some(deck())).unwrap();
+        let x_of = |game: &Game<'_>| {
+            game.mobs
+                .iter()
+                .find(|m| m.id == holder)
+                .map(|m| m.position.x)
+                .unwrap()
+        };
+        let mut began = Vec::new();
+        for _ in 0..8 {
+            began.push(x_of(game));
+            // The level's own tick records the colliders as it begins.
+            game.tick_server(false).unwrap();
+            shift_stand(game, holder, Vec3::new(0.5, 0.0, 0.0));
+        }
+        let history = game
+            .level_collider_history()
+            .expect("a server records a level that has a collider");
+        let history = history.borrow();
+        let (log, _) = history.get(holder).expect("the collider's frames");
+        for age in 0..8usize {
+            let frame = log.frame_at(history.now(), age as f64).unwrap();
+            assert!(
+                (frame.origin.x - began[7 - age]).abs() < 1.0e-9,
+                "age {age}: {} vs {}",
+                frame.origin.x,
+                began[7 - age]
+            );
+        }
+        // Between two ticks it is the line between them.
+        let mid = log.frame_at(history.now(), 1.5).unwrap().origin.x;
+        assert!((mid - (began[6] + began[5]) / 2.0).abs() < 1.0e-9, "{mid}");
+        drop(history);
+        // The collider goes: the level keeps no history.
+        holder_ref.set_collider(game, None).unwrap();
+        game.tick_server(false).unwrap();
+        assert!(game.level_collider_history().is_none());
     });
 }
