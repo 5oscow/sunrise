@@ -67,10 +67,10 @@ The helper file holds exactly one function: private, safe, with no attributes an
 | `MODIFY_CONSTANT` | on one literal in the body | the new value |
 | `MODIFY_VARIABLE` | on one read or write of a local or parameter | the new value |
 | `MODIFY_EXPRESSION_VALUE` | on the value of one call in the body (`$value`) | the new value |
-| `WRAP_OPERATION` | around one call, which you get as `$operation` and may run or not | the call's type |
+| `WRAP_OPERATION` | around one call, which you get as `$operation` and may run or not. The receiver and arguments run at the call site, in order, before the wrapper. The wrapper's declared types are expected types for the game's own expressions, and the tool guards only part of that. Receiver: it must be a reference parameter of the target function (`engine.go`, declared as the parameter's own reference type); a computed receiver, a call result such as `res(ok)?.read` or `choose(1)?.read()`, is refused with `E_OPERATION_SIGNATURE` whatever it is declared as, by value or by reference, since `choose(1)?.read()` declared `Choice<i64>` is another call than the game's. Binding the receiver to a local in the game's code does not make it a row. Arguments: one that carries a `?`, an `unsafe` block, a `const` block or a try block is refused with `E_UNSUPPORTED_CONTROL_FLOW` (`scale(default_value(0.1)?)` declared `f32` converts `0.1` through `f32`); a plain block elsewhere in the call is not refused. Not guarded: an ordinary argument, such as the literal in `width(1)`, takes the type its binding declares, and a named receiver's type is compared by its spelling, so declare exactly the game's types. Wrapping a computed receiver is planned as follow-up work | the call's type; a callee that declares no return type gives `()`, so `impl FnOnce(A)` and `impl FnOnce(A) -> ()` are the same operation |
 
 The other kinds act on one place in the body, which a `selector` names as source text. For a call, write the
-callee without arguments: `autosave_interval` or `self.next_autosave_interval`. For
+callee without arguments: `autosave_interval` or `self.next_autosave_interval`. A bare method name finds no method call: a method's selector writes its receiver as source text, `make()?.method`, and a count of 0 for a bare name called as a method here names that selector when it can be written. For
 `MODIFY_EXPRESSION_VALUE`, write the whole expression: `autosave_interval(rate)`. `MODIFY_VARIABLE` uses
 `variable` instead. `require` is how many matches the body has (inside `slice`, if set), and `ordinal` picks one, from 0.
 
@@ -95,7 +95,7 @@ callee without arguments: `autosave_interval` or `self.next_autosave_interval`. 
 | `$value` | The value being changed: the return value, the expression's value, or the argument, constant or variable. |
 | `$arg0`, `$arg1`, … | An argument of the selected call (`WRAP_OPERATION`). |
 | `$args` | All arguments of the selected call, as a tuple (`MODIFY_ARGS`). |
-| `$receiver` | The receiver of a selected method call (`WRAP_OPERATION`); the first binding, and the operation's first parameter. |
+| `$receiver` | The receiver of a selected method call (`WRAP_OPERATION`); the first binding, and the operation's first parameter. It is a reference parameter of the target function, declared as that parameter's own reference type. A computed receiver (a call result) is refused: see `WRAP_OPERATION`. |
 | `$operation` | The selected call, as `impl FnOnce(args) -> result` (`WRAP_OPERATION`); the last binding. |
 | `$local:NAME:N`, `$local_ref:NAME:N`, `$local_mut:NAME:N` | The `N`th local named `NAME` in the body, from 0: by value, `&` or `&mut`. |
 
@@ -128,13 +128,15 @@ These functions are refused:
 - generic over types or consts, or inside an `impl` block that is;
 - taking `impl Trait`, returning `!`, or taking `self` by value;
 - `const`, `async`, `unsafe` or `#[inline(always)]`;
-- existing only under a `cfg`;
+- existing only under a `cfg` the signed build does not compile in (the function is then absent from the build);
 - a body that declares a `static`, thread-local, `macro_rules!` or `impl`;
 - a body that uses a location-dependent macro such as `file!`, `line!`, `module_path!`, `include!` or `env!`;
 - a body that uses a non-exported crate-local macro defined outside its module path. Macros defined
   in the target module or its ancestors are copied with the function.
 
 The one generic function you can target is a [published loop's body](3-loops.md#mixins-on-the-loop).
+
+The tool plans against what the patch library compiles. The launcher gives it the build's cfg set (the target's options and the features the prebuilt game was built with), and it drops the items, statements, fields, variants, parameters and match arms under an inactive `cfg` and expands `cfg_attr`. A function with an inner `#[cfg(test)] fn helper()` or a `#[cfg(feature = "x")]` statement takes its mixins like any other. The features are the game crate's: a `feature` predicate is decided only in the game crate's own functions. In a function of a crate below it (`sunrise_world`, say) it stays undecided, since that crate's resolved features are not the game's, and is refused. `unix`, `target_os` and the other options hold for every crate. The tool decides only what the signed build vouches for: `feature` in the game crate (from the game's feature list), `test` (the patch library is not a test build, so it is off), and the target facts that follow from the validated target (`target_os`, `target_family`, `unix`, `windows`, `target_arch`, `target_pointer_width`, `target_endian`, `target_env`, `target_vendor`, `target_abi`), read from the printed set and compared on their full values. Everything that depends on compiler flags (`debug_assertions`, `overflow_checks`, `panic`, `target_feature`, `relocation_model`, `sanitize*`, `doc`, `miri`) or on the original build's build script (any custom name) is undecided in both directions, listed or not. A `cfg` the set cannot decide (`version(..)`, `accessible(..)`, an expression-level attribute, a `feature` outside the game crate, a flag-dependent or custom name) is refused with `E_UNSUPPORTED_CFG`. This reduces the source inside a function the route already lets a row target; a function that carries a `cfg` or `cfg_attr` of its own is still not replaceable, active or not.
 
 ## With other mods
 

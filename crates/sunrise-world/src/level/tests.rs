@@ -4375,13 +4375,14 @@ fn survive_hooks_answer_for_the_block() {
             _pos: BlockPos,
             state: BlockStateId,
             survives: &mut Option<bool>,
-        ) {
+        ) -> bool {
             self.asked.set(self.asked.get() + 1);
             if let Some((block, answer)) = self.survive
                 && self.b.block(state) == block
             {
                 *survives = Some(answer);
             }
+            false
         }
         fn before_may_place_on(
             &self,
@@ -4389,12 +4390,13 @@ fn survive_hooks_answer_for_the_block() {
             ground: BlockStateId,
             _ground_pos: BlockPos,
             may: &mut Option<bool>,
-        ) {
+        ) -> bool {
             if let Some((plant, on)) = self.ground
                 && self.b.block(state) == plant
             {
                 *may = Some(self.b.block(ground) == on);
             }
+            false
         }
     }
     let Some(f) = fixture() else { return };

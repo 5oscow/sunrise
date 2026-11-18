@@ -14,8 +14,7 @@ use sunrise_core::geometry::Vec3;
 use sunrise_protocol::packets::configuration::ClientInformation;
 
 pub(in crate::game) fn with_guests(test: impl FnOnce(&mut super::Game<'_>)) {
-    let root = std::path::PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap());
-    with_guests_at(root, test);
+    with_guests_at(super::native_entity_refs::tests::fixture_root(), test);
 }
 
 pub(in crate::game) fn with_guests_at(

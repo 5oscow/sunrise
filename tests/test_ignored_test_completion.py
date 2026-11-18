@@ -787,6 +787,16 @@ class Legs(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("no longer runs", log)
 
+    def test_a_windows_row_is_not_expected_by_a_linux_leg(self):
+        windows = ignored_tests.Row("example", "exporters_log", "test:hidden", "daily", "daily-example.txt", "windows")
+        mine = leg_names()[1][0]
+        with patch.object(ignored_tests, "listed_entries", return_value=[windows]):
+            self.assertEqual(ignored_tests.daily_rows(), [])
+            self.assertEqual(ignored_tests.daily_rows_groups([windows]), {})
+            code, log = self.judge({}, {mine: True})
+        self.assertEqual(code, 0, log)
+        self.assertNotIn("no longer runs", log)
+
     def test_a_new_failure_and_an_incomplete_leg_fail(self):
         mine = leg_names()[1][0]
         code, log = self.judge({}, {mine: False})
