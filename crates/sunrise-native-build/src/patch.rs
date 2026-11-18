@@ -552,6 +552,8 @@ pub fn prepare<'a>(
     // With no rows (only modules or bridges), the crate compiles as generated.
     let patched = if let Some(tool) = &tool {
         let patched = out.join("patch-applied");
+        // The tool refuses an output folder that exists on macOS and Windows.
+        remove_previous_output(&patched)?;
         // The tool plans against what the patch library compiles: this computer's cfg set under the
         // flags it is compiled with (the prebuilt game's target is this computer's,
         // `check_identity`), and the features the game was built with.
@@ -618,6 +620,19 @@ pub fn prepare<'a>(
 
 /// The game's features as the `--cfg` flags the patch library is compiled with. The compile and
 /// the `--print cfg` that the tool plans against both take them from here, so they cannot drift.
+/// Removes the last build's output at `path`: a folder, a file, or a symlink in its place, never
+/// what a link points at (`remove_dir_all` takes the link itself). Nothing there is fine; any
+/// other failure stops the build with its own error.
+fn remove_previous_output(path: &Path) -> Result<(), String> {
+    let removed = match fs::symlink_metadata(path) {
+        Ok(meta) if meta.is_file() => fs::remove_file(path),
+        Ok(_) => fs::remove_dir_all(path),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e),
+    };
+    removed.map_err(|e| format!("{}: {e}", path.display()))
+}
+
 fn game_cfg(cmd: &mut std::process::Command, sdk: &Identity) {
     for feature in sdk.game_features() {
         cmd.arg("--cfg").arg(format!("feature=\"{feature}\""));
@@ -639,6 +654,34 @@ fn build_cfg(printed: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod refusal_tests {
+    /// A rebuild in the same folder starts with no applied-patch output, whether the last build
+    /// left a folder or a symlink there; the link's target is untouched.
+    #[test]
+    fn the_last_builds_applied_output_is_removed_and_a_links_target_kept() {
+        use super::remove_previous_output;
+        use std::fs;
+        let root = std::env::temp_dir().join(format!("sunrise-applied-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let applied = root.join("patch-applied");
+        fs::create_dir_all(applied.join("crate/src")).unwrap();
+        fs::write(applied.join("crate/src/lib.rs"), "stale").unwrap();
+        remove_previous_output(&applied).unwrap();
+        assert!(fs::symlink_metadata(&applied).is_err());
+        remove_previous_output(&applied).unwrap();
+
+        #[cfg(unix)]
+        {
+            let target = root.join("elsewhere");
+            fs::create_dir_all(&target).unwrap();
+            fs::write(target.join("keep"), "kept").unwrap();
+            std::os::unix::fs::symlink(&target, &applied).unwrap();
+            remove_previous_output(&applied).unwrap();
+            assert!(fs::symlink_metadata(&applied).is_err());
+            assert_eq!(fs::read_to_string(target.join("keep")).unwrap(), "kept");
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn the_build_cfg_is_the_printed_set() {
         assert_eq!(
