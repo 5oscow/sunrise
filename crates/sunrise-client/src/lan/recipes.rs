@@ -344,11 +344,19 @@ pub struct ContentPart {
 }
 impl ContentPart {
     /// Decode a content part only within the same bound used by the sender.
+    /// Each recipe's `type` is decoded here, as on disk, so that the
+    /// replacement and the book's numbering read the canonical id even from a
+    /// server that sends a bare one.
     pub fn decode(data: &[u8]) -> Result<Self, String> {
         if data.len() > CONTENT_MAX {
             return Err(format!("recipe content exceeds {CONTENT_MAX} bytes"));
         }
-        serde_json::from_slice(data).map_err(|error| error.to_string())
+        let mut part: Self = serde_json::from_slice(data).map_err(|error| error.to_string())?;
+        for (id, recipe) in &mut part.recipes {
+            sunrise_items::recipe_sources::decode_type(recipe)
+                .map_err(|error| format!("recipe {id}: {error}"))?;
+        }
+        Ok(part)
     }
 }
 

@@ -1383,7 +1383,8 @@ pub(crate) const INGREDIENT_MAPS: [&str; 2] = ["key", "shapes"];
 pub struct ResolvedRecipe {
     /// The id as `recipe_sources::sources` names it.
     pub name: String,
-    /// The file as written: what mods and clients see.
+    /// The file as written, but with its `type` canonicalized to
+    /// `namespace:path` (`recipe_sources::decode_type`): what mods and clients see.
     pub file: Arc<Value>,
     /// The file with the `ingredient` hook's answers in place, for the tables
     /// to parse. The file itself when it names no mod kind.
@@ -1502,10 +1503,10 @@ impl ResolvedSources {
         context: &sunrise_world::native_load_context::LoadContext,
     ) -> Result<Self> {
         let context = context.with_fluid_tags(sunrise_items::items::fluid_tag_list(root, overlay)?);
-        Self::resolve_collecting(
-            sunrise_items::recipe_sources::sources(root, overlay)?,
-            &context,
-        )
+        let (sources, refused) = sunrise_items::recipe_sources::sources_collecting(root, overlay)?;
+        let mut resolved = Self::resolve_collecting(sources, &context)?;
+        resolved.failures.extend(refused);
+        Ok(resolved)
     }
     /// Whether every recipe resolved; sources with failures are never shared.
     pub fn is_complete(&self) -> bool {
@@ -1540,13 +1541,6 @@ impl ResolvedSources {
     ) -> Result<Self> {
         // Every consumer keeps vanilla's resource-file registration order.
         sources.sort_by_cached_key(|(name, _)| registration_key(name));
-        // A `type` without a namespace is `minecraft:`'s (`Identifier.parse`);
-        // everything after this reads the qualified id.
-        for (_, file) in &mut sources {
-            if let Some(kind) = file["type"].as_str().filter(|kind| !kind.contains(':')) {
-                file["type"] = format!("minecraft:{kind}").into();
-            }
-        }
         let listened = mod_api::__private::listened(mod_api::HookId::Ingredient);
         let recipes = sources
             .into_iter()

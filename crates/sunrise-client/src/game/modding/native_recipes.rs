@@ -686,6 +686,31 @@ mod tests {
         assert_eq!(names, ["iron_ingot", "stick", "braid:sticks_from_logs"]);
     }
 
+    /// A window's own `smelting` file (a bare type) and a server's bare one
+    /// both read as `minecraft:smelting`: the server's replaces the window's,
+    /// and the book numbers the same displays as for qualified types.
+    #[test]
+    fn synced_sources_classify_bare_types_as_minecrafts() {
+        let root = tempfile::tempdir().unwrap();
+        let folder = root.path().join("data/minecraft/recipe");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("iron_ingot.json"), r#"{"type":"smelting"}"#).unwrap();
+        let own = sunrise_items::recipe_sources::sources(
+            root.path(),
+            &sunrise_world::loot::PackOverlay::NONE,
+        )
+        .unwrap();
+        let part = sunrise_client::lan::recipes::ContentPart::decode(
+            br#"{"recipes":[["minecraft:gold_ingot",{"type":"smelting"}]],"last":["minecraft:smelting"]}"#,
+        )
+        .unwrap();
+        let types = part.last.unwrap();
+        let all = super::synced_sources(own, part.recipes, &types);
+        let names: Vec<_> = all.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(names, ["gold_ingot"]);
+        assert_eq!(all[0].1["type"], "minecraft:smelting");
+    }
+
     /// With the server's crafting recipes synced, the book still holds the
     /// vanilla ones under their own display ids (a viewer's "+" reads them,
     /// `recipe_book_ids`), and a recipe only the server has gets one too.
