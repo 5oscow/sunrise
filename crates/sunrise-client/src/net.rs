@@ -930,6 +930,7 @@ fn run(
     recorder: &RecorderSlot,
     payloads: &Arc<crate::raw_payloads::Transport>,
 ) -> Result<Reason, Reason> {
+    let singleplayer = local.is_some();
     let (host, port, mut c) = if let Some(pipe) = local {
         (address.to_owned(), 0, Connection::local(pipe))
     } else {
@@ -1081,7 +1082,13 @@ fn run(
     status(send, &tr(lang, "connect.joining"));
     // ClientHandshakePacketListenerImpl.handleLoginFinished: the brand, then
     // the client information.
-    send_identity(&mut c, &sunrise_hooks::engine::client_identity(address)).map_err(e)?;
+    // The window's own server thread is no join to an address: it hears vanilla's identity.
+    let identity = if singleplayer {
+        sunrise_hooks::ClientIdentity::vanilla()
+    } else {
+        sunrise_hooks::engine::client_identity(address)
+    };
+    send_identity(&mut c, &identity).map_err(e)?;
     c.send(&cfg::Serverbound::ClientInformation(info).encode())
         .map_err(e)?;
     let (mut reader, writer) = c.split();
