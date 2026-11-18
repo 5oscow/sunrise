@@ -267,6 +267,9 @@ enum TaskKind {
         id: Option<u32>,
         health: Option<f32>,
         report_tick: u64,
+        /// `attack ID` turned to the entity at this tick: the reach check and the click
+        /// wait for the next tick's pick (client_pick.rs), the one its input reads.
+        aimed: Option<u64>,
     },
 }
 impl TaskKind {
@@ -921,11 +924,6 @@ impl Game<'_> {
         let (yaw, pitch) = yaw_pitch(eye, at);
         self.yaw = yaw;
         self.pitch = pitch.clamp(-90.0, 90.0);
-        // The crosshair target is stored, picked once per frame and per tick
-        // (client_pick.rs). Pick again along the new view, as the frame drawn after a
-        // mouse turn would, so this command's own reads see where it now looks:
-        // `attack ID`'s reach check and the target in `look-at`'s reply.
-        self.refresh_client_pick(1.0);
         Ok(())
     }
     /// Aim at a face of `pos` the crosshair can reach; the face hit.
@@ -1352,7 +1350,8 @@ impl Game<'_> {
             "look-at" => {
                 self.need_world()?;
                 let over = a.has("over").then(|| a.num("over", 0.0)).transpose()?;
-                if over.is_some() {
+                // An entity's target is reported once a frame has picked along the new view.
+                if over.is_some() || a.pos.first() == Some(&"entity") {
                     self.turning()?;
                 }
                 let before = (self.yaw, self.pitch);
@@ -1375,10 +1374,14 @@ impl Game<'_> {
                             .ok_or_else(|| format!("no entity {id}"))?;
                         let c = m.center();
                         self.face_point(c)?;
-                        (
-                            "entity",
-                            json!({ "ok": true, "yaw": self.yaw, "pitch": self.pitch, "target": self.looking_at() }),
-                        )
+                        // The crosshair target is picked once per tick and per frame
+                        // (client_pick.rs): with no motion to feed, the reply waits for the
+                        // next frame's pick along the new view.
+                        if over.is_none() {
+                            return self.start_glide((0.0, 0.0), 0.0, Some("entity"), reply);
+                        }
+                        // Only the turn below replies.
+                        ("entity", Value::Null)
                     }
                     _ => {
                         let at = [a.f64(0, "X")?, a.f64(1, "Y")?, a.f64(2, "Z")?];
@@ -1412,13 +1415,22 @@ impl Game<'_> {
                         .ok_or_else(|| format!("no entity {id}"))?;
                     let c = m.center();
                     self.face_point(c)?;
+                    // The stored pick is still the old view's until the next tick picks.
+                    return self.start_task(
+                        "attack",
+                        TaskKind::Attack {
+                            id: Some(id),
+                            health: None,
+                            report_tick: 0,
+                            aimed: Some(self.ticks),
+                        },
+                        reply,
+                        5.0,
+                    );
                 }
                 let target = self
                     .mob_hit()
                     .map(|(i, _, _)| (self.mobs[i].id, self.mobs[i].health));
-                if id.is_some() && target.map(|t| t.0) != id {
-                    return Err("that entity is out of reach or hidden; get closer".into());
-                }
                 self.agent_mouse(MouseButton::Left, true)?;
                 self.agent_mouse(MouseButton::Left, false)?;
                 let report_tick = self.ticks + 4;
@@ -1428,6 +1440,7 @@ impl Game<'_> {
                         id: target.map(|t| t.0),
                         health: target.map(|t| t.1),
                         report_tick,
+                        aimed: None,
                     },
                     reply,
                     5.0,
@@ -2173,7 +2186,36 @@ impl Game<'_> {
                 id,
                 health,
                 report_tick,
+                aimed,
             } => {
+                if let Some(at) = *aimed {
+                    if self.ticks <= at && !timed_out && interrupted.is_none() {
+                        return None;
+                    }
+                    if let Some(why) = interrupted {
+                        return Some(json!({ "error": why }));
+                    }
+                    if timed_out {
+                        return Some(json!({ "error": "game ticks are not advancing (paused?)" }));
+                    }
+                    *aimed = None;
+                    let target = self.mob_hit().map(|(i, _, _)| &self.mobs[i]);
+                    if target.map(|m| m.id) != *id {
+                        return Some(
+                            json!({ "error": "that entity is out of reach or hidden; get closer" }),
+                        );
+                    }
+                    *health = target.map(|m| m.health);
+                    if let Err(e) = self
+                        .require_playing_screen()
+                        .and_then(|()| self.agent_mouse(MouseButton::Left, true))
+                        .and_then(|()| self.agent_mouse(MouseButton::Left, false))
+                    {
+                        return Some(json!({ "error": e.to_string() }));
+                    }
+                    *report_tick = self.ticks + 4;
+                    return None;
+                }
                 if self.ticks < *report_tick && !timed_out {
                     return None;
                 }
