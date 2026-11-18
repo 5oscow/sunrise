@@ -1607,6 +1607,30 @@ impl Game<'_> {
         let mut set = false;
         self.native_as_player_handle(player, |game| set = game.set_respawn_point(stored)) && set
     }
+    /// The ping the Tab list shows (`ServerCommonPacketListenerImpl.latency`, kept by the
+    /// connection's keep-alives): 0 for a fake player and for an acting player with no known
+    /// connection. None for a stale or unavailable player.
+    pub(super) fn player_latency(&self, player: PlayerRef) -> Option<i32> {
+        if let Some(guest) = self.online_player_record(player) {
+            return Some(guest.latency.load(Ordering::Relaxed));
+        }
+        (self.native_acting_player() == Some(player) || self.player_handle_read(player).is_some())
+            .then_some(0)
+    }
+    /// The permission level `player_hide` set, `Some(None)` when shown. None for a stale world
+    /// epoch, on a client and in a world nobody else can join.
+    pub(super) fn player_hidden(&self, player: PlayerRef) -> Option<Option<u8>> {
+        (self.native_lifecycle.epoch()? == player.entity().epoch()).then_some(())?;
+        Some(self.lan.as_ref()?.hub.hidden.get(&player.uuid()).copied())
+    }
+    /// The name `player_set_nickname` set, `Some(None)` when there is none. None for a stale
+    /// or offline player, or without a server list.
+    pub(super) fn player_nickname(&self, player: PlayerRef) -> Option<Option<String>> {
+        let uuid = self.message_player_uuid(player)?;
+        let hub = &self.lan.as_ref()?.hub;
+        hub.online_players().any(|g| g.uuid == uuid).then_some(())?;
+        Some(hub.nicknames.get(&uuid).cloned())
+    }
     /// Hides that player (a vanish) from the players below permission
     /// `level`, or shows them again (None): from the next tick those players
     /// lose them from the Tab list and the world (their client stops

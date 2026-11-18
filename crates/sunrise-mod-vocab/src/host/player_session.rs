@@ -72,6 +72,24 @@ pub trait PlayerSessionBackend {
     #[access(WorldOnly)]
     fn player_sees(&self, viewer: PlayerRef, target: PlayerRef)
     -> Result<bool, PlayerWorldRefusal>;
+    /// Side: server.
+    /// The ping the Tab list shows, in milliseconds (`ServerCommonPacketListenerImpl.latency`:
+    /// keep-alive round trips averaged three parts old to one part new). 0 until the first
+    /// keep-alive answer, for a fake player and for an acting player with no known connection.
+    /// None for a stale or unavailable player.
+    #[access(WorldOnly)]
+    fn player_latency(&self, player: PlayerRef) -> Option<i32>;
+    /// Side: server.
+    /// The permission level `player_hide` set for that player, `Some(None)` when they are shown.
+    /// Kept by UUID, so a player who rejoined hidden reads it too. None for a stale world
+    /// epoch, on a client and in a world nobody else can join.
+    #[access(WorldOnly)]
+    fn player_hidden(&self, player: PlayerRef) -> Option<Option<u8>>;
+    /// Side: server.
+    /// The name `player_set_nickname` set for that player, `Some(None)` when there is none.
+    /// None for a stale or offline player, or when the server list is unavailable.
+    #[access(WorldOnly)]
+    fn player_nickname(&self, player: PlayerRef) -> Option<Option<String>>;
 }
 /// The handles' writes of the `player_session` area, implemented by the game and reached through [`BackendMut`].
 // hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait

@@ -1,0 +1,5 @@
+# A mod's server reads of a player's latency, hide level and nickname (PlayerRef::latency, hidden, nickname).
+sunrise-client game::native_player_visibility_tests::a_client_reads_no_latency_hide_level_or_nickname lib daily resources
+sunrise-client game::native_player_visibility_tests::a_stale_handle_reads_no_latency_hide_level_or_nickname lib daily resources
+sunrise-client game::native_player_visibility_tests::hide_level_and_nickname_read_back lib daily resources
+sunrise-client game::native_player_visibility_tests::latency_reads_what_the_keep_alives_measured lib daily resources
