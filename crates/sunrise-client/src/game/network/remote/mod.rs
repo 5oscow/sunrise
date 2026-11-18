@@ -2123,6 +2123,13 @@ impl Game<'_> {
     pub(super) fn remote_backlog(&self) -> usize {
         self.remote.as_ref().map_or(0, |r| r.backlog.len())
     }
+    /// The attack clicks queued for the next tick (`KeyMapping.click`, not yet handled).
+    pub(in crate::game) fn remote_attack_clicks_queued(&self) -> u32 {
+        self.remote.as_ref().map_or(0, |r| {
+            r.input
+                .queued(sunrise_client::interaction_input::Button::Attack)
+        })
+    }
     /// A headless command oracle has a real connection but no movement tick.
     /// Acknowledge loaded terrain without predicting or sending movement.
     pub(super) fn poll_stationary_client(&mut self) -> Result<()> {
@@ -8742,10 +8749,15 @@ impl Game<'_> {
             self.hotbar_presses
                 .iter_mut()
                 .for_each(sunrise_client::input_queue::ClickQueue::clear);
+            self.agent_attack_clicks_left(0);
             return;
         }
         let (attack, use_item) = (self.left, self.right);
         input.tick(&mut RemoteInputWorld(self), attack, use_item);
+        // An item in use drains the queues without acting on them.
+        self.agent_attack_clicks_left(
+            input.queued(sunrise_client::interaction_input::Button::Attack),
+        );
         self.remote_queued_keys();
         if let Some(r) = self.remote.as_mut() {
             input.merge_queued(std::mem::take(&mut r.input));

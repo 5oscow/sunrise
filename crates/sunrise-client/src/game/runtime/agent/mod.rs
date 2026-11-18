@@ -278,8 +278,11 @@ enum TaskKind {
 enum AttackAim {
     /// Turned to the entity at this tick: the reach check waits for the next tick's pick.
     Turned(u64),
-    /// Clicked: the next tick's input takes the click.
-    Clicked,
+    /// Clicked: the command's click waits in the attack click queue behind `ahead` others,
+    /// a player's queued before it.
+    Clicked { ahead: u32 },
+    /// The queue was dropped with the click in it (a screen opened, an item in use).
+    Dropped,
     /// The entity the pick held when the tick's input took the click (and dropped it unless
     /// that is the ID).
     Taken(Option<u32>),
@@ -2013,20 +2016,24 @@ impl Game<'_> {
 
     /// The tick's input is taking an attack click (`Minecraft.startAttack`): an `attack ID`
     /// that clicked keeps the entity this tick's pick holds, the pick the click is taken with.
-    /// Whether that is not the ID: the click is then the command's, and is dropped. Other clicks
-    /// (no `attack ID` waiting on its click) go on.
+    /// Whether the click is the command's and the pick is not the ID: it is then dropped. The
+    /// clicks queued before the command's, and any with no `attack ID` waiting, go on.
     pub(in crate::game) fn agent_attack_click_refused(&mut self) -> bool {
         let Some(Task {
             kind:
                 TaskKind::Attack {
-                    aimed: Some(AttackAim::Clicked),
+                    aimed: Some(AttackAim::Clicked { ahead }),
                     ..
                 },
             ..
-        }) = self.agent.task
+        }) = self.agent.task.as_mut()
         else {
             return false;
         };
+        if *ahead > 0 {
+            *ahead -= 1;
+            return false;
+        }
         let picked = self.mob_hit().map(|(i, _, _)| self.mobs[i].id);
         let Some(Task {
             kind: TaskKind::Attack { id, aimed, .. },
@@ -2037,6 +2044,20 @@ impl Game<'_> {
         };
         *aimed = Some(AttackAim::Taken(picked));
         picked != *id
+    }
+
+    /// The tick's keybinds are done, `left` attack clicks still queued: a command's click still
+    /// waiting with none left was dropped with the queue.
+    pub(in crate::game) fn agent_attack_clicks_left(&mut self, left: u32) {
+        if let Some(Task {
+            kind: TaskKind::Attack { aimed, .. },
+            ..
+        }) = self.agent.task.as_mut()
+            && matches!(aimed, Some(AttackAim::Clicked { .. }))
+            && left == 0
+        {
+            *aimed = Some(AttackAim::Dropped);
+        }
     }
 
     /// Advance the running agent task; reply when it ends.
@@ -2249,7 +2270,8 @@ impl Game<'_> {
                     if timed_out {
                         return Some(json!({ "error": "game ticks are not advancing (paused?)" }));
                     }
-                    *aimed = Some(AttackAim::Clicked);
+                    let ahead = self.remote_attack_clicks_queued();
+                    *aimed = Some(AttackAim::Clicked { ahead });
                     let target = self.mob_hit().map(|(i, _, _)| &self.mobs[i]);
                     if target.map(|m| m.id) != *id {
                         return Some(
@@ -2263,6 +2285,9 @@ impl Game<'_> {
                         .and_then(|()| self.agent_mouse(MouseButton::Left, false))
                     {
                         return Some(json!({ "error": e.to_string() }));
+                    }
+                    if self.remote_attack_clicks_queued() == ahead {
+                        return Some(json!({ "error": "the attack click queue is full" }));
                     }
                     *report_tick = self.ticks + 4;
                     return None;
@@ -2280,7 +2305,7 @@ impl Game<'_> {
                 if self.ticks < *report_tick && !timed_out {
                     return None;
                 }
-                if *aimed == Some(AttackAim::Clicked) {
+                if matches!(*aimed, Some(AttackAim::Clicked { .. } | AttackAim::Dropped)) {
                     return Some(json!({ "error": "the attack click was not taken" }));
                 }
                 let now = id.and_then(|id| self.mobs.iter().find(|m| m.id == id));

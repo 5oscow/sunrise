@@ -352,16 +352,130 @@ fn attack_by_id_reports_a_click_no_tick_took() {
         tick(game);
         // A screen over the world: the tick's keybinds don't run, and its queued clicks go.
         game.screen = Screen::GameModeSwitcher;
-        for _ in 0..4 {
+        tick(game);
+        assert_eq!(clicks_sent(game, server), Vec::<String>::new());
+        // The screen closes; the player's next click on pig 31 is not the command's.
+        game.screen = Screen::Playing;
+        player_click(game);
+        tick(game);
+        assert_eq!(attacks_on(&clicks_sent(game, server), 31), 1);
+        for _ in 0..2 {
             tick(game);
         }
         assert_eq!(
             reply(&replies)["error"],
             json!("the attack click was not taken")
         );
-        game.screen = Screen::Playing;
+    });
+}
+
+/// A player's left click through the same mouse mapping, queued for the next tick.
+fn player_click(game: &mut Game<'_>) {
+    game.agent_mouse(MouseButton::Left, true).unwrap();
+    game.agent_mouse(MouseButton::Left, false).unwrap();
+}
+
+/// A tick whose keybinds run, then `clicks` player clicks, then the control poll's agent step
+/// (where `attack ID` queues its click, behind them).
+fn tick_with_player_clicks(game: &mut Game<'_>, clicks: usize) {
+    game.ticks += 1;
+    game.remote_handle_input();
+    for _ in 0..clicks {
+        player_click(game);
+    }
+    game.advance_agent();
+}
+
+fn attacks_on(sent: &[String], id: u32) -> usize {
+    sent.iter()
+        .filter(|s| **s == format!("attack {id}"))
+        .count()
+}
+
+#[test]
+#[ignore = "daily"]
+fn attack_by_id_drops_its_own_click_not_a_players_in_the_same_tick() {
+    with_pig_and_server(|game, listener, server| {
+        add_second_pig(game);
+        let (_, replies) = command(game, "attack 31");
+        tick_with_player_clicks(game, 1);
+        pick_second_pig(game, listener);
         tick(game);
-        assert_eq!(clicks_sent(game, server), Vec::<String>::new());
+        assert_eq!(
+            clicks_sent(game, server),
+            ["attack 32", "punch"],
+            "the player's click acts, the command's is dropped"
+        );
+        assert_eq!(reply(&replies)["picked"], json!(32));
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn attack_by_id_checks_its_own_click_behind_a_tick_of_player_clicks() {
+    with_pig_and_server(|game, listener, server| {
+        add_second_pig(game);
+        let (_, replies) = command(game, "attack 31");
+        // A tick takes 64 attack clicks: the player's fill it, the command's waits.
+        tick_with_player_clicks(game, 64);
+        pick_second_pig(game, listener);
+        tick(game);
+        let sent = clicks_sent(game, server);
+        assert_eq!(attacks_on(&sent, 32), 64, "every player click acts");
+        assert_eq!(attacks_on(&sent, 31), 0);
+        assert!(
+            replies.try_recv().is_err(),
+            "the command's click is still queued"
+        );
+        // The next tick picks pig 31 again: the command's click acts on it.
+        listener.lock().unwrap().result = None;
+        tick(game);
+        assert_eq!(attacks_on(&clicks_sent(game, server), 31), 1);
+        for _ in 0..3 {
+            tick(game);
+        }
+        let reply = reply(&replies);
+        assert_eq!(reply["hit"], json!(true), "{reply}");
+        assert_eq!(reply["target"], json!(31), "{reply}");
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn attack_by_id_click_drained_by_an_item_in_use_is_not_a_later_click() {
+    with_pig_and_server(|game, _, server| {
+        let (_, replies) = command(game, "attack 31");
+        tick(game);
+        // An item in use: the tick drains the click queues without acting on them.
+        game.using = Some((game.selected, 0));
+        tick(game);
+        game.using = None;
+        // The player's next click on pig 31 is not the command's.
+        player_click(game);
+        tick(game);
+        assert_eq!(attacks_on(&clicks_sent(game, server), 31), 1);
+        for _ in 0..3 {
+            tick(game);
+        }
+        assert_eq!(
+            reply(&replies)["error"],
+            json!("the attack click was not taken")
+        );
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn attack_by_id_reports_a_full_click_queue() {
+    with_pig_and_server(|game, _, server| {
+        let (_, replies) = command(game, "attack 31");
+        tick_with_player_clicks(game, 1024);
+        assert_eq!(
+            reply(&replies)["error"],
+            json!("the attack click queue is full")
+        );
+        tick(game);
+        assert_eq!(attacks_on(&clicks_sent(game, server), 31), 64);
     });
 }
 
@@ -371,9 +485,8 @@ fn an_ordinary_click_attacks_what_the_pick_holds() {
     with_pig_and_server(|game, listener, server| {
         add_second_pig(game);
         pick_second_pig(game, listener);
-        // A click with no `attack ID` waiting, through the mouse mapping as a player's.
-        game.agent_mouse(MouseButton::Left, true).unwrap();
-        game.agent_mouse(MouseButton::Left, false).unwrap();
+        // A click with no `attack ID` waiting.
+        player_click(game);
         tick(game);
         assert_eq!(clicks_sent(game, server), ["attack 32", "punch"]);
     });
