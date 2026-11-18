@@ -425,27 +425,46 @@ class CompareTests(unittest.TestCase):
     def test_judge_pairs_neighbouring_games_and_gates_on_the_budget(self):
         from tools.perf_bench import ARMS, judge
 
-        def games(before, after, noise):
+        def games(before, after, noise, figure="p50_ms"):
             out = []
             for i, n in enumerate(noise):
                 v = before if ARMS[i % 4] == "A" else after
-                out.append({"village": {"p50_ms": v + n, "cpu_p50_ms": v / 2}})
+                out.append({"village": {figure: v + n, "p99_ms": 1.0, "server_tick_p50_ms": 5.0,
+                                        "server_tick_p99_ms": 9.0, "cpu_p50_ms": v / 2}})
             return out
 
         noise = [0.02, -0.01, 0.03, -0.02, 0.01, 0.0, -0.03, 0.02, 0.01, -0.01, 0.02, -0.02]
-        same = {r["figure"]: r for r in judge(games(5.0, 5.0, noise), 3)}
+        same = {r["figure"]: r for r in judge(games(5.0, 5.0, noise), 3, ["village"])}
         self.assertEqual((same["p50_ms"]["verdict"], same["p50_ms"]["passed"]), ("within_noise", True))
         self.assertEqual((same["cpu_p50_ms"]["gated"], same["cpu_p50_ms"]["passed"]), (False, None))
-        slower = {r["figure"]: r for r in judge(games(5.0, 5.25, noise), 3)}["p50_ms"]
+        slower = {r["figure"]: r for r in judge(games(5.0, 5.25, noise), 3, ["village"])}["p50_ms"]
         self.assertEqual((slower["verdict"], slower["passed"]), ("slower", False), "5% over a 3% budget")
-        self.assertTrue({r["figure"]: r for r in judge(games(5.0, 5.25, noise), 8)}["p50_ms"]["passed"])
-        self.assertFalse(judge(games(5.0, 5.0, noise[:10]), 3)[0]["passed"], "five pairs give no interval")
+        self.assertTrue({r["figure"]: r for r in judge(games(5.0, 5.25, noise), 8, ["village"])}["p50_ms"]["passed"])
+        self.assertFalse(judge(games(5.0, 5.0, noise[:10]), 3, ["village"])[0]["passed"], "five pairs give no interval")
+
+    def test_judge_gates_unrounded_values_and_fails_what_is_missing(self):
+        from tools.perf_bench import ARMS, judge
+        pick = lambda before, after: [before if ARMS[i % 4] == "A" else after for i in range(12)]
+        frame = [{"village": {"p50_ms": v, "p99_ms": 1.0, "server_tick_p50_ms": 5.0, "server_tick_p99_ms": 9.0}}
+                 for v in pick(0.24951, 0.25749)]
+        row = {r["figure"]: r for r in judge(frame, 3, ["village"])}["p50_ms"]
+        self.assertFalse(row["passed"], "3.2% slower, though 0.250 and 0.257 round to under 3%")
+        tick = [{"village": {"p50_ms": 1.0, "p99_ms": 1.0, "server_tick_p50_ms": v, "server_tick_p99_ms": 9.0}}
+                for v in pick(1.0, 1.0)]
+        row = {r["figure"]: r for r in judge(tick, 3, ["village"])}["server_tick_p50_ms"]
+        self.assertFalse(row["passed"], "1.0 and 1.0 in 0.1 ms steps can hide 8% more")
+        lacking = [{"village": {"p50_ms": 1.0, "p99_ms": 1.0}} for _ in range(12)]
+        rows = {r["figure"]: r for r in judge(lacking, 3, ["village", "menu_hold"])}
+        self.assertEqual((rows["server_tick_p50_ms"]["verdict"], rows["server_tick_p50_ms"]["passed"]), ("missing", False))
+        menu = [r for r in judge(lacking, 3, ["menu_hold"])]
+        self.assertEqual({(r["figure"], r["verdict"]) for r in menu}, {("p50_ms", "missing"), ("p99_ms", "missing")},
+                         "menu_hold gates frame time only")
 
     def test_tick_query_percentiles(self):
         from tools.perf_bench import parse_tick_query
         lines = ["The game is running normally", "Target tick rate: 20.0 per second.\nAverage time per tick: 3.1ms (Target: 50.0ms)",
                  "Percentiles: P50: 2.9ms P95: 4.2ms P99: 6.0ms. Sample: 100"]
-        self.assertEqual(parse_tick_query(lines), {"p50_ms": 2.9, "p95_ms": 4.2, "p99_ms": 6.0})
+        self.assertEqual(parse_tick_query(lines), {"p50_ms": 2.9, "p95_ms": 4.2, "p99_ms": 6.0, "samples": 100})
         self.assertIsNone(parse_tick_query(["Unknown command"]))
 
     def test_game_folder_gets_graphics_and_packs(self):
@@ -458,6 +477,7 @@ class CompareTests(unittest.TestCase):
             (tmp / "Relief").mkdir()
             (tmp / "Relief" / "pack.mcmeta").write_text("{}")
             (tmp / "golden").mkdir()
+            (tmp / "dusk.zip").write_bytes(b"PK")
             game = tmp / "game"
             game.mkdir()
             (game / "options.txt").write_text("renderDistance:8\n")
@@ -470,3 +490,9 @@ class CompareTests(unittest.TestCase):
             self.assertTrue((game / "resourcepacks/Relief/pack.mcmeta").exists())
             self.assertTrue((game / "shaderpacks/golden").is_dir())
             self.assertEqual(env, {"SUNRISE_SHADER_PACK": "golden"})
+            zipped = tmp / "fresh"
+            zipped.mkdir()
+            (zipped / "options.txt").write_text("")
+            args.shader_pack, args.resource_pack, args.graphics = str(tmp / "dusk.zip"), None, None
+            self.assertEqual(game_folder_extras(args, zipped), ("", {"SUNRISE_SHADER_PACK": "dusk.zip"}))
+            self.assertTrue((zipped / "shaderpacks/dusk.zip").is_file())
