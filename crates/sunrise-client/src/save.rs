@@ -2078,9 +2078,15 @@ fn write_region_records(
             }
         }
         if changed {
-            let handle = region.sync_handle()?;
-            drop(region);
-            handle.sync_data()?;
+            match region.sync_handle() {
+                Ok(handle) => {
+                    drop(region);
+                    handle.sync_data()?;
+                }
+                // Out of descriptors: flush under the lock as before rather than
+                // skip durability for this region and every region after it.
+                Err(_) => region.sync()?,
+            }
         }
     }
     Ok(())
