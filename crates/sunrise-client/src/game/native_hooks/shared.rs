@@ -247,8 +247,11 @@ impl Game<'_> {
             ScreenTarget::Options => self.open_options(false),
             ScreenTarget::Inventory => {
                 // A menu the server opened for the screen asked for (a crafting
-                // table) closes: the inventory shows the player's own.
-                self.close_container();
+                // table) closes: the inventory shows the player's own. With
+                // only the player's own open, there is nothing to close.
+                if self.remote_menu_type().is_some() {
+                    self.close_container();
+                }
                 self.open_player_inventory();
             }
             ScreenTarget::Advancements => self.open_advancements(false),

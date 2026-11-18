@@ -170,16 +170,18 @@ impl Game<'_> {
     /// A mod's own screen closes (Escape, or `mod_screen_close`).
     pub(in crate::game) fn close_mod_screen(&mut self) {
         if self.screen == Screen::Mod {
+            // `Screen.onClose`'s `setScreen(null)` with no world opens the
+            // title screen, behind the mod's until the change goes ahead; a
+            // mod's `Vanilla` answer then opens its own title screen instead.
+            if let Some(title) = self.title.as_mut() {
+                title.open_by_id("title");
+            }
             self.set_screen(Screen::Playing);
             if self.screen == Screen::Mod {
                 // `screen_opening` kept it open.
                 return;
             }
-            // `Screen.onClose`'s `setScreen(null)` with no world: the title screen.
-            match self.title.as_mut() {
-                Some(title) => title.open_by_id("title"),
-                None => self.capture(true),
-            }
+            self.capture(self.title.is_none());
         }
         self.native_mod_screen = None;
     }

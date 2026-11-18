@@ -835,9 +835,7 @@ impl Title {
             "add_server" => self.set_mode(Mode::Multiplayer(
                 crate::multiplayer::Screen::add_server(),
             )),
-            "direct_connect" => {
-                self.set_mode(Mode::Multiplayer(crate::multiplayer::Screen::direct()))
-            }
+            "direct_connect" => self.open_multiplayer(crate::multiplayer::Screen::direct()),
             _ => {}
         }
         self.gated = gated;
@@ -3440,15 +3438,20 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
             return crate::multiplayer::Outcome::None;
         };
         match screen.click(hit, x, y, size, &self.saves) {
-            crate::multiplayer::Outcome::Open(mut next) => {
-                if let crate::multiplayer::Screen::Direct { address } = &mut *next {
-                    address.clone_from(&self.last_server);
-                }
-                self.set_mode(Mode::Multiplayer(*next));
+            crate::multiplayer::Outcome::Open(next) => {
+                self.open_multiplayer(*next);
                 crate::multiplayer::Outcome::None
             }
             outcome => outcome,
         }
+    }
+    /// Opens a multiplayer screen; Direct Connection starts on the last
+    /// server joined (`lastServer`).
+    fn open_multiplayer(&mut self, mut next: crate::multiplayer::Screen) {
+        if let crate::multiplayer::Screen::Direct { address } = &mut next {
+            address.clone_from(&self.last_server);
+        }
+        self.set_mode(Mode::Multiplayer(next));
     }
     /// A left press on the game rules (they need the atlas for text): whether
     /// it lands on a button, for its sound.
