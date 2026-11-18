@@ -5426,7 +5426,18 @@ impl Game<'_> {
             }
         }
         if keep {
-            self.add_projectile(arrow);
+            // The arrow never left the level (AbstractArrow.onHitEntity's
+            // deflect(REVERSE), or a dodge it flies on past): it goes back at
+            // its join order's place, so it keeps ticking before every entity
+            // that joined after it (EntityTickList), and nothing hears it
+            // launch again.
+            let join = arrow.join;
+            let projectiles = &mut self.creatures.projectiles;
+            let index = projectiles
+                .iter()
+                .position(|q| q.join > join)
+                .unwrap_or(projectiles.len());
+            projectiles.insert(index, arrow);
         }
     }
     /// `ThrownEnderpearl.onHit` for a living non-player owner: the same hook,
