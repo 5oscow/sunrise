@@ -14184,7 +14184,8 @@ def check_attack_charge(host, guest, out):
     finally:
         host('command', command='attribute @s minecraft:knockback_resistance base set 0')
         host('command', command='gamerule natural_health_regeneration true')
-    assert full == 9.0 and swapped < 9.0, f'9 charged, less right after a swap: {full}, {swapped}'
+    # 9 * (0.2 + scale^2 * 0.8) is at least 1.8: a hit that never landed deals 0 and fails here.
+    assert full == 9.0 and 1.8 <= swapped < 9.0, f'9 charged, 1.8 to 9 right after a swap: {full}, {swapped}'
     return full, swapped
 
 
