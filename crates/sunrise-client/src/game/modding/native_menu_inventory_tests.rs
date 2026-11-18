@@ -257,4 +257,48 @@ mod owner {
             },
         );
     }
+
+    /// A hook running in another level than the owner's has no business with their inventory:
+    /// the overflow of a full inventory would be tossed at the owner's coordinates in that
+    /// level. The insert leaves the owner's stacks alone and drops nothing there.
+    #[test]
+    #[ignore = "daily"]
+    fn a_hook_in_another_level_leaves_the_owners_inventory_and_drops_alone() {
+        with_guests(|game| {
+            game.level.player_uuid = Some(playerdata::uuid_ints(12));
+            assert_ne!(game.dim.id(), "minecraft:the_nether");
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .update_guest(12, |g| {
+                    g.dimension = "minecraft:the_nether".to_owned();
+                    g.inventory
+                        .fill(Some(ItemStack::new("minecraft:stone", 64)));
+                })
+                .unwrap();
+            let diamond = mod_api::ItemResource::of(
+                &ItemStack::new("minecraft:diamond", 1)
+                    .try_into_api()
+                    .unwrap(),
+            );
+            let slot = ItemPlace::PlayerSlot {
+                player: 12,
+                slot: 0,
+            };
+            let dropped = game.dropped.len();
+            (game as &mut dyn ServerHost)
+                .transaction(|host, tx| {
+                    slot.insert(host, tx, &diamond, 1);
+                    Ok::<_, ()>(())
+                })
+                .unwrap();
+            let guest = &game.lan.as_ref().unwrap().hub.guests[0];
+            assert!(guest.inventory.iter().all(|s| {
+                s.as_ref()
+                    .is_some_and(|s| s.count == 64 && &*s.item == "minecraft:stone")
+            }));
+            assert_eq!(game.dropped.len(), dropped);
+        });
+    }
 }
