@@ -232,28 +232,19 @@ fn scrolling_label(
         color,
     );
 }
-/// Vanilla's slider: its track (highlighted while focused), the 8 px handle at `position` (0..1), the value over them.
+/// Vanilla's slider: track and 8 px handle at `position` (0..1) lit as `AbstractSliderButton`'s, the value over them.
 pub fn slider(
     batch: &mut HudBatch,
     atlas: &HudAtlas,
     rect: [f32; 4],
     value: &Text,
     position: f32,
-    (hover, live, focused): (bool, bool, bool),
+    (hover, focused, held, live): (bool, bool, bool, bool),
 ) {
     let [x, y, w, h] = rect;
     let tint = if live { WHITE } else { muted() };
-    let track = if live && focused {
-        "gui/sprites/widget/slider_highlighted"
-    } else {
-        "gui/sprites/widget/slider"
-    };
+    let (track, handle) = ui::slider_sprites_ext(hover, live, focused, false, held);
     ui::nine_slice(batch, atlas, track, x, y, w, h, tint);
-    let handle = if hover && live {
-        "gui/sprites/widget/slider_handle_highlighted"
-    } else {
-        "gui/sprites/widget/slider_handle"
-    };
     let at = x + (position.clamp(0.0, 1.0) * (w - 8.0)).floor();
     ui::nine_slice(batch, atlas, handle, at, y, 8.0, h, tint);
     let ty = y + ((h - 8.0) / 2.0).floor();
@@ -318,7 +309,7 @@ mod tests {
                 button(b, a, r, t, (false, true, false))
             }),
             ("slider", |b, a, r, t| {
-                slider(b, a, r, t, 0.5, (false, true, false))
+                slider(b, a, r, t, 0.5, (false, false, false, true))
             }),
             ("cycler", |b, a, r, t| cycler(b, a, r, t, (false, true))),
         ];
