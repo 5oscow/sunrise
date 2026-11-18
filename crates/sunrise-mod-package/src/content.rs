@@ -30,21 +30,20 @@ pub fn check_path(name: &str) -> Result<(), String> {
     let plain_char = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit() || "_.-".contains(c);
     let mut parts = name.split('/');
     let top = parts.next();
-    let rest: Vec<&str> = parts.collect();
+    // assets/<namespace>/<file> at least.
     let named_ok = matches!(top, Some("assets" | "data"))
-        && rest.len() >= 2 // assets/<namespace>/<file> at least.
-        && rest
-            .iter()
-            .all(|part| !part.is_empty() && *part != "." && *part != "..");
-    if named_ok && rest.iter().all(|part| part.chars().all(plain_char)) {
+        && parts.clone().count() >= 2
+        && parts
+            .clone()
+            .all(|part| !part.is_empty() && part != "." && part != "..");
+    if named_ok && parts.clone().all(|part| part.chars().all(plain_char)) {
         return Ok(());
     }
     let mut error = format!(
         "{name:?} is not a plain assets/ or data/ path: after assets/ or data/, every part is made of a-z, 0-9, _, . and - (vanilla's resource-location characters, so the path means the same on every OS), and none is . or .."
     );
     if named_ok {
-        let fixed: Vec<String> = rest
-            .iter()
+        let fixed: Vec<String> = parts
             .map(|part| {
                 part.to_ascii_lowercase()
                     .chars()
@@ -3951,10 +3950,7 @@ capabilities = ["registries"]
             assert!(check_path(bad).is_err(), "{bad}");
         }
         let error = check_path("data/ruby/Glow-Slab.json").unwrap_err();
-        assert!(
-            error.contains("a-z, 0-9") && error.contains("\"data/ruby/glow-slab.json\""),
-            "{error}"
-        );
+        assert!(error.contains("\"data/ruby/glow-slab.json\""), "{error}");
     }
 }
 

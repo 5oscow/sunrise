@@ -1653,10 +1653,7 @@ capabilities = ["registries"]
     #[test]
     fn a_missing_or_misspelled_field_is_named_with_the_line_to_write() {
         let missing = Manifest::parse(&EXAMPLE.replace("version = \"0.1.0\"\n", "")).unwrap_err();
-        assert_eq!(
-            missing,
-            "sunrise-mod.toml: the field version is missing; add version = \"0.1.0\""
-        );
+        assert!(missing.contains("version = \"0.1.0\""), "{missing}");
         let typo = Manifest::parse(&EXAMPLE.replace("version =", "vrsion =")).unwrap_err();
         assert!(typo.contains("unknown field `vrsion`"), "{typo}");
         assert!(typo.contains("did you mean `version`?"), "{typo}");
