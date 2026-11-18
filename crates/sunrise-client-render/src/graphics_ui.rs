@@ -823,6 +823,7 @@ impl H {
     }
     pub fn slider_steps(self) -> Option<u32> {
         match self {
+            H::LodDistance => Some((LOD_STEPS.len() - 1) as u32),
             H::ChunkUpdates => Some(64),
             H::EntityCullingPrecheck => Some(32),
             H::UploadBudget => Some((UPLOAD_STEPS.len() - 1) as u32),
@@ -2728,6 +2729,7 @@ mod tests {
         // HDR's sliders step only where the display offers HDR.
         let out = offering(true, None);
         let options = [
+            H::LodDistance,
             H::ChunkUpdates,
             H::UploadBudget,
             H::Workers,
