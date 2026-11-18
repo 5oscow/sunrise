@@ -1055,13 +1055,11 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     fn farmland_random_tick(&mut self, state: BlockStateId, pos: BlockPos) {
         let b = self.b;
         let moisture = b.table.int(state, b.props.moisture);
-        let mut near_water = self.level.has_water_ticket(pos);
         // IBlockExtension.canBeHydrated: the farmland's parts, looked up once.
         let asks = self.level.asks_can_be_hydrated(state);
         let held = asks && self.level.hold_farmland_hydration(state);
-        if held && near_water {
-            return;
-        }
+        // Switching a mod off removes its tickets, so any remaining ticket can still water it.
+        let mut near_water = self.level.has_water_ticket(pos);
         if !near_water {
             'search: for x in -4..=4 {
                 for y in 0..=1 {
@@ -1081,8 +1079,8 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 }
             }
         }
-        // A missing owner answer is not a dry or wet result. Keep the input state
-        // unless a Part ahead of the owner explicitly found a hydrating fluid.
+        // Without a ticket or an explicit answer from an earlier Part, held farmland
+        // neither dries nor takes on moisture from the template's rain rule.
         if held && !near_water {
             return;
         }

@@ -843,8 +843,8 @@ pub trait LevelAccess: BlockEntityNeighbors {
         false
     }
     /// Whether the farmland's subscribed hydration rule belongs to its disabled owner.
-    /// Asked only when a Part subscribes. If held, only an earlier Part can make a
-    /// nearby fluid hydrate the farmland; otherwise the random tick leaves it alone.
+    /// Asked only when a Part subscribes. If held, the random tick leaves the
+    /// farmland alone unless a session water ticket or an earlier Part waters it.
     fn hold_farmland_hydration(&self, _state: BlockStateId) -> bool {
         false
     }

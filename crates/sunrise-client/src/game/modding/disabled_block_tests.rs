@@ -349,7 +349,7 @@ mod tests {
                     [2, 3, 7].map(|moisture| b.table.set_int(dry, b.props.moisture, moisture))
                 });
                 let fluid_pos = POS.offset(2, 0, 0);
-                let mut tick = |initial, fluid| {
+                let tick = |game: &mut Game<'_>, initial, fluid| {
                     game.with_level(|b, level, ticks| {
                         level.set_raw(POS, initial);
                         level.set_raw(fluid_pos, fluid);
@@ -357,25 +357,75 @@ mod tests {
                         level.block_state(POS)
                     })
                 };
+                let level = game.level(game.dim.id()).unwrap();
+                let at = [POS.x, POS.y, POS.z];
+                assert!(level.set_weather_levels(game, 0.0, 0.0));
 
                 assert!(mod_api::__private::set_mod_enabled("inert_test", false));
                 // The later Part accepts lava, but the disabled owner precedes it.
-                assert_eq!(tick(three, lava), three);
-                assert_eq!(tick(dry, lava), dry);
-                assert_eq!(tick(dry, air), dry);
-                assert_eq!(tick(control, lava), dirt);
-                assert_eq!(tick(dry, water), wet, "the earlier enabled Part can answer");
+                assert_eq!(tick(game, three, lava), three);
+                assert_eq!(tick(game, dry, lava), dry);
+                assert_eq!(tick(game, dry, air), dry);
+                assert_eq!(tick(game, control, lava), dirt);
+                assert_eq!(
+                    tick(game, dry, water),
+                    wet,
+                    "the earlier enabled Part can answer"
+                );
                 assert!(mod_api::__private::set_mod_enabled("enabled_prefix", false));
-                assert_eq!(tick(dry, water), dry);
+                assert_eq!(tick(game, dry, water), dry);
+
+                {
+                    let _owner = mod_platform::content::crash::enter_native_mod(
+                        mod_api::content::crash::ModCall {
+                            id: "enabled_observer",
+                            hook: "test",
+                            part: None,
+                        },
+                    );
+                    let ticket = level
+                        .add_water_ticket(game, at, [POS.x + 1, POS.y + 1, POS.z + 1])
+                        .unwrap();
+                    assert_eq!(
+                        tick(game, three, air),
+                        wet,
+                        "an enabled mod's ticket waters it"
+                    );
+                    assert!(ticket.remove(game));
+                }
+
+                game.install_live_features();
+                let plains = game.res.biomes().id("minecraft:plains");
+                let mut chunk = Chunk::empty(0, 0);
+                for qy in 0..game.world.shape.height / 4 {
+                    for qx in 0..4 {
+                        for qz in 0..4 {
+                            chunk.set_biome_cell(qx, qy, qz, plains);
+                        }
+                    }
+                }
+                game.world.chunks.insert((0, 0), Arc::new(chunk));
+                assert!(level.set_weather_levels(game, 1.0, 0.0));
+                assert_eq!(
+                    level.is_raining_at(game, [POS.x, POS.y + 1, POS.z]),
+                    Some(true)
+                );
+                assert_eq!(
+                    tick(game, three, air),
+                    three,
+                    "rain does not wet held farmland"
+                );
 
                 assert!(mod_api::__private::set_mod_enabled(
                     "enabled_observer",
                     false
                 ));
                 assert!(mod_api::__private::set_mod_enabled("inert_test", true));
-                assert_eq!(tick(dry, lava), wet);
-                assert_eq!(tick(three, air), two);
-                assert_eq!(tick(dry, air), dirt);
+                assert_eq!(tick(game, three, air), wet, "rain wets unheld farmland");
+                assert!(level.set_weather_levels(game, 0.0, 0.0));
+                assert_eq!(tick(game, dry, lava), wet);
+                assert_eq!(tick(game, three, air), two);
+                assert_eq!(tick(game, dry, air), dirt);
             },
         );
     }
