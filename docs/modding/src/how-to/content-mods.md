@@ -1024,12 +1024,14 @@ recipes, names and loot. Blocks, items, creative tabs, mob effects, entity types
 For example, a package with ID `ported_farmersdelight` and
 `namespaces = ["farmersdelight"]` can declare `farmersdelight:cooking_pot`
 and its `farmersdelight:` block entity type without changing saved-world IDs.
-The namespace collision fence applies. `minecraft`, `c` and
-`sunrise` cannot be listed. Two mods that are on may not own the same namespace (one's id or listed namespace being
-the other's): the game keeps the first in load order and leaves the other's content out, with "mods A and B both use
-the namespace N; turn one of them off" in the log. Paths use vanilla's resource characters, at most 65,536 files, 16
-MiB each and 512 MiB in all. A mod whose content is refused is left out, with the reason in the log. The game reads
-this content into its block and item tables (`sunrise_client::mod_content`, [modpacks.md](https://github.com/sunrise-org/sunrise/blob/main/docs/modpacks.md)). A tag entry
+`minecraft`, `c` and `sunrise` cannot be listed. When two packages list the same extra namespace, the first
+admitted package owns it; the game leaves the later package's content out and logs the conflict. A package's
+primary namespace is its ID. Listing another package's ID as an extra namespace is a load error, regardless of
+load order.
+
+Paths use vanilla's resource characters, at most 65,536 files, 16 MiB each and 512 MiB in all. A mod whose
+content is refused is left out, with the reason in the log. The game reads this content into its block and item
+tables (`sunrise_client::mod_content`, [modpacks.md](https://github.com/sunrise-org/sunrise/blob/main/docs/modpacks.md)). A tag entry
 naming an id nobody registers (a block a port left out, another mod's item) is dropped, so the rest of the tag
 loads; vanilla would drop the whole tag.
 
