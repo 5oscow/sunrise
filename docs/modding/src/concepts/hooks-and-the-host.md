@@ -198,9 +198,10 @@ and `collision_shape` alike.
 A signal read never asks `state_for_placement` or `can_survive`, so it cannot re-enter the hook it was read in.
 On a client (its placement prediction and its own shape updates ask `state_for_placement`, `can_survive`,
 `may_place_on` and `can_sustain_plant` too) these reads answer from the client's loaded copy of the level, and the
-reads above that refuse clients return `None`, as do the tag tests (`block_in_tag`, `fluid_in_tag`, `tags()`);
-`BlockEntityPartState::state_in` gives its default there. Never answer from those as if they were the server's: a
-client's own shape update that refuses a block removes it on that client.
+reads above that refuse clients return `None`, as do `block_in_tag` and `fluid_in_tag`. `tags()` still returns a
+service: `Tags::key` can resolve a key, but membership (`is_in_tag`) and member lists (`items`, `fluids`, `blocks`)
+return `None` in this view. `BlockEntityPartState::state_in` gives its default there. Never answer from those as if
+they were the server's: a client's own shape update that refuses a block removes it on that client.
 `LevelTicksHost`'s signal reads moved here and now return `Option`.
 
 A neighbour's `BlockPart::fence_gate_in_wall` answers whether a fence gate sits at wall height
