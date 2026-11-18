@@ -179,3 +179,82 @@ fn menu_player_inventory_transactions() {
 fn menu_player_inventory_after_world_save_reload() {
     exercise(true);
 }
+
+/// #2671: single player, where the world's owner is also a guest of the server thread.
+mod owner {
+    use super::*;
+    use std::cell::RefCell;
+
+    thread_local! {
+        /// Each extract and insert the hook made, then the amounts read after.
+        static SEEN: RefCell<Vec<u32>> = const { RefCell::new(Vec::new()) };
+    }
+
+    struct Owner;
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Owner {
+        fn menu_clicked(&self, host: &mut dyn ServerHost, event: &mut mod_api::MenuClickedEvent) {
+            let menu = host.menu(event.uuid, event.window).unwrap();
+            let diamond = mod_api::ItemResource::of(
+                &ItemStack::new("minecraft:diamond", 1)
+                    .try_into_api()
+                    .unwrap(),
+            );
+            let player_slot = ItemPlace::PlayerSlot {
+                player: event.uuid,
+                slot: 0,
+            };
+            let menu_slot = ItemPlace::MenuSlot { menu, slot: 72 };
+            let own_slot = ItemPlace::MenuSlot { menu, slot: 9 };
+            let cursor = menu.cursor();
+            let mut seen = Vec::new();
+            host.transaction(|host, tx| {
+                seen.push(player_slot.extract(host, tx, &diamond, 1));
+                seen.push(menu_slot.extract(host, tx, &diamond, 1));
+                seen.push(own_slot.insert(host, tx, &diamond, 1));
+                seen.push(cursor.insert(host, tx, &diamond, 1));
+                seen.push(player_slot.amount(host));
+                seen.push(menu_slot.amount(host));
+                Ok::<_, ()>(())
+            })
+            .unwrap();
+            SEEN.with(|s| *s.borrow_mut() = seen);
+        }
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn menu_clicked_moves_the_owners_hotbar_slot_and_cursor() {
+        mod_platform::testing::with_mods(
+            vec![mod_api::ModEntry::new("owner", Box::new(Owner))].into(),
+            || {
+                with_guests(|game| {
+                    game.level.player_uuid = Some(playerdata::uuid_ints(12));
+                    game.lan
+                        .as_mut()
+                        .unwrap()
+                        .hub
+                        .update_guest(12, |g| {
+                            g.inventory[0] = Some(ItemStack::new("minecraft:diamond", 2));
+                        })
+                        .unwrap();
+                    let window = game
+                        .lan
+                        .as_mut()
+                        .unwrap()
+                        .hub
+                        .open_native_menu(12, 5, Tag::String("owner".into()), vec![None; 45])
+                        .unwrap();
+                    game.native_menu_clicked(12, window, 9, 0, 0);
+                    // Each extract takes 1, the own slot and the cursor take 1; then 0 left
+                    // in the first slot's pair of reads (2 - 1 - 1).
+                    assert_eq!(SEEN.with(|s| s.borrow().clone()), [1, 1, 1, 1, 0, 0]);
+                    let guest = &game.lan.as_ref().unwrap().hub.guests[0];
+                    assert!(guest.inventory[0].is_none());
+                    assert_eq!(guest.carried.as_ref().map(|s| s.count), Some(1));
+                    assert_eq!(guest.native_menu[9].as_ref().map(|s| s.count), Some(1));
+                });
+            },
+        );
+    }
+}

@@ -1903,7 +1903,15 @@ impl Game<'_> {
     /// guest's through `as_guest`, including within another guest's turn.
     /// False when it didn't run: no such player here, or dead.
     pub(super) fn native_as_player(&mut self, uuid: u128, f: impl FnOnce(&mut Self)) -> bool {
-        if uuid == self.native_acting_id() {
+        // With no guest's turn running, `native_acting_id` is the world's owner: on a server
+        // thread that owner is a guest too, whose state is theirs, not the `Game`'s own.
+        let owner_guest = self.lan_acting_uuid.is_none()
+            && self.lan.as_ref().is_some_and(|host| {
+                host.hub
+                    .holder_guest(uuid, self.dim.id())
+                    .is_some_and(|g| !g.dead)
+            });
+        if !owner_guest && uuid == self.native_acting_id() {
             if self
                 .player
                 .as_ref()

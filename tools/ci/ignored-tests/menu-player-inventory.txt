@@ -1,2 +1,3 @@
 sunrise-client game::native_menu_inventory_tests::menu_player_inventory_after_world_save_reload lib daily game-boot
 sunrise-client game::native_menu_inventory_tests::menu_player_inventory_transactions lib daily game-boot
+sunrise-client game::native_menu_inventory_tests::owner::menu_clicked_moves_the_owners_hotbar_slot_and_cursor lib daily game-boot
