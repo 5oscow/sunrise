@@ -7480,7 +7480,7 @@ impl Screen {
             | SubScreen::Uploading { .. }
             | SubScreen::CreateWorldUpload { .. } => {}
             SubScreen::Main => {
-let signed_in = session().is_some();
+                let signed_in = session().is_some();
                 // `RealmsHeader.createLayout`: join on the left of the 308 content, the
                 // invite and news buttons 4 apart on its right.
                 buttons.push((
@@ -7621,19 +7621,6 @@ let signed_in = session().is_some();
                     }
                 }
             }
-        }
-        buttons
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn draw(
-        &self,
-        batch: &mut HudBatch,
-        atlas: &HudAtlas,
-        caret: &mut crate::ui::Caret,
-        focused_at: Instant,
-        cursor: (f32, f32),
-            _ => {}
         }
         buttons
     }
