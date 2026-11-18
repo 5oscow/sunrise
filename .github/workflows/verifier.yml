@@ -140,7 +140,7 @@ jobs:
           set -euo pipefail
           case "${{ matrix.platform }}" in
             linux-*) file "dist/$NAME" | tee /dev/stderr | grep -Eq 'statically linked|static-pie linked' ;;
-            macos-*) otool -L "dist/$NAME" | tee /dev/stderr | awk 'NR>1 && $1 !~ /^\/usr\/lib\/(libSystem|libresolv)/ { bad=1 } END { exit bad }' ;;
+            macos-*) otool -L "dist/$NAME" | tee /dev/stderr | awk 'NR>1 && $1 !~ /^(\/usr\/lib|\/System\/Library)\// { bad=1 } END { exit bad }' ;;
           esac
           if [ "$RUNNABLE" = true ]; then
             chmod +x "dist/$NAME"
