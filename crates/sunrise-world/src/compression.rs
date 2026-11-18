@@ -88,14 +88,27 @@ impl Compression {
                 Ok(())
             }
             Self::Gzip => {
-                let decoder = flate2::read::MultiGzDecoder::new(bytes);
-                decoder
-                    .take((max_output as u64).saturating_add(1))
-                    .read_to_end(output)?;
-                if output.len() > max_output {
-                    return Err(invalid("decompression limit exceeded"));
+                let mut decoder = flate2::bufread::GzDecoder::new(bytes);
+                loop {
+                    decoder
+                        .by_ref()
+                        .take((max_output.saturating_sub(output.len()) as u64).saturating_add(1))
+                        .read_to_end(output)?;
+                    if output.len() > max_output {
+                        return Err(invalid("decompression limit exceeded"));
+                    }
+                    let remaining = decoder.into_inner();
+                    if remaining.is_empty() {
+                        return Ok(());
+                    }
+                    decoder = flate2::bufread::GzDecoder::new(remaining);
+                    // GZIPInputStream probes for another member only after a valid
+                    // trailer. An invalid next header ends the stream, but a bad
+                    // body or trailer after a valid header is still an error.
+                    if decoder.header().is_none() {
+                        return Ok(());
+                    }
                 }
-                Ok(())
             }
             Self::Zlib => zlib_into(bytes, max_output, output),
             Self::Lz4 => {
@@ -179,13 +192,17 @@ fn zlib_blocks(
     loop {
         let before_in = decoder.total_in();
         let before_out = decoder.total_out();
-        let status = decoder
-            .decompress(
-                &bytes[before_in as usize..],
-                &mut block,
-                FlushDecompress::None,
-            )
-            .map_err(|e| invalid(e.to_string()))?;
+        let status = match decoder.decompress(
+            &bytes[before_in as usize..],
+            &mut block,
+            FlushDecompress::None,
+        ) {
+            Ok(status) => status,
+            // InflaterInputStream ends the stream if a dictionary is required
+            // but none was supplied.
+            Err(e) if e.needs_dictionary().is_some() => return Ok(()),
+            Err(e) => return Err(invalid(e.to_string())),
+        };
         let produced = (decoder.total_out() - before_out) as usize;
         if produced > max_output.saturating_sub(output.len()) {
             return Err(invalid("decompression limit exceeded"));
@@ -417,6 +434,40 @@ mod tests {
             [0; 16]
         );
     }
+    #[test]
+    fn gzip_ignores_junk_after_a_complete_member_but_checks_later_members() {
+        // GZIPOutputStream's output for [41], captured from Temurin 25.0.5.
+        let first = [
+            0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 0xff, 0xd3, 4, 0, 0xe1, 0x77, 0xb0, 0x90, 1, 0, 0, 0,
+        ];
+        for junk in [&[0, 0, 0][..], &first[..3], &[7; 20]] {
+            assert_eq!(
+                Compression::Gzip
+                    .decode(&[&first[..], junk].concat(), 2)
+                    .unwrap(),
+                [41]
+            );
+        }
+        let mut two = [first, first].concat();
+        assert_eq!(Compression::Gzip.decode(&two, 2).unwrap(), [41, 41]);
+        two[2 * first.len() - 8] ^= 1;
+        assert!(Compression::Gzip.decode(&two, 2).is_err());
+        assert!(Compression::Gzip.decode(&first[..3], 2).is_err());
+    }
+
+    #[test]
+    fn zlib_needs_dictionary_is_end_of_stream_like_inflater_input_stream() {
+        // A valid zlib header with FDICT set and a dictionary identifier, no
+        // dictionary supplied. Temurin 25.0.5 InflaterInputStream reads no bytes.
+        let needs_dictionary = [0x78, 0xf9, 0x77, 0x0a, 0xed, 0x81];
+        assert!(
+            Compression::Zlib
+                .decode(&needs_dictionary, 32)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
     #[test]
     fn all_codecs_roundtrip_and_enforce_limits() {
         for codec in [
