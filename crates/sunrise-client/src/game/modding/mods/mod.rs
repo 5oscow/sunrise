@@ -693,6 +693,30 @@ pub(super) struct ContentOverlay {
     pub(super) content_mods: Vec<sunrise_client::save::level_mods::ModRecord>,
 }
 
+/// A package's primary namespace is not an alias another layer can acquire.
+fn refuse_primary_namespace_claims(
+    manifests: &[&sunrise_mod_package::Manifest],
+) -> sunrise_client::Result<()> {
+    let primary: std::collections::HashSet<_> = manifests
+        .iter()
+        .map(|manifest| manifest.id.as_str())
+        .chain(mod_api::__private::installed_code_ids())
+        .collect();
+    for manifest in manifests {
+        if let Some(namespace) = manifest
+            .namespaces
+            .iter()
+            .find(|ns| primary.contains(ns.as_str()))
+        {
+            return Err(format!(
+                "mod {} claims namespace {namespace}, which is the primary namespace of mod {namespace}",
+                manifest.id,
+            ).into());
+        }
+    }
+    Ok(())
+}
+
 /// Builds the content overlay: every enabled or dev content mod's files
 /// merged over `root`. Registration of what the mods declare is
 /// [`content_root`]'s step.
@@ -768,6 +792,7 @@ pub(super) fn content_overlay(
         })
         .collect();
     let manifests: Vec<_> = packages.iter().map(|source| source.manifest).collect();
+    refuse_primary_namespace_claims(&manifests)?;
     let overrides = sunrise_mod_package::dependencies::Overrides::read(&sources.overrides_dir)?;
     let resolution = sunrise_mod_package::dependencies::resolve_manifests(
         &manifests,
@@ -2051,6 +2076,26 @@ mod tests {
     use super::*;
     use mod_api::__private::native::BuiltMod;
     use sunrise_mod_package::runtime::Runtime;
+
+    #[test]
+    fn a_package_cannot_claim_another_packages_primary_namespace() {
+        let manifest = |id, aliases| {
+            sunrise_mod_package::Manifest::parse(&format!(
+                "id='{id}'\nname='{id}'\nversion='1'\napi='0.2'\nnamespaces=[{aliases}]"
+            ))
+            .unwrap()
+        };
+        let owner = manifest("owner", "");
+        let claimant = manifest("claimant", "'owner'");
+        for layers in [[&owner, &claimant], [&claimant, &owner]] {
+            assert_eq!(
+                refuse_primary_namespace_claims(&layers)
+                    .unwrap_err()
+                    .to_string(),
+                "mod claimant claims namespace owner, which is the primary namespace of mod owner"
+            );
+        }
+    }
 
     #[test]
     fn only_clients_collect_registered_keys() {

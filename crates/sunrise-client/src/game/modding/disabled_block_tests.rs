@@ -195,23 +195,20 @@ mod tests {
                 side: mod_api::Side::Both,
             },
             BuiltMod {
-                id: "inert_test_extra",
+                id: "namespace_claimant",
                 version: "1.0.0",
                 side: mod_api::Side::Both,
             },
         ];
         let dir = tempfile::tempdir().unwrap();
-        // The second package's own ID conflicts with the first's extra namespace. The
-        // dependency orders admission; the second package's compiled code stays installed.
-        for (package, declarations) in BUILT.iter().zip([
-            "namespaces=['inert_test_extra']",
-            "[dependencies]\ninert_test='*'",
-        ]) {
+        // Both packages declare the same alias. The dependency orders admission; the
+        // later package's compiled code stays installed when its content is refused.
+        for (package, dependencies) in BUILT.iter().zip(["", "[dependencies]\ninert_test='*'"]) {
             let id = package.id;
             let path = dir.path().join(NATIVE_DIR).join(id);
             std::fs::create_dir_all(path.join("src")).unwrap();
             std::fs::write(path.join("sunrise-mod.toml"), format!(
-                "id='{id}'\nname='{id}'\nversion='1.0.0'\napi='0.2'\nside='both'\ncapabilities=['registries']\n{declarations}\n[native]\ngame='26.3'\nsunrise='{}'\nmixins='{}'\n",
+                "id='{id}'\nname='{id}'\nversion='1.0.0'\napi='0.2'\nside='both'\ncapabilities=['registries']\nnamespaces=['inert_test_extra']\n{dependencies}\n[native]\ngame='26.3'\nsunrise='{}'\nmixins='{}'\n",
                 "a".repeat(40), "b".repeat(40),
             )).unwrap();
             std::fs::write(
@@ -229,7 +226,7 @@ mod tests {
         let mods: mod_api::Mods = vec![
             mod_api::ModEntry::new("enabled_prefix", Box::new(EnabledPrefix(probe.clone()))),
             mod_api::ModEntry::new("inert_test", Box::new(Owner(probe.clone()))),
-            mod_api::ModEntry::new("inert_test_extra", Box::new(ConflictingCode)),
+            mod_api::ModEntry::new("namespace_claimant", Box::new(ConflictingCode)),
             mod_api::ModEntry::new("enabled_observer", Box::new(Observer(probe.clone()))),
         ]
         .into();

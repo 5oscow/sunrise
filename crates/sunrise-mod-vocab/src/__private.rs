@@ -58,6 +58,11 @@ pub fn install_content_owners<'a>(owners: impl IntoIterator<Item = (&'a str, &'a
     crate::runtime::install_content_owners(owners);
 }
 
+/// Whether the engine has bound content ownership for the installed dispatch.
+pub fn content_owners_published() -> bool {
+    crate::runtime::content_owners_published()
+}
+
 /// Whether the declaring package of this content is switched off.
 pub fn content_owner_disabled(id: &str) -> bool {
     crate::runtime::content_owner_disabled(id)

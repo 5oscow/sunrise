@@ -287,21 +287,28 @@ pub(crate) fn mod_index_on(index: usize) -> bool {
     })
 }
 
-/// Freeze the admitted registry owners. A content-only owner has no dispatch slot.
+/// Freeze primary IDs first, then the first admitted owner of each alias.
+/// An admitted content-only owner reserves its aliases without a dispatch slot.
 pub(crate) fn install_content_owners<'a>(owners: impl IntoIterator<Item = (&'a str, &'a str)>) {
     if let Some(installed) = installed() {
         installed.content_owners.get_or_init(|| {
-            owners
-                .into_iter()
-                .map(|(namespace, owner)| {
-                    (
-                        namespace.into(),
-                        installed.mod_id_owners.get(owner).copied(),
-                    )
-                })
-                .collect()
+            let mut by_namespace: std::collections::HashMap<Box<str>, _> = installed
+                .mod_id_owners
+                .iter()
+                .map(|(&id, &index)| (id.into(), Some(index)))
+                .collect();
+            for (namespace, owner) in owners {
+                by_namespace
+                    .entry(namespace.into())
+                    .or_insert_with(|| installed.mod_id_owners.get(owner).copied());
+            }
+            by_namespace
         });
     }
+}
+
+pub(crate) fn content_owners_published() -> bool {
+    installed().is_none_or(|installed| installed.content_owners.get().is_some())
 }
 
 /// Content ownership is resolved at startup, not by scanning mods on a tick.
@@ -312,12 +319,8 @@ pub(crate) fn content_owner_disabled(id: &str) -> bool {
 pub(crate) fn content_owner_index(id: &str) -> Option<usize> {
     let (namespace, _) = id.split_once(':')?;
     let installed = installed()?;
-    match installed
-        .content_owners
-        .get()
-        .and_then(|owners| owners.get(namespace))
-    {
-        Some(owner) => *owner,
+    match installed.content_owners.get() {
+        Some(owners) => owners.get(namespace).copied().flatten(),
         None => installed.mod_id_owners.get(namespace).copied(),
     }
 }
@@ -606,26 +609,11 @@ mod listener_lease_tests {
 mod toggle_tests {
     use super::*;
 
-    struct Quiet;
-    #[mod_api::__subscriptions]
-    impl Hooks for Quiet {}
-
-    #[test]
-    fn admitted_content_only_owner_takes_precedence_over_a_mod_id() {
-        crate::testing::with_dispatch(
-            vec![ModEntry::new("shared", Box::new(Quiet))].into(),
-            || {
-                assert!(set_mod_enabled("shared", false));
-                assert!(content_owner_disabled("shared:machine"));
-
-                install_content_owners([("shared", "content_only")]);
-                assert!(!content_owner_disabled("shared:machine"));
-            },
-        );
-    }
-
     #[test]
     fn cached_disabled_flag_tracks_repeated_and_independent_toggles() {
+        struct Quiet;
+        #[mod_api::__subscriptions]
+        impl crate::Hooks for Quiet {}
         crate::testing::with_dispatch(
             vec![
                 ModEntry::new("a", Box::new(Quiet)),
