@@ -866,7 +866,17 @@ impl Game<'_> {
         b.previous_yaw = b.yaw;
         // Entity.commonTick: the client's interpolation, before the boat ticks.
         if controlled {
+            let from = b.position;
             self.interpolate_driven_boat(&mut b);
+            // A step that crosses a section is filed where it happens, not folded into
+            // the end-of-tick scan with the boat's own move.
+            if from != b.position {
+                self.entity_section_step(
+                    b.id,
+                    [from.x, from.y, from.z],
+                    [b.position.x, b.position.y, b.position.z],
+                );
+            }
         }
         // Entity.baseTick ends with Leashable.tickLeash, on a server only
         // (a ridden boat's lead ticks in `tick_boats`).

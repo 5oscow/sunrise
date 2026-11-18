@@ -275,8 +275,12 @@ impl Game<'_> {
                 }
             }
         } else if self.riding == Some(vehicle_id) {
-            // The server takes the player out, then teleports it.
+            // The server takes the player out, then teleports it. A boat's easing toward
+            // a teleport this client was given ends with its control.
             self.riding = None;
+            if let Some(i) = self.boats.iter().position(|b| b.id == vehicle_id) {
+                self.boats.update(i, |b| b.lerp = None);
+            }
             if let Some(m) = self.mob_index.get_mut(&mut self.mobs, vehicle_id) {
                 m.rider = None;
             }
@@ -534,7 +538,7 @@ impl Game<'_> {
     ) {
         let at = Vec3::new(to[0], to[1], to[2]);
         if let Some(id) = self.driven_mount().map(|m| m.id) {
-            self.remote_move_vehicle_and_file(to, rotation.0);
+            self.remote_move_vehicle_and_file(to, rotation);
             if let Some(m) = self.mob_index.get_mut(&mut self.mobs, id) {
                 m.velocity = velocity;
                 m.on_ground = on_ground;
@@ -544,7 +548,9 @@ impl Game<'_> {
         let Some(i) = self.driven_boat() else {
             return;
         };
-        let far = self.boats[i].position.distance_squared(at) > 4096.0;
+        // tooBigToInterpolate measures from where the boat is going while it eases.
+        let far = self.boats[i].client_position().0.distance_squared(at) > 4096.0;
+        let id = self.boats[i].id;
         self.boats.update(i, |b| {
             if far {
                 b.lerp = None;
@@ -559,15 +565,21 @@ impl Game<'_> {
             b.velocity = velocity;
             b.on_ground = on_ground;
         });
-        if far && let Some(report) = self.remote_vehicle_packets().into_iter().next() {
-            self.send(report);
+        if far {
+            self.entity_section_moved_id(id);
+            if let Some(report) = self.remote_vehicle_packets().into_iter().next() {
+                self.send(report);
+            }
         }
     }
 
     /// `ClientPacketListener.handleMoveVehicle`: the server put the boat or
-    /// the mount the player drives back.
-    pub(super) fn remote_move_vehicle(&mut self, position: [f64; 3], yaw: f32) {
+    /// the mount the player drives back (`absSnapTo`: position and rotation, the
+    /// old ones too; its deltaMovement stays).
+    pub(super) fn remote_move_vehicle(&mut self, position: [f64; 3], (yaw, pitch): (f32, f32)) {
         let at = Vec3::new(position[0], position[1], position[2]);
+        // absSnapRotationTo.
+        let (yaw, pitch) = (yaw % 360.0, pitch.clamp(-90.0, 90.0) % 360.0);
         if let Some(id) = self.driven_mount().map(|m| m.id)
             && let Some(m) = self.mob_index.get_mut(&mut self.mobs, id)
         {
@@ -575,20 +587,21 @@ impl Game<'_> {
             m.position = at;
             m.yaw = yaw;
             m.previous_yaw = yaw;
-            m.velocity = Vec3::ZERO;
+            m.head_pitch = pitch;
+            m.previous_head_pitch = pitch;
             return;
         }
         let Some(i) = self.driven_boat() else {
             return;
         };
-        // absSnapTo, after the interpolation is cancelled: the boat keeps its
-        // deltaMovement.
+        // After the interpolation is cancelled.
         self.boats.update(i, |b| {
             b.lerp = None;
             b.previous = at;
             b.position = at;
-            b.yaw = yaw % 360.0;
-            b.previous_yaw = b.yaw;
+            b.yaw = yaw;
+            b.previous_yaw = yaw;
+            b.pitch = pitch;
         });
     }
 

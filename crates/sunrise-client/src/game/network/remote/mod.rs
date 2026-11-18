@@ -3743,6 +3743,11 @@ impl Game<'_> {
                     pick(rel::DELTA_Y, velocity.y, p.delta[1]),
                     pick(rel::DELTA_Z, velocity.z, p.delta[2]),
                 );
+                // The tracked endpoint stays the server's latest, for the relative
+                // teleports that come once nobody here drives it.
+                if let Some(t) = self.remote.as_mut().and_then(|r| r.entities.get_mut(&p.id)) {
+                    t.position = position;
+                }
                 self.teleport_driven_vehicle(position, rotation, delta, p.on_ground);
             }
             C::TeleportEntity(p) => {
@@ -3808,7 +3813,7 @@ impl Game<'_> {
                 if let Some(at) = self.driven_client_position() {
                     let to = Vec3::new(p.position[0], p.position[1], p.position[2]);
                     if to.subtract(at).length() > f64::from(1.0e-5_f32) {
-                        self.remote_move_vehicle_and_file(p.position, p.yaw);
+                        self.remote_move_vehicle_and_file(p.position, (p.yaw, p.pitch));
                     }
                     if let Some(report) = self.remote_vehicle_packets().into_iter().next() {
                         self.send(report);
