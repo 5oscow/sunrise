@@ -604,18 +604,20 @@ pub(super) fn emit<'a>(
                     "{name}: NativeHookHost requires a read-only host and receiver"
                 ));
             }
-            let passed = host
-                .as_ref()
-                .map(|(_, param)| {
-                    if scoped_read_host {
-                        "self.host".to_owned()
-                    } else if param.call == "&*self" && receiver_mut == Some(false) {
-                        "self".to_owned()
-                    } else {
-                        param.call.to_owned()
-                    }
-                })
-                .into_iter()
+            let native_host = host.as_ref().map(|(_, param)| {
+                if scoped_read_host {
+                    "self.host".to_owned()
+                } else if name == "place_liquid" {
+                    format!("{}.without_container_loot()", param.call)
+                } else if param.call == "&*self" && receiver_mut == Some(false) {
+                    "self".to_owned()
+                } else {
+                    param.call.to_owned()
+                }
+            });
+            let passed = native_host
+                .iter()
+                .cloned()
                 .chain(if declared.is_empty() {
                     args.iter()
                         .chain(output.as_ref())
@@ -713,18 +715,9 @@ pub(super) fn emit<'a>(
                 None
             };
             let body = if let Some(crossing) = crossing {
-                let passed = host
-                    .as_ref()
-                    .map(|(_, param)| {
-                        if scoped_read_host {
-                            "self.host".to_owned()
-                        } else if param.call == "&*self" && receiver_mut == Some(false) {
-                            "self".to_owned()
-                        } else {
-                            param.call.to_owned()
-                        }
-                    })
-                    .into_iter()
+                let passed = native_host
+                    .iter()
+                    .cloned()
                     .chain(crossing.arguments.iter().cloned().map(|argument| {
                         surface_calls
                             .get(argument.as_str())

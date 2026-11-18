@@ -467,7 +467,11 @@ struct LiquidCalls {
     queried: std::sync::Mutex<Vec<(bool, Option<u32>, mod_api::FluidKey)>>,
     placed: std::sync::Mutex<Vec<mod_api::FluidState>>,
     refuse_place: std::sync::atomic::AtomicBool,
+    signals: std::sync::Mutex<Option<Vec<[Option<i32>; 3]>>>,
 }
+
+const SIGNAL_POS: [i32; 3] = [1, 65, 3];
+const LOOT_POS: [i32; 3] = [3, 65, 3];
 
 struct LiquidPart(Arc<LiquidCalls>);
 
@@ -492,6 +496,10 @@ impl mod_api::BlockPart for LiquidPart {
         event: &mut mod_api::PlaceLiquidEvent,
     ) -> Option<bool> {
         self.0.placed.lock().unwrap().push(event.fluid);
+        if let Some(signals) = self.0.signals.lock().unwrap().as_mut() {
+            signals
+                .push([SIGNAL_POS, LOOT_POS, [16, 65, 0]].map(|pos| level.container_signal(pos)));
+        }
         let pos = [event.pos.x, event.pos.y, event.pos.z];
         let result = level.block_state_id("minecraft:emerald_block").unwrap();
         let changed = level.set_block(pos, result, mod_api::BlockUpdateFlags::CLIENTS);
@@ -700,6 +708,93 @@ fn declining_liquid_part_writes_never_reach_the_next_part_or_commit() {
                 state(game, "minecraft:dirt")
             );
         });
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn liquid_hosts_read_the_same_comparator_signal_without_unpacking_loot() {
+    use sunrise_client::{items::ItemStack, save::PendingContainerLoot, world::BlockEntityExtras};
+    use sunrise_core::{geometry::Direction, nbt::Tag};
+    with_liquid_part(|game, level, calls| {
+        *calls.signals.lock().unwrap() = Some(Vec::new());
+        let chest = state(game, "minecraft:chest");
+        let [x, y, z] = SIGNAL_POS;
+        game.world.set(x, y, z, chest).unwrap();
+        game.world.block_entities.insert(
+            (x, y, z),
+            BlockEntity::Chest(vec![Some(ItemStack::new("minecraft:stone", 64)); 27]),
+        );
+        let [x, y, z] = LOOT_POS;
+        let loot_pos = (x, y, z);
+        game.world.set(x, y, z, chest).unwrap();
+        game.world
+            .block_entities
+            .insert(loot_pos, BlockEntity::Chest(vec![None; 27]));
+        let pending = PendingContainerLoot {
+            table: Tag::String("minecraft:chests/simple_dungeon".into()),
+            seed: Some(Tag::Long(42)),
+        };
+        game.world.set_block_entity_extras(
+            loot_pos,
+            BlockEntityExtras {
+                source: None,
+                pending_loot: Some(pending.clone()),
+            },
+        );
+
+        assert!(
+            game.dispense_filled_bucket(
+                (2, 65, 1),
+                Direction::South,
+                ItemStack::new("minecraft:water_bucket", 1)
+            )
+            .is_some()
+        );
+        assert_eq!(
+            game.world
+                .block_entity_extras(loot_pos)
+                .pending_loot
+                .as_ref(),
+            Some(&pending)
+        );
+        game.world
+            .set(AT[0], AT[1], AT[2], state(game, "minecraft:dandelion"))
+            .unwrap();
+        let outer = game.transaction_open();
+        assert!(game.level_place_fluid(
+            level,
+            AT,
+            key("minecraft:water"),
+            None,
+            true,
+            outer.transaction()
+        ));
+        assert_eq!(
+            game.world
+                .block_entity_extras(loot_pos)
+                .pending_loot
+                .as_ref(),
+            Some(&pending)
+        );
+        game.transaction_close(&outer, false);
+        assert_eq!(
+            game.world.block_entity_extras(loot_pos).pending_loot,
+            Some(pending)
+        );
+        assert!(
+            game.world
+                .block_entities
+                .get(&loot_pos)
+                .unwrap()
+                .slots()
+                .iter()
+                .all(Option::is_none)
+        );
+        assert_eq!(
+            calls.signals.lock().unwrap().as_deref(),
+            Some(&[[Some(15), Some(0), None]; 2][..])
+        );
     });
 }
 

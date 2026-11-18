@@ -141,6 +141,10 @@ impl LevelHost for JournalLevelWrite<'_, '_> {
 }
 
 impl LevelRandomHost for JournalLevelWrite<'_, '_> {
+    fn container_signal(&mut self, pos: [i32; 3]) -> Option<i32> {
+        self.is_loaded(pos)
+            .then(|| self.game.stored_container_signal((pos[0], pos[1], pos[2])))
+    }
     fn attachments(&mut self) -> &mut dyn AttachmentStore {
         self.game
     }
