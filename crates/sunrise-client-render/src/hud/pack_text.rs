@@ -45,10 +45,23 @@ pub(super) fn load_core(
     defines: &[&str],
     glue: &Glue,
 ) -> Option<Arc<CoreProgram>> {
+    load_pair(root, defaults, (name, name), defines, glue, &|_| false)
+}
+
+/// [`load_core`] for a pipeline whose stages have names of their own (`core/screenquad` and
+/// `core/lightmap`) and that gives the blocks `provided` says yes to.
+pub(super) fn load_pair(
+    root: &ResourceSource,
+    defaults: &ResourceSource,
+    (vertex_name, name): (&str, &str),
+    defines: &[&str],
+    glue: &Glue,
+    provided: &dyn Fn(&str) -> bool,
+) -> Option<Arc<CoreProgram>> {
     let read = |base: &ResourceSource, path: &str| base.read_to_string(path).ok();
     let own =
         |path: &str| read(root, path).filter(|text| read(defaults, path).as_ref() != Some(text));
-    let vertex_path = format!("assets/minecraft/shaders/core/{name}.vsh");
+    let vertex_path = format!("assets/minecraft/shaders/core/{vertex_name}.vsh");
     let fragment_path = format!("assets/minecraft/shaders/core/{name}.fsh");
     let (own_vertex, own_fragment) = (own(&vertex_path), own(&fragment_path));
     if own_vertex.is_none() && own_fragment.is_none() {
@@ -61,7 +74,9 @@ pub(super) fn load_core(
         let path = format!("assets/{namespace}/{path}");
         read(root, &path).or_else(|| read(defaults, &path))
     };
-    match crate::core_shader::translate_core(&vertex, &fragment, defines, &include, glue) {
+    match crate::core_shader::translate_core_with(
+        &vertex, &fragment, defines, &include, glue, provided,
+    ) {
         Ok(program) => {
             log::info!("the resource pack's {name} shader is used");
             Some(Arc::new(program))
@@ -73,7 +88,20 @@ pub(super) fn load_core(
     }
 }
 
-/// The packs' core shaders the atlas carries (text, block outline, sky, stars).
+/// The packs' `core/lightmap` with `core/screenquad`, when a pack replaces either stage: the
+/// pass gives it `LightmapInfo` besides vanilla's blocks.
+fn load_lightmap(root: &ResourceSource, defaults: &ResourceSource) -> Option<Arc<CoreProgram>> {
+    load_pair(
+        root,
+        defaults,
+        ("screenquad", "lightmap"),
+        &[],
+        &crate::gfx::core_lightmap::GLUE,
+        &|block| block == crate::gfx::core_lightmap::INFO_BLOCK,
+    )
+}
+
+/// The packs' core shaders the atlas carries (text, block outline, sky, stars, lightmap).
 pub(super) fn load_shaders(
     atlas: &mut super::HudAtlas,
     root: &ResourceSource,
@@ -90,6 +118,7 @@ pub(super) fn load_shaders(
     let sky = |name| load_core(root, defaults, name, &[], &crate::gfx::core_sky::GLUE);
     atlas.sky_shader = sky("sky");
     atlas.stars_shader = sky("stars");
+    atlas.lightmap_shader = load_lightmap(root, defaults);
     let world = |defines: &[&str], glue| load_core(root, defaults, "text", defines, glue);
     atlas.text_shaders.world = world(&[], &crate::gfx::core_text::WORLD_GLUE);
     atlas.text_shaders.see_through = world(
@@ -353,6 +382,67 @@ mod tests {
         }
         // A pack finds the GUI scale as ScreenSize.x * ProjMat[0][0] / 2.
         assert!((data[8] * data[64] / 2.0 - 4.0).abs() < 1e-4);
+    }
+
+    /// Packs in memory: vanilla's lightmap stages (in shape) as the defaults, and `own` files
+    /// of a pack over them.
+    fn lightmap_packs(own: &[(&str, &str)]) -> (ResourceSource, ResourceSource) {
+        use sunrise_assets::resource_source::Resource;
+        let vanilla = [
+            (
+                "assets/minecraft/shaders/core/screenquad.vsh",
+                "#version 330\nlayout(location = 0) out vec2 texCoord;\n\
+                 void main() {\n    vec2 uv = vec2((gl_VertexIndex << 1) & 2, gl_VertexIndex & 2);\n\
+                     gl_Position = vec4(uv * 2.0 - 1.0, 0.0, 1.0);\n    texCoord = uv;\n}\n",
+            ),
+            (
+                "assets/minecraft/shaders/core/lightmap.fsh",
+                "#version 330\nlayout(std140) uniform LightmapInfo {\n    float SkyFactor;\n} info;\n\
+                 layout(location = 0) in vec2 texCoord;\nlayout(location = 0) out vec4 fragColor;\n\
+                 void main() {\n    fragColor = vec4(info.SkyFactor);\n}\n",
+            ),
+        ];
+        let source = |files: Vec<(&str, &str)>| {
+            ResourceSource::indexed(
+                files
+                    .into_iter()
+                    .map(|(path, text)| {
+                        (path.to_owned(), Resource::bytes(text.as_bytes().to_vec()))
+                    })
+                    .collect(),
+            )
+        };
+        let mut pack = vanilla.to_vec();
+        for (path, text) in own {
+            pack.retain(|(p, _)| p != path);
+            pack.push((path, text));
+        }
+        (source(pack), source(vanilla.to_vec()))
+    }
+
+    fn lightmap(own: &[(&str, &str)]) -> Option<Arc<CoreProgram>> {
+        let (root, defaults) = lightmap_packs(own);
+        load_lightmap(&root, &defaults)
+    }
+
+    /// A pack's `core/lightmap` is loaded with vanilla's `core/screenquad` (a stage of another
+    /// name), and the reverse; none when no pack replaces either; refused when it reads a block
+    /// the lightmap pass doesn't give.
+    #[test]
+    fn a_pack_replacing_either_lightmap_stage_is_loaded() {
+        let red = "#version 330\nlayout(std140) uniform LightmapInfo {\n    float SkyFactor;\n} info;\n\
+                   layout(location = 0) in vec2 texCoord;\nlayout(location = 0) out vec4 fragColor;\n\
+                   void main() {\n    fragColor = vec4(info.SkyFactor, 0.0, 0.0, 1.0);\n}\n";
+        let fsh = "assets/minecraft/shaders/core/lightmap.fsh";
+        let vsh = "assets/minecraft/shaders/core/screenquad.vsh";
+        let program = lightmap(&[(fsh, red)]).expect("the pack's lightmap");
+        assert_eq!(program.other, ["LightmapInfo"]);
+        let quad = "#version 330\nlayout(location = 0) out vec2 texCoord;\n\
+                    void main() {\n    texCoord = vec2(0.5);\n    gl_Position = vec4(0.0, 0.0, 0.0, 1.0);\n}\n";
+        assert!(lightmap(&[(vsh, quad)]).is_some());
+        assert!(lightmap(&[]).is_none(), "no pack replaces either stage");
+        let other = red.replace("LightmapInfo", "Elsewhere");
+        assert!(lightmap(&[(fsh, &other)]).is_none());
     }
 
     #[test]

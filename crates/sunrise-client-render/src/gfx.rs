@@ -173,6 +173,7 @@ pub mod capture;
 mod celestial;
 mod census;
 pub mod compositor;
+pub(crate) mod core_lightmap;
 pub(crate) mod core_lines;
 pub(crate) mod core_sky;
 pub(crate) mod core_text;
@@ -426,6 +427,9 @@ pub struct Renderer {
     core_text: Option<core_text::CoreText>,
     /// The packs' `core/sky` and `core/stars`, drawn in place of the native sky and stars.
     core_sky: Option<core_sky::CoreSky>,
+    /// A resource pack's `core/lightmap`, which draws the light texture in place of the native
+    /// one.
+    core_lightmap: Option<core_lightmap::CoreLightmap>,
     /// Gizmo lines: opaque ones (`RenderTypes.lines`, which writes depth),
     /// translucent ones (`RenderTypes.linesTranslucentNoDepthWrite`) and the
     /// always-on-top ones.
@@ -1899,7 +1903,11 @@ impl Renderer {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            // A pack's `core/lightmap` draws into it, and its pixels are read back for F3.
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         let lightmap_view = lightmap.create_view(&Default::default());
@@ -3272,6 +3280,7 @@ impl Renderer {
             core_lines: None,
             core_text: None,
             core_sky: None,
+            core_lightmap: None,
             debug_lines_opaque,
             debug_lines,
             debug_lines_on_top,
@@ -3844,71 +3853,6 @@ impl Renderer {
     fn screen_view(&self, fov_degrees: f32, yaw: f32, pitch: f32, far: f32) -> View {
         let aspect = self.config.width as f32 / self.config.height.max(1) as f32;
         View::screen(yaw, pitch, fov_degrees, aspect, far)
-    }
-    fn update_lightmap(
-        &mut self,
-        encoder: &mut wgpu::CommandEncoder,
-        sky: &Sky,
-        darkness: f32,
-        gamma: f32,
-        night_vision: f32,
-        flicker: f32,
-        boss_darken: f32,
-    ) {
-        // lightmap.fsh: per (block, sky) level.
-        let brightness = |level: f32| level / (4.0 - 3.0 * level);
-        let mut pixels = [0u8; 16 * 16 * 4];
-        for s in 0..16 {
-            for b in 0..16 {
-                let block_level = b as f32 / 15.0;
-                let sky_level = s as f32 / 15.0;
-                let block_brightness = brightness(block_level) * (1.4 + flicker);
-                let sky_brightness = brightness(sky_level) * sky.sky_light_factor;
-                // NightVisionColor defaults to 0x999999.
-                let mut color =
-                    Vec3::from(sky.ambient_light_color).max(Vec3::splat(0.6 * night_vision));
-                color += Vec3::from(sky.sky_light_color) * sky_brightness;
-                let parabolic = (2.0 * block_level - 1.0).powi(2);
-                let block_color = Vec3::from(sky.block_light_tint).lerp(Vec3::ONE, 0.9 * parabolic);
-                color += block_color * block_brightness;
-                // lightmap.fsh: a boss bar mixes the light toward 70/60/60%.
-                color = color.lerp(color * Vec3::new(0.7, 0.6, 0.6), boss_darken);
-                color -= Vec3::splat(darkness);
-                color = color.clamp(Vec3::ZERO, Vec3::ONE);
-                let max = color.max_element().max(1e-6);
-                let inverted = 1.0 - max;
-                let scaled = 1.0 - inverted.powi(4);
-                let not_gamma = color * (scaled / max);
-                color = color.lerp(not_gamma, gamma);
-                let i = (s * 16 + b) * 4;
-                pixels[i] = (color.x * 255.0) as u8;
-                pixels[i + 1] = (color.y * 255.0) as u8;
-                pixels[i + 2] = (color.z * 255.0) as u8;
-                pixels[i + 3] = 255;
-            }
-        }
-        if self.fullbright {
-            pixels.fill(255);
-        }
-        // The lightmap changes with the time of day, flicker and effects,
-        // not every frame: upload only what differs from the texture.
-        if pixels == self.lightmap_pixels && self.lightmap_uploaded {
-            return;
-        }
-        self.uploads.texture(
-            encoder,
-            wgpu::TexelCopyTextureInfo {
-                texture: &self.lightmap,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            16,
-            16,
-            &pixels,
-        );
-        self.lightmap_pixels = pixels;
-        self.lightmap_uploaded = true;
     }
     fn animate(&mut self, encoder: &mut wgpu::CommandEncoder, tick: u64, cull_inactive: bool) {
         let active = cull_inactive.then_some(&self.active_animated_layers[..]);

@@ -5,20 +5,22 @@ use super::{Renderer, ScreenshotRequest, copy_frame, submit};
 
 impl Renderer {
     /// The frame's readbacks to start right after its submission (on the submit thread when
-    /// the frame goes there): occlusion culling's results (`cull`) and GPU culling's
-    /// statistics. GPU frames leave occlusion culling off, so a frame has one at most.
+    /// the frame goes there): occlusion culling's results (`cull`), GPU culling's statistics
+    /// and a pack-drawn lightmap's pixels. GPU frames leave occlusion culling off.
     pub(super) fn after_submit(&mut self) -> Option<submit::AfterSubmit> {
         let cull = self.cull.as_mut().and_then(|c| c.submitted());
+        let cull = cull.map(|c| Box::new(c) as submit::AfterSubmit);
         let gpu = self.gpu_culling.as_mut().and_then(|g| g.submitted());
-        match (cull, gpu) {
-            (Some(c), Some(g)) => Some(Box::new(move || {
-                c();
-                g();
-            })),
-            (Some(c), None) => Some(Box::new(c)),
-            (None, Some(g)) => Some(Box::new(g)),
-            (None, None) => None,
-        }
+        let gpu = gpu.map(|g| Box::new(g) as submit::AfterSubmit);
+        let lightmap = self.core_lightmap.as_mut().and_then(|l| l.submitted());
+        let reads: Vec<submit::AfterSubmit> = [cull, gpu, lightmap].into_iter().flatten().collect();
+        (!reads.is_empty()).then(|| {
+            Box::new(move || {
+                for read in reads {
+                    read();
+                }
+            }) as submit::AfterSubmit
+        })
     }
     /// Frame `frame`'s statistics shown, unless a newer frame's are: a CPU frame's as it is
     /// drawn, a GPU frame's when its counts come back (`GpuCulling::collect`).

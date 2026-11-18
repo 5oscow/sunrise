@@ -104,15 +104,7 @@ impl Renderer {
                 &self.animations,
             );
         }
-        self.update_lightmap(
-            &mut encoder,
-            &frame.sky,
-            frame.darkness.1,
-            (self.gamma - frame.darkness.0).max(0.0),
-            frame.night_vision,
-            frame.block_flicker,
-            frame.boss_darken,
-        );
+        self.update_lightmap(&mut encoder, frame);
         let views = self.views(frame);
         let pose = frame.bob * frame.spin;
         let view_proj = views.primary().view_proj(pose);
