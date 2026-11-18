@@ -67,7 +67,7 @@ pub trait EntityFireFrostBackendMut {
     fn entity_set_ticks_frozen(&mut self, entity: EntityRef, ticks: i32) -> bool;
 }
 
-/// The handles' client-only writes of the fire and frost area.
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 #[sunrise_mod_api_macros::host_area]
 pub trait EntityFireFrostClientBackendMut {
