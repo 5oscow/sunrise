@@ -1313,7 +1313,7 @@ impl<'a, 'w> Finder<'a, 'w> {
         let i = self.heap.len();
         self.heap.push(n);
         self.nodes[n as usize].heap = i as i32;
-        self.up_heap(i);
+        Self::up_heap(&mut self.nodes, &mut self.heap, i);
     }
     fn heap_pop(&mut self) -> u32 {
         let popped = self.heap[0];
@@ -1321,7 +1321,7 @@ impl<'a, 'w> Finder<'a, 'w> {
         if !self.heap.is_empty() {
             self.heap[0] = last;
             self.nodes[last as usize].heap = 0;
-            self.down_heap(0);
+            Self::down_heap(&mut self.nodes, &mut self.heap, 0);
         }
         self.nodes[popped as usize].heap = -1;
         popped
@@ -1331,65 +1331,57 @@ impl<'a, 'w> Finder<'a, 'w> {
         self.nodes[n as usize].f = cost;
         let i = self.nodes[n as usize].heap as usize;
         if cost < old {
-            self.up_heap(i);
+            Self::up_heap(&mut self.nodes, &mut self.heap, i);
         } else {
-            self.down_heap(i);
+            Self::down_heap(&mut self.nodes, &mut self.heap, i);
         }
     }
-    fn up_heap(&mut self, mut i: usize) {
-        let node = self.heap[i];
-        let cost = self.nodes[node as usize].f;
+    fn up_heap(nodes: &mut [Node], heap: &mut [u32], mut i: usize) {
+        let node = heap[i];
+        let cost = nodes[node as usize].f;
         while i > 0 {
             let parent_i = (i - 1) >> 1;
-            let parent = self.heap[parent_i];
-            if cost >= self.nodes[parent as usize].f {
+            let parent = heap[parent_i];
+            if cost < nodes[parent as usize].f {
+                heap[i] = parent;
+                nodes[parent as usize].heap = i as i32;
+                i = parent_i;
+            } else {
                 break;
             }
-            self.heap[i] = parent;
-            self.nodes[parent as usize].heap = i as i32;
-            i = parent_i;
         }
-        self.heap[i] = node;
-        self.nodes[node as usize].heap = i as i32;
+        heap[i] = node;
+        nodes[node as usize].heap = i as i32;
     }
-    fn down_heap(&mut self, mut i: usize) {
-        let node = self.heap[i];
-        let cost = self.nodes[node as usize].f;
-        let size = self.heap.len();
+    fn down_heap(nodes: &mut [Node], heap: &mut [u32], mut i: usize) {
+        let node = heap[i];
+        let cost = nodes[node as usize].f;
         loop {
             let left_i = 1 + (i << 1);
+            let Some(&left) = heap.get(left_i) else { break };
             let right_i = left_i + 1;
-            if left_i >= size {
+            let left_cost = nodes[left as usize].f;
+            let right_cost = heap
+                .get(right_i)
+                .map_or(f32::INFINITY, |&n| nodes[n as usize].f);
+            // Equal children favor the right. If it is absent (+infinity),
+            // its cost cannot be strictly less than any node's cost.
+            let (child_i, child_cost) = if left_cost < right_cost {
+                (left_i, left_cost)
+            } else {
+                (right_i, right_cost)
+            };
+            if child_cost < cost {
+                let child = heap[child_i];
+                heap[i] = child;
+                nodes[child as usize].heap = i as i32;
+                i = child_i;
+            } else {
                 break;
             }
-            let left = self.heap[left_i];
-            let left_cost = self.nodes[left as usize].f;
-            let (right, right_cost) = if right_i >= size {
-                (u32::MAX, f32::INFINITY)
-            } else {
-                (
-                    self.heap[right_i],
-                    self.nodes[self.heap[right_i] as usize].f,
-                )
-            };
-            if left_cost < right_cost {
-                if left_cost >= cost {
-                    break;
-                }
-                self.heap[i] = left;
-                self.nodes[left as usize].heap = i as i32;
-                i = left_i;
-            } else {
-                if right_cost >= cost {
-                    break;
-                }
-                self.heap[i] = right;
-                self.nodes[right as usize].heap = i as i32;
-                i = right_i;
-            }
         }
-        self.heap[i] = node;
-        self.nodes[node as usize].heap = i as i32;
+        heap[i] = node;
+        nodes[node as usize].heap = i as i32;
     }
     // --- PathFinder.findPath ------------------------------------------------
     fn best_h(&self, n: u32, targets: &mut [Target]) -> f32 {
@@ -1554,6 +1546,27 @@ fn collision_steps(length: f64, box_size: f64) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn heap_moves_only_on_strictly_lower_cost() {
+        // Vanilla's BinaryHeap uses strict float comparisons throughout.
+        let mut nodes = [Node::new(0, 0, 0), Node::new(1, 0, 0), Node::new(2, 0, 0)];
+        let mut heap = [0, 1, 2];
+        nodes[1].f = f32::NAN;
+        Finder::up_heap(&mut nodes, &mut heap, 1);
+        assert_eq!(heap, [0, 1, 2]);
+
+        nodes[0].f = f32::NAN;
+        nodes[1].f = f32::INFINITY;
+        Finder::down_heap(&mut nodes, &mut heap[..2], 0);
+        assert_eq!(heap, [0, 1, 2]);
+
+        nodes[0].f = 2.0;
+        nodes[1].f = 1.0;
+        nodes[2].f = 1.0;
+        Finder::down_heap(&mut nodes, &mut heap, 0);
+        assert_eq!(heap, [2, 1, 0]);
+    }
 
     #[test]
     fn collision_subdivision_preserves_small_vanilla_boxes_and_bounds_pathological_ones() {
