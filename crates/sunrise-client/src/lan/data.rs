@@ -107,10 +107,13 @@ pub const CORE_PACK: (&str, &str, &str) = ("minecraft", "core", sunrise_protocol
 /// from the prepared resources only.
 /// Enchantments are among them: the items' enchantment catalog reads a
 /// world's pack definitions too, so their ids must reach clients.
+/// World clocks are too: a dimension type's `default_clock` must name a
+/// clock the client was sent, or it reads that dimension's time as zero.
 const PACK_REGISTRIES: &[&str] = &[
     "minecraft:dialog",
     "minecraft:dimension_type",
     "minecraft:enchantment",
+    "minecraft:world_clock",
 ];
 
 /// A registry's entries from the resource root's namespaces other than
@@ -1486,6 +1489,47 @@ mod tests {
             [0, 2],
             "the pack's dialog, then the nested tag's"
         );
+    }
+
+    /// #2506: a world pack's clock reaches the clients, so a dimension type
+    /// that names it as `default_clock` resolves on their side.
+    #[test]
+    #[ignore = "daily"]
+    fn world_packs_supply_world_clocks() {
+        use sunrise_world::loot::PackOverlay;
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/sunrise-client")
+            .join(sunrise_core::VANILLA_VERSION);
+        let files = vec![
+            ("world_clock/demo:moon".into(), vec![b"{}".to_vec()]),
+            (
+                "dimension_type/demo:moon".into(),
+                vec![br#"{"default_clock":"demo:moon"}"#.to_vec()],
+            ),
+        ];
+        let sync = SyncData::load(
+            &root,
+            &PackOverlay::new(&files),
+            &sunrise_world::item_defaults::read(&root).unwrap(),
+            &crate::crafting::ResolvedSources::default(),
+        )
+        .unwrap();
+        let packets = sync.registry_packets(true, &LevelShapes::VANILLA);
+        let clocks = packets
+            .iter()
+            .find(|p| p.registry == "minecraft:world_clock")
+            .unwrap();
+        let sent = |name: &str| {
+            let entry = clocks.entries.iter().find(|e| e.id == name);
+            entry.map(|e| e.data.is_some())
+        };
+        assert_eq!(
+            sent("demo:moon"),
+            Some(true),
+            "no client knows the pack's clock"
+        );
+        assert_eq!(sent("minecraft:overworld"), Some(false));
+        assert_eq!(sent("minecraft:the_end"), Some(false));
     }
 
     /// #7843: the server sends its tags as `TagLoader` merged them from the
