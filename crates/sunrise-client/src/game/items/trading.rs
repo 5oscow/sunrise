@@ -1142,7 +1142,11 @@ mod select_on_a_server_tests {
             // client's menu moved (payment and result emptied, the bread in the hotbar's last
             // slot), and the merchant's own effects stay the server's (no orb, no trade stat).
             let traded = game.stats.get("custom", "minecraft:traded_with_villager");
-            game.remote_menu_ops(&[(Some(2), 0, sunrise_client::menu::Input::QuickMove)]);
+            game.remote_menu_ops(&[(
+                Some(super::RESULT),
+                0,
+                sunrise_client::menu::Input::QuickMove,
+            )]);
             let mut changed = Vec::new();
             while let Ok((id, bytes)) = peer.recv() {
                 if let Ok(S::ContainerClick(p)) = S::decode(id, &bytes) {
