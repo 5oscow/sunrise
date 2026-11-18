@@ -2,6 +2,7 @@
 """Keep Linux release executables runnable on Ubuntu 22.04 (docs/ci-runners.md)."""
 import argparse
 import os
+from pathlib import Path
 import re
 import shutil
 import subprocess
@@ -31,13 +32,35 @@ def incompatible_versions(report):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("binaries", nargs="+")
+    parser.add_argument("binaries", nargs="*")
+    parser.add_argument("--sdk", type=Path, help="check every ELF in this SDK artifact tree")
+    parser.add_argument("--std-dir", type=Path, help="the pinned rustc's target-libdir (required with --sdk)")
     args = parser.parse_args()
+    binaries = args.binaries
+    if args.sdk is not None:
+        if args.std_dir is None:
+            parser.error("--sdk requires --std-dir")
+        sdk = []
+        for path in sorted(args.sdk.rglob("*")):
+            if path.is_file():
+                with path.open("rb") as file:
+                    if file.read(4) == b"\x7fELF":
+                        sdk.append(path)
+        if not sdk:
+            parser.error(f"no ELF files in SDK {args.sdk}")
+        std = sorted(args.std_dir.glob("libstd-*.so"))
+        if not std:
+            parser.error(f"no pinned libstd-*.so in {args.std_dir}")
+        binaries += [str(path) for path in [*sdk, *std]]
+    elif args.std_dir is not None:
+        parser.error("--std-dir requires --sdk")
+    if not binaries:
+        parser.error("give at least one binary or an SDK")
     readelf = shutil.which("readelf")
     if readelf is None:
         parser.error("readelf is required (install binutils)")
     failed = False
-    for binary in args.binaries:
+    for binary in binaries:
         result = subprocess.run([readelf, "--wide", "--version-info", "--", binary], text=True, capture_output=True,
                                 env={**os.environ, "LC_ALL": "C"})
         if result.returncode:

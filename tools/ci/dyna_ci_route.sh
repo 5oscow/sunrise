@@ -6,7 +6,8 @@
 #
 # Env: VARS_ENABLED and VARS_LEASE (the run's snapshot of DYNA_CI_SELF_HOSTED and DYNA_CI_POOL_UNTIL), EVENT,
 # SAME_REPO, GH_TOKEN (actions: read, for the run's creation time), GITHUB_REPOSITORY and GITHUB_RUN_ID. A
-# reusable workflow's GITHUB_RUN_ID is its caller's run, whose snapshot it shares.
+# reusable workflow's GITHUB_RUN_ID is its caller's run, whose snapshot it shares. ALLOW_PUBLIC_RUN_LOOKUP lets
+# public SDK calls lacking actions:read fall back to the unauthenticated run timestamp.
 set -uo pipefail
 ENABLED=
 LEASE=
@@ -24,6 +25,11 @@ if [ -z "$LEASE" ]; then
   SOURCE=snapshot
   CREATED_AT=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" -q .created_at 2>/dev/null || true)
   [ -z "$CREATED_AT" ] || CREATED=$(date -d "$CREATED_AT" +%s 2>/dev/null || true)
+  if [ -z "$CREATED" ] && [ "${ALLOW_PUBLIC_RUN_LOOKUP:-}" = true ] && [ "${SAME_REPO:-}" = true ]; then
+    CREATED_AT=$(curl --proto '=https' -fsS --max-time 10 \
+      "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" | jq -er '.created_at' || true)
+    [ -z "$CREATED_AT" ] || CREATED=$(date -d "$CREATED_AT" +%s 2>/dev/null || true)
+  fi
 fi
 ENABLED=${ENABLED:-${VARS_ENABLED:-}} LEASE=${LEASE:-${VARS_LEASE:-}} LEASE_SOURCE=$SOURCE CREATED=$CREATED \
   exec bash "$(dirname "${BASH_SOURCE[0]}")/dyna_ci_runner.sh"

@@ -22,6 +22,8 @@ permissions:
   contents: read
 env:
   TAG: sdk-${{ inputs.commit || github.sha }}
+  SDK_PYTHON: python
+  SDK_WORK: .
 jobs:
   fresh:
     # Main's head may already have its build: a quiet day, or a second dispatch.
@@ -37,11 +39,30 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           if gh release view "$TAG" > /dev/null 2>&1; then echo needed=false; else echo needed=true; fi >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        if: vars.SDK_LINUX_POOL == 'true' && inputs.legs != 'windows-macos' && steps.release.outputs.needed == 'true'
+        id: route-source
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - id: route
+        if: steps.route-source.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VARS_ENABLED: ${{ vars.DYNA_CI_SELF_HOSTED }}
+          VARS_LEASE: ${{ vars.DYNA_CI_POOL_UNTIL }}
+          SAME_REPO: ${{ github.repository == 'sunrise-org/sunrise' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+          EVENT: ${{ github.event_name }}
+          # Some SDK callers grant only contents: read. Public run metadata can be read without actions: read.
+          ALLOW_PUBLIC_RUN_LOOKUP: true
+        run: bash tools/ci/dyna_ci_route.sh >> "$GITHUB_OUTPUT"
       # The build's matrix: every leg, or the Linux ones or the others alone. The daily run calls the two groups
       # separately, so its fn-replace-check, which reads only the Linux legs, does not wait for macOS.
       - id: legs
         env:
           LEGS: ${{ inputs.legs }}
+          POOL_ENABLED: ${{ vars.SDK_LINUX_POOL }}
+          SELF_HOSTED: ${{ steps.route.outputs.self_hosted }}
           # The launcher builds native mods with the windows-gnu toolchain and its own MinGW linker.
           ALL: >-
             [{"name": "linux", "os": "ubuntu-22.04", "target": "x86_64-unknown-linux-gnu", "linkage": true},
@@ -55,7 +76,11 @@ jobs:
             windows-macos) pick='map(select(.os != "ubuntu-22.04"))' ;;
             *) echo "::error::legs is all, linux or windows-macos, not '$LEGS'"; exit 1 ;;
           esac
-          echo "matrix=$(jq -c "{include: $pick}" <<< "$ALL")" >> "$GITHUB_OUTPUT"
+          if [[ "$POOL_ENABLED" == true && "$SELF_HOSTED" == true ]]; then
+            pick="$pick | map(if .os == \"ubuntu-22.04\" then .os = \"dyna-large\" else . end)"
+          fi
+          matrix=$(jq -c "{include: ($pick)}" <<< "$ALL")
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
   build:
     needs: fresh
@@ -75,70 +100,135 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ inputs.commit }}
+      - name: Workflow-owned Linux setup and ABI check
+        if: runner.os == 'Linux'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .sdk-ci-tools
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            tools/check_glibc.py
+            tools/ci/cargo_jobs.py
+            tools/ci/glibc_floor_setup.sh
+            tools/ci/source_mtimes.py
       - name: The launcher's pinned Rust
         id: rust
         run: |
           echo "version=$(cat tools/ci/rust-version)" >> "$GITHUB_OUTPUT"
+      - name: Allocate private SDK scratch on the build volume
+        if: runner.environment == 'self-hosted'
+        env:
+          LEG: ${{ matrix.name }}
+        run: |
+          umask 077
+          # Keep Zig's Cargo outputs separate from jobs whose `cc` still links against system glibc.
+          target="${CARGO_TARGET_DIR:?}/sdk-$LEG-glibc235"
+          jobs=$(python3 .sdk-ci-tools/tools/ci/cargo_jobs.py --job-mib 4096)
+          mkdir -p "$target"
+          scratch=$(mktemp -d "$target/package.XXXXXX")
+          {
+            echo "CARGO_TARGET_DIR=$target"
+            echo 'CARGO_INCREMENTAL=0'
+            echo "CARGO_BUILD_JOBS=$jobs"
+            echo "RUSTUP_HOME=${DYNA_CI_BUILD:?}/rustup"
+            echo "TMPDIR=$scratch"
+            echo "SDK_WORK=$scratch"
+            echo 'SDK_PYTHON=python3'
+            echo "ZIG_GLOBAL_CACHE_DIR=$scratch/zig-cache"
+          } >> "$GITHUB_ENV"
+          echo "${CARGO_HOME:?}/bin" >> "$GITHUB_PATH"
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ steps.rust.outputs.version }}-${{ matrix.target }}
           components: ${{ matrix.linkage && 'clippy' || '' }}
       - uses: actions/setup-python@v5
+        if: runner.environment == 'github-hosted'
         with:
           python-version: '3.12'
       # Saved by main's runs only, which every branch restores from: a branch's copy (about 700 MB a leg) serves no
       # other ref and pushed main's out of the repository's 10 GB, so main's daily legs found no cache at all.
       - uses: Swatinem/rust-cache@v2
+        if: runner.environment == 'github-hosted'
         with:
           shared-key: prebuilt-${{ matrix.name }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: ALSA and udev headers
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && runner.environment == 'github-hosted'
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
+      - name: Link against glibc 2.35
+        if: runner.environment == 'self-hosted'
+        run: bash .sdk-ci-tools/tools/ci/glibc_floor_setup.sh
+      - name: Restore unchanged source timestamps
+        if: runner.environment == 'self-hosted'
+        run: python3 .sdk-ci-tools/tools/ci/source_mtimes.py "$CARGO_TARGET_DIR/ci-source-mtimes-v2.json"
       - name: Build and collect
-        run: python tools/prebuilt_game.py build prebuilt ${{ matrix.server && '--server' || '' }}
+        run: |
+          "$SDK_PYTHON" tools/prebuilt_game.py build "$SDK_WORK/prebuilt" ${{ matrix.server && '--server' || '' }}
+      - name: Check Linux SDK glibc baseline before linking starter mods
+        if: runner.os == 'Linux'
+        run: python3 .sdk-ci-tools/tools/check_glibc.py --sdk "$SDK_WORK/prebuilt" --std-dir "$(rustc --print target-libdir)"
       # Two starter mods, the second calling the first through its library as a mod calls a declared dependency
       # (on windows-gnu through the first's import library); `start` then loads both.
       - name: Two starter mods and the game executable build against the archive alone
-        run: python tools/prebuilt_game.py smoke prebuilt
+        run: |
+          "$SDK_PYTHON" tools/prebuilt_game.py smoke "$SDK_WORK/prebuilt"
       # Runs what smoke built, installed as the launcher installs it, with no game data: it loads the game's
       # libraries and sets up the mods' runtime, and must stop cleanly at the missing prepared files. A crash
       # there (two allocators, #3877) fails this OS's leg, so its archive never publishes.
       - name: The game executable starts and loads the game's libraries
         timeout-minutes: 10
-        run: python tools/prebuilt_game.py start prebuilt
+        run: |
+          "$SDK_PYTHON" tools/prebuilt_game.py start "$SDK_WORK/prebuilt"
       # Warns past 80% of Windows' 65,535 exported names per DLL and fails past 90%.
       - name: Exported names, toward Windows' 65,535
-        run: python tools/prebuilt_game.py exports prebuilt | tee -a "$GITHUB_STEP_SUMMARY"
+        run: |
+          "$SDK_PYTHON" tools/prebuilt_game.py exports "$SDK_WORK/prebuilt" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Two mod libraries share the game's exact Rust state
         id: linkage
         if: matrix.linkage
-        run: python tools/native_dylib_probe.py --sdk prebuilt --output target/native-dylib-probe
+        run: |
+          "$SDK_PYTHON" tools/native_dylib_probe.py --sdk "$SDK_WORK/prebuilt" --output "$SDK_WORK/target/native-dylib-probe"
       - name: The starter mod checks against the API source alone, host and wasm32
         if: matrix.name == 'linux'
         run: |
           rustup target add wasm32-unknown-unknown
-          rm -rf target/api-source
-          python tools/sdk_api_source.py build target/api-source
-          python tools/sdk_api_source.py check target/api-source
+          rm -rf -- "$SDK_WORK/target/api-source"
+          "$SDK_PYTHON" tools/sdk_api_source.py build "$SDK_WORK/target/api-source"
+          "$SDK_PYTHON" tools/sdk_api_source.py check "$SDK_WORK/target/api-source"
       - name: Probe command log
         if: failure() && steps.linkage.outcome == 'failure'
         run: |
-          if [ -f target/native-dylib-probe/commands.log ]; then
-            tail -n 120 target/native-dylib-probe/commands.log
-          fi
+          log="$SDK_WORK/target/native-dylib-probe/commands.log"
+          if [ -f "$log" ]; then tail -n 120 "$log"; fi
       # The leg's assets, named for its target and side; the layout's number is in each identity (package_format).
-      # The surface export runs the sunrise-stage that `build` compiled from this commit (target/prebuilt/tools).
+      # Use the sunrise-stage compiled by `build`, in the same Cargo target even on the pool.
       - name: Pack the SDK's assets
         run: >-
-          python tools/prebuilt_game.py pack prebuilt dist
-          --stage-tool target/prebuilt/tools/release/sunrise-stage${{ runner.os == 'Windows' && '.exe' || '' }}
+          "$SDK_PYTHON" tools/prebuilt_game.py pack "$SDK_WORK/prebuilt" "$SDK_WORK/dist"
+          --stage-tool "${CARGO_TARGET_DIR:-target}/prebuilt/tools/release/sunrise-stage${{ runner.os == 'Windows' && '.exe' || '' }}"
+      # The tree above is packed byte for byte. Pack also builds the desktop leg's separate `tool` archive.
+      - name: Check Linux SDK glibc baseline after packing
+        if: runner.os == 'Linux'
+        env:
+          SERVER: ${{ matrix.server }}
+        run: |
+          tool=()
+          if [[ "$SERVER" != true ]]; then
+            tool=("${CARGO_TARGET_DIR:-target}/release/cargo-sunrise-mod")
+          fi
+          python3 .sdk-ci-tools/tools/check_glibc.py --sdk "$SDK_WORK/prebuilt" --std-dir "$(rustc --print target-libdir)" "${tool[@]}"
       - name: Asset sizes
-        run: (cd dist && du -h *) | tee -a "$GITHUB_STEP_SUMMARY"
+        run: (cd "$SDK_WORK/dist" && du -h *) | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: sdk-leg-${{ matrix.name }}
-          path: dist
+          path: ${{ env.SDK_WORK }}/dist
           if-no-files-found: error
           retention-days: 7
           overwrite: true
+      - name: Clean private SDK scratch
+        if: always() && runner.environment == 'self-hosted'
+        run: |
+          if [[ "$SDK_WORK" != . ]]; then rm -rf -- "$SDK_WORK"; fi
