@@ -340,12 +340,22 @@ pub(super) fn stop() {
 /// `native-check`'s reply: each mod's refusal, verdict or the file it needs.
 #[derive(Debug, Deserialize)]
 pub(super) struct Checked {
+    /// Absent from a tool older than this launcher; `null` when no mod is usable.
+    #[serde(default, deserialize_with = "present")]
+    pub route: Option<Option<String>>,
     pub mods: Vec<CheckedMod>,
+}
+
+/// A field that is there, `null` or not: [`Checked::route`]'s absence is told apart from its `null`.
+fn present<'de, D: serde::Deserializer<'de>>(field: D) -> Result<Option<Option<String>>, D::Error> {
+    Option::<String>::deserialize(field).map(Some)
 }
 
 #[derive(Debug, Deserialize)]
 pub(super) struct CheckedMod {
     pub id: String,
+    #[serde(default)]
+    pub refusal: Option<String>,
     #[serde(default)]
     pub verdict: Option<super::fit::Verdict>,
     #[serde(default)]
@@ -398,14 +408,16 @@ pub(super) fn ask(
     result
 }
 
+/// What a tool from before a command or reply field this launcher needs is told.
+pub(super) fn too_old() -> String {
+    crate::i18n::tr(
+        "This build's native build tool is too old for this launcher: install a newer version.",
+    )
+    .to_owned()
+}
+
 /// A one-line command's reply: its value, its error's message, or (no line at all) a tool from before the command.
 fn reply(line: Option<&str>) -> Result<Value, String> {
-    let too_old = || {
-        crate::i18n::tr(
-            "This build's native build tool is too old for this launcher: install a newer version.",
-        )
-        .to_owned()
-    };
     let value: Value = serde_json::from_str(line.ok_or_else(too_old)?).map_err(|_| too_old())?;
     if let Some(error) = value.get("error") {
         return Err(trf(
