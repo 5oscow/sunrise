@@ -1052,6 +1052,11 @@ impl<
         mod_api::LevelHost::block_entity_part_snapshot(&*self.level, entity, namespace, name)
     }
     fn block_entity_data(&self, entity: mod_api::BlockEntityRef) -> Option<mod_api::Compound> {
+        use mod_api::__private::game::Fields;
+        let [x, y, z] = entity.fields().position;
+        if self.previewed(BlockPos::new(x, y, z)).is_some() {
+            return None;
+        }
         mod_api::LevelHost::block_entity_data(&*self.level, entity)
     }
     fn block_state_id(&self, name: &str) -> Option<mod_api::BlockState> {

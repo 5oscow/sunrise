@@ -406,6 +406,43 @@ fn a_placement_part_reads_comparator_outputs_the_client_holds() {
     });
 }
 
+#[test]
+#[ignore = "daily"]
+fn a_placement_view_hides_block_entity_data_at_replaced_positions() {
+    use mod_api::LevelHost;
+    use sunrise_core::position::BlockPos;
+    use sunrise_world::level::PreviewBlocks;
+
+    on_a_client(Vec::new().into(), |game| {
+        game.remote.as_mut().unwrap().logged_in = true;
+        let pos = [1, 65, 1];
+        let campfire = game
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:campfire")
+            .unwrap();
+        game.world.set(1, 65, 1, campfire).unwrap();
+        game.world.block_entities.insert(
+            (1, 65, 1),
+            sunrise_client::containers::BlockEntity::Campfire(Box::default()),
+        );
+        let air = game.world.air;
+        game.with_level(|_, live, ticks| {
+            let view = live.view(ticks);
+            let entity = view
+                .block_entity(pos)
+                .expect("campfire handle in the live view");
+            let data = view.block_entity_data(entity).expect("live campfire data");
+
+            let changes = PreviewBlocks::from([(BlockPos::new(1, 65, 1), air)]);
+            let preview = live.view(ticks).previewing(Some(&changes));
+            assert!(preview.block_entity_data(entity).is_none());
+            assert_eq!(view.block_entity_data(entity), Some(data));
+        });
+    });
+}
+
 /// The guess asks the live level's placement and survival questions over its own writes, with
 /// the live ticks it reads; a look that asks no mods asks none.
 #[test]
