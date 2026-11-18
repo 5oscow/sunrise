@@ -55,7 +55,7 @@ class PrFilesTests(unittest.TestCase):
             previous = Path.cwd()
             try:
                 os.chdir(directory)
-                expected = changed_entries(base, "HEAD")
+                expected = changed_entries(base, git("rev-parse", "HEAD"))
             finally:
                 os.chdir(previous)
         # What GitHub lists for the same change: renames folded, a copy marked as one.
@@ -66,12 +66,32 @@ class PrFilesTests(unittest.TestCase):
         self.assertEqual(out, "listed=true\n")
         self.assertEqual(sorted(listed), sorted(expected))
 
-    def test_the_list_is_read_for_this_runs_commits_only(self):
-        # The comparison names both commit ids: a branch that moves and comes back between reads can't change it.
+    def test_a_same_count_push_and_revert_cannot_replace_the_event_comparison(self):
+        # The old mutable PR endpoint could report the expected head both before and after a files request,
+        # but serve a different same-count diff between the two reads.
+        event = [{"status": "modified", "filename": "src/lib.rs"}]
+        moved = [{"status": "modified", "filename": "docs/setup.md"}]
+
+        def get(path):
+            if path.startswith("pulls/"):
+                return moved if "/files" in path else {"base": {"sha": BASE}, "head": {"sha": HEAD}}
+            return api(event)(path)
+
+        self.assertEqual(self.run_main(get, len(moved)), ("listed=true\n", [("M", "src/lib.rs")]))
+
+    def test_a_comparison_below_the_limit_can_be_used(self):
         files = [{"status": "added", "filename": f"docs/{n}.md"} for n in range(pr_files.API_LIMIT - 1)]
         out, listed = self.run_main(api(files), len(files))
         self.assertEqual(out, "listed=true\n")
         self.assertEqual(len(listed), pr_files.API_LIMIT - 1)
+
+    def test_empty_and_malformed_api_records_fall_back(self):
+        for files in ([], [{"status": "modified", "filename": ""}],
+                      [{"status": "modified", "filename": "docs/a.md\0M\0docs/b.md"}],
+                      [{"status": "renamed", "filename": "docs/new.md", "previous_filename": None}],
+                      [{"status": "modified", "filename": "docs/a.md"}] * 2):
+            with self.subTest(files=files):
+                self.assertEqual(self.run_main(api(files), len(files)), ("listed=false\n", None))
 
     def test_any_doubt_falls_back_to_the_history(self):
         one = [{"status": "modified", "filename": "docs/setup.md"}]
