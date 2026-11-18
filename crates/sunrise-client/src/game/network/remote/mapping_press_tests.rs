@@ -253,6 +253,16 @@ fn the_host_presses_by_name_and_refuses_the_others() {
             ClientInputClientHost::set_mapping_down(game, "nope", true),
             Err(MappingError::Unknown { key: "nope".into() })
         );
+        assert_eq!(
+            ClientInputClientHost::set_mapping_down(game, "key.pickItem", true),
+            Err(MappingError::ClickOnly {
+                key: "key.pickItem".into()
+            })
+        );
+        assert_eq!(
+            ClientInputClientHost::click_mapping(game, "key.pickItem"),
+            Ok(())
+        );
         game.player = None;
         assert_eq!(
             ClientInputClientHost::set_mapping_down(game, "key.forward", true),
@@ -281,7 +291,9 @@ fn a_callback_click_survives_until_the_next_tick() {
 #[ignore = "daily"]
 fn opening_a_screen_releases_mod_holds() {
     with_pressing_game(|game, _, _| {
-        use winit::keyboard::KeyCode;
+        use sunrise_client::held::Source;
+        use winit::event::MouseButton;
+        use winit::keyboard::{KeyCode, ModifiersState};
 
         game.mapped_key_event(KeyCode::KeyW, true, false).unwrap();
         assert!(game.mapping_state("key.forward").unwrap().0);
@@ -292,12 +304,34 @@ fn opening_a_screen_releases_mod_holds() {
         assert!(!game.mapping_state("key.forward").unwrap().0);
         game.set_mapping_down("key.forward", true).unwrap();
         game.set_mapping_down("key.attack", true).unwrap();
-        assert!(game.left);
-        game.was_playing = true;
+        game.set_mapping_down("key.use", true).unwrap();
+        assert!(game.left && game.right);
+        game.physical_buttons
+            .extend([MouseButton::Left, MouseButton::Right]);
         game.screen = Screen::Inventory;
         game.build_screen();
-        game.track_toggle_screens();
-        assert!(!game.left);
+        // No redraw/reconciliation before the screen closes. Controller releases
+        // forwarded for cleanup cannot give the hold back to the mouse in a screen.
+        for button in [MouseButton::Left, MouseButton::Right] {
+            game.mouse_mapping(button, false, Source::Pad).unwrap();
+        }
+        game.screen = Screen::Playing;
+        game.build_screen();
+        assert!(!game.left && !game.right);
         assert!(!game.mapping_state("key.forward").unwrap().0);
+
+        // ModifiersChanged can contain an unrelated change, or be the OS's only
+        // report of a real release. Only the recovered sneak release takes over.
+        game.settings.toggle_crouch = false;
+        game.physical_keys.insert(KeyCode::ShiftLeft);
+        game.update_modifiers(ModifiersState::SHIFT | ModifiersState::ALT);
+        game.mapped_key_event(KeyCode::ShiftLeft, true, false)
+            .unwrap();
+        game.set_mapping_down("key.sneak", true).unwrap();
+        game.update_modifiers(ModifiersState::SHIFT);
+        game.heal_hold_latches();
+        assert!(game.mapping_state("key.sneak").unwrap().0);
+        game.update_modifiers(ModifiersState::empty());
+        assert!(!game.mapping_state("key.sneak").unwrap().0);
     });
 }

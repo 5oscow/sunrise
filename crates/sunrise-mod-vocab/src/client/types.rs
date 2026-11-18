@@ -94,6 +94,11 @@ pub enum MappingError {
         /// The name asked for.
         key: String,
     },
+    /// The mapping accepts a click but has no held state (`key.pickItem`).
+    ClickOnly {
+        /// The name asked for.
+        key: String,
+    },
 }
 
 /// The metadata of a server play packet observed by `Hooks::client_packet`.

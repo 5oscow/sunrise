@@ -21,8 +21,7 @@ use winit::event::MouseButton;
 #[derive(Default)]
 pub(super) struct ExtrasState {
     fps: FpsCounter,
-    /// Left and right mouse buttons: held, and their clicks.
-    mouse: [bool; 2],
+    /// Attack and use click rates.
     cps: [Cps; 2],
     /// Auto-reconnect's attempts at the current server.
     reconnect: Tracker,
@@ -41,21 +40,14 @@ impl Game<'_> {
             MouseButton::Right => 1,
             _ => return,
         };
-        self.extras.mouse[i] = pressed;
         // For mods (`input.clicks-per-second`, `native_clicks`).
         if pressed {
             let now = self.extras_now();
             self.extras.cps[i].click(now);
         }
     }
-    /// Once per frame: the frame's time, and keys let go behind screens.
+    /// Once per frame: update frame timing and the extra HUD state.
     pub(super) fn extras_frame(&mut self, elapsed: Duration) {
-        // Under agent control the window may lack focus without pausing.
-        let focused = self.focused || self.control.is_some();
-        let playing = self.screen == Screen::Playing && self.title.is_none() && focused;
-        if !playing {
-            self.extras.mouse = [false; 2];
-        }
         // For mods (`render.frame-stats`, `native_frame_rate`).
         let now = self.extras_now();
         self.extras.fps.record(now, elapsed.as_secs_f32() * 1000.0);

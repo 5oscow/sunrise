@@ -87,7 +87,8 @@ pub trait ClientInputClientHost {
     /// key step acts on it with all its checks: a held use repeats every four ticks, a held attack
     /// goes on breaking the block. With a screen or overlay open a press does nothing, and opening
     /// one lets go of every mapping, as `KeyMapping.releaseAll` does. `key_mapping_pre` is not
-    /// asked: it is about physical keys.
+    /// asked: it is about physical keys. `key.pickItem` is click-only; this call returns
+    /// [`MappingError::ClickOnly`] for it.
     #[access(WorldOnly)]
     fn set_mapping_down(&mut self, key: &str, down: bool) -> Result<(), MappingError>;
     /// Side: client.

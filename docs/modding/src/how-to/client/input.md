@@ -35,6 +35,7 @@ input below the limits keeps its order and timing.
 
 | Error | When |
 |---|---|
+| `MappingError::ClickOnly { key }` | `set_mapping_down` on `key.pickItem`; use `click_mapping` instead |
 | `MappingError::NoWorld` | no player is in a world |
 | `MappingError::Unknown { key }` | no vanilla mapping has that name (`"nope"`) |
 | `MappingError::NotGameplay { key }` | a vanilla mapping of another category (`key.screenshot`, `key.fullscreen`, `key.chat`...) |

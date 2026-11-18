@@ -116,6 +116,9 @@ impl Game<'_> {
         down: bool,
     ) -> Result<(), MappingError> {
         let default = self.pressable_mapping(key)?;
+        if default == Err(MouseButton::Middle) {
+            return Err(MappingError::ClickOnly { key: key.into() });
+        }
         if down && self.mod_mappings_screen_open() {
             return Ok(());
         }
