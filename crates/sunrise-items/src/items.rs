@@ -967,6 +967,7 @@ impl Items {
                 damage,
                 extra,
             };
+            let villager_food = component_prototype.villager_food(None);
             items.insert(
                 id.clone(),
                 ItemInfo {
@@ -1063,9 +1064,7 @@ impl Items {
                         .map(|(_, rest)| (*rest).to_owned())
                         .or_else(|| mod_remainders.get(name).cloned()),
                     template: mod_templates.get(name).map(|t| Arc::from(t.as_str())),
-                    villager_food: c["minecraft:villager_food"]["nutrition"]
-                        .as_i64()
-                        .map(|n| n as i32),
+                    villager_food,
                     use_speed: c["minecraft:use_effects"]["speed_multiplier"]
                         .as_f64()
                         .unwrap_or(0.2) as f32,

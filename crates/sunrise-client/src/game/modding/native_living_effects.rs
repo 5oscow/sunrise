@@ -54,7 +54,11 @@ impl Game<'_> {
         index: usize,
     ) -> Option<bool> {
         let target = self.native_living_target(living)?;
-        let effect = self.consumable(stack)?.effects.get(index)?.clone();
+        let effect = stack
+            .consumable(self.items().get(&stack.item))?
+            .effects
+            .get(index)?
+            .clone();
         match target {
             t @ (Target::Player | Target::Guest(_)) => self
                 .for_player(t, |g| {
