@@ -6308,16 +6308,30 @@ impl Game<'_> {
         )
         .into_iter()
         .map(|mut c| {
+            self.attach_save_data(&mut c);
             if mod_api::__private::has_part_hook(mod_api::HookId::BlockEntitySaveAdditional) {
-                for (pos, entity) in &mut c.block_entities {
-                    if let BlockEntity::Mod(entity) = entity
-                        && let Some(BlockEntity::Mod(live)) = self.world.block_entities.get(pos)
-                    {
-                        self.capture_block_entity_payload(*pos, live.id(), &mut entity.nbt);
-                    }
+                let edits: std::collections::BTreeMap<_, _> = c
+                    .block_entities
+                    .iter()
+                    .filter_map(|(pos, entity)| {
+                        let BlockEntity::Mod(entity) = entity else {
+                            return None;
+                        };
+                        if !matches!(
+                            self.world.block_entities.get(pos),
+                            Some(BlockEntity::Mod(_))
+                        ) {
+                            return None;
+                        }
+                        self.capture_block_entity_payload(*pos, entity.id(), &entity.nbt)
+                            .map(|edited| (*pos, edited))
+                    })
+                    .collect();
+                if !edits.is_empty() {
+                    Arc::make_mut(c.saved.get_or_insert_with(Default::default))
+                        .block_entity_save_edits = Some(Arc::new(edits));
                 }
             }
-            self.attach_save_data(&mut c);
             Arc::new(c)
         })
         .collect()

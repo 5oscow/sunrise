@@ -69,6 +69,7 @@ impl SaveDir {
             {
                 let mut pending = self.pending.lock().map_err(|_| "pending writes poisoned")?;
                 for (key, record) in records {
+                    let record = record.track_block_entity_edits();
                     let seq = self.sequence.fetch_add(1, Ordering::Relaxed);
                     pending.insert((folder, key.0, key.1), (seq, record.clone()));
                     batch.push((key, record, seq));
@@ -90,7 +91,10 @@ impl SaveDir {
                 0
             };
             self.outstanding.chunks.fetch_add(chunks, Ordering::Relaxed);
-            if writer.send.send((folder, batch)).is_err() {
+            if let Err(mpsc::SendError((_, batch))) = writer.send.send((folder, batch)) {
+                for (_, record, _) in &batch {
+                    record.finish_block_entity_edits(false);
+                }
                 self.outstanding.chunks.fetch_sub(chunks, Ordering::Relaxed);
                 *self
                     .outstanding
@@ -172,6 +176,11 @@ impl SaveDir {
                             chunk_disk::prepare_batch(&batch)?;
                             write_region_records(&root, cache, folder, &records)
                         })();
+                        // Release readers of failed or coalesced records. Only the writer
+                        // can admit the edits of a record it actually wrote.
+                        for (_, record, _) in &batch {
+                            record.finish_block_entity_edits(false);
+                        }
                         if let Err(e) = &result {
                             chunk_disk::note_failed(&batch);
                             let message = format!("failed to write {folder} files: {e}");

@@ -1,4 +1,4 @@
-use super::{block_entity_id, string, uuid_tag};
+use super::{block_entity_id, saved_item_slot, string, uuid_tag};
 use crate::{
     beehive::BeehiveExt,
     mobs::{spawner::SpawnerExt, trial_spawner::TrialSpawnerExt},
@@ -12,7 +12,7 @@ pub fn encode(
     block: &str,
     items: &crate::items::Items,
 ) -> Tag {
-    encode_with(p, e, block, items, |_, _| {})
+    encode_with(p, e, block, items, |_, _| None)
 }
 
 /// Encode a live block entity, allowing its owner to supply the mod payload
@@ -22,7 +22,7 @@ pub fn encode_with(
     e: &crate::containers::BlockEntity,
     block: &str,
     items: &crate::items::Items,
-    save_additional: impl FnOnce(&str, &mut Compound),
+    save_additional: impl FnOnce(&str, &Compound) -> Option<Compound>,
 ) -> Tag {
     let item_to_nbt =
         |stack: &crate::items::ItemStack| sunrise_items::item_nbt::item_to_nbt(stack, items);
@@ -31,16 +31,37 @@ pub fn encode_with(
         sunrise_items::item_nbt::encode_items_using(slots, item_to_nbt)
     };
     if let BlockEntity::Mod(m) = e {
-        let mut map = m.nbt.clone();
-        save_additional(m.id(), &mut map);
+        let mut map = save_additional(m.id(), &m.nbt).unwrap_or_else(|| m.nbt.clone());
         if let Some((key, shapes)) = m.shapes_tag() {
             map.insert(key.into(), shapes);
         }
         map.insert("id".into(), string(m.id()));
-        if m.items.iter().any(Option::is_some) {
-            map.insert("Items".into(), encode_items(&m.items));
-        } else if !m.items.is_empty() {
-            map.remove(&"Items".into());
+        if !m.items.is_empty() {
+            let key = "Items".into();
+            let Tag::List(mut entries) = encode_items(&m.items) else {
+                unreachable!("the item slot encoder returns a list")
+            };
+            match m.nbt.get(&key) {
+                Some(Tag::List(raw)) => {
+                    entries.extend(
+                        raw.iter()
+                            .filter(|entry| {
+                                saved_item_slot(entry).is_none_or(|slot| slot >= m.items.len())
+                            })
+                            .cloned(),
+                    );
+                    map.insert(key, Tag::List(entries));
+                }
+                // No slot key to merge; keep the opaque value unless a modeled
+                // item needs the field. Otherwise ContainerHelper.saveAllItems's
+                // default always-write rule includes even an empty modeled list.
+                Some(raw) if entries.is_empty() => {
+                    map.insert(key, raw.clone());
+                }
+                _ => {
+                    map.insert(key, Tag::List(entries));
+                }
+            }
         }
         for (key, v) in [("x", p.0), ("y", p.1), ("z", p.2)] {
             map.insert(key.into(), Tag::Int(v));

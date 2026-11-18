@@ -3,7 +3,7 @@ use super::{BlockEntity, Game, GameLevel, Pos};
 use crate::game::native_level_signals::ReadLevel;
 use mod_api::{BlockEntityRef, BlockEntityTypeKey, HookId, LevelRef};
 use sunrise_client::save::block_entity_encode;
-use sunrise_core::nbt::{Compound, Limits, Tag, validate_saved_compound};
+use sunrise_core::nbt::{Compound, Limits, Tag};
 use sunrise_mod_runtime::attachments::ATTACHMENTS_KEY;
 
 fn save_additional(
@@ -11,18 +11,16 @@ fn save_additional(
     pos: Pos,
     generation: Option<u64>,
     kind: &str,
-    tag: &mut Compound,
+    tag: &Compound,
     fire: impl FnOnce(BlockEntityTypeKey, BlockEntityRef, &mut Compound),
-) {
+) -> Option<Compound> {
     if kind.is_empty()
         || !mod_api::__private::block_entity_type_listens(HookId::BlockEntitySaveAdditional, kind)
     {
-        return;
+        return None;
     }
-    let Some(id) = mod_api::__private::block_entity_type_key(kind) else {
-        return;
-    };
-    let Some(generation) = generation else { return };
+    let id = mod_api::__private::block_entity_type_key(kind)?;
+    let generation = generation?;
     let entity =
         mod_api::__private::game::block_entity_ref(level, [pos.0, pos.1, pos.2], generation);
     // The raw attachment field stays available for the disk overlay (including
@@ -34,19 +32,34 @@ fn save_additional(
         .map(|(name, value)| (name.clone(), value.clone()))
         .collect();
     fire(id, entity, &mut output);
+    // Admit the listener's structure once. Disk encoding owns the byte budget
+    // of the complete chunk, not the individual payload's standalone size.
+    let max_depth = Limits::saved().max_depth;
+    let mut pending: Vec<_> = output.values().map(|tag| (tag, 1)).collect();
+    while let Some((tag, depth)) = pending.pop() {
+        match tag {
+            Tag::List(items) if depth < max_depth => {
+                pending.extend(items.iter().map(|v| (v, depth + 1)))
+            }
+            Tag::Compound(items) if depth < max_depth => {
+                pending.extend(items.values().map(|v| (v, depth + 1)))
+            }
+            Tag::End | Tag::List(_) | Tag::Compound(_) => {
+                log::warn!(
+                    "block_entity_save_additional: refused malformed payload for {kind} at {pos:?}"
+                );
+                sunrise_core::nbt::discard_tag(Tag::Compound(output));
+                return None;
+            }
+            _ => {}
+        }
+    }
     output.remove(&key);
     let mut output = crate::game::native_block_entity_refs::mod_payload(output);
-    // The chunk root and its block_entities list enclose the saved compound.
-    if let Err(error) = validate_saved_compound(&output, 2, Limits::saved()) {
-        log::warn!(
-            "block_entity_save_additional: refused invalid payload for {kind} at {pos:?}: {error}"
-        );
-        return;
+    if let Some(attachments) = tag.get(&key) {
+        output.insert(key, attachments.clone());
     }
-    if let Some(attachments) = tag.remove(&key) {
-        output.insert(key, attachments);
-    }
-    *tag = output;
+    (output != *tag).then_some(output)
 }
 
 impl Game<'_> {
@@ -54,15 +67,15 @@ impl Game<'_> {
         &self,
         pos: Pos,
         kind: &str,
-        tag: &mut Compound,
-    ) {
+        tag: &Compound,
+    ) -> Option<Compound> {
         // A detached unload column still has its live slots until after capture.
         self.capture_block_entity_payload_at(
             pos,
             self.world.block_entities.generation(&pos),
             kind,
             tag,
-        );
+        )
     }
 
     fn capture_block_entity_payload_at(
@@ -70,8 +83,8 @@ impl Game<'_> {
         pos: Pos,
         generation: Option<u64>,
         kind: &str,
-        tag: &mut Compound,
-    ) {
+        tag: &Compound,
+    ) -> Option<Compound> {
         if self.is_logical_server()
             && mod_api::__private::has_part_hook(HookId::BlockEntitySaveAdditional)
             && let Some(level) = self.level(self.dim.id())
@@ -79,7 +92,9 @@ impl Game<'_> {
             let host = ReadLevel { game: self, level };
             save_additional(level, pos, generation, kind, tag, |id, entity, tag| {
                 mod_api::dispatch_block_entity_save_additional(&host, id, entity, tag);
-            });
+            })
+        } else {
+            None
         }
     }
 
@@ -94,7 +109,7 @@ impl Game<'_> {
         items: &sunrise_client::items::Items,
     ) -> Tag {
         block_entity_encode::encode_with(pos, entity, block, items, |kind, tag| {
-            self.capture_block_entity_payload_at(pos, generation, kind, tag);
+            self.capture_block_entity_payload_at(pos, generation, kind, tag)
         })
     }
 
@@ -107,7 +122,7 @@ impl Game<'_> {
         items: &sunrise_client::items::Items,
     ) -> Tag {
         block_entity_encode::encode_with(pos, entity, block, items, |kind, tag| {
-            self.capture_block_entity_payload(pos, kind, tag);
+            self.capture_block_entity_payload(pos, kind, tag)
         })
     }
 }
@@ -133,7 +148,9 @@ impl GameLevel<'_> {
                     |id, entity, tag| {
                         self.native_block_entity_save_additional(id, entity, tag);
                     },
-                );
+                )
+            } else {
+                None
             }
         })
     }

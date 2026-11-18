@@ -7,9 +7,97 @@ use sunrise_core::{
 use sunrise_world::region::RegionFile;
 
 use super::{
-    Record,
-    compression_pool::{CompressionPool, compress_records, compress_records_with_pool},
+    Chunk, ChunkExtras, Compression, Encoding, LevelShape, Record,
+    compression_pool::{
+        CompressionPool, compress_record, compress_records, compress_records_with_pool,
+    },
+    write_chunk_record,
 };
+
+#[test]
+fn full_record_overflow_discards_edits_without_losing_current_chunk_data() {
+    use crate::containers::{BlockEntity, ModBlockEntity, ModBlockEntityFields};
+    use sunrise_core::nbt::{Compound, write_named};
+
+    let (registry, biomes) = super::loot_tests::fixture();
+    let mut chunk = Chunk::empty(0, 0);
+    let pos = (1, 64, 1);
+    chunk.block_entities.push((
+        pos,
+        BlockEntity::Mod(Box::new(ModBlockEntity::new(
+            "test:machine".into(),
+            ModBlockEntityFields {
+                nbt: Compound::from([("stored".into(), Tag::Int(7))]),
+                ..Default::default()
+            },
+        ))),
+    ));
+    let edited = Compound::from([("edit".into(), Tag::ByteArray(vec![9; 64 * 1024]))]);
+    let limits = Limits {
+        max_bytes: 96 * 1024,
+        ..Limits::saved()
+    };
+    // The edit fits by itself. Combined with the rest of the captured record it does not.
+    assert!(
+        write_named(
+            &NamedTag {
+                name: "".into(),
+                tag: Tag::Compound(edited.clone())
+            },
+            limits
+        )
+        .is_ok()
+    );
+    let unrelated = Tag::ByteArray(vec![11; 64 * 1024]);
+    chunk.saved = Some(Arc::new(ChunkExtras {
+        last_update: 37,
+        root: Compound::from([("test:unrelated".into(), unrelated.clone())]),
+        block_entity_save_edits: Some(Arc::new([(pos, edited)].into())),
+        ..Default::default()
+    }));
+    let record = Record::Chunk(
+        Arc::new(chunk),
+        Arc::new(Encoding {
+            registry: Box::leak(Box::new(registry)),
+            biomes: Arc::new(biomes),
+            items: Default::default(),
+            tables: None,
+            shape: LevelShape::OVERWORLD,
+        }),
+        None,
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let mut region = RegionFile::open_writable(dir.path().join("r.0.0.mca"), true).unwrap();
+    let pos = ChunkPos::new(0, 0);
+    for (limits, compressed_overflow, admitted) in [
+        (Limits::saved(), false, true),
+        (limits, false, false),
+        (Limits::saved(), true, false),
+    ] {
+        let record = record.clone().track_block_entity_edits();
+        let mut compressed = compress_record(&record, Compression::Zlib, 0, limits)
+            .unwrap()
+            .unwrap();
+        if compressed_overflow {
+            // Simulate an oversized compressor result without the cost of
+            // zlib encoding a large incompressible input.
+            compressed.compressed = vec![0; 64 * 1024 * 1024 + 1];
+        }
+        write_chunk_record(&mut region, pos, &record, compressed).unwrap();
+        let saved = region.read(pos).unwrap().unwrap().nbt(limits).unwrap();
+        assert_eq!(record.tag().unwrap().as_ref(), &saved);
+        assert_eq!(saved.tag.get("LastUpdate"), Some(&Tag::Long(37)));
+        assert_eq!(saved.tag.get("test:unrelated"), Some(&unrelated));
+        let Some(Tag::List(entities)) = saved.tag.get("block_entities") else {
+            panic!("block entities missing from the record");
+        };
+        assert_eq!(entities[0].get("edit").is_some(), admitted);
+        assert_eq!(
+            entities[0].get("stored"),
+            if admitted { None } else { Some(&Tag::Int(7)) }
+        );
+    }
+}
 
 fn sample_tag(i: i32) -> NamedTag {
     let payload: Vec<i64> = (0..((i * 131) % 1500).abs())

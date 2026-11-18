@@ -859,9 +859,8 @@ fn read_network_with_reader(reader: &mut Reader<'_, '_>) -> Result<(Tag, usize),
     Ok((tag, reader.offset))
 }
 
-struct Writer<const MEASURE: bool> {
+struct Writer {
     bytes: Vec<u8>,
-    measured: usize,
     limits: Limits,
     nodes: usize,
     /// `NbtIo.StringFallbackDataOutput`, the disk writer's: a string too long
@@ -872,29 +871,18 @@ struct Writer<const MEASURE: bool> {
     /// is written as the canonical one. The network writer keeps its bits.
     canonical_nan: bool,
 }
-impl<const MEASURE: bool> Writer<MEASURE> {
-    fn len(&self) -> usize {
-        if MEASURE {
-            self.measured
-        } else {
-            self.bytes.len()
-        }
-    }
+impl Writer {
     fn error(&self, reason: &'static str) -> Error {
         Error {
-            offset: self.len(),
+            offset: self.bytes.len(),
             reason,
         }
     }
     fn put(&mut self, bytes: &[u8]) -> Result<(), Error> {
-        if bytes.len() > self.limits.max_bytes.saturating_sub(self.len()) {
+        if bytes.len() > self.limits.max_bytes.saturating_sub(self.bytes.len()) {
             return Err(self.error("byte limit exceeded"));
         }
-        if MEASURE {
-            self.measured += bytes.len();
-        } else {
-            self.bytes.extend_from_slice(bytes);
-        }
+        self.bytes.extend_from_slice(bytes);
         Ok(())
     }
     fn count(&mut self, len: usize) -> Result<(), Error> {
@@ -918,14 +906,6 @@ impl<const MEASURE: bool> Writer<MEASURE> {
             return Err(self.error("modified UTF-8 exceeds 65535 bytes"));
         };
         self.put(&len.to_be_bytes())?;
-        if MEASURE {
-            let len = usize::from(len);
-            if len > self.limits.max_bytes.saturating_sub(self.len()) {
-                return Err(self.error("byte limit exceeded"));
-            }
-            self.measured += len;
-            return Ok(());
-        }
         // One byte per unit (most strings): written at once while they fit.
         if usize::from(len) == string.0.len()
             && usize::from(len) <= self.limits.max_bytes.saturating_sub(self.bytes.len())
@@ -1013,7 +993,17 @@ impl<const MEASURE: bool> Writer<MEASURE> {
                     }
                 }
             }
-            Tag::Compound(values) => self.compound(values, depth)?,
+            Tag::Compound(values) => {
+                for (name, value) in values {
+                    if matches!(value, Tag::End) {
+                        return Err(self.error("End cannot be a named value"));
+                    }
+                    self.put(&[value.id()])?;
+                    self.string(name)?;
+                    self.payload(value, depth + 1)?;
+                }
+                self.put(&[0])?;
+            }
             Tag::IntArray(v) => {
                 self.count(v.len())?;
                 for item in v {
@@ -1029,43 +1019,6 @@ impl<const MEASURE: bool> Writer<MEASURE> {
         }
         Ok(())
     }
-
-    fn compound(&mut self, values: &Compound, depth: usize) -> Result<(), Error> {
-        for (name, value) in values {
-            if matches!(value, Tag::End) {
-                return Err(self.error("End cannot be a named value"));
-            }
-            self.put(&[value.id()])?;
-            self.string(name)?;
-            self.payload(value, depth + 1)?;
-        }
-        self.put(&[0])
-    }
-}
-
-/// Validate a compound produced by a callback for an enclosing save without allocating the
-/// bytes that the actual encoder will write. `depth` is the compound's depth in that save.
-/// Unlike the disk writer, refuse overlong strings rather than replace them with empty ones.
-pub fn validate_saved_compound(
-    values: &Compound,
-    depth: usize,
-    limits: Limits,
-) -> Result<(), Error> {
-    let mut writer = Writer::<true> {
-        bytes: Vec::new(),
-        measured: 0,
-        limits,
-        nodes: 1,
-        empty_long_strings: false,
-        canonical_nan: true,
-    };
-    if limits.max_nodes == 0 {
-        return Err(writer.error("node limit exceeded"));
-    }
-    if depth >= limits.max_depth {
-        return Err(writer.error("depth limit exceeded"));
-    }
-    writer.compound(values, depth)
 }
 
 /// `NbtIo.write`: a file root. A string too long for modified UTF-8 is
@@ -1075,9 +1028,8 @@ pub fn write_named(root: &NamedTag, limits: Limits) -> Result<Vec<u8>, Error> {
 }
 
 fn write_named_parts(name: &JavaString, tag: &Tag, limits: Limits) -> Result<Vec<u8>, Error> {
-    let mut writer = Writer::<false> {
+    let mut writer = Writer {
         bytes: Vec::new(),
-        measured: 0,
         limits,
         nodes: 0,
         empty_long_strings: true,
@@ -1092,9 +1044,8 @@ fn write_named_parts(name: &JavaString, tag: &Tag, limits: Limits) -> Result<Vec
 }
 
 pub fn write_network(tag: &Tag, limits: Limits) -> Result<Vec<u8>, Error> {
-    let mut writer = Writer::<false> {
+    let mut writer = Writer {
         bytes: Vec::new(),
-        measured: 0,
         limits,
         nodes: 0,
         empty_long_strings: false,

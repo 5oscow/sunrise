@@ -5,18 +5,16 @@ mod tests {
     use std::sync::atomic::{AtomicI32, Ordering};
     use std::sync::{Arc, Mutex};
     use sunrise_client::{
-        chunk::Chunk,
+        chunk::{Chunk, LevelShape},
         containers::{BlockEntity, ModBlockEntity, ModBlockEntityFields, SHAPES_KEY},
+        save::SaveDir,
     };
     use sunrise_core::{
         nbt::{Compound, Limits, Tag},
         position::ChunkPos,
     };
     use sunrise_mod_runtime::attachments::ATTACHMENTS_KEY;
-    use sunrise_world::{
-        compression::Compression,
-        region::{ChunkRecord, RegionFile},
-    };
+    use sunrise_world::region::RegionFile;
 
     struct Counter(Arc<AtomicI32>);
     #[mod_api::sunrise_part]
@@ -137,8 +135,8 @@ mod tests {
                         entity.nbt.get(&"count".into()).cloned()
                     };
                     let snapshots = &capture[0].block_entities;
-                    let edited = fields(&snapshots.iter().find(|(p, _)| *p == pos).unwrap().1);
-                    assert!(matches!(edited, Some(Tag::Int(13..=15))));
+                    let stored = fields(&snapshots.iter().find(|(p, _)| *p == pos).unwrap().1);
+                    assert_eq!(stored, Some(Tag::Int(7)));
                     assert_eq!(
                         fields(&snapshots.iter().find(|(p, _)| *p == silent).unwrap().1),
                         Some(Tag::Int(7))
@@ -149,23 +147,24 @@ mod tests {
                     );
                     assert_eq!(count.load(Ordering::Relaxed), 16);
 
-                    // Refusing one Part's invalid output must still write this chunk, with
-                    // its stored payload and the other entity's valid change in the same record.
-                    let root = sunrise_client::save::encode(
-                        &capture[0],
-                        game.pack.assets.registry,
-                        game.res.biomes(),
-                        game.res.items(),
-                    );
-                    let limits = Limits::saved();
-                    let record =
-                        ChunkRecord::from_nbt(&root, Compression::Zlib, 0, limits).unwrap();
+                    // A malformed individual payload is refused at the callback seam.
+                    // Other entities' valid edits still reach the actual region record.
                     let scratch = tempfile::tempdir().unwrap();
-                    let mut region =
-                        RegionFile::open_writable(scratch.path().join("r.0.0.mca"), true).unwrap();
-                    let chunk = ChunkPos::new(0, 0);
-                    region.write(chunk, &record).unwrap();
-                    let saved = region.read(chunk).unwrap().unwrap().nbt(limits).unwrap();
+                    let save = SaveDir::new(
+                        scratch.path().to_owned(),
+                        LevelShape::OVERWORLD,
+                        Some(Arc::new(Default::default())),
+                    );
+                    save.save_later(&capture, game.pack.assets.registry, game.res.biomes())
+                        .unwrap();
+                    save.flush().unwrap();
+                    let saved = RegionFile::open(scratch.path().join("region/r.0.0.mca"))
+                        .unwrap()
+                        .read(ChunkPos::new(0, 0))
+                        .unwrap()
+                        .unwrap()
+                        .nbt(Limits::saved())
+                        .unwrap();
                     let Some(Tag::List(entities)) = saved.tag.get("block_entities") else {
                         panic!("expected saved block entities");
                     };
@@ -175,7 +174,7 @@ mod tests {
                             .find(|tag| tag.get("x") == Some(&Tag::Int(x)))
                             .unwrap()
                     };
-                    assert_eq!(at(1).get("count"), edited.as_ref());
+                    assert!(matches!(at(1).get("count"), Some(Tag::Int(13..=15))));
                     assert_eq!(at(3).get("count"), Some(&Tag::Int(-1)));
                     assert_eq!(at(3).get("invalid"), None);
                     assert_eq!(at(4).get("count"), None);

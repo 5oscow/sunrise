@@ -5,7 +5,9 @@ pub trait Hooks {
     /// (`BlockEntity.saveAdditional`). Edits affect only the output; the entity,
     /// its inventory, identity, position, and engine-managed attachments and
     /// shapes are not changed. Parts of the entity's type run in dispatch order.
-    /// Invalid NBT is refused and the originally stored payload is used.
+    /// Malformed payloads are refused. If the region writer cannot encode or
+    /// admit the complete chunk record, it retries that snapshot with stored
+    /// block-entity payloads instead of listener edits.
     ///
     /// Asked on the logical server thread for chunk saves (including unload),
     /// command reads, and copies into items, loot or templates. The read-only
