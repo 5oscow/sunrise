@@ -281,6 +281,15 @@ fn a_callback_click_survives_until_the_next_tick() {
 #[ignore = "daily"]
 fn opening_a_screen_releases_mod_holds() {
     with_pressing_game(|game, _, _| {
+        use winit::keyboard::KeyCode;
+
+        game.mapped_key_event(KeyCode::KeyW, true, false).unwrap();
+        assert!(game.mapping_state("key.forward").unwrap().0);
+        game.set_mapping_down("key.forward", false).unwrap();
+        assert!(!game.mapping_state("key.forward").unwrap().0);
+        game.set_mapping_down("key.forward", true).unwrap();
+        game.mapped_key_event(KeyCode::KeyW, false, false).unwrap();
+        assert!(!game.mapping_state("key.forward").unwrap().0);
         game.set_mapping_down("key.forward", true).unwrap();
         game.set_mapping_down("key.attack", true).unwrap();
         assert!(game.left);
@@ -289,9 +298,6 @@ fn opening_a_screen_releases_mod_holds() {
         game.build_screen();
         game.track_toggle_screens();
         assert!(!game.left);
-        assert!(!game.keys.held_by(
-            &winit::keyboard::KeyCode::KeyW,
-            sunrise_client::held::Source::Mod
-        ));
+        assert!(!game.mapping_state("key.forward").unwrap().0);
     });
 }

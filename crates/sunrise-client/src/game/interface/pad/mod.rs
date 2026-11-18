@@ -371,6 +371,23 @@ impl Game<'_> {
             self.pad.in_use = true;
             self.pad.keyboard_took_over = false;
         }
+        if self.pad.state.left != state.left {
+            let directions = |stick| {
+                gamepad::move_vector(stick, self.settings.controller.move_deadzone)
+                    .map(gamepad::eight_direction_keys)
+                    .unwrap_or_default()
+            };
+            let before = directions(self.pad.state.left);
+            let after = directions(state.left);
+            for (i, key) in [KeyCode::KeyW, KeyCode::KeyS, KeyCode::KeyA, KeyCode::KeyD]
+                .into_iter()
+                .enumerate()
+            {
+                if before[i] != after[i] {
+                    self.keys.resume_device_input(&key);
+                }
+            }
+        }
         self.pad.state = state;
         self.pad_radial_frame();
         self.pad_drop_frame();
@@ -590,6 +607,7 @@ impl Game<'_> {
                     return Ok(());
                 }
                 let screen_open = self.screen != Screen::Playing || self.title.is_some();
+                self.keys.resume_device_input(&KeyCode::ShiftLeft);
                 let was = self.keys.held(Action::Sneak);
                 self.toggles.pad_toggle(SNEAK, screen_open);
                 self.sync_toggle(SNEAK);

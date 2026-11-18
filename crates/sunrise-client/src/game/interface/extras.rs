@@ -79,10 +79,6 @@ impl Game<'_> {
         let [l, r] = &mut self.extras.cps;
         (l.per_second(now) as u32, r.per_second(now) as u32)
     }
-    /// Whether the attack and use buttons are held.
-    pub(super) fn mouse_held(&self) -> [bool; 2] {
-        self.extras.mouse
-    }
     /// A mod's zoom in effect (`native_zoom`): (factor, smooth, turning
     /// scale); none is 1.
     fn zoom_now(&self) -> (f32, bool, f64) {

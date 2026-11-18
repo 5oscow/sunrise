@@ -52,11 +52,7 @@ impl Game<'_> {
     }
     pub(super) fn sync_toggle(&mut self, slot: usize) {
         let key = [KeyCode::ShiftLeft, KeyCode::ControlLeft][slot];
-        if self.toggles.is_down(slot) {
-            self.keys.insert(key);
-        } else {
-            self.keys.remove(&key);
-        }
+        self.keys.sync_latch(key, self.toggles.is_down(slot));
     }
     pub(super) fn update_modifiers(&mut self, state: winit::keyboard::ModifiersState) {
         self.modifiers = state;
@@ -130,12 +126,7 @@ impl Game<'_> {
             };
             // A controller's stick click acts as the key without setting the modifier: it is held
             // while the pad holds it (or its release waits for a tick), not when the keyboard says.
-            // Nor does the modifier say anything of a mod's hold (`set_mapping_down`).
-            let pad = self.input_holds(mapping)
-                || self.keys.held_by(
-                    &[KeyCode::ShiftLeft, KeyCode::ControlLeft][slot],
-                    Source::Mod,
-                );
+            let pad = self.input_holds(mapping);
             if !held && !pad {
                 self.toggles.0[slot].set_down(false, needs_toggle);
                 self.sync_toggle(slot);
@@ -156,7 +147,7 @@ impl Game<'_> {
                     .translate_all(*physical)
                     .contains(&Ok(key))
             }),
-            Source::Agent | Source::Mod => false,
+            Source::Agent => false,
         }
     }
     /// Apply a physical key to every mapping bound to it.
@@ -241,6 +232,7 @@ impl Game<'_> {
                 (_, false) => KeyAction::Press,
                 (_, true) => KeyAction::Repeat,
             };
+            self.keys.resume_device_input(&key);
             // One device letting go doesn't let go for the other still holding it.
             if !pressed && self.toggle_held_elsewhere(slot, key, source) {
                 return Ok(());
@@ -367,6 +359,16 @@ impl Game<'_> {
         source: Source,
     ) -> Result<()> {
         if !pressed && self.mouse_mapping_held_elsewhere(button, source) {
+            // The other device's hold takes over again, even after a direct setDown(false).
+            // In toggle mode a release does not change the mapping.
+            let toggled = match button {
+                MouseButton::Left => self.settings.toggle_attack,
+                MouseButton::Right => self.settings.toggle_use,
+                _ => return Ok(()),
+            };
+            if !toggled {
+                self.mouse_mapping_set_down(button, true);
+            }
             return Ok(());
         }
         self.play_mouse(button, pressed)
@@ -382,7 +384,7 @@ impl Game<'_> {
             _ => return false,
         };
         match source {
-            Source::Keyboard | Source::Agent | Source::Mod => self.input_holds(mapping),
+            Source::Keyboard | Source::Agent => self.input_holds(mapping),
             Source::Pad => {
                 let keys = &self.settings.keys;
                 self.physical_buttons
@@ -475,9 +477,20 @@ impl Game<'_> {
 /// gameplay asks of a device beyond the keyboard and mouse, and tells it. Gameplay calls these,
 /// never the controller modules; today `pad` answers.
 impl Game<'_> {
-    /// The analog move vector (`[left, forward]`, -1..1) while a device moves the player.
+    /// The analog move vector (`[left, forward]`, -1..1), excluding directions whose
+    /// mappings were set up directly.
     pub(super) fn input_move(&self) -> Option<[f32; 2]> {
-        self.pad_move()
+        let mut stick = self.pad_move()?;
+        for (axis, (positive, negative)) in stick.iter_mut().zip([
+            (KeyCode::KeyA, KeyCode::KeyD),
+            (KeyCode::KeyW, KeyCode::KeyS),
+        ]) {
+            let key = if *axis > 0.0 { positive } else { negative };
+            if self.keys.override_for(&key) == Some(false) {
+                *axis = 0.0;
+            }
+        }
+        (stick != [0.0; 2]).then_some(stick)
     }
 
     /// Whether a device holds the key mapping named `mapping` (`key.use`).
