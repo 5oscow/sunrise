@@ -222,8 +222,8 @@ impl Game<'_> {
                 if !written {
                     return Err(CraftedByError::Unavailable);
                 }
+                self.register_made_maps(maps);
                 self.notice_menu_place_write(place);
-                self.defer_effect(DeferredEffect::MapCrafted(maps));
                 item
             } else {
                 held.item
@@ -1413,6 +1413,112 @@ pub(super) mod tests {
                     .get("crafted", "minecraft:stick"),
                 2
             );
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn crafted_by_map_reservations_follow_nested_commit_and_abort() {
+        use super::{Game, Menu};
+        use crate::game::maps::{MapData, map_id};
+        use sunrise_client::save::read_dat;
+        use sunrise_core::nbt::Tag;
+
+        super::super::native_guest_turn_tests::with_guests(|game| {
+            let save = tempfile::tempdir().unwrap();
+            game.world_root = save.path().to_owned();
+            let maps_dir = save.path().join("data/minecraft/maps");
+            let source = game.new_map_id(MapData::fresh(0.0, 0.0, 0, "minecraft:overworld"));
+            let map = |directive| {
+                let mut stack = ItemStack::new("minecraft:filled_map", 1);
+                stack.data_mut().map_id = Some(source);
+                stack.data_mut().map_post_processing = Some(directive);
+                stack
+            };
+            game.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
+                guest.carried = Some(map(1));
+                guest.inventory[0] = Some(map(0));
+            });
+            let menu = game
+                .player_container_menu(game.player(12).unwrap())
+                .unwrap();
+            let cursor = menu.cursor();
+            let slot = ItemPlace::MenuSlot { menu, slot: 36 };
+            let held_ids = |game: &Game<'_>| {
+                [
+                    game.menu_carried(menu).flatten().as_ref().and_then(map_id),
+                    game.menu_slot(menu, 36).flatten().as_ref().and_then(map_id),
+                ]
+            };
+            let saved_counter = || {
+                let index = read_dat(&maps_dir.join("last_id.dat")).unwrap();
+                index.get("data").unwrap().get("map").unwrap().clone()
+            };
+
+            let root = game.transaction_open();
+            let tx = game.transaction_current().unwrap();
+            cursor.on_crafted_by(game, &tx, 1).unwrap();
+            let child = game.transaction_open();
+            let child_tx = game.transaction_current().unwrap();
+            slot.on_crafted_by(game, &child_tx, 1).unwrap();
+            assert_eq!(held_ids(game), [Some(source + 1), Some(source + 2)]);
+
+            // A held map derived from the parent's pending copy can find the new map.
+            let mut derived = game.menu_carried(menu).flatten().unwrap();
+            derived.data_mut().map_post_processing = Some(0);
+            let maps = game.level_maps([&derived]);
+            Menu::map_crafted(Some(&maps), &mut derived);
+            assert_eq!(map_id(&derived), Some(source + 3));
+            game.register_made_maps(maps);
+            let chained = game.map(source + 3).unwrap();
+            assert_eq!(chained.scale, 1);
+            assert!(chained.locked);
+
+            game.transaction_close(&child, false);
+            assert_eq!(held_ids(game), [Some(source + 1), Some(source)]);
+            assert!(game.map(source + 2).is_none());
+            assert!(game.map(source + 3).is_none());
+
+            let child = game.transaction_open();
+            let child_tx = game.transaction_current().unwrap();
+            slot.on_crafted_by(game, &child_tx, 1).unwrap();
+            game.transaction_close(&child, true);
+            assert_eq!(held_ids(game), [Some(source + 1), Some(source + 2)]);
+            assert!(game.map(source + 2).unwrap().locked);
+
+            // Child commit still isn't a save boundary. Root abort restores both slots and IDs.
+            game.save_maps();
+            assert_eq!(saved_counter(), Tag::Int(source));
+            for id in [source + 1, source + 2, source + 3] {
+                assert!(!maps_dir.join(format!("{id}.dat")).exists());
+            }
+            game.transaction_close(&root, false);
+            game.save_maps();
+            assert_eq!(saved_counter(), Tag::Int(source));
+            assert_eq!(game.peek_map_id(), source + 1);
+            assert_eq!(game.menu_carried(menu).flatten(), Some(map(1)));
+            assert_eq!(game.menu_slot(menu, 36).flatten(), Some(map(0)));
+            for id in [source + 1, source + 2, source + 3] {
+                assert!(game.map(id).is_none());
+                assert!(!maps_dir.join(format!("{id}.dat")).exists());
+            }
+
+            let host: &mut dyn ServerHost = game;
+            assert_eq!(
+                host.transaction(|host, tx| {
+                    cursor.on_crafted_by(host, tx, 1)?;
+                    slot.on_crafted_by(host, tx, 1)
+                }),
+                Ok(())
+            );
+            assert_eq!(held_ids(game), [Some(source + 1), Some(source + 2)]);
+            assert_eq!(game.map(source + 1).unwrap().scale, 1);
+            assert!(game.map(source + 2).unwrap().locked);
+            game.save_maps();
+            assert_eq!(saved_counter(), Tag::Int(source + 2));
+            assert!(maps_dir.join(format!("{}.dat", source + 1)).is_file());
+            assert!(maps_dir.join(format!("{}.dat", source + 2)).is_file());
+            assert!(!maps_dir.join(format!("{}.dat", source + 3)).exists());
         });
     }
 

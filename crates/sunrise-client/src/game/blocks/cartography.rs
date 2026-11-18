@@ -74,7 +74,7 @@ impl Game<'_> {
         }
     }
 
-    /// The scaled and locked copies a menu made (`level.setMapData`).
+    /// The scaled and locked copies a menu made (`level.setMapData`), staged if a transaction is open.
     pub(super) fn register_made_maps(&mut self, maps: LevelMaps) {
         for (id, source, scale) in maps.made.into_inner() {
             let Some(data) = self
