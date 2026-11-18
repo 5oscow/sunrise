@@ -46,7 +46,7 @@ struct Channel {
     owner: u8,
     /// Its world (`Mixer::world_id`; 0 none).
     world: u32,
-    /// The sound file it started and when, to tell another player's copy of it.
+    /// The sound file and start time, used to spot copies from other backends.
     started: Option<(String, std::time::Instant)>,
     /// Its sound event plays clearly through a mod's muffle (`Audio::muffle`).
     unmuffled: bool,
@@ -345,7 +345,7 @@ pub struct MixerBackend {
     /// Whose channels these are (`Channel::owner`).
     owner: u8,
     world: u32,
-    /// How many other players share this output: alone, a sound never looks for its copy.
+    /// Number of additional backends sharing the output. With none, there's no duplicate check.
     shares: Arc<std::sync::atomic::AtomicUsize>,
 }
 /// Dropping a shared backend removes its camera and sounds.
@@ -367,7 +367,7 @@ impl Drop for MixerBackend {
 /// Each shared backend gets its own block of channel ids. Blocks are never reused, so a pending
 /// decode for a dropped backend cannot attach to a new one. The primary backend counts from 0.
 static SHARED_CHANNELS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-/// Two players' copies of one sound: started within this of each other.
+/// Maximum time between copies of a sound started by different backends.
 const SAME_SOUND: std::time::Duration = std::time::Duration::from_millis(150);
 /// Decoded interleaved samples, their rate and channel count (`None`: the file did not load).
 type Samples = Option<(Arc<Vec<f32>>, u32, u16)>;
@@ -612,22 +612,22 @@ fn decode(resource: &Resource) -> Option<(Vec<f32>, u32, u16)> {
     }
     (channels != 0).then_some((samples, rate, channels))
 }
-/// A sound file without its variant number (`mob/creeper/say2.ogg` is `mob/creeper/say`): each
-/// player's game picks its own variant of the same event.
+/// A sound file without its variant number (`mob/creeper/say2.ogg` is `mob/creeper/say`):
+/// each client can pick its own variant of the same event.
 // ponytail: variants named by a trailing number, as vanilla's are; the event name if a pack breaks it.
 fn variantless(key: &str) -> &str {
     key.trim_end_matches(".ogg")
         .trim_end_matches(|c: char| c.is_ascii_digit())
 }
 impl MixerBackend {
-    /// Another local player's game started this same sound here just now (both clients
-    /// heard it); this copy stays stopped, the first is heard from the nearest camera.
+    /// Another backend sharing this output started the same sound here just now: this copy
+    /// stays stopped, and the first is heard from the nearest camera.
     ///
     /// A copy is recognised only by its file (without the variant), world, place and time: the
-    /// games pick variants on their own and play many sounds client-side (steps, digging), so
+    /// clients pick variants on their own and play many sounds locally (steps, digging), so
     /// nothing marks two copies of one event. Two different events alike in all four (two
-    /// players' steps on grass, side by side, within 150 ms) are heard once. That is accepted:
-    /// at that distance and timing they sound like one; a doubled sound is the louder fault.
+    /// footsteps on grass, side by side, within 150 ms) are heard once. At that distance and
+    /// timing they sound like one; a doubled sound is the louder fault.
     fn duplicate(&self, channel: ChannelId, (namespace, path): (&str, &str)) -> bool {
         // Alone: nobody else's copy, and no lock taken for it.
         if self.shares.load(std::sync::atomic::Ordering::Relaxed) == 0 {
@@ -636,7 +636,7 @@ impl MixerBackend {
         let Ok(mut m) = self.mixer.lock() else {
             return false;
         };
-        // Alone (no other player's camera), or a sound by the listener (a click, music): its own.
+        // Relative sounds (clicks, music) belong only to their listener.
         let Some(c) = m.channels.get(&channel).filter(|c| !c.relative) else {
             return false;
         };
@@ -1671,7 +1671,7 @@ impl Audio {
             stopped: Default::default(),
             preview: Default::default(),
             muffle: None,
-            // The device belongs to the first player's output, which looks after it.
+            // The primary backend owns and maintains the output device.
             #[cfg(feature = "audio")]
             default_seen: self.default_seen.clone(),
             #[cfg(feature = "audio")]
@@ -2981,9 +2981,9 @@ mod tests {
     }
 
     #[test]
-    fn another_players_copy_of_a_sound_is_dropped() {
+    fn a_shared_backends_copy_of_a_sound_is_dropped() {
         let mixer = Arc::new(Mutex::new(Mixer::default()));
-        // One other player shares the output.
+        // One additional backend shares the output.
         let shares = Arc::new(std::sync::atomic::AtomicUsize::new(1));
         let backend = |owner| MixerBackend {
             mixer: mixer.clone(),
@@ -2996,7 +2996,7 @@ mod tests {
             world: 0,
             shares: shares.clone(),
         };
-        let (mut p1, mut p2) = (backend(0), backend(1));
+        let (mut primary, mut shared) = (backend(0), backend(1));
         // The second listener is active, so the backends share the speakers.
         mixer
             .lock()
@@ -3008,17 +3008,17 @@ mod tests {
             b.set_position(id, at);
             !b.duplicate(id, ("minecraft", "mob/creeper/say1.ogg"))
         };
-        assert!(started(&mut p1, [5.0, 64.0, 5.0]));
+        assert!(started(&mut primary, [5.0, 64.0, 5.0]));
         // The shared backend got the same sound at the same place: one copy plays.
-        assert!(!started(&mut p2, [5.2, 64.0, 5.0]));
+        assert!(!started(&mut shared, [5.2, 64.0, 5.0]));
         // A sound elsewhere, or repeated by the same backend, still plays.
-        assert!(started(&mut p2, [40.0, 64.0, 5.0]));
-        assert!(started(&mut p1, [5.0, 64.0, 5.0]));
+        assert!(started(&mut shared, [40.0, 64.0, 5.0]));
+        assert!(started(&mut primary, [5.0, 64.0, 5.0]));
         // Equal coordinates in another dimension describe a different sound.
-        p2.world = mixer.lock().unwrap().world_id("nether");
-        assert!(started(&mut p2, [5.0, 64.0, 5.0]));
+        shared.world = mixer.lock().unwrap().world_id("nether");
+        assert!(started(&mut shared, [5.0, 64.0, 5.0]));
         // Dropping the shared backend also removes its sounds.
-        drop(p2);
+        drop(shared);
         assert!(
             mixer
                 .lock()
