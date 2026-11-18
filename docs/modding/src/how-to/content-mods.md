@@ -205,11 +205,15 @@ A block names its template and what differs from it:
 ```
 
 A fence gate needs no kind of its own: a block whose template is a vanilla `minecraft:*_fence_gate` is a
-`FenceGateBlock`, with the template wood's open and close sounds. `"open_sound"` and `"close_sound"` (sound event ids,
-such as `"minecraft:block.chain.break"` or a sound of the mod's own `sounds.json`) replace them, as a gate built with its
-own `WoodType` has, and they are what opening by hand, a redstone signal and a wind-charge or other explosion toggle all
-play. Either key needs a `*_fence_gate` template and a `namespace:path` id, or the load fails naming the file; leaving
-both out keeps the wood's sounds.
+`FenceGateBlock`, with the template wood's open and close sounds. `"open_sound"` and `"close_sound"` accept a sound
+event id, such as `"minecraft:block.chain.break"` or a sound of the mod's own `sounds.json`, to replace that sound at
+all three sites. They also accept an object, for example `"open_sound": {"use": "rope:open", "redstone": "rope:powered"}`:
+`use` is a player's interaction (including client prediction), `explosion` is an unpowered gate triggered by an
+explosion, and `redstone` is a power change that changes the open state. A missing site keeps the **template wood's**
+sound, not another site's override. Native and wasm declarations use `GateSound::All` or `GateSound::Sites` with
+`on_use`, `on_explosion`, and `on_redstone`. Both keys need a `*_fence_gate` template; unknown sites and invalid
+`namespace:path` sound ids fail the load naming the file and key. Leaving both keys out keeps the wood's sounds.
+Pitch draws, volume, sound source, player exclusion and game events are unchanged.
 
 A block gets a block item of its own id by default. `"item": false` gives it none: pick-block takes nothing and
 `Block.asItem` is air (what a block drops comes from its loot table). `"block_item": "<item id>"` (with `"item": false`) makes the block

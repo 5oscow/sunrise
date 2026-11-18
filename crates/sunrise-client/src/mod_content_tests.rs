@@ -6304,8 +6304,8 @@ fn signs_take_their_form_wood_and_wall_block_from_their_declaration() {
 
 /// A fence gate of a mod is a vanilla `FenceGateBlock` through its template, with
 /// its wood's sounds unless the file names its own: `open_sound` and
-/// `close_sound` replace `WoodType.fenceGateOpen` and `fenceGateClose`, the one
-/// value a use, a redstone change and an explosion all read.
+/// `close_sound` override every site or just the named sites, retaining the
+/// template wood for each missing site.
 #[test]
 #[ignore = "daily"]
 fn a_content_fence_gate_plays_its_own_sounds_or_its_woods() {
@@ -6332,6 +6332,10 @@ fn a_content_fence_gate_plays_its_own_sounds_or_its_woods() {
                 "data/gates/sunrise/block/half.json",
                 r#"{"template": "minecraft:birch_fence_gate", "open_sound": "gates:half.open"}"#,
             ),
+            (
+                "data/gates/sunrise/block/sites.json",
+                r#"{"template":"minecraft:oak_fence_gate","open_sound":{"use":"gates:use.open","redstone":"gates:wire.open"},"close_sound":{"explosion":"gates:blast.close"}}"#,
+            ),
         ],
     );
     let root = resource_root_fixture(
@@ -6347,12 +6351,15 @@ fn a_content_fence_gate_plays_its_own_sounds_or_its_woods() {
         let state = registry.default_state(name).unwrap();
         let data = behaviours.data(state);
         (
-            data.gate_open.as_deref().map(str::to_owned),
-            data.gate_close.as_deref().map(str::to_owned),
+            std::array::from_fn::<_, 3, _>(|i| data.gate_open[i].as_deref().map(str::to_owned)),
+            std::array::from_fn::<_, 3, _>(|i| data.gate_close[i].as_deref().map(str::to_owned)),
         )
     };
     let gate = |open: Option<&str>, close: Option<&str>| {
-        (open.map(str::to_owned), close.map(str::to_owned))
+        (
+            std::array::from_fn::<_, 3, _>(|_| open.map(str::to_owned)),
+            std::array::from_fn::<_, 3, _>(|_| close.map(str::to_owned)),
+        )
     };
     assert_eq!(
         sounds("gates:oak"),
@@ -6370,6 +6377,23 @@ fn a_content_fence_gate_plays_its_own_sounds_or_its_woods() {
         gate(
             Some("gates:half.open"),
             Some("minecraft:block.fence_gate.close")
+        )
+    );
+    assert_eq!(
+        sounds("gates:sites"),
+        (
+            [
+                "gates:use.open",
+                "minecraft:block.fence_gate.open",
+                "gates:wire.open"
+            ]
+            .map(|s| Some(s.to_owned())),
+            [
+                "minecraft:block.fence_gate.close",
+                "gates:blast.close",
+                "minecraft:block.fence_gate.close"
+            ]
+            .map(|s| Some(s.to_owned())),
         )
     );
     assert_eq!(
