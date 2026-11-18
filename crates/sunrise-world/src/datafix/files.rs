@@ -43,7 +43,8 @@ pub fn read_dat(path: &Path) -> io::Result<Option<Tag>> {
 }
 
 /// [`read_dat`] under a `NbtAccounter` heap quota, `None` for unlimited.
-/// The byte and depth caps of [`Limits::saved`] are Sunrise's own guards.
+/// The depth cap of [`Limits::saved`] is vanilla's read-depth limit; its byte
+/// cap is a Sunrise guard on top of the contract.
 fn read_dat_with_quota(path: &Path, quota: Option<u64>) -> io::Result<Option<Tag>> {
     let bytes = match fs::read(path) {
         Ok(b) => b,
@@ -56,12 +57,13 @@ fn read_dat_with_quota(path: &Path, quota: Option<u64>) -> io::Result<Option<Tag
         Some(quota) => nbt::read_named_quota(&raw, limits, quota),
         None => nbt::read_named(&raw, limits),
     }
-    .map_err(|e| invalid(e.to_string()))?;
+    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     Ok(Some(root.tag))
 }
 
 /// `SavedDataStorage.readTagFromDisk`: a file without the gzip header is plain NBT.
-/// The byte and depth caps of [`Limits::saved`] are Sunrise's guards, not vanilla's.
+/// The depth cap of [`Limits::saved`] is vanilla's read-depth limit; its byte
+/// cap is a Sunrise guard on top of the contract.
 pub fn read_saved_dat(path: &Path) -> io::Result<Option<Tag>> {
     let bytes = match fs::read(path) {
         Ok(b) => b,
@@ -79,8 +81,9 @@ pub fn read_saved_dat(path: &Path) -> io::Result<Option<Tag>> {
 }
 
 /// `NbtIo.writeCompressed`, creating the parent folders. The byte and depth
-/// caps of [`Limits::saved`] on the written NBT are Sunrise's guards: vanilla
-/// applies no read quota to what it writes.
+/// caps of [`Limits::saved`] on the written NBT are Sunrise's write guards, not
+/// the contract's read-depth limit: vanilla applies no read quota to what it
+/// writes.
 pub fn write_dat(path: &Path, tag: &Tag) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -1656,6 +1659,7 @@ mod upgrade_tests {
             panic!("the list is gone");
         };
         assert_eq!(items.len(), 1_000_001);
+        assert!(items.iter().all(|item| *item == Tag::Byte(1)));
         drop(region);
         let _ = fs::remove_dir_all(&dir);
     }
@@ -1691,7 +1695,7 @@ mod upgrade_tests {
             let chunk = region.read(pos).unwrap().unwrap();
             let tag = chunk.nbt(Limits::saved()).unwrap().tag;
             let items = match tag.get("Items") {
-                Some(Tag::List(items)) => items.len(),
+                Some(Tag::List(items)) => items.iter().filter(|i| **i == Tag::Byte(1)).count(),
                 _ => 0,
             };
             (data_version(&tag, -1), items)
@@ -1735,7 +1739,9 @@ mod upgrade_tests {
         assert!((raw.len() as u64) < nbt::NETWORK_NBT_QUOTA);
 
         let error = fix_world_files_deferred(&base, &UpgradeProgress::new()).unwrap_err();
-        assert!(error.to_string().contains("heap quota"), "{error}");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        let source = error.get_ref().and_then(|e| e.downcast_ref::<nbt::Error>());
+        assert_eq!(source.map(|e| e.reason), Some("heap quota exceeded"));
         assert!(read_dat(&base.join("level.dat")).unwrap().is_some());
         let _ = fs::remove_dir_all(&base);
     }
@@ -1766,6 +1772,7 @@ mod upgrade_tests {
                 panic!("{} lost its list", file.display());
             };
             assert_eq!(items.len(), 1_100_000);
+            assert!(items.iter().all(|item| *item == Tag::Byte(1)));
         }
         let _ = fs::remove_dir_all(&base);
     }
