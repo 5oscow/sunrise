@@ -1361,7 +1361,31 @@ mod tests {
                 g.player =
                     Some(PlayerMotion::new(g.motion, sunrise_core::geometry::Vec3::ZERO).unwrap());
                 let local = g.entity(7).unwrap();
-                g.spawn_entity(15, "minecraft:armor_stand", [0.0; 3], [0.0; 3]);
+                // The packet a server sends: it makes the client's own copy of the stand, which a bare
+                // `spawn_entity` (the tracking half of `handleAddEntity`) does not.
+                let stand_kind = g
+                    .remote
+                    .as_ref()
+                    .unwrap()
+                    .builtin
+                    .get("minecraft:entity_type")
+                    .unwrap()
+                    .id("minecraft:armor_stand")
+                    .unwrap();
+                g.handle_packet(sunrise_protocol::packets::play::Clientbound::AddEntity(
+                    sunrise_protocol::packets::play::AddEntity {
+                        id: 15,
+                        uuid: 15,
+                        kind: stand_kind,
+                        position: [0.0; 3],
+                        velocity: [0.0; 3],
+                        pitch: 0,
+                        yaw: 0,
+                        head_yaw: 0,
+                        data: 0,
+                    },
+                ))
+                .unwrap();
                 let stand = g.entity(15).unwrap();
                 for flag in [1, 0] {
                     for id in [7, 15] {

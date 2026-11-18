@@ -167,6 +167,10 @@ pub trait BlockStatesBackend {
     #[access(Metadata)]
     fn block_state_map_color(&self, state: BlockState) -> Option<u8>;
     /// Side: both.
+    /// Decode a packed map color for [`BlockStates::map_color_rgba`].
+    #[access(Metadata)]
+    fn block_state_map_color_rgba(&self, packed: u8) -> Option<[u8; 4]>;
+    /// Side: both.
     /// `BlockState.getLightEmission()`: the light level the state gives off, 0 to 15 (a torch 14,
     /// glowstone 15, stone 0). The state's own value: a block that declares `dynamic_light`
     /// answers per cell through its parts, which this does not ask. None for an unknown state.

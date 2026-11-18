@@ -259,7 +259,11 @@ fn the_text_background_opacity_sets_the_backdrop_and_the_faded_text() {
 fn glyphs_of_a_label_refused_for_capacity_still_upload() {
     with_client_game(|game| {
         face_south(game);
-        // Runic letters: drawn nowhere else, so laying them out rasterizes them.
+        // The default font's runes are already packed bitmap glyphs, not runtime
+        // uploads. Force Unifont and an empty per-game cache so this layout must
+        // rasterize them, independently of any text drawn during game setup.
+        game.gui.atlas.font.uniform = true;
+        game.gui.atlas.font.reset_cache();
         let text = Text::literal("\u{16A0}\u{16A2}\u{16A6}");
         let at = [0.5, 70.0, 0.5];
         let options = NameTagOptions::new(false, true, 0xF0);
@@ -457,8 +461,10 @@ fn a_wasm_mods_labels_draw_the_same_pixels_as_a_native_mods() {
         || {
             sunrise_guest_stack::run_on_guest_stack(|| {
                 sunrise_mod_wasm::copy_probe::with_load_budget(|| {
+                    // The native control only draws labels; leave the process-wide block entity
+                    // table unset until the wasm fixture loads its declared types.
                     let native: mod_api::Mods =
-                        vec![mod_api::ModEntry::new("wasm_fixture", Box::new(Native))].into();
+                        vec![mod_api::ModEntry::new("native_labels", Box::new(Native))].into();
                     let mut expected = None;
                     mod_platform::testing::with_mods(native, || {
                         with_client_game(|game| expected = Some(scene_frame(game)));
