@@ -1112,11 +1112,15 @@ mod tests {
         entries.insert("test.shared".into(), serde_json::json!({"text":"."}));
         entries.insert(
             "test.cycle.a".into(),
-            serde_json::json!({"translate":"test.cycle.b"}),
+            serde_json::json!({"translate":"test.cycle.b","extra":["?"]}),
         );
         entries.insert(
             "test.cycle.b".into(),
             serde_json::json!({"translate":"test.cycle.a","fallback":"unused","extra":["!"]}),
+        );
+        entries.insert(
+            "test.cycle.siblings".into(),
+            serde_json::json!([{"translate":"test.cycle.a"},{"translate":"test.cycle.b"}]),
         );
         let mut language = Language::default();
         assert!(
@@ -1127,7 +1131,39 @@ mod tests {
         scoped(language, || {
             assert_eq!(get("test.chain.0"), literal);
             assert_eq!(get("test.repeat"), ".".repeat(160));
-            assert_eq!(get("test.cycle.a"), "!");
+            assert_eq!(get("test.cycle.a"), "!?");
+            assert_eq!(get("test.cycle.siblings"), "!??!");
+        });
+    }
+
+    #[test]
+    fn language_shares_a_diamond_chain_and_refuses_oversized_fanout() {
+        let mut entries = serde_json::Map::new();
+        for n in 0..48 {
+            let next = format!("test.diamond.{}", n + 1);
+            entries.insert(
+                format!("test.diamond.{n}"),
+                serde_json::json!([{"translate":next},{"translate":next}]),
+            );
+        }
+        entries.insert("test.diamond.48".into(), serde_json::json!({"text":""}));
+        entries.insert(
+            "test.large".into(),
+            serde_json::json!({"text":"x".repeat(64 * 1024)}),
+        );
+        entries.insert(
+            "test.fanout".into(),
+            serde_json::Value::Array(vec![serde_json::json!({"translate":"test.large"}); 128]),
+        );
+        let mut language = Language::default();
+        assert!(
+            language.overlay(&serde_json::to_vec(&entries).unwrap(), &|value| Some(
+                value.clone()
+            ))
+        );
+        scoped(language, || {
+            assert_eq!(get_or("test.diamond.0", "fallback"), "");
+            assert_eq!(get_or("test.fanout", "fallback"), "fallback");
         });
     }
 
