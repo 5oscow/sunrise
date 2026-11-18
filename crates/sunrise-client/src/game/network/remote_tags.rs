@@ -59,7 +59,9 @@ impl Game<'_> {
         super::class_tags::install(&mut items, self.res.facts());
         // Rebuild scoped parts against the received tags before refreshing state-only facts.
         let mut part_items = self.items().clone();
+        let names = items.block_state_names();
         part_items.block_tags = items.block_tags.clone();
+        part_items.rebuild_block_tag_flags(names);
         part_items.item_tags = items.item_tags.clone();
         let parts = match self.prepare_parts(&part_items) {
             Ok(parts) => parts,

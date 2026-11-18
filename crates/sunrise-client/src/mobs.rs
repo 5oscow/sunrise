@@ -3274,6 +3274,11 @@ pub struct MobWorld<'a> {
     pub thundering: bool,
     pub level: sunrise_core::LevelKey,
     pub block_tags: &'a HashMap<String, std::collections::HashSet<String>>,
+    /// [`crate::items::BlockTagFlags`] bits by block state id: the tags the
+    /// mob code asks about by name (`minecraft:climbable`, `minecraft:fire`
+    /// and the rest), so a tick tests a bit instead of hashing two strings.
+    /// Empty in a view built without a catalog: every flag reads false.
+    pub block_tag_flags: &'a [u16],
     /// Each block's `fallOn` rule (the player's landing registry).
     pub landing: &'a sunrise_world::block_landing::BlockLandingRegistry,
     pub biomes: &'a crate::biome::Biomes,

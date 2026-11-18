@@ -8,6 +8,7 @@ use super::{
 };
 use crate::blocks::Fluid;
 use crate::fast_hash::FxHashMap;
+use crate::items::BlockTagFlags;
 use sunrise_core::geometry::{Aabb, Vec3};
 use sunrise_core::position::BlockPos;
 
@@ -70,7 +71,7 @@ impl MobWorld<'_> {
                     } else if data::vanilla_burning_block(
                         &facts.name,
                         facts.emission > 0,
-                        self.has_tag("minecraft:fire", &facts.name),
+                        self.state_flag(state, BlockTagFlags::FIRE),
                     ) {
                         Some(PathType::FireInNeighbor)
                     } else {

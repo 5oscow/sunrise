@@ -1106,15 +1106,8 @@ impl Game<'_> {
     /// bigger value wraps), and `data` is empty until the server's first
     /// values arrive, so read it with `get`. Draw with `native_sprite`, `native_fill` and
     /// `native_text`.
-    pub(in crate::game) fn native_screen_draw(
-        &self,
-        block: &str,
-        pos: Option<[i32; 3]>,
-        data: &[i32],
-        draw: &mut HudBatch,
-        origin: [f32; 2],
-    ) {
-        self.fire_screen_draw(block, pos, data, draw, origin);
+    pub(in crate::game) fn native_screen_draw(&self, call: mod_api::__private::ScreenDrawCall<'_>) {
+        self.fire_screen_draw(call);
     }
     /// The open screen has drawn itself and its tooltips (`Screen.render`,
     /// the point of `ScreenEvent.Render.Post`): draw over it with
@@ -1343,13 +1336,9 @@ impl Game<'_> {
     /// a mapped slot. The listener's final lines replace the item's lines.
     pub(in crate::game) fn native_screen_tooltip(
         &self,
-        block: &str,
-        data: &[i32],
-        at: [f32; 2],
-        slot: Option<u32>,
-        lines: &mut Vec<(Text, u32)>,
+        call: mod_api::__private::ScreenTooltipCall<'_>,
     ) {
-        self.fire_screen_tooltip(block, data, at, slot, lines);
+        self.fire_screen_tooltip(call);
     }
     /// A player pressed a mod container's button (`clickMenuButton`), on
     /// the server. The block entity is out of the world during the call;
@@ -4787,12 +4776,11 @@ impl GameLevel<'_> {
 }
 impl LevelView<'_> {
     /// `VegetationBlock.mayPlaceOn` for the plant `state` on `ground` at
-    /// `ground_pos`, before the plant answers it: the blocks a mod plant (one
-    /// whose template is a vanilla plant, such as a crop) can stand on. Its
-    /// template's `canSurvive` asks it, so the plant is refused there and pops
-    /// off when its ground changes to one it can't stand on. Answer only for your
-    /// own blocks. The level is read-only. Asked on both sides: a client asks it
-    /// from its placement prediction and its own shape updates.
+    /// `ground_pos`, when the soil's `can_sustain_plant` leaves the decision to
+    /// the plant. The plant inherits vegetation rules from its template or opts
+    /// into them in its block declaration. Answer only for your own blocks.
+    /// The level is read-only. Asked on both sides: a client asks it from its
+    /// placement prediction and its own shape updates.
     #[inline(always)]
     pub(in crate::game) fn native_may_place_on(
         &self,

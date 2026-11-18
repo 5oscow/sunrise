@@ -19,6 +19,10 @@ nix profile install github:horizon-rust/horizon#sunrise-server
 
 `overlays.default` adds them to `pkgs`; on Linux, `nix develop` gives the build environment of the workspace.
 
+Sunrise is under the PolyForm Shield licence ([LICENSING.md](../LICENSING.md)), which nixpkgs counts as unfree. The
+flake's own packages, checks and module build as they are. With the overlay, your nixpkgs decides: allow these
+packages, for example with `nixpkgs.config.allowUnfreePredicate = pkg: lib.hasPrefix "sunrise-" (lib.getName pkg);`.
+
 ## Preparing the game files
 
 `sunrise-prepare` works in a writable folder (its pinned hashes, the exporters' sources, scratch files). The

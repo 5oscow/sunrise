@@ -17,8 +17,9 @@ pub trait Hooks {
     /// `native_state_with_property`, and know whether `state` is yours with
     /// `native_state_block`. It is asked for every placer that goes
     /// through vanilla's placement (a player's `BlockItem.place`, a
-    /// dispenser's `DirectionalPlaceContext`), and the answer still takes its
-    /// survival and entity obstruction checks. A trait mod returns
+    /// dispenser's `DirectionalPlaceContext`). The item's `must_survive` controls
+    /// the ordinary final survival check. Standing/wall candidate survival and
+    /// entity obstruction are independent. A trait mod returns
     /// `Some(Some(state))` to choose a state, `Some(None)` to refuse, or
     /// `None` to leave the answer to the next mod or vanilla. Changes to the event's fluid
     /// copy are mod-provided data forwarded to later Parts, never consumed by the engine.

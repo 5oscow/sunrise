@@ -204,6 +204,22 @@ return `None` in this view. `BlockEntityPartState::state_in` gives its default t
 they were the server's: a client's own shape update that refuses a block removes it on that client.
 `LevelTicksHost`'s signal reads moved here and now return `Option`.
 
+Before a block's placement state is selected, `ItemPart::placement_context` replaces the item's
+`BlockItem.updatePlacementContext` rewrite: `Some(Some(context))` rewrites the target and click,
+`Some(None)` refuses, and `None` runs vanilla (including scaffolding's column walk). The placing
+item cannot change, click and view values must be finite, and the target must be within bounds.
+Replaceability is checked before the rewrite, not again on its answer. At the final `BlockItem.canPlace`
+check, `ItemPart::must_survive` decides whether placement must pass `can_survive`: `Some(false)`
+skips it, `Some(true)` requires it, and `None` keeps vanilla (scaffolding false, other block items
+true). Standing/wall items retain their own unconditional candidate-survival checks. Entity
+obstruction is still checked. Both hooks run on both sides with
+a read-only `LevelSide`, dispatched by item id. These events have no stack yet: they decide from
+the item and level, not held components. Player and dispenser placement offer the resolved decision
+once to `entity_place`; if a listener changes its inputs, the placement is refused rather than
+retargeted. The veto's placement neighbour and the post-placement notice use the resolved face,
+and the notice uses the resolved click location. Neither changes the sides of the block placement or
+survival hooks.
+
 A neighbour's `BlockPart::fence_gate_in_wall` answers whether a fence gate sits at wall height
 beside that state. It runs on both sides at placement and shape updates, with a read-only `LevelSide`:
 `Some(true)` counts as a wall, `Some(false)` does not, and `None` keeps the `minecraft:walls` tag

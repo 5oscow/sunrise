@@ -570,7 +570,7 @@ impl Game<'_> {
         let id = info.id.trim_start_matches("minecraft:").to_owned();
         let gliding = self.player.as_ref().is_some_and(|p| p.fall_flying);
         if let Some(hit) = block {
-            if info.block.is_some() {
+            if info.block.is_some() && Self::can_hint_block_placement(&stack) {
                 let placeable = if self.may_build() {
                     self.remote_would_place(hit, &stack)
                 } else {
