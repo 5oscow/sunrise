@@ -1879,12 +1879,12 @@ impl Game<'_> {
         let Some(read) = self.player_handle_read(player) else {
             return false;
         };
-        let conn = match read {
+        let guest = match read {
             PlayerRead::Acting { .. } => None,
-            PlayerRead::Guest(g) if !g.dead => Some(g.conn),
+            PlayerRead::Guest(g) if !g.dead => Some((g.conn, Dim::from_id(&g.dimension))),
             PlayerRead::Guest(_) => return false,
         };
-        let Some(conn) = conn else {
+        let Some((conn, there)) = guest else {
             if self
                 .player
                 .as_ref()
@@ -1895,34 +1895,26 @@ impl Game<'_> {
             f(self);
             return true;
         };
-        self.as_guest(conn, f).is_some()
+        self.as_guest_in_their_level(conn, there, f)
     }
 
-    /// Runs `f` with the player `uuid`'s state in place: theirs already when
-    /// they are the acting player (the host, or a guest swapped in), else a
-    /// guest's through `as_guest`, including within another guest's turn.
-    /// False when it didn't run: no such player here, or dead.
+    /// Runs `f` with the player `uuid`'s state in place, in the player's own level: theirs
+    /// already when they are acting (a guest in their turn, or the `Game`'s own player where
+    /// no guest holds them), else a guest's through `as_guest_in_their_level`, including
+    /// within another guest's turn. False when it didn't run: no such player here, dead, or
+    /// in a level that isn't open.
     pub(super) fn native_as_player(&mut self, uuid: u128, f: impl FnOnce(&mut Self)) -> bool {
         // With no guest's turn running, `native_acting_id` is the world's owner: on a server
-        // thread that owner is a guest too, whose state is theirs, not the `Game`'s own. Only
-        // the owner is refused when living in another level: the call would otherwise fall to
-        // the acting-player branch below and run on the `Game`'s own player, who is not theirs.
-        // Any other guest keeps `as_guest`'s path, as before the owner's fallback.
-        let here = self.dim.id();
-        let owner = self.lan_acting_uuid.is_none() && uuid == self.native_acting_id();
-        let owner_guest = owner
-            .then(|| {
-                self.lan
-                    .as_ref()
-                    .and_then(|host| host.hub.holder_guest(uuid, here))
-                    .filter(|g| !g.dead)
-                    .map(|g| g.dimension == here)
-            })
-            .flatten();
-        if owner_guest == Some(false) {
-            return false;
-        }
-        if owner_guest.is_none() && uuid == self.native_acting_id() {
+        // thread that owner is a guest too, whose state is theirs, not the `Game`'s own.
+        let guest = self
+            .lan
+            .as_ref()
+            .and_then(|host| host.hub.holder_guest(uuid, self.dim.id()))
+            .filter(|g| !g.dead)
+            .map(|g| (g.conn, Dim::from_id(&g.dimension)));
+        let acting = self.lan_acting_uuid == Some(uuid)
+            || (guest.is_none() && uuid == self.native_acting_id());
+        if acting {
             if self
                 .player
                 .as_ref()
@@ -1933,15 +1925,7 @@ impl Game<'_> {
             f(self);
             return true;
         }
-        let Some(host) = self.lan.as_ref() else {
-            return false;
-        };
-        let conn = host
-            .hub
-            .holder_guest(uuid, self.dim.id())
-            .filter(|g| !g.dead)
-            .map(|g| g.conn);
-        conn.and_then(|conn| self.as_guest(conn, f)).is_some()
+        guest.is_some_and(|(conn, there)| self.as_guest_in_their_level(conn, there, f))
     }
 }
 

@@ -258,9 +258,9 @@ mod owner {
         );
     }
 
-    /// A hook running in another level than the owner's has no business with their inventory:
-    /// the overflow of a full inventory would be tossed at the owner's coordinates in that
-    /// level. The insert leaves the owner's stacks alone and drops nothing there.
+    /// A hook running in another level than the owner's reaches the owner's own inventory,
+    /// never the `Game`'s player: the insert is accepted as for any player, what doesn't fit
+    /// waits for the commit, and the abort puts the owner's stacks back and drops nothing.
     #[test]
     #[ignore = "daily"]
     fn a_hook_in_another_level_leaves_the_owners_inventory_and_drops_alone() {
@@ -313,10 +313,11 @@ mod owner {
             let moved: Result<(), ()> = (game as &mut dyn ServerHost).transaction(|host, tx| {
                 let taken = source.extract(host, tx, &diamond, 1);
                 assert_eq!(taken, 1);
-                assert_eq!(slot.insert(host, tx, &diamond, taken), 0);
+                assert_eq!(slot.insert(host, tx, &diamond, taken), 1);
                 Err(())
             });
             assert!(moved.is_err());
+            assert!(game.inventory.iter().all(Option::is_none));
             let giver = game.lan.as_ref().unwrap().hub.guest(13).unwrap();
             assert_eq!(giver.inventory[0].as_ref().map(|s| s.count), Some(1));
             let guest = &game.lan.as_ref().unwrap().hub.guests[0];
@@ -328,10 +329,8 @@ mod owner {
         });
     }
 
-    /// Only the owner is refused in another level: a guest who isn't the owner is reached
-    /// through `as_guest` as before. A transaction that clears a stack of such a guest in the
-    /// Nether and aborts restores it, and a stack given to them with a full inventory is
-    /// delivered, not discarded at commit.
+    /// A transaction that clears a stack of a guest in the Nether and aborts restores it, and
+    /// a stack given to them with a full inventory is delivered at commit, in the Nether.
     #[test]
     #[ignore = "daily"]
     fn a_non_owner_guest_in_another_level_keeps_their_stack_through_an_abort() {
@@ -339,6 +338,9 @@ mod owner {
         with_guests(|game| {
             game.level.player_uuid = Some(playerdata::uuid_ints(12));
             assert_ne!(game.dim.id(), "minecraft:the_nether");
+            // A level is open while a player is in it.
+            game.enter_level(super::super::Dim::Nether).unwrap();
+            game.enter_level(super::super::Dim::Overworld).unwrap();
             let stack = |game: &super::super::Game<'_>, snbt: &str| {
                 let host: &dyn mod_api::Host = game;
                 host.item_from_snbt(snbt).unwrap()
@@ -378,7 +380,9 @@ mod owner {
                 Ok(())
             });
             assert!(given.is_ok());
-            assert_eq!(game.dropped.len(), dropped + 1);
+            assert_eq!(game.dropped.len(), dropped);
+            game.enter_level(super::super::Dim::Nether).unwrap();
+            assert_eq!(game.dropped.len(), 1);
         });
     }
 }

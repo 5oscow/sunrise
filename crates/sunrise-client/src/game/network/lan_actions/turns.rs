@@ -42,6 +42,34 @@ impl Game<'_> {
         }
     }
 
+    /// `as_guest` in the level the guest is in (`Player.level()`), `there`: a level other than
+    /// the one in place is put in place for the turn and the one in place put back after, so
+    /// what the turn drops, plays or tells lands where the guest is. Inside a transaction no
+    /// level moves (its journal is the level's in place): the turn writes only the guest's own
+    /// state, and what reaches their level waits for the commit, which runs it there. False when
+    /// the turn didn't run, or their level isn't open: it is never opened for this.
+    pub(in crate::game) fn as_guest_in_their_level(
+        &mut self,
+        conn: u32,
+        there: Dim,
+        f: impl FnOnce(&mut Self),
+    ) -> bool {
+        let here = self.dim;
+        if there == here || !self.transactions.is_empty() {
+            return self.as_guest(conn, f).is_some();
+        }
+        if !self.levels.parked.contains_key(&there) || self.enter_level(there).is_err() {
+            return false;
+        }
+        let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.as_guest(conn, f).is_some()
+        }));
+        // `here` was parked by the swap above, so entering it again only swaps back.
+        let back = self.enter_level(here);
+        debug_assert!(back.is_ok(), "the parked level re-enters");
+        ran.unwrap_or_else(|payload| std::panic::resume_unwind(payload))
+    }
+
     /// Where guest `conn` is in the hub's list.
     pub(in crate::game) fn guest_index(&self, conn: u32) -> Option<usize> {
         self.lan.as_ref()?.hub.guests.connection_index(conn)

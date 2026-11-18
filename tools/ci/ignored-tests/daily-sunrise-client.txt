@@ -145,6 +145,7 @@ sunrise-client game::native_player_inventory_tests::equipment_effects_wait_for_r
 sunrise-client game::native_player_inventory_tests::give_write_aborts lib daily resources
 sunrise-client game::native_player_inventory_tests::inventory_slots_are_read_and_written_by_vanillas_numbers lib daily resources
 sunrise-client game::native_player_inventory_tests::inventory_write_aborts lib daily resources
+sunrise-client game::native_player_level_tests::a_full_inventory_in_another_level_overflows_where_the_player_is lib daily resources
 sunrise-client game::native_player_persistent_data_tests::a_respawn_keeps_only_player_persisted lib daily resources
 sunrise-client game::native_player_persistent_data_tests::each_persistent_data_refusal_has_its_own_name_and_writes_nothing lib daily resources
 sunrise-client game::native_player_persistent_data_tests::persistent_data_is_kept_in_the_players_record lib daily resources
