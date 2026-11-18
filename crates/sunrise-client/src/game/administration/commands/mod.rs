@@ -1288,11 +1288,17 @@ impl Game<'_> {
                 None => Some(self.level.ensure_player_uuid()),
             };
             self.for_player(t, |g| {
+                // An acting player in another level than the command's (`execute in`) gets
+                // what does not fit dropped, and the trigger's rewards, in their own.
+                let theirs = conn
+                    .and_then(|conn| g.command_guest(conn))
+                    .map(|guest| Dim::from_id(&guest.dimension));
+                let back = theirs.and_then(|dim| g.enter_command_level(dim));
                 let mut remaining = count;
                 while remaining > 0 {
                     let size = remaining.min(max_stack);
                     remaining -= size;
-                    g.give_acting_stack(
+                    let rest = g.give_acting_stack(
                         ItemStack {
                             item: id.as_str().into(),
                             count: size as u32,
@@ -1301,11 +1307,15 @@ impl Game<'_> {
                         },
                         uuid,
                     );
+                    debug_assert!(rest.is_none(), "the player's own level is in place");
                 }
                 // containerMenu.broadcastChanges: InventoryChangeTrigger
                 // (and its announcement) comes before the command's message.
                 if g.player.is_some() {
                     g.check_inventory_trigger();
+                }
+                if let Some(back) = back {
+                    g.enter_command_level(back);
                 }
             });
         }

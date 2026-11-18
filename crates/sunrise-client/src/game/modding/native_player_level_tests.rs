@@ -277,3 +277,46 @@ fn an_inventory_reward_for_a_player_in_another_level_waits_for_their_own_tick() 
         }
     });
 }
+
+/// `execute in the_nether run give @s` by an Overworld guest whose inventory is full: the
+/// diamond that doesn't fit lies in their own level, the Overworld, and nothing is in the
+/// Nether, which the command put in place.
+#[test]
+#[ignore = "daily"]
+fn give_to_oneself_under_execute_in_another_level_drops_in_the_players_level() {
+    use crate::game::lan_actions::GuestCommand;
+    with_guests(|game| {
+        game.build_registries();
+        game.level.player_uuid = Some(playerdata::uuid_ints(12));
+        game.enter_level(Dim::Nether).unwrap();
+        game.enter_level(Dim::Overworld).unwrap();
+        game.lan
+            .as_mut()
+            .unwrap()
+            .hub
+            .update_guest(13, |g| {
+                g.inventory
+                    .fill(Some(ItemStack::new("minecraft:stone", 64)))
+            })
+            .unwrap();
+        let before = dropped(game);
+        let told = game.run_guest_command_told(GuestCommand {
+            conn: 13,
+            command: "execute in minecraft:the_nether run give @s minecraft:diamond".into(),
+            permission: 4,
+            integrated: true,
+            quiet: false,
+        });
+        assert!(
+            told.as_ref().is_some_and(|(ok, _)| *ok),
+            "{:?}",
+            told.map(|t| t.1.iter().map(|l| l.plain()).collect::<Vec<_>>())
+        );
+        assert_eq!(game.dim, Dim::Overworld, "the command's own level is back");
+        assert_eq!(diamonds(game, 13), 0);
+        assert_eq!(dropped(game), [before[0] + 1, before[1]]);
+        let lying = game.dropped.iter().next().unwrap();
+        assert_eq!(&*lying.stack.item, "minecraft:diamond");
+        assert!((lying.position.x - 3.0).abs() < 3.0 && (lying.position.z - 5.0).abs() < 3.0);
+    });
+}
