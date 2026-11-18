@@ -36,6 +36,7 @@ pub mod registry_rustc;
 pub mod rust;
 mod slots;
 
+pub use mixins_patch::MixinsIdentity;
 pub use prebuilt::{Refusal, compiling};
 pub use registry_inventory::Inventory as RegistryInventory;
 
@@ -65,8 +66,7 @@ pub const CLIENT: &str = if cfg!(windows) {
     "sunrise-client"
 };
 
-/// horizon-mixins, for bundles that don't name the revision they were tested with.
-const MIXINS_GIT: &str = "https://github.com/horizon-rust/horizon-mixins";
+/// The horizon-mixins revision this tool ships with.
 pub const MIXINS_REV: &str = sunrise_mod_package::mixins_tool::REV;
 
 /// `native-build --mixins-from-source`: this process builds the horizon-mixins tool from its
@@ -193,10 +193,12 @@ impl Bundle {
 
     /// Whether horizon-mixins reads source to transform the game.
     pub fn needs_mixins(&self) -> bool {
-        !self.native().mixin.is_empty()
-            || !self.native().module.is_empty()
-            || !self.native().bridge.is_empty()
-            || !self.native().state.is_empty()
+        self.manifest.native.as_ref().is_some_and(|native| {
+            !native.mixin.is_empty()
+                || !native.module.is_empty()
+                || !native.bridge.is_empty()
+                || !native.state.is_empty()
+        })
     }
 }
 
@@ -546,29 +548,6 @@ fn diagnostic(text: &str) -> Option<String> {
         line += &format!(" ({file})");
     }
     Some(line)
-}
-
-/// horizon-mixins at commit `rev`, built once with the launcher's cargo (`cargo install --locked`);
-/// `on_build` hears only when it is built.
-pub fn tool(rust: &dyn Toolchain, rev: &str, on_build: &impl Fn()) -> Result<PathBuf, String> {
-    let dir = root().join("tools").join(&rev[..12]);
-    let bin = dir
-        .join("bin")
-        .join(format!("horizon-mixins{}", std::env::consts::EXE_SUFFIX));
-    if !bin.is_file() {
-        on_build();
-        let mut cmd = rust.command(&rust.cargo());
-        rust::low_priority(&mut cmd);
-        rust.configure_cargo(&mut cmd);
-        cmd.args([
-            "install", "--locked", "--git", MIXINS_GIT, "--rev", rev, "--root",
-        ])
-        .arg(&dir)
-        .arg("horizon-mixins-cli");
-        run(cmd, "Building horizon-mixins", |_| {})?;
-    }
-    host::mark_used(&dir)?;
-    Ok(bin)
 }
 
 /// External mixins traverse ordinary module declarations, not generated OUT_DIR includes.

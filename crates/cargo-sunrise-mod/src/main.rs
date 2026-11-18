@@ -180,7 +180,7 @@ fn main() -> ExitCode {
 }
 
 /// `build [--wasm] [--update-lock]`: the package in `target/sunrise-mod/`, after a wasm mod's
-/// `mod.wasm` (with `--wasm`) and followed by a native mod's own compile. Also the first step of `publish`.
+/// `mod.wasm` (with `--wasm`) or a native mod's compile. Also the first step of `publish`.
 fn build_command(
     entry: mod_surface::child::ChildEntry,
     args: &[String],
@@ -199,24 +199,21 @@ fn build_command(
                 .collect::<Vec<_>>(),
             api.as_ref(),
         )?;
-        let path = build(entry)?;
-        println!("Built {}", path.display());
-        return Ok(path);
-    }
-    if code_project(root) {
+    } else if code_project(root) {
         fetched(root)?;
     }
-    let path = build(entry)?;
+    let package = Package::read(root)?;
+    // The package carries the mixins revision and Cargo.lock from the completed build.
+    let built = package
+        .is_native()
+        .then(|| dev::build(root, args.iter().any(|a| a == "--update-lock")))
+        .transpose()?;
+    let path = build(
+        entry,
+        &package,
+        built.as_ref().map(|built| built.mixins.as_str()),
+    )?;
     println!("Built {}", path.display());
-    if dev::is_native(root)? {
-        let lock = || std::fs::read(root.join("Cargo.lock")).ok();
-        let before = lock();
-        dev::build(root, args.iter().any(|a| a == "--update-lock"))?;
-        // The package carries the lock the build used: packed again when the build wrote one.
-        if lock() != before {
-            build(entry)?;
-        }
-    }
     Ok(path)
 }
 
@@ -523,18 +520,19 @@ fn new_code(
 /// the files in `assets/` and `data/`, and for a code mod its source and its uses table, scanned
 /// against the pinned build (none for a mod made for exactly one build, or built against the game
 /// checkout it lies in, which has no published surface to scan against).
-fn build(entry: mod_surface::child::ChildEntry) -> Result<PathBuf, String> {
+fn build(
+    entry: mod_surface::child::ChildEntry,
+    package: &Package,
+    mixins: Option<&str>,
+) -> Result<PathBuf, String> {
     let root = Path::new(".");
-    let package = Package::read(root)?;
-    let code = package.manifest.native.is_some() || package.manifest.wasm.is_some();
+    let code = package.is_native() || package.manifest.wasm.is_some();
     let mut api = None;
-    let mut mixins = None;
     let uses = if code && sdk_fetch::game_tree(root)?.is_none() {
         let sdk = sdk_fetch::ensure_sdk(root)?;
         let surface = uses_table::surface_of(&sdk)?;
         let scanned = uses_table::scan(entry, root, &surface)?;
         api = Some(surface);
-        mixins = Some(sdk.mixins.clone());
         match scanned {
             uses_table::Scanned::Uses(uses) => Some(uses.table(sdk.build).to_json().into_bytes()),
             uses_table::Scanned::Exact(_) => None,
@@ -554,7 +552,7 @@ fn build(entry: mod_surface::child::ChildEntry) -> Result<PathBuf, String> {
         &root.join("target/sunrise-mod"),
         uses.as_deref(),
         api.as_ref(),
-        mixins.as_deref(),
+        mixins,
     )
 }
 
@@ -562,9 +560,8 @@ fn build_in(root: &Path) -> Result<PathBuf, String> {
     pack_into(root, &root.join("target/sunrise-mod"), None, None, None)
 }
 
-/// The manifest text a package carries: the project's, with what the tool derives written in
-/// when the project leaves it out: `api`, `capabilities`, and a native mod's `mixins` (the
-/// revision its pinned SDK names, when one was fetched).
+/// The manifest text a package carries: the project's with derived `api` and `capabilities`
+/// defaults, and, for a native build, the mixins revision selected by that build.
 fn completed_manifest(text: &str, mixins: Option<&str>) -> Result<String, String> {
     let mut doc: toml_edit::DocumentMut = text.parse().map_err(|e| format!("{MANIFEST}: {e}"))?;
     let root = doc.as_table_mut();
@@ -581,8 +578,7 @@ fn completed_manifest(text: &str, mixins: Option<&str>) -> Result<String, String
     if let (Some(mixins), Some(native)) = (
         mixins,
         doc.get_mut("native").and_then(|n| n.as_table_like_mut()),
-    ) && !native.contains_key("mixins")
-    {
+    ) {
         native.insert("mixins", toml_edit::value(mixins));
     }
     Ok(doc.to_string())
@@ -599,8 +595,7 @@ fn pack_into(
     if package.manifest.native.is_some() || package.manifest.wasm.is_some() {
         layouts::build(root, api)?;
     }
-    let text =
-        std::fs::read_to_string(root.join(MANIFEST)).map_err(|e| format!("{MANIFEST}: {e}"))?;
+    let text = bounded::read(&root.join(MANIFEST), bounded::MAX_MANIFEST)?;
     let bytes = Package::pack_directory_with(root, uses, Some(completed_manifest(&text, mixins)?))?;
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let path = dir.join(format!("{}.smod", package.manifest.id));
@@ -702,22 +697,13 @@ mod tests {
     use super::*;
 
     const OLD_BUILD: &str = "0123456789abcdef0123456789abcdef01234567";
-    const OLD_MIXINS: &str = "fedcba9876543210fedcba9876543210fedcba98";
-    const NEW_MIXINS: &str = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c";
 
-    /// A build's SDK as its `sdk.json` names it, without a download: the tool of `OLD_BUILD` is
-    /// `OLD_MIXINS` and every other build's is `NEW_MIXINS`, never the one this binary was built with.
+    /// A build's SDK as its `sdk.json` names it, without a download.
     fn offline(project: &Path, build: &str) -> Result<sdk_fetch::PinnedSdk, String> {
         Ok(sdk_fetch::PinnedSdk {
             build: build.to_owned(),
             name: build.to_owned(),
             dir: project.join(sdk_fetch::DIR),
-            mixins: if build == OLD_BUILD {
-                OLD_MIXINS
-            } else {
-                NEW_MIXINS
-            }
-            .to_owned(),
             surface: project.join(sdk_fetch::DIR).join("surface.json"),
         })
     }
@@ -908,6 +894,41 @@ mod tests {
     }
 
     #[test]
+    fn a_supported_explicit_mixins_pin_is_in_the_package_facts() {
+        use sunrise_mod_package::{mixins_tool, sdk::Mixins};
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("example");
+        new(&code_args(&root, "native"), &offline).unwrap();
+        let manifest = root.join(MANIFEST);
+        let text = std::fs::read_to_string(&manifest).unwrap();
+        let rev = mixins_tool::REV;
+        std::fs::write(
+            manifest,
+            format!("{text}\nmixins = '{rev}'\n[[native.mixin]]\nid='tick'\nkind='HEAD'\ntarget='game::tick'\nhelper='src/tick.rs'\n"),
+        )
+        .unwrap();
+        std::fs::write(root.join("src/tick.rs"), "pub fn tick() {}\n").unwrap();
+        let bundle = sunrise_native_build::bundle_in(&root).unwrap().unwrap();
+        assert!(bundle.needs_mixins());
+        let sdk = Mixins {
+            rev: rev.into(),
+            patch: mixins_tool::patch_hash(),
+        };
+        let identity =
+            sunrise_native_build::MixinsIdentity::resolve([&bundle], Some(&sdk)).unwrap();
+        let smod = pack_into(
+            &root,
+            &dir.path().join("out"),
+            None,
+            None,
+            Some(identity.revision()),
+        )
+        .unwrap();
+        let packed = sunrise_mod_package::index::native::Bundle::read(&smod).unwrap();
+        assert_eq!(packed.facts().api, format!("native-1/{OLD_BUILD}/{rev}"));
+    }
+
+    #[test]
     fn the_native_template_packs_into_an_smod_the_registry_accepts() {
         let dir = std::env::temp_dir().join(format!("sunrise-mod-native-{}", std::process::id()));
         let path = dir.join("machine-mod");
@@ -943,7 +964,9 @@ mod tests {
             "{api}"
         );
         assert_eq!(sdk_fetch::pin(&path).unwrap(), commit);
-        let smod = build_in(&path).unwrap();
+        // No rows: the package still carries the SDK's revision for readers that require it.
+        let rev = "fedcba9876543210fedcba9876543210fedcba98";
+        let smod = pack_into(&path, &path.join("target"), None, None, Some(rev)).unwrap();
         // The package carries what the tool derives, which the project did not write.
         let packed = Package::entry(&smod, MANIFEST, 1 << 20).unwrap().unwrap();
         let packed = String::from_utf8(packed).unwrap();
@@ -954,6 +977,7 @@ mod tests {
         );
         let bundle = sunrise_mod_package::index::native::Bundle::read(&smod).unwrap();
         assert_eq!(bundle.manifest.id, "machine_mod");
+        assert_eq!(bundle.facts().api, format!("native-1/{commit}/{rev}"));
         let names: Vec<_> = bundle.files.keys().map(String::as_str).collect();
         assert_eq!(names, ["Cargo.toml", "src/lib.rs", "sunrise-mod.toml"]);
         assert!(path.join("sunrise-mod.toml").is_file());

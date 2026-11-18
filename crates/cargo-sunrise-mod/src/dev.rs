@@ -184,6 +184,8 @@ pub(crate) struct Built {
     binary: PathBuf,
     libraries: Vec<PathBuf>,
     records: Vec<Library>,
+    /// Revision for the package manifest: checked for mixins, inherited when they are unused.
+    pub(crate) mixins: String,
 }
 
 /// Turns the build's event lines into the lines a developer reads, and keeps its result.
@@ -233,6 +235,16 @@ pub(crate) fn build(project: &Path, update_lock: bool) -> Result<Built, String> 
         &build,
     )
     .map_err(|e| format!("sdk-{build}: {e}"))?;
+    let mixins = if bundle.needs_mixins() {
+        sunrise_native_build::MixinsIdentity::resolve([&bundle], Some(&index.mixins))?.revision()
+    } else {
+        bundle
+            .native()
+            .mixins
+            .as_deref()
+            .unwrap_or(&index.mixins.rev)
+    }
+    .to_owned();
     let rust = toolchain(&index.toolchain.rust, target, cache.join("cargo-home"))?;
     let package =
         sdk_fetch::fetch_slices(&base, &index, target, &sdk_dir, &|line| println!("{line}"))?;
@@ -309,6 +321,7 @@ pub(crate) fn build(project: &Path, update_lock: bool) -> Result<Built, String> 
         binary,
         libraries,
         records,
+        mixins,
     })
 }
 

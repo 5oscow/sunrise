@@ -1,7 +1,7 @@
 //! Internals discovery: which game internals a native mod names, found by checking it against the pinned game's source with the deprecation lint forced (`native-discover`).
 use crate::host::trf;
 use crate::rust::Toolchain;
-use crate::{Bundle, api, dependencies, internals};
+use crate::{MixinsIdentity, api, dependencies, internals, mixins_patch};
 use serde::Deserialize;
 use std::{
     collections::BTreeSet,
@@ -12,6 +12,7 @@ use std::{
 };
 use sunrise_mod_package::build_data;
 use sunrise_mod_package::internals::{self as catalog, ListedInternal};
+use sunrise_mod_package::sdk::Mixins;
 
 #[derive(Debug)]
 pub enum Error {
@@ -38,14 +39,25 @@ impl std::fmt::Display for Error {
 impl std::error::Error for Error {}
 
 /// The internals the mod in `folder` names, each as the pinned game's catalog lists it.
-pub fn internals(rust: &dyn Toolchain, folder: &Path) -> Result<Vec<ListedInternal>, Error> {
-    let game = catalog_for_mod(rust, folder, &crate::root().join("internals-sync"))?;
+/// `sdk` is only needed when the executing tool came from outside that SDK.
+pub fn internals(
+    rust: &dyn Toolchain,
+    folder: &Path,
+    sdk: Option<&Mixins>,
+) -> Result<Vec<ListedInternal>, Error> {
+    let game = catalog_for_mod(rust, folder, sdk)?;
     discover_catalog(rust, folder, &game)
 }
 
 /// The pinned game's build data (`internals.json`, `points.json`) with only this mod's modules applied, copied into `output`, which must not exist yet.
-pub fn catalog(rust: &dyn Toolchain, folder: &Path, output: &Path) -> Result<PathBuf, Error> {
-    let game = catalog_for_mod(rust, folder, &crate::root().join("internals-sync"))?;
+/// `sdk` is only needed when the executing tool came from outside that SDK.
+pub fn catalog(
+    rust: &dyn Toolchain,
+    folder: &Path,
+    sdk: Option<&Mixins>,
+    output: &Path,
+) -> Result<PathBuf, Error> {
+    let game = catalog_for_mod(rust, folder, sdk)?;
     fs::create_dir(output).map_err(|e| format!("{}: {e}", output.display()))?;
     for name in [build_data::INTERNALS, build_data::POINTS] {
         fs::copy(game.join(name), output.join(name)).map_err(|e| e.to_string())?;
@@ -57,14 +69,15 @@ pub fn catalog(rust: &dyn Toolchain, folder: &Path, output: &Path) -> Result<Pat
 fn catalog_for_mod(
     rust: &dyn Toolchain,
     folder: &Path,
-    cache_root: &Path,
+    sdk: Option<&Mixins>,
 ) -> Result<PathBuf, Error> {
     catalog_for_mod_with(
         folder,
-        cache_root,
+        &crate::root().join("internals-sync"),
+        sdk,
         crate::source,
-        |bundle, prepared, input, fresh| {
-            let tool = crate::tool(rust, bundle.native().mixins_or(crate::MIXINS_REV), &|| {})?;
+        |identity, prepared, input, fresh| {
+            let tool = mixins_patch::tool(rust, identity)?;
             crate::run(
                 crate::apply(rust, &tool, prepared, input, fresh),
                 "horizon-mixins",
@@ -155,12 +168,16 @@ fn discover_catalog(
 fn catalog_for_mod_with(
     folder: &Path,
     cache_root: &Path,
+    sdk: Option<&Mixins>,
     source: impl FnOnce(&str) -> Result<PathBuf, String>,
-    apply: impl FnOnce(&Bundle, &Path, &Path, &Path) -> Result<(), String>,
+    apply: impl FnOnce(&MixinsIdentity, &Path, &Path, &Path) -> Result<(), String>,
 ) -> Result<PathBuf, Error> {
-    let bundle = crate::bundle_in(folder)?.ok_or_else(|| "not a native mod project".to_owned())?;
+    let bundle = crate::bundle_in(folder)?
+        .filter(|bundle| bundle.manifest.native.is_some())
+        .ok_or_else(|| "not a native mod project".to_owned())?;
     let native = bundle.native();
-    let cache = if bundle.needs_mixins() {
+    let needs_mixins = bundle.needs_mixins();
+    let cache = if needs_mixins {
         cache_root
             .join(&native.sunrise)
             .join("modules")
@@ -168,14 +185,11 @@ fn catalog_for_mod_with(
     } else {
         cache_root.join(&native.sunrise)
     };
-    let game = cache.join(if bundle.needs_mixins() {
-        "module-game"
-    } else {
-        "game"
-    });
-    if !bundle.needs_mixins() && game.join(".discovery-ready").is_file() {
+    let game = cache.join(if needs_mixins { "module-game" } else { "game" });
+    if !needs_mixins && game.join(".discovery-ready").is_file() {
         return Ok(game);
     }
+    let identity = MixinsIdentity::resolve([&bundle], sdk)?;
     let source = source(&native.sunrise).map_err(|reason| Error::SourceUnavailable {
         revision: native.sunrise.clone(),
         reason,
@@ -184,12 +198,12 @@ fn catalog_for_mod_with(
     if fresh.exists() {
         fs::remove_dir_all(&fresh).map_err(|e| e.to_string())?;
     }
-    if bundle.needs_mixins() {
+    if needs_mixins {
         let input = cache.join("mixins.incoming");
         crate::stage_mixins(std::slice::from_ref(&bundle), &input)?;
         let prepared = cache.join("mixins.source");
         crate::prepare_mixins_source(&source, &prepared)?;
-        apply(&bundle, &prepared, &input, &fresh)
+        apply(&identity, &prepared, &input, &fresh)
             .map_err(|error| format!("{}: {error}", bundle.manifest.id))?;
     } else {
         crate::sync(&source, &fresh)?;

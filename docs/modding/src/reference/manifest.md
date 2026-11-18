@@ -54,7 +54,7 @@ naming the nearest valid key when one is close. Native mods may declare top-leve
 | --- | --- | --- |
 | `game` | string | not empty, the Minecraft version (`"26.3"`) |
 | `sunrise` | string | the exact Sunrise commit, 40 lowercase hex characters |
-| `mixins` | string, optional | the exact horizon-mixins commit, 40 lowercase hex characters; absent, the one the pinned SDK names (`sdk.json`'s `mixins`), which `build` writes into the package |
+| `mixins` | string, optional | a horizon-mixins commit, 40 lowercase hex characters; when mixins are used it must match the pinned SDK. If omitted, `build` writes the SDK's revision into the package. See [The pin](sdk/03-in-a-project.md#the-pin). |
 | `module` | array of tables | optional support modules, written as `[[native.module]]` |
 
 API points use top-level declarations.

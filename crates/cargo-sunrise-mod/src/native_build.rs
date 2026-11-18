@@ -132,11 +132,11 @@ fn discovered(plan: &contract::DiscoverPlan) -> Result<serde_json::Value, (&'sta
     };
     match &plan.catalog {
         Some(output) => {
-            sunrise_native_build::discover::catalog(&plan.toolchain, &plan.mods, output)
+            sunrise_native_build::discover::catalog(&plan.toolchain, &plan.mods, None, output)
                 .map(|path| serde_json::json!({"catalog": path}))
                 .map_err(kind)
         }
-        None => sunrise_native_build::discover::internals(&plan.toolchain, &plan.mods)
+        None => sunrise_native_build::discover::internals(&plan.toolchain, &plan.mods, None)
             .map(|internals| serde_json::json!({"internals": internals}))
             .map_err(kind),
     }

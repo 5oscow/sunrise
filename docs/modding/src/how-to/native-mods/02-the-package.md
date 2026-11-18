@@ -34,8 +34,10 @@ sunrise = "<exact 40-character lowercase Sunrise commit>"
 Never write the commit by hand. `cargo sunrise-mod new --template native` fills it in from the SDK of the
 build it pins, and `cargo sunrise-mod update` moves it when you pin a newer build ([Install the mod
 tool](../../start/install-tool.md), [In a mod project](../../reference/sdk/03-in-a-project.md#the-pin)).
-The horizon-mixins commit is the one the pinned SDK names; a mod with `[[native.mixin]]` rows may pin another
-with `mixins = "<exact 40-character lowercase horizon-mixins commit>"` under `[native]`. Unknown fields are refused. `icon.png` has no manifest key: when present it must be a valid,
+Leave `[native] mixins` out to use the horizon-mixins revision in the pinned SDK. For a mod that uses mixins,
+an explicit `mixins = "<exact 40-character lowercase horizon-mixins commit>"` must match that revision; it
+does not override it. See [The pin](../../reference/sdk/03-in-a-project.md#the-pin).
+Unknown fields are refused. `icon.png` has no manifest key: when present it must be a valid,
 nonzero square PNG, at most 512 × 512 pixels and 256 KiB encoded. It is optional for both content
 and code mods; the scaffold does not create one.
 
