@@ -22,7 +22,7 @@ pub struct ConfigurationRequest {
 /// Process-unique identities keep a capability stale even after a server restarts.
 pub(super) fn next_connection() -> Option<ConfigurationConnection> {
     static NEXT: AtomicU64 = AtomicU64::new(1);
-    NEXT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+    NEXT.try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
         .ok()
         .map(mod_api::__private::configuration_connection)
 }

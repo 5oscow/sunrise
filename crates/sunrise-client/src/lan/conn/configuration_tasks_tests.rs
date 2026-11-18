@@ -146,6 +146,7 @@ default_areas!(
     ConfigServerHost,
     DisplaysServerHost,
     EntitiesServerHost,
+    FluidsServerHost,
     ItemsServerHost,
     MenusServerHost,
     MerchantsServerHost,
