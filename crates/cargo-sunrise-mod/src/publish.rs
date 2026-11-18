@@ -4,12 +4,14 @@
 //!
 //! The output holds the entry, a new project's icon if supplied, the new package under its release name
 //! and SHA-256, and `PULL_REQUEST.md`. It is not a complete registry checkout.
-use crate::bounded::{self, ReadError};
+use crate::{
+    bounded::{self, Symlinks},
+    internals::atomic_write,
+};
 use std::{
     fs,
-    io::{ErrorKind, Read, Write},
+    io::ErrorKind,
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
 };
 use sunrise_mod_package::{
     Manifest,
@@ -89,38 +91,6 @@ fn parse(args: &[String]) -> Result<Options, String> {
     Ok(o)
 }
 
-/// Binary inputs, including the just-built archive: refuse special files and read at most one
-/// byte past the limit. Nonblocking open also covers a regular file swapped for a FIFO.
-fn read_binary(path: &Path, limit: u64) -> Result<Vec<u8>, ReadError> {
-    let io_error = |e| ReadError::Io(path.to_owned(), e);
-    if !fs::symlink_metadata(path).map_err(io_error)?.is_file() {
-        return Err(ReadError::NotRegular(path.to_owned()));
-    }
-    let mut options = fs::OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW);
-    }
-    let file = options.open(path).map_err(io_error)?;
-    let metadata = file.metadata().map_err(io_error)?;
-    if !metadata.is_file() {
-        return Err(ReadError::NotRegular(path.to_owned()));
-    }
-    if metadata.len() > limit {
-        return Err(ReadError::TooLarge(path.to_owned(), limit));
-    }
-    let mut bytes = Vec::new();
-    file.take(limit + 1)
-        .read_to_end(&mut bytes)
-        .map_err(io_error)?;
-    if bytes.len() as u64 > limit {
-        return Err(ReadError::TooLarge(path.to_owned(), limit));
-    }
-    Ok(bytes)
-}
-
 /// A submission icon must fit both the package and the registry page.
 const PUBLISH_ICON_SIDE: std::ops::RangeInclusive<u32> = *ICON_SIDE.start()
     ..=if MAX_DIMENSION < *ICON_SIDE.end() {
@@ -130,7 +100,7 @@ const PUBLISH_ICON_SIDE: std::ops::RangeInclusive<u32> = *ICON_SIDE.start()
     };
 
 fn read_icon(path: &Path) -> Result<Option<Vec<u8>>, String> {
-    let bytes = match read_binary(path, MAX_ICON as u64) {
+    let bytes = match bounded::read_bytes(path, MAX_ICON as u64, Symlinks::Refuse) {
         Ok(bytes) => bytes,
         Err(e) if e.is_not_found() => return Ok(None),
         Err(e) => {
@@ -242,37 +212,6 @@ fn draft(
         key: o.key.clone(),
         versions: vec![version],
     }
-}
-
-/// Replace a staged file without following links at the destination or temporary name.
-fn write_output(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(0);
-    let io_error = |e| format!("{}: {e}; choose a writable --out folder", path.display());
-    for _ in 0..16 {
-        let n = NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed);
-        let temporary = path.with_file_name(format!(".publish-{}-{n}.tmp", std::process::id()));
-        let mut file = match fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temporary)
-        {
-            Ok(file) => file,
-            Err(e) if e.kind() == ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(io_error(e)),
-        };
-        let written = file.write_all(bytes);
-        drop(file);
-        return written
-            .and_then(|()| fs::rename(&temporary, path))
-            .map_err(|e| {
-                let _ = fs::remove_file(&temporary);
-                io_error(e)
-            });
-    }
-    Err(format!(
-        "{}: no unused temporary name; choose a fresh --out folder",
-        path.display()
-    ))
 }
 
 fn pull_request(entry: &Entry, v: &EntryVersion, size: u64, first: bool) -> (String, String) {
@@ -449,7 +388,7 @@ pub fn run(entry_point: mod_surface::child::ChildEntry, args: &[String]) -> Resu
         let args: Vec<String> = o.wasm.then(|| "--wasm".to_owned()).into_iter().collect();
         crate::build_command(entry_point, &args)?
     };
-    let package_bytes = read_binary(&package, index::MAX_FILE).map_err(|e| {
+    let package_bytes = bounded::read_bytes(&package, index::MAX_FILE, Symlinks::Refuse).map_err(|e| {
         format!("{e}: build a regular .smod within the registry's size limit with `cargo sunrise-mod build` and sign it again if needed")
     })?;
     let report = crate::check::check(
@@ -514,13 +453,16 @@ pub fn run(entry_point: mod_surface::child::ChildEntry, args: &[String]) -> Resu
         fs::create_dir_all(dir)
             .map_err(|e| format!("{}: {e}; choose a writable --out folder", dir.display()))?;
     }
-    write_output(&mods.join(format!("{id}.toml")), entry_text.as_bytes())?;
-    write_output(&files.join(&version.sha256), &package_bytes)?;
-    write_output(&out.join(&file), &package_bytes)?;
+    let write = |path: PathBuf, bytes: &[u8]| {
+        atomic_write(&path, bytes).map_err(|e| format!("{e}; choose a writable --out folder"))
+    };
+    write(mods.join(format!("{id}.toml")), entry_text.as_bytes())?;
+    write(files.join(&version.sha256), &package_bytes)?;
+    write(out.join(&file), &package_bytes)?;
     if let (Some(dir), Some(bytes)) = (&icons, &icon) {
-        write_output(&dir.join(format!("{id}.png")), bytes)?;
+        write(dir.join(format!("{id}.png")), bytes)?;
     }
-    write_output(&out.join("PULL_REQUEST.md"), body.as_bytes())?;
+    write(out.join("PULL_REQUEST.md"), body.as_bytes())?;
 
     let mut remaining = entry.check_fields();
     remaining.extend(
@@ -657,14 +599,14 @@ mod tests {
         }
         fs::write(&icon, vec![0; MAX_ICON + 1]).unwrap();
         assert!(matches!(
-            read_binary(&icon, MAX_ICON as u64),
-            Err(ReadError::TooLarge(..))
+            bounded::read_bytes(&icon, MAX_ICON as u64, Symlinks::Refuse),
+            Err(bounded::ReadError::TooLarge(..))
         ));
         fs::remove_file(&icon).unwrap();
         fs::create_dir(&icon).unwrap();
         assert!(matches!(
-            read_binary(&icon, MAX_ICON as u64),
-            Err(ReadError::NotRegular(..))
+            bounded::read_bytes(&icon, MAX_ICON as u64, Symlinks::Refuse),
+            Err(bounded::ReadError::NotRegular(..))
         ));
     }
 

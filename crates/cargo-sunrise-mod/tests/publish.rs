@@ -242,7 +242,7 @@ fn signed_publish_stages_the_exact_prebuilt_package_with_the_checkout_key() {
 #[test]
 #[ignore = "daily"]
 fn output_replaces_file_symlinks_but_refuses_linked_directories() {
-    use std::os::unix::fs::symlink;
+    use std::os::unix::fs::{PermissionsExt, symlink};
     let work = tempfile::tempdir().unwrap();
     let root = work.path();
     manifest(root, "1");
@@ -250,6 +250,7 @@ fn output_replaces_file_symlinks_but_refuses_linked_directories() {
     fs::create_dir(&outside).unwrap();
     let sentinel = outside.join("coords_hud.toml");
     fs::write(&sentinel, b"untouched").unwrap();
+    fs::set_permissions(&sentinel, fs::Permissions::from_mode(0o700)).unwrap();
     fs::create_dir(root.join("out")).unwrap();
     fs::write(root.join("out/PULL_REQUEST.md"), b"old request").unwrap();
     symlink(&outside, root.join("out/mods")).unwrap();
@@ -269,6 +270,12 @@ fn output_replaces_file_symlinks_but_refuses_linked_directories() {
     let dest = root.join("out").join(ENTRY);
     symlink(&sentinel, &dest).unwrap();
     success(run(root, &args));
-    assert!(fs::symlink_metadata(dest).unwrap().is_file());
+    let metadata = fs::symlink_metadata(dest).unwrap();
+    assert!(metadata.is_file());
+    assert_eq!(metadata.permissions().mode() & 0o111, 0);
+    assert_eq!(
+        fs::metadata(&sentinel).unwrap().permissions().mode() & 0o777,
+        0o700
+    );
     assert_eq!(fs::read(&sentinel).unwrap(), b"untouched");
 }
