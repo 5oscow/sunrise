@@ -178,7 +178,7 @@ fn lifecycle_and_cancellation() {
 
 #[test]
 fn scale_change_keeps_a_stationary_pointer_on_the_same_click_target() {
-    let mut game = Game { drag_button: None, physical_buttons: HashSet::from([0]),
+    let mut game = Game { container_buttons: HashSet::new(), drag_button: None, physical_buttons: HashSet::from([0]),
         physical_keys: HashSet::new(), cursor: (0.0, 0.0), window_cursor: None,
         framebuffer: [640, 480], backing_scale: 1.0, gui_scale: 2, modifiers: ModifiersState(5),
         synthetic: false, open: true, cancel: false, handled: 0, posts: 0,
