@@ -28,6 +28,8 @@ jobs:
   fetch:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # The `release` environment deploys from main only, so GitHub enforces that too; this job binds none of its secrets.
+    environment: release
     outputs:
       dry_run: ${{ steps.mode.outputs.dry_run }}
       release_id: ${{ steps.draft.outputs.release_id }}
@@ -192,6 +194,8 @@ jobs:
     if: needs.fetch.outputs.dry_run == 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Main only, as fetch; it binds none of the environment's secrets.
+    environment: release
     permissions:
       contents: write
     steps:
