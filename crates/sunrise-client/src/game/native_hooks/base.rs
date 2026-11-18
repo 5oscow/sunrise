@@ -364,8 +364,9 @@ impl GameLevel<'_> {
         ground: BlockStateId,
         ground_pos: BlockPos,
         may: &mut Option<bool>,
+        inert: &mut bool,
     ) {
-        self.fire_may_place_on(dimension, state, ground, ground_pos, may);
+        self.fire_may_place_on(dimension, state, ground, ground_pos, may, inert);
     }
 
     /// An authoritative server's `ServerLevel.tickBlock` is about to run a
@@ -4844,8 +4845,9 @@ impl LevelView<'_> {
         pos: BlockPos,
         state: BlockStateId,
         survives: &mut Option<bool>,
+        inert: &mut bool,
     ) {
-        self.fire_can_survive(dimension, pos, state, survives);
+        self.fire_can_survive(dimension, pos, state, survives, inert);
     }
 
     /// A block is about to take the state it is placed in
