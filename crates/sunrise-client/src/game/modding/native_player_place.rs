@@ -1,8 +1,11 @@
-//! A block a mod writes in a player's turn: `level_set_block` with a placement's flags, then `setPlacedBy`.
+//! Placement writes and the `Block.setPlacedBy` step for code that chooses the block state.
 use super::{Game, native_server::PlayerRead};
-use mod_api::{BlockUpdateFlags, LevelRef, PlayerRef, PlayerWorldRefusal as Refusal};
+use mod_api::{
+    BlockUpdateFlags, LevelRef, LevelWriteError, PlayerRef, PlayerWorldRefusal as Refusal,
+};
+use sunrise_client::{containers::BlockEntity, items::ItemStack};
 use sunrise_core::position::BlockPos;
-use sunrise_world::registry::BlockStateId;
+use sunrise_world::{level::classes::Class, registry::BlockStateId};
 
 /// A placement's write flags: neighbours and clients told, shapes updated unless known.
 fn placement_flags(update_neighbour_shapes: bool) -> BlockUpdateFlags {
@@ -68,7 +71,8 @@ impl Game<'_> {
             Ok(false) => return Err(Refusal::Unchanged),
             Err(_) => return Err(Refusal::Stale),
         }
-        let ran = self.native_as_player_handle(player, |game| game.set_placed_by(pos, state));
+        let ran =
+            self.native_as_player_handle(player, |game| game.set_placed_by(pos, Some(state), None));
         if ran { Ok(()) } else { Err(Refusal::Stale) }
     }
     /// A chosen state written as a placement writes it, then `Block.setPlacedBy`, with no
@@ -80,18 +84,55 @@ impl Game<'_> {
         pos: [i32; 3],
         state: BlockStateId,
         update_neighbour_shapes: bool,
-    ) -> Result<bool, mod_api::LevelWriteError> {
+    ) -> Result<bool, LevelWriteError> {
         let flags = placement_flags(update_neighbour_shapes);
         if !self.level_set_block(level, pos, state, flags)? {
             return Ok(false);
         }
-        self.set_placed_by(pos, state);
+        self.set_placed_by(pos, Some(state), None);
         Ok(true)
     }
-    /// `Block.setPlacedBy` of the block that now stands at `pos`, when it is `state`'s.
-    fn set_placed_by(&mut self, pos: [i32; 3], state: BlockStateId) {
-        let at = BlockPos::new(pos[0], pos[1], pos[2]);
-        self.with_level(|b, level, ticks| b.set_placed_by_state(level, ticks, at, state));
+    /// `Block.setPlacedBy` of a block already standing at `pos`, with no placer. Its stack
+    /// is consulted, not placed: the caller has already loaded any block entity data.
+    pub(super) fn level_set_placed_by(
+        &mut self,
+        level: LevelRef,
+        pos: [i32; 3],
+        stack: Option<&ItemStack>,
+    ) -> Result<bool, LevelWriteError> {
+        if !self.native_level_write_position(level, pos)? {
+            return Ok(false);
+        }
+        self.set_placed_by(pos, None, stack);
+        Ok(true)
+    }
+    /// `Block.setPlacedBy` of the block standing at `pos`. If part of a write-and-place
+    /// operation, skip it when a neighbour update replaced the block just written.
+    fn set_placed_by(
+        &mut self,
+        pos: [i32; 3],
+        expected: Option<BlockStateId>,
+        stack: Option<&ItemStack>,
+    ) {
+        let [x, y, z] = pos;
+        let placed = self.world.block(x, y, z);
+        if expected.is_some_and(|state| {
+            let b = self.res.behaviours();
+            b.block(placed) != b.block(state)
+        }) {
+            return;
+        }
+        let at = BlockPos::new(x, y, z);
+        self.with_level(|b, level, ticks| b.set_placed_by_state(level, ticks, at, placed));
+        let key = (x, y, z);
+        if let Some(BlockEntity::CommandBlock(_)) = self.world.block_entities.get(&key) {
+            self.command_block_placed(key, stack);
+        } else if let Some(stack) = stack
+            && self.res.behaviours().data(placed).is(Class::Jukebox)
+        {
+            self.jukebox_placed(pos, stack);
+        }
         let _ = self.process_level_events();
+        let _ = self.check_wither_spawn(pos);
     }
 }

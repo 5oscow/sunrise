@@ -1822,10 +1822,8 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
 }
 
 impl Behaviours {
-    /// The `Block.setPlacedBy` step of a placement, for a block already written at `pos` (a bed's
-    /// head, a door's upper half), when the block standing there is `state`'s block, except a
-    /// dried ghast's, which only plays its place sound. Nothing is written otherwise; the
-    /// write itself is the caller's (`Level.setBlock`).
+    /// `Block.setPlacedBy` for the state standing at `pos` (a bed's head, a door's upper half).
+    /// The caller has already written the block itself (`Level.setBlock`).
     pub fn set_placed_by_state<L: LevelAccess + ?Sized>(
         &self,
         level: &mut L,
@@ -1833,11 +1831,7 @@ impl Behaviours {
         pos: BlockPos,
         state: BlockStateId,
     ) {
-        let mut sim = self.sim(level, ticks);
-        let placed = sim.state(pos);
-        if self.block(placed) == self.block(state) && !self.data(placed).is(Class::DriedGhast) {
-            sim.set_placed_by(pos, placed);
-        }
+        self.sim(level, ticks).set_placed_by(pos, state);
     }
     /// `BlockItem.place` for the item in `ctx`: resolves the replaced
     /// position, computes `getStateForPlacement`, checks survival and entity

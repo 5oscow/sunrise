@@ -150,8 +150,8 @@ pub trait PlayerInteractionBackendMut {
     /// the player's turn (a bed places its head, a door its upper half). Nothing else of vanilla's `BlockItem.place`
     /// or `useOn` runs: no check that the block may be placed there (survival, entity
     /// obstruction, build permission, spawn protection), no `placed_block` advancement trigger or
-    /// statistic, no place sound, no game event, no item used or consumed, and `setPlacedBy` is
-    /// not given the player as placer. The player is only whose turn `setPlacedBy` runs in, so it is
+    /// statistic, item placement sound, placement game event, or item use or consumption.
+    /// `setPlacedBy` is not given the player as placer. The player is only whose turn `setPlacedBy` runs in, so it is
     /// not "as player" in the sense of a use-on. The state is written as given. Refuses, writing
     /// nothing, with `PlayerWorldRefusal`: `Client`, `Stale`, `Dead`, `StaleLevel`, `OtherLevel`
     /// (not the level in place, where the player is), `UnknownState`, `OutOfWorld`, `NotLoaded`

@@ -44,6 +44,58 @@ fn a_block_placed_without_a_player_runs_set_placed_by() {
     });
 }
 
+/// `JukeboxBlock.setPlacedBy` reads the supplied stack's RecordItem key but does
+/// not load its NBT into the jukebox; only the block state reflects that key.
+#[test]
+#[ignore = "daily"]
+fn a_post_write_placement_reads_the_stack_without_loading_its_data() {
+    use crate::game::api_values::TryIntoApi;
+    use sunrise_client::{block_entity_item::BLOCK_ENTITY_DATA, items::ItemStack};
+
+    with_game(|game| {
+        let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+        loaded(game);
+        let level = game.level(game.dim.id()).unwrap();
+        let pos = [2, 70, 2];
+        let jukebox = state(game, "minecraft:jukebox");
+        assert_eq!(
+            game.level_set_block(level, pos, jukebox, BlockUpdateFlags::NONE),
+            Ok(true)
+        );
+        assert_eq!(level.set_placed_by(game, pos, None), Ok(true));
+        assert_eq!(game.world.block(pos[0], pos[1], pos[2]), jukebox);
+
+        let mut stack = ItemStack::new("minecraft:jukebox", 1);
+        let data = sunrise_client::command::snbt::parse_fully(
+            r#"{id:"minecraft:jukebox",RecordItem:{id:"minecraft:music_disc_cat",count:1}}"#,
+        )
+        .unwrap();
+        stack.data_mut().set_other(BLOCK_ENTITY_DATA, Some(data));
+        let stack = stack.try_into_api().unwrap();
+        assert_eq!(
+            level.set_placed_by(game, [128, 70, 2], Some(&stack)),
+            Ok(false)
+        );
+        assert_eq!(level.set_placed_by(game, pos, Some(&stack)), Ok(true));
+        let placed = game
+            .pack
+            .assets
+            .registry
+            .state(game.world.block(pos[0], pos[1], pos[2]))
+            .unwrap();
+        assert_eq!(
+            placed.properties.get("has_record").map(String::as_str),
+            Some("true")
+        );
+        assert!(
+            game.block_entity_nbt(pos)
+                .unwrap()
+                .get("RecordItem")
+                .is_none()
+        );
+    });
+}
+
 /// A fence is fitted to the fence beside it without anything being written.
 #[test]
 #[ignore = "daily"]

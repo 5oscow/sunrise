@@ -673,7 +673,7 @@ impl Game<'_> {
         self.set_biome_at(pos, biome)
     }
     /// One residency boundary for state-bearing block writes; position refusal is vanilla.
-    fn native_level_write_position(
+    pub(super) fn native_level_write_position(
         &self,
         level: LevelRef,
         pos: [i32; 3],

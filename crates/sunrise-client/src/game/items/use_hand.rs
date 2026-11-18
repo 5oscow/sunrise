@@ -651,13 +651,7 @@ impl Game<'_> {
             self.apply_placed_item(target, &stack, game_master);
             // Block.setPlacedBy.
             match self.world.block_entities.get(&key) {
-                Some(BlockEntity::CommandBlock(_)) => {
-                    let data = stack.data().is_some_and(|d| {
-                        d.other(sunrise_client::block_entity_item::BLOCK_ENTITY_DATA)
-                            .is_some()
-                    });
-                    self.command_block_placed(key, !data);
-                }
+                Some(BlockEntity::CommandBlock(_)) => self.command_block_placed(key, Some(&stack)),
                 Some(BlockEntity::StructureBlock(_)) => self.structure_block_placed(key),
                 Some(BlockEntity::JigsawBlock(_)) => self.jigsaw_block_placed(key),
                 Some(BlockEntity::TestBlock(_)) => self.test_block_placed(key),

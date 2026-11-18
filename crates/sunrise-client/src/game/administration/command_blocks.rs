@@ -8,6 +8,7 @@ use sunrise_client::{
     command_block::{self, CommandBlock, Mode},
     containers::BlockEntity,
     hud::{HudBatch, rgba},
+    items::ItemStack,
     screen_draw::Measure,
     text::Text,
     ui::{self, EditBox},
@@ -396,9 +397,15 @@ impl Game<'_> {
     }
 
     /// `CommandBlock.setPlacedBy`: unless the item carried block entity data
-    /// (`defaults` false), output tracking follows `send_command_feedback` and
+    /// output tracking follows `send_command_feedback` and
     /// the block's own automatic flag; then the block takes the signal around it.
-    pub(super) fn command_block_placed(&mut self, pos: Pos, defaults: bool) {
+    pub(super) fn command_block_placed(&mut self, pos: Pos, stack: Option<&ItemStack>) {
+        let defaults = !stack.is_some_and(|stack| {
+            stack.carries_component(
+                self.items().get(&stack.item),
+                sunrise_client::block_entity_item::BLOCK_ENTITY_DATA,
+            )
+        });
         let feedback = self
             .ui
             .rules
