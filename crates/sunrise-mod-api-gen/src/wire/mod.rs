@@ -189,6 +189,7 @@ pub(super) const SUBSCRIBED: &[(&str, &str)] = &[
     ("BlockEntityPart", "block_entity_subscribed"),
     ("ItemPart", "item_subscribed"),
     ("MenuPart", "menu_subscribed"),
+    ("MobEffectPart", "effect_subscribed"),
     ("FluidPart", "fluid_subscribed"),
     ("EntityPart", "entity_subscribed"),
 ];

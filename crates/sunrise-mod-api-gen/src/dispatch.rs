@@ -80,7 +80,26 @@ pub(super) fn emit<'a>(
         let is_render = is_render(hook);
         let external = free_function_source(target);
         let in_game = external.is_none();
-        let (method, call) = if let Some((krate, path)) = external {
+        // Effect cadence and action have one paired dispatcher. Generate the events and
+        // Part methods for both, but neither a `fire` wrapper nor a standalone dispatch.
+        let declaration_only = target == crate::hook_targets::EFFECT_TICK_TARGET
+            && hook
+                .scope
+                .as_ref()
+                .is_some_and(|scope| scope.kind == PartKind::Effect);
+        let (method, call) = if declaration_only {
+            let carrier = format!("{}Call", hook_id(name));
+            let receiver = if hook.host == Some(crate::catalog::HostAccess::Read) {
+                "&self"
+            } else {
+                "&mut self"
+            };
+            let method = syn::parse_str(&format!(
+                "fn {native}({receiver}, call: {carrier}<'_>) {{}}"
+            ))
+            .map_err(|error| format!("invalid declared signature for {name}: {error}"))?;
+            (method, format!("dispatch_{name}"))
+        } else if let Some((krate, path)) = external {
             let Some((module, function)) = path.rsplit_once("::") else {
                 return Err(format!("wrong target for {name}"));
             };
@@ -133,7 +152,7 @@ pub(super) fn emit<'a>(
                 format!("dispatch_{name}"),
             )
         };
-        let fill = !is_render && needs_fill(&method, &call, in_game)?;
+        let fill = !declaration_only && !is_render && needs_fill(&method, &call, in_game)?;
         let sig = &method.sig;
         let mut native_args = Vec::new();
         let mut receiver_mut = None;
@@ -344,6 +363,7 @@ pub(super) fn emit<'a>(
                     PartKind::BlockEntity => ("BlockEntityPart", "block_entity"),
                     PartKind::Item => ("ItemPart", "item"),
                     PartKind::Menu => ("MenuPart", "menu"),
+                    PartKind::Effect => ("MobEffectPart", "effect"),
                     PartKind::Fluid => ("FluidPart", "fluid"),
                     PartKind::Entity => ("EntityPart", "entity"),
                 };
@@ -376,6 +396,9 @@ pub(super) fn emit<'a>(
                     }
                     "& ItemStack" => {
                         format!("{table}(|| super::content::registry_keys::item_id({key}.item()))")
+                    }
+                    "EffectKey" if table == "effect" => {
+                        format!("effect(|| super::content::registry_keys::effect_id({key}))")
                     }
                     "BlockEntityTypeKey" if table == "block_entity" => format!(
                         "block_entity_kind(|| super::content::registry_keys::block_entity_type_name({key}))"
@@ -569,7 +592,7 @@ pub(super) fn emit<'a>(
         if let Some((name, ty)) = output.as_ref().filter(|_| contract != Contract::Collect) {
             dispatch_params.push(format!("{name}: {}", ty.to_token_stream()));
         }
-        if !declared.is_empty() {
+        if !declared.is_empty() && (!declaration_only || name == "apply_effect_tick") {
             dispatch_params.truncate(usize::from(host.is_some()));
             let (fields, generics) = carrier_fields(&carried);
             dispatch_params.push(format!(
@@ -577,7 +600,7 @@ pub(super) fn emit<'a>(
                 if generics.is_empty() { "" } else { "<'_>" }
             ));
             calls.push_str(&format!(
-                "/// What the game passes `dispatch_{name}`: the hook's declared parameters.\n#[doc(hidden)]\n#[allow(missing_docs)]\n// no wire: internal call carrier, not an owned boundary value.\npub struct {carrier}{generics} {{\n{fields}}}\n"
+                "/// The hook's declared parameters at the engine boundary.\n#[doc(hidden)]\n#[allow(missing_docs)]\n// no wire: internal call carrier, not an owned boundary value.\npub struct {carrier}{generics} {{\n{fields}}}\n"
             ));
         }
         for (name, ty) in &stack_outputs {
@@ -618,7 +641,7 @@ pub(super) fn emit<'a>(
             _ => "",
         };
         // Reuse the exact host and drawing conversions for generated game-side calls.
-        if in_game {
+        if in_game && !declaration_only {
             // A scoped read hook can run against either the game or a borrowed
             // tick view. Its native receiver carries the selected host.
             let scoped_read_host = target.contains("::NativeHookHost<");
@@ -873,6 +896,9 @@ pub(super) fn emit<'a>(
         dispatch.push_str(&format!(
             "/// What [`{trait_name}::{name}`] is told. Each field is that hook's argument of the same name, described in the hook's doc.\n#[allow(missing_docs)]\n{wire_form}\npub struct {event_type}{generics} {{\n{fields}}}\n"
         ));
+        if declaration_only {
+            continue;
+        }
         let build = format!(
             "{stack_snapshots}{}let {}{event} = {event_type} {{ {} }};",
             if answered && contract == Contract::Collect {
