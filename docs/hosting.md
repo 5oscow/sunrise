@@ -208,6 +208,10 @@ start instead of being ignored. When the game changes a setting itself (`/whitel
 back into `server.toml` when it stops, and your comments are kept. Changes to the file apply at the next
 restart: there is no live reload yet.
 
+One retired key is the exception: `max_view_distance` under `[server]`, the old far ring, is ignored with a note
+at each start, and can be removed. For more reach, raise `view_distance` (up to 32); unlike the far ring, that
+loads and, where the world hasn't been generated yet, generates the chunks it sends.
+
 ### Operators' commands: `admin_feedback_to_ops`
 
 On by default, as vanilla: when an operator runs a command that reports to admins (`/gamemode`, `/give`, `/tp`...),
