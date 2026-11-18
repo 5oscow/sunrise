@@ -37,8 +37,8 @@ const COMMANDS: &[Command] = &[
     Command {
         name: "update",
         everyday: true,
-        usage: "update [--sunrise <build>]",
-        summary: "Repins a native or wasm mod to another game build (the current Nightly unless --sunrise names one) and reports what that breaks; a content mod pins no build.",
+        usage: "update [--sunrise <build>] [--accept <inject id>]…",
+        summary: "Repins a native or wasm mod to another game build (the current Nightly unless --sunrise names one) and reports what that breaks, refusing a changed [[inject]] target unless --accept names it; a content mod pins no build.",
     },
     Command {
         name: "hooks",
@@ -61,7 +61,7 @@ const COMMANDS: &[Command] = &[
     Command {
         name: "internals",
         everyday: false,
-        usage: "internals sync [--repo <path>] | internals add <path>… [--kind <kind>]",
+        usage: "internals sync | internals add <path>… [--kind <kind>]",
         summary: "Writes the game internals a native mod names into sunrise-mod.toml, found by checking its code or taken from the pinned build's catalog.",
     },
     Command {
@@ -168,9 +168,8 @@ pub fn unknown(name: &str) -> String {
     format!("{name:?} is not a cargo sunrise-mod command; `cargo sunrise-mod --help` lists them")
 }
 
-/// Whether `args` (a command's, after its name) ask for its help: `--help` or `-h` before any `--`.
+/// Whether `args` (a command's, after its name) ask for its help: `--help` or `-h` right after the
+/// command. Later it may be an option's value (`--summary --help`) or meant for the game (`run -- --help`).
 pub fn asked(args: &[String]) -> bool {
-    args.iter()
-        .take_while(|a| *a != "--")
-        .any(|a| a == "--help" || a == "-h")
+    args.first().is_some_and(|a| a == "--help" || a == "-h")
 }
