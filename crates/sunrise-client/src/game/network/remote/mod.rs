@@ -502,6 +502,8 @@ pub(super) struct Remote {
     /// The block, item and fluid tags of `registries` by name, as native mods read them
     /// (`install_remote_tags`).
     pub(super) tags: Option<sunrise_client::items::Items>,
+    /// Whether the published snapshot includes the item registry, even if its table is empty.
+    pub(super) has_item_tags: bool,
     /// The game's enchantments and the server's that it lacks (a data
     /// pack's), from their synced data; `None` when the server has none.
     pub(super) enchantments: Option<Arc<sunrise_client::enchant::Enchantments>>,
@@ -1144,6 +1146,7 @@ impl Game<'_> {
             lang,
             registries: Arc::new(Dynamic::default()),
             tags: None,
+            has_item_tags: false,
             enchantments: None,
             joined: false,
             reconfiguring: None,
@@ -1389,6 +1392,7 @@ impl Game<'_> {
             lang,
             registries: Arc::new(Dynamic::default()),
             tags: None,
+            has_item_tags: false,
             enchantments: None,
             joined: false,
             reconfiguring: None,
@@ -2368,6 +2372,7 @@ impl Game<'_> {
             .as_ref()
             .map(|d| (d.dimension.clone(), d.pos));
         if !same {
+            self.clock.reset_client_level_tick_state();
             // A new ClientLevel: Minecraft.setLevel stops every sound.
             self.stop_sounds_for_new_level();
             let mut streaming = Streaming::new(
@@ -5221,12 +5226,15 @@ impl Game<'_> {
                 self.remote_server_data(p.icon.as_deref());
             }
             C::MapItemData(p) => self.remote_map_item_data(&p),
-            // handleTickingState / handleTickingStep: the level's TickRateManager.
-            C::TickingState(p) => {
+            // handleTickingState / handleTickingStep do nothing without a ClientLevel.
+            C::TickingState(p) if self.remote.as_ref().is_some_and(Remote::has_level) => {
                 self.clock.set_rate(p.rate);
                 self.clock.set_frozen(p.frozen);
             }
-            C::TickingStep(p) => self.clock.set_frozen_ticks_to_run(p.steps),
+            C::TickingStep(p) if self.remote.as_ref().is_some_and(Remote::has_level) => {
+                self.clock.set_frozen_ticks_to_run(p.steps);
+            }
+            C::TickingState(_) | C::TickingStep(_) => {}
             C::UpdateAdvancements(p) => self.remote_advancements(p),
             // handleAwardStats: StatsCounter.setValue for each.
             C::AwardStats(p) => {

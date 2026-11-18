@@ -364,8 +364,9 @@ impl GameLevel<'_> {
         ground: BlockStateId,
         ground_pos: BlockPos,
         may: &mut Option<bool>,
+        inert: &mut bool,
     ) {
-        self.fire_may_place_on(dimension, state, ground, ground_pos, may);
+        self.fire_may_place_on(dimension, state, ground, ground_pos, may, inert);
     }
 
     /// An authoritative server's `ServerLevel.tickBlock` is about to run a
@@ -3141,9 +3142,15 @@ impl Game<'_> {
     /// it (`u32::MAX` keeps the text's own); `Text::legacy` reads `§` codes.
     /// The stack has its components (`stack.data()`). Asked each frame the
     /// tooltip shows, never for one the stack hides or a crossbow's loaded
-    /// projectile.
-    pub(in crate::game) fn native_tooltip(&self, stack: &ItemStack, lines: &mut Vec<(Text, u32)>) {
-        self.fire_tooltip(stack, lines);
+    /// projectile. `context` shares the player, flags and vanilla client-level
+    /// tick rate with component tooltip appenders.
+    pub(in crate::game) fn native_tooltip(
+        &self,
+        stack: &ItemStack,
+        context: &mod_api::TooltipAppendContext,
+        lines: &mut Vec<(Text, u32)>,
+    ) {
+        self.fire_tooltip(stack, context, lines);
     }
     /// Client-side image component for this stack's tooltip. Answer its width/height
     /// in GUI pixels; finite positive dimensions reserve space after text and any
@@ -4844,8 +4851,9 @@ impl LevelView<'_> {
         pos: BlockPos,
         state: BlockStateId,
         survives: &mut Option<bool>,
+        inert: &mut bool,
     ) {
-        self.fire_can_survive(dimension, pos, state, survives);
+        self.fire_can_survive(dimension, pos, state, survives, inert);
     }
 
     /// A block is about to take the state it is placed in

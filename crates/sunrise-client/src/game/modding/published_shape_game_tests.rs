@@ -378,6 +378,38 @@ fn a_published_shape_stands_over_a_dynamic_template_and_takes_its_offset() {
     });
 }
 
+/// With no declared offset keys, a bamboo template moves its published outline to the
+/// vanilla column, not its published collision. The outline ray only crosses the moved box.
+#[test]
+#[ignore = "daily"]
+fn inherited_published_outline_hits_at_the_template_column() {
+    if fresh("inherited_published_outline_hits_at_the_template_column") {
+        return;
+    }
+    with_bus(|game| {
+        let pos = [1, 64, 2];
+        let entity = place(game, TUFT, pos);
+        assert_eq!(
+            game.block_entity_set_shapes(entity, Some(shapes(&[HALF], &[THIN]))),
+            Ok(true)
+        );
+        // Vanilla's XZ column offset at (1, 2) is (-0.1166666597, -0.1833333299).
+        let x = 1.3833333402872086;
+        let z = 2.3166666701436043;
+        let level = game.level(game.dim.id()).unwrap();
+        let ray = |mode| {
+            game.level_clip(level, [x, 66.0, z], [x, 63.0, z], mode, ClipFluid::None)
+                .filter(|hit| !hit.miss)
+                .map(|hit| (hit.block, hit.location))
+        };
+        assert_eq!(ray(ClipBlock::Outline), Some((pos, [x, 64.25, z])));
+        assert_eq!(ray(ClipBlock::Collider), Some((pos, [x, 64.5, z])));
+        let [bounds]: [[f64; 6]; 1] = game.outline_boxes(pos).try_into().unwrap();
+        assert!((bounds[0] - 1.3333333402872086).abs() < 1.0e-12);
+        assert!((bounds[2] - 2.2666666701436043).abs() < 1.0e-12);
+    });
+}
+
 /// A publish that a transaction aborts puts the old shape back and tells the neighbours, as the
 /// publish did: the water beside the block is scheduled again to read the restored shape.
 #[test]
