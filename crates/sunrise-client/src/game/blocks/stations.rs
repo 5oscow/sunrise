@@ -39,7 +39,7 @@ fn tooltip_position(
 use super::api_values::{TryIntoApi, TryIntoEngine};
 use super::{Game, Screen};
 use mod_api::{TooltipElement, TooltipImage};
-use std::cell::RefCell;
+use std::cell::Cell;
 use sunrise_client::{
     block_entity_item, brewing,
     containers::BlockEntity,
@@ -53,8 +53,15 @@ use sunrise_client::{
 use sunrise_core::random::{LegacyRandom, RandomSource};
 
 thread_local! {
-    // A listener, part or appender may ask for another tooltip on the same client thread.
-    static TOOLTIP_CALLBACKS: RefCell<()> = const { RefCell::new(()) };
+    static IN_TOOLTIP_BUILD: Cell<bool> = const { Cell::new(false) };
+}
+
+struct TooltipBuildGuard;
+
+impl Drop for TooltipBuildGuard {
+    fn drop(&mut self) {
+        IN_TOOLTIP_BUILD.set(false);
+    }
 }
 
 /// The book above the enchanting table's offers: `EnchantmentScreen`'s
@@ -1583,10 +1590,13 @@ impl Game<'_> {
         creative: bool,
         advanced: bool,
     ) -> Vec<(sunrise_client::text::Text, u32)> {
-        TOOLTIP_CALLBACKS.with(|active| {
-            let scope = active.try_borrow_mut().ok();
-            self.build_stack_tooltip_lines(stack, nested, creative, advanced, scope.is_some())
-        })
+        // A listener, part or appender may ask for another tooltip on the same client thread.
+        let guard = if IN_TOOLTIP_BUILD.replace(true) {
+            None
+        } else {
+            Some(TooltipBuildGuard)
+        };
+        self.build_stack_tooltip_lines(stack, nested, creative, advanced, guard.is_some())
     }
 
     fn build_stack_tooltip_lines(
