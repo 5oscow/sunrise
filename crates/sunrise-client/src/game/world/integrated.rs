@@ -1680,6 +1680,24 @@ pub(super) mod tests {
                 )
                 .unwrap(),
             );
+            // The owner's file as last saved, with an experience total the panicking tick's
+            // state (37) differs from.
+            game.level.xp_total = 11;
+            game.level.write_player(&root, game.res.items()).unwrap();
+            let owner_file = std::fs::read_dir(root.join("players").join("data"))
+                .unwrap()
+                .next()
+                .unwrap()
+                .unwrap()
+                .path();
+            let owner_xp = || {
+                let player = sunrise_client::save::read_dat(&owner_file)?;
+                match player.get("XpTotal") {
+                    Some(sunrise_core::nbt::Tag::Int(xp)) => Some(*xp),
+                    _ => None,
+                }
+            };
+            assert_eq!(owner_xp(), Some(11));
             let flags = Arc::new(Flags::default());
             flags.fail_tick.store(true, Ordering::Relaxed);
             flags.published.store(1234, Ordering::Relaxed);
@@ -1698,7 +1716,8 @@ pub(super) mod tests {
             );
             let saved = sunrise_client::save::Level::read(&root).unwrap();
             assert_eq!(saved.name, "saved after integrated tick panic");
-            assert_eq!(saved.xp_total, 37);
+            // No hub: players are not saved, so the owner's file keeps what it had.
+            assert_eq!(owner_xp(), Some(11));
             assert_eq!(flags.published.load(Ordering::Relaxed), 0);
             assert!(game.session_lock.is_none());
             std::fs::remove_dir_all(&root).ok();
