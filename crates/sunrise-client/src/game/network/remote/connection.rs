@@ -12,7 +12,6 @@ impl Game<'_> {
         let server = Server::new(address, name, lan);
         sunrise_hooks::engine::connecting(&server);
         self.last_connection = Some(server);
-        self.extras_connecting(address, name, lan);
     }
     /// The server this window connected to last over the network: while connected, and after a
     /// lost connection while the Disconnected screen may connect there again.
@@ -27,15 +26,13 @@ impl Game<'_> {
             .is_some_and(|server| server.lan)
     }
     /// The server let the player in (`Hooks::joined`).
-    pub(in crate::game) fn connection_joined(&mut self) {
+    pub(in crate::game) fn connection_joined(&self) {
         sunrise_hooks::engine::joined();
-        self.extras_joined();
     }
     /// The player left on purpose: nothing to connect again to (`Hooks::left`).
     pub(in crate::game) fn connection_left(&mut self) {
         self.last_connection = None;
         sunrise_hooks::engine::left();
-        self.extras_left();
     }
     /// The connection ended without the player leaving (`Hooks::ended`), before the Disconnected
     /// screen shows. The last server is forgotten unless something will connect there again.
@@ -45,15 +42,14 @@ impl Game<'_> {
         key: Option<&str>,
         from_server: bool,
     ) {
-        self.extras_ended(reason, key, from_server);
         sunrise_hooks::engine::ended(&Ended::new(reason, key, from_server));
-        if self.retry_answer().is_none() {
+        if sunrise_hooks::engine::retry().is_none() {
             self.last_connection = None;
         }
     }
     /// The Disconnected screen just shown offers to connect again while something asks to.
     pub(in crate::game) fn offer_retry(&mut self) {
-        let Some(answer) = self.retry_answer() else {
+        let Some(answer) = sunrise_hooks::engine::retry() else {
             return;
         };
         // A connection due at once is made on the next frame (`follow_retry`).
@@ -78,7 +74,7 @@ impl Game<'_> {
         if retry_slot(&mut self.title).is_none_or(|slot| slot.is_none()) {
             return Ok(());
         }
-        let answer = self.retry_answer();
+        let answer = sunrise_hooks::engine::retry();
         let Some(slot) = retry_slot(&mut self.title) else {
             return Ok(());
         };
@@ -97,10 +93,6 @@ impl Game<'_> {
         *slot = None;
         let realm = self.realm_session;
         self.connect_server_with_options(&server.address, &server.name, None, server.lan, realm)
-    }
-    /// Whether to connect again: the auto-reconnect extra's answer, else a crate's.
-    fn retry_answer(&self) -> Option<Retry> {
-        self.extras_retry().or_else(sunrise_hooks::engine::retry)
     }
 }
 

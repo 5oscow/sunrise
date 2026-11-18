@@ -21,7 +21,6 @@ minimapSize:96
 minimapShape:square
 minimapZoom:1
 minimapRotate:false
-autoReconnect:false
 uiSoundReserve:false
 ownNameTag:false
 skipModdedSplashesIfVanillaModified:true

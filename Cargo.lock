@@ -5225,6 +5225,7 @@ dependencies = [
  "sunrise-heartbeat",
  "sunrise-perf-share",
  "sunrise-platform",
+ "sunrise-reconnect",
  "winresource",
 ]
 
@@ -5355,6 +5356,13 @@ dependencies = [
  "sunrise-mod-runtime",
  "sunrise-threads",
  "sunrise-world",
+]
+
+[[package]]
+name = "sunrise-reconnect"
+version = "0.1.0"
+dependencies = [
+ "sunrise-platform",
 ]
 
 [[package]]

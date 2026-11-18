@@ -152,7 +152,6 @@ pub mod raw_payloads;
 pub mod realms;
 pub mod recipe_book;
 pub mod recipe_book_screen;
-pub mod reconnect;
 pub mod save;
 // The carrier ownership store: an internal storage layer of this
 // library, used by the game crate's transfers (game/world/), like

@@ -152,7 +152,7 @@ Sunrise's own extras and its product, and every built-in address of an outside s
   telemetry and benchmark uploads, releases and updates, the hosting supervisor, the launcher.
 - **Examples:** `sunrise-addresses`, `sunrise-friends`, `sunrise-relay`, `sunrise-telemetry`,
   `sunrise-perf-share`, `sunrise-release-sign`, `sunrise-server`, `sunrise-mod-registry`, `sunrise-heartbeat`,
-  `sunrise-official`, `sunrise-discord`, `launcher/`. Still in engine crates today:
+  `sunrise-official`, `sunrise-discord`, `sunrise-reconnect`, `launcher/`. Still in engine crates today:
   `game/extras.rs` and `game/extras/`, `extras_ui.rs`, `pvp.rs`.
 - **Rules:**
   - It uses the platform's public API only, never the engine.
@@ -293,7 +293,7 @@ build pays nothing.
 
 The hooks today: `started` (once, when someone plays: not a dedicated server, a benchmark or an automated run),
 `published` (the world opened to or closed from LAN or friends, on change), `shutdown` (the window closed, the
-world saved) and `tunnel` (the resolver of `friend:` addresses, Play with Friends') and `captures` (Open and Share for saved performance captures, `sunrise-perf-share`: with none registered the game offers neither) and `client_identity` (how the client presents itself to the server it joins: the brand of vanilla's `ClientBrandRetriever.getClientModName`, and the custom payloads it sends in the configuration phase after it. It gets the address as typed, before SRV or DNS resolution; the first answer wins, and none gives `vanilla` with no payloads. It runs on the network thread, once per join, so it must not touch game state. `sunrise-official` answers for the official Horizon server, which requires its brand and an empty payload offer), and the window's connection to a server: `connecting`, `joined`, `left`, `ended`, and `retry`, which the Disconnected screen asks whether to connect again and what its line says (`sunrise_hooks::connection`: with none registered it offers nothing, as vanilla's). **A hook you need and don't find:** add a method with an empty default to `Hooks` and a function in
+world saved) and `tunnel` (the resolver of `friend:` addresses, Play with Friends') and `captures` (Open and Share for saved performance captures, `sunrise-perf-share`: with none registered the game offers neither) and `client_identity` (how the client presents itself to the server it joins: the brand of vanilla's `ClientBrandRetriever.getClientModName`, and the custom payloads it sends in the configuration phase after it. It gets the address as typed, before SRV or DNS resolution; the first answer wins, and none gives `vanilla` with no payloads. It runs on the network thread, once per join, so it must not touch game state. `sunrise-official` answers for the official Horizon server, which requires its brand and an empty payload offer), and the window's connection to a server: `connecting`, `joined`, `left`, `ended`, and `retry`, which the Disconnected screen asks whether to connect again and what its line says (`sunrise_hooks::connection`, `sunrise-reconnect`: with none registered it offers nothing, as vanilla's). **A hook you need and don't find:** add a method with an empty default to `Hooks` and a function in
 `sunrise_hooks::engine` that the engine calls where vanilla does the matching thing; give it plain data or a type
 the engine owns, never one from above. A hook that needs engine types the platform doesn't expose yet (a draw
 context for HUD and chat overlays, a settings page) comes with that type's platform API (M6). An extension point
@@ -579,11 +579,11 @@ plain data (id, name, version, authors, licence and its link, homepage, issues, 
 ## Extras that may leave the game
 
 Sunrise's extras are Sunrise-layer code. Each one is a candidate to become an optional native mod that players add
-themselves, or stays a cfg-gated module linked into the official build. None moves yet; the list is here so new work doesn't add to them. See [extras.md](extras.md) for each one:
+themselves, or stays a module linked into the official build, as auto-reconnect is (crate `sunrise-reconnect`). The list is here so new work doesn't add to them. See [extras.md](extras.md) for each one:
 
 - zoom (OptiFine-style), keystrokes and FPS overlays, own name tag;
 - Mouse Tweaks controls, sorting, scroll-wheel settings, smooth chat;
-- auto-reconnect, UI-sound channels, the music page;
+- UI-sound channels, the music page;
 - the PvP & HUD presets and widgets, the replay editor (Replay Studio's camera paths and timeline), the AI agent page;
 - the Sunrise Settings menu itself, the advanced menu that hosts them;
 - the renderer's extras: fullbright, dynamic lights, hidden block-break particles;

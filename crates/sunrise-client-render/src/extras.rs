@@ -65,8 +65,6 @@ pub struct Extras {
     pub minimap_zoom: f32,
     /// Turn with the player (forward up) instead of north up.
     pub minimap_rotate: bool,
-    /// Retry lost multiplayer connections (`reconnect`).
-    pub auto_reconnect: bool,
     /// Positional sounds leave a few static sound channels free for UI sounds
     /// and others played to the listener (`sound_engine::HEARD_RESERVE`).
     pub ui_sound_reserve: bool,
@@ -143,7 +141,6 @@ impl Default for Extras {
             minimap_round: false,
             minimap_zoom: 1.0,
             minimap_rotate: false,
-            auto_reconnect: false,
             ui_sound_reserve: false,
             own_name_tag: false,
             skip_modded_splashes_if_vanilla_modified: true,
@@ -238,7 +235,6 @@ impl Extras {
                     }
                 }
                 "minimapRotate" => e.minimap_rotate = flag(e.minimap_rotate),
-                "autoReconnect" => e.auto_reconnect = flag(e.auto_reconnect),
                 "uiSoundReserve" => e.ui_sound_reserve = flag(e.ui_sound_reserve),
                 "ownNameTag" => e.own_name_tag = flag(e.own_name_tag),
                 "skipModdedSplashesIfVanillaModified" => {
@@ -322,7 +318,6 @@ impl Extras {
         );
         push("minimapZoom", &self.minimap_zoom);
         push("minimapRotate", &bool_text(self.minimap_rotate));
-        push("autoReconnect", &bool_text(self.auto_reconnect));
         push("uiSoundReserve", &bool_text(self.ui_sound_reserve));
         push("ownNameTag", &bool_text(self.own_name_tag));
         push(
@@ -517,7 +512,6 @@ pub enum Item {
     DynamicLights,
     OwnNameTag,
     HideBlockParticles,
-    AutoReconnect,
     UiSoundReserve,
     /// The Music... page on Music & Sounds (`Music page`).
     MusicPage,
@@ -545,7 +539,9 @@ pub enum Item {
 pub fn rows() -> Vec<Result<Item, &'static str>> {
     use Item::*;
     // Fullbright, Dynamic lights and Hide block-break particles change the picture: they
-    // are on the graphics screen's Quality page (`graphics_ui::rows`), not here.
+    // are on the graphics screen's Quality page (`graphics_ui::rows`), not here. A section a crate
+    // adds joins the group its title names (`sunrise_hooks::pages::Place::Extras`): Auto-reconnect
+    // and Discord fill Multiplayer.
     vec![
         Err("sunrise.extras.header.third_person"),
         Ok(OwnNameTag),
@@ -560,7 +556,6 @@ pub fn rows() -> Vec<Result<Item, &'static str>> {
         Err("sunrise.extras.header.world"),
         Ok(Pregen),
         Err("sunrise.extras.header.multiplayer"),
-        Ok(AutoReconnect),
         Err("sunrise.extras.header.sound"),
         Ok(UiSoundReserve),
         Ok(MusicPage),
@@ -577,7 +572,6 @@ impl Item {
             Item::DynamicLights => "sunrise.extras.dynamic_lights",
             Item::OwnNameTag => "sunrise.extras.own_name_tag",
             Item::HideBlockParticles => "sunrise.extras.hide_block_particles",
-            Item::AutoReconnect => "sunrise.extras.auto_reconnect",
             Item::UiSoundReserve => "sunrise.extras.ui_sound_reserve",
             Item::MusicPage => "sunrise.extras.music_page",
             Item::MouseTweaks => "sunrise.extras.mouse_tweaks",
@@ -602,7 +596,6 @@ impl Item {
             Item::DynamicLights => "sunrise.extras.dynamic_lights.tooltip",
             Item::OwnNameTag => "sunrise.extras.own_name_tag.tooltip",
             Item::HideBlockParticles => "sunrise.extras.hide_block_particles.tooltip",
-            Item::AutoReconnect => "sunrise.extras.auto_reconnect.tooltip",
             Item::UiSoundReserve => "sunrise.extras.ui_sound_reserve.tooltip",
             Item::MusicPage => "sunrise.extras.music_page.tooltip",
             Item::MouseTweaks => "sunrise.extras.mouse_tweaks.tooltip",
@@ -636,7 +629,6 @@ impl Item {
             Item::DynamicLights => "Dynamic lights",
             Item::OwnNameTag => "Own name tag",
             Item::HideBlockParticles => "Hide block-break particles",
-            Item::AutoReconnect => "Auto-reconnect",
             Item::UiSoundReserve => "Keep channels for UI sounds",
             Item::MusicPage => "Music page",
             Item::MouseTweaks => "Mouse Tweaks controls",
@@ -664,8 +656,8 @@ impl Item {
             ChatIndicator => ChatAnimation,
             Pvp(o) => return o.parent().map(Pvp),
             Fullbright | DynamicLights | OwnNameTag | HideBlockParticles | MouseTweaks | Sort
-            | AutoReconnect | NoAi | AgentControl | ReproKeys | ChatAnimation
-            | WheelCyclesSettings | MusicPage | PackBrowser | Pregen => {
+            | NoAi | AgentControl | ReproKeys | ChatAnimation | WheelCyclesSettings | MusicPage
+            | PackBrowser | Pregen => {
                 return None;
             }
         })
@@ -685,9 +677,6 @@ impl Item {
             }
             Item::HideBlockParticles => {
                 "Hides the debris particles that burst from a broken block and crumble off the one you mine. Other particles stay."
-            }
-            Item::AutoReconnect => {
-                "Rejoins a server after a lost connection or a restart, never after a kick or ban."
             }
             Item::UiSoundReserve => {
                 "Sounds in the world leave 16 of the 247 sound channels free, so a flood of them (a big explosion) can't silence menu clicks."
@@ -740,7 +729,6 @@ impl Item {
             Item::ChatAnimation => Some(Cost::None),
             Item::OwnNameTag
             | Item::HideBlockParticles
-            | Item::AutoReconnect
             | Item::MouseTweaks
             | Item::Sort
             | Item::WheelCyclesSettings
@@ -755,7 +743,6 @@ impl Item {
             Item::DynamicLights => e.dynamic_lights,
             Item::OwnNameTag => e.own_name_tag,
             Item::HideBlockParticles => e.hide_block_particles,
-            Item::AutoReconnect => e.auto_reconnect,
             Item::UiSoundReserve => e.ui_sound_reserve,
             Item::MusicPage => e.music_page,
             Item::MouseTweaks => e.mouse_tweaks,
@@ -792,7 +779,6 @@ impl Item {
             Item::DynamicLights => e.dynamic_lights = !e.dynamic_lights,
             Item::OwnNameTag => e.own_name_tag = !e.own_name_tag,
             Item::HideBlockParticles => e.hide_block_particles = !e.hide_block_particles,
-            Item::AutoReconnect => e.auto_reconnect = !e.auto_reconnect,
             Item::UiSoundReserve => e.ui_sound_reserve = !e.ui_sound_reserve,
             Item::MusicPage => e.music_page = !e.music_page,
             Item::MouseTweaks => e.mouse_tweaks = !e.mouse_tweaks,
@@ -973,7 +959,7 @@ mod tests {
     fn everything_is_off_by_default_and_round_trips() {
         let d = Extras::default();
         assert!(!d.fullbright && !d.dynamic_lights);
-        assert!(!d.zoom && !d.fps && !d.keystrokes && !d.minimap && !d.auto_reconnect);
+        assert!(!d.zoom && !d.fps && !d.keystrokes && !d.minimap);
         assert!(!d.mouse_tweaks && !d.sort && !d.own_name_tag && !d.ui_sound_reserve);
         assert!(!d.hide_block_particles && !d.pregen);
         assert!(!d.music_page && d.music_off.is_empty());
@@ -999,7 +985,6 @@ mod tests {
         e.minimap_zoom = 0.5;
         e.minimap_rotate = true;
         e.minimap_corner = Corner::BottomLeft;
-        e.auto_reconnect = true;
         Item::Pregen.cycle(&mut e, false);
         assert_eq!(Item::Pregen.switch(&e), Some(true));
         Item::OwnNameTag.cycle(&mut e, false);
