@@ -15,9 +15,10 @@ fn title(session: Option<&str>) -> String {
 }
 
 impl Game<'_> {
-    /// The session part `createTitle` adds once `getConnection` has a player; none for a replay.
+    /// The session part `createTitle` adds while `getConnection` has a player and its connection is open.
     fn title_session(&self) -> Option<&'static str> {
-        if self.remote.is_none() || self.player.is_none() || self.replay.playing() {
+        let live = self.remote.as_ref().is_some_and(|r| r.session.connected());
+        if !live || self.player.is_none() {
             return None;
         }
         Some(if self.integrated.is_some() && !self.is_published() {
