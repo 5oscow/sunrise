@@ -2083,7 +2083,7 @@ mod tests {
     fn a_package_cannot_claim_another_packages_primary_namespace() {
         let manifest = |id, aliases| {
             sunrise_mod_package::Manifest::parse(&format!(
-                "id='{id}'\nname='{id}'\nversion='1.0.0'\napi='0.2'\ncapabilities=[]\nnamespaces=[{aliases}]"
+                "id='{id}'\nname='{id}'\nversion='1.0.0'\napi='0.2'\ncapabilities=['registries']\nnamespaces=[{aliases}]"
             ))
             .unwrap()
         };
