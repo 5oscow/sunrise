@@ -1,6 +1,6 @@
 //! The `sunrise-verify` the install tests run: built here with the `test-key` feature, in a folder of its own, so it
 //! trusts the throwaway key of `SUNRISE_VERIFY_TEST_KEY`. The binary cargo builds for the integration tests
-//! (`CARGO_BIN_EXE_sunrise-verify`) is the release one, without it.
+//! (`CARGO_BIN_EXE_sunrise-verify`) has the feature only when the whole test run is given `--features test-key`.
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;

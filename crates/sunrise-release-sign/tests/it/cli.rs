@@ -310,36 +310,62 @@ fn signed_folder(name: &str) -> (PathBuf, String) {
 fn the_verifier_takes_no_option_that_changes_who_is_trusted() {
     let (dir, public) = signed_folder("verifier-options");
     let ok = ["verify", "--tag", TAG];
-    // The fixture passes through the same call; every refusal below is the grammar's, naming the option.
-    let o = verifier(&ok, &[&dir], Some(&public));
-    assert!(o.status.success(), "{}", stderr(&o));
-    for (extra, named) in [
-        (vec!["--key", public.as_str()], "--key"),
-        (vec!["--repository", "someone/else"], "--repository"),
-        (vec!["--publishing"], "--publishing"),
-        (vec!["--bogus"], "--bogus"),
-        (vec!["--only"], "needs the release's folder"),
-        (vec!["--tag", TAG], "--tag is given twice"),
-    ] {
-        let mut args = ok.to_vec();
-        args.extend(&extra);
-        let out = verifier(&args, &[&dir], Some(&public));
-        assert!(!out.status.success(), "{extra:?}");
-        assert!(stderr(&out).contains(named), "{extra:?}: {}", stderr(&out));
+    let good = verifier(&ok, &[&dir], Some(&public));
+    assert!(good.status.success(), "{}", stderr(&good));
+    // Both builds (the feature one and cargo's own binary) refuse alike, before any key is looked at.
+    let binaries = [
+        crate::common::test_key_verifier().to_owned(),
+        PathBuf::from(env!("CARGO_BIN_EXE_sunrise-verify")),
+    ];
+    for binary in &binaries {
+        let run = |extra: &[&str], paths: &[&Path]| {
+            Command::new(binary)
+                .args(ok)
+                .args(extra)
+                .args(paths)
+                .env("SUNRISE_VERIFY_TEST_KEY", &public)
+                .output()
+                .unwrap()
+        };
+        for (extra, named) in [
+            (vec!["--key", public.as_str()], "--key"),
+            (vec!["--repository", "someone/else"], "--repository"),
+            (vec!["--publishing"], "--publishing"),
+            (vec!["--bogus"], "--bogus"),
+            (vec!["-x"], "-x"),
+            (vec!["--only"], "--only needs a value"),
+            (vec!["--only", "--bogus"], "--only needs a value"),
+            (vec!["--signature", "-x"], "--signature needs a value"),
+            (vec!["--tag", TAG], "--tag is given twice"),
+        ] {
+            // The option goes after the folder, so a missing value is the end of the arguments.
+            let out = run(&extra, &[]);
+            let folder_last = Command::new(binary)
+                .args(ok)
+                .arg(&dir)
+                .args(&extra)
+                .env("SUNRISE_VERIFY_TEST_KEY", &public)
+                .output()
+                .unwrap();
+            for out in [out, folder_last] {
+                assert!(!out.status.success(), "{extra:?}");
+                assert!(
+                    stderr(&out).contains(named)
+                        || stderr(&out).contains("needs the release's folder"),
+                    "{extra:?}: {}",
+                    stderr(&out)
+                );
+            }
+        }
+        let out = run(&[], &[&dir, &dir]);
+        assert!(!out.status.success() && stderr(&out).contains("one folder"));
+        let out = Command::new(binary)
+            .args(["verify", "--only", "x"])
+            .arg(&dir)
+            .output()
+            .unwrap();
+        assert!(!out.status.success() && stderr(&out).contains("--tag"));
     }
-    let out = verifier(&ok, &[&dir, &dir], Some(&public));
-    assert!(!out.status.success() && stderr(&out).contains("one folder"));
-    let out = verifier(&["verify", "--only", "x"], &[&dir], Some(&public));
-    assert!(stderr(&out).contains("--tag"));
-    // A trailing --only after the folder used to be dropped and read as "check everything".
-    let out = Command::new(crate::common::test_key_verifier())
-        .args(ok)
-        .arg(&dir)
-        .arg("--only")
-        .env("SUNRISE_VERIFY_TEST_KEY", &public)
-        .output()
-        .unwrap();
-    assert!(!out.status.success() && stderr(&out).contains("--only needs a value"));
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -354,7 +380,8 @@ fn the_verifier_checks_the_selected_file_and_signature_with_exactly_one_test_key
         args.extend(extra);
         verifier(&args, &[&dir], key)
     };
-    // The selected file, from the alternate signature file.
+    // The selected file, from the alternate signature file: the default one is not a signature at all here.
+    std::fs::write(dir.join(SIGNATURE), "garbage\n").unwrap();
     assert!(
         run(
             &[
@@ -368,10 +395,17 @@ fn the_verifier_checks_the_selected_file_and_signature_with_exactly_one_test_key
         .status
         .success()
     );
+    std::fs::copy(dir.join("alt.sig"), dir.join(SIGNATURE)).unwrap();
     let out = run(&["--only", "missing.zip"], Some(&public));
     assert!(stderr(&out).contains("missing.zip is not in"));
-    let out = run(&["--signature", "../alt.sig"], Some(&public));
-    assert!(stderr(&out).contains("names a file of the folder"));
+    for name in ["../alt.sig", "C:alt.sig", "sub\\alt.sig"] {
+        let out = run(&["--signature", name], Some(&public));
+        assert!(!out.status.success());
+        assert!(
+            stderr(&out).contains("names a file of the folder"),
+            "{name}"
+        );
+    }
     // Not the signed bytes: refused naming the file, for the selected one only.
     std::fs::write(dir.join("sunrise-windows-x64.zip"), b"tampered").unwrap();
     assert!(
@@ -383,7 +417,8 @@ fn the_verifier_checks_the_selected_file_and_signature_with_exactly_one_test_key
     // The key: another one, none of the built-in ones, and not exactly one.
     let other = other.public_base64();
     assert!(stderr(&run(&[], Some(&other))).contains("signature doesn't match"));
-    assert!(stderr(&run(&[], None)).contains("signature doesn't match"));
+    let out = run(&[], None);
+    assert!(!out.status.success() && stderr(&out).contains("SUNRISE_VERIFY_TEST_KEY"));
     let two = format!("{public}\n{other}");
     assert!(stderr(&run(&[], Some(&two))).contains("exactly one key"));
     assert!(stderr(&run(&[], Some("not a key"))).contains("not base64"));
@@ -407,6 +442,7 @@ fn the_verifier_has_no_keygen_and_writes_no_key() {
 
 #[test]
 #[ignore = "daily"]
+#[cfg(not(feature = "test-key"))]
 fn a_release_verifier_ignores_the_test_key() {
     // The binary cargo builds for release has no `test-key` feature: the variable is never read, so the key that
     // signed the fixture is not trusted.

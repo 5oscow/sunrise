@@ -6,7 +6,8 @@
 //!     sunrise-verify verify --tag <tag> [--signature <file>] [--only <file>]... <folder>
 //!
 //! Built with the `test-key` feature (the install tests only, never a release), it trusts exactly the one key in
-//! `SUNRISE_VERIFY_TEST_KEY` instead of the built-in ones; without the feature the variable is not read.
+//! `SUNRISE_VERIFY_TEST_KEY` instead of the built-in ones, and refuses to run without it; without the feature the
+//! variable is not read.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -47,7 +48,13 @@ fn parse(
                 let value = args
                     .next()
                     .transpose()?
+                    .filter(|v| !v.is_empty() && !v.starts_with('-'))
                     .ok_or(format!("{arg} needs a value"))?;
+                if arg == "--signature" && value.contains(['/', '\\', ':']) {
+                    return Err(format!(
+                        "--signature names a file of the folder, not {value:?}"
+                    ));
+                }
                 match arg.as_str() {
                     "--tag" if tag.is_none() => tag = Some(value),
                     "--signature" if signature.is_none() => signature = Some(value),
@@ -55,7 +62,7 @@ fn parse(
                     _ => return Err(format!("{arg} is given twice")),
                 }
             }
-            option if option.starts_with("--") => {
+            option if option.starts_with('-') => {
                 return Err(format!("verify does not take {option}"));
             }
             _ if folder.is_none() => folder = Some(PathBuf::from(arg)),
@@ -80,7 +87,6 @@ fn keys() -> Result<Vec<PublicKey>, String> {
                 other.len()
             )),
         },
-        Err(std::env::VarError::NotPresent) => Ok(sunrise_release_sign::trusted_keys()),
         Err(e) => Err(format!("SUNRISE_VERIFY_TEST_KEY: {e}")),
     }
 }
