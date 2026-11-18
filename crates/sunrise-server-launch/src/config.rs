@@ -37,7 +37,6 @@ max_viewed_ticking_chunks = 441             # of them, ticking (one player's sim
 max_viewed_loaded_chunks_per_level = 16384  # the same for all players together, per level
 max_viewed_ticking_chunks_per_level = 3528  # ticking, all players together, per level
 admin_feedback_to_ops = true # operators see each other's commands ([name: ...], vanilla); false: only the log
-accept_older_clients = false # true: 26.2 clients join too, their packets translated (docs/hosting.md)
 
 [world]
 name = "world"               # the world folder
@@ -113,7 +112,7 @@ enabled = true               # false pauses it and keeps the webhook
 "##;
 
 /// Each typed setting: its section, its name, and the vanilla key it writes.
-pub const TYPED: [(&str, &str, &str); 21] = [
+pub const TYPED: [(&str, &str, &str); 20] = [
     ("server", "motd", "motd"),
     ("server", "port", "server-port"),
     ("server", "bind", "server-ip"),
@@ -148,11 +147,6 @@ pub const TYPED: [(&str, &str, &str); 21] = [
         "server",
         "admin_feedback_to_ops",
         "sunrise-admin-feedback-to-ops",
-    ),
-    (
-        "server",
-        "accept_older_clients",
-        "sunrise-accept-older-clients",
     ),
     ("world", "name", "level-name"),
     ("world", "seed", "level-seed"),
@@ -328,9 +322,6 @@ pub struct Server {
     /// Whether operators get each other's command feedback (`[name: ...]`, vanilla's broadcastToAdmins);
     /// false leaves it to the console's log, so nobody in game sees an operator's commands.
     pub admin_feedback_to_ops: bool,
-    /// Whether 26.2 clients may join, their packets translated (sunrise-protocol's `ClientSession`); off, they
-    /// are turned away as vanilla turns away any other release.
-    pub accept_older_clients: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -593,7 +584,6 @@ impl Default for Server {
             max_viewed_loaded_chunks_per_level: 2048 * 8,
             max_viewed_ticking_chunks_per_level: 441 * 8,
             admin_feedback_to_ops: true,
-            accept_older_clients: false,
         }
     }
 }
@@ -645,6 +635,8 @@ fn text_or_number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::E
 /// What `parse` answers for a `server.toml` that still has an `[anticheat]` section.
 const ANTICHEAT_REMOVED: &str =
     "anticheat was removed from Sunrise; delete the [anticheat] section from server.toml";
+/// What `parse` answers for a `server.toml` that still sets `[server] accept_older_clients`.
+const OLDER_CLIENTS_REMOVED: &str = "accept_older_clients was removed from Sunrise; delete it from the [server] section of server.toml";
 
 impl Config {
     pub fn parse(text: &str) -> Result<Self, String> {
@@ -652,6 +644,15 @@ impl Config {
             // The anticheat is gone: an old file's section gets what to do, not "unknown field".
             match toml::from_str::<toml::Table>(text) {
                 Ok(table) if table.contains_key("anticheat") => ANTICHEAT_REMOVED.to_owned(),
+                // Older clients are gone too: the key every older template wrote gets the same.
+                Ok(table)
+                    if table
+                        .get("server")
+                        .and_then(toml::Value::as_table)
+                        .is_some_and(|s| s.contains_key("accept_older_clients")) =>
+                {
+                    OLDER_CLIENTS_REMOVED.to_owned()
+                }
                 _ => e.to_string(),
             }
         })?;
@@ -1109,6 +1110,16 @@ mod tests {
     }
 
     #[test]
+    fn a_leftover_accept_older_clients_key_says_what_to_do() {
+        let old = TEMPLATE.replace("[server]\n", "[server]\naccept_older_clients = false\n");
+        assert_ne!(old, TEMPLATE);
+        assert_eq!(Config::parse(&old), Err(OLDER_CLIENTS_REMOVED.to_owned()));
+        // Another unknown key in the section keeps serde's own message.
+        let other = TEMPLATE.replace("[server]\n", "[server]\nnonsense = false\n");
+        assert_ne!(Config::parse(&other).unwrap_err(), OLDER_CLIENTS_REMOVED);
+    }
+
+    #[test]
     fn the_collision_cap_is_off_unless_its_section_sets_it() {
         assert_eq!(Config::default().entities.max_collisions, 0);
         assert!(!TEMPLATE.lines().any(|l| l.trim() == "[entities]"));
@@ -1185,12 +1196,11 @@ mod tests {
             ServerProperties::new(Properties::default(), &mut SystemEntropy::default()).unwrap();
         for (key, value) in Config::default().vanilla() {
             // Sunrise's own, which vanilla doesn't have: their defaults behave as vanilla does
-            // (the far ring off, operators told of each other's commands, other releases turned away,
-            // and caps on viewed areas, which only a mod asks for).
+            // (the far ring off, operators told of each other's commands, and caps on viewed areas,
+            // which only a mod asks for).
             if key.starts_with("sunrise-") {
                 let vanilla_like = match key.as_str() {
                     "sunrise-admin-feedback-to-ops" => "true",
-                    "sunrise-accept-older-clients" => "false",
                     "sunrise-max-viewed-loaded-chunks" => "2048",
                     "sunrise-max-viewed-ticking-chunks" => "441",
                     "sunrise-max-viewed-loaded-chunks-per-level" => "16384",

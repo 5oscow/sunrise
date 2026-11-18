@@ -165,7 +165,6 @@ max_viewed_ticking_chunks = 441
 max_viewed_loaded_chunks_per_level = 16384
 max_viewed_ticking_chunks_per_level = 3528
 admin_feedback_to_ops = true # operators see each other's commands ([name: ...]); false: only the log
-accept_older_clients = false # true: 26.2 clients join too (see below; work in progress)
 
 [world]
 name = "world"
@@ -215,18 +214,6 @@ On by default, as vanilla: when an operator runs a command that reports to admin
 the other operators read `[name: ...]` in gray, and the console logs it. Players who aren't operators never see it
 either way. `false` keeps it to the console's log (`logs/latest.log`): nobody in game sees an operator's commands,
 while each operator still reads their own command's answer.
-
-### Older clients: `accept_older_clients`
-
-Off by default, a Sunrise setting with no vanilla equivalent: a vanilla server, and Sunrise's, turn away a client of
-any other release. With `accept_older_clients = true` a 26.2 client may join too. Sunrise renumbers its packets and
-the blocks, items, entities, particles and sounds in them both ways, with no proxy in between; what 26.3 added and
-26.2 lacks is shown as the nearest thing 26.2 has (a poplar log as a birch log, a wool slab as a stone slab), and
-what has no such thing (a cushion) isn't shown. The server list shows the server as joinable for 26.2.
-
-This is work in progress (#10404): the packets whose layout changed between 26.2 and 26.3 aren't translated yet,
-so for now a 26.2 player gets through the login and is then told that 26.2 can't be translated yet, before the
-server sends anything it would misread. 26.3 clients are served exactly as before, whatever the setting.
 
 ### Seeing further: `max_view_distance`
 

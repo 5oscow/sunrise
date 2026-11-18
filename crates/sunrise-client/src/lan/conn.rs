@@ -784,7 +784,7 @@ fn serve_connection(
         // ServerHandshakePacketListenerImpl: a server that does not reply
         // to status requests closes the connection.
         handshake::STATUS if !shared.enable_status() => Ok(()),
-        handshake::STATUS => serve_status(&mut c, &shared, intention.protocol),
+        handshake::STATUS => serve_status(&mut c, &shared),
         handshake::TRANSFER if !shared.accepts_transfers() => {
             login_disconnect(
                 &mut c,
@@ -793,9 +793,7 @@ fn serve_connection(
             Ok(())
         }
         handshake::LOGIN | handshake::TRANSFER => {
-            if let Some(version) = older_client(&shared, intention.protocol) {
-                c.serve_older(version);
-            } else if intention.protocol != PROTOCOL_VERSION {
+            if intention.protocol != PROTOCOL_VERSION {
                 let key = if intention.protocol < 754 {
                     "multiplayer.disconnect.outdated_client"
                 } else {
@@ -817,22 +815,7 @@ fn serve_connection(
     }
 }
 
-/// The older release a client's handshake states, when this server lets it join
-/// (`sunrise-accept-older-clients`): 26.2 down to 1.20.5. The client-direction adapter
-/// also knows older releases whose server-direction layouts are not implemented.
-fn older_client(
-    shared: &Shared,
-    protocol: i32,
-) -> Option<sunrise_protocol::adapter::ServerVersion> {
-    use sunrise_protocol::adapter::ServerVersion;
-    let version = ServerVersion::from_protocol(protocol)?;
-    (shared.config.accept_older_clients
-        && version.at_most(ServerVersion::V26_2)
-        && !version.at_most(ServerVersion::V1_20_3))
-    .then_some(version)
-}
-
-fn serve_status(c: &mut Connection, shared: &Shared, protocol: i32) -> Result<(), String> {
+fn serve_status(c: &mut Connection, shared: &Shared) -> Result<(), String> {
     let e = |e: sunrise_protocol::Error| e.to_string();
     let mut requested = false;
     loop {
@@ -842,11 +825,7 @@ fn serve_status(c: &mut Connection, shared: &Shared, protocol: i32) -> Result<()
             status::Serverbound::StatusRequest(_) if requested => return Ok(()),
             status::Serverbound::StatusRequest(_) => {
                 requested = true;
-                // A client this server lets join is told its own protocol, so its list shows it joinable.
-                let json = match older_client(shared, protocol) {
-                    Some(_) => shared.status_json_for(protocol),
-                    None => shared.status_json(),
-                };
+                let json = shared.status_json();
                 c.send(
                     &status::Clientbound::StatusResponse(status::StatusResponse { json }).encode(),
                 )
@@ -1406,24 +1385,6 @@ fn login_and_configure(
             _ => {}
         }
     };
-    // An older client's packet ids are translated, not yet what is inside them (#10404): the registry data,
-    // tags and play packets would reach it in 26.3's ids and layouts, so it is turned away before them.
-    if let Some(version) = c.older_client()
-        && !shared.config.older_clients_play
-    {
-        let text = super::OLDER_CLIENTS_UNFINISHED;
-        let reason = sunrise_core::nbt::Tag::String(sunrise_core::nbt::JavaString::from(text));
-        let _ = send(c, cfg::Clientbound::Disconnect(cfg::Disconnect { reason }));
-        if let Some(log) = &shared.config.log {
-            let line = format!(
-                "Disconnecting {name}: its client is on protocol {} ({text})",
-                version.protocol()
-            );
-            (log.write)("Server thread", "INFO", &line);
-        }
-        lost(shared, &format!("{name} ({})", uuid_string(uuid)), text);
-        return Ok(None);
-    }
     // A Sunrise client hears that this server runs its mods' quiet commands
     // (sunrise_protocol::quiet); a vanilla one is told nothing.
     if brand == "sunrise" {
@@ -2458,11 +2419,6 @@ pub(super) fn frame_body(
     body: &[u8],
     out: &mut Vec<u8>,
 ) -> sunrise_protocol::Result<()> {
-    // Renumbered first for a client of an older release; one with no such packet gets nothing.
-    let Some(body) = writer.for_client(body)? else {
-        return Ok(());
-    };
-    let body = &body[..];
     match writer.framing() {
         sunrise_protocol::connection::Framing::Network(Some(t))
             if body.len() >= t.max(SHARED_FRAME_MIN) =>
@@ -2614,19 +2570,23 @@ mod tests {
         }
     }
 
-    /// Having tables for Sunrise to join an old server does not make the reverse direction supported.
+    /// ServerHandshakePacketListenerImpl.beginLogin: a client of another protocol is told it is outdated
+    /// (below 754) or incompatible, as vanilla tells it.
     #[test]
-    fn nbt_item_clients_are_refused_even_when_older_clients_are_enabled() {
+    fn clients_of_another_protocol_are_refused_as_vanilla_refuses_them() {
         let config = crate::lan::NetConfig {
             announce: false,
             listen: false,
-            accept_older_clients: true,
-            ..crate::lan::NetConfig::loopback(0, "Older clients".into(), 8)
+            ..crate::lan::NetConfig::loopback(0, "Other protocols".into(), 8)
         };
         let lan =
             crate::lan::Lan::start_with(Arc::new(crate::lan::data::SyncData::empty()), config)
                 .unwrap();
-        for protocol in [764, 765] {
+        for (protocol, key) in [
+            (753, "multiplayer.disconnect.outdated_client"),
+            (764, "multiplayer.disconnect.incompatible"),
+            (776, "multiplayer.disconnect.incompatible"),
+        ] {
             let mut c = Connection::local(lan.connect_local().unwrap());
             c.send(
                 &handshake::Serverbound::Intention(handshake::Intention {
@@ -2651,12 +2611,10 @@ mod tests {
             let login::Clientbound::Disconnect(reason) =
                 login::Clientbound::decode(id, &payload).unwrap()
             else {
-                panic!("protocol {protocol} was allowed into the reverse adapter")
+                panic!("protocol {protocol} was let in")
             };
             assert!(
-                reason
-                    .reason_json
-                    .contains("multiplayer.disconnect.incompatible"),
+                reason.reason_json.contains(key),
                 "protocol {protocol}: {}",
                 reason.reason_json
             );
