@@ -232,6 +232,17 @@ fn scrolling_label(
         color,
     );
 }
+/// What a slider's sprites follow, as `AbstractSliderButton.getSprite` and `getHandleSprite`.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SliderState {
+    pub hover: bool,
+    pub focused: bool,
+    /// `canChangeValue`: the keyboard changes its value (Enter pressed on it).
+    pub editing: bool,
+    /// Dragged with the mouse.
+    pub held: bool,
+    pub live: bool,
+}
 /// Vanilla's slider: track and 8 px handle at `position` (0..1) lit as `AbstractSliderButton`'s, the value over them.
 pub fn slider(
     batch: &mut HudBatch,
@@ -239,11 +250,13 @@ pub fn slider(
     rect: [f32; 4],
     value: &Text,
     position: f32,
-    (hover, focused, held, live): (bool, bool, bool, bool),
+    state: SliderState,
 ) {
     let [x, y, w, h] = rect;
+    let live = state.live;
     let tint = if live { WHITE } else { muted() };
-    let (track, handle) = ui::slider_sprites_ext(hover, live, focused, false, held);
+    let (track, handle) =
+        ui::slider_sprites_ext(state.hover, live, state.focused, state.editing, state.held);
     ui::nine_slice(batch, atlas, track, x, y, w, h, tint);
     let at = x + (position.clamp(0.0, 1.0) * (w - 8.0)).floor();
     ui::nine_slice(batch, atlas, handle, at, y, 8.0, h, tint);
@@ -309,7 +322,17 @@ mod tests {
                 button(b, a, r, t, (false, true, false))
             }),
             ("slider", |b, a, r, t| {
-                slider(b, a, r, t, 0.5, (false, false, false, true))
+                slider(
+                    b,
+                    a,
+                    r,
+                    t,
+                    0.5,
+                    SliderState {
+                        live: true,
+                        ..Default::default()
+                    },
+                )
             }),
             ("cycler", |b, a, r, t| cycler(b, a, r, t, (false, true))),
         ];
