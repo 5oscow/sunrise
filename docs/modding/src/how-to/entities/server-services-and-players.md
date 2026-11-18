@@ -238,5 +238,6 @@ the other flags and speeds stay as supplied by the last abilities packet.
 
 A hook runs inside the turn of the player whose action fired it. When a hook panics, the panic still ends the
 server, but the crash save writes nothing for that player: their `players/data/<uuid>.dat`, stats and
-advancements stay as last saved, so an item taken but not yet placed is never duplicated or lost on disk. The log
-names the turn with a warning. A panic your code caught does not count: the record ends with the server tick.
+advancements stay as last saved, so an item taken but not yet placed is never duplicated or lost in the player's
+files. The world save does not roll back what the turn already changed in the world, and a vehicle that player rides
+alone stays in the world. The log names the turn with a warning. A panic your code caught does not count: the record ends with the server tick.
