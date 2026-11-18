@@ -35,7 +35,7 @@ Feature → files → harness for the most-changed areas: [docs/architecture.md]
   becomes an issue listing the suspect PRs, fixed by an ordinary PR. `tools/ci/move_to_daily.py` moves an existing
   `verify` test that needs resources, a child process or the network. Builds: snapshot (a commit of main, gate green; published as
   `snapshot-<date>-<short>`, which no launcher offers), nightly (published by a fully green daily run), release (cut from a nightly).
-- **No hardcoded user-facing strings.** Keep UI translation-ready from the start. In the launcher (`launcher/`), wrap visible text with `tr("...")` or `trf("... {arg} ...", &[("arg", &val)])` from `crate::i18n` instead of raw string literals or `format!`. In the game, use translation keys (`Text::tr`, `lang::get`), never hardcoded English strings.
+- **No hardcoded user-facing strings.** Keep UI translation-ready from the start. In the launcher ([sunrise-org/sunrise-launcher](https://github.com/sunrise-org/sunrise-launcher)), wrap visible text with `tr("...")` or `trf("... {arg} ...", &[("arg", &val)])` from `crate::i18n` instead of raw string literals or `format!`. In the game, use translation keys (`Text::tr`, `lang::get`), never hardcoded English strings.
 - **Claim before you start**: comment `/claim` on the issue (no issue yet: open one, then claim it). An assigned
   issue is taken, and so is one labelled `in progress` (claimed on Discord): pick another. `/unclaim` when you stop;
   a claim with no open PR linking it is released after 5 days. The issues free to claim, without reading threads:
@@ -119,7 +119,7 @@ already done.
 
 ## Crates
 
-Game workspace (root `Cargo.toml`); `launcher/` and `crates/sunrise-telemetry-server` are separate workspaces.
+Game workspace (root `Cargo.toml`); `crates/sunrise-telemetry-server` is a separate workspace, and the launcher is its own repository, [sunrise-org/sunrise-launcher](https://github.com/sunrise-org/sunrise-launcher).
 
 | Crate | Owns |
 |---|---|
@@ -158,12 +158,12 @@ Game workspace (root `Cargo.toml`); `launcher/` and `crates/sunrise-telemetry-se
 | `sunrise-platform` | The platform's public API: what the Sunrise layer may use of the engine ([docs/layers.md](docs/layers.md)); re-exports `sunrise-system` today |
 | `sunrise-hooks`, `sunrise-game`, `sunrise-official`, `sunrise-heartbeat` | The layer seam: the engine's hooks for crates above it, the game an executable starts, the official executable (shipped as `sunrise-client`) that registers Sunrise's in-game parts, the first of them ([docs/layers.md](docs/layers.md#how-a-sunrise-crate-plugs-in)) |
 | `sunrise-dualsense`, `sunrise-threads`, `sunrise-release-sign`, `sunrise-bots`, `xtask` | DualSense output, thread priorities, signed release checksums, load-test bots, repo tasks |
-| `launcher/` | GPUI launcher, **moved to [sunrise-org/sunrise-launcher](https://github.com/sunrise-org/sunrise-launcher) with its history (2026-11-18)**: make launcher changes there. This copy is frozen until it is removed (launcher split D1); `launcher-bridge.yml` signs that repository's releases with this repository's release key and publishes them there and here as `launcher@X.Y.Z`, for launchers installed from here |
+| [sunrise-org/sunrise-launcher](https://github.com/sunrise-org/sunrise-launcher) | GPUI launcher, in its own repository (moved there with its history, 2026-11-18): make launcher changes there. `launcher-bridge.yml` signs that repository's releases with this repository's release key and publishes them there and here as `launcher@X.Y.Z`, for launchers installed from here |
 
 Other top-level folders: `tools/` (harnesses and dev scripts), `tests/` (Python unit tests: `python3 -m
 unittest discover -s tests`), `mods/sunrise/src/test/java/dev/sunriselab/parity/` (Java oracles),
 `docs/`, `.github/workflows/`. The website (playsunrise.net) is `frontend/site` in the private sunrise-org/sunny: its build
-reads `README.md`, `launcher/links.json`, `docs/api/`, `roadmap/roadmap.json` and `crates/sunrise-theme/tokens.css` from main.
+reads `README.md`, `docs/api/`, `roadmap/roadmap.json` and `crates/sunrise-theme/tokens.css` from main.
 
 ## Write tests with signal
 
@@ -251,7 +251,7 @@ state stays separate from the library tests. This compiles gameplay twice for ex
 
 | Subsystem | Files |
 |---|---|
-| Game loop, tick, frame | `game.rs`: `fn run`, `impl ApplicationHandler for Game` (`window_event`, `about_to_wait`), `fn tick`, `fn tick_world`, `fn render`; L: `clock.rs`, `spans.rs`; `sunrise-client-input/src/window.rs` |
+| Game loop, tick, frame | `game.rs`: `fn run`, `impl ApplicationHandler for Game` (`window_event`, `about_to_wait`), `fn tick`, `fn render`; G: `world/level_tick.rs` (`fn tick_world`, `fn tick_mobs`); L: `clock.rs`, `spans.rs`; `sunrise-client-input/src/window.rs` |
 | Rendering | L: `gfx.rs` (`Renderer::new`, `Renderer::render`), `gfx/` (cull, occlusion, translucency, upload, timing, lod, weather, stars, end_sky), `*.wgsl`, `particles.rs`, `block_entity_render.rs`, `item_render.rs`, `fog.rs`, `clouds.rs`, `camera.rs`, `first_person.rs`; G: `render_tick.rs`, `item_draw.rs`, `screen_backgrounds.rs` (panorama, menu blur, border wall) |
 | Chunks, streaming, light | L: `streaming.rs` (worker pool: generate, light, mesh), `world.rs`, `chunk.rs`, `chunk_map.rs`, `light.rs`, `mesher.rs` + `mesher/`, `vanillagen.rs` (binds sunrise-world's generator), `lod.rs` + `lod/`, `server_terrain.rs` (a server's kept chunks), `bluemap.rs` + `bluemap_detect.rs` (far terrain from its web map), `ticket_levels.rs`; G: `world_loading.rs`, `world_entry.rs`, `postprocess.rs`; game.rs `fn update_world` |
 | World generation | `crates/sunrise-world/src/worldgen/` (`generator*.rs`, `feature_graph.rs`, `structure/`, `carver/`) |
@@ -272,7 +272,7 @@ state stays separate from the library tests. This compiles gameplay twice for ex
 | Resource packs | L: `packs.rs` + `packs/`, `pack_screen.rs`, `atlas_sources.rs`, `sprites.rs`, `mipmap.rs`, `model_library.rs`, `font.rs`, `mobs/cem.rs` + `mobs/cem_anim.rs` (OptiFine/EMF entity models and their animations); `sunrise-client-core/src/lang.rs`; crates `sunrise-assets`, `sunrise-optifine`; G: `packs.rs` |
 | Agent control | L: `control.rs` (socket), `bin/sunrise-ctl/`; G: `control.rs`, `agent.rs`, `events.rs`, `ui_control.rs` ([docs/agent-control.md](docs/agent-control.md)) |
 | Mods | crate `sunrise-mod-package`; G: `modding/mods/mod.rs` (content and mod load), `modding/mods/standalone.rs` (standalone model registration); L: `mod_content.rs`, `mod_list.rs` |
-| Sunrise extras, settings | L: `extras.rs`, `graphics.rs`, `settings.rs`, `minimap.rs`; G: `interface/extras.rs` + `interface/extras/` (each extra's glue: `mouse_tweaks.rs`, `sorting.rs`, `pvp.rs`, `reconnect.rs`), `options.rs` |
+| Sunrise extras, settings | L: `extras.rs`, `graphics.rs`, `settings.rs`; G: `interface/extras.rs` + `interface/extras/` (each extra's glue: `mouse_tweaks.rs`, `sorting.rs`, `pvp.rs`, `reconnect.rs`), `options.rs` |
 
 ## How `Game` is organised
 
@@ -280,7 +280,7 @@ state stays separate from the library tests. This compiles gameplay twice for ex
   `<feature>/mod.rs`) adds an `impl Game<'_>` block and state types. Logical modules remain direct
   children of `game`; an area's `.game-area` marker enables build-derived declarations.
 - Find a feature's code: `grep -rn "fn tick_<thing>\|fn <verb>_<thing>" crates/sunrise-client/src/game*`;
-  the file is under `game/<area>/`. Find its callers in game.rs's `fn tick` / `fn tick_world`.
+  the file is under `game/<area>/`. Find its callers in game.rs's `fn tick` and `world/level_tick.rs`'s `fn tick_world`.
 - Fields that say which mode runs: `remote` (this window is a client of a server: multiplayer, LAN guest, or
   single player on its server thread), `lan` (`LanHost`: this world is open to the network), `integrated`
   (the window's own server thread), `serving` (this `Game` *is* that server thread), `options.dedicated`.

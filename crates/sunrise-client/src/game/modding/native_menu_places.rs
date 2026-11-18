@@ -50,22 +50,26 @@ fn held_identity(stack: &ItemStack) -> ItemStack {
     stack
 }
 
-/// The inventory slot holding `hand`'s stack (the selected hotbar slot, or the offhand's 40) and
-/// that stack, of `guest`.
-fn held_by(guest: &Guest, hand: Hand) -> (usize, Option<&ItemStack>) {
-    match hand {
-        Hand::Off => (40, guest.offhand.as_ref()),
-        _ => (
-            guest.selected,
-            guest.inventory.get(guest.selected).and_then(Option::as_ref),
-        ),
-    }
-}
-
 impl Game<'_> {
+    /// The inventory slot holding `hand`'s stack (the selected hotbar slot, or the offhand's 40) and
+    /// that stack, of `guest`: read from the game in their own turn, when their record holds the
+    /// outer player's.
+    fn held_by<'a>(&'a self, guest: &'a Guest, hand: Hand) -> (usize, Option<&'a ItemStack>) {
+        let (selected, inventory, offhand) = match self.lan_acting == Some(guest.conn) {
+            true => (self.selected, &self.inventory, &self.offhand),
+            false => (guest.selected, &guest.inventory, &guest.offhand),
+        };
+        match hand {
+            Hand::Off => (40, offhand.as_ref()),
+            _ => (selected, inventory.get(selected).and_then(Option::as_ref)),
+        }
+    }
+
     /// `player_back_mod_menu_slots`: backs `window`'s first container slots with `places`. An
     /// empty list takes the backing away; a slot no longer backed is emptied, so the copy it
-    /// showed never becomes the menu's own storage.
+    /// showed never becomes the menu's own storage. In the player's own turn (an item's use
+    /// that opened the menu), the record holds the outer player's inventory, so mirroring
+    /// and resending wait until after the turn.
     pub(super) fn player_back_mod_menu_slots(
         &mut self,
         player: mod_api::PlayerRef,
@@ -80,14 +84,15 @@ impl Game<'_> {
         let mut held = [None, None];
         for place in &places {
             if let MenuSlotPlace::HeldItem { hand, .. } = *place {
-                let (index, stack) = held_by(guest, hand);
+                let (index, stack) = self.held_by(guest, hand);
                 held[usize::from(hand == Hand::Off)] = stack.map(|s| (index, held_identity(s)));
             }
         }
-        let selected = guest.selected;
+        let selected = self.held_by(guest, Hand::Main).0;
         let conn = self
             .native_conn(uuid)
             .ok_or(MenuSlotBackRefusal::NoPlayerOrWindow)?;
+        let acting = self.lan_acting == Some(conn);
         let (size, slots) = self
             .lan
             .as_ref()
@@ -135,12 +140,16 @@ impl Game<'_> {
             .as_ref()
             .filter(|old| old.window == window)
             .map_or(0, |old| old.places.len());
-        *entry = (count > 0).then_some(MenuSlotPlaces {
+        *entry = (count > 0).then(|| MenuSlotPlaces {
             window,
             places,
             locked,
             held,
-            noticed: false,
+            // A notice belongs to the window, not the backing that happened to queue it.
+            noticed: lan.hub.native_menu_events.iter().any(|event| {
+                matches!(event, NativeMenuEvent::PlacesChanged { uuid: owner, window: queued }
+                    if *owner == uuid && *queued == window)
+            }),
         });
         if let Some(index) = lan.hub.guests.connection_index(conn)
             && let Some(shown) = lan.hub.guests.native_menu_mut(index)
@@ -148,6 +157,11 @@ impl Game<'_> {
             for slot in shown.iter_mut().take(before).skip(count) {
                 *slot = None;
             }
+        }
+        if acting {
+            // Slots cleared above reach the client through the container sync after the turn.
+            self.queue_menu_places_notice(conn, uuid);
+            return Ok(());
         }
         if count > 0 {
             self.refresh_menu_places(conn, uuid, menu);
@@ -207,7 +221,7 @@ impl Game<'_> {
                 let Some((index, identity)) = bound else {
                     return true;
                 };
-                let (now, stack) = held_by(guest, hand);
+                let (now, stack) = self.held_by(guest, hand);
                 now == *index && stack.is_some_and(|stack| held_identity(stack) == *identity)
             })
     }
@@ -276,9 +290,14 @@ impl Game<'_> {
         {
             return;
         }
-        let Some(conn) = self.native_conn(uuid) else {
-            return;
-        };
+        if let Some(conn) = self.native_conn(uuid) {
+            self.queue_menu_places_notice(conn, uuid);
+        }
+    }
+
+    /// Queues one look at the places of `conn`'s backed menu (`NativeMenuEvent::PlacesChanged`),
+    /// unless one is already waiting to be taken.
+    fn queue_menu_places_notice(&mut self, conn: u32, uuid: u128) {
         let Some(lan) = self.lan.as_mut() else {
             return;
         };
@@ -303,19 +322,15 @@ impl Game<'_> {
         let Some(conn) = self.native_conn(uuid) else {
             return;
         };
-        let Some((backed_window, ..)) = self.menu_places_of(conn) else {
-            return;
-        };
-        if let Some(backed) = self
+        let Some(backed) = self
             .lan
             .as_mut()
             .and_then(|lan| lan.menus.get_mut(&conn)?.slot_places.as_mut())
-        {
-            backed.noticed = false;
-        }
-        if backed_window != window {
+            .filter(|backed| backed.window == window)
+        else {
             return;
-        }
+        };
+        backed.noticed = false;
         match self.menu(uuid, window) {
             Some(menu) => {
                 self.refresh_menu_places(conn, uuid, menu);
@@ -518,14 +533,18 @@ mod tests {
     }
 
     /// Guest 1 (UUID 123) holding a shulker box in hotbar slot 0 with 64 stone in inventory
-    /// slot 9, and a 27-slot mod chest menu open: its window.
-    fn backpack_menu(game: &mut Game<'_>) -> i32 {
+    /// slot 9.
+    fn backpack_guest(game: &mut Game<'_>) {
         open_to_lan(game);
         let mut player = guest(1);
         player.selected = 0;
         player.inventory[0] = Some(ItemStack::new("minecraft:shulker_box", 1));
         player.inventory[9] = Some(ItemStack::new("minecraft:stone", 64));
         game.lan.as_mut().unwrap().hub.guests.push(player);
+    }
+
+    /// A 27-slot mod chest menu opened for guest 1: its window.
+    fn open_pack(game: &mut Game<'_>) -> i32 {
         let host: &mut dyn ServerHost = game;
         host.open_menu(
             123,
@@ -536,6 +555,12 @@ mod tests {
         )
         .unwrap()
         .unwrap()
+    }
+
+    /// [`backpack_guest`] with the menu open: its window.
+    fn backpack_menu(game: &mut Game<'_>) -> i32 {
+        backpack_guest(game);
+        open_pack(game)
     }
 
     fn held_slot(n: usize) -> ItemPlace {
@@ -702,6 +727,14 @@ mod tests {
                 back(game, places),
                 Err(MenuSlotBackRefusal::PlaceUnresolved { index: 1 })
             );
+            // A native window with hidden slots has no live menu handle, even in its own turn.
+            edit_guest(game, |g| g.menu.as_mut().unwrap().hidden.push(0));
+            let refused = Err(MenuSlotBackRefusal::NoPlayerOrWindow);
+            assert_eq!(back(game, held_places(Hand::Main, 0..1)), refused);
+            assert_eq!(
+                game.as_guest(1, |game| back(game, held_places(Hand::Main, 0..1))),
+                Some(refused)
+            );
             // A block's menu shows its block's slots: no backing is stored for it.
             edit_guest(game, |g| {
                 g.menu.as_mut().unwrap().slots = Slots::Block((0, 64, 0));
@@ -744,6 +777,113 @@ mod tests {
             assert_eq!(shown(game), None, "mirrored after the write, not inside it");
             game.run_native_menu_events();
             assert_eq!(shown(game), Some(5));
+        });
+    }
+
+    /// An item's use opens its menu and backs it at once, inside the player's own turn.
+    #[test]
+    #[ignore = "daily"]
+    fn a_menu_backed_in_the_players_own_turn_shows_the_held_box_after_it() {
+        with_game(|game| {
+            backpack_guest(game);
+            let (window, backed) = game
+                .as_guest(1, |game| {
+                    let host: &mut dyn ServerHost = game;
+                    let carried = ItemPlace::PlayerSlot {
+                        player: 123,
+                        slot: 9,
+                    };
+                    let stone = carried.resource(host).unwrap();
+                    let put = host.transaction(|host, tx| {
+                        Ok::<_, ()>(held_slot(4).insert(host, tx, &stone, 5))
+                    });
+                    assert_eq!(put, Ok(5));
+                    let window = open_pack(game);
+                    let player = game.player(123).unwrap();
+                    let places = held_places(Hand::Main, 0..27);
+                    (
+                        window,
+                        game.player_back_mod_menu_slots(player, window, places),
+                    )
+                })
+                .unwrap();
+            assert_eq!(backed, Ok(()));
+            let shown = |game: &Game<'_>| {
+                let guest = game.lan.as_ref().unwrap().hub.guest(1).unwrap();
+                guest.native_menu[4].as_ref().map(|s| s.count)
+            };
+            assert_eq!(shown(game), None, "mirrored after the turn, not inside it");
+            game.run_native_menu_events();
+            assert_eq!(shown(game), Some(5));
+            let host: &mut dyn ServerHost = game;
+            assert!(host.menu(123, window).is_some());
+
+            // The box bound is the one the player held in that turn: another box selected, the
+            // next click closes the menu and moves nothing.
+            edit_guest(game, |g| {
+                g.inventory[1] = Some(ItemStack::new("minecraft:shulker_box", 1));
+                g.selected = 1;
+            });
+            assert!(game.place_menu_click(123, window, 27, 0, 1));
+            let host: &mut dyn ServerHost = game;
+            assert_eq!(host.menu(123, window), None);
+            let carried = ItemPlace::PlayerSlot {
+                player: 123,
+                slot: 9,
+            };
+            assert_eq!(carried.amount(host), 64);
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn rebinding_coalesces_notices_until_the_right_window_is_processed() {
+        with_game(|game| {
+            backpack_guest(game);
+            let (old, new) = game
+                .as_guest(1, |game| {
+                    let player = game.player(123).unwrap();
+                    let old = open_pack(game);
+                    game.player_back_mod_menu_slots(player, old, held_places(Hand::Main, 0..1))
+                        .unwrap();
+                    let new = open_pack(game);
+                    for places in [
+                        held_places(Hand::Main, 0..2),
+                        Vec::new(),
+                        held_places(Hand::Main, 1..2),
+                    ] {
+                        game.player_back_mod_menu_slots(player, new, places)
+                            .unwrap();
+                    }
+                    (old, new)
+                })
+                .unwrap();
+            // Deliver the old window's change as the event drain does, then write again.
+            game.menu_places_changed(123, old);
+            game.notice_menu_place_write(&held_slot(1));
+            let windows: Vec<_> = game
+                .lan
+                .as_ref()
+                .unwrap()
+                .hub
+                .native_menu_events
+                .iter()
+                .filter_map(|event| match event {
+                    NativeMenuEvent::PlacesChanged { uuid: 123, window } => Some(*window),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                windows,
+                [old, new],
+                "one notice per window, even across an unback"
+            );
+            game.run_native_menu_events();
+            game.notice_menu_place_write(&held_slot(1));
+            assert!(matches!(
+                game.lan.as_ref().unwrap().hub.native_menu_events.as_slice(),
+                [NativeMenuEvent::PlacesChanged { uuid: 123, window }] if *window == new
+            ));
         });
     }
 

@@ -311,24 +311,21 @@ impl Game<'_> {
     }
     pub(in crate::game) fn syntax_failure(&mut self, e: &CommandError, command: &str) {
         self.command_failure(e.message.clone());
-        let Some(input) = &e.input else { return };
-        let cursor = e.cursor.min(input.len());
+        let Some(window) = e.context_window() else {
+            return;
+        };
         let suggest = Style {
             click: Some(text::ClickEvent::SuggestCommand(format!("/{command}"))),
             ..Style::default()
         };
         let mut context = Text::empty();
-        if cursor > 10 {
+        if window.ellipsis {
             context.push("...");
         }
-        let start = (0..=cursor.saturating_sub(10))
-            .rev()
-            .find(|&i| input.is_char_boundary(i))
-            .unwrap_or(0);
-        context.push(&input[start..cursor]);
-        if cursor < input.len() {
+        context.push(window.before.as_str());
+        if !window.after.is_empty() {
             context.push(
-                Text::literal(&input[cursor..])
+                Text::literal(window.after)
                     .with_color(text::RED)
                     .underlined(),
             );
@@ -2445,7 +2442,8 @@ impl Game<'_> {
                     // counter, and the crystal is shown with its base.
                     self.next_entity += 1;
                     let at = Vec3::new(pos[0], pos[1], pos[2]);
-                    let drawn = self.world.random.next_int_bound(100_000).unwrap_or(0);
+                    let (drawn, uuid) = super::dragon::Crystal::own_draws();
+                    self.persist.uuids.insert(self.next_entity, uuid);
                     let time = super::dragon::Crystal::start_time(at, drawn, self.clock.still());
                     let crystal = super::dragon::Crystal::new(self.next_entity, at, true, time);
                     self.crystals.push(crystal);
