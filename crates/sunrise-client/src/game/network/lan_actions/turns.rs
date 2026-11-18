@@ -47,6 +47,42 @@ impl Game<'_> {
         self.lan.as_ref()?.hub.guests.connection_index(conn)
     }
 
+    /// Runs `f` with guest `gi`'s own inventory, equipment and cursor in its hub record. In
+    /// its own turn the game holds them and the record holds the outer player's, so a packet
+    /// built from the record would show that player's stacks. `f` works on the record: the
+    /// game's player fields hold the outer player's meanwhile.
+    pub(in crate::game) fn with_own_record<R>(
+        &mut self,
+        gi: usize,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        let own = self
+            .lan
+            .as_ref()
+            .is_some_and(|host| self.lan_acting == Some(host.hub.guests[gi].conn));
+        let swap = |game: &mut Self| {
+            if let Some(host) = game.lan.as_mut() {
+                host.hub.guests.update(gi, |g| {
+                    // The fields `enter_guest_at` swaps.
+                    std::mem::swap(&mut game.inventory, &mut g.inventory);
+                    std::mem::swap(&mut game.armor, &mut g.armor);
+                    std::mem::swap(&mut game.location_armor, &mut g.location_armor);
+                    std::mem::swap(&mut game.offhand, &mut g.offhand);
+                    std::mem::swap(&mut game.equipment, &mut g.equipment);
+                    std::mem::swap(&mut game.carried, &mut g.carried);
+                });
+            }
+        };
+        if own {
+            swap(self);
+        }
+        let result = f(self);
+        if own {
+            swap(self);
+        }
+        result
+    }
+
     /// `as_guest`, with the system messages the guest's action earns (the
     /// `player::sendSystemMessage` of a packet handler) sent to that guest.
     pub(in crate::game) fn as_guest_messaged<R>(

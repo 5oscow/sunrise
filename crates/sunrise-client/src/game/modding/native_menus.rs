@@ -92,12 +92,16 @@ impl Game<'_> {
     ) -> Option<i32> {
         let conn = self.native_conn(uuid)?;
         self.close_for_open(conn, replace);
-        let window = self.lan.as_mut()?.hub.open_native_menu(
-            conn,
-            rows,
-            component_nbt(&title.component()),
-            items,
-        )?;
+        let gi = self.guest_index(conn)?;
+        // The first contents show the player's own inventory and cursor, in their turn too.
+        let window = self.with_own_record(gi, |game| {
+            game.lan.as_mut()?.hub.open_native_menu(
+                conn,
+                rows,
+                component_nbt(&title.component()),
+                items,
+            )
+        })?;
         self.player_menu_opening(conn);
         Some(window)
     }
@@ -150,16 +154,21 @@ impl Game<'_> {
             return Ok(None);
         }
         self.close_for_open(conn, replace);
-        let host = self.lan.as_mut().ok_or(OpenMenuError::PlayerUnavailable)?;
-        let window = host.hub.open_menu_window(
-            conn,
-            &id,
-            component_nbt(&title.component()),
-            pos.map(|[x, y, z]| (x, y, z)),
-            sunrise_client::lan::menu::Slots::Native,
-            vec![None; kind.slots],
-            Some(extra),
-        );
+        let gi = self
+            .guest_index(conn)
+            .ok_or(OpenMenuError::PlayerUnavailable)?;
+        // The first contents show the player's own inventory and cursor, in their turn too.
+        let window = self.with_own_record(gi, |game| {
+            game.lan.as_mut()?.hub.open_menu_window(
+                conn,
+                &id,
+                component_nbt(&title.component()),
+                pos.map(|[x, y, z]| (x, y, z)),
+                sunrise_client::lan::menu::Slots::Native,
+                vec![None; kind.slots],
+                Some(extra),
+            )
+        });
         if window.is_some() {
             self.player_menu_opening(conn);
         }
@@ -926,6 +935,60 @@ mod tests {
             assert!(content.carried.is_some(), "the cursor is sent with it");
             let host: &mut dyn ServerHost = game;
             assert!(host.menu(123, window).is_some(), "still the open menu");
+        });
+    }
+
+    /// A menu opened in the player's own turn, nested in another player's, clears and shows
+    /// that player's own cursor and inventory: none of the outer player's stacks reach them.
+    #[test]
+    #[ignore = "daily"]
+    fn a_menu_opened_in_a_nested_turn_sends_the_openers_own_inventory_and_cursor() {
+        with_game(|game| {
+            let rx = watched_guest(game);
+            let mut outer = guest(2);
+            outer.inventory[3] = Some(ItemStack::new("minecraft:diamond", 7));
+            outer.carried = Some(ItemStack::new("minecraft:dirt", 9));
+            let hub = &mut game.lan.as_mut().unwrap().hub;
+            hub.guests.push(outer);
+            hub.guests.update(0, |g| {
+                g.inventory[5] = Some(ItemStack::new("minecraft:gold_ingot", 2));
+                g.carried = Some(ItemStack::new("minecraft:stone", 4));
+            });
+            sent(&rx);
+            let window = game
+                .as_guest(2, |game| {
+                    game.as_guest(1, |game| open(game, 1, "pack", MenuReplace::CloseFirst))
+                })
+                .flatten()
+                .unwrap();
+            let contents: Vec<_> = sent(&rx)
+                .into_iter()
+                .filter_map(|packet| match packet {
+                    C::ContainerSetContent(content) => Some(content),
+                    _ => None,
+                })
+                .collect();
+            // The cursor's stone back in the inventory, then the menu's first contents.
+            let windows: Vec<_> = contents.iter().map(|c| c.container).collect();
+            assert_eq!(windows, [0, window]);
+            for content in &contents {
+                let mut counts: Vec<_> = content.items.iter().flatten().map(|s| s.count).collect();
+                counts.sort_unstable();
+                assert_eq!(
+                    counts,
+                    [2, 4],
+                    "window {}: their gold and stone",
+                    content.container
+                );
+                assert!(content.carried.is_none(), "window {}", content.container);
+            }
+            let hub = &game.lan.as_ref().unwrap().hub;
+            assert_eq!(hub.guests[0].carried, None);
+            assert_eq!(
+                hub.guests[1].carried,
+                Some(ItemStack::new("minecraft:dirt", 9)),
+                "the outer player's cursor stays theirs"
+            );
         });
     }
 

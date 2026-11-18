@@ -42,18 +42,21 @@ impl Game<'_> {
     /// `AbstractContainerMenu.removed`: what a closing player held on the
     /// cursor goes back into their inventory (`placeItemBackInInventory`,
     /// dropped only if it doesn't fit), and their client's cursor empties
-    /// with the inventory it is sent.
+    /// with the inventory it is sent. In their own turn (a menu opened by their item's use)
+    /// that is their own cursor and inventory, not the outer player's.
     pub(in crate::game) fn guest_carried_back(&mut self, gi: usize) {
-        let carried = self
-            .lan
-            .as_mut()
-            .and_then(|host| host.hub.guests.update(gi, |g| g.carried.take()));
-        if let Some(c) = carried {
-            self.lan_place_back(gi, vec![c]);
-            if let Some(host) = self.lan.as_mut() {
-                host.hub.send_inventory(gi);
+        self.with_own_record(gi, |game| {
+            let carried = game
+                .lan
+                .as_mut()
+                .and_then(|host| host.hub.guests.update(gi, |g| g.carried.take()));
+            if let Some(c) = carried {
+                game.lan_place_back(gi, vec![c]);
+                if let Some(host) = game.lan.as_mut() {
+                    host.hub.send_inventory(gi);
+                }
             }
-        }
+        });
     }
 
     pub(in crate::game) fn drop_guest_items(&mut self, gi: usize, stacks: Vec<ItemStack>) {
