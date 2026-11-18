@@ -18,7 +18,9 @@ MANIFEST_JOIN = re.compile(r'env!\(\s*"CARGO_MANIFEST_DIR"\s*\)\s*\)?((?:\s*\.jo
 MANIFEST_CONCAT = re.compile(r'concat!\(\s*env!\(\s*"CARGO_MANIFEST_DIR"\s*\)\s*,\s*' + STRING)
 JOINED = re.compile(r'\.join\(\s*' + STRING + r'\s*\)')
 # A build script runs in its crate's folder: a literal it reads or opens, reruns on, or starts a path from (joined in turn) is a path from there.
-BUILD_READ = re.compile(r'\b(?:read_to_string|read|read_dir|copy|open)\(\s*' + STRING + r'|cargo::?rerun-if-changed=((?:[^"\\]|\\[^n])+)')
+BUILD_READ = re.compile(r'\b(?:read_to_string|read|read_dir|copy|open)\(\s*' + STRING)
+LITERAL = re.compile(STRING, re.S)
+RERUN = re.compile(r'^\s*cargo::?rerun-if-changed=(.+)$', re.M)
 BUILD_PATH = re.compile(r'\b(?:Path::new|PathBuf::from)\(\s*' + STRING + r'\s*\)((?:\s*\.join\(\s*' + STRING + r'\s*\))*)')
 BUILD_EMPTY = re.compile(r'\b(?:PathBuf::new|PathBuf::default)\(\s*\)((?:\s*\.join\(\s*' + STRING + r'\s*\))+)')
 ABSOLUTE = re.compile(r'^(?:/|[A-Za-z]:|//)')
@@ -38,6 +40,12 @@ def plain(text: str) -> str:
 def unescaped(literal: str) -> str:
     """A plain string literal's text."""
     return re.sub(r"\\(.)", r"\1", literal)
+
+
+def rust_text(literal: str) -> str:
+    """A plain string literal's text as Rust reads it: a line continuation drops the newline and the indent after it, `\\n` is a newline."""
+    literal = re.sub(r"\\\n\s*", "", literal)
+    return re.sub(r"\\(.)", lambda m: {"n": "\n", "r": "\r", "t": "\t"}.get(m.group(1), m.group(1)), literal, flags=re.S)
 
 
 def joined(parts: list[str]) -> str:
@@ -113,7 +121,14 @@ def problems(root: Path, files: list[str]) -> list[str]:
             checks += [(m, here, unescaped(m.group(1)).replace("\\", "/").lstrip("/")) for m in MANIFEST_CONCAT.finditer(text)]
             checks += [(m, here, joined(JOINED.findall(m.group(1)))) for m in MANIFEST_JOIN.finditer(text)]
             if path.name == "build.rs":
-                checks += [(m, here, unescaped(m.group(1) or m.group(2))) for m in BUILD_READ.finditer(text)]
+                checks += [(m, here, unescaped(m.group(1))) for m in BUILD_READ.finditer(text)]
+                # What a build script prints, line by line as Cargo reads it: each rerun-if-changed path is its own.
+                checks += [
+                    (m, here, rerun.group(1).strip())
+                    for m in LITERAL.finditer(text)
+                    if "rerun-if-changed" in m.group(1)
+                    for rerun in RERUN.finditer(rust_text(m.group(1)))
+                ]
                 checks += [(m, here, joined([m.group(1), *JOINED.findall(m.group(2))])) for m in BUILD_PATH.finditer(text)]
                 checks += [(m, here, joined(JOINED.findall(m.group(1)))) for m in BUILD_EMPTY.finditer(text)]
             for match, base, value in checks:

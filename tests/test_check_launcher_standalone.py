@@ -79,7 +79,9 @@ class LauncherStandalone(unittest.TestCase):
                                  '    let here = PathBuf::new().join("assets").join("icon.png");\n}\n',
             "launcher/crates/b/Cargo.toml": "[package]\nname = 'b'\n",
             "launcher/crates/b/build.rs": 'fn main() {\n    println!("cargo:rerun-if-changed=..\\\\..\\\\..\\\\README.md");\n'
-                                          '    println!("cargo:rerun-if-changed=src\\ncargo::rerun-if-changed=../../../x");\n}\n',
+                                          '    println!("cargo:rerun-if-changed=src\\ncargo::rerun-if-changed=../../../x");\n'
+                                          '    println!("cargo:rerun-if-changed=src\\\n        \\ncargo:rerun-if-changed=../../../y");\n'
+                                          '    println!("cargo:rerun-if-changed=src\ncargo:rerun-if-changed=../../../z");\n}\n',
             "launcher/src/lib.rs": 'const I: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "\\\\assets\\\\icon.png"));\n',
         })
         self.assertEqual(sorted(problem.split(":")[1] for problem in found if "crates/b" not in problem),
@@ -87,6 +89,9 @@ class LauncherStandalone(unittest.TestCase):
         self.assertTrue(any(p.startswith("launcher/crates/b/build.rs:2:") for p in found), found)
         # Two directives in one string, a newline apart: each path is its own.
         self.assertTrue(any(p.startswith("launcher/crates/b/build.rs:3: '../../../x'") for p in found), found)
+        # A line continuation then `\\n`, and a newline inside the literal, each start the next directive.
+        for line, path in [("4", "y"), ("6", "z")]:
+            self.assertTrue(any(p.startswith(f"launcher/crates/b/build.rs:{line}: '../../../{path}'") for p in found), found)
 
     def test_this_repository_launcher_builds_from_its_own_files(self):
         self.assertEqual(guard.problems(guard.ROOT, guard.tracked(guard.ROOT)), [])
