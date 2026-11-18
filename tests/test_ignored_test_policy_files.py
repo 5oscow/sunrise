@@ -140,8 +140,9 @@ class PolicyFiles(unittest.TestCase):
                               capture_output=True, text=True, cwd=ROOT)
         self.assertEqual(done.returncode, 0, done.stderr)
         # The committed rows: the subprocess reads the real folder, not this test's scratch one.
-        self.assertEqual(done.stdout, "sunrise-prepare test:hidden_exporters "
-                                      "exporters_write_to_their_log_file_without_a_console\n")
+        with patch.object(ignored_tests, "POLICY", ROOT / "tools/ci/ignored-tests"):
+            expected = "".join(f"{package} {target} {test}\n" for package, target, test in ignored_tests.windows_rows())
+        self.assertEqual(done.stdout, expected)
 
     def test_an_unset_variable_runs_nothing(self):
         self.write("wasm-fixture.txt", "pkg a::one VAR needs\n")
