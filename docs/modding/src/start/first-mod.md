@@ -148,7 +148,8 @@ plan = {
 json.dump(plan, open(f"{b}/lock-plan.json", "w"))
 plan["package"] = {"runtime": f"{b}/runtime", "api": f"{b}/api", "engine": f"{b}/engine"}
 plan["target"] = "client"
-plan["registry"] = False
+# True agrees to compile the mod's crates.io dependencies, whose build scripts and proc macros run on this computer.
+plan["registry"] = True
 json.dump(plan, open(f"{b}/plan.json", "w"))
 PY
   cargo sunrise-mod native-lock < "$B/lock-plan.json"
@@ -163,7 +164,9 @@ The tool prints one JSON event per line. A build that worked prints these two, t
 {"event":"built","route":"prebuilt-api","binary":"…/runtime/bin/sunrise-client","libraries":["…/libmod_api.so", …, "…/libmod_greeter.so"], …}
 ```
 
-The compiled mod is the last of `libraries`. The tool only compiles: installing the result into an instance, and
+`"registry": true` in the plan is your agreement to compile the mod's own crates.io dependencies, whose build
+scripts and proc macros run on your computer; the greeter has none, and a mod with any stops without it. The compiled
+mod is the last of `libraries`. The tool only compiles: installing the result into an instance, and
 selecting it, is the launcher's step, so a mod built this way does not appear in the launcher until you run the
 launcher's `native-build` on it. A build for another
 computer needs that computer's target triple in `TARGET` (macOS arm64 is `aarch64-apple-darwin`, Windows x64 is
