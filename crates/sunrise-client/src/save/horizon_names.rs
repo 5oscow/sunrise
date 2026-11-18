@@ -55,11 +55,12 @@ fn adopt_in_entity(entity: &mut Tag) {
     }
 }
 
-/// `horizon:attachments` on `holder` becomes [`ATTACHMENTS_KEY`], unless that is there already.
+/// `horizon:attachments` on `holder` becomes [`ATTACHMENTS_KEY`], unless that is there already,
+/// and is dropped either way, so a cleared Sunrise value never brings the Horizon one back.
 fn adopt(holder: &mut Tag) {
     if let Tag::Compound(map) = holder
-        && !map.contains_key(&ATTACHMENTS_KEY.into())
         && let Some(saved) = map.remove(&HORIZON_ATTACHMENTS_KEY.into())
+        && !map.contains_key(&ATTACHMENTS_KEY.into())
     {
         map.insert(ATTACHMENTS_KEY.into(), saved);
     }

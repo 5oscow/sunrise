@@ -44,6 +44,7 @@ fn a_horizon_chunk_and_its_block_entities_keep_their_attachments() {
     };
     assert_eq!(block_entities[0].get(ATTACHMENTS_KEY), Some(&saved(2)));
     assert_eq!(block_entities[1].get(ATTACHMENTS_KEY), Some(&saved(4)));
+    assert_eq!(block_entities[1].get("horizon:attachments"), None);
 }
 
 #[test]
