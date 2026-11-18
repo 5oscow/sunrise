@@ -191,8 +191,7 @@ fn a_block_part_reads_a_block_entity_through_its_owning_level() {
         // The part answers from the chest's saved data, so the override reaches
         // past the chest's own vanilla Blocked type.
         assert_eq!(
-            game.mob_world_base(&[])
-                .path_type_from_state(3, 64, 1),
+            game.mob_world_base(&[]).path_type_from_state(3, 64, 1),
             PathType::Walkable
         );
         // A second loaded dimension has a chest of its own at the same position:
@@ -206,8 +205,7 @@ fn a_block_part_reads_a_block_entity_through_its_owning_level() {
         );
         chest_level(game, 2);
         assert_eq!(
-            game.mob_world_base(&[])
-                .path_type_from_state(3, 64, 1),
+            game.mob_world_base(&[]).path_type_from_state(3, 64, 1),
             PathType::Damaging
         );
     });

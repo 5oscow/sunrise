@@ -917,10 +917,7 @@ mod tests {
             };
             game.world.block_entities.insert(pos, holder());
             let original = game.block_entity(level, [1, 64, 1]).unwrap();
-            assert_eq!(
-                original.merge_data(game, compound("{count:3}")),
-                Ok(true)
-            );
+            assert_eq!(original.merge_data(game, compound("{count:3}")), Ok(true));
             game.with_level(|_, host, ticks| {
                 let wrapped = super::super::mod_api_host::LevelTicks::new(&*host, ticks);
                 assert_eq!(
@@ -937,7 +934,10 @@ mod tests {
                 );
                 // The ticks wrapper hands the same reads through, saved data included.
                 let data = mod_api::LevelHost::block_entity_data(&*host, original);
-                assert_eq!(data.as_ref().and_then(|data| data.get(&"count".into())), Some(&mod_api::Tag::Int(3)));
+                assert_eq!(
+                    data.as_ref().and_then(|data| data.get(&"count".into())),
+                    Some(&mod_api::Tag::Int(3))
+                );
                 assert_eq!(
                     mod_api::LevelHost::block_entity_data(&wrapped, original),
                     data,

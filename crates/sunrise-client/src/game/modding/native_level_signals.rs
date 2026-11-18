@@ -320,11 +320,10 @@ impl LevelHost for ReadLevel<'_, '_> {
     fn raw_brightness(&self, pos: [i32; 3], sky_darken: i32) -> i32 {
         // Java's unchecked subtraction: a listener may pass any darkening, including
         // `i32::MIN`, and the result wraps as vanilla's `int` arithmetic does.
-        self.brightness(mod_api::LightLayer::Block, pos)
-            .max(
-                self.brightness(mod_api::LightLayer::Sky, pos)
-                    .wrapping_sub(sky_darken),
-            )
+        self.brightness(mod_api::LightLayer::Block, pos).max(
+            self.brightness(mod_api::LightLayer::Sky, pos)
+                .wrapping_sub(sky_darken),
+        )
     }
     fn is_loaded(&self, [x, y, z]: [i32; 3]) -> bool {
         self.game.world.is_loaded_at(x, y, z)
