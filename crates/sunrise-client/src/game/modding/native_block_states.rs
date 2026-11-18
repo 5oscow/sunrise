@@ -269,6 +269,10 @@ impl Game<'_> {
         self.pack.assets.registry.state(state)?;
         Some(self.res.facts().get(state).map_color)
     }
+    /// Decode a packed pixel with the same palette and shade arithmetic as map rendering.
+    pub(super) fn block_state_map_color_rgba(&self, packed: u8) -> Option<[u8; 4]> {
+        Some(super::maps::packed_rgba(packed))
+    }
     /// `BlockState.getLightEmission()`. None for an unknown state.
     pub(super) fn block_state_light_emission(&self, state: BlockStateId) -> Option<u8> {
         self.pack.assets.registry.state(state)?;
