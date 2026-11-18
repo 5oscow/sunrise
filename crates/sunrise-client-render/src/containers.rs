@@ -2,7 +2,7 @@
 //! kinds, ticking as `AbstractFurnaceBlockEntity.serverTick` with fuel times
 //! from the data-driven `context_int_provider`/`context_float_provider` files.
 
-pub use crate::chunk::block_entity::published_shapes::{PublishedShapes, SHAPES_KEY};
+pub use crate::chunk::block_entity::published_shapes::{CheckedShape, PublishedShapes, SHAPES_KEY};
 pub use crate::chunk::block_entity::{
     Banner, Beacon, BlockEntity, Brushable, Campfire, ChiseledBookshelf, Crafter, CreakingHeart,
     EndGateway, Furnace, FurnaceKind, Jukebox, Lectern, MOD_MENUS, ModBlockEntity,

@@ -517,6 +517,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "sunrise-addresses",
+ "sunrise-mod-api-gen",
  "sunrise-mod-package",
  "sunrise-mod-point-emit",
  "sunrise-mod-source",
@@ -4890,6 +4891,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "sunrise-game-discovery",
+ "sunrise-mod-call",
  "sunrise-mod-point-shape",
  "sunrise-mod-source",
  "sunrise-mod-surface",
@@ -4920,6 +4922,13 @@ dependencies = [
  "quote",
  "sunrise-mod-point-shape",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "sunrise-mod-call"
+version = "0.1.0"
+dependencies = [
+ "sha2",
 ]
 
 [[package]]
@@ -4992,6 +5001,7 @@ dependencies = [
  "sunrise-core",
  "sunrise-mod-api",
  "sunrise-mod-api-macros",
+ "sunrise-mod-call",
  "sunrise-mod-point-shape",
  "sunrise-mod-surface",
  "sunrise-mod-vocab",
@@ -5035,6 +5045,7 @@ dependencies = [
  "sunrise-mod-api",
  "sunrise-mod-api-gen",
  "sunrise-mod-api-macros",
+ "sunrise-mod-call",
  "sunrise-mod-point-shape",
  "syn 2.0.119",
 ]
@@ -5081,6 +5092,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "sunrise-mod-call",
  "syn 2.0.119",
 ]
 
@@ -5119,6 +5131,7 @@ dependencies = [
  "sunrise-mod-api",
  "sunrise-mod-api-gen",
  "sunrise-mod-api-macros",
+ "sunrise-mod-call",
  "sunrise-mod-package",
  "sunrise-mod-point-emit",
  "sunrise-mod-points",

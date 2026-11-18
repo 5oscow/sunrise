@@ -1606,15 +1606,8 @@ one, where vanilla gives the `by` one.
   `fluids`, so they survive restarts, and the block's own tick reads them there. Other blocks and mods reach them, and a
   cauldron's, through the [`FLUIDS` capability](../concepts/capabilities/block-fluids.md).
 
-- What the mob effects of a content mod ([installing and using mods](../start/installing.md)) do, named after vanilla's `MobEffect` methods,
-  or NeoForge's event where it has one. On the server, each tick a player or a mob has one,
-  `should_apply_effect_tick_this_tick` says whether it acts (vanilla's base answer is no) and
-  `native_apply_effect_tick` acts, and may end it, before it counts down, as in `MobEffectInstance.tickServer`. These
-  two take `&self`: during a mob's tick the mob world borrows the game, so `&mut self` would alias that borrow, and the
-  game doesn't hold the mobs being ticked, nor the player's effects. `on_effect_added` hears it given to an
-  entity that didn't have it, and `mob_effect_added` (NeoForge's `MobEffectEvent.Added`) every time it is given.
-  A mob is its `Entity.getId`; a player is None, with their state swapped in (`host.players().acting_player`). Vanilla's effects
-  never reach them.
+- A content effect's tick behaviour belongs to its [`MobEffectPart`](../how-to/entities/effect-ticks.md), not global listeners.
+  `on_effect_added` hears a content effect given to an entity that did not have it; `mob_effect_added` (NeoForge's `MobEffectEvent.Added`) hears every addition.
   The three moments around them cover every effect, vanilla's included: `mob_effect_applicable`
   (NeoForge's `MobEffectEvent.Applicable`, vanilla's `canBeAffected`) answers whether an effect can land — the first
   mod to answer `Allow` or `Deny` overrides the vanilla tag check, and an unanswered hook falls
@@ -2324,7 +2317,7 @@ registration path.
   thunder), on a block broken by a player or an explosion and on a mob's death loot; None on the other rolls. The game sets it
   around a roll with `with_native_loot_place`.
 
-- How a mod block burns on an authoritative server, and whether it makes a campfire over it a signal fire on either side. `fire_odds(dimension, state, pos, face, odds)` answers
+- How a mod block ignites on either side and burns on the server, and whether it makes a campfire over it a signal fire on either side. `fire_odds(dimension, state, pos, face, odds)` answers
   `FireBlock`'s flammability table (`FireBlock.setFlammable(block, igniteOdds, burnOdds)`) before vanilla's table, for the block at `pos` seen from its side `face` (the one facing the fire, or the air fire may take): put
   `(ignite, burn)` in `odds` for your own blocks. Ignite odds above zero let fire stand beside the block and spread
   to the air around it (planks 5, wool 30), so a face with ignite odds of zero isn't flammable; burn odds are how fast fire destroys it (planks 20, wool 60); `(0, 0)` never
@@ -2779,8 +2772,8 @@ registration path.
   (`menu_clicked`, `menu_closed`), and trades on them between the players'
   [`ENTITY_ITEMS`](../concepts/capabilities/entity-items.md) handlers in one transaction ([Server menus](#server-menus)).
 
-- Item tooltips: an `ItemPart`'s `tooltip` adds its item's own lines where `Item.appendHoverText` does, after
-  the name and before the components' lines, never for a tooltip the stack hides.
+- Item tooltips: unless the stack hides them, `ItemPart::tooltip` adds lines where `Item.appendHoverText` does,
+  after the name and before the components, with the same `TooltipAppendContext` as appenders in `event.context`.
   `Hooks::item_tooltip` (NeoForge's `ItemTooltipEvent`) then gets every item's whole tooltip once it is
   complete, with the local player, the stack's `TooltipDisplay` and its `TooltipFlag` (`advanced`, `creative`),
   and may add, change or remove any line. Sunrise's creative search reads vanilla's exported tooltip text, so it
@@ -2791,9 +2784,9 @@ registration path.
   or `Before(id)` and `After(id)` for a component detail Sunrise lists (`minecraft:lore`, `minecraft:enchantments`...), where
   the lines go among the other components' lines. The game asks only that appender, only for a stack that carries the
   component (live, transient ones included) and whose `tooltip_display` shows it, and only while its mod is enabled. It gets
-  the stack and a `TooltipAppendContext` (the local player, `advanced`, `creative`, and `nested` for a crossbow's projectile),
-  and adds its lines after the item's own lines and before the durability and advanced lines. The creative search doesn't read
-  these lines, as it doesn't `item_tooltip`. A mod that reacts to every item keeps `item_tooltip`.
+  the stack and a `TooltipAppendContext` (local player, `advanced`/`creative`/`nested` flags, and the client level's
+  `tick_rate`, or 20 without a level). Its lines go after the item's own and before durability and advanced lines.
+  Creative search doesn't read these lines or `item_tooltip`; mods reacting to every item use `item_tooltip`.
   `Before`/`After` accept only the 23 vanilla anchors listed in `tooltip_appender.rs`, not other registered
   components. The `registerAppender(TooltipLocation, ...)` overload is not represented. Several appenders may register
   for one component; all run in registration order at an equal placement. The player is always the local player,

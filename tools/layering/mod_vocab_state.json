@@ -159,11 +159,6 @@
     "category": "dispatch table",
     "reason": "Thread-local dispatch inventory for isolated engine tests."
   },
-  "wire/mod.rs::RESOURCE_REACHED": {
-    "type": "std::cell::Cell<bool>",
-    "category": "reentrancy guard",
-    "reason": "Per-thread flag set while a Wire layout walk reaches a resource handle's codec, read by the Part state declaration's capability check."
-  },
   "wire/wire_resources.rs::ACCESS": {
     "type": "OnceLock<ResourceAccess>",
     "category": "set-once socket",
@@ -203,11 +198,6 @@
     "type": "OnceLock<Vec<DatapackRegistryDeclaration>>",
     "category": "test-support",
     "reason": "Compiled only under cfg(any(test, feature = \"testing\")), never in a production build. Set once with installed datapack-registry declarations so connection tests on other threads can look them up; holds no live authoring requests."
-  },
-  "@generated/wire_generated.rs::WIRE_LAYOUT": {
-    "type": "::std::sync::LazyLock<u64>",
-    "category": "immutable ABI layout fingerprint",
-    "reason": "Hash of the build-fixed Wire layouts; the generator validates its sole declaration and type before writing output."
   },
   "world/startup_progress.rs::SCREEN": {
     "type": "OnceLock<Arc<dynStartupScreen>>",
