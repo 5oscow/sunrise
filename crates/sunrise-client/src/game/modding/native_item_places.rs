@@ -182,53 +182,66 @@ impl Game<'_> {
             _ => return Err(CraftedByError::NotHeld),
         };
         let player = menu.fields().player;
-        let item = if let Some(slot) = slot
-            && matches!(
+        let handler_stack = if slot.is_some_and(|slot| {
+            matches!(
                 self.menu_slot_backing(menu, slot),
                 Some(MenuSlotBacking::Place(_))
-            ) {
-            // A handler-owned slot exposes only an API resource, not the engine's transient
-            // directive. Read the item from the handler, never from the display mirror.
-            let stack = place.stack(self).ok_or(CraftedByError::NotHeld)?;
-            mod_api::__private::item_key_id(stack.item())
-                .ok_or(CraftedByError::Unavailable)?
-                .into()
+            )
+        }) {
+            // The handler owns this stack, not the slot's display mirror.
+            Some(place.stack(self).ok_or(CraftedByError::NotHeld)?)
         } else {
-            let mut held = match slot {
+            None
+        };
+        let mut held = if let Some(stack) = &handler_stack {
+            super::api_values::stack_value(stack).map_err(|_| CraftedByError::Unavailable)?
+        } else {
+            // Read engine storage directly: its API snapshot omits the transient directive.
+            match slot {
                 Some(slot) => self.menu_slot(menu, slot),
                 None => self.menu_carried(menu),
             }
             .flatten()
             .filter(|stack| stack.count > 0 && stack.item.as_ref() != "minecraft:air")
-            .ok_or(CraftedByError::NotHeld)?;
-            // Do not round-trip through the API component codec: it deliberately omits
-            // the map's pending scale/lock directive.
-            if held.item.as_ref() == "minecraft:filled_map"
-                && held
-                    .data()
-                    .is_some_and(|data| data.map_post_processing.is_some())
-            {
-                let maps = self.level_maps([&held]);
+            .ok_or(CraftedByError::NotHeld)?
+        };
+        let item = held.item.clone();
+        if held.item.as_ref() == "minecraft:filled_map"
+            && held
+                .data()
+                .is_some_and(|data| data.map_post_processing.is_some())
+        {
+            mod_api::run_transaction(self, |game, tx| {
+                let maps = game.level_maps([&held]);
                 Menu::map_crafted(Some(&maps), &mut held);
-                let item = held.item.clone();
-                let written = if let Some(slot) = slot {
-                    self.replace_crafted_menu_slot(menu, slot, held)
-                } else {
-                    self.native_as_player_handle(player, |game| {
+                // Reserve before calling the handler, which can make other maps. A refusal
+                // aborts the reservation along with any writes made during the replacement.
+                game.register_made_maps(maps);
+                let written = match (handler_stack, slot) {
+                    (Some(mut stack), _) => {
+                        use super::api_values::TryIntoApi;
+                        let processed = held
+                            .try_into_api()
+                            .map_err(|_| CraftedByError::Unavailable)?;
+                        // Only these two components change. Keep the rest of the handler's patch.
+                        stack.copy_component_from(&processed, "minecraft:map_id");
+                        stack.copy_component_from(&processed, "minecraft:map_post_processing");
+                        place.exchange(game, tx, &mod_api::ItemResource::of(&stack), stack.count())
+                            == stack.count()
+                    }
+                    (None, Some(slot)) => game.replace_crafted_menu_slot(menu, slot, held),
+                    (None, None) => game.native_as_player_handle(player, |game| {
                         game.journal_player(player.uuid());
                         game.carried = Some(held);
-                    })
+                    }),
                 };
                 if !written {
                     return Err(CraftedByError::Unavailable);
                 }
-                self.register_made_maps(maps);
-                self.notice_menu_place_write(place);
-                item
-            } else {
-                held.item
-            }
-        };
+                game.notice_menu_place_write(place);
+                Ok(())
+            })?;
+        }
         self.defer_effect(DeferredEffect::ItemStat {
             player: player.uuid(),
             stat: "crafted",
@@ -1519,6 +1532,165 @@ pub(super) mod tests {
             assert!(maps_dir.join(format!("{}.dat", source + 1)).is_file());
             assert!(maps_dir.join(format!("{}.dat", source + 2)).is_file());
             assert!(!maps_dir.join(format!("{}.dat", source + 3)).exists());
+        });
+    }
+
+    fn with_crafted_by_handler_map(
+        accepts_replacement: bool,
+        test: impl FnOnce(&mut super::Game<'_>, ItemPlace, i32, mod_api::ItemStack),
+    ) {
+        use crate::game::maps::MapData;
+        use mod_api::__private::game::Fields;
+        use mod_api::{
+            AttachedItems, AttachmentType, Holder, MenuReplace, MenuSlotPlace, StackList,
+        };
+        use sunrise_core::nbt::{JavaString, Tag};
+
+        static MAP_SLOT: AttachmentType<StackList<ItemResource>> = AttachmentType {
+            namespace: "crafted_map_fixture",
+            name: "slot",
+            default: Vec::new,
+            codec: None,
+            copy_on_death: false,
+            sync: false,
+        };
+
+        struct MapStorage(bool);
+        #[mod_api::__subscriptions]
+        impl mod_api::Hooks for MapStorage {
+            fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+                let valid: fn(&ItemResource) -> bool = if self.0 { |_| true } else { |_| false };
+                r.entity_capability_before_game(
+                    &ENTITY_ITEMS,
+                    "minecraft:pig",
+                    move |_, entity, ()| {
+                        Some(Box::new(AttachedItems::single(
+                            &MAP_SLOT,
+                            Holder::Entity(entity.id()),
+                            1,
+                            valid,
+                        )))
+                    },
+                );
+            }
+        }
+
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "crafted_map_fixture",
+            Box::new(MapStorage(accepts_replacement)),
+        )]
+        .into();
+        crate::game::api_values::install_parts(&mods).unwrap();
+        mod_platform::testing::with_mods(mods, || {
+            super::super::native_guest_turn_tests::with_guests(|game| {
+                let source = game.new_map_id(MapData::fresh(0.0, 0.0, 1, "minecraft:overworld"));
+                let mut map = ItemStack::new("minecraft:filled_map", 1);
+                map.data_mut().map_id = Some(source);
+                let mut map = map.try_into_api().unwrap();
+                map.apply_components(
+                    &[
+                        (
+                            JavaString::from("minecraft:map_post_processing"),
+                            Tag::String("scale".into()),
+                        ),
+                        (
+                            JavaString::from("minecraft:custom_data"),
+                            Tag::compound([("marker", Tag::Int(17))]),
+                        ),
+                    ]
+                    .into_iter()
+                    .collect(),
+                )
+                .unwrap();
+
+                pig(game, 700, 64.0);
+                let entity = game.entity(700).unwrap();
+                MAP_SLOT
+                    .set(
+                        game,
+                        Holder::Entity(entity.id()),
+                        vec![Some((ItemResource::of(&map), 1))],
+                    )
+                    .unwrap();
+                let host: &mut dyn ServerHost = game;
+                let window = host
+                    .open_menu(
+                        12,
+                        3,
+                        mod_api::Text::literal("map fixture"),
+                        Vec::new(),
+                        MenuReplace::CloseFirst,
+                    )
+                    .unwrap()
+                    .unwrap();
+                let menu = host.menu(12, window).unwrap();
+                game.player_back_mod_menu_slots(
+                    menu.fields().player,
+                    window,
+                    vec![MenuSlotPlace::EntityItems { entity, slot: 0 }],
+                )
+                .unwrap();
+                let place = ItemPlace::MenuSlot { menu, slot: 0 };
+                assert_eq!(place.stack(game), Some(map.clone()));
+                test(game, place, source, map);
+            });
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn crafted_by_replaces_the_map_in_a_handler_backed_slot() {
+        with_crafted_by_handler_map(true, |game, place, source, original| {
+            assert_eq!(
+                game.transaction(|game, tx| place.on_crafted_by(game, tx, 3)),
+                Ok(())
+            );
+            let updated = place.stack(game).unwrap();
+            use sunrise_core::nbt::JavaString;
+            let patch = updated.components().unwrap().as_nbt();
+            let custom_data = JavaString::from("minecraft:custom_data");
+            assert_eq!(updated.item(), original.item());
+            assert_eq!(updated.count(), original.count());
+            assert_eq!(
+                patch.get(&JavaString::from("minecraft:map_id")),
+                Some(&mod_api::Tag::Int(source + 1))
+            );
+            assert!(!patch.contains_key(&JavaString::from("minecraft:map_post_processing")));
+            assert_eq!(
+                patch.get(&custom_data),
+                original.components().unwrap().as_nbt().get(&custom_data)
+            );
+            assert_eq!(game.map(source + 1).unwrap().scale, 2);
+            assert_eq!(game.map(source).unwrap().scale, 1);
+            assert_eq!(
+                game.lan.as_ref().unwrap().play[&12]
+                    .stats
+                    .get("crafted", "minecraft:filled_map"),
+                3
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn crafted_by_refused_handler_write_drops_the_map_and_stat() {
+        with_crafted_by_handler_map(false, |game, place, source, original| {
+            // Catch the refusal and commit the caller's transaction anyway.
+            assert_eq!(
+                game.transaction(|game, tx| Ok::<_, ()>(place.on_crafted_by(game, tx, 3))),
+                Ok(Err(CraftedByError::Unavailable))
+            );
+            assert_eq!(place.stack(game), Some(original));
+            assert!(game.map(source + 1).is_none());
+            assert_eq!(game.peek_map_id(), source + 1);
+            let crafted = game
+                .lan
+                .as_ref()
+                .unwrap()
+                .play
+                .get(&12)
+                .map_or(0, |play| play.stats.get("crafted", "minecraft:filled_map"));
+            assert_eq!(crafted, 0);
         });
     }
 
