@@ -1270,7 +1270,6 @@ impl Game<'_> {
                 )
             });
             drop(history);
-            drop(parts);
             // Then the bodies standing on a collider that moved are carried with it.
             if result.is_ok() && !paused {
                 sunrise_client::block_contact::in_level(
@@ -1280,6 +1279,7 @@ impl Game<'_> {
                     || self.carry_pass(&colliders),
                 );
             }
+            drop(parts);
             drop(tick_span);
             self.drain_entity_inside();
             if result.is_err() {

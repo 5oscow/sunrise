@@ -131,7 +131,8 @@ impl Hub {
 
 /// The context the guest's own client moves through (`MotionWorld::context`): a player at `y`
 /// holding the item in its selected slot, so a part is asked the same query on both sides. The
-/// identity is the mover the gate names.
+/// identity is the guest's own, whoever the move's collider exemption names (a carried guest's
+/// carrier, say), so a part is asked about the guest in every scan of its moves.
 fn guest_context(g: &Guest, y: f64, descending: bool) -> CollisionContext<'_> {
     let held = g
         .inventory
@@ -144,7 +145,7 @@ fn guest_context(g: &Guest, y: f64, descending: bool) -> CollisionContext<'_> {
         });
     CollisionContext::for_entity(
         CollisionEntity {
-            identity: EntityIdentity(0),
+            identity: EntityIdentity(u64::from(g.entity_id as u32)),
             kind: EntityContextKind::Player,
             y,
             descending,

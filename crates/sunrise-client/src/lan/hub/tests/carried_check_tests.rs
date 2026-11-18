@@ -1249,3 +1249,69 @@ fn an_attaching_player_is_stopped_by_another_collider_across_its_path() {
         "stopped by the other collider, not through it: {kept:?}"
     );
 }
+
+/// A block's part is asked about the guest itself in the scan that commits a carried guest, as
+/// in its ordinary moves: not about nothing, and not about the collider that carries it.
+#[test]
+#[ignore = "daily"]
+fn a_carried_guests_settle_asks_a_part_about_the_guest() {
+    let Some(fixture) = crate::test_fixtures::vanilla() else {
+        return;
+    };
+    crate::native_client_hooks::test_hooks::install();
+    let glass = fixture
+        .assets
+        .registry
+        .default_state("minecraft:glass")
+        .unwrap();
+    fixture.collision.set_part_states([glass]);
+    let asked = Rc::new(RefCell::new(Vec::new()));
+    let seen = Rc::clone(&asked);
+    crate::native_client_hooks::test_hooks::COLLISION_ANSWER.with_borrow_mut(|answer| {
+        *answer = Some(Box::new(move |query| {
+            seen.borrow_mut().push(query.entity());
+            None
+        }));
+    });
+    let rig = Rig::new(vec![(DECK, deck(20.0), along(ORIGIN[2]))]);
+    let mut side = Guestside::new(fixture, &[], 100);
+    side.world.set(22, 9, 12, glass).unwrap();
+    let id = side.hub.guests[0].entity_id;
+    let mut next = 2;
+    let ctx = TickCtx {
+        sea_level: 63,
+        world: &mut side.world,
+        entities: &[],
+        next_entity: &mut next,
+        spawn: [20.5, 9.0, 12.0],
+        spawn_angle: [0.0; 2],
+        difficulty: 2,
+        difficulty_locked: false,
+        clock_rate: 1.0,
+        tick_rate: 20.0,
+        tick_frozen: false,
+        tick_steps: Default::default(),
+        collision: Some(&fixture.collision),
+        border: &side.border,
+        streaming: None,
+    };
+    let looped = Arc::new(crate::native_client_hooks::test_hooks::loop_context());
+    let parts = Rc::new(crate::collision_parts::ModParts::new(looped.clone()));
+    let _parts = sunrise_world::part_collision::InParts::enter(parts.clone());
+    rig.within(|| {
+        side.hub
+            .settle(0, [20.5, 9.0, 12.5], [22.0, 9.0, 12.5], &ctx);
+        parts.begin_tick(&looped);
+        sunrise_client_render::moving_colliders::as_mover(DECK, || {
+            side.hub
+                .settle(0, [20.5, 9.0, 12.5], [22.0, 9.0, 12.5], &ctx)
+        });
+    });
+    fixture.collision.set_part_states([]);
+    let asked = asked.borrow();
+    assert_eq!(asked.len(), 2, "the wall's part was asked: {asked:?}");
+    assert!(
+        asked.iter().all(|entity| *entity == Some(id as u32)),
+        "asked about {asked:?}, not the guest {id}"
+    );
+}

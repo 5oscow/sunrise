@@ -4569,6 +4569,10 @@ impl Game<'_> {
         cancel
     }
     fn tick(&mut self) -> Result<()> {
+        // Held through the carry too: a carried body's move asks the parts as its own does.
+        let _parts = (!self.is_logical_server())
+            .then(|| self.collision_parts())
+            .flatten();
         // A client's tick of the level it shows holds the colliders as it began, then carries
         // its own player with the one it stands on; a server's level tick holds its own scope.
         let start = (!self.is_logical_server()).then(|| self.placed_moving_colliders());
@@ -4589,9 +4593,6 @@ impl Game<'_> {
             return Ok(());
         }
         self.abort_open_transactions();
-        let _parts = (!self.is_logical_server())
-            .then(|| self.collision_parts())
-            .flatten();
         // `Player.entityInteractionRange`/`blockInteractionRange` for the tick's
         // picks: the attribute carries creative's and a server's modifiers.
         self.entity_reach = self.interaction_range("minecraft:entity_interaction_range", 3.0, 5.0);
