@@ -206,6 +206,16 @@ impl sunrise_world::level::LevelAccess for DryLevel<'_> {
     ) -> Option<bool> {
         self.base.is_valid_bonemeal_target(pos, state)
     }
+    fn placement_context(
+        &self,
+        item: &str,
+        context: &sunrise_world::level::PlacementContext,
+    ) -> Option<Option<sunrise_world::level::PlacementContext>> {
+        self.base.placement_context(item, context)
+    }
+    fn must_survive(&self, item: &str) -> Option<bool> {
+        self.base.must_survive(item)
+    }
     fn game_time(&self) -> i64 {
         self.base.game_time()
     }
