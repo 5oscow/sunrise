@@ -429,6 +429,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         self.emit(super::LevelEvent::Sound {
             pos,
             sound: sound.into(),
+            source: None,
             volume: 1.0,
             pitch: 1.0,
         });
@@ -440,6 +441,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             self.emit(super::LevelEvent::Sound {
                 pos,
                 sound: "minecraft:block.dried_ghast.place_in_water".into(),
+                source: None,
                 volume: 1.0,
                 pitch: 1.0,
             });

@@ -352,6 +352,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         self.emit(super::LevelEvent::Sound {
             pos,
             sound: "minecraft:block.fire.extinguish".into(),
+            source: None,
             volume: 0.5,
             pitch,
         });

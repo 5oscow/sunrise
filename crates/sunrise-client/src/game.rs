@@ -3745,6 +3745,7 @@ impl Game<'_> {
                 LevelEvent::Sound {
                     pos,
                     sound,
+                    source,
                     volume,
                     pitch,
                 } => {
@@ -3758,7 +3759,16 @@ impl Game<'_> {
                     } else {
                         format!("minecraft:{sound}")
                     };
-                    self.audio.play(&name, Some(c), volume, pitch);
+                    match source {
+                        Some(sunrise_world::level::LevelSoundSource::Blocks) => self.audio.play_on(
+                            mod_api::SoundSource::Blocks.index(),
+                            &name,
+                            Some(c),
+                            volume,
+                            pitch,
+                        ),
+                        None => self.audio.play(&name, Some(c), volume, pitch),
+                    }
                 }
                 // Handled as the behaviour emits it (GameLevel::emit).
                 LevelEvent::DropResources { pos, state } => {

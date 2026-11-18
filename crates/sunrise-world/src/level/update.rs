@@ -245,9 +245,23 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         self.level.emit(LevelEvent::Sound {
             pos,
             sound: sound.clone(),
+            source: None,
             volume,
             pitch,
         });
+    }
+    pub(super) fn fence_gate_sound(&mut self, pos: BlockPos, sound: Option<std::sync::Arc<str>>) {
+        // Keep the pitch draw even when the gate has no sound at this site.
+        let pitch = self.random().next_float() * 0.1 + 0.9;
+        if let Some(sound) = sound {
+            self.level.emit(LevelEvent::Sound {
+                pos,
+                sound,
+                source: Some(super::LevelSoundSource::Blocks),
+                volume: 1.0,
+                pitch,
+            });
+        }
     }
     pub fn game_event(&mut self, pos: BlockPos, event: &'static str) {
         self.level.emit(LevelEvent::GameEvent {

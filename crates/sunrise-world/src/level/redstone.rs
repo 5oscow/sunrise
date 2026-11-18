@@ -843,6 +843,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         self.emit(LevelEvent::Sound {
             pos,
             sound: "minecraft:block.lever.click".into(),
+            source: None,
             volume: 0.3,
             pitch: if powered { 0.6 } else { 0.5 },
         });
@@ -952,10 +953,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 } else {
                     data.gate_close[super::data::GateSoundSite::Redstone as usize].clone()
                 };
-                let pitch = self.random().next_float() * 0.1 + 0.9;
-                if let Some(sound) = sound {
-                    self.sound(pos, &sound, 1.0, pitch);
-                }
+                self.fence_gate_sound(pos, sound);
                 self.game_event(
                     pos,
                     if power {
@@ -1001,6 +999,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 self.emit(LevelEvent::Sound {
                     pos,
                     sound: sound.into(),
+                    source: None,
                     volume: 1.0,
                     pitch: 1.0,
                 });
@@ -1083,6 +1082,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         self.emit(LevelEvent::Sound {
             pos,
             sound: sound.into(),
+            source: None,
             volume: 3.0,
             pitch,
         });
@@ -1193,6 +1193,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         self.emit(LevelEvent::Sound {
             pos,
             sound: "minecraft:block.bell.use".into(),
+            source: None,
             volume: 2.0,
             pitch: 1.0,
         });
