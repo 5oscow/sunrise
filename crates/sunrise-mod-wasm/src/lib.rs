@@ -477,12 +477,8 @@ pub fn load_installed(
     let game_dir = &launch.context.game_dir;
     let dev = &launch.context.dev_mods;
     let budget = compile_budget::CompileBudget::read(launch, player_dir);
-    let env = |key: &str| std::env::var_os(key);
-    let home = &launch.context.home;
-    let mut cache = module_cache::ModuleCache::new(
-        sunrise_mod_package::selection::cache_home_in(home, game_dir, env)
-            .join(module_cache::CACHE_DIR),
-    );
+    let mut cache =
+        module_cache::ModuleCache::new(launch.cache_home().join(module_cache::CACHE_DIR));
     if let Ok(budget) = budget.as_ref() {
         cache.budget = *budget;
     }
@@ -586,7 +582,7 @@ pub fn load_installed(
         Ok(_) => {
             let std = read_std(
                 std::env::current_exe().ok().as_deref(),
-                sunrise_mod_package::selection::private_home_in(home, env).as_deref(),
+                launch.private_home(),
             );
             load_available_std(
                 std.as_deref(),
