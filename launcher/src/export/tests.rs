@@ -122,9 +122,10 @@ fn served(e: &Entry) -> Option<FileRef> {
 #[test]
 fn an_exported_options_file_does_not_carry_the_last_server() {
     let home = home("last-server");
+    // The game ends a line at LF, CRLF or a bare CR, and reads past bytes that are not UTF-8.
     put(
         &home.join("options.txt"),
-        b"lang:fr_ch\nlastServer:203.0.113.7:25565\nfov:70\r\nlastServer:\n",
+        b"lang:fr_ch\rlastServer:203.0.113.7:25565\rfov:70\r\nlastServer:\r\nname:caf\xE9\xFF\nlastServer:x\rgamma:1",
     );
     for format in [Format::Zip, Format::Mrpack] {
         let out = home.join(format!(
@@ -141,22 +142,12 @@ fn an_exported_options_file_does_not_carry_the_last_server() {
         } else {
             "overrides/options.txt"
         };
-        let options = String::from_utf8(read(&out, entry)).unwrap();
-        assert_eq!(options, "lang:fr_ch\nfov:70\r\n", "{format:?}");
+        assert_eq!(
+            read(&out, entry),
+            b"lang:fr_ch\rfov:70\r\nname:caf\xE9\xFF\ngamma:1",
+            "{format:?}"
+        );
     }
-    fs::remove_dir_all(&home).unwrap();
-}
-
-#[test]
-fn an_options_file_that_is_not_utf8_does_not_carry_the_last_server() {
-    let home = home("last-server-latin1");
-    put(
-        &home.join("options.txt"),
-        b"lang:fr_ch\nlastServer:203.0.113.7:25565\nname:caf\xE9\xFF\n",
-    );
-    let out = home.join("out/Share.zip");
-    export(&home, "Share", Format::Zip, &[], &[], &out).unwrap();
-    assert_eq!(read(&out, "options.txt"), b"lang:fr_ch\nname:caf\xE9\xFF\n");
     fs::remove_dir_all(&home).unwrap();
 }
 
