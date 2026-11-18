@@ -1365,7 +1365,6 @@ pub(super) fn inert_support_fixture() -> Behaviours {
         liquid_blocks: FluidBlockBindings::new(&registry).unwrap(),
         dynamic: HashMap::new(),
         occlusion_cache: Default::default(),
-        published_occlusion_cache: Default::default(),
         growth: Default::default(),
         block_maps: Default::default(),
         fluid_interactions: Default::default(),
