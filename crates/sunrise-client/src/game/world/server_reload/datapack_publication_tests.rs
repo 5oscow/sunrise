@@ -98,6 +98,31 @@ fn datapack_game_open_reload_and_exhaustion_are_atomic() {
                     game.mods.datapack_registries.as_ref().unwrap().generation(),
                     1
                 );
+                let old = game.mods.datapack_registries.as_ref().unwrap().clone();
+                write(
+                    &winning,
+                    r#"{"power":8,"neoforge:conditions":[{"type":"neoforge:or","values":[{"type":"neoforge:always"},{"type":"absent:spell_enabled"}]}]}"#,
+                );
+                let features = game.level.enabled_features.clone();
+                let error = game
+                    .reload_datapacks(true, &features)
+                    .err()
+                    .expect("unknown ID refuses the winning registry entry")
+                    .to_string();
+                assert!(
+                    error.contains("data/registry_test/registry_test/spell/fire.json"),
+                    "{error}"
+                );
+                assert!(error.contains("absent:spell_enabled"), "{error}");
+                assert!(std::sync::Arc::ptr_eq(
+                    game.mods.datapack_registries.as_ref().unwrap(),
+                    &old
+                ));
+                assert!(std::sync::Arc::ptr_eq(
+                    &sunrise_client::datapack_net::served().unwrap(),
+                    &old
+                ));
+                assert_eq!(power(game), DatapackValue::Int(7));
                 write(&winning, "{bad");
                 assert!(!game.run_command("reload"));
                 assert_eq!(power(game), DatapackValue::Int(7));

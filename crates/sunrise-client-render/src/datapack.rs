@@ -2219,10 +2219,12 @@ mod tests {
             files["data/example/example/spell/fire.json"],
             vec![("high".to_owned(), b"high".to_vec())]
         );
+        assert!(registry_files(&refs, &[], |_, _| true).unwrap().is_empty());
         assert!(
-            registry_files(&refs, &[], true, |_, _, _| true)
+            registry_files(&refs, &[("example", "spell")], |_, bytes| bytes == b"low")
                 .unwrap()
-                .is_empty()
+                .is_empty(),
+            "a rejected winning resource does not reveal the lower version"
         );
         // Oversized losing files are never read; an oversized winner is retained
         // only as the bounded refusal prefix, not as its full payload.

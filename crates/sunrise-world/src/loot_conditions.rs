@@ -90,6 +90,34 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_pool_with_an_unknown_condition_refuses_its_whole_table() {
+        let files = [file(
+            "loot_table",
+            json!({"pools":[
+                {"rolls":1},
+                {"rolls":1,"neoforge:conditions":[{"type":"unknown:pool"}]}
+            ]}),
+        )];
+        let conditions = LoadConditions::new([]);
+        let mut out = HashMap::new();
+        overlay_map(
+            &PackOverlay {
+                files: &files,
+                conditions: &conditions,
+            },
+            "loot_table",
+            &mut out,
+        );
+        assert!(out.is_empty());
+        let error = conditions.check_errors().unwrap_err();
+        assert!(
+            error
+                .contains("data/demo/loot_table/file.json: unknown load conditions [unknown:pool]"),
+            "{error}"
+        );
+    }
+
     /// The whole-file check still holds for every kind.
     #[test]
     fn a_files_own_failing_conditions_still_omit_it() {

@@ -813,6 +813,26 @@ mod tests {
     }
 
     #[test]
+    fn a_bad_value_condition_does_not_replace_or_apply_any_values_in_its_layer() {
+        let layers = files(&[(
+            "data_maps/mymod:item/fuel",
+            &[
+                json!({"values":{"minecraft:stick":2,"minecraft:coal":3}}),
+                json!({"replace":true,"values":{"minecraft:oak_log":4,"minecraft:planks":{
+                "value":5,"neoforge:conditions":[{"type":"neoforge:not","value":{"type":"minecraft:missing"}}]
+            }},"remove":["minecraft:coal"]}),
+                json!({"values":{"minecraft:birch_log":6}}),
+            ],
+        )]);
+        let maps = load(&layers);
+        assert_eq!(get(&maps, "minecraft:stick"), Some(&json!(2)));
+        assert_eq!(get(&maps, "minecraft:coal"), Some(&json!(3)));
+        assert_eq!(get(&maps, "minecraft:oak_log"), None);
+        assert_eq!(get(&maps, "minecraft:planks"), None);
+        assert_eq!(get(&maps, "minecraft:birch_log"), Some(&json!(6)));
+    }
+
+    #[test]
     fn a_newer_file_overrides_and_replace_clears_what_came_before() {
         let f = files(&[(
             "data_maps/mymod:item/fuel",

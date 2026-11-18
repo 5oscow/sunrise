@@ -947,25 +947,3 @@ mod registry_tests;
 #[cfg(test)]
 #[path = "condition_log_tests.rs"]
 mod log_tests;
-
-#[cfg(test)]
-mod recipe_error_tests {
-    use super::*;
-    #[test]
-    fn recipe_load_escalates_unknown_conditions_only_for_its_resource_folder() {
-        let conditions = LoadConditions::new([])
-            .with_diagnostics()
-            .with_lookup(BTreeMap::new(), |_, _| None);
-        let file = serde_json::json!({"neoforge:conditions":[{"type":"absent:condition"}]});
-        assert!(!conditions.allows_file(&file, "data/example/tags/item/flag.json"));
-        assert_eq!(conditions.check_errors(), Ok(()));
-        assert_eq!(conditions.check_resource_errors("recipe"), Ok(()));
-        assert!(!conditions.allows_file(&file, "data/example/recipe/deep/data/entry.json"));
-        let error = conditions.check_resource_errors("recipe").unwrap_err();
-        assert!(
-            error.contains("data/example/recipe/deep/data/entry.json")
-                && error.contains("absent:condition")
-        );
-        assert!(!error.contains("tags/item/flag.json"));
-    }
-}

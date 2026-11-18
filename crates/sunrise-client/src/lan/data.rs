@@ -1159,6 +1159,50 @@ mod tests {
     use super::*;
 
     #[test]
+    fn synchronized_registries_validate_only_the_winning_pack_files_before_join() {
+        let root = tempfile::tempdir().unwrap();
+        let bad = |id| {
+            serde_json::json!({"neoforge:conditions":[{"type":id}]})
+                .to_string()
+                .into_bytes()
+        };
+        let files = [
+            (
+                "dialog/test:valid".into(),
+                vec![bad("absent:loser"), b"{}".to_vec()],
+            ),
+            (
+                "dialog/test:bad".into(),
+                vec![b"{}".to_vec(), bad("absent:dialog")],
+            ),
+            (
+                "dimension_type/test:bad".into(),
+                vec![bad("minecraft:unknown")],
+            ),
+        ];
+        let conditions = sunrise_world::conditions::LoadConditions::new([]);
+        SyncData::stage_pack_conditions(
+            root.path(),
+            &sunrise_world::loot::PackOverlay {
+                files: &files,
+                conditions: &conditions,
+            },
+        );
+        let error = conditions.check_errors().unwrap_err();
+        assert!(
+            error.contains("data/test/dialog/bad.json: unknown load conditions [absent:dialog]"),
+            "{error}"
+        );
+        assert!(
+            error.contains(
+                "data/test/dimension_type/bad.json: unknown load conditions [minecraft:unknown]"
+            ),
+            "{error}"
+        );
+        assert!(!error.contains("absent:loser"), "{error}");
+    }
+
+    #[test]
     fn false_conditions_do_not_suppress_lan_tag_operations() {
         let root = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(root.path().join("tags/dialog")).unwrap();
