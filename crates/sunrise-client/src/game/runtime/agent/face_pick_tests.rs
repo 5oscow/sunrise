@@ -244,6 +244,12 @@ fn attack_by_id_ends_without_a_click_on_death_or_without_ticks() {
             reply(&replies)["error"],
             json!("game ticks are not advancing (paused?)")
         );
+        // A screen opened over the world before the tick: the click would land on it.
+        let (_, replies) = command(game, "attack 31");
+        game.screen = Screen::GameModeSwitcher;
+        tick(game);
+        let error = reply(&replies)["error"].as_str().unwrap().to_owned();
+        assert!(error.ends_with("screen is open; close it first (close, or click-button)"));
         assert_eq!(attack_clicks(game), 0);
     });
 }
@@ -264,5 +270,20 @@ fn attack_by_id_follows_the_listener_decision() {
         );
         assert!(game.agent.task.is_none());
         assert_eq!(attack_clicks(game), 0, "nothing was clicked");
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn look_at_entity_waits_for_a_running_turn() {
+    with_pig_behind(|game, _| {
+        let (turning, _turn) = command(game, "turn 10 0 --over 1");
+        assert!(matches!(turning, Ok(Handled::Deferred)));
+        let (handled, _) = command(game, "look-at entity 31");
+        assert_eq!(
+            handled.err().map(|e| e.to_string()),
+            Some("already turning; wait for it or send stop".into())
+        );
+        assert_eq!(game.yaw, 90.0, "the running turn keeps the view");
     });
 }
