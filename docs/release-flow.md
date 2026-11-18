@@ -10,19 +10,18 @@ and every launcher and `sunrise-server update` install it ([Nightly only](#night
 
 Rollups, syncs and main's pushes are checked by one gate, `dyna-checks` (`.github/workflows/dyna-ci.yml`: `lint`,
 `verify`, `verify-static`); a plain pull request gets its cheap checks there (`format`, `verify-static`)
-([CONTRIBUTING.md](../CONTRIBUTING.md#ci-tiers)). The `checks` workflow (`.github/workflows/ci.yml`) adds a free
-full `verify` on GitHub's runners for a fork's pull request only (opened, pushed to or reopened; labels never start
-it): this repository's own pull requests get the cheap checks alone, and their rollups the heavy gate. It also runs
-every 6 hours on main to save the Rust caches its pull request runs read. Its by-hand jobs (Windows ARM64 and
-JFR analysis) run only on dispatch:
+([CONTRIBUTING.md](../CONTRIBUTING.md#ci-tiers)), forks' included. The `checks` workflow (`.github/workflows/ci.yml`)
+runs a full `verify` of main on GitHub's runners every 6 hours, and on any ref by hand
+(`gh workflow run checks --ref <ref> -f verify=true`); no pull request starts it. Until 2026-11-18 every push to a
+fork's pull request ran it, which held the organisation's GitHub-hosted runners ahead of the release jobs. A dispatch
+without `verify` runs only its by-hand jobs (Windows ARM64 and JFR analysis):
 
 | Job | Runs on | What | Time |
 | --- | --- | --- | --- |
-| `verify` | Forks' pull requests and scheduled runs on main only, on GitHub's `ubuntu-24.04` (a fork's pull request sees no repository variable, so no switch could move it off a machine that is off); `SELF_HOSTED_CI=all` sends the scheduled runs to our checks runners (label `sunrise-checks`), `light` or `off` keeps them on GitHub ([CI runners](ci-runners.md)). This repository's own pull requests skip it | Three jobs side by side: the public-tree check and Python tests (`verify (tree and tools)`), rustfmt and clippy with warnings denied (`verify (format and lint)`), the Rust tests (`verify (Rust tests)`); `verify` waits for them and passes when each passed or had nothing to do. Dependencies and the workspace build come from a cache saved by scheduled runs on main (GitHub) or the runner's own build folder (ours) | ~8 min |
+| `verify` | Scheduled runs on main and dispatches with `verify`, on GitHub's `ubuntu-24.04` | Three jobs side by side: the public-tree check and Python tests (`verify (tree and tools)`), rustfmt and clippy with warnings denied (`verify (format and lint)`), the Rust tests of the whole workspace (`verify (Rust tests)`); `verify` waits for them and passes when each passed. Dependencies and the workspace build come from a cache saved by scheduled runs on main | ~8 min |
 
-`verify` runs even in a cancelled run of `checks`, so it fails there instead of being skipped. A pull request that
-changes no Rust (docs, tools) runs only its quick steps and finishes in about a minute. A pull request's public-tree check reads only
-its own commits (`--range base..head`); scheduled runs on main read every ref's history.
+`verify` runs even in a cancelled run of `checks`, so it fails there instead of being skipped. Its public-tree check
+reads every ref's history.
 
 ## Merging
 
