@@ -3,12 +3,17 @@
 //! record (position, velocity, spawn time, lifetime, seed, colour, size, roll), and where it is,
 //! how big, what colour and which frame are a function of that record and the time. Here the
 //! function runs when the frame's particle quads are built, beside the engine's own particles.
+//! A type with its own `shader` instead hands its records to that shader ([`ShaderBatch`]),
+//! which computes the quads on the graphics card as the wiki's 1.21.11 format describes; it keeps
+//! its quads here until the renderer draws it, and for good when the renderer can't.
 use super::{ParticleLevel, ParticleLightCache};
 use crate::hud::Rect;
 use crate::mesher::Vertex;
 use glam::{DVec3, Mat3, Quat, Vec3 as FVec3};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, Ordering};
+use sunrise_polytone::gpu_particle::{GPU_BLOCK_SIZE, HeightmapArea, gpu_block};
 use sunrise_polytone::particles::{CustomParticle, Gpu, RenderType};
 
 /// How a particle quad turns (`rotation_mode`).
@@ -95,6 +100,8 @@ struct Record {
     rgba: [f32; 4],
     size: f32,
     roll: f32,
+    /// The initializer's `custom`, for a custom shader (`Params.z`).
+    custom: f32,
 }
 
 /// A GPU particle type's records: a ring of `limit` slots, the oldest overwritten.
@@ -107,6 +114,8 @@ pub(super) struct Store {
     records: Vec<Record>,
     next: usize,
     limit: usize,
+    /// The type's own shader, when it has one that translated.
+    shader: Option<Arc<GpuShader>>,
 }
 
 /// The atlas name of a full texture path: `ns:textures/particle/a/b.png` is `ns:particle/a/b`
@@ -162,7 +171,7 @@ fn motion(gpu: &Gpu, position: [f64; 3], velocity: [f64; 3], t: f64) -> ([f64; 3
 }
 
 impl Store {
-    pub(super) fn new(def: &Arc<CustomParticle>) -> Option<Self> {
+    pub(super) fn new(def: &Arc<CustomParticle>, shader: Option<Arc<GpuShader>>) -> Option<Self> {
         let gpu = def.gpu.clone()?;
         Some(Self {
             def: def.clone(),
@@ -173,6 +182,7 @@ impl Store {
             next: 0,
             // The wiki's default ring capacity.
             limit: def.limit.map_or(16_384, |l| l.max(1) as usize),
+            shader,
         })
     }
 
@@ -181,7 +191,7 @@ impl Store {
     }
 
     /// Records a spawn from a particle its initializer set up (position, motion, life, look).
-    pub(super) fn spawn(&mut self, p: &super::Particle, now: u64, seed: u64) {
+    pub(super) fn spawn(&mut self, p: &super::Particle, custom: f64, now: u64, seed: u64) {
         if p.lifetime <= 0 {
             return;
         }
@@ -194,6 +204,7 @@ impl Store {
             rgba: p.rgba,
             size: p.size,
             roll: p.roll,
+            custom: custom as f32,
         };
         if self.records.len() < self.limit {
             self.records.push(record);
@@ -217,7 +228,8 @@ impl Store {
         self.records.len()
     }
 
-    /// The quads of every live record at `now + partial` ticks.
+    /// The quads of every live record at `now + partial` ticks; none while the renderer draws
+    /// the type with its own shader.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn render(
         &self,
@@ -231,7 +243,9 @@ impl Store {
         out: &mut Vec<Vertex>,
         additive: &mut Vec<Vertex>,
     ) {
-        if self.def.render_type == RenderType::Invisible {
+        if self.def.render_type == RenderType::Invisible
+            || self.shader.as_ref().is_some_and(|s| s.drawn())
+        {
             return;
         }
         let Some(&(rect, _)) = atlas.get(&self.sprite) else {
@@ -340,6 +354,285 @@ impl Store {
     }
 }
 
+/// A GPU particle type's own shader (`shader`): its program, texture and `uniforms`, and
+/// whether the renderer draws with it.
+pub struct GpuShader {
+    /// The shader's id (`ns:name`), for the log.
+    pub id: String,
+    pub program: Arc<crate::core_shader::CoreProgram>,
+    /// `Sampler0`: the type's `texture` (width, height, RGBA pixels).
+    pub texture: Option<(u32, u32, Arc<[u8]>)>,
+    pub render_type: RenderType,
+    /// Each uniform the pack names, set every frame from its expression.
+    pub uniforms: Vec<(String, sunrise_polytone::expr::Program)>,
+    /// [`UNTRIED`], [`DRAWN`] or [`REFUSED`]: what the renderer made of it.
+    state: AtomicU8,
+}
+
+/// The renderer hasn't built the shader's pipeline yet: the type draws its quads.
+const UNTRIED: u8 = 0;
+/// The renderer draws the type with its shader: the type draws no quads.
+const DRAWN: u8 = 1;
+/// The shader doesn't build, or can't draw into this frame: the type draws its quads.
+const REFUSED: u8 = 2;
+
+impl GpuShader {
+    pub fn new(
+        id: String,
+        program: Arc<crate::core_shader::CoreProgram>,
+        texture: Option<(u32, u32, Arc<[u8]>)>,
+        render_type: RenderType,
+        uniforms: Vec<(String, sunrise_polytone::expr::Program)>,
+    ) -> Self {
+        Self {
+            id,
+            program,
+            texture,
+            render_type,
+            uniforms,
+            state: AtomicU8::new(UNTRIED),
+        }
+    }
+
+    /// Whether the renderer draws the type with this shader (its quads are left out).
+    pub fn drawn(&self) -> bool {
+        self.state.load(Ordering::Relaxed) == DRAWN
+    }
+
+    /// Whether the renderer can't use this shader (the type draws its quads, and no batch).
+    pub fn refused(&self) -> bool {
+        self.state.load(Ordering::Relaxed) == REFUSED
+    }
+
+    /// The renderer's verdict: `Some(true)` it draws with it from the next frame on,
+    /// `Some(false)` it can't, `None` it will try again (its frame changed).
+    pub(crate) fn set_drawn(&self, drawn: Option<bool>) {
+        let state = match drawn {
+            Some(true) => DRAWN,
+            Some(false) => REFUSED,
+            None => UNTRIED,
+        };
+        self.state.store(state, Ordering::Relaxed);
+    }
+}
+
+impl std::fmt::Debug for GpuShader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GpuShader").field("id", &self.id).finish()
+    }
+}
+
+/// What a custom shader's vertex stage reads (wiki "GPU Particles", 1.21.11 and up): the
+/// record, the same on the quad's four corners (`gl_VertexIndex & 3` is the corner).
+pub const GLUE: crate::core_shader::Glue = crate::core_shader::Glue {
+    inputs: &[
+        ("Position", "vec3"),
+        ("Velocity", "vec3"),
+        ("SpawnLife", "vec2"),
+        ("Params", "vec4"),
+        ("Color", "vec4"),
+        ("UV2", "ivec2"),
+    ],
+    prelude: "layout(location = 0) in vec3 hz_position;\n\
+              layout(location = 1) in vec3 hz_velocity;\n\
+              layout(location = 2) in vec2 hz_spawn_life;\n\
+              layout(location = 3) in vec4 hz_params;\n\
+              layout(location = 4) in vec4 hz_color;\n\
+              layout(location = 5) in ivec2 hz_uv2;",
+    setup: "Position = hz_position; Velocity = hz_velocity; SpawnLife = hz_spawn_life; \
+            Params = hz_params; Color = hz_color; UV2 = hz_uv2;",
+    finish: "",
+    vertex_id: "int(gl_VertexIndex)",
+};
+
+/// One corner of a record for a custom shader.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct ShaderVertex {
+    /// Where it spawned, relative to the batch's `Origin`.
+    pub position: [f32; 3],
+    /// Its starting velocity, blocks per tick.
+    pub velocity: [f32; 3],
+    /// The tick it spawned on (on the batch's `Time` clock) and its life in ticks.
+    pub spawn_life: [f32; 2],
+    /// Size (half-width), roll, `custom`, a random seed in 0..1.
+    pub params: [f32; 4],
+    /// RGBA.
+    pub color: [u8; 4],
+    /// The light where it spawned, as vanilla's `UV2`: block light and sky light, times 16.
+    pub uv2: [i32; 2],
+    pad: u32,
+}
+
+/// A type's live records for its own shader, with the block and uniforms of this frame.
+#[derive(Debug)]
+pub struct ShaderBatch {
+    pub shader: Arc<GpuShader>,
+    /// Four corners a record.
+    pub vertices: Vec<ShaderVertex>,
+    /// How many times each record draws: its `area`'s copies, all on its own place.
+    pub copies: u32,
+    pub block: [u8; GPU_BLOCK_SIZE],
+    pub uniforms: Vec<(String, f32)>,
+}
+
+impl Orientation {
+    /// The `Billboard` a custom shader reads: 0 facing the camera, 1 around Y, 2 flat, 3 along
+    /// its velocity.
+    fn billboard(self) -> i32 {
+        match self {
+            Self::Camera | Self::Fixed => 0,
+            Self::AroundY => 1,
+            Self::Flat => 2,
+            Self::Movement => 3,
+        }
+    }
+}
+
+impl Store {
+    /// The type's own shader, unless the renderer refused it.
+    fn usable_shader(&self) -> Option<&Arc<GpuShader>> {
+        self.shader.as_ref().filter(|s| !s.refused())
+    }
+
+    /// The live records for the type's own shader at `now + partial` ticks, each drawn once
+    /// for every copy of its `area`, on its own place. `None` for a type without one, or one
+    /// the renderer refused.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn shader_batch(
+        &self,
+        camera: DVec3,
+        now: u64,
+        partial: f32,
+        light_cache: &mut ParticleLightCache,
+        light_at: &dyn Fn([i32; 3]) -> u8,
+        heightmap: Option<HeightmapArea>,
+        uniforms: Vec<(String, f32)>,
+    ) -> Option<ShaderBatch> {
+        let shader = self.usable_shader()?.clone();
+        if self.def.render_type == RenderType::Invisible {
+            return None;
+        }
+        // Positions relative to the camera's block, so they stay exact as floats; the clock
+        // from a recent multiple of 65536 ticks, for the same reason.
+        let anchor = camera.floor();
+        let base = now & !0xFFFF;
+        let time = (now - base) as f32 + partial;
+        let mut vertices = Vec::with_capacity(self.records.len() * 4);
+        for r in &self.records {
+            let spawn = (r.spawn as i64 - base as i64) as f32;
+            if time - spawn >= r.lifetime {
+                continue;
+            }
+            let world = DVec3::from_array(r.position);
+            let packed = light_cache.get(ParticleLevel::block_at(r.position), light_at);
+            let block_light = i32::from((packed & 15).max(self.def.light_level));
+            let c = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+            let vertex = ShaderVertex {
+                position: (world - anchor).as_vec3().to_array(),
+                velocity: r.velocity.map(|v| v as f32),
+                spawn_life: [spawn, r.lifetime],
+                params: [r.size, r.roll, r.custom, unit(r.seed, 6) as f32],
+                color: r.rgba.map(c),
+                uv2: [block_light * 16, i32::from(packed >> 4) * 16],
+                pad: 0,
+            };
+            vertices.extend([vertex; 4]);
+        }
+        let block = gpu_block(
+            &self.gpu,
+            self.def.render_type,
+            self.orientation.billboard(),
+            self.def.random_sprite,
+            (anchor - camera).as_vec3().to_array(),
+            time,
+            camera.to_array(),
+            heightmap,
+        );
+        Some(ShaderBatch {
+            shader,
+            vertices,
+            // An `area`'s copies stack on the record (measured on the real mod: nine copies of
+            // an 8-block area draw on one spot, three additive ones three times as bright);
+            // spreading them is the shader's to do, as the default shader does.
+            copies: self.gpu.area.map_or(1, |(_, n)| n),
+            block,
+            uniforms,
+        })
+    }
+}
+
+/// The GPU particle types drawn with their own shaders.
+impl super::ParticleEngine {
+    /// The heightmap area GPU particle shaders want refilled now (wiki "GPU Particles": the
+    /// motion-blocking heights of `size` columns a side around the camera, every half second),
+    /// with `min_y` the world's bottom; `None` while no live type has a shader or the last one is
+    /// fresh. The caller fills it and the batches read it.
+    pub fn polytone_heightmap_due(
+        &mut self,
+        camera: DVec3,
+        size: u32,
+        min_y: i32,
+    ) -> Option<HeightmapArea> {
+        if !self
+            .polytone_gpu
+            .iter()
+            .any(|s| s.usable_shader().is_some())
+        {
+            return None;
+        }
+        let now = self.polytone_ticks;
+        if let Some((area, at)) = self.polytone_heightmap
+            && now < at + 10
+            && area.min_y == min_y
+        {
+            return None;
+        }
+        let half = (size / 2) as i32;
+        let area = HeightmapArea {
+            origin: [
+                camera.x.floor() as i32 - half,
+                camera.z.floor() as i32 - half,
+            ],
+            size,
+            min_y,
+        };
+        self.polytone_heightmap = Some((area, now));
+        Some(area)
+    }
+
+    /// The GPU particle types drawn by their own shaders (wiki "GPU Particles"): each one's live
+    /// records with this frame's block and uniforms, for the renderer.
+    pub fn polytone_shader_batches(
+        &self,
+        camera: DVec3,
+        partial: f32,
+        light_at: &dyn Fn([i32; 3]) -> u8,
+    ) -> Vec<ShaderBatch> {
+        let Some(registry) = &self.polytone else {
+            return Vec::new();
+        };
+        let heightmap = self.polytone_heightmap.map(|(area, _)| area);
+        let mut light_cache = ParticleLightCache::default();
+        self.polytone_gpu
+            .iter()
+            .filter_map(|store| {
+                let uniforms = registry.gpu_uniforms(store.usable_shader()?, camera.to_array());
+                store.shader_batch(
+                    camera,
+                    self.polytone_ticks,
+                    partial,
+                    &mut light_cache,
+                    light_at,
+                    heightmap,
+                    uniforms,
+                )
+            })
+            .filter(|batch| !batch.vertices.is_empty())
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -359,6 +652,160 @@ mod tests {
             area: None,
             kill_below_heightmap: false,
         }
+    }
+
+    /// A GPU particle type (`area` of `count` copies when given) with its own shader.
+    fn store(area_count: Option<u32>) -> Store {
+        let mut json = serde_json::json!({
+            "type": "gpu", "texture": "test:textures/particle/rain.png", "render_type": "opaque"
+        });
+        if let Some(count) = area_count {
+            json["area"] = serde_json::json!({"size": [8, 8, 8], "count": count});
+        }
+        let def = Arc::new(CustomParticle::parse(&json).unwrap());
+        let program = crate::core_shader::translate_core_with(
+            "#version 330\nlayout(location = 0) in vec3 Position;\n\
+             void main() {\n    gl_Position = vec4(Position, 1.0);\n}\n",
+            "#version 330\nlayout(location = 0) out vec4 fragColor;\n\
+             void main() {\n    fragColor = vec4(1.0);\n}\n",
+            &[],
+            &|_| None,
+            &GLUE,
+            &|_| false,
+        )
+        .expect("the shaders translate");
+        let shader = GpuShader::new(
+            "test:rain".to_owned(),
+            Arc::new(program),
+            None,
+            RenderType::Opaque,
+            Vec::new(),
+        );
+        Store::new(&def, Some(Arc::new(shader))).unwrap()
+    }
+
+    /// A record spawned on tick `spawn`, alive `lifetime` ticks.
+    fn record(position: [f64; 3], spawn: u64, lifetime: f32) -> Record {
+        Record {
+            position,
+            velocity: [0.1, -0.5, 0.0],
+            spawn,
+            lifetime,
+            seed: 7,
+            rgba: [1.0, 0.5, 0.25, 1.0],
+            size: 0.15,
+            roll: 0.3,
+            custom: 2.0,
+        }
+    }
+
+    fn batch(store: &Store, camera: DVec3, now: u64, partial: f32) -> Option<ShaderBatch> {
+        store.shader_batch(
+            camera,
+            now,
+            partial,
+            &mut ParticleLightCache::default(),
+            // Sky light 15, block light 7.
+            &|_| 0xF7,
+            None,
+            vec![("Brightness".to_owned(), 0.5)],
+        )
+    }
+
+    /// Wiki "GPU Particles": the record is the vertex format, the same on the quad's four
+    /// corners: its place relative to the camera's block, its velocity, spawn tick and life on
+    /// the batch's clock (65536 ticks back at most), size, roll, `custom`, colour and light. A
+    /// record whose life is over is left out, one spawned before the clock's start included.
+    #[test]
+    fn a_shader_batch_gives_each_live_record_its_four_corners() {
+        let mut store = store(None);
+        store
+            .records
+            .push(record([12.25, 71.5, -2.0], 65_540, 20.0));
+        store.records.push(record([0.0; 3], 65_500, 20.0));
+        let camera = DVec3::new(10.5, 70.25, -3.75);
+        let live = batch(&store, camera, 65_546, 0.5).unwrap();
+        assert_eq!(live.vertices.len(), 4);
+        let v = live.vertices[0];
+        assert!(live.vertices.iter().all(|c| *c == v));
+        assert_eq!(v.position, [2.25, 1.5, 2.0]);
+        assert_eq!(v.velocity, [0.1, -0.5, 0.0]);
+        assert_eq!(v.spawn_life, [4.0, 20.0]);
+        assert_eq!(v.params[..3], [0.15, 0.3, 2.0]);
+        assert!((0.0..1.0).contains(&v.params[3]));
+        assert_eq!(v.color, [255, 128, 64, 255]);
+        assert_eq!(v.uv2, [112, 240]);
+        let floats: &[f32] = bytemuck::cast_slice(&live.block);
+        // `Origin` (the camera's block from the camera) and `Time`.
+        assert_eq!(floats[..4], [-0.5, -0.25, -0.25, 10.5]);
+        assert_eq!(live.uniforms, [("Brightness".to_owned(), 0.5)]);
+        // The second record spawned 36 ticks before the clock's start and lives 20: over.
+        store.records.remove(0);
+        assert!(
+            batch(&store, camera, 65_546, 0.5)
+                .unwrap()
+                .vertices
+                .is_empty()
+        );
+    }
+
+    /// Measured beside the real mod: an `area`'s copies of a record with its own shader draw on
+    /// the record's own place (the shader spreads them, as the default shader does), so three
+    /// additive copies are three times as bright, not three faint ones.
+    #[test]
+    fn an_areas_copies_stack_on_their_record() {
+        let camera = DVec3::new(0.5, 0.5, 0.5);
+        let mut stacked = store(Some(3));
+        stacked.records.push(record([3.0, 2.0, 1.0], 10, 20.0));
+        let copies = batch(&stacked, camera, 12, 0.0).unwrap();
+        assert_eq!(copies.copies, 3);
+        assert_eq!(copies.vertices.len(), 4);
+        assert_eq!(copies.vertices[0].position, [3.0, 2.0, 1.0]);
+        let mut single = store(None);
+        single.records.push(record([3.0, 2.0, 1.0], 10, 20.0));
+        assert_eq!(batch(&single, camera, 12, 0.0).unwrap().copies, 1);
+    }
+
+    /// A type with its own shader draws its quads until the renderer draws it with the shader,
+    /// and again for good once the renderer refuses it (it doesn't build, or the frame holds
+    /// linear light), when it hands the renderer no batch either.
+    #[test]
+    fn a_type_keeps_its_quads_until_the_renderer_draws_its_shader() {
+        let mut store = store(None);
+        store.records.push(record([3.0, 2.0, 1.0], 10, 20.0));
+        let rect = Rect {
+            u0: 0.0,
+            v0: 0.0,
+            u1: 1.0,
+            v1: 1.0,
+            w: 16,
+            h: 16,
+        };
+        let atlas = HashMap::from([("test:particle/rain".to_owned(), (rect, true))]);
+        let quads = |store: &Store| {
+            let (mut out, mut additive) = (Vec::new(), Vec::new());
+            store.render(
+                &atlas,
+                DVec3::ZERO,
+                Quat::IDENTITY,
+                12,
+                0.0,
+                &mut ParticleLightCache::default(),
+                &|_| 0xF0,
+                &mut out,
+                &mut additive,
+            );
+            out.len() / 4
+        };
+        let shader = store.shader.clone().unwrap();
+        assert_eq!(quads(&store), 1, "not tried yet: its quads");
+        assert!(batch(&store, DVec3::ZERO, 12, 0.0).is_some());
+        shader.set_drawn(Some(true));
+        assert_eq!(quads(&store), 0, "drawn with its shader: no quads");
+        assert!(batch(&store, DVec3::ZERO, 12, 0.0).is_some());
+        shader.set_drawn(Some(false));
+        assert_eq!(quads(&store), 1, "refused: its quads again");
+        assert!(batch(&store, DVec3::ZERO, 12, 0.0).is_none());
     }
 
     #[test]

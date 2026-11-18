@@ -123,6 +123,36 @@ fn rains_at(world: &World, biomes: &Biomes, x: i32, y: i32, z: i32) -> bool {
 }
 
 impl Game<'_> {
+    /// Polytone GPU particles with their own shader: their heightmap (`Sampler1`) every half
+    /// second and this frame's records go to the renderer.
+    pub(super) fn polytone_gpu_particles(&mut self, camera: glam::DVec3, alpha: f64) {
+        let world = &self.world;
+        if let Some(area) = self.particles.polytone_heightmap_due(
+            camera,
+            sunrise_client::gfx::POLYTONE_HEIGHTMAP_SIZE,
+            world.bottom_y(),
+        ) {
+            let properties = &self.pack.assets.properties;
+            let size = area.size as i32;
+            let heights: Vec<u16> = (0..size * size)
+                .map(|i| {
+                    let (x, z) = (area.origin[0] + i % size, area.origin[1] + i / size);
+                    let top = motion_blocking_height(world, properties, x, z);
+                    (top - area.min_y).clamp(0, i32::from(u16::MAX)) as u16
+                })
+                .collect();
+            if let Some(renderer) = &self.renderer {
+                renderer.set_polytone_heightmap(&heights);
+            }
+        }
+        let batches = self
+            .particles
+            .polytone_shader_batches(camera, alpha as f32, &|b| world.light(b[0], b[1], b[2]));
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.set_polytone_batches(batches);
+        }
+    }
+
     /// `GameRenderer`'s cardinal light: the level's type uses the Nether's diffuse lights.
     pub(super) fn nether_lighting(&self) -> bool {
         self.dimension_type().cardinal_light == CardinalLight::Nether

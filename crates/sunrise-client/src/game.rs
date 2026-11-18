@@ -8686,6 +8686,7 @@ impl Game<'_> {
         let fog = self.frame_fog(camera, &sky, biome, water_fog);
         if !title {
             self.client_particle_geometry(camera, alpha, fov_degrees, &mut entities);
+            self.polytone_gpu_particles(camera, alpha);
         }
         let mut world_geometry = self.world_geometry.take().expect("view storage");
         self.fill_world_geometry(

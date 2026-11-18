@@ -41,7 +41,7 @@ use mod_behaviour::{ModBehaviour, mod_curve};
 pub use native::{ParticleController, ParticleUpdate, register_particle_providers};
 use spawn::next_double_between;
 pub mod polytone;
-mod polytone_gpu;
+pub mod polytone_gpu;
 mod polytone_model;
 mod simple;
 use simple::{PARALLEL_MIN, parallel_threads, sprite_from_age_in, tick_simple};
@@ -1109,6 +1109,8 @@ pub struct ParticleEngine {
     /// The packs' GPU particles' records, one store per type, and the ticks they count in.
     polytone_gpu: Vec<polytone_gpu::Store>,
     polytone_ticks: u64,
+    /// The heightmap the GPU particle shaders read (`Sampler1`) and the tick it was taken.
+    polytone_heightmap: Option<(sunrise_polytone::gpu_particle::HeightmapArea, u64)>,
     /// The last frame's additively blended quads (`take_additive`).
     additive: std::sync::Mutex<Vec<Vertex>>,
     emitters: Vec<TrackingEmitter>,
@@ -1226,6 +1228,7 @@ impl ParticleEngine {
             polytone_overrides: HashMap::new(),
             polytone_gpu: Vec::new(),
             polytone_ticks: 0,
+            polytone_heightmap: None,
             additive: std::sync::Mutex::default(),
             emitters: Vec::new(),
             starters: Vec::new(),
@@ -1845,18 +1848,20 @@ impl ParticleEngine {
             && let Some(def) = registry.get(name)
         {
             let (registry, def, name) = (registry.clone(), def.clone(), name.to_owned());
-            let particle = polytone::make(self, &registry, &name, &def, o, p, v, seed)?;
+            let (particle, custom) = polytone::make(self, &registry, &name, &def, o, p, v, seed)?;
             if def.gpu.is_some() {
                 // A GPU particle is only a record: it never becomes an engine particle.
                 let now = self.polytone_ticks;
                 let store = match self.polytone_gpu.iter().position(|s| s.is(&def)) {
                     Some(i) => &mut self.polytone_gpu[i],
                     None => {
-                        self.polytone_gpu.push(polytone_gpu::Store::new(&def)?);
+                        let shader = registry.gpu_shader(&name);
+                        self.polytone_gpu
+                            .push(polytone_gpu::Store::new(&def, shader)?);
                         self.polytone_gpu.last_mut()?
                     }
                 };
-                store.spawn(&particle, now, seed as u64);
+                store.spawn(&particle, custom, now, seed as u64);
                 return None;
             }
             return Some(particle);
