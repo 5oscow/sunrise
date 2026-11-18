@@ -1,73 +1,81 @@
 #!/usr/bin/env python3
-"""Check that the default and vanilla (Extras-off) builds resolve every shared dependency with the same features,
-so CI builds the second variant incrementally: a dependency whose features differ recompiles, and so does everything
-above it. Resolves only (`cargo tree`), never compiles. Covers Linux, the platform it runs on; each build context
-(the target, and the host that runs build scripts and proc-macros) is compared on its own, as Cargo compiles them
-apart."""
+"""Check that the vanilla (Extras-off) build reuses every dependency the default build compiled, so CI builds the
+second variant incrementally: only workspace crates, which own the Extras features, may differ. Compares Cargo's own
+plan of each build (`--unit-graph`, which compiles nothing): a dependency unit is reused when its package, target,
+mode, features, profile and platform match and so do the units it depends on, as Cargo's fingerprint requires.
+Linux, the platform it runs on. `--unit-graph` is unstable: RUSTC_BOOTSTRAP=1 is set for this planning call only."""
 
-import re
+import hashlib
+import json
+import os
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import unquote
 
 ROOT = Path(__file__).resolve().parents[2]
 BUILD_ROOTS = ("sunrise-game", "sunrise-mod-host")
 # The vanilla build: Extras off, and controllers with it (an Extras feature). The release workflows will use this
 # same feature set when they build both variants.
 EXTRAS_OFF_FEATURES = "audio"
-# `cargo tree --charset ascii`'s indent: four characters a level, then the package or a section header.
-LINE = re.compile(r"^((?:[|` ] {3}|[|`]-- )*)(.*)$")
-PATH = re.compile(r" \((/[^)]*)\)$")
 
 
-def features_for(root, *, extras_off):
-    """{(context, package): {features}}, context `target` or `host`, for every dependency outside the workspace:
-    workspace crates own the Extras features, so theirs differ by design."""
-    command = ["cargo", "tree", "--locked", "--color", "never", "--charset", "ascii", "-p", root,
-               "-e", "normal,build", "--format", "{p}|{f}"]
+def in_workspace(pkg_id):
+    """Whether a unit's package is one of this checkout's path packages (`path+file:///…#version`)."""
+    return pkg_id.startswith("path+file://") and Path(unquote(pkg_id[len("path+file://"):].split("#")[0])
+                                                      ).is_relative_to(ROOT)
+
+
+def plan(root, *, extras_off):
+    """{key: unit} of every dependency unit outside the workspace, each keyed by what it is built from: itself and,
+    recursively, the units it depends on."""
+    command = ["cargo", "build", "--locked", "--release", "-p", root, "--unit-graph", "-Z", "unstable-options"]
     if extras_off:
         command += ["--no-default-features", "--features", EXTRAS_OFF_FEATURES]
-    output = subprocess.check_output(command, cwd=ROOT, text=True)
-    packages = {}
-    # The current node at each depth: whether it is built for the host, and whether the children listed after it
-    # are its build-dependencies (a `[build-dependencies]` header, indented as its children's continuation lines).
-    host = []
-    building = set()
-    for line in output.splitlines():
-        prefix, text = LINE.fullmatch(line).groups()
-        depth = len(prefix) // 4
-        if text == "[build-dependencies]":
-            building.add(depth)
-            continue
-        building = {level for level in building if level < depth}
-        package, features = text.removesuffix(" (*)").split("|", 1)
-        # A build script's dependencies and a proc-macro, and all below them, run on the host.
-        on_host = depth > 0 and (host[depth - 1] or depth - 1 in building) or package.endswith(" (proc-macro)")
-        host[depth:] = [on_host]
-        path = PATH.search(package.removesuffix(" (proc-macro)"))
-        if path and Path(path[1]).is_relative_to(ROOT):
-            continue
-        context = "host" if on_host else "target"
-        packages.setdefault((context, package), set()).add(tuple(sorted(filter(None, features.split(",")))))
-    return packages
+    units = json.loads(subprocess.check_output(command, cwd=ROOT, text=True,
+                                               env={**os.environ, "RUSTC_BOOTSTRAP": "1"}))["units"]
+    keys = {}
+
+    def key(index):
+        if index not in keys:
+            unit = units[index]
+            dependencies = sorted((dependency["extern_crate_name"], key(dependency["index"]))
+                                  for dependency in unit["dependencies"])
+            keys[index] = hashlib.sha256(json.dumps([own(unit), dependencies]).encode()).hexdigest()
+        return keys[index]
+
+    return {key(index): unit for index, unit in enumerate(units) if not in_workspace(unit["pkg_id"])}
 
 
-def describe(feature_sets):
-    return " / ".join(f"[{', '.join(features)}]" for features in sorted(feature_sets))
+def own(unit):
+    """What a unit is built from, leaving out its dependencies."""
+    return json.dumps({name: unit[name] for name in ("pkg_id", "target", "mode", "features", "profile", "platform")},
+                      sort_keys=True)
+
+
+def describe(unit):
+    name, version = unit["pkg_id"].rsplit("#", 1)[-1].rsplit("@", 1)
+    return f"{name} {version} {unit['target']['name']} ({unit['mode']}; features [{', '.join(unit['features'])}])"
 
 
 def main():
     failed = False
     for root in BUILD_ROOTS:
-        default = features_for(root, extras_off=False)
-        extras_off = features_for(root, extras_off=True)
-        for context, package in sorted(default.keys() & extras_off.keys()):
-            if extras_off[context, package] != default[context, package]:
-                failed = True
-                print(f"{root}: {package} ({context}): default {describe(default[context, package])}; "
-                      f"Extras-off {describe(extras_off[context, package])}", file=sys.stderr)
+        default = plan(root, extras_off=False)
+        extras_off = plan(root, extras_off=True)
+        # What the vanilla build compiles again after the default build: the units that differ themselves, and how
+        # many more are compiled again only because something below them did.
+        rebuilt = [unit for key, unit in extras_off.items() if key not in default]
+        built = {own(unit) for unit in default.values()}
+        causes = sorted({describe(unit) for unit in rebuilt if own(unit) not in built})
+        for line in causes:
+            print(f"{root}: {line} differs from every unit the default build compiled", file=sys.stderr)
+        if rebuilt:
+            failed = True
+            print(f"{root}: {len(rebuilt)} dependency units would be compiled again for the vanilla build",
+                  file=sys.stderr)
     if not failed:
-        print("Shared dependency features match for default and Extras-off (sunrise-game and sunrise-mod-host).")
+        print("The vanilla build reuses every dependency the default build compiled (sunrise-game and sunrise-mod-host).")
     return int(failed)
 
 

@@ -816,7 +816,7 @@ jobs:
         id: ignored_test_policy_files_read_cleanly
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: python3 tools/ci/check_ignored_test_rows.py
-      - name: Shared dependency features match across Extras variants
+      - name: The vanilla build reuses the default build's dependencies
         id: extras_features
         if: ${{ !cancelled() && steps.setup.outcome == 'success' && runner.os == 'Linux' && needs.changes.outputs.rust_required != 'false' }}
         run: python3 tools/ci/check_extras_features.py
