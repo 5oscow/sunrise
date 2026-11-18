@@ -209,6 +209,21 @@ fn walk(dir: &Path, out: &mut BTreeMap<String, Value>, enchantment: bool) {
     }
 }
 
+/// `WorldClock.DIRECT_CODEC`, a unit map codec: a pack's clock is any JSON object. One that is
+/// not refuses the load with its id, as `RegistryDataLoader` does, so a dimension type never
+/// names a clock that silently went missing or kept the built-in one it meant to replace.
+fn check_world_clocks(overlay: &sunrise_world::loot::PackOverlay) -> Result<(), String> {
+    for (id, files) in overlay.kind("world_clock") {
+        let top = sunrise_world::loot::PackOverlay::top(files);
+        match serde_json::from_slice::<Value>(top) {
+            Ok(Value::Object(_)) => {}
+            Ok(_) => return Err(format!("world clock {id}: not a map")),
+            Err(e) => return Err(format!("world clock {id}: {e}")),
+        }
+    }
+    Ok(())
+}
+
 /// A synchronized registry's entries from the world's data packs (`<dir>/`
 /// files, the top pack's for each id) over the game's own. Each entry is
 /// ((namespace, path), JSON, from a pack); `file_order` sorts them.
@@ -544,6 +559,9 @@ impl SyncData {
                         sunrise_world::worldgen::overrides::mod_dimensions(),
                         &mut entries,
                     );
+                }
+                if *key == "minecraft:world_clock" {
+                    check_world_clocks(overlay)?;
                 }
                 pack_entries(path, overlay, &mut entries);
             }
@@ -1491,45 +1509,98 @@ mod tests {
         );
     }
 
-    /// #2506: a world pack's clock reaches the clients, so a dimension type
-    /// that names it as `default_clock` resolves on their side.
+    /// #2506: a world pack's clocks reach the clients from the pack's own files, so a dimension
+    /// type that names one as `default_clock` resolves on their side. Under known-pack
+    /// negotiation a clock the pack replaces goes with its data, one it leaves does not.
     #[test]
     #[ignore = "daily"]
     fn world_packs_supply_world_clocks() {
-        use sunrise_world::loot::PackOverlay;
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/sunrise-client")
             .join(sunrise_core::VANILLA_VERSION);
-        let files = vec![
-            ("world_clock/demo:moon".into(), vec![b"{}".to_vec()]),
-            (
-                "dimension_type/demo:moon".into(),
-                vec![br#"{"default_clock":"demo:moon"}"#.to_vec()],
-            ),
-        ];
+        let world =
+            std::env::temp_dir().join(format!("sunrise-pack-clocks-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&world);
+        let pack = world.join("datapacks/moon");
+        let write = |p: &str, t: &str| {
+            let path = pack.join(p);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, t).unwrap();
+        };
+        write(
+            "pack.mcmeta",
+            r#"{"pack":{"description":"Moon","pack_format":1}}"#,
+        );
+        write("data/demo/world_clock/moon.json", "{}");
+        write("data/minecraft/world_clock/the_end.json", "{}");
+        write(
+            "data/demo/dimension_type/moon.json",
+            r#"{"default_clock":"demo:moon"}"#,
+        );
+        let packs = crate::datapack::discover(&world);
+        let files: Vec<_> = crate::datapack::DataStore::load(&packs.iter().collect::<Vec<_>>())
+            .files
+            .into_iter()
+            .collect();
+        let _ = std::fs::remove_dir_all(&world);
         let sync = SyncData::load(
             &root,
-            &PackOverlay::new(&files),
+            &sunrise_world::loot::PackOverlay::new(&files),
             &sunrise_world::item_defaults::read(&root).unwrap(),
             &crate::crafting::ResolvedSources::default(),
         )
         .unwrap();
         let packets = sync.registry_packets(true, &LevelShapes::VANILLA);
-        let clocks = packets
+        let registry = |key: &str| packets.iter().find(|p| p.registry == key).unwrap();
+        let moon = registry("minecraft:dimension_type")
+            .entries
             .iter()
-            .find(|p| p.registry == "minecraft:world_clock")
-            .unwrap();
+            .find(|e| e.id == "demo:moon")
+            .and_then(|e| e.data.as_ref())
+            .expect("the pack's dimension type goes with its data");
+        let Some(Tag::String(clock)) = moon.get("default_clock") else {
+            panic!("the dimension type names no clock: {moon:?}");
+        };
+        let clock = clock.to_string_lossy();
         let sent = |name: &str| {
-            let entry = clocks.entries.iter().find(|e| e.id == name);
-            entry.map(|e| e.data.is_some())
+            let clocks = &registry("minecraft:world_clock").entries;
+            clocks
+                .iter()
+                .find(|e| e.id == name)
+                .map(|e| e.data.is_some())
         };
         assert_eq!(
-            sent("demo:moon"),
+            sent(&clock),
             Some(true),
-            "no client knows the pack's clock"
+            "no client knows the clock {clock} the dimension names"
         );
-        assert_eq!(sent("minecraft:overworld"), Some(false));
-        assert_eq!(sent("minecraft:the_end"), Some(false));
+        assert_eq!(sent("minecraft:the_end"), Some(true), "the replaced clock");
+        assert_eq!(
+            sent("minecraft:overworld"),
+            Some(false),
+            "the untouched clock"
+        );
+    }
+
+    /// A pack's clock that is not a map refuses the registry load with its id
+    /// (`WorldClock.DIRECT_CODEC`), where it used to be skipped; any map is a clock.
+    #[test]
+    fn a_malformed_world_clock_refuses_the_load() {
+        let check = |json: &[u8]| {
+            let files = vec![
+                (
+                    "world_clock/demo:fine".to_owned(),
+                    vec![br#"{"any":1}"#.to_vec()],
+                ),
+                ("world_clock/demo:moon".to_owned(), vec![json.to_vec()]),
+            ];
+            check_world_clocks(&sunrise_world::loot::PackOverlay::new(&files))
+        };
+        assert_eq!(check(b"{}"), Ok(()));
+        for bad in [&b"[]"[..], b"{", b"5"] {
+            let refused = check(bad).unwrap_err();
+            assert!(refused.contains("demo:moon"), "{refused}");
+        }
     }
 
     /// #7843: the server sends its tags as `TagLoader` merged them from the
