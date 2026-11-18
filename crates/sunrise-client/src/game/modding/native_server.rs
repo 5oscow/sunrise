@@ -1904,15 +1904,21 @@ impl Game<'_> {
     /// False when it didn't run: no such player here, or dead.
     pub(super) fn native_as_player(&mut self, uuid: u128, f: impl FnOnce(&mut Self)) -> bool {
         // With no guest's turn running, `native_acting_id` is the world's owner: on a server
-        // thread that owner is a guest too, whose state is theirs, not the `Game`'s own. Only
-        // in the level they are in: from another level a hook has no business with their
-        // inventory (an overflow would be tossed at their coordinates in the wrong level).
-        let owner_guest = self.lan_acting_uuid.is_none()
-            && self.lan.as_ref().is_some_and(|host| {
-                host.hub
-                    .holder_guest(uuid, self.dim.id())
-                    .is_some_and(|g| !g.dead && g.dimension == self.dim.id())
-            });
+        // thread that owner is a guest too, whose state is theirs, not the `Game`'s own. A living
+        // guest in another level isn't reachable from here: a hook has no business with their
+        // inventory (an overflow would be tossed at their coordinates in this level), and the
+        // `Game`'s own player is not theirs.
+        let here = self.dim.id();
+        let holder = self
+            .lan
+            .as_ref()
+            .and_then(|host| host.hub.holder_guest(uuid, here))
+            .filter(|g| !g.dead)
+            .map(|g| (g.conn, g.dimension == here));
+        let owner_guest = self.lan_acting_uuid.is_none() && holder.is_some();
+        if owner_guest && holder.is_some_and(|(_, in_level)| !in_level) {
+            return false;
+        }
         if !owner_guest && uuid == self.native_acting_id() {
             if self
                 .player

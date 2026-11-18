@@ -267,6 +267,15 @@ mod owner {
         with_guests(|game| {
             game.level.player_uuid = Some(playerdata::uuid_ints(12));
             assert_ne!(game.dim.id(), "minecraft:the_nether");
+            // The `Game`'s own player, living and with room: not the owner's, who is a guest.
+            game.player = Some(
+                sunrise_client::motion::PlayerMotion::new(
+                    game.motion,
+                    sunrise_core::geometry::Vec3::new(8.5, 64.0, 8.5),
+                )
+                .unwrap(),
+            );
+            game.inventory.fill(None);
             game.lan
                 .as_mut()
                 .unwrap()
@@ -286,13 +295,30 @@ mod owner {
                 player: 12,
                 slot: 0,
             };
-            let dropped = game.dropped.len();
-            (game as &mut dyn ServerHost)
-                .transaction(|host, tx| {
-                    slot.insert(host, tx, &diamond, 1);
-                    Ok::<_, ()>(())
+            // A diamond of another player moves to the owner, as a mod's transfer does: what
+            // the owner can't take goes back, here by aborting the transaction.
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .update_guest(13, |g| {
+                    g.inventory[0] = Some(ItemStack::new("minecraft:diamond", 1))
                 })
                 .unwrap();
+            let source = ItemPlace::PlayerSlot {
+                player: 13,
+                slot: 0,
+            };
+            let dropped = game.dropped.len();
+            let moved: Result<(), ()> = (game as &mut dyn ServerHost).transaction(|host, tx| {
+                let taken = source.extract(host, tx, &diamond, 1);
+                assert_eq!(taken, 1);
+                assert_eq!(slot.insert(host, tx, &diamond, taken), 0);
+                Err(())
+            });
+            assert!(moved.is_err());
+            let giver = game.lan.as_ref().unwrap().hub.guest(13).unwrap();
+            assert_eq!(giver.inventory[0].as_ref().map(|s| s.count), Some(1));
             let guest = &game.lan.as_ref().unwrap().hub.guests[0];
             assert!(guest.inventory.iter().all(|s| {
                 s.as_ref()
