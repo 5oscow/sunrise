@@ -1794,6 +1794,95 @@ mod tests {
         );
     }
 
+    /// A native mod's clock (`native_data_pack_files`) sits below the world's enabled packs
+    /// (`overlay_files`), so the pack's clock for the same id is the one sent, even when the
+    /// native one has a false load condition; a clock only the native mod gives is sent too.
+    #[test]
+    fn an_enabled_packs_world_clock_wins_over_a_native_contribution() {
+        let world =
+            std::env::temp_dir().join(format!("sunrise-clock-packs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&world);
+        let pack = world.join("datapacks/moon");
+        let write = |p: &str, t: &str| {
+            let path = pack.join(p);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, t).unwrap();
+        };
+        write("pack.mcmeta", r#"{"pack":{"description":"Moon"}}"#);
+        write(
+            "data/minecraft/world_clock/the_end.json",
+            r#"{"from":"pack"}"#,
+        );
+        let packs = crate::datapack::discover(&world);
+        // `overlay_files`: the native mod's files first, the enabled packs' over them.
+        let mut files: BTreeMap<String, Vec<Vec<u8>>> = BTreeMap::from([
+            (
+                "world_clock/minecraft:the_end".to_owned(),
+                vec![br#"{"neoforge:conditions":[{"type":"neoforge:false"}]}"#.to_vec()],
+            ),
+            ("world_clock/test:frozen".to_owned(), vec![b"{}".to_vec()]),
+        ]);
+        let enabled: Vec<_> = packs.iter().collect();
+        for (path, versions) in crate::datapack::DataStore::load(&enabled).files {
+            files.entry(path).or_default().extend(versions);
+        }
+        let _ = std::fs::remove_dir_all(&world);
+        let files: Vec<_> = files.into_iter().collect();
+        let overlay = sunrise_world::loot::PackOverlay::new(&files);
+
+        // The clock registry's steps in `load_with_frozen`, over the host's own clocks.
+        let host = |path: &str| {
+            (
+                ("minecraft".to_owned(), path.to_owned()),
+                Value::Object(<_>::default()),
+                false,
+            )
+        };
+        let mut entries = vec![host("overworld"), host("the_end")];
+        pack_entries("world_clock", &overlay, &mut entries);
+        condition_filter::filter(&mut entries, false, overlay.conditions, "world_clock");
+        let mut entries: Vec<_> = entries
+            .into_iter()
+            .map(|(key, value, packed)| (key, json_to_nbt(&value), packed))
+            .collect();
+        file_order(&mut entries);
+        let mut sync = SyncData::empty();
+        sync.registries.push((
+            "minecraft:world_clock".to_owned(),
+            Entries {
+                names: entries
+                    .iter()
+                    .map(|((ns, p), ..)| format!("{ns}:{p}"))
+                    .collect(),
+                data: entries.iter().map(|(_, v, _)| v.clone()).collect(),
+                from_pack: entries.iter().map(|(.., packed)| *packed).collect(),
+            },
+        ));
+        let packets = sync.registry_packets(true, &LevelShapes::VANILLA);
+        let sent = |id: &str| {
+            packets[0]
+                .entries
+                .iter()
+                .find(|e| e.id == id)
+                .map(|e| e.data.clone())
+        };
+        assert_eq!(
+            sent("minecraft:the_end"),
+            Some(Some(json_to_nbt(&serde_json::json!({"from":"pack"})))),
+            "the enabled pack's clock is sent, not removed by the native one's condition"
+        );
+        assert_eq!(
+            sent("test:frozen"),
+            Some(Some(json_to_nbt(&serde_json::json!({})))),
+            "a clock only the native mod gives"
+        );
+        assert_eq!(
+            sent("minecraft:overworld"),
+            Some(None),
+            "the untouched clock"
+        );
+    }
+
     #[test]
     fn a_changed_dimension_type_is_sent_with_its_shape() {
         let vanilla: Value =
