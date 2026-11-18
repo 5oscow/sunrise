@@ -259,7 +259,7 @@ harnesses = [
 lan = [
   "damage", "hazards", "pvp", "deaths", "kills", "looting", "hurt", "eat*", "xp", "effects", "absorption", "breath",
   "lava", "drops", "shield", "totem", "keepinv", "helduse", "consume-release", "fishing*", "maps", "strikes",
-  "digging", "instant_digging", "knockback", "sprint-hit-slowdown", "spear", "critical-hits", "legacy-pvp",
+  "digging", "instant_digging", "knockback", "sprint-hit-slowdown", "spear", "critical-hits",
   "mob-thorns", "player-thorns", "death-credit", "damage-attacker", "entity-die", "trident*", "arrow_pickup",
   "riptide_rain", "explorer_map", "loot_give_guest", "creative_*", "mining-drop-latency", "deathmining", "contacts",
   "levelup-sounds", "worn", "armour", "dig_*", "popped_break_effects",
@@ -298,10 +298,13 @@ paths = [
   "crates/sunrise-client/src/menu.rs", "crates/sunrise-client/src/container_screen.rs", "crates/sunrise-client/src/creative.rs",
   "crates/sunrise-client/src/crafting.rs", "crates/sunrise-client/src/recipe_book*", "crates/sunrise-client/src/stations.rs",
   "crates/sunrise-client-render/src/containers.rs", "crates/sunrise-world/src/simple_container.rs",
+  "crates/sunrise-client/src/game/interface/container_hooks.rs", "crates/sunrise-client/src/game/interface/extras/mouse_tweaks.rs",
 ]
 cargo = [
   { package = "sunrise-client-lib", target = "lib", filter = "menu::" },
   { package = "sunrise-client-lib", target = "lib", filter = "crafting::" },
+  { package = "sunrise-client", target = "lib", filter = "game::container_hooks::" },
+  { package = "sunrise-client", target = "lib", filter = "game::extras::mouse_tweaks::" },
 ]
 harnesses = [
   "menu_click", "container_*", "storage_menu", "vehicle_container", "carrier_inventory", "simple_container",
