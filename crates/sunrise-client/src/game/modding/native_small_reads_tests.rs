@@ -84,7 +84,7 @@ fn restricted_level_support_and_sky_reads() {
                 assert_eq!(level.can_see_sky([3, -1000, 5]), None);
             });
             assert!(!game.world.loaded(32, 5));
-            // Neither query needs synced server container contents on a client: it refuses.
+            // The read-only level host refuses support and sky queries on clients.
             game.options.dedicated = None;
             game.options.execution_role = ExecutionRole::Client;
             game.with_level(|_, level, _| {

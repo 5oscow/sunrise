@@ -37,12 +37,13 @@ The handler receives a borrowed raw JSON value: the condition's object without
 numbers, strings, lists and objects. Invalid mod input must return
 `ConditionError`; handlers must not panic while reading it. `ConditionError`
 has explicit Wire encoding. Native and WebAssembly registrants cross the same generated route.
-Handlers run in the server's candidate data reload, before the entries become
-visible. Results are retained for each entry and condition payload in that
-candidate, so repeated readers do not call the handler again. A new reload
-reevaluates the entry. Handlers must not mutate live data. A native handler
-panic becomes a named reload error ("handler panicked"), keeping the previous
-usable data. A wasm trap follows the runtime's normal failure policy.
+Startup data loaders and the server's candidate data reload both use registered
+handlers before entries become visible. Results are retained for each entry and
+condition payload in that load, so repeated readers do not call the handler
+again. A new load reevaluates the entry. Handlers must not mutate live data.
+A native handler panic becomes a named load error ("handler panicked"); on
+reload, the previous usable data stays installed. A wasm trap follows the
+runtime's normal failure policy.
 
 `true` loads the entry; `false` omits it, without exposing a lower pack's
 version. A callback error refuses the reload and names the file. The previous
