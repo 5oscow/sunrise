@@ -233,6 +233,8 @@ pub struct MobType {
     /// The bounds `finalize`'s attribute record clamps to, from the catalog.
     pub attribute_bounds: finalize::AttrBounds,
     pub gravity: f64,
+    /// The type's `safe_fall_distance`: the base of a mob's attribute when
+    /// `attributes` has no row for it (`finalize::base_value`).
     pub safe_fall_distance: f64,
     pub fall_damage_multiplier: f64,
     pub water_efficiency: f64,
@@ -4478,10 +4480,17 @@ impl Mob {
             absorption_removed |= !keep && e.id == "minecraft:absorption";
             keep
         });
+        // `removeModifier` dirties `max_absorption` only when the modifier
+        // is there, permanent or a mod's transient one with its id: a loaded
+        // Absorption, which added none, clamps nothing.
+        let (cap, absorption_id) = (finalize::Attr::MaxAbsorption, "minecraft:effect.absorption");
+        let cap_removed = absorption_removed
+            && (finalize::modifier_amount(self, cap, absorption_id).is_some()
+                || finalize::has_transient_modifier(self, cap, absorption_id));
         for effect in removed {
             self.set_effect_modifiers(effect, None);
         }
-        if absorption_removed {
+        if cap_removed {
             // LivingEntity.onAttributeUpdated clamps to the remaining maximum;
             // removing Absorption does not subtract the hearts it granted.
             self.absorption = self.absorption.min(armor::max_absorption(self));
@@ -4581,16 +4590,19 @@ impl Mob {
         if !active.visible {
             self.extra.hidden_effects.push(effect);
         }
+        // `onEffectAdded` for a new effect, `onEffectUpdated(_, true, _)` for a
+        // changed one: the modifiers follow the active amplifier.
+        if changed {
+            self.set_effect_modifiers(effect, Some(active.amplifier));
+        }
+        // Then `MobEffectInstance.onEffectStarted`, for every `addEffect`:
+        // `AbsorptionMobEffect` raises the amount within the maximum the
+        // modifier above set.
         if effect == "minecraft:absorption" {
             self.absorption = self
                 .absorption
                 .max(4.0 * (incoming.amplifier + 1) as f32)
                 .clamp(0.0, armor::max_absorption(self));
-        }
-        // `onEffectAdded` for a new effect, `onEffectUpdated(_, true, _)` for a
-        // changed one: the modifiers follow the active amplifier.
-        if changed {
-            self.set_effect_modifiers(effect, Some(active.amplifier));
         }
         self.effects_dirty |= changed;
         changed
@@ -5311,7 +5323,13 @@ pub(crate) mod sensor_scan_tests {
             armor_toughness: 0.0,
             knockback_resistance: 0.0,
             jump_strength: 0.42,
-            attributes: Arc::default(),
+            // `LivingEntity.createLivingAttributes`: every living entity has
+            // the attributes an effect's modifier changes on a mob (#1988).
+            attributes: Arc::new(HashMap::from([
+                ("minecraft:safe_fall_distance".to_owned(), 3.0),
+                ("minecraft:max_absorption".to_owned(), 0.0),
+                ("minecraft:waypoint_transmit_range".to_owned(), 0.0),
+            ])),
             item_stack_limits: Default::default(),
             attribute_bounds: Default::default(),
             gravity: 0.08,
@@ -7346,19 +7364,10 @@ mod hidden_speed_mob_tick_tests {
 
     #[test]
     fn consume_effect_removal_clamps_absorption_to_remaining_maximum() {
-        use sunrise_world::attributes::entity::Catalog;
-        let bits = |v: f64| format!("{:016x}", v.to_bits());
-        let catalog = Arc::new(
-            Catalog::from_json(&serde_json::json!({
-                "data_version": sunrise_world::DATA_VERSION,
-                "attributes": [
-                    {"id":"minecraft:max_absorption", "default":bits(0.0), "min":bits(0.0), "max":bits(2048.0), "syncable":true}
-                ],
-                "entities": {"minecraft:pig":{"minecraft:max_absorption":bits(0.0)}}
-            }))
-            .unwrap(),
-        );
-        let key = catalog.id("minecraft:max_absorption").unwrap();
+        // A mob whose `max_absorption` base is `base`.
+        let with_base = |m: &mut Mob, base: f64| {
+            finalize::set_base(m, finalize::Attr::MaxAbsorption, base);
+        };
 
         let mut kind = (*sensor_scan_tests::kind()).clone();
         kind.id = "minecraft:pig".into();
@@ -7383,11 +7392,7 @@ mod hidden_speed_mob_tick_tests {
         // Case 2: Base 20 mob with Absorption I (granting 4.0 absorption hearts, max_absorption 24.0).
         // On ClearAllEffects, max_absorption becomes 20.0; amount 4.0 is <= 20.0, so it keeps 4.0.
         let mut m20 = Mob::new(2, kind.clone(), Vec3::ZERO, 0.0);
-        let mut attrs = catalog.create("minecraft:pig").unwrap();
-        attrs.edit(key, |value, observer| {
-            value.set_base_value(20.0, observer).unwrap();
-        });
-        m20.extra.armor_attributes = Some(Box::new(attrs));
+        with_base(&mut m20, 20.0);
         m20.add_effect("absorption", 600, 0);
         assert_eq!(armor::max_absorption(&m20), 24.0);
         assert_eq!(m20.absorption, 4.0);
@@ -7404,11 +7409,7 @@ mod hidden_speed_mob_tick_tests {
         // On RemoveEffects(["minecraft:absorption"]), remaining max_absorption is 20.0,
         // so amount 24.0 is clamped to 20.0.
         let mut m20_clamp = Mob::new(3, kind.clone(), Vec3::ZERO, 0.0);
-        let mut attrs3 = catalog.create("minecraft:pig").unwrap();
-        attrs3.edit(key, |value, observer| {
-            value.set_base_value(20.0, observer).unwrap();
-        });
-        m20_clamp.extra.armor_attributes = Some(Box::new(attrs3));
+        with_base(&mut m20_clamp, 20.0);
         m20_clamp.add_effect("absorption", 600, 0);
         m20_clamp.absorption = 24.0;
         m20_clamp.apply_consume_effect(
@@ -7438,11 +7439,7 @@ mod hidden_speed_mob_tick_tests {
         // The shared command/expiry removal path must obey the same contract.
         for (base, amount, expected) in [(20.0, 8.0, 8.0), (20.0, 24.0, 20.0), (0.0, 4.0, 0.0)] {
             let mut m = Mob::new(5, kind.clone(), Vec3::ZERO, 0.0);
-            let mut attrs = catalog.create("minecraft:pig").unwrap();
-            attrs.edit(key, |value, observer| {
-                value.set_base_value(base, observer).unwrap();
-            });
-            m.extra.armor_attributes = Some(Box::new(attrs));
+            with_base(&mut m, base);
             m.add_effect("absorption", 600, 1);
             m.absorption = amount;
             m.effects_dirty = false;
