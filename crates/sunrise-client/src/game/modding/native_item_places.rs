@@ -4,10 +4,9 @@
 //! them through `ItemPlace`'s `stack`, `insert` and `extract`, which come here for these places; a block entity's slots,
 //! a stack inside an item and a mod's own places go through their handlers.
 use super::Game;
-use super::api_values::{TryIntoApi, stack_value};
-use super::transactions::After;
+use super::transactions::{After, DeferredEffect};
 use mod_api::__private::game::*;
-use mod_api::{CraftedByError, EquipmentSlot, ItemPlace, ItemResource, LivingRef, Transaction};
+use mod_api::{CraftedByError, EquipmentSlot, ItemPlace, LivingRef, MenuSlotBacking, Transaction};
 use sunrise_client::{first_person::Hand, items::ItemStack, menu::Menu};
 
 impl Game<'_> {
@@ -177,33 +176,63 @@ impl Game<'_> {
         if !self.transaction_holds(tx) {
             return Err(CraftedByError::Unavailable);
         }
-        let player = match place {
-            ItemPlace::MenuSlot { menu, .. } | ItemPlace::PlayerCursor { menu } => {
-                menu.fields().player.uuid()
-            }
+        let (menu, slot) = match *place {
+            ItemPlace::MenuSlot { menu, slot } => (menu, Some(slot)),
+            ItemPlace::PlayerCursor { menu } => (menu, None),
             _ => return Err(CraftedByError::NotHeld),
         };
-        let Some(before) = place.stack(self) else {
-            return Err(CraftedByError::NotHeld);
-        };
-        let before_engine = stack_value(&before).map_err(|_| CraftedByError::Unavailable)?;
-        let mut after_engine = before_engine.clone();
-        let maps = self.level_maps([&before_engine]);
-        Menu::map_crafted(Some(&maps), &mut after_engine);
-        if after_engine != before_engine {
-            let after = after_engine
-                .try_into_api()
-                .map_err(|_| CraftedByError::Unavailable)?;
-            if place.exchange(self, tx, &ItemResource::of(&after), before.count()) != before.count()
-            {
-                return Err(CraftedByError::Unavailable);
+        let player = menu.fields().player;
+        let item = if let Some(slot) = slot
+            && matches!(
+                self.menu_slot_backing(menu, slot),
+                Some(MenuSlotBacking::Place(_))
+            ) {
+            // A handler-owned slot exposes only an API resource, not the engine's transient
+            // directive. Read the item from the handler, never from the display mirror.
+            let stack = place.stack(self).ok_or(CraftedByError::NotHeld)?;
+            mod_api::__private::item_key_id(stack.item())
+                .ok_or(CraftedByError::Unavailable)?
+                .into()
+        } else {
+            let mut held = match slot {
+                Some(slot) => self.menu_slot(menu, slot),
+                None => self.menu_carried(menu),
             }
-            self.defer_effect(super::transactions::DeferredEffect::MapCrafted(maps));
-        }
-        self.defer_effect(super::transactions::DeferredEffect::ItemStat {
-            player,
+            .flatten()
+            .filter(|stack| stack.count > 0 && stack.item.as_ref() != "minecraft:air")
+            .ok_or(CraftedByError::NotHeld)?;
+            // Do not round-trip through the API component codec: it deliberately omits
+            // the map's pending scale/lock directive.
+            if held.item.as_ref() == "minecraft:filled_map"
+                && held
+                    .data()
+                    .is_some_and(|data| data.map_post_processing.is_some())
+            {
+                let maps = self.level_maps([&held]);
+                Menu::map_crafted(Some(&maps), &mut held);
+                let item = held.item.clone();
+                let written = if let Some(slot) = slot {
+                    self.replace_crafted_menu_slot(menu, slot, held)
+                } else {
+                    self.native_as_player_handle(player, |game| {
+                        game.journal_player(player.uuid());
+                        game.carried = Some(held);
+                    })
+                };
+                if !written {
+                    return Err(CraftedByError::Unavailable);
+                }
+                self.notice_menu_place_write(place);
+                self.defer_effect(DeferredEffect::MapCrafted(maps));
+                item
+            } else {
+                held.item
+            }
+        };
+        self.defer_effect(DeferredEffect::ItemStat {
+            player: player.uuid(),
             stat: "crafted",
-            item: before_engine.item.clone(),
+            item,
             amount,
         });
         Ok(())
