@@ -17,8 +17,10 @@ use sunrise_core::{geometry::Vec3, random::RandomSource};
 // Vex state: `flag` charging, `counter2` the owner's mob id (0 none),
 // `home` the bound origin, `egg_time` the life left (-1 unlimited).
 
+/// The `Vex` constructor and `registerGoals`. Gravity stays on: `Vex.tick`
+/// turns it off only after its first `super.tick()`, so a new vex with AI
+/// falls for one tick.
 pub fn register(m: &mut Mob) {
-    m.no_gravity = true;
     m.ai.mov.kind = super::control::MoveKind::Custom;
     m.extra.set_main_hand(Some("minecraft:iron_sword".into()));
     if m.extra.egg_time == 0 {
@@ -375,6 +377,13 @@ mod owner_save_tests {
         ty.id = "minecraft:vex".into();
         ty.species = Species::Vex;
         Mob::new(1, kind, Vec3::ZERO, 0.0)
+    }
+
+    /// The `Vex` constructor leaves `DATA_NO_GRAVITY` at its default, false:
+    /// only the end of `Vex.tick` sets it.
+    #[test]
+    fn a_new_vex_has_gravity_until_its_first_tick() {
+        assert!(!vex().no_gravity);
     }
 
     /// `Level.getEntity(uuid)` for the test: `Game` answers this with
