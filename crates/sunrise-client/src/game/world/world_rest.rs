@@ -277,7 +277,7 @@ pub(super) fn load_world_rest(
             }),
         )
     };
-    conditions.check_errors()?;
+    // World staging checks conditions after the selected packs have supplied their winners.
     let (items, recipes, stations) = items?;
     let (animate, fog) = animate?;
     let (mob_types, mob_data) = mobs?;
