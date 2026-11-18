@@ -994,7 +994,7 @@ mod tests {
     fn an_option_set_keeps_sunrise_files() {
         let mut s = Settings::parse("fov:70\n");
         s.mods.enabled.insert("zoom".into());
-        s.extras.minimap = true;
+        s.extras.sort = true;
         s.sunrise.fog = !s.sunrise.fog;
         s.controller.vibration = !s.controller.vibration;
         let set = s.with_option("fov", "90").unwrap();

@@ -277,6 +277,9 @@ macro_rules! named_blocks {
         #[derive(Clone, Copy, Debug)]
         pub struct Named { $(pub $field: BlockId,)* }
         impl Named {
+            #[cfg(test)]
+            const TEST_NAMES: &'static [&'static str] = &[$(concat!("minecraft:", $name),)*];
+
             pub(super) fn resolve(table: &StateTable) -> io::Result<Self> {
                 Ok(Self { $($field: table.block_by_name(concat!("minecraft:", $name)).ok_or_else(|| invalid(concat!("missing block ", $name)))?,)* })
             }
@@ -1179,7 +1182,6 @@ fn build_with_gameplay<G: GameplayStateSource>(
         liquid_blocks,
         dynamic,
         occlusion_cache: Default::default(),
-        published_occlusion_cache: Default::default(),
         growth: Default::default(),
         block_maps: Default::default(),
         fluid_interactions: Default::default(),
@@ -1244,6 +1246,129 @@ fn instrument_index(name: &str) -> u8 {
         .iter()
         .position(|n| n.eq_ignore_ascii_case(name))
         .map_or(0, |i| i as u8)
+}
+
+/// Minimal in-memory behaviour tables for an unsupported plant carried by a piston.
+#[cfg(test)]
+pub(super) fn inert_support_fixture() -> Behaviours {
+    use serde_json::{Map, json};
+
+    let mut states = Vec::new();
+    let mut defaults = Map::new();
+    for &name in Named::TEST_NAMES.iter().chain(&["test:plant", "test:soil"]) {
+        if defaults.contains_key(name) {
+            continue;
+        }
+        defaults.insert(name.into(), json!(states.len()));
+        if matches!(name, "minecraft:water" | "minecraft:lava") {
+            for level in 0..16 {
+                states.push(json!([name, false, false, "", {
+                    "id": name, "properties": {"level": level.to_string()}
+                }]));
+            }
+        } else {
+            states.push(json!([name, false, false, "", name]));
+        }
+    }
+    let registry = BlockRegistry::from_facts_json(
+        json!({"defaults": defaults, "states": states})
+            .to_string()
+            .as_bytes(),
+    )
+    .unwrap();
+    let mut table = StateTable::new(&registry).unwrap();
+    let props = Props::resolve(&mut table);
+    let named = Named::resolve(&table).unwrap();
+    let plant = table.block_by_name("test:plant").unwrap();
+    let blocks = (0..table.block_count())
+        .map(|index| {
+            let block = BlockId(index as u16);
+            let class = if block == plant {
+                Class::Vegetation
+            } else if block == named.moving_piston {
+                Class::MovingPiston
+            } else {
+                Class::Block
+            };
+            BlockData {
+                class,
+                chain: vec![class],
+                classes: ClassSet::default(),
+                interfaces: 0,
+                set_type: None,
+                gate_open: [None, None, None],
+                gate_close: [None, None, None],
+                open_sound: None,
+                close_sound: None,
+                ticks_to_stay_pressed: 0,
+                max_weight: 0,
+                link: None,
+                link2: None,
+                support_tag: None,
+                support_tag2: None,
+                feature: None,
+                grow_probability: 0.0,
+                growth_direction: Direction::Up,
+                schedule_fluid_ticks: false,
+                declared_waterlogged: false,
+                weather: 0,
+                ignite_odds: 0,
+                burn_odds: 0,
+                sounds: Arc::new(Sounds {
+                    volume: 0.0,
+                    pitch: 0.0,
+                    place: "".into(),
+                    break_: "".into(),
+                    fall: "".into(),
+                }),
+                item: "".into(),
+                dynamic_shape: false,
+                declared_vegetation: false,
+            }
+        })
+        .collect();
+    let facts = (0..table.state_count())
+        .map(|index| StateFacts {
+            flags: if table.block(BlockStateId(index as u32)) == named.air {
+                state_flags::AIR
+            } else {
+                0
+            },
+            sturdy: 0,
+            weak: 0,
+            strong: 0,
+            fluid: FluidState::EMPTY,
+            emission: 0,
+            dampening: 0,
+            hardness: 0.0,
+            push: PushReaction::PushPull,
+            resolved_push: super::piston_reactions::CachedReaction::new(PushReaction::PushPull),
+            instrument: 0,
+            shape: -1,
+            collision_offset: None,
+        })
+        .collect();
+    Behaviours {
+        table,
+        props,
+        named,
+        tags: Tags::default(),
+        all_tags: HashMap::new(),
+        facts,
+        shapes: Vec::new(),
+        shape_info: Vec::new(),
+        fluid_tags: FluidTags::default(),
+        fluid_definitions: HashMap::new(),
+        blocks,
+        items: HashMap::new(),
+        potted_by_content: HashMap::new(),
+        liquid_blocks: FluidBlockBindings::new(&registry).unwrap(),
+        dynamic: HashMap::new(),
+        occlusion_cache: Default::default(),
+        growth: Default::default(),
+        block_maps: Default::default(),
+        fluid_interactions: Default::default(),
+    }
 }
 
 impl GameplayStateSource for Value {

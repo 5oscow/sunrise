@@ -219,6 +219,30 @@ impl SaveDir {
         }
         self.write_result()
     }
+    /// Wait until at most `low` chunk records are still queued, without waiting
+    /// for all of them; a save pass resuming at half the cap keeps the writer fed
+    /// without stalling for records it did not have to.
+    ///
+    /// The predicate is `chunks`, not `count`: `count` holds queued batches and
+    /// one batch can carry many records, so waiting on it would let the record
+    /// cap (`MAX_ASYNC_CHUNK_WRITES`) drift with how the caller batches.
+    pub(super) fn wait_for_chunk_writes_below(&self, low: usize) -> Result<()> {
+        let mut count = self
+            .outstanding
+            .count
+            .lock()
+            .map_err(|_| "writer poisoned")?;
+        // The writer lowers `chunks` before it takes this same mutex to notify,
+        // so a wakeup cannot fall between the check and the wait.
+        while self.outstanding.chunks.load(Ordering::Relaxed) > low {
+            count = self
+                .outstanding
+                .done
+                .wait(count)
+                .map_err(|_| "writer poisoned")?;
+        }
+        self.write_result()
+    }
     /// `ChunkMap.activeChunkWrites`: chunk records, excluding entity/POI IO.
     pub fn active_chunk_writes(&self) -> usize {
         self.outstanding.chunks.load(Ordering::Relaxed)
