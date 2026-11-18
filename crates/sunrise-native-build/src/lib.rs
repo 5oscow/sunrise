@@ -664,20 +664,28 @@ pub fn sync(from: &Path, to: &Path) -> Result<(), String> {
     let new = files(from)?;
     let old = if to.is_dir() { files(to)? } else { Vec::new() };
     for (name, path) in &new {
-        let target = to.join(name);
-        if fs::read(&target).ok() != fs::read(path).ok() {
-            fs::create_dir_all(target.parent().unwrap_or(to)).map_err(|e| e.to_string())?;
-            fs::copy(path, &target)
-                .and_then(|_| fs::File::options().write(true).open(&target))
-                .and_then(|file| file.set_modified(std::time::SystemTime::now()))
-                .map_err(|e| format!("{}: {e}", target.display()))?;
-        }
+        copy_changed(path, &to.join(name))?;
     }
     for (name, path) in old {
         if new.binary_search_by(|(n, _)| n.cmp(&name)).is_err() {
             let _ = fs::remove_file(path);
         }
     }
+    Ok(())
+}
+
+/// Writes `from` over `to` when their bytes differ, with the current time (see [`sync`]).
+fn copy_changed(from: &Path, to: &Path) -> Result<(), String> {
+    if fs::read(to).ok() == fs::read(from).ok() {
+        return Ok(());
+    }
+    if let Some(parent) = to.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    fs::copy(from, to)
+        .and_then(|_| fs::File::options().write(true).open(to))
+        .and_then(|file| file.set_modified(std::time::SystemTime::now()))
+        .map_err(|e| format!("{}: {e}", to.display()))?;
     Ok(())
 }
 

@@ -117,7 +117,7 @@ fn discover_catalog(
         .to_path_buf();
     crate::host::mark_used(&cache)?;
     let stage = cache.join("stage");
-    prepare_stage(game, &stage)?;
+    prepare_stage(game, &stage, bundle.needs_mixins())?;
     let mut listed = internals::Catalog::read(&stage)?;
     listed.discovery = true;
     api::stage(&stage, &projects, &declared, &resolution, &listed)?;
@@ -229,7 +229,9 @@ fn catalog_for_mod_with(
 // sunrise-world watches it, so restoring the pristine lock would rebuild the entire game
 // every time. Reset only the workspace membership and the generated mod source copies.
 // The first copy is published by a rename, so an interrupted copy is never taken as warm.
-fn prepare_stage(game: &Path, stage: &Path) -> Result<(), String> {
+// `regenerated`: the mod's own mixins rewrote the game tree, so its changed sources and catalogs
+// are taken too.
+fn prepare_stage(game: &Path, stage: &Path, regenerated: bool) -> Result<(), String> {
     if !stage.is_dir() {
         let fresh = stage.with_extension("new");
         if fresh.exists() {
@@ -237,6 +239,12 @@ fn prepare_stage(game: &Path, stage: &Path) -> Result<(), String> {
         }
         crate::sync(game, &fresh)?;
         fs::rename(&fresh, stage).map_err(|e| e.to_string())?;
+    } else if regenerated {
+        for (name, path) in crate::files(game)? {
+            if name != "Cargo.lock" {
+                crate::copy_changed(&path, &stage.join(name))?;
+            }
+        }
     } else {
         fs::copy(game.join("Cargo.toml"), stage.join("Cargo.toml")).map_err(|e| e.to_string())?;
     }
@@ -359,6 +367,29 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn a_regenerated_game_tree_reaches_the_warm_stage_and_the_resolved_lock_stays() {
+        let root = crate::tests::dir("discovery-regenerated");
+        let game = root.join("game");
+        let stage = root.join("stage");
+        fs::create_dir_all(&game).unwrap();
+        fs::write(game.join("Cargo.toml"), "[workspace]\nmembers=[]\n").unwrap();
+        fs::write(game.join("Cargo.lock"), "original").unwrap();
+        fs::write(game.join("module.rs"), "first").unwrap();
+        fs::write(game.join(internals::INTERNALS), "first catalog").unwrap();
+        prepare_stage(&game, &stage, true).unwrap();
+        fs::write(stage.join("Cargo.lock"), "resolved").unwrap();
+        fs::write(game.join("module.rs"), "second").unwrap();
+        fs::write(game.join(internals::INTERNALS), "second catalog").unwrap();
+        prepare_stage(&game, &stage, true).unwrap();
+        assert_eq!(fs::read(stage.join("module.rs")).unwrap(), b"second");
+        assert_eq!(
+            fs::read(stage.join(internals::INTERNALS)).unwrap(),
+            b"second catalog"
+        );
+        assert_eq!(fs::read(stage.join("Cargo.lock")).unwrap(), b"resolved");
+    }
+
+    #[test]
     fn discovery_cache_keeps_the_resolved_lock_and_game_sources_but_replaces_mods() {
         let root = crate::tests::dir("discovery-cache");
         let game = root.join("game");
@@ -367,7 +398,7 @@ mod tests {
         fs::write(game.join("Cargo.toml"), "[workspace]\nmembers=[]\n").unwrap();
         fs::write(game.join("Cargo.lock"), "original").unwrap();
         fs::write(game.join("game.rs"), "struct Game;").unwrap();
-        prepare_stage(&game, &stage).unwrap();
+        prepare_stage(&game, &stage, false).unwrap();
         let modified = fs::metadata(stage.join("game.rs"))
             .unwrap()
             .modified()
@@ -376,7 +407,7 @@ mod tests {
         fs::write(stage.join("Cargo.toml"), "with a generated mod").unwrap();
         fs::create_dir_all(stage.join("native-api/old/src")).unwrap();
         fs::write(stage.join("native-api/old/src/lib.rs"), "old mod").unwrap();
-        prepare_stage(&game, &stage).unwrap();
+        prepare_stage(&game, &stage, false).unwrap();
         assert_eq!(
             fs::read(stage.join("Cargo.lock")).unwrap(),
             b"resolved with mod dependencies"
@@ -409,7 +440,7 @@ mod tests {
         let partial = root.join("stage.new");
         fs::create_dir_all(&partial).unwrap();
         fs::write(partial.join("Cargo.toml"), "[workspace]\nmembers=[]\n").unwrap();
-        prepare_stage(&game, &stage).unwrap();
+        prepare_stage(&game, &stage, false).unwrap();
         assert_eq!(fs::read(stage.join("internals.json")).unwrap(), b"[]");
         assert!(stage.join("crates/lib.rs").is_file());
         assert!(!partial.exists());
