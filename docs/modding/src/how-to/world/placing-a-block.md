@@ -16,7 +16,7 @@ These are all server operations on the level in place.
   flags (neighbours and clients told, and unless `update_neighbour_shapes` is false their shapes
   updated) and then runs `Block.setPlacedBy`, so a bed gets its head, a door its upper half and a
   tall plant its top. It returns `Ok(true)` when the block was written and `Ok(false)` for an
-  unchanged state, an unloaded or out-of-height position, or a fenced origin or companion. It
+  unchanged state, an unloaded or out-of-height position, or any fenced placement write. It
   has the same refusal when it would summon a wither.
 
 ```rust,ignore

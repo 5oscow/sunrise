@@ -63,20 +63,29 @@ impl<'w> DryLevel<'w> {
 }
 
 impl crate::game::Game<'_> {
-    /// Preview state-level placement effects before a code placement can write any fenced cell.
+    /// Trace the optional initial write and state-level callback off the live world.
+    /// Both steps use the same scratch level so the callback sees the write's shape updates.
     pub(in crate::game) fn preview_set_placed_by(
         &mut self,
         pos: BlockPos,
         state: BlockStateId,
+        write_flags: Option<i32>,
     ) -> sunrise_world::level::PreviewBlocks {
         self.with_level(|behaviours, level, _| {
             let random = level.random().clone();
             let mut dry = DryLevel::new(level);
             dry.random = random;
             dry.asks_mods = false;
-            // Standalone and convenience callers both preview with the chosen state at the origin.
-            dry.changed.insert(pos, state);
-            behaviours.set_placed_by_state(&mut dry, &mut Ticks::default(), pos, state);
+            let mut ticks = Ticks::default();
+            if let Some(flags) = write_flags
+                && !behaviours.set_block(&mut dry, &mut ticks, pos, state, flags)
+            {
+                return dry.changed;
+            }
+            let placed = dry.block_state(pos);
+            if behaviours.block(placed) == behaviours.block(state) {
+                behaviours.set_placed_by_state(&mut dry, &mut ticks, pos, placed);
+            }
             dry.changed
         })
     }

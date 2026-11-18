@@ -63,13 +63,13 @@ impl Game<'_> {
         if self.world.block(x, y, z) == state {
             return Err(Refusal::Unchanged);
         }
+        let flags = placement_flags(update_neighbour_shapes);
         if !self
-            .placement_callback_allowed(pos, state)
+            .placement_allowed(pos, state, Some(flags))
             .map_err(|_| Refusal::InTransaction)?
         {
             return Err(Refusal::Fenced);
         }
-        let flags = placement_flags(update_neighbour_shapes);
         // The write is `level_set_block`'s, on the level as it stands (a guest's turn is not
         // the authoritative level); only `setPlacedBy` runs in the player's turn.
         match self.level_set_block(level, pos, state, flags) {
@@ -92,13 +92,13 @@ impl Game<'_> {
         state: BlockStateId,
         update_neighbour_shapes: bool,
     ) -> Result<bool, LevelWriteError> {
+        let flags = placement_flags(update_neighbour_shapes);
         if !self.native_level_write_position(level, pos)?
             || self.world.block(pos[0], pos[1], pos[2]) == state
-            || !self.placement_callback_allowed(pos, state)?
+            || !self.placement_allowed(pos, state, Some(flags))?
         {
             return Ok(false);
         }
-        let flags = placement_flags(update_neighbour_shapes);
         if !self.level_set_block(level, pos, state, flags)? {
             return Ok(false);
         }
@@ -117,23 +117,24 @@ impl Game<'_> {
             return Ok(false);
         }
         let state = self.world.block(pos[0], pos[1], pos[2]);
-        if !self.placement_callback_allowed(pos, state)? {
+        if !self.placement_allowed(pos, state, None)? {
             return Ok(false);
         }
         self.run_mod_placement_callback(pos, state, stack);
         Ok(true)
     }
 
-    fn placement_callback_allowed(
+    fn placement_allowed(
         &mut self,
         pos: [i32; 3],
         state: BlockStateId,
+        write_flags: Option<BlockUpdateFlags>,
     ) -> Result<bool, LevelWriteError> {
         if self.world.carrier_fences.has_locked_cells() {
             let at = BlockPos::new(pos[0], pos[1], pos[2]);
             if self.world.carrier_fences.locks_cell(&pos)
                 || self
-                    .preview_set_placed_by(at, state)
+                    .preview_set_placed_by(at, state, write_flags.map(|flags| flags.bits()))
                     .keys()
                     .any(|p| self.world.carrier_fences.locks_cell(&[p.x, p.y, p.z]))
             {

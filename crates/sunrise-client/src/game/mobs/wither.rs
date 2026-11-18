@@ -138,9 +138,23 @@ impl Game<'_> {
         let Some((found, cells)) = self.wither_spawn_pattern(placed, state) else {
             return Ok(());
         };
+        // Clear and update the formation before the item notice, without publishing
+        // unrelated effects that were already queued (notably the item's place sound
+        // and block_place event). Restore those even if pattern processing fails.
+        let pending = std::mem::take(&mut self.level_events);
+        let result = self.spawn_wither_pattern(found, &cells);
+        self.level_events.splice(..0, pending);
+        result
+    }
+
+    fn spawn_wither_pattern(
+        &mut self,
+        found: PatternMatch,
+        cells: &[[i32; 3]],
+    ) -> sunrise_client::Result<()> {
         // Clear the pattern, the wither appears on the middle of the bottom
         // row facing along the pattern's forwards axis, then neighbours update.
-        self.clear_pattern_blocks(&cells)?;
+        self.clear_pattern_blocks(cells)?;
         let base = found.block(1, 2, 0);
         let at = [
             f64::from(base[0]) + 0.5,
@@ -159,7 +173,7 @@ impl Game<'_> {
         }
         // SUMMONED_ENTITY for each player within 50 blocks of the wither's box.
         self.trigger_summoned(id, 50.0);
-        self.update_pattern_blocks(&cells)
+        self.update_pattern_blocks(cells)
     }
     /// `WitherSkull.onHitEntity` / `onHit`: 8 `wither_skull` damage from a
     /// skull with an owner (healing a wither owner 5 when it kills), else 5

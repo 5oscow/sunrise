@@ -4,9 +4,9 @@ pub trait Hooks {
     /// `BlockItemExtension.onBlockPlacedBy`: this item's block has been placed,
     /// its final block state and stack block-entity data applied, and
     /// `Block.setPlacedBy` completed (including companion blocks). Runs once,
-    /// at the primary position, before the placement trigger and stack consumption.
-    /// Placement sounds and level events normally follow; a block's callback can
-    /// run its own effects first. A skull that completes a wither reports air there.
+    /// at the primary position, before the item's placement sound, game event,
+    /// placement trigger and stack consumption. `state` is the live block state
+    /// after the callback, which can have changed the block or run its own effects.
     /// `stack` is the pre-shrink stack; `placer` is the placing player, or None
     /// for a dispenser. `level` is the level the block was placed in. `face` and `click` are the placement context's clicked
     /// face and world-space hit point. Failed, refused and canceled placements
@@ -17,12 +17,12 @@ pub trait Hooks {
 notice (hook version 2). It runs once after the final state, stack block-entity data
 and `Block.setPlacedBy` work exist, including a bed's head, at the primary position
 (the bed's foot). The event carries the pre-shrink `stack`, optional `placer`, placement `level`, `pos`,
-final `state`, clicked `face` and world-space `click`. A dispenser has no placer.
+live `state` after the callback, clicked `face` and world-space `click`. A dispenser has no placer.
 Use the `ServerHost` and block-entity handles to copy stack data or link companions;
 writes are not overwritten by the placement's stack-data application. The notice
-precedes the placement trigger and consumption and cannot cancel the placement.
-Placement sounds and level events normally follow, but a skull's callback clears
-its wither pattern first, so the notice reports air at its position. A refusal,
+precedes the item's placement sound, game event, trigger and consumption, and
+cannot cancel the placement. The block callback can run its own effects first,
+including clearing a completed wither pattern. A refusal,
 placement failure or `entity_place` cancellation never fires it. Items without a
 subscribed Part cost one `item_listens` lookup and no stack conversion.
 "##]

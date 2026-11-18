@@ -250,6 +250,59 @@ fn a_tripwire_placement_cannot_rewrite_a_fenced_hook_or_wire() {
 
 #[test]
 #[ignore = "daily"]
+fn placement_previews_shape_updates_before_the_tripwire_callback() {
+    use super::native_guest_turn_tests::with_guests;
+    use crate::game::api_values::TryIntoApi;
+    use mod_api::PlayerWorldRefusal;
+
+    with_guests(|game| {
+        let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+        loaded(game);
+        let level = game.level(game.dim.id()).unwrap();
+        let player = game.player(13).unwrap();
+        let hook = state(game, "minecraft:tripwire_hook");
+        let east = game
+            .with_props(hook, &[("facing", "east"), ("attached", "false")])
+            .unwrap();
+        let west_attached = game
+            .with_props(hook, &[("facing", "west"), ("attached", "true")])
+            .unwrap();
+        let west_detached = game
+            .with_props(hook, &[("facing", "west"), ("attached", "false")])
+            .unwrap();
+        let stone = state(game, "minecraft:stone");
+        let (origin, near, far) = ([2, 70, 2], [3, 70, 2], [5, 70, 2]);
+        for (pos, block) in [
+            ([1, 70, 2], stone),
+            (origin, stone),
+            (near, east),
+            ([6, 70, 2], stone),
+            (far, west_attached),
+        ] {
+            assert_eq!(
+                game.level_set_block(level, pos, block, BlockUpdateFlags::NONE),
+                Ok(true)
+            );
+        }
+        // The nearer hook faces the same way, so it hides the far one until
+        // the placement write replaces the nearer hook's support and drops it.
+        game.world.carrier_fences.lock_cell(far);
+        assert_eq!(game.level_place_block(level, origin, east, true), Ok(false));
+        assert_eq!(
+            player.place_block(game, level, origin, east.try_into_api().unwrap(), true),
+            Err(PlayerWorldRefusal::Fenced)
+        );
+        let read =
+            |game: &super::Game<'_>| [origin, near, far].map(|[x, y, z]| game.world.block(x, y, z));
+        assert_eq!(read(game), [stone, east, west_attached]);
+        game.world.carrier_fences.unlock_cell(far);
+        assert_eq!(game.level_place_block(level, origin, east, true), Ok(true));
+        assert_eq!(read(game), [east, game.world.air, west_detached]);
+    });
+}
+
+#[test]
+#[ignore = "daily"]
 fn a_transaction_refuses_only_a_completing_wither_placement() {
     use super::native_guest_turn_tests::with_guests;
     use crate::game::api_values::TryIntoApi;
