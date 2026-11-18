@@ -78,6 +78,43 @@ pub fn with_dispatch<R>(mods: Mods, f: impl FnOnce() -> R) -> R {
     f()
 }
 
+struct RestoreParts {
+    previous: Option<&'static crate::parts::Installed>,
+    committed: bool,
+}
+
+impl RestoreParts {
+    fn fresh() -> Self {
+        Self {
+            previous: crate::parts::TEST_PARTS.replace(None),
+            committed: false,
+        }
+    }
+}
+
+impl Drop for RestoreParts {
+    fn drop(&mut self) {
+        if !self.committed {
+            crate::parts::TEST_PARTS.set(self.previous);
+        }
+    }
+}
+
+/// Probe registrations with no frozen test Parts, then run with the caller's lookup snapshot.
+/// Any Parts installed by the body stay local to this scope, even if it unwinds.
+// hidden: the API-owned `with_mods` uses this boundary; not API for mod authors.
+#[doc(hidden)]
+pub fn with_parts_registration_probe<T, R>(
+    mods: Mods,
+    probe: impl FnOnce(&[crate::ModEntry]) -> T,
+    run: impl FnOnce(Mods, T) -> R,
+) -> R {
+    let restore = RestoreParts::fresh();
+    let registered = probe(&mods);
+    crate::parts::TEST_PARTS.set(restore.previous);
+    run(mods, registered)
+}
+
 /// Rebuild a fixture's Parts snapshot from a fresh registration epoch on this thread.
 ///
 /// On success the replacement stays installed. An error or unwinding restores the previous snapshot.
@@ -86,21 +123,7 @@ pub fn with_dispatch<R>(mods: Mods, f: impl FnOnce() -> R) -> R {
 // hidden: only the shared game fixtures in sunrise-mod-api rebuild their Parts epoch; not API.
 #[doc(hidden)]
 pub fn rebuild_parts<R, E>(f: impl FnOnce() -> Result<R, E>) -> Result<R, E> {
-    struct Restore {
-        previous: Option<&'static crate::parts::Installed>,
-        committed: bool,
-    }
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            if !self.committed {
-                crate::parts::TEST_PARTS.set(self.previous);
-            }
-        }
-    }
-    let mut restore = Restore {
-        previous: crate::parts::TEST_PARTS.replace(None),
-        committed: false,
-    };
+    let mut restore = RestoreParts::fresh();
     let result = f();
     restore.committed = result.is_ok();
     result
