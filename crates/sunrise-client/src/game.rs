@@ -1774,6 +1774,16 @@ struct Game<'a> {
     remote: Option<remote::Remote>,
     /// The current connection came from Realms (retained for reconnect).
     realm_session: bool,
+    /// The server this window connected to last over the network: kept while something may
+    /// connect there again (game/network/remote/connection.rs).
+    last_connection: Option<sunrise_hooks::connection::Server>,
+    /// A connection over the network is open: started, not yet closed (one `Hooks::left` or
+    /// `Hooks::ended` each).
+    connection_open: bool,
+    /// The crates' answer to the last connection's end, until the Disconnected screen shows it.
+    pending_retry: Option<sunrise_hooks::connection::Retry>,
+    /// A connection the Disconnected screen makes on its next frame, as that answer asked.
+    retry_due: Option<sunrise_hooks::connection::Server>,
     /// Replay playback (game/replay.rs), and Sunrise Studio's editor on it (game/studio.rs).
     pub(super) replay: replay::Replay,
     pub(super) studio: studio::Studio,
@@ -10390,7 +10400,7 @@ impl Game<'_> {
                     }
                     self.client_tick_steps(steps, Some(event_loop))?;
                     self.extras_frame(elapsed);
-                    self.extras_retry()?;
+                    self.follow_retry()?;
                     self.apply_mouse_look();
                     self.input_look(elapsed.as_secs_f32());
                     self.advance_flight();
@@ -11157,6 +11167,10 @@ impl<'a> Game<'a> {
             attachment_indexes: Default::default(),
             remote: None,
             realm_session: false,
+            last_connection: None,
+            connection_open: false,
+            pending_retry: None,
+            retry_due: None,
             replay: Default::default(),
             studio: Default::default(),
             lan: None,
