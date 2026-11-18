@@ -44,6 +44,7 @@ impl From<(Identifier, String)> for ConditionError {
 /// registered a handler in that namespace. Registering a foreign ID doesn't
 /// make its namespace owned. Other unknown IDs omit the file at any depth
 /// inside `not`, `and` or `or`, with one ERROR log entry per file per candidate.
+/// Recipes refuse unknown IDs regardless of namespace.
 /// A returned error or native panic refuses the candidate reload, naming the
 /// file, condition and owner. Handlers must not mutate published data.
 pub trait LoadCondition: Send + Sync + 'static {
@@ -108,8 +109,11 @@ impl LoadConditions for LoadConditionDeclarations {
         name: Identifier,
         condition: Arc<dyn LoadCondition>,
     ) -> Result<(), ConditionError> {
-        let owner = crate::content::crash::current_native_mod()
-            .expect("load condition registration inside mod dispatch");
+        let Some(owner) = crate::content::crash::current_native_mod() else {
+            return Err(ConditionError::new(format!(
+                "cannot register condition {name} outside register_load_conditions dispatch"
+            )));
+        };
         if (self.is_reserved)(&name) {
             let error = ConditionError::new(format!(
                 "mod {owner} cannot register condition {name}: that ID is built in"
@@ -131,6 +135,27 @@ impl LoadConditions for LoadConditionDeclarations {
 
 #[cfg(test)]
 mod error_tests {
+    use super::*;
+
+    struct Always;
+    impl LoadCondition for Always {
+        fn test(&self, _: &serde_json::Value) -> Result<bool, ConditionError> {
+            Ok(true)
+        }
+    }
+
+    #[test]
+    fn detached_registration_returns_a_named_error() {
+        let mut declarations = LoadConditionDeclarations::new(|_| false);
+        let error = declarations
+            .register_handler(Identifier::parse("demo:flag").unwrap(), Arc::new(Always))
+            .unwrap_err();
+        assert_eq!(
+            error.message,
+            "cannot register condition demo:flag outside register_load_conditions dispatch"
+        );
+    }
+
     #[test]
     fn condition_error_supports_standard_error_propagation() {
         fn propagate() -> Result<(), Box<dyn std::error::Error>> {
