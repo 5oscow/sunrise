@@ -1052,7 +1052,7 @@ fn trial_case(
         .push((pos, registry.resolve(&block_state(state, ominous))?));
     let text = sunrise_client::skins::base64_decode(&get("snbt", "")).ok_or("bad snbt")?;
     let tag = sunrise_core::nbt::parse_snbt(&String::from_utf8(text)?)?.0;
-    let mut spawner = TrialSpawner::load(&tag);
+    let mut spawner = TrialSpawner::load(&tag, None);
     let ticks: i64 = get("ticks", "1").parse()?;
     let t0: i64 = get("t0", "0").parse()?;
     let kill: i64 = get("kill", "0").parse()?;
