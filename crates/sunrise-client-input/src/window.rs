@@ -89,6 +89,8 @@ impl PointerSpace {
     }
 
     /// Recover the surface position from an OS-delivered `CursorMoved` event.
+    /// Winit does not expose the event's sampling scale. Decode using the
+    /// factor visible at delivery, and retain that interpretation thereafter.
     pub fn os_sample(self, position: PhysicalPosition<f64>) -> PointerSample {
         if self.wayland {
             // Winit multiplied a wl_fixed (1/256 surface unit) by the backing
@@ -96,8 +98,34 @@ impl PointerSpace {
             let snap = |raw: f64| (raw / self.backing_scale * 256.0).round() / 256.0;
             PointerSample::Wayland(LogicalPosition::new(snap(position.x), snap(position.y)))
         } else {
-            position.into()
+            self.physical_sample(position)
         }
+    }
+
+    /// Keep the factor in effect when an unsnapped physical position arrives.
+    pub fn physical_sample(self, position: PhysicalPosition<f64>) -> PointerSample {
+        PointerSample::Physical {
+            position,
+            backing_scale: self.backing_scale,
+        }
+    }
+
+    /// Convert a retained sample to the window's current physical coordinates.
+    /// Keep the sample itself for projection, without this round trip.
+    pub fn physical_position(self, sample: PointerSample) -> PhysicalPosition<f64> {
+        if let PointerSample::Physical {
+            position,
+            backing_scale,
+        } = sample
+            && backing_scale == self.backing_scale
+        {
+            return position;
+        }
+        let position = sample.screen_position();
+        PhysicalPosition::new(
+            position.x * self.backing_scale,
+            position.y * self.backing_scale,
+        )
     }
 
     /// `MouseHandler.grabMouse` / `releaseMouse` center in window units.
@@ -122,30 +150,32 @@ impl PointerSpace {
 /// A cursor sample retained for projection after a redraw or resize.
 #[derive(Clone, Copy, Debug)]
 pub enum PointerSample {
-    Physical(PhysicalPosition<f64>),
+    Physical {
+        position: PhysicalPosition<f64>,
+        backing_scale: f64,
+    },
     Wayland(LogicalPosition<f64>),
 }
 
 impl PointerSample {
-    fn screen_position(self, backing_scale: f64) -> LogicalPosition<f64> {
+    /// Use the sample's own factor, never the current window factor.
+    pub fn screen_position(self) -> LogicalPosition<f64> {
         match self {
-            Self::Physical(position) => {
-                LogicalPosition::new(position.x / backing_scale, position.y / backing_scale)
-            }
+            Self::Physical {
+                position,
+                backing_scale,
+            } => LogicalPosition::new(position.x / backing_scale, position.y / backing_scale),
             Self::Wayland(position) => position,
         }
     }
 }
 
-impl From<PhysicalPosition<f64>> for PointerSample {
-    fn from(position: PhysicalPosition<f64>) -> Self {
-        Self::Physical(position)
-    }
-}
-
 impl Default for PointerSample {
     fn default() -> Self {
-        Self::Physical(PhysicalPosition::new(0.0, 0.0))
+        Self::Physical {
+            position: PhysicalPosition::new(0.0, 0.0),
+            backing_scale: 1.0,
+        }
     }
 }
 
@@ -163,8 +193,8 @@ impl PointerProjection {
     }
 
     /// `MouseHandler` projects window coordinates before dispatching mouse input.
-    pub fn project_pointer(self, sample: impl Into<PointerSample>) -> GuiPointer {
-        let position = sample.into().screen_position(self.window.backing_scale);
+    pub fn project_pointer(self, sample: PointerSample) -> GuiPointer {
+        let position = sample.screen_position();
         GuiPointer(
             self.project_axis(position.x, 0),
             self.project_axis(position.y, 1),
@@ -174,22 +204,11 @@ impl PointerProjection {
     /// Measure motion in the current GUI units, even if the scale changed
     /// since the last sample. Narrow only the final delta for the hook ABI.
     pub fn drag_delta(self, previous: PointerSample, current: PointerSample) -> [f32; 2] {
-        let scale = self.window.backing_scale;
-        let (dx, dy) = match (previous, current) {
-            // Retain the original subtract-then-scale order for raw samples.
-            (PointerSample::Physical(previous), PointerSample::Physical(current)) => (
-                (current.x - previous.x) / scale,
-                (current.y - previous.y) / scale,
-            ),
-            _ => {
-                let previous = previous.screen_position(scale);
-                let current = current.screen_position(scale);
-                (current.x - previous.x, current.y - previous.y)
-            }
-        };
+        let previous = previous.screen_position();
+        let current = current.screen_position();
         [
-            self.project_axis(dx, 0) as f32,
-            self.project_axis(dy, 1) as f32,
+            self.project_axis(current.x - previous.x, 0) as f32,
+            self.project_axis(current.y - previous.y, 1) as f32,
         ]
     }
 
@@ -985,13 +1004,15 @@ mod tests {
             gui,
             window: PointerSpace::new(size, 1.0),
         };
-        assert_eq!(
-            pixel
-                .project_pointer(PhysicalPosition::new(321.75, 231.75))
-                .pixel(),
-            (161.0, 116.0)
-        );
-        let just_below = pixel.project_pointer(PhysicalPosition::new(321.49844, 231.75));
+        let at = |projection: PointerProjection, x, y| {
+            projection.project_pointer(
+                projection
+                    .window
+                    .physical_sample(PhysicalPosition::new(x, y)),
+            )
+        };
+        assert_eq!(at(pixel, 321.75, 231.75).pixel(), (161.0, 116.0));
+        let just_below = at(pixel, 321.49844, 231.75);
         assert_eq!(just_below.pixel().0, 160.0);
         assert_eq!(just_below.subpixel().0, 161.0f32.next_down());
         // 513x385 window units at 1.25x, rounded to 641x481 drawable pixels.
@@ -1001,9 +1022,8 @@ mod tests {
             gui,
             window: PointerSpace::new(size, 1.25),
         };
-        let raw = PhysicalPosition::new(321.5625, 231.75);
-        assert_eq!(pixel.project_pointer(raw).pixel().0, 161.0);
-        assert_eq!(scaled.project_pointer(raw).pixel().0, 160.0);
+        assert_eq!(at(pixel, 321.5625, 231.75).pixel().0, 161.0);
+        assert_eq!(at(scaled, 321.5625, 231.75).pixel().0, 160.0);
         assert_eq!(
             scaled.window.center(),
             PhysicalPosition::new(320.625, 240.625)
@@ -1048,10 +1068,29 @@ mod tests {
             // Agent and pad events take the inverse path. Snapping this
             // non-grid position at 140/120 would move it onto pixel 35.
             let synthetic = (35.0_f32.next_down(), 67.25);
-            let projected = projection.project_pointer(projection.window_pointer(synthetic));
+            let sample = projection
+                .window
+                .physical_sample(projection.window_pointer(synthetic));
+            let projected = projection.project_pointer(sample);
             assert_eq!(projected.subpixel(), synthetic);
             assert_eq!(projected.pixel(), (34.0, 67.0));
         }
+    }
+
+    #[test]
+    fn retained_samples_use_their_own_scales_when_reprojected_together() {
+        let old = PointerSpace::new([640, 480], 1.0);
+        let new = PointerSpace::new([1280, 960], 2.0);
+        let projection = PointerProjection {
+            gui: GuiSize::new([1280, 960], 4, false),
+            window: new,
+        };
+        let previous = old.os_sample(PhysicalPosition::new(200.0, 100.0));
+        let stationary = new.os_sample(PhysicalPosition::new(400.0, 200.0));
+        let moved = new.os_sample(PhysicalPosition::new(404.0, 194.0));
+        assert_eq!(projection.project_pointer(previous).pixel(), (100.0, 50.0));
+        assert_eq!(projection.drag_delta(previous, stationary), [0.0, 0.0]);
+        assert_eq!(projection.drag_delta(previous, moved), [1.0, -1.5]);
     }
 
     #[test]
@@ -1079,8 +1118,10 @@ mod tests {
                         let x = (i % gui.size[0]) as f32;
                         let y = ((i * 173) % gui.size[1]) as f32;
                         let point = if i % 4 == 0 { (-x, -y) } else { (x, y) };
-                        let projected =
-                            projection.project_pointer(projection.window_pointer(point));
+                        let sample = projection
+                            .window
+                            .physical_sample(projection.window_pointer(point));
+                        let projected = projection.project_pointer(sample);
                         assert_eq!(projected.pixel(), point);
                         if i % 4 != 0 {
                             assert_eq!(projected.subpixel(), point);

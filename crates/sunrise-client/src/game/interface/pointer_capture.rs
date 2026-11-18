@@ -262,7 +262,7 @@ impl Game<'_> {
             .window
             .center_after_grab_change(capture, was_grabbed)
         {
-            self.set_window_cursor(pos, projection);
+            self.set_window_cursor(projection.window.physical_sample(pos), projection);
         }
     }
     /// The game's pointer grab leaves the system pointer where the person at the computer has

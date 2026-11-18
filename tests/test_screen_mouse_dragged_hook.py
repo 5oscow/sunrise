@@ -20,9 +20,13 @@ class ScreenMouseDraggedHookTests(unittest.TestCase):
         hooks = hooks.replace("pub(super) fn", "fn").replace("super::glfw_", "glfw_")
         track = method(hooks, "track_drag_button")
         dispatch = method(hooks, "screen_mouse_dragged")
-        start = source.index("                        let projection = self.pointer_projection(size);", source.index("WindowEvent::CursorMoved { position"))
+        start = source.index("                        let projection = self.pointer_projection(size);")
         cursor_end = source.index("                        if self.dialog_open()", start)
         cursor = source[start:cursor_end]
+        window_handler = (ROOT / "crates/sunrise-client/src/game/runtime/window_handler.rs").read_text(encoding="utf-8")
+        handler = method(window_handler, "handle_window_event_as")
+        sample = handler[handler.index("        let cursor_sample ="):handler.index("        // Who caused it,")]
+        refresh = method(source, "refresh_window_cursor")
         set_cursor = method(source, "set_window_cursor")
         # The extracted fixture only models the mouse-drag hook. Keep the
         # replay timeline's independent drag handler out of this focused slice.
@@ -36,9 +40,12 @@ use std::{cell::RefCell, collections::HashSet};
 type MouseButton = i32;
 mod winit {
     pub mod dpi {
-        #[derive(Clone, Copy)]
+        #[derive(Clone, Copy, Debug)]
         pub struct PhysicalPosition<T> { pub x: T, pub y: T }
         impl<T> PhysicalPosition<T> { pub fn new(x: T, y: T) -> Self { Self { x, y } } }
+        #[derive(Clone, Copy, Debug)]
+        pub struct LogicalPosition<T> { pub x: T, pub y: T }
+        impl<T> LogicalPosition<T> { pub fn new(x: T, y: T) -> Self { Self { x, y } } }
     }
     pub mod keyboard {
         #[derive(Clone, Copy)]
@@ -51,10 +58,13 @@ mod winit {
 use winit::{dpi::PhysicalPosition, keyboard::ModifiersState};
 extern crate self as sunrise_client;
 mod window {
-    use super::PhysicalPosition;
+    use super::winit::dpi::{LogicalPosition, PhysicalPosition};
     POINTER_PROJECTION
 }
-use window::{GuiSize, PointerProjection, PointerSpace};
+use window::{GuiSize, PointerProjection, PointerSample, PointerSpace};
+mod input_trace {
+    #[derive(PartialEq)] pub enum InputOrigin { User, Game }
+}
 mod native_hooks {
     pub enum ScreenMousePost { Drag { button: i32, delta: [f32; 2] } }
     pub enum ScreenMousePre { NotFired, Canceled, Passed(ScreenMousePost) }
@@ -64,9 +74,10 @@ fn glfw_button(button: i32) -> i32 { button }
 fn glfw_modifiers(state: ModifiersState) -> u32 { state.0 }
 struct View { mouse: (f32, f32) }
 type Point = PhysicalPosition<f64>;
-enum WindowEvent { Focused(bool) }
+enum WindowEvent { Focused(bool), CursorMoved { position: Point } }
 struct Game { drag_button: Option<i32>, physical_buttons: HashSet<i32>, physical_keys: HashSet<i32>,
-    cursor: (f32, f32), window_cursor: Option<Point>, gui_scale: u32, modifiers: ModifiersState,
+    cursor: (f32, f32), window_cursor: Option<PointerSample>, gui_scale: u32, modifiers: ModifiersState,
+    framebuffer: [u32; 2], backing_scale: f64,
     synthetic: bool, open: bool, cancel: bool, handled: usize, posts: usize,
     calls: RefCell<Vec<(i32, [f32; 2], (f32, f32))>> }
 impl Game {
@@ -79,12 +90,25 @@ impl Game {
     TRACK
     DISPATCH
     POINTER_SETTER
+    REFRESH_CURSOR
+    fn pointer_space(&self, _: [u32; 2]) -> PointerSpace {
+        PointerSpace::new(self.framebuffer, self.backing_scale)
+    }
     fn pointer_projection(&self, size: [u32; 2]) -> PointerProjection {
-        PointerProjection { gui: GuiSize::new(size, self.gui_scale, false), window: PointerSpace::new(size, 1.0) }
+        PointerProjection { gui: GuiSize::new(size, self.gui_scale, false), window: self.pointer_space(size) }
+    }
+    fn renderer_pointer_projection(&self) -> Option<PointerProjection> {
+        Some(self.pointer_projection(self.framebuffer))
     }
     fn pointer(&mut self, position: Point) -> Result<(), ()> {
-        let size = [640, 480];
+        let size = self.framebuffer;
+        let event = WindowEvent::CursorMoved { position };
+        let retained_sample = None;
         let mut mouse_post = None;
+        use input_trace::InputOrigin;
+        let origin = if self.synthetic { InputOrigin::Game } else { InputOrigin::User };
+        CURSOR_SAMPLE
+        let sample = cursor_sample.unwrap();
         CURSOR
         self.posts += usize::from(mouse_post.is_some());
         self.handled += 1; Ok(())
@@ -95,8 +119,9 @@ impl Game {
 fn lifecycle_and_cancellation() {
     for cancel in [false, true] {
         let mut game = Game { drag_button: None, physical_buttons: HashSet::from([0, 1]),
-            physical_keys: HashSet::from([10]), cursor: (10.0, 10.0), window_cursor: Some(Point::new(20.0, 20.0)),
-            gui_scale: 2, modifiers: ModifiersState(5), synthetic: false,
+            physical_keys: HashSet::from([10]), cursor: (10.0, 10.0),
+            window_cursor: Some(PointerSpace::new([640, 480], 1.0).physical_sample(Point::new(20.0, 20.0))),
+            framebuffer: [640, 480], backing_scale: 1.0, gui_scale: 2, modifiers: ModifiersState(5), synthetic: false,
             open: true, cancel, handled: 0, posts: 0, calls: RefCell::new(vec![]) };
         game.track_drag_button(0, true);
         game.track_drag_button(1, true);
@@ -146,7 +171,26 @@ fn lifecycle_and_cancellation() {
         assert!((*dx - 1e-8).abs() < 1e-12, "wrong delta: {dx}");
     }
 }
-""".replace("TRACK", track).replace("DISPATCH", dispatch).replace("CURSOR", cursor).replace("FOCUS", focus).replace("POINTER_SETTER", set_cursor).replace("POINTER_PROJECTION", pointer_projection_sources())
+
+#[test]
+fn scale_change_keeps_a_stationary_pointer_on_the_same_click_target() {
+    let mut game = Game { drag_button: None, physical_buttons: HashSet::from([0]),
+        physical_keys: HashSet::new(), cursor: (0.0, 0.0), window_cursor: None,
+        framebuffer: [640, 480], backing_scale: 1.0, gui_scale: 2, modifiers: ModifiersState(5),
+        synthetic: false, open: true, cancel: false, handled: 0, posts: 0,
+        calls: RefCell::new(vec![]) };
+    game.track_drag_button(0, true);
+    game.pointer(Point::new(200.0, 100.0)).unwrap();
+    game.framebuffer = [1280, 960];
+    game.backing_scale = 2.0;
+    game.gui_scale = 4;
+    // Same refresh MouseInput uses before hit testing, with no new cursor event.
+    game.refresh_window_cursor();
+    assert!((100.0..108.0).contains(&game.cursor.0) && (50.0..58.0).contains(&game.cursor.1));
+    game.pointer(Point::new(400.0, 200.0)).unwrap();
+    assert!(game.calls.borrow().is_empty());
+}
+""".replace("TRACK", track).replace("DISPATCH", dispatch).replace("CURSOR_SAMPLE", sample).replace("REFRESH_CURSOR", refresh).replace("CURSOR", cursor).replace("FOCUS", focus).replace("POINTER_SETTER", set_cursor).replace("POINTER_PROJECTION", pointer_projection_sources())
         with tempfile.TemporaryDirectory() as folder:
             src, exe = Path(folder) / "drag.rs", Path(folder) / "drag.exe"
             src.write_text(fixture, encoding="utf-8")

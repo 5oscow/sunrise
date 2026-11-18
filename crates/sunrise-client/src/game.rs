@@ -9072,22 +9072,26 @@ fn autosave_interval(rate: f32) -> i64 {
 /// winit's events for a window's game, with any loop: a headless client (#4951) has no
 /// winit loop and calls these from its own.
 impl Game<'_> {
-    fn pointer_projection(
-        &self,
-        framebuffer: [u32; 2],
-    ) -> sunrise_client::window::PointerProjection {
-        use sunrise_client::window::{GuiSize, PointerProjection, PointerSpace};
-        let inputs = self.settings.gui_scale_inputs();
-        let window = match self.window.as_deref() {
+    fn pointer_space(&self, framebuffer: [u32; 2]) -> sunrise_client::window::PointerSpace {
+        use sunrise_client::window::PointerSpace;
+        match self.window.as_deref() {
             // Split panes receive already-local positions. They have no separate OS window.
             Some(window) if !self.split_window => *self
                 .window_pointer_space
                 .get_or_init(|| PointerSpace::from_window(window)),
             _ => PointerSpace::new(framebuffer, 1.0),
-        };
+        }
+    }
+
+    fn pointer_projection(
+        &self,
+        framebuffer: [u32; 2],
+    ) -> sunrise_client::window::PointerProjection {
+        use sunrise_client::window::{GuiSize, PointerProjection};
+        let inputs = self.settings.gui_scale_inputs();
         PointerProjection {
             gui: GuiSize::new(framebuffer, inputs.requested, inputs.unicode),
-            window,
+            window: self.pointer_space(framebuffer),
         }
     }
 
@@ -9108,10 +9112,9 @@ impl Game<'_> {
 
     fn set_window_cursor(
         &mut self,
-        sample: impl Into<sunrise_client::window::PointerSample>,
+        sample: sunrise_client::window::PointerSample,
         projection: sunrise_client::window::PointerProjection,
     ) {
-        let sample = sample.into();
         self.window_cursor = Some(sample);
         self.cursor = projection.project_pointer(sample).subpixel();
     }
@@ -9135,15 +9138,8 @@ impl Game<'_> {
         &mut self,
         event_loop: &dyn EventLoopCtl,
         mut event: WindowEvent,
-        origin: input_trace::InputOrigin,
+        cursor_sample: Option<sunrise_client::window::PointerSample>,
     ) {
-        let cursor_sample = |projection: sunrise_client::window::PointerProjection, position| {
-            if origin == input_trace::InputOrigin::User {
-                projection.window.os_sample(position)
-            } else {
-                position.into()
-            }
-        };
         if matches!(
             event,
             WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. }
@@ -9289,7 +9285,7 @@ impl Game<'_> {
             self.refresh_window_cursor();
         }
         // The real mouse takes the pointer back from the keyboard's focus.
-        self.key_focus_mouse(event_loop, &event);
+        self.key_focus_mouse(event_loop, &event, cursor_sample);
         // The screen's narration hears of the input before the screen takes
         // it; the pointer events the keyboard's focus sends aren't the mouse.
         if !self.key_focus_quiet() {
@@ -9302,9 +9298,11 @@ impl Game<'_> {
         {
             let upgrade = starting.handle.upgrade();
             match &event {
-                WindowEvent::CursorMoved { position, .. } => {
-                    if let Some(projection) = self.renderer_pointer_projection() {
-                        self.set_window_cursor(cursor_sample(projection, *position), projection);
+                WindowEvent::CursorMoved { .. } => {
+                    if let (Some(projection), Some(sample)) =
+                        (self.renderer_pointer_projection(), cursor_sample)
+                    {
+                        self.set_window_cursor(sample, projection);
                     }
                 }
                 WindowEvent::MouseInput {
@@ -9603,11 +9601,10 @@ impl Game<'_> {
                         self.regrab_on_refocus = held;
                     }
                 }
-                WindowEvent::CursorMoved { position, .. } => {
-                    if let Some(r) = &self.renderer {
+                WindowEvent::CursorMoved { .. } => {
+                    if let (Some(r), Some(sample)) = (&self.renderer, cursor_sample) {
                         let size = [r.config.width, r.config.height];
                         let projection = self.pointer_projection(size);
-                        let sample = cursor_sample(projection, position);
                         let delta = self
                             .window_cursor
                             .map_or([0.0; 2], |previous| projection.drag_delta(previous, sample));

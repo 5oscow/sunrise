@@ -98,10 +98,11 @@ fn screen_draw_receives_open_blocks_position() {
 
             // No new motion: the odd-sized resize allows GUI scale 2.
             let small = [638, 478];
-            game.set_window_cursor(
-                PhysicalPosition::new(321.75, 231.75),
-                game.pointer_projection(small),
-            );
+            let projection = game.pointer_projection(small);
+            let sample = projection
+                .window
+                .physical_sample(PhysicalPosition::new(321.75, 231.75));
+            game.set_window_cursor(sample, projection);
             game.hud(small);
             game.hud([641, 481]);
 

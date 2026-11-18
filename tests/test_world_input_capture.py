@@ -84,9 +84,12 @@ enum Screen { Playing, Paused, Inventory, Chat }
 enum CursorGrabMode { Locked, Confined, None }
 mod winit {
     pub mod dpi {
-        #[derive(Clone, Copy)]
+        #[derive(Clone, Copy, Debug)]
         pub struct PhysicalPosition<T> { pub x: T, pub y: T }
         impl<T> PhysicalPosition<T> { pub fn new(x: T, y: T) -> Self { Self { x, y } } }
+        #[derive(Clone, Copy, Debug)]
+        pub struct LogicalPosition<T> { pub x: T, pub y: T }
+        impl<T> LogicalPosition<T> { pub fn new(x: T, y: T) -> Self { Self { x, y } } }
         pub struct PhysicalSize<T> { pub width: T, pub height: T }
         impl From<PhysicalSize<u32>> for [u32; 2] {
             fn from(size: PhysicalSize<u32>) -> Self { [size.width, size.height] }
@@ -96,7 +99,7 @@ mod winit {
 use winit::dpi::{PhysicalPosition, PhysicalSize};
 extern crate self as sunrise_client;
 mod window {
-    use super::{PhysicalPosition, Window};
+    use super::{Window, winit::dpi::{LogicalPosition, PhysicalPosition}};
     POINTER_PROJECTION
     impl PointerSpace {
         pub fn from_window(window: &Window) -> Self { Self::new(window.inner_size().into(), 1.0) }
@@ -161,7 +164,7 @@ struct Game {
     remote: Option<Remote>,
     studio: Studio, replay: Replay,
     mining: bool, lan_acting: Option<u32>, renderer: Option<Renderer>, cursor: (f32, f32),
-    window_cursor: Option<PhysicalPosition<f64>>,
+    window_cursor: Option<window::PointerSample>,
     window_pointer_space: std::cell::OnceCell<window::PointerSpace>,
     server_packs: ServerPacks, command_prompt: Option<()>, options: Options, settings: Settings,
     unclaimed_window: bool, scripted: bool, focus_after_run: Option<bool>, applied_focus: Vec<bool>,
@@ -546,6 +549,7 @@ fn main() {
 '''
         fixture = fixture.replace("POINTER_PROJECTION", pointer_projection_sources())
         fixture = fixture.replace("METHODS", method(source, "capture") + "\n" +
+                                  method(source, "pointer_space") + "\n" +
                                   method(source, "pointer_projection") + "\n" +
                                   method(source, "set_window_cursor") + "\n" +
                                   method(source, "capture_loaded_world") + "\n" +

@@ -1662,7 +1662,10 @@ mod tests {
             assert_eq!(view(&second), (4.0, 240.0, 180.0));
         });
         first.settings.force_unicode = true;
-        first.menu.pointer = winit::dpi::PhysicalPosition::new(400.0, 200.0).into();
+        first.menu.pointer = first
+            .menu_pointer_projection()
+            .window
+            .physical_sample(winit::dpi::PhysicalPosition::new(400.0, 200.0));
         first.apply_menu_settings();
         assert_eq!(view(&first), (4.0, 240.0, 180.0));
         assert_eq!(first.menu.cursor, (100.0, 50.0));
@@ -1758,7 +1761,7 @@ mod tests {
             game.handle_window_event_inner(
                 &Loop,
                 WindowEvent::DroppedFile(source.join("Game pack")),
-                input_trace::InputOrigin::User,
+                None,
             );
             assert!(game.ui.options.pack_screen.as_ref().unwrap().confirming());
             assert!(!packs::packs_dir().join("Game pack").exists());
