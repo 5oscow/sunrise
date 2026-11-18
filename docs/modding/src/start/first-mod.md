@@ -21,7 +21,7 @@ cd greeter
 ```
 
 ```text
-Created greeter (native mod id greeter). Your editor resolves sunrise-mod-api once the SDK is in .sunrise/sdk/: any cargo sunrise-mod command fetches it in a fresh clone. Next: sunrise-launcher native-build greeter --instance <instance> --trust-native-code
+Created greeter (native mod id greeter). Your editor resolves sunrise-mod-api once the SDK is in .sunrise/sdk/: `cargo sunrise-mod check` fetches it in a fresh clone. Next: sunrise-launcher native-build greeter --instance <instance> --trust-native-code
 SDK 2d81263 (build 2d8126336e579777eabf9b2fd8b3d476236a04f2) in greeter/.sunrise/sdk
 ```
 
@@ -39,7 +39,7 @@ greeter/
 └── .sunrise/sdk/        # the pinned SDK: fetched by the tool, never committed or packed
 ```
 
-After a fresh clone, run any `cargo sunrise-mod` command once before opening the project in an editor: it fetches
+After a fresh clone, run `cargo sunrise-mod check` once before opening the project in an editor: it fetches
 `.sunrise/sdk/` again. `cargo sunrise-mod update` moves both pins to the newer Nightly later.
 
 ## 3. Read the hook
@@ -62,7 +62,10 @@ After a fresh clone, run any `cargo sunrise-mod` command once before opening the
 
 ## 4. Check that it compiles
 
+`check` compiles for wasm32 as well as for this computer, so install that target for the project's toolchain once:
+
 ```sh
+rustup target add wasm32-unknown-unknown
 cargo sunrise-mod check
 ```
 
@@ -97,28 +100,60 @@ folder and choose **Build** ([Installing and using mods](installing.md)).
 
 The same compile is a command of the tool, so it runs where there is no launcher: in a build server, or while you
 check that a project builds. It takes a plan, one line of JSON on standard input ([the
-contract](../reference/sdk/08-native-build.md)), and the SDK's `runtime` and `api` slices, which you download once.
+contract](../reference/sdk/08-native-build.md)), and the SDK's `runtime`, `api` and `engine` slices, which you download once. `native-lock` runs first: it pins the
+mod's registry dependencies against the game's, with a plan of its own.
 This block is for Linux x86_64 and, from the project's folder, downloads the slices of the pinned build, checks
-them, installs the Rust the SDK was built with, and builds:
+Sunrise's signature on their checksums and then each slice, installs the Rust the SDK was built with, and builds. It
+needs `openssl` (1.1.1 or newer) and `python3`, and it stops at the first step that fails:
 
 ```sh
-BASE=https://github.com/sunrise-org/sunrise/releases/download
-COMMIT=$(sed -n 's/^sunrise = "\(.*\)"/\1/p' sunrise-mod.toml)
-TARGET=x86_64-unknown-linux-gnu
-RUST=$(sed -n 's/.*"rust": *"\([^"]*\)".*/\1/p' .sunrise/sdk/sdk.json)
-rustup toolchain install "$RUST" --profile minimal
-B="${TMPDIR:-/tmp}/sunrise-native-build/$COMMIT"
-mkdir -p "$B/runtime" "$B/api"
-curl -fsSL -o "$B/SHA256SUMS" "$BASE/sdk-$COMMIT/SHA256SUMS"
-for slice in runtime api; do
-  curl -fsSL -o "$B/$slice-$TARGET.tar.xz" "$BASE/sdk-$COMMIT/$slice-$TARGET.tar.xz"
-  (cd "$B" && grep " $slice-$TARGET.tar.xz\$" SHA256SUMS | sha256sum -c -)
-  tar -xJf "$B/$slice-$TARGET.tar.xz" -C "$B/$slice"
-done
-cat > "$B/plan.json" <<EOF
-{"contract":2,"work":"$B/work","toolchain":{"dir":"$(rustc +"$RUST" --print sysroot)","target":"$TARGET","cargo_home":"$B/cargo-home"},"package":{"runtime":"$B/runtime","api":"$B/api","engine":"$B/engine"},"mods":"$PWD","target":"client","registry":false}
-EOF
-cargo sunrise-mod native-build < "$B/plan.json"
+(
+  set -eu
+  BASE=https://github.com/sunrise-org/sunrise/releases/download
+  KEY=r53xb3cuafGxZSicLz06KC+xXp9NJdPH8snNmXo5pAc=
+  COMMIT=$(sed -n 's/^sunrise = "\(.*\)"/\1/p' sunrise-mod.toml)
+  TARGET=x86_64-unknown-linux-gnu
+  RUST=$(sed -n 's/.*"rust": *"\([^"]*\)".*/\1/p' .sunrise/sdk/sdk.json)
+  rustup toolchain install "$RUST" --profile minimal
+  B="${TMPDIR:-/tmp}/sunrise-native-build/$COMMIT"
+  mkdir -p "$B/runtime" "$B/api" "$B/engine" "$B/work"
+  curl -fsSL -o "$B/SHA256SUMS" "$BASE/sdk-$COMMIT/SHA256SUMS"
+  curl -fsSL -o "$B/SHA256SUMS.sig" "$BASE/sdk-$COMMIT/SHA256SUMS.sig"
+  (
+    cd "$B"
+    printf 'horizon release sdk-%s\n' "$COMMIT" | cat - SHA256SUMS > message
+    { printf '\060\052\060\005\006\003\053\145\160\003\041\000'; printf '%s' "$KEY" | openssl base64 -d -A; } > key.der
+    signed=
+    while read -r line || [ -n "$line" ]; do
+      printf '%s' "$line" | openssl base64 -d -A > signature
+      openssl pkeyutl -verify -rawin -pubin -keyform DER -inkey key.der -in message -sigfile signature > /dev/null 2>&1 && signed=1
+    done < SHA256SUMS.sig
+    [ -n "$signed" ] || { echo "SHA256SUMS is not signed by Sunrise" >&2; exit 1; }
+  )
+  for slice in runtime api engine; do
+    curl -fsSL -o "$B/$slice-$TARGET.tar.xz" "$BASE/sdk-$COMMIT/$slice-$TARGET.tar.xz"
+    (cd "$B" && grep " $slice-$TARGET.tar.xz\$" SHA256SUMS | sha256sum -c -)
+    tar -xJf "$B/$slice-$TARGET.tar.xz" -C "$B/$slice"
+  done
+  python3 - "$B" "$TARGET" "$RUST" "$PWD" <<'PY'
+import json, subprocess, sys
+b, target, rust, mods = sys.argv[1:]
+sysroot = subprocess.check_output(["rustc", f"+{rust}", "--print", "sysroot"], text=True).strip()
+plan = {
+    "contract": 2,
+    "work": f"{b}/work",
+    "toolchain": {"dir": sysroot, "target": target, "cargo_home": f"{b}/cargo-home"},
+    "mods": mods,
+}
+json.dump(plan, open(f"{b}/lock-plan.json", "w"))
+plan["package"] = {"runtime": f"{b}/runtime", "api": f"{b}/api", "engine": f"{b}/engine"}
+plan["target"] = "client"
+plan["registry"] = False
+json.dump(plan, open(f"{b}/plan.json", "w"))
+PY
+  cargo sunrise-mod native-lock < "$B/lock-plan.json"
+  cargo sunrise-mod native-build < "$B/plan.json"
+)
 ```
 
 The tool prints one JSON event per line. A build that worked prints these two, the second cut short here:
@@ -130,7 +165,7 @@ The tool prints one JSON event per line. A build that worked prints these two, t
 
 The compiled mod is the last of `libraries`. The tool only compiles: installing the result into an instance, and
 selecting it, is the launcher's step, so a mod built this way does not appear in the launcher until you run the
-launcher's `native-build` on it. A mod with a `[native.*]` table also needs the `engine` slice, and a build for another
+launcher's `native-build` on it. A build for another
 computer needs that computer's target triple in `TARGET` (macOS arm64 is `aarch64-apple-darwin`, Windows x64 is
 `x86_64-pc-windows-gnu`).
 

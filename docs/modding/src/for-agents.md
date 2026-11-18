@@ -17,7 +17,7 @@ commands and the rules that decide whether the code compiles. The same material,
 ## 1. Install the tool
 
 Take the page [Install the mod tool](start/install-tool.md) and run the block for the user's computer. It reads the
-current Nightly's build, downloads that SDK release's tool, checks its hash and puts `cargo-sunrise-mod` on the
+current Nightly's build, downloads that SDK release's tool, checks Sunrise's signature and the tool's hash, and puts `cargo-sunrise-mod` on the
 `PATH`. On NixOS the prebuilt binary needs `steam-run` or `nix-ld`; the fallback is
 `cargo install --locked --git https://github.com/sunrise-org/sunrise cargo-sunrise-mod`.
 
@@ -26,10 +26,11 @@ current Nightly's build, downloads that SDK release's tool, checks its hash and 
 ```sh
 cargo sunrise-mod new greeter --template native
 cd greeter
+rustup target add wasm32-unknown-unknown
 cargo sunrise-mod check
 ```
 
-`new` writes a complete project and fetches its SDK into `.sunrise/sdk/`. `check` compiles it. It must end with a
+`new` writes a complete project and fetches its SDK into `.sunrise/sdk/`. `check` compiles it for this computer and for wasm32, which is why the target is added first. It must end with a
 line like `greeter uses 34 items of the API (…). Made for 2d81263.` Run `check` after every edit, and fix what it
 reports before going on. Use another mod id by changing the folder name: `new` turns it into the id.
 
@@ -58,6 +59,10 @@ user's step, because it allows native code on their install.
 - Extra crates.io dependencies are allowed and are pinned by the mod's own `Cargo.lock`; a git or path dependency
   outside the mod is refused. The `sunrise-mod-api` path in `Cargo.toml` points at `.sunrise/sdk/` and stays as
   written.
+- A crate the game also locks (`zip`, for example) takes the game's version, pinned with `=`:
+  `zip = { version = "=9.1.3", … }`. Look the version up in `.sunrise/sdk/api/Cargo.lock`, the game's locked
+  versions of what the API uses. A native build that refuses with "moved or changed its dependency graph" names
+  the crate: pin it to the game's version.
 - Do not commit `.sunrise/` (the template's `.gitignore` already skips it).
 - Run `cargo sunrise-mod check` before saying the work is done, and show its output. For the registry's checks on
   the packed file, run `cargo sunrise-mod build`, then `cargo sunrise-mod check target/sunrise-mod/<id>.smod`.
