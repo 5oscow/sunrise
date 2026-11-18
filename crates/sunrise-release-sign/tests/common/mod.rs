@@ -11,8 +11,8 @@ pub fn test_key_verifier() -> &'static Path {
         let target = Path::new(env!("CARGO_TARGET_TMPDIR")).join("verify-test-key");
         let status = Command::new(env!("CARGO"))
             .args(["build", "--quiet", "--locked", "--bin", "sunrise-verify"])
-            .args(["--features", "test-key", "--manifest-path"])
-            .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"))
+            .args(["--features", "test-key"])
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
             .arg("--target-dir")
             .arg(&target)
             .status()
