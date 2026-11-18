@@ -2284,11 +2284,8 @@ impl Game<'_> {
                     self.remove_dropped(i);
                 }
             }
-            Target::Orb(id) => {
-                if let Some(o) = self.orbs.iter_mut().find(|o| o.id == id) {
-                    o.age = u32::MAX / 2;
-                }
-            }
+            // Entity.kill removes the orb.
+            Target::Orb(id) => self.orbs.retain(|o| o.id != id),
             Target::Projectile(id) => self.remove_projectile(id),
             Target::Stand(id) => self.armor_stands.retain(|a| a.id != id),
             Target::Frame(id) => {
@@ -2323,8 +2320,6 @@ impl Game<'_> {
             // No command names a part, and `kill` on one would not stop its dragon.
             Target::DragonPart(_) => {}
         }
-        // The orbs marked for removal are gone (Entity.kill removes them).
-        self.orbs.retain(|o| o.age < u32::MAX / 2);
         if let Some(at) = died {
             self.post_game_event("minecraft:entity_die", at, context);
         }

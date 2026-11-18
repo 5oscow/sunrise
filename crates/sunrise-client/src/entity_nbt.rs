@@ -2874,7 +2874,8 @@ pub fn orb_to_nbt(o: &ExperienceOrb, uuid: [i32; 4]) -> Tag {
         ("Fire", Tag::Short(o.fire_ticks as i16)),
         ("Health", Tag::Short(o.health as i16)),
         ("Air", Tag::Short(o.air as i16)),
-        ("Age", Tag::Short(o.age.min(i16::MAX as u32) as i16)),
+        // `putShort("Age", (short) age)`.
+        ("Age", Tag::Short(o.age as i16)),
         ("Value", Tag::Short(o.value as i16)),
         ("Count", Tag::Int(o.count.min(i32::MAX as u32) as i32)),
     ] {
@@ -2905,7 +2906,8 @@ pub fn orbs_from_nbt(tag: &Tag) -> Vec<ExperienceOrb> {
         velocity: motion(tag),
         // `getShortOr("Value", 0)`, unclamped.
         value: tag.get("Value").and_then(int_value).unwrap_or(0) as i16 as i32,
-        age: number(tag.get("Age")).unwrap_or(0).max(0) as u32,
+        // `getShortOr("Age", 0)`: a signed short, unclamped.
+        age: tag.get("Age").and_then(int_value).unwrap_or(0) as i16 as i32,
         on_ground: flag(tag, "OnGround"),
         count,
         ticks: 0,
@@ -6296,6 +6298,23 @@ mod tests {
         assert_eq!(
             orb_to_nbt(&back[0], [0; 4]).get("Air"),
             Some(&Tag::Short(32767))
+        );
+    }
+    /// `ExperienceOrb.readAdditionalSaveData` reads `Age` with `getShortOr`,
+    /// unclamped, and `addAdditionalSaveData` writes `(short) age`: `Age:-100s`
+    /// loads as -100, saves `-99s` after one `++age`, and an age past a short
+    /// wraps.
+    #[test]
+    fn an_orb_keeps_a_negative_age() {
+        let at = ("Pos", doubles(&[1.0, 2.0, 3.0]));
+        let mut o = orbs_from_nbt(&Tag::compound([at, ("Age", Tag::Short(-100))])).remove(0);
+        assert_eq!(o.age, -100);
+        o.age += 1;
+        assert_eq!(orb_to_nbt(&o, [0; 4]).get("Age"), Some(&Tag::Short(-99)));
+        o.age = 40_000;
+        assert_eq!(
+            orb_to_nbt(&o, [0; 4]).get("Age"),
+            Some(&Tag::Short(-25_536))
         );
     }
     #[test]
