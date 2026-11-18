@@ -5275,6 +5275,7 @@ dependencies = [
  "open",
  "serde",
  "serde_json",
+ "subtle",
  "sunrise-addresses",
  "sunrise-platform",
  "ureq",
