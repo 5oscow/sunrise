@@ -663,18 +663,6 @@ impl Hooks for Mod {
         self.calls.lock().unwrap().push(self.id);
         Some(Zoom(self.id))
     }
-    fn should_apply_effect_tick_this_tick(
-        &self,
-        _: &dyn Host,
-        event: &mut ShouldApplyEffectTickThisTickEvent,
-    ) {
-        assert_eq!(
-            (event.effect, event.tick_count, event.amplifier),
-            (EffectKey(7), 19, 2)
-        );
-        event.apply = !event.apply;
-        self.calls.lock().unwrap().push(self.id);
-    }
     fn living_incoming_damage(
         &self,
         _: &mut dyn HitHost,

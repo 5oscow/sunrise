@@ -68,6 +68,7 @@ pub struct Parts {
     pub(crate) block_entity_kinds: HashMap<Box<str>, Vec<Attached<dyn BlockEntityPart>>>,
     pub(crate) items: HashMap<Box<str>, Vec<Attached<dyn ItemPart>>>,
     pub(crate) menus: HashMap<Box<str>, Vec<Attached<dyn MenuPart>>>,
+    pub(crate) effects: HashMap<Box<str>, Vec<Attached<dyn MobEffectPart>>>,
     pub(crate) fluids: HashMap<Box<str>, Vec<Attached<dyn FluidPart>>>,
     /// Entity parts by entity type id (`minecraft:zombie`, `mymod:robot`), for the goal
     /// registration at every `Mob` construction and the scoped hooks the entity
@@ -128,6 +129,7 @@ pub struct HookParts {
     pub(crate) block_entity_kinds: HashMap<Box<str>, Vec<Attached<dyn BlockEntityPart>>>,
     pub(crate) items: HashMap<Box<str>, Vec<Attached<dyn ItemPart>>>,
     pub(crate) menus: HashMap<Box<str>, Vec<Attached<dyn MenuPart>>>,
+    pub(crate) effects: HashMap<Box<str>, Vec<Attached<dyn MobEffectPart>>>,
     pub(crate) fluids: HashMap<Box<str>, Vec<Attached<dyn FluidPart>>>,
     pub(crate) entities: HashMap<Box<str>, Vec<Attached<dyn EntityPart>>>,
 }
@@ -573,6 +575,7 @@ impl Parts {
         index!(block_entity_kinds, block_entity_subscribed);
         index!(items, item_subscribed);
         index!(menus, menu_subscribed);
+        index!(effects, effect_subscribed);
         index!(fluids, fluid_subscribed);
         index!(entities, entity_subscribed);
     }
