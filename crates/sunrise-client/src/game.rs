@@ -5360,7 +5360,7 @@ impl Game<'_> {
         }
         laps.lap("eg_fire_items");
         for stand in &self.armor_stands {
-            if stand.fire_ticks > 0 && !stand.marker {
+            if stand.is_on_fire() && !stand.marker {
                 let scale = if stand.small { 0.5 } else { 1.0 };
                 let at = stand.render_position(alpha);
                 if !fire_visible([at.x, at.y, at.z], 0.5 * scale, 1.975 * scale) {
@@ -5435,7 +5435,7 @@ impl Game<'_> {
         self.player_model_geometry(camera, player_alpha, &mut out);
         if self.own_body_in_view()
             && let Some(p) = &self.player
-            && p.fire_ticks > 0
+            && p.is_on_fire()
             && !(p.spectator || self.own_render_canceled())
         {
             let feet = self

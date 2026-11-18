@@ -449,7 +449,7 @@ fn block_contact_damage(
     fire: f32,
     lava: bool,
 ) {
-    if fire > 0.0 && !m.kind.flags.fire_immune {
+    if fire > 0.0 && !m.fire_immune() {
         let multiplier = m.burning_time();
         m.fire_ticks = crate::motion::environment::ignite_contact(
             m.fire_ticks,
@@ -459,7 +459,7 @@ fn block_contact_damage(
         );
         m.damage(level, fire, Damage::of(DamageKind::InFire));
     }
-    if lava && !m.kind.flags.fire_immune {
+    if lava && !m.fire_immune() {
         m.ignite_for_ticks(300);
         m.damage(level, 4.0, Damage::of(DamageKind::Lava));
     }
@@ -2003,7 +2003,7 @@ fn base_tick(
     }
     // Entity.baseTick counts burn damage and the timer before a wet mob is put out.
     if m.fire_ticks > 0 {
-        if m.kind.flags.fire_immune {
+        if m.fire_immune() {
             m.fire_ticks = 0;
         } else {
             if m.fire_ticks % 20 == 0 && !m.fluids.in_lava {

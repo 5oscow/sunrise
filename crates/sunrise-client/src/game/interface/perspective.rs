@@ -1022,7 +1022,7 @@ impl Game<'_> {
         let fire = self
             .player
             .as_ref()
-            .filter(|p| p.fire_ticks > 0 && !p.spectator)
+            .filter(|p| p.is_on_fire() && !p.spectator)
             .map(|p| (p.dimensions.width, p.dimensions.height));
         let glints = preview_glint_quads(&verts, gui, wings.clone(), self.glint_frame);
         let quads = player_preview_quads_no_cull(verts, gui, fire, &atlas.sprites, wings);

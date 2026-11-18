@@ -254,6 +254,7 @@ pub(super) struct Tracked {
     /// this base, so the server's next delta still lands where it means.
     codec_base: [f64; 3],
     on_fire: bool,
+    mod_fire_immune: bool,
     silent: bool,
     /// `Entity.vehicle`: the entity it rides (`SetPassengers`), whatever either one's type.
     pub(in crate::game) vehicle: Option<u32>,
@@ -2741,6 +2742,7 @@ impl Game<'_> {
                     position,
                     codec_base: position,
                     on_fire: false,
+                    mod_fire_immune: false,
                     silent: false,
                     vehicle: None,
                 },
@@ -6421,10 +6423,12 @@ impl Game<'_> {
         // The server decides fire the window cannot predict (blaze fireballs,
         // fire aspect, lightning): Entity.isOnFire reads the synched flag, so
         // the predicted tick's countdown must not end it while it is set.
-        player.fire_ticks = hold_server_fire(
-            player.fire_ticks,
-            self.remote.as_ref().is_some_and(|r| r.own_on_fire),
-        );
+        if !player.mod_fire_immune {
+            player.fire_ticks = hold_server_fire(
+                player.fire_ticks,
+                self.remote.as_ref().is_some_and(|r| r.own_on_fire),
+            );
+        }
         // LocalPlayer.onUpdateAbilities: flight turned on or off (a double
         // jump, a spectator, landing) is sent to the server.
         let flying = player.flying;
@@ -10104,6 +10108,15 @@ impl Remote {
             self.entities.get(&id).map(|t| t.on_fire)
         }
     }
+    pub(in crate::game) fn tracked_fire_immunity(&self, id: i32) -> Option<bool> {
+        Some(self.entities.get(&id)?.mod_fire_immune)
+    }
+    pub(in crate::game) fn set_tracked_fire_immunity(&mut self, id: i32, immune: bool) -> bool {
+        self.entities.get_mut(&id).is_some_and(|entity| {
+            entity.mod_fire_immune = immune;
+            true
+        })
+    }
     /// The kind and last sent position of a tracked server entity.
     pub(super) fn tracked(&self, id: i32) -> Option<(&str, [f64; 3])> {
         self.entities.get(&id).map(|t| (&*t.kind, t.position))
@@ -10642,6 +10655,7 @@ pub(crate) mod tests {
                     position: [0.0; 3],
                     codec_base: [0.0; 3],
                     on_fire: false,
+                    mod_fire_immune: false,
                     silent: false,
                     vehicle: None,
                 },
@@ -14570,6 +14584,7 @@ pub(crate) mod tests {
             position: [0.0, 64.0, 0.0],
             codec_base: [0.0, 64.0, 0.0],
             on_fire: false,
+            mod_fire_immune: false,
             silent: false,
             vehicle: None,
         };
@@ -14609,6 +14624,7 @@ pub(crate) mod tests {
                 position: [8.5, 64.0, -3.5],
                 codec_base: [8.5, 64.0, -3.5],
                 on_fire: false,
+                mod_fire_immune: false,
                 silent: false,
                 vehicle: None,
             },
@@ -14654,6 +14670,7 @@ pub(crate) mod tests {
                 position: [8.5, 64.0, -3.5],
                 codec_base: [8.5, 64.0, -3.5],
                 on_fire: false,
+                mod_fire_immune: false,
                 silent: true,
                 vehicle: None,
             },

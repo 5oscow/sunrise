@@ -6030,7 +6030,7 @@ impl Game<'_> {
                     Who::Mob(id) => {
                         let hurt = self.mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
                             let remaining = m.fire_ticks;
-                            if !m.kind.flags.fire_immune {
+                            if !m.fire_immune() {
                                 m.ignite_for_ticks(100);
                             }
                             let hurt = m.damage_projectile(

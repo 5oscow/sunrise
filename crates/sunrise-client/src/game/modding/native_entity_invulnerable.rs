@@ -47,7 +47,7 @@ impl Game<'_> {
             _ => None,
         }
     }
-    fn native_player_body_mut(
+    pub(super) fn native_player_body_mut(
         &mut self,
         t: Target,
     ) -> Option<&mut sunrise_client::motion::PlayerMotion> {

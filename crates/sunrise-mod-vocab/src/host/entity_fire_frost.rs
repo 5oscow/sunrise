@@ -9,13 +9,14 @@ pub trait EntityFireFrostBackend {
     /// Side: both.
     /// `Entity.isOnFire`: not fire immune, and positive remaining fire ticks OR the
     /// client's synced shared flag 0. Players, mobs, armor stands and items, as
-    /// `entity_fire_ticks` covers. Reads the client's own copy on a client;
-    /// None for other kinds or stale handles.
+    /// `entity_fire_ticks` covers, as well as other players tracked by a client.
+    /// Reads this side's own immunity and fire state. None for other kinds or stale handles.
     #[access(WorldOnly)]
     fn entity_is_on_fire(&self, entity: EntityRef) -> Option<bool>;
-    /// Side: server.
-    /// Whether the entity's type never burns (`EntityType.fireImmune`):
-    /// players and mobs.
+    /// Side: both.
+    /// `Entity.fireImmune`: the built-in answer or the immunity granted on this side.
+    /// Players, mobs, armor stands and the intrinsically immune dragon. `None` for
+    /// unsupported entities or stale handles.
     #[access(WorldOnly)]
     fn entity_fire_immune(&self, entity: EntityRef) -> Option<bool>;
     /// Side: server.
@@ -33,6 +34,14 @@ pub trait EntityFireFrostBackend {
 #[doc(hidden)]
 #[sunrise_mod_api_macros::host_area]
 pub trait EntityFireFrostBackendMut {
+    /// Side: server. Grants a player, mob or armor stand fire immunity or clears its grant.
+    /// The last write wins; `false` cannot remove built-in immunity. Granting silently
+    /// clears any current burn. The grant belongs to this live body, is not saved, and
+    /// is lost when the body is replaced, including on respawn. It survives a level
+    /// transfer that carries the same body. Mods should recompute it from worn equipment.
+    /// Returns `false` for a stale or unsupported entity, or on a client.
+    #[access(WorldOnly)]
+    fn entity_set_fire_immunity(&mut self, entity: EntityRef, immune: bool) -> bool;
     /// Side: server.
     /// Sets the remaining fire ticks (`Entity.setRemainingFireTicks`).
     #[access(WorldOnly)]
@@ -56,4 +65,17 @@ pub trait EntityFireFrostBackendMut {
     /// Sets the entity's frozen ticks (`Entity.setTicksFrozen`).
     #[access(WorldOnly)]
     fn entity_set_ticks_frozen(&mut self, entity: EntityRef, ticks: i32) -> bool;
+}
+
+/// The handles' client-only writes of the fire and frost area.
+#[doc(hidden)]
+#[sunrise_mod_api_macros::host_area]
+pub trait EntityFireFrostClientBackendMut {
+    /// Side: client. Sets or clears the same additive grant on this client's own copy
+    /// of a player (including its local player), mob or armor stand. It affects local
+    /// prediction and drawing only and is never sent to the server. The grant ends when
+    /// the client discards that entity copy. Returns `false` for unsupported entities,
+    /// stale handles and outside a client world.
+    #[access(WorldOnly)]
+    fn entity_set_client_fire_immunity(&mut self, entity: EntityRef, immune: bool) -> bool;
 }
