@@ -34,31 +34,32 @@ cargo sunrise-mod check target/sunrise-mod/my_mod.smod   # the registry's checks
   ([writing hooks](../start/writing-hooks.md)). Any other `--template` is refused.
 - `build` packs the checked project into `target/sunrise-mod/<id>.smod`: `sunrise-mod.toml`, `assets/`,
   `data/`, optional `icon.png` and, for code, the root Cargo project. It reads content with the game's own package
-  rules and runs the reference checks of `check` below; an error stops the build and removes the earlier
-  `<id>.smod`, so a stale file never looks current. Without `--wasm`, it does not compile code. Native code requires both `Cargo.toml` and `[native]`; inconsistent
-  declarations and a manifest without capability `registries` are refused.
+  rules and runs the reference checks of `check` below. Once the build reaches output cleanup, it removes the
+  previous `<id>.smod` before running the reference checks. Earlier failures, such as a manifest or SDK error,
+  can leave the previous package in place. Without `--wasm`, the build does not compile code. Native code requires
+  both `Cargo.toml` and `[native]`; inconsistent declarations and a manifest without capability `registries` are refused.
 - `run` builds, then starts `sunrise-client` (on `PATH`, or `--game PATH`, or `SUNRISE_CLIENT`) with
   `--dev-mod target/sunrise-mod/<id>.smod`, always on. Arguments after `--` go to the game. The game reads content once
   at start, so rebuild and run again after an edit.
-- `check` in a project folder runs the package rules, the render pipeline shaders and the reference checks, in
-  well under a second for a content mod. It reads each file as the game does (a byte-order mark and comments are
-  fine) and only the fields its format treats as references; payloads only a mod reads (a recipe type's own fields,
-  `components`, custom data, a mod's blockstate or item model type) and files that `neoforge:conditions` may disable
-  are left alone, as are tag entries that are `required: false` or removed. One rule sets the severity. An **error**
-  (exit 1) is a finding where the tool sees everything that decides the answer and the game would drop or draw the
-  thing broken: a blockstate, model parent or item definition naming a model file the mod lacks; a model naming a
-  texture file it lacks (one a model built on it overrides does not count); a block that declares `render_shape`
-  `MODEL` with no blockstate; a recipe, a tag or a loot entry naming an item, block, fluid (a world fluid's
-  `flowing_` form too) or entity type of the mod's own namespaces that it does not declare; a `#tag` of the mod that
-  has no file; a JSON file that does not parse. A **warning** (printed, exit 0) is a finding where something else
-  could supply the thing, worded "could not find ... in this mod; if X supplies it, ignore this": a `[[jar]]` layer or a declared dependency's jar (the tool fetches none),
-  an atlas source of the mod (it renames sprites and reads directories), or a block whose template draws without a
-  block model (a chest, a sign) and declares no `render_shape`; or a legal mistake: a block with no loot table, a
-  block or item with no name in `en_us.json` or no item definition, and registry content in a package whose `side`
-  is `client` (the default when the line is missing), which breaks joining a server. What the tool cannot judge is
-  dropped without a word: the ids a mod's code declares (a mod with `native` or `wasm` is not asked for them) and
-  ids in vanilla's namespace, whose tables the tool does not have. Each message names the file, the id and what to
-  do, with a near miss from the declared ids.
+- `check` in a project folder runs the package rules, the render pipeline shader checks and offline reference checks.
+  It checks references to IDs in namespaces the manifest owns, not to vanilla or other mods. It checks these forms:
+  - Models in blockstate `variants` and `multipart`, model `parent` and `textures` fields, and model references in
+    item definitions. The game's model decoder reads one model and ignores trailing input.
+  - Ingredients and results in built-in shaped, shapeless, cooking, stonecutting, smithing and transmute recipes.
+    Recipe `#tag` ingredients, custom recipe types, components and other opaque data are not checked.
+  - Direct item, block, fluid (including its `flowing_` form) and entity type IDs in tag `values`, and required
+    nested `#tag` references. Tag files can be in any namespace, including `minecraft`; optional entries and removals
+    are not checked. Nested references require the full registry folder, such as `worldgen/biome`.
+  - Loot item entries' `name` and block-state conditions' `block` fields. Recipes, tags, loot tables and loot pools
+    that `neoforge:conditions` may disable are left alone.
+
+  A missing reference is an **error** (exit 1) only when the tool has enough information to confirm it. Otherwise,
+  it can **warn** without failing: a `[[jar]]` layer, dependency or atlas source may supply the resource, an inline
+  composite child may override a texture, the registry folder may be unknown, or a local recipe filter may remove
+  the recipe or swap the reference. The tool does not fetch dependencies or check registry entries declared in code.
+  It also checks for blockstates on blocks with `render_shape` set to `MODEL` and warns about missing local loot
+  tables, item definitions or English names, or registry content on a client-only package. Reference diagnostics name
+  the source file, the relevant field or member index, and the ID.
 - `check <file>` runs what the registry runs: the file's size and SHA-256, its manifest and content, and a signature
   with `--key <public key> --signature <file>.minisig`. It reads `.smod`, `.spack`, resource pack `.zip`
   and `.sshader` files.

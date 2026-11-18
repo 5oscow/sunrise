@@ -3,13 +3,12 @@
 //! definition's model, the ids a recipe, a tag or a loot table names in the mod's own namespaces,
 //! and what a block needs to be playable (a blockstate, a loot table, a name).
 //!
-//! Each file is read as the game reads it, and only the fields its format treats as references:
-//! models, blockstates and item definitions through `sunrise-assets`' decoders (a byte-order mark
-//! is skipped; a blockstate with a `neoforge:definition_type` and an item model type the decoder
-//! does not know are a mod's own payload, left alone), the other files through the shapes the
-//! recipe, tag and loot loaders walk (a recipe's ingredients and result, a tag's `values`, a loot
-//! entry's `name` and a state condition's `block`), never the data beside them (components, custom
-//! data, a recipe type's own fields). Comments are skipped as Gson's lenient reader skips them. A
+//! The tool checks only fields that the game's formats treat as references: models through the
+//! game's `CuboidModel` decoder, blockstates and item definitions through `sunrise-assets`' decoders
+//! (mod-defined types are left alone), and the other files through the shapes the recipe, tag and
+//! loot loaders walk (a recipe's ingredients and result, a tag's `values`, a loot entry's `name`
+//! and a state condition's `block`). Components, custom data and fields of unknown recipe types
+//! are not scanned. The generic JSON reader accepts a byte-order mark and comments. A
 //! file the load conditions (`neoforge:conditions`) may disable, a tag entry that is not
 //! `required`, and a removal are not read: they cannot break a mod that does not have what they
 //! name.
@@ -318,14 +317,20 @@ impl References<'_> {
         Ok(())
     }
 
-    /// A model file's parent and sprites; [`References::check_models`] checks them once every model is
-    /// known, so a slot a child model overrides is not asked of its parent.
+    /// Match the model library: read UTF-8 and let its decoder consume one model, not the whole file.
     fn read_model(&mut self, name: &str, namespace: &str, path: &str) -> Result<(), String> {
-        let Some((text, _)) = self.json(name)? else {
-            return Ok(());
-        };
-        let Ok(definition) = CuboidModel::from_json(&text) else {
-            return Ok(());
+        let bytes = self.reader.read(name)?;
+        let definition = match std::str::from_utf8(&bytes)
+            .map_err(|error| error.to_string())
+            .and_then(|text| CuboidModel::from_json(text).map_err(|error| error.to_string()))
+        {
+            Ok(model) => model,
+            Err(error) => {
+                self.findings.errors.push(format!(
+                    "{name}: the game could not read this model: {error}. Fix the model JSON."
+                ));
+                return Ok(());
+            }
         };
         self.models.insert(
             format!("{namespace}:{path}"),
@@ -461,8 +466,14 @@ impl References<'_> {
         };
         let mut found = Vec::new();
         loot_table_ids(&table, &mut found);
-        for (registry, id) in found {
-            self.id_in_registry(name, &id, registry, "the loot entry", None);
+        for (registry, field, id) in found {
+            self.id_in_registry(
+                name,
+                id,
+                registry,
+                &format!("the loot reference at {field}"),
+                None,
+            );
         }
         Ok(())
     }
@@ -676,7 +687,7 @@ impl References<'_> {
             let loot = format!("data/{namespace}/loot_table/blocks/{path}.json");
             if !self.jar && !self.has(&loot) {
                 self.findings.warnings.push(format!(
-                    "{file}: the block {} has no loot table, so it drops nothing when broken. Add {loot}.",
+                    "{file}: no local loot table found for the block {} (expected {loot}). Add one if this block needs its own table.",
                     block.id
                 ));
             }
@@ -732,7 +743,7 @@ impl References<'_> {
             };
             if !self.jar {
                 self.findings.warnings.push(format!(
-                    "{file}: {why}, so players see the raw key {key}. Add the name."
+                    "{file}: no local name found for {key} ({why}). Add the key to {lang} if another language source does not supply it."
                 ));
             }
         }
@@ -894,10 +905,12 @@ fn ingredient_ids<'v>(ingredient: &'v Value, path: &str, out: &mut Vec<(String, 
     }
 }
 
-/// The `(registry, id)` a loot table names: an item entry's `name`, a state condition's `block`,
-/// through the table's pools (a pool the load conditions may disable is left out), their entries
-/// and their conditions. A function's work (`set_components`, `set_custom_data`) names no id.
-fn loot_table_ids(table: &Value, out: &mut Vec<(&'static str, String)>) {
+type LootReference<'v> = (&'static str, &'static str, &'v str);
+
+/// The `(registry, field, id)` a loot table names: an item entry's `name`, a state condition's
+/// `block`, through the table's pools, entries and conditions. Conditional pools and a loot
+/// function's payload (`set_components`, `set_custom_data`) are not checked.
+fn loot_table_ids<'v>(table: &'v Value, out: &mut Vec<LootReference<'v>>) {
     list(table.get("functions"), |function| {
         conditions(function.get("conditions"), out);
     });
@@ -922,7 +935,7 @@ fn list<'v>(value: Option<&'v Value>, mut each: impl FnMut(&'v Value)) {
     }
 }
 
-fn entries(value: Option<&Value>, out: &mut Vec<(&'static str, String)>) {
+fn entries<'v>(value: Option<&'v Value>, out: &mut Vec<LootReference<'v>>) {
     list(value, |entry| {
         conditions(entry.get("conditions"), out);
         list(entry.get("functions"), |f| {
@@ -930,7 +943,7 @@ fn entries(value: Option<&Value>, out: &mut Vec<(&'static str, String)>) {
         });
         let kind = type_of(entry).map(|t| t.strip_prefix("minecraft:").unwrap_or(t));
         match (kind, entry.get("name").and_then(Value::as_str)) {
-            (Some("item"), Some(name)) => out.push(("item", name.to_owned())),
+            (Some("item"), Some(name)) => out.push(("item", "entry.name", name)),
             (Some("alternatives" | "group" | "sequence"), _) => {
                 entries(entry.get("children"), out);
             }
@@ -939,13 +952,13 @@ fn entries(value: Option<&Value>, out: &mut Vec<(&'static str, String)>) {
     });
 }
 
-fn conditions(value: Option<&Value>, out: &mut Vec<(&'static str, String)>) {
+fn conditions<'v>(value: Option<&'v Value>, out: &mut Vec<LootReference<'v>>) {
     list(value, |condition| {
         let kind = type_of(condition).map(|t| t.strip_prefix("minecraft:").unwrap_or(t));
         match kind {
             Some("block_state_property") => {
                 if let Some(block) = condition.get("block").and_then(Value::as_str) {
-                    out.push(("block", block.to_owned()));
+                    out.push(("block", "condition.block", block));
                 }
             }
             Some("inverted") => conditions(condition.get("term"), out),
@@ -1195,7 +1208,7 @@ mod tests {
         let table = r#"{"pools":[{"entries":[{"type":"minecraft:item","name":"gb:slabs"}]}]}"#;
         let e = errors(&[("data/gb/loot_table/blocks/slab.json", table)]);
         assert!(
-            e[0].contains("the loot entry gb:slabs is not an item"),
+            e[0].contains("entry.name") && e[0].contains("gb:slabs is not an item"),
             "{e:?}"
         );
         // Through a group's children, and a state condition's block.
@@ -1224,7 +1237,7 @@ mod tests {
         );
         assert!(f.errors.is_empty(), "{f:?}");
         assert_eq!(f.warnings.len(), 2, "{f:?}");
-        assert!(f.warnings[0].contains("has no loot table"));
+        assert!(f.warnings[0].contains("no local loot table"));
         assert!(f.warnings[1].contains("has no \"block.gb.slab\""));
         let f = findings(MANIFEST, &[("assets/gb/lang/en_us.json", "")]);
         assert!(
@@ -1492,7 +1505,18 @@ mod tests {
         );
     }
 
-    /// 9. The game reads a byte-order mark and comments.
+    #[test]
+    fn the_model_decoder_leaves_trailing_input_unread() {
+        let file = "assets/gb/models/block/slab.json";
+        let trailing = r#"{"textures":{"all":"gb:block/stone"}} this is not part of the model"#;
+        clean(MANIFEST, &[(file, trailing)]);
+        let e = errors(&[(file, r#"{"textures":{"all":}}"#)]);
+        assert_eq!(e.len(), 1, "{e:?}");
+        assert!(e[0].starts_with(file));
+        assert!(e[0].contains("could not read this model"));
+    }
+
+    /// 9. The generic JSON reader accepts comments, and the model decoder accepts a BOM.
     #[test]
     fn a_byte_order_mark_and_comments_are_read_as_the_game_reads_them() {
         let recipe = "\u{feff}{\n// a note\n\"type\":\"minecraft:crafting_shaped\", /* the key */\n\"pattern\":[\"SS\"],\"key\":{\"S\":\"gb:shard\"},\"result\":{\"id\":\"gb:slab\"}}";
