@@ -1137,8 +1137,10 @@ impl Game<'_> {
                                 else {
                                     continue;
                                 };
-                                let key = sunrise_core::nbt::JavaString::from(id.to_string());
-                                let marker = sunrise_core::nbt::JavaString::from(format!("!{id}"));
+                                let key =
+                                    sunrise_core::nbt::JavaString::from(id.to_string().as_str());
+                                let marker =
+                                    sunrise_core::nbt::JavaString::from(format!("!{id}").as_str());
                                 c.remove(&key);
                                 c.remove(&marker);
                                 if remove {
