@@ -890,10 +890,6 @@ impl Game<'_> {
     pub(in crate::game) fn native_shader_params(&self, partial: f32, params: &mut [[f32; 4]; 8]) {
         self.fire_shader_params(partial, params);
     }
-    /// The minimap a native mod shows: set `minimap` when it is none yet.
-    pub(in crate::game) fn native_minimap(&self, minimap: &mut Option<mod_api::Minimap>) {
-        self.fire_minimap(minimap);
-    }
     /// Register namespaced NBT component types before content loads.
     pub(in crate::game) fn native_component_types(
         context: &mod_api::RegistrationContext,
@@ -4588,6 +4584,20 @@ impl Game<'_> {
             game_time: self.world.game_time,
             day_time: self.world.day_time,
         })
+    }
+    /// `native_text` scaled by `scale` about `at`, its top-left corner (a GUI pose's scale).
+    pub(in crate::game) fn native_text_scaled(
+        &self,
+        batch: &mut HudBatch,
+        text: &str,
+        at: [f32; 2],
+        scale: f32,
+        argb: u32,
+        shadow: bool,
+    ) {
+        let start = batch.vertices.len();
+        self.native_text(batch, text, at, argb, shadow);
+        batch.scale_since(start, at[0], at[1], scale, scale);
     }
     /// The saved key and modifiers for an owner-bound registration, or its declared default.
     pub(in crate::game) fn mod_key(

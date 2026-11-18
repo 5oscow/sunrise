@@ -2063,8 +2063,10 @@ fn write_region_records(
         let Some(region) = cached_region(cache, (rx, rz), &path, create)? else {
             continue;
         };
-        let mut region = region.lock().map_err(|_| "region file poisoned")?;
+        // Keep far readers on the exact locked read path while writes and their
+        // flush are in progress, so they cannot use a stale kept header.
         let _writing = far_regions::writing(cache, (rx, rz));
+        let mut region = region.lock().map_err(|_| "region file poisoned")?;
         let mut changed = false;
         for (pos, record) in &list {
             match record {
@@ -2076,7 +2078,15 @@ fn write_region_records(
             }
         }
         if changed {
-            region.sync()?;
+            match region.sync_handle() {
+                Ok(handle) => {
+                    drop(region);
+                    handle.sync_data()?;
+                }
+                // Out of descriptors: flush under the lock as before rather than
+                // skip durability for this region and every region after it.
+                Err(_) => region.sync()?,
+            }
         }
     }
     Ok(())
@@ -6783,6 +6793,104 @@ mod tests {
                 .is_empty()
         );
         drop((reopened, save, lock));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_save_pass_resumes_at_the_write_watermark_instead_of_flushing() {
+        let dir =
+            std::env::temp_dir().join(format!("sunrise-save-watermark-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let save = std::sync::Arc::new(super::SaveDir::new(
+            dir.clone(),
+            super::LevelShape::OVERWORLD,
+            Some(Default::default()),
+        ));
+        let lock = super::SessionLock::acquire(&dir).unwrap();
+        // Hold the region lock so the writer stops there deterministically, rather
+        // than relying on disk speed or sleeps: it keeps the lock while it writes.
+        let region = super::cached_region(
+            &save.regions,
+            (0, 0),
+            &save.region_path("region", 0, 0),
+            true,
+        )
+        .unwrap()
+        .unwrap();
+        let blocked = region.lock().unwrap();
+        let record = |x: i32| ((x, 0), None);
+        save.write_records("region", (0..4).map(record).collect(), false)
+            .unwrap();
+        assert_eq!(save.active_chunk_writes(), 4);
+        assert!(!save.writes_finished().unwrap());
+        // The four queued records are at the watermark: a save pass resumes at
+        // once and leaves them to the writer. On its own thread so that a pass
+        // that waited like `flush` fails the test instead of hanging it.
+        let (resumed, resume_result) =
+            std::sync::mpsc::channel::<std::result::Result<(), String>>();
+        let resuming = {
+            let save = save.clone();
+            std::thread::spawn(move || {
+                resumed
+                    .send(
+                        save.wait_for_chunk_writes_below(4)
+                            .map_err(|e| e.to_string()),
+                    )
+                    .unwrap()
+            })
+        };
+        resume_result
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap()
+            .unwrap();
+        resuming.join().unwrap();
+        assert_eq!(save.active_chunk_writes(), 4);
+        assert!(!save.writes_finished().unwrap());
+        // One below it, on that same queue, the wait does hold the caller, as a
+        // flush does: only releasing the lock below can wake either.
+        let (waited, wait_result) = std::sync::mpsc::channel::<std::result::Result<(), String>>();
+        let waiting = {
+            let save = save.clone();
+            std::thread::spawn(move || {
+                waited
+                    .send(
+                        save.wait_for_chunk_writes_below(3)
+                            .map_err(|e| e.to_string()),
+                    )
+                    .unwrap()
+            })
+        };
+        let (flushed, flush_result) = std::sync::mpsc::channel::<std::result::Result<(), String>>();
+        let flushing = {
+            let save = save.clone();
+            std::thread::spawn(move || {
+                flushed
+                    .send(save.flush().map_err(|e| e.to_string()))
+                    .unwrap()
+            })
+        };
+        let quiet = |rx: &std::sync::mpsc::Receiver<std::result::Result<(), String>>| {
+            matches!(
+                rx.recv_timeout(std::time::Duration::from_millis(200)),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+            )
+        };
+        assert!(quiet(&wait_result), "the wait returned below its watermark");
+        assert!(quiet(&flush_result), "flush returned while blocked");
+        drop(blocked);
+        wait_result
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap()
+            .unwrap();
+        flush_result
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap()
+            .unwrap();
+        flushing.join().unwrap();
+        waiting.join().unwrap();
+        assert!(save.writes_finished().unwrap());
+        assert_eq!(save.active_chunk_writes(), 0);
+        drop((save, lock));
         let _ = std::fs::remove_dir_all(dir);
     }
 

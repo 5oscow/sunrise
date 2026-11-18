@@ -1690,7 +1690,7 @@ struct Game<'a> {
     pending_bench: Option<(Instant, std::sync::mpsc::Sender<String>, bool)>,
     /// Recent frame times for the performance overlay.
     frame_graph: sunrise_client::perf_overlay::FrameGraph,
-    /// Sunrise's extras (minimap, auto-reconnect; mods' counters): `game/interface/extras.rs`.
+    /// Sunrise's extras (auto-reconnect; mods' counters): `game/interface/extras.rs`.
     extras: extras::ExtrasState,
     /// The PvP & HUD options' state (`game/entities/pvp.rs`).
     pvp: pvp::PvpState,
@@ -5584,21 +5584,28 @@ impl Game<'_> {
                     v.intersects(o - glam::Vec3::ONE, o + glam::Vec3::splat(2.0))
                 })
             };
-            let camera_list: Vec<&([i32; 3], u32)> = r
-                .visible_block_entities_in_frustum(
-                    self.settings.chunk_fade,
-                    camera,
-                    view,
-                    &off_screen,
-                    long_range,
-                )
-                .filter(|(block, section_inside)| {
-                    let (pos, state) = **block;
-                    self.live_block_entity_render(pos, state)
-                        && (off_screen(state) || *section_inside || in_view(&pos))
-                })
-                .map(|(block, _)| block)
-                .collect();
+            // One walk of the uploaded sections' block entities feeds both lists below
+            // (`Renderer::block_entities_in_range` prunes by range alone): the camera's list,
+            // and the sections the GPU cache warms.
+            let mut camera_list: Vec<&([i32; 3], u32)> = Vec::new();
+            let mut cache_candidates: Vec<&([i32; 3], u32)> = Vec::new();
+            // A shader pack keeps the cache off (`render_with_cache_options_and_callbacks`),
+            // so nothing warms it.
+            let warm_cache = self.pack_ids.is_none();
+            for entity in
+                r.block_entities_in_range(self.settings.chunk_fade, camera, view, long_range)
+            {
+                let (pos, state) = *entity.block;
+                if !self.live_block_entity_render(pos, state) {
+                    continue;
+                }
+                if off_screen(state) || entity.section_inside || in_view(&pos) {
+                    camera_list.push(entity.block);
+                }
+                if warm_cache && entity.near {
+                    cache_candidates.push(entity.block);
+                }
+            }
             // A shader pack's shadow pass draws the block entities of every section it draws,
             // in the view or not (`Renderer::shadow_pass_block_entities`, #8464): those the
             // view leaves out go in hidden from the camera.
@@ -5709,16 +5716,6 @@ impl Game<'_> {
                         },
                     );
             } else {
-                let cache_candidates = r
-                    .visible_block_entities_in_frustum(
-                        self.settings.chunk_fade,
-                        camera,
-                        None,
-                        |_| false,
-                        |_| false,
-                    )
-                    .filter(|(block, _)| self.live_block_entity_render(block.0, block.1))
-                    .map(|(block, _)| block);
                 (
                     static_block_entities,
                     visible_static_block_entity_sections,
@@ -5729,7 +5726,7 @@ impl Game<'_> {
                     .render_with_gpu_cache_options(
                         &scene,
                         visible,
-                        cache_candidates,
+                        cache_candidates.into_iter(),
                         block_entity_cache,
                         r.block_entity_revision(),
                         |pos| r.block_entity_section_revision(pos),

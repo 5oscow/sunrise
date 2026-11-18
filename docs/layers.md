@@ -429,7 +429,7 @@ pub trait Canvas {
     fn text_width(&self, text: &str) -> f32;
     fn text(&mut self, x: f32, y: f32, text: &str, argb: u32, shadow: bool);
     fn fill(&mut self, x: f32, y: f32, w: f32, h: f32, argb: u32);
-    /// A box of `w` × `h` in `corner`, stacked with the minimap, PvP widgets and mods' boxes;
+    /// A box of `w` × `h` in `corner`, stacked with the PvP widgets and mods' boxes;
     /// `None` while the debug screen covers that corner.
     fn place(&mut self, corner: Corner, w: f32, h: f32) -> Option<(f32, f32)>;
 }
@@ -589,7 +589,7 @@ themselves, or stays a cfg-gated module linked into the official build. None mov
 - the renderer's extras: fullbright, dynamic lights, hidden block-break particles;
 - chunk pregeneration.
 
-The minimap already moved to a native mod ([extras.md](extras.md#moved-to-native-mods)).
+Zoom, the FPS counter and Keystrokes already moved to native mods ([extras.md](extras.md#moved-to-native-mods)).
 Controllers and replay recording are platform ([above](#controllers-replays-and-ui-pages)).
 
 ## The checks

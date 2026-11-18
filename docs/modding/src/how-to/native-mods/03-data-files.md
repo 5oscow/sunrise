@@ -32,9 +32,13 @@ participate in resource reloads.
 ## Package contents
 
 A native bundle accepts the manifest, optional icon, root `Cargo.toml`, `Cargo.lock` and `build.rs`,
-`.rs` and `.toml` files under `src/`, `assets/` and `data/`, and root text files (`README*`, `LICENSE*`,
+`.rs` and `.toml` files under `src/`, `assets/` and `data/`, a `runtime/` folder listed in `[runtime]`, and root text files (`README*`, `LICENSE*`,
 `LICENCE*`, `COPYING*`, `NOTICE*`). Source and resource size limits are checked separately;
 any other file causes the archive to be refused ([the manifest](../../reference/manifest.md)).
+
+`runtime/` holds the data files your code opens beside itself: each is listed in `[runtime]` with its SHA-512, any
+file type, up to 64 MiB a file, 256 MiB and 256 files in all. They are not pack data and no reload touches them;
+a missing, extra or mismatched file refuses the package by name ([`[runtime]`](../../reference/manifest.md)).
 
 Although the archive accepts `build.rs`, a native build refuses it unless you disable it with
 `build = false` in Cargo's `[package]` table and remove build dependencies.
