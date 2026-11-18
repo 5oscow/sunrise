@@ -92,8 +92,11 @@ jobs:
       pr_sha: ${{ steps.gate.outputs.pr_sha }}
       # Whether this run's code may use our own runners: never a fork's pull request, dispatched or not.
       trusted: ${{ steps.gate.outputs.trusted || ((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'true' || 'false') }}
-      rust_required: ${{ steps.selection.outputs.rust_required || 'true' }}
-      tooling_required: ${{ steps.selection.outputs.tooling_required || 'true' }}
+      # Off where selection needs none, and on a main push whose tree its merged head's pull_request run already
+      # passed (tools/ci/gate_reuse.py): the jobs then run only what doesn't depend on them, on the small runner.
+      rust_required: ${{ steps.reuse.outputs.reused == 'true' && 'false' || steps.selection.outputs.rust_required || 'true' }}
+      tooling_required: ${{ steps.reuse.outputs.reused == 'true' && 'false' || steps.selection.outputs.tooling_required || 'true' }}
+      reused_run: ${{ steps.reuse.outputs.run }}
       # Only a gate (heavy) uses Dyna's runners; a pull request outside it runs where a pool-down run would.
       self_hosted: ${{ steps.gate.outputs.heavy == 'true' && !inputs.github-fallback && steps.hosted.outputs.forced_github != 'true' && steps.runner.outputs.self_hosted || 'false' }}
       # Where lint and verify run when they don't go to Dyna's pool: boat-large for listed outside contributors
@@ -133,6 +136,12 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: python3 tools/ci/rust_changes.py --all "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
+      - name: Reuse the merged head's passed gate
+        if: github.event_name == 'push'
+        id: reuse
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/ci/gate_reuse.py >> "$GITHUB_OUTPUT"
       # workflow_run omits pull_requests for fork runs. Record only immutable IDs;
       # the trusted controller reads this as bounded data, never as executable code.
       - name: Record the original PR base for boat recovery
@@ -266,12 +275,34 @@ jobs:
         run: exit 1
       - name: Documentation needs no Rust lint
         if: needs.changes.outputs.rust_required == 'false'
-        run: echo 'Rust lint is not selected; repository hygiene still runs.'
+        env:
+          REUSED: ${{ needs.changes.outputs.reused_run }}
+        run: |
+          if [ -n "$REUSED" ]; then
+            echo "This tree passed the gate in run $REUSED; repository hygiene still runs." | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Rust lint is not selected; repository hygiene still runs.'
+          fi
       # Not diff-selected: any tracked file can contain a captured tool notice.
       - uses: actions/checkout@v4
         with:
           # A dispatch with `pr`: that pull request's head; otherwise this event's commit.
           ref: ${{ needs.changes.outputs.pr_sha }}
+      # The tree this gate checks, so a main push of the same tree can take its verdict (tools/ci/gate_reuse.py).
+      - name: Record the checked tree
+        id: tree
+        if: needs.changes.outputs.rust_required != 'false'
+        run: |
+          mkdir -p "$RUNNER_TEMP/gate-tree"
+          git rev-parse 'HEAD^{tree}' | tee "$RUNNER_TEMP/gate-tree/tree"
+          echo "tree=$(cat "$RUNNER_TEMP/gate-tree/tree")" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        if: steps.tree.outcome == 'success'
+        with:
+          name: gate-tree-${{ steps.tree.outputs.tree }}
+          path: ${{ runner.temp }}/gate-tree/tree
+          retention-days: 3
+          overwrite: true
       - name: Check Dyna dependencies (install fallback without root)
         if: needs.changes.outputs.rust_required != 'false' && env.RUNNER_KIND == 'dyna'
         run: bash tools/ci/dyna_ci_deps.sh
