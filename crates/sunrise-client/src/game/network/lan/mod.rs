@@ -1421,7 +1421,7 @@ impl Game<'_> {
             return;
         }
         // A proxy released this record to another server, which now owns saving it.
-        if guest.placed && !guest.released {
+        if guest.placed && !guest.released && !self.crash_save.excludes(guest.conn) {
             let _ = self.finish_player_autosaves(true);
             if self
                 .lan
@@ -1585,7 +1585,7 @@ impl Game<'_> {
     /// live record, independently of the dirty entries sent to their client.
     pub(super) fn save_connected_guest_statistics(&self, host: &LanHost) {
         for guest in &host.hub.guests {
-            if !guest.placed || guest.released {
+            if !guest.placed || guest.released || self.crash_save.excludes(guest.conn) {
                 continue;
             }
             let Some(uuid) = self.records_uuid(host, guest.uuid) else {
@@ -1691,7 +1691,7 @@ impl Game<'_> {
             .hub
             .guests
             .iter()
-            .position(|g| g.uuid == uuid && g.placed)
+            .position(|g| g.uuid == uuid && g.placed && !self.crash_save.excludes(g.conn))
         {
             let live = Some(self.player_state.attachments.clone());
             host.hub.guests.update(i, |g| {

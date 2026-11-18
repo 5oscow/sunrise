@@ -14,12 +14,20 @@ pub(in crate::game) struct CrashSave {
     /// interrupted, or the hub is lost.
     pub(in crate::game) keep_owner_file: bool,
     hub_lost: bool,
+    /// The connections of the interrupted players: the player-data, stats and advancement
+    /// saves skip them. They stay online, so each still gets its logout.
+    excluded: std::collections::BTreeSet<u32>,
 }
 
 impl CrashSave {
     /// The game's own stats and advancements belong to an interrupted player.
     pub(in crate::game) fn holds_interrupted(&self, acting: Option<u32>) -> bool {
         self.acting && acting.is_some()
+    }
+
+    /// Whether the player on `conn` is interrupted: their files are not written.
+    pub(in crate::game) fn excludes(&self, conn: u32) -> bool {
+        self.excluded.contains(&conn)
     }
 }
 
@@ -136,7 +144,8 @@ impl Game<'_> {
     /// player and clears the acting marker), when a swap that is still open displaces them, or
     /// when they are still swapped in as the acting player. Such a player is not saved: their
     /// last saved file, stats and advancements stay, for the half-done turn can hold an item
-    /// taken but not yet placed. When that is the single-player owner, or the hub is lost
+    /// taken but not yet placed. The player stays online (`placed`), so their logout still
+    /// fires; only the saves read the exclusion. When that is the single-player owner, or the hub is lost
     /// (`crashed` and no hub, or an interrupted turn and no hub), `level.dat` is written without
     /// a new player file, keeping a legacy `Data.Player`.
     pub(in crate::game) fn exclude_interrupted_players(
@@ -162,16 +171,20 @@ impl Game<'_> {
         };
         for conn in conns {
             let owner = host.owner.as_ref().map(|o| o.uuid);
-            let Some(name) = host.hub.guests.update_connection(conn, |guest| {
-                let first = std::mem::replace(&mut guest.placed, false);
-                (first.then(|| guest.name.clone()), Some(guest.uuid) == owner)
+            let Some((name, is_owner)) = host.hub.guests.update_connection(conn, |guest| {
+                (
+                    guest.placed.then(|| guest.name.clone()),
+                    Some(guest.uuid) == owner,
+                )
             }) else {
                 continue;
             };
-            if name.1 {
+            if is_owner {
                 self.crash_save.keep_owner_file = true;
             }
-            if let Some(name) = name.0 {
+            if let Some(name) = name
+                && self.crash_save.excluded.insert(conn)
+            {
                 warn(&format!(
                     "The panic interrupted a player's turn ({name}): that player keeps the last saved file"
                 ));

@@ -20,6 +20,19 @@ impl log::Log for Warnings {
 }
 static WARNINGS: Warnings = Warnings(Mutex::new(Vec::new()));
 
+/// Records who each `player_logged_out` listener call is for.
+struct Logouts(std::sync::Arc<Mutex<Vec<u128>>>);
+#[mod_api::__subscriptions]
+impl mod_api::Hooks for Logouts {
+    fn player_logged_out(
+        &self,
+        _: &mut dyn mod_api::ServerHost,
+        event: &mut mod_api::PlayerLoggedOutEvent<'_>,
+    ) {
+        self.0.lock().unwrap().push(event.player);
+    }
+}
+
 fn player_file(root: &Path, uuid: u128) -> PathBuf {
     sunrise_client::lan::playerdata::path(root, uuid)
 }
@@ -104,11 +117,29 @@ fn scenario(nested: bool) {
         assert!(game.lan_guest_swaps.is_empty() && game.lan_acting.is_none());
 
         // The stop path saves; no tick has run since, so the record stands.
-        game.run_server_lifecycle(true, |_, began| {
-            *began = true;
-            Ok(())
-        })
-        .unwrap();
+        let logouts = std::sync::Arc::new(Mutex::new(Vec::new()));
+        mod_platform::testing::with_mods(
+            vec![mod_api::ModEntry::new(
+                "logouts",
+                Box::new(Logouts(logouts.clone())),
+            )]
+            .into(),
+            || {
+                game.run_server_lifecycle(true, |_, began| {
+                    *began = true;
+                    Ok(())
+                })
+                .unwrap();
+            },
+        );
+        // An interrupted player stays online: each login still gets its one logout.
+        let mut left = logouts.lock().unwrap().clone();
+        left.sort_unstable();
+        assert!(
+            left.iter().filter(|&&p| p == 12).count() == 1
+                && left.iter().filter(|&&p| p == 13).count() == 1,
+            "one logout for each of guests 12 and 13: {left:?}"
+        );
 
         assert_eq!(
             read(12),

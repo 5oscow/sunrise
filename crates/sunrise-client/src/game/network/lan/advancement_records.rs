@@ -8,6 +8,7 @@ impl Game<'_> {
         guest: &sunrise_client::lan::guest::Guest,
     ) {
         if !guest.placed
+            || self.crash_save.excludes(guest.conn)
             || guest.released
             || !guest.participates_in_player_simulation()
             || self.adv.tree.list.is_empty()
@@ -35,6 +36,7 @@ impl Game<'_> {
         guest: &sunrise_client::lan::guest::Guest,
     ) {
         if !guest.placed
+            || self.crash_save.excludes(guest.conn)
             || guest.released
             || !guest.participates_in_player_simulation()
             || self.adv.tree.list.is_empty()
