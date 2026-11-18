@@ -47,6 +47,8 @@ jobs:
       self_hosted: ${{ steps.runner.outputs.self_hosted }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       # The pool's switch and lease (tools/ci/dyna_ci_route.sh): a snapshot is judged at the run's creation, so a
       # run that waited in a concurrency group or GitHub's queue is not sent off the pool by a lease that lapsed
       # meanwhile.
@@ -74,6 +76,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          persist-credentials: false
           ref: ${{ inputs.commit }}
       # GitHub's 16 GB runner is short of memory for the game's release build with more than two crates at once.
       # A Dyna runner builds as many as its CPU quota allows within its memory, 4 GiB per release rustc
