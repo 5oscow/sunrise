@@ -692,8 +692,8 @@ impl Game<'_> {
         };
         let time = (self.world.game_time.rem_euclid(40)) as f32 + alpha as f32;
         let scoping = self.scoping();
-        // `BeaconRenderer.shouldRender` culls at the render distance.
-        let view = f64::from(self.streaming.radius * 16);
+        // `BeaconRenderer.shouldRender` culls at the effective render distance.
+        let view = f64::from(self.effective_render_distance() * 16);
         let beams = self.world.block_entities.iter().filter_map(|(k, e)| {
             let sections = match beam(e) {
                 Some(sections) => std::borrow::Cow::Borrowed(sections),
