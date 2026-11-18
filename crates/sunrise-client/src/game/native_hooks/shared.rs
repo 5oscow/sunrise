@@ -2774,6 +2774,7 @@ impl Game<'_> {
 
     /// Tells the mods of the chunks that came into this level.
     pub(super) fn native_chunks_loaded(&mut self) {
+        self.fire_pending_block_entity_data_loads();
         let loaded = std::mem::take(&mut self.world.loaded_chunks);
         if self.remote.is_some() {
             return;

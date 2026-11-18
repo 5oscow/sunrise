@@ -350,7 +350,8 @@ impl Game<'_> {
         let Some(saved) = self.saved_block_entity(key, false) else {
             return;
         };
-        let placed = block_entity_item::place(&saved, &components(stack), game_master);
+        let (placed, custom_data_loaded) =
+            block_entity_item::place_with_load_result(&saved, &components(stack), game_master);
         if placed == saved {
             return;
         }
@@ -368,6 +369,9 @@ impl Game<'_> {
         }
         self.load_block_name(key, &entity, &placed);
         self.world.block_entities.insert(key, entity);
+        if custom_data_loaded {
+            self.notify_block_entity_load_additional(key);
+        }
         self.update_spawner_display(key);
     }
 }
