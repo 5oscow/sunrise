@@ -275,7 +275,8 @@ class RustChangesTests(unittest.TestCase):
 
     def test_this_repositorys_gated_helpers_select_their_steps(self):
         # The boundary check runs only under rust_required; the shards script prepares the Rust test setup.
-        for path in ["tools/ci/check_api_boundary.py", "tools/ci/ignored_shards.py"]:
+        # The formatting driver runs only under rust_required, so a change to it alone runs it.
+        for path in ["tools/ci/check_api_boundary.py", "tools/ci/ignored_shards.py", "tools/ci/format_scan.py"]:
             with self.subTest(path=path):
                 self.assertTrue(selections([("M", path)])["rust_required"])
         self.assertFalse(selections([("M", "tools/parity.py")])["rust_required"])
