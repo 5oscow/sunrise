@@ -4161,6 +4161,7 @@ impl Game<'_> {
             spectator: false,
             watching: false,
             hidden: None,
+            general: false,
         })
     }
 }

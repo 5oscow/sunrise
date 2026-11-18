@@ -20,8 +20,8 @@ use sunrise_core::identifier::Identifier;
 pub const CHANNEL: &str = "sunrise:general_entity";
 /// The channel's exact declaration version in the negotiated table.
 pub const VERSION: &str = "1";
-/// The longest type key, in bytes.
-pub const MAX_KEY: usize = 256;
+/// The longest type key, in bytes: registration's own bound.
+pub const MAX_KEY: usize = sunrise_mod_runtime::MAX_GENERAL_ENTITY_KEY;
 /// The largest message, in bytes.
 pub const MAX_MESSAGE: usize = 1024;
 

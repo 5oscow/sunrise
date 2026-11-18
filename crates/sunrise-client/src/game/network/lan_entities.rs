@@ -800,12 +800,11 @@ impl Game<'_> {
         assign_resident_ids!(self.breath_clouds, b, next, None);
     }
 
-    /// Primed TNT, falling blocks, projectiles, tridents, firework rockets and
-    /// end crystals, as guests track them.
     /// A mod's general entity rows (#792), as the tracker reads them. Their type key is no
     /// entity type a client knows, so pairing introduces them on `sunrise:general_entity`
     /// (`lan/entity.rs`), to Sunrise clients only; their own data are their synced attachments.
-    /// A quarantined record never becomes a row, so it is never tracked.
+    /// Only these states are marked general: a quarantined record, which keeps its type's key,
+    /// is no row and is tracked as an unknown kind (never paired).
     fn lan_general_states(&self, out: &mut States, after: u32) {
         let catalog = super::general::general_type_catalog();
         let rows = self.resident_entities.general.rows.iter();
@@ -821,9 +820,12 @@ impl Game<'_> {
             e.velocity = [v.x, v.y, v.z];
             [e.yaw, e.pitch] = row.rotation;
             e.head_yaw = row.rotation[0];
+            e.general = true;
         }
     }
 
+    /// Primed TNT, falling blocks, projectiles, tridents, firework rockets and
+    /// end crystals, as guests track them.
     fn lan_projectile_states(&mut self, out: &mut States, after: u32) {
         let Some(host) = self.lan.as_mut() else {
             return;

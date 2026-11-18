@@ -3390,6 +3390,7 @@ impl Hub {
             spectator: false,
             watching: false,
             hidden: None,
+            general: false,
         }
     }
 

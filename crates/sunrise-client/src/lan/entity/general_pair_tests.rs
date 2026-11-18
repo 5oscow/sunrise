@@ -1,6 +1,8 @@
 //! A native mod's general rows in the tracker: introduced on `sunrise:general_entity` to the
 //! clients that read it, at the declaration's range and interval, and never to another client.
 use super::*;
+use crate::fast_hash::FxHashSet;
+use crate::lan::Body;
 use mod_api::{GeneralEntityCategory, GeneralSavePolicy};
 use sunrise_protocol::buf::Reader;
 
@@ -8,7 +10,7 @@ struct Declare;
 #[mod_api::__subscriptions]
 impl mod_api::Hooks for Declare {
     fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
-        for (path, chunks, interval) in [("near", 2, 1), ("far", 8, 10)] {
+        for (path, chunks, interval) in [("near", 2, 1), ("far", 8, 10), ("wide", 320, 3)] {
             r.declare_general_entity(
                 path,
                 GeneralEntityCategory::Misc,
@@ -26,8 +28,8 @@ impl mod_api::Hooks for Declare {
     }
 }
 
-/// `test` with `mymod:near` (2 chunks, every tick) and `mymod:far` (8 chunks, every 10 ticks)
-/// declared.
+/// `test` with `mymod:near` (2 chunks, every tick), `mymod:far` (8 chunks, every 10 ticks) and
+/// `mymod:wide` (320 chunks) declared.
 fn with_types(test: impl FnOnce()) {
     mod_platform::__private::initialize().expect("test registration requires the mod API runtime");
     // A general type is declared only while the registration phase is current.
@@ -39,6 +41,7 @@ fn with_types(test: impl FnOnce()) {
     });
 }
 
+/// A live general row of type `kind` at x.
 fn row(id: i32, kind: &str, x: f64) -> EntityState {
     EntityState {
         id,
@@ -48,6 +51,7 @@ fn row(id: i32, kind: &str, x: f64) -> EntityState {
         yaw: 45.0,
         pitch: -10.0,
         velocity: [0.125, 0.0, 0.0],
+        general: true,
         ..EntityState::default()
     }
 }
@@ -59,7 +63,7 @@ fn decode(bytes: &[u8]) -> play::Clientbound {
 }
 
 /// The general spawns in `out`, decoded.
-fn spawns(out: &[crate::lan::Body]) -> Vec<general_entity::Message> {
+fn spawns(out: &[Body]) -> Vec<general_entity::Message> {
     out.iter()
         .filter_map(|b| match decode(b) {
             play::Clientbound::CustomPayload(p) if p.channel == general_entity::CHANNEL => {
@@ -70,8 +74,15 @@ fn spawns(out: &[crate::lan::Body]) -> Vec<general_entity::Message> {
         .collect()
 }
 
-/// Whether any packet in `out` names entity `id` (an add, a move, a sync or a removal).
-fn names(out: &[crate::lan::Body], id: i32) -> bool {
+fn spawn_ids(out: &[Body]) -> Vec<i32> {
+    spawns(out)
+        .into_iter()
+        .map(|general_entity::Message::Spawn { id, .. }| id)
+        .collect()
+}
+
+/// Whether any packet in `out` names entity `id` (an add, a spawn, a move, a sync or a removal).
+fn names(out: &[Body], id: i32) -> bool {
     out.iter().any(|b| match decode(b) {
         play::Clientbound::MoveEntityPos(play::MoveEntityPos(m))
         | play::Clientbound::MoveEntityPosRot(play::MoveEntityPosRot(m))
@@ -84,63 +95,119 @@ fn names(out: &[crate::lan::Body], id: i32) -> bool {
     })
 }
 
-fn viewer<'a>(
+/// Where a client that got `out` puts entity `id`, decoding as the client does: the spawn's
+/// position, then each move's delta from the position before it, or a sync's absolute one.
+fn decoded(out: &[Body], id: i32) -> Option<[f64; 3]> {
+    let mut at = None;
+    for body in out {
+        match decode(body) {
+            play::Clientbound::CustomPayload(p) if p.channel == general_entity::CHANNEL => {
+                let general_entity::Message::Spawn {
+                    id: of, position, ..
+                } = general_entity::decode(&p.data).unwrap();
+                if of == id {
+                    at = Some(position);
+                }
+            }
+            play::Clientbound::MoveEntityPos(play::MoveEntityPos(m))
+            | play::Clientbound::MoveEntityPosRot(play::MoveEntityPosRot(m))
+                if m.id == id =>
+            {
+                if let (Some(base), Some(delta)) = (at, &m.delta) {
+                    at = Some(delta.end(base));
+                }
+            }
+            play::Clientbound::EntityPositionSync(p) if p.id == id => {
+                at = Some(match p.path {
+                    play::PositionPath::Linear(to) => to,
+                    play::PositionPath::Stepped(steps) => steps.last().unwrap().0,
+                });
+            }
+            _ => {}
+        }
+    }
+    at
+}
+
+/// One client of the level, with what it was sent tick by tick.
+struct Client {
     general_entity: bool,
-    chunks: &'a crate::fast_hash::FxHashSet<(i32, i32)>,
-    at: [f64; 3],
-    tracker: &'a mut Tracker,
-    out: &'a mut Vec<crate::lan::Body>,
-) -> Viewer<'a> {
-    Viewer {
-        entity_id: 1,
-        spectator: false,
-        permission: 0,
-        sunrise: true,
-        general_entity,
-        moved: true,
-        position: at,
-        view_distance: 10,
-        chunks,
-        sources: None,
-        tracker,
-        out,
-        gone: None,
+    sources: Option<Vec<((i32, i32), i32)>>,
+    view_distance: i32,
+    tracker: Tracker,
+    sent: Vec<Vec<Body>>,
+}
+
+impl Client {
+    /// A client in the level that reads general spawns, or one that doesn't.
+    fn new(general_entity: bool) -> Self {
+        Self {
+            general_entity,
+            sources: None,
+            view_distance: 10,
+            tracker: Tracker::default(),
+            sent: Vec::new(),
+        }
+    }
+
+    fn all(&self) -> Vec<Body> {
+        self.sent.concat()
     }
 }
 
-/// Two clients at `at`, one that reads the channel and one that doesn't, ticked over `ticks`
-/// (each tick's entities from `rows`); what each was sent, tick by tick.
-type Sent = Vec<Vec<crate::lan::Body>>;
-fn run(at: [f64; 3], ticks: u32, rows: impl Fn(u32) -> Vec<EntityState>) -> (Sent, Sent) {
-    let mut level = Entities::default();
-    let (mut sunrise, mut vanilla) = (Tracker::default(), Tracker::default());
-    let chunks: crate::fast_hash::FxHashSet<(i32, i32)> = (-10..=10)
-        .flat_map(|x| (-10..=10).map(move |z| (x, z)))
+/// One tracking pass of `states`, each client at its `at`. A registry knows `minecraft:` keys
+/// (as id 5) and no general one.
+fn pass(level: &mut Entities, clients: &mut [Client], at: &[[f64; 3]], states: &[EntityState]) {
+    let chunks: FxHashSet<(i32, i32)> = (-40..=40)
+        .flat_map(|x| (-40..=40).map(move |z| (x, z)))
         .collect();
-    let riding = Riding::default();
-    let (mut sent_sunrise, mut sent_vanilla) = (Vec::new(), Vec::new());
-    for tick in 0..ticks {
-        let (mut a, mut b) = (Vec::new(), Vec::new());
-        let mut viewers = [
-            viewer(true, &chunks, at, &mut sunrise, &mut a),
-            viewer(false, &chunks, at, &mut vanilla, &mut b),
-        ];
-        let states = rows(tick);
-        let refs: Vec<&EntityState> = states.iter().collect();
-        // As the hub's registry lookup: a general key is no entity type a client knows.
-        level.tick(&refs, &riding, &mut viewers, |_| None);
-        sent_sunrise.push(a);
-        sent_vanilla.push(b);
+    let mut outs: Vec<Vec<Body>> = clients.iter().map(|_| Vec::new()).collect();
+    let mut viewers: Vec<Viewer> = clients
+        .iter_mut()
+        .zip(outs.iter_mut())
+        .zip(at)
+        .map(|((c, out), &position)| Viewer {
+            entity_id: 1,
+            spectator: false,
+            permission: 0,
+            sunrise: true,
+            general_entity: c.general_entity,
+            moved: true,
+            position,
+            view_distance: c.view_distance,
+            chunks: &chunks,
+            sources: c.sources.as_deref(),
+            tracker: &mut c.tracker,
+            out,
+            gone: None,
+        })
+        .collect();
+    let refs: Vec<&EntityState> = states.iter().collect();
+    level.tick(&refs, &Riding::default(), &mut viewers, |kind| {
+        kind.starts_with("minecraft:").then_some(5)
+    });
+    drop(viewers);
+    for (c, out) in clients.iter_mut().zip(outs) {
+        c.sent.push(out);
     }
-    assert!(!vanilla.is_tracking(7) && !vanilla.is_tracking(8));
-    (sent_sunrise, sent_vanilla)
+}
+
+/// A client that reads general spawns and one that doesn't, both at `at`, over `ticks` passes
+/// of `rows(tick)`.
+fn run(at: [f64; 3], ticks: u32, rows: impl Fn(u32) -> Vec<EntityState>) -> [Client; 2] {
+    let mut level = Entities::default();
+    let mut clients = [Client::new(true), Client::new(false)];
+    for tick in 0..ticks {
+        pass(&mut level, &mut clients, &[at, at], &rows(tick));
+    }
+    clients
 }
 
 #[test]
 fn a_reading_client_in_range_gets_one_spawn_and_another_client_nothing() {
     with_types(|| {
-        let (sunrise, vanilla) = run([0.5, 64.0, 0.5], 3, |_| vec![row(7, "mymod:far", 4.5)]);
-        let all: Vec<_> = sunrise.concat();
+        let [sunrise, vanilla] = run([0.5, 64.0, 0.5], 3, |_| vec![row(7, "mymod:far", 4.5)]);
+        let all = sunrise.all();
         assert_eq!(
             spawns(&all),
             [general_entity::Message::Spawn {
@@ -156,7 +223,26 @@ fn a_reading_client_in_range_gets_one_spawn_and_another_client_nothing() {
             !all.iter()
                 .any(|b| matches!(decode(b), play::Clientbound::AddEntity(_)))
         );
-        assert!(!names(&vanilla.concat(), 7));
+        assert!(!names(&vanilla.all(), 7));
+        assert!(!vanilla.tracker.is_tracking(7));
+    });
+}
+
+/// A saved tree whose root type is installed but a rider's is not is quarantined whole: its root
+/// keeps the type's key, yet is no row (`EntityState::general` unset), and is never paired.
+#[test]
+fn a_quarantined_record_with_a_declared_key_is_never_paired() {
+    with_types(|| {
+        let [sunrise, vanilla] = run([0.5, 64.0, 0.5], 3, |_| {
+            vec![EntityState {
+                general: false,
+                ..row(7, "mymod:far", 4.5)
+            }]
+        });
+        for client in [&sunrise, &vanilla] {
+            assert!(!names(&client.all(), 7));
+            assert!(!client.tracker.is_tracking(7));
+        }
     });
 }
 
@@ -164,14 +250,31 @@ fn a_reading_client_in_range_gets_one_spawn_and_another_client_nothing() {
 fn the_declared_range_decides_who_pairs() {
     with_types(|| {
         // 40 blocks away: past `near`'s 2 chunks (32 blocks), within `far`'s 8 (128).
-        let (sunrise, _) = run([40.5, 64.0, 0.5], 1, |_| {
+        let [sunrise, _] = run([40.5, 64.0, 0.5], 1, |_| {
             vec![row(7, "mymod:near", 0.5), row(8, "mymod:far", 0.5)]
         });
-        let ids: Vec<i32> = spawns(&sunrise[0])
-            .into_iter()
-            .map(|general_entity::Message::Spawn { id, .. }| id)
-            .collect();
-        assert_eq!(ids, [8]);
+        assert_eq!(spawn_ids(&sunrise.sent[0]), [8]);
+    });
+}
+
+/// `entity-broadcast-range-percentage` scales the declared range before anything caps it:
+/// `mymod:wide`'s 320 chunks at 10% reach 512 blocks, past what a byte of chunks scaled
+/// (25 chunks, 408 blocks) would.
+#[test]
+fn the_broadcast_percentage_scales_a_wide_declared_range() {
+    with_types(|| {
+        let mut level = Entities {
+            range_percent: Some(10),
+            ..Entities::default()
+        };
+        let mut clients = [Client::new(true), Client::new(true)];
+        for c in &mut clients {
+            c.view_distance = 40;
+        }
+        let at = [[500.5, 64.0, 0.5], [520.5, 64.0, 0.5]];
+        pass(&mut level, &mut clients, &at, &[row(7, "mymod:wide", 0.5)]);
+        assert_eq!(spawn_ids(&clients[0].sent[0]), [7]);
+        assert!(spawn_ids(&clients[1].sent[0]).is_empty());
     });
 }
 
@@ -183,11 +286,11 @@ fn moves_go_out_at_the_declared_interval() {
             let x = 0.5 + f64::from(tick) * 0.25;
             vec![row(7, "mymod:near", x), row(8, "mymod:far", x)]
         };
-        let (sunrise, _) = run([0.5, 64.0, 0.5], 21, moving);
+        let [sunrise, _] = run([0.5, 64.0, 0.5], 21, moving);
         let moved = |id: i32| -> Vec<u32> {
             (1..21)
                 .filter(|&t| {
-                    sunrise[t as usize].iter().any(|b| match decode(b) {
+                    sunrise.sent[t as usize].iter().any(|b| match decode(b) {
                         play::Clientbound::MoveEntityPos(play::MoveEntityPos(m))
                         | play::Clientbound::MoveEntityPosRot(play::MoveEntityPosRot(m)) => {
                             m.id == id
@@ -212,13 +315,83 @@ fn leaving_range_removes_the_row_and_coming_back_spawns_it_afresh() {
             1 => 100.5,
             _ => 1.5,
         };
-        let (sunrise, _) = run([0.5, 64.0, 0.5], 3, |t| vec![row(7, "mymod:near", x(t))]);
-        assert_eq!(spawns(&sunrise[0]).len(), 1);
+        let [sunrise, _] = run([0.5, 64.0, 0.5], 3, |t| vec![row(7, "mymod:near", x(t))]);
+        assert_eq!(spawn_ids(&sunrise.sent[0]), [7]);
         assert!(
-            sunrise[1]
+            sunrise.sent[1]
                 .iter()
                 .any(|b| matches!(decode(b), play::Clientbound::RemoveEntities(p) if p.ids == [7]))
         );
-        assert_eq!(spawns(&sunrise[2]).len(), 1);
+        assert_eq!(spawn_ids(&sunrise.sent[2]), [7]);
+    });
+}
+
+/// A key the spawn cannot carry (registration refuses one; a row may not have one): no client is
+/// introduced to the row, so none is recorded as tracking it or sent its moves.
+#[test]
+fn a_row_whose_spawn_cannot_be_written_is_tracked_by_nobody() {
+    with_types(|| {
+        let long = format!("mymod:{}", "l".repeat(general_entity::MAX_KEY));
+        let [sunrise, _] = run([0.5, 64.0, 0.5], 3, |tick| {
+            vec![row(7, &long, 0.5 + f64::from(tick))]
+        });
+        assert!(!sunrise.tracker.is_tracking(7));
+        assert!(!names(&sunrise.all(), 7));
+    });
+}
+
+/// A client that starts tracking a row between its updates is introduced at the position the
+/// others were last told, so the next move's delta lands both on the same point.
+#[test]
+fn a_client_paired_between_updates_decodes_the_next_move_as_the_others_do() {
+    with_types(|| {
+        let mut level = Entities::default();
+        let mut clients = [Client::new(true), Client::new(true)];
+        let (near, away) = ([0.5, 64.0, 0.5], [600.5, 64.0, 0.5]);
+        // `far` updates every 10 ticks; the second client arrives at tick 3, between updates.
+        for tick in 0..=21 {
+            let at = [near, if tick < 3 { away } else { near }];
+            let x = 0.5 + f64::from(tick) * 0.25;
+            pass(&mut level, &mut clients, &at, &[row(7, "mymod:far", x)]);
+        }
+        assert_eq!(spawn_ids(&clients[1].sent[3]), [7]);
+        // A move follows the late spawn, and both clients decode it to one point.
+        assert!(clients[1].sent[4..].concat().iter().any(|b| matches!(
+            decode(b),
+            play::Clientbound::MoveEntityPos(_) | play::Clientbound::MoveEntityPosRot(_)
+        )));
+        let first = decoded(&clients[0].all(), 7).unwrap();
+        let second = decoded(&clients[1].all(), 7).unwrap();
+        assert_eq!(first, second);
+    });
+}
+
+/// A client viewing the level from another (#3716) is sent no general spawn, so a general row
+/// takes none of the starts its cap allows: every other entity up to the cap is still started.
+#[test]
+fn general_rows_take_no_start_under_a_viewed_levels_cap() {
+    with_types(|| {
+        let room = sunrise_protocol::viewed_levels::MAX_ENTITIES;
+        let mut states = vec![row(1, "mymod:far", 0.5)];
+        states.extend((0..room as i32).map(|i| EntityState {
+            id: 100 + i,
+            uuid: 0x10_0000 + i as u128,
+            kind: "minecraft:item".into(),
+            position: [0.5, 64.0, 0.5],
+            ..EntityState::default()
+        }));
+        let mut level = Entities::default();
+        let mut viewer = Client::new(false);
+        viewer.sources = Some(vec![((0, 0), 10)]);
+        let mut clients = [viewer];
+        pass(&mut level, &mut clients, &[[1.0e6, 64.0, 1.0e6]], &states);
+        let tracker = &clients[0].tracker;
+        assert!(!tracker.is_tracking(1));
+        assert_eq!(
+            (100..100 + room as i32)
+                .filter(|&id| tracker.is_tracking(id))
+                .count(),
+            room
+        );
     });
 }
