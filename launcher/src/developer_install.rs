@@ -305,14 +305,12 @@ mod tests {
     fn dirty_tracked_checkout_is_refused_but_local_commit_is_snapshotted() {
         let folder = tempfile::tempdir().unwrap();
         let git = |args: &[&str]| {
-            assert!(
-                Command::new("git")
-                    .current_dir(folder.path())
-                    .args(args)
-                    .status()
-                    .unwrap()
-                    .success()
-            );
+            assert!(Command::new("git")
+                .current_dir(folder.path())
+                .args(args)
+                .status()
+                .unwrap()
+                .success());
         };
         git(&["init", "-q"]);
         fs::write(folder.path().join("input"), "committed").unwrap();
@@ -337,11 +335,9 @@ mod tests {
             "committed"
         );
         fs::write(folder.path().join("input"), "dirty").unwrap();
-        assert!(
-            committed_snapshot(folder.path())
-                .unwrap_err()
-                .contains("Commit your changes first")
-        );
+        assert!(committed_snapshot(folder.path())
+            .unwrap_err()
+            .contains("Commit your changes first"));
     }
     /// A checkout with the exporters manifest, and a game program beside the given companions.
     fn packaging_inputs(
