@@ -220,7 +220,6 @@ impl Game<'_> {
 
     /// Entity.isOnFire: remaining ticks or the client's synced flag, unless fire immune.
     pub(super) fn entity_is_on_fire(&self, entity: EntityRef) -> Option<bool> {
-        let id = i32::try_from(entity.id()).ok()?;
         let (ticks, immune) = match self
             .native_entity_read_target(entity)
             .and_then(|target| self.native_target_body(target))
@@ -240,7 +239,11 @@ impl Game<'_> {
             }
             _ => (0, self.client_tracked_player_fire_immunity(entity)?),
         };
-        let synced = !self.is_logical_server() && self.remote.as_ref()?.entity_on_fire(id)?;
+        let synced = !self.is_logical_server()
+            && self
+                .remote
+                .as_ref()?
+                .entity_on_fire(i32::try_from(entity.id()).ok()?)?;
         Some(!immune && (ticks > 0 || synced))
     }
 
@@ -292,12 +295,13 @@ impl Game<'_> {
     }
 
     fn set_fire_immunity_for(&mut self, target: Target, immune: bool) -> bool {
+        let server = self.is_logical_server();
         let (grant, ticks) = match target {
             Target::Mob(id) => {
                 let Some(mob) = self.mobs.iter_mut().find(|m| m.id == id && !m.removed) else {
                     return false;
                 };
-                mob.needs_sync |= mob.mod_fire_immune != immune;
+                mob.needs_sync |= server && mob.mod_fire_immune != immune;
                 (&mut mob.mod_fire_immune, &mut mob.fire_ticks)
             }
             Target::Stand(id) => {
@@ -315,7 +319,9 @@ impl Game<'_> {
             _ => return false,
         };
         *grant = immune;
-        if immune {
+        // Remote mobs and stands keep the server's fire bit in this field. Mask it
+        // while rendering, but keep the copy so revocation needs no new packet.
+        if immune && (server || matches!(target, Target::Player)) {
             *ticks = (*ticks).min(0);
         }
         true
@@ -1483,34 +1489,36 @@ mod tests {
                 g.player =
                     Some(PlayerMotion::new(g.motion, sunrise_core::geometry::Vec3::ZERO).unwrap());
                 let local = g.entity(7).unwrap();
-                // The packet a server sends: it makes the client's own copy of the stand, which a bare
-                // `spawn_entity` (the tracking half of `handleAddEntity`) does not.
-                let stand_kind = g
-                    .remote
-                    .as_ref()
-                    .unwrap()
-                    .builtin
-                    .get("minecraft:entity_type")
-                    .unwrap()
-                    .id("minecraft:armor_stand")
+                // Spawn actual renderable client copies through the normal packet path.
+                for (id, name) in [(15, "minecraft:armor_stand"), (16, "minecraft:zombie")] {
+                    let kind = g
+                        .remote
+                        .as_ref()
+                        .unwrap()
+                        .builtin
+                        .get("minecraft:entity_type")
+                        .unwrap()
+                        .id(name)
+                        .unwrap();
+                    g.handle_packet(sunrise_protocol::packets::play::Clientbound::AddEntity(
+                        sunrise_protocol::packets::play::AddEntity {
+                            id,
+                            uuid: id as u128,
+                            kind,
+                            position: [0.0; 3],
+                            velocity: [0.0; 3],
+                            pitch: 0,
+                            yaw: 0,
+                            head_yaw: 0,
+                            data: 0,
+                        },
+                    ))
                     .unwrap();
-                g.handle_packet(sunrise_protocol::packets::play::Clientbound::AddEntity(
-                    sunrise_protocol::packets::play::AddEntity {
-                        id: 15,
-                        uuid: 15,
-                        kind: stand_kind,
-                        position: [0.0; 3],
-                        velocity: [0.0; 3],
-                        pitch: 0,
-                        yaw: 0,
-                        head_yaw: 0,
-                        data: 0,
-                    },
-                ))
-                .unwrap();
+                }
                 let stand = g.entity(15).unwrap();
+                let zombie = g.entity(16).unwrap();
                 for flag in [1, 0] {
-                    for id in [7, 15] {
+                    for id in [7, 15, 16] {
                         g.handle_packet(
                             sunrise_protocol::packets::play::Clientbound::SetEntityData(
                                 sunrise_protocol::packets::play::SetEntityData {
@@ -1538,6 +1546,26 @@ mod tests {
                     assert_eq!(local.is_on_fire(g), Some(false));
                     assert!(local.set_client_fire_immunity(g, false));
                     assert_eq!(local.is_on_fire(g), Some(flag != 0));
+                    // Revoking while the server flag is unchanged must reveal the
+                    // existing flame again, both in the handle and in the draw state.
+                    for (grant, burning) in [(true, false), (false, flag != 0)] {
+                        assert!(zombie.set_client_fire_immunity(g, grant));
+                        assert!(stand.set_client_fire_immunity(g, grant));
+                        assert_eq!(zombie.is_on_fire(g), Some(burning));
+                        assert_eq!(stand.is_on_fire(g), Some(burning));
+                        assert_eq!(
+                            g.mobs.iter().find(|m| m.id == 16).unwrap().is_on_fire(),
+                            burning
+                        );
+                        assert_eq!(
+                            g.armor_stands
+                                .iter()
+                                .find(|s| s.id == 15)
+                                .unwrap()
+                                .is_on_fire(),
+                            burning
+                        );
+                    }
                 }
                 g.player.as_mut().unwrap().fire_ticks = 2;
                 assert_eq!(

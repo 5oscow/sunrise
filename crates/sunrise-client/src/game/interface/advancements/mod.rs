@@ -687,7 +687,6 @@ impl Game<'_> {
         EntityView {
             kind: "minecraft:player".into(),
             position: [p.position.x, p.position.y, p.position.z],
-            // Entity.isOnFire on a server: remainingFireTicks (players aren't fire immune).
             on_fire: p.is_on_fire(),
             sneaking: p.pose == sunrise_client::pose::Pose::Crouching,
             // Input.shift: the held key, as `BlockItem.place`'s sneaking reads it.

@@ -2703,9 +2703,10 @@ impl Mob {
             .sum();
         (base - 0.15 * f64::from(protection)).max(0.0)
     }
-    /// `Entity.fireImmune`, including the heart-bound Creaking override.
+    /// The mob type's fire immunity or a live grant. Species-specific hurt rules
+    /// (such as the Creaking's heart-bound damage gate) stay on their own paths.
     pub fn fire_immune(&self) -> bool {
-        self.kind.flags.fire_immune || self.mod_fire_immune || creaking::heart_bound(self)
+        self.kind.flags.fire_immune || self.mod_fire_immune
     }
     /// Entity.isOnFire: fire-immune mobs never count as burning, even on the
     /// tick a sun or fire check set their timer before `base_tick` clears it.

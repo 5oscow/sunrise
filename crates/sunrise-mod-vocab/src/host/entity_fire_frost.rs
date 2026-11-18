@@ -14,9 +14,10 @@ pub trait EntityFireFrostBackend {
     #[access(WorldOnly)]
     fn entity_is_on_fire(&self, entity: EntityRef) -> Option<bool>;
     /// Side: both.
-    /// `Entity.fireImmune`: the built-in answer or the immunity granted on this side.
-    /// Players, mobs, armor stands and the intrinsically immune dragon. `None` for
-    /// unsupported entities or stale handles.
+    /// `Entity.fireImmune`: type immunity or the live grant on this side. Separate
+    /// species-specific damage rules do not turn on the grant. Players, mobs, armor
+    /// stands and the intrinsically immune dragon. `None` for unsupported entities
+    /// or stale handles.
     #[access(WorldOnly)]
     fn entity_fire_immune(&self, entity: EntityRef) -> Option<bool>;
     /// Side: server.
@@ -73,8 +74,9 @@ pub trait EntityFireFrostBackendMut {
 pub trait EntityFireFrostClientBackendMut {
     /// Side: client. Sets or clears the same additive grant on this client's own copy
     /// of a player (including its local player), mob or armor stand. It affects local
-    /// prediction and drawing only and is never sent to the server. The grant ends when
-    /// the client discards that entity copy. Returns `false` for unsupported entities,
+    /// prediction and drawing only, preserving remote entities' synced fire state so it
+    /// is visible again if the grant is revoked. The grant is not sent to the server and
+    /// ends when the client discards that entity copy. Returns `false` for unsupported entities,
     /// stale handles and outside a client world.
     #[access(WorldOnly)]
     fn entity_set_client_fire_immunity(&mut self, entity: EntityRef, immune: bool) -> bool;
