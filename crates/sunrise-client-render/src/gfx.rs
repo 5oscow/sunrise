@@ -113,10 +113,8 @@ pub use entity_batch::{
 use external::{shadow_box, shadow_runs};
 pub use frustum::{Cull, Frusta, JoinedFrusta, ShadowCull};
 use frustum::{block_entities_within_reach, frustum, shadow_casters, taa_frustum};
-use section_fade::{
-    CHUNK_VISIBILITY_THRESHOLD, FadeInputs, chunk_visibility, fade_millis, section_instance,
-    section_visibility,
-};
+pub use section_fade::{CHUNK_VISIBILITY_THRESHOLD, chunk_visibility, fade_millis};
+use section_fade::{FadeInputs, compiled_and_visible, section_instance, section_visibility};
 pub use view::{View, ViewSet};
 
 /// Whether Translucent Batching is offered (`graphics::offer_translucent_batching`): where

@@ -82,9 +82,10 @@ enum ClientState {
     /// `WaitingForPlayerChunk`: until the section around the player is shown.
     WaitingForPlayerChunk {
         player_section_ready: bool,
-        /// When the player's section was first seen compiled: its
-        /// `RenderSection.uploadedTime`, which its fade-in counts from.
-        section_compiled_at: Option<u64>,
+        /// Without a renderer: the player's section and when it was first
+        /// seen compiled, its `RenderSection.uploadedTime` that its fade-in
+        /// counts from (`player_section_compiled`).
+        section_compiled_at: Option<([i32; 3], u64)>,
         timeout_after: u64,
     },
     /// `ClientLevelReady`.
@@ -172,12 +173,20 @@ impl LevelLoadTracker {
             *player_section_ready = true;
         }
     }
-    /// `LevelRenderer`'s check before that callback, for a client that draws
-    /// no sections itself: the player's section is compiled (now, or since
-    /// an earlier call of this load), and `isSectionCompiledAndVisible` holds
-    /// once `RenderSection.getVisibility(now, fade_ms)` reaches 0.3 (225 ms
-    /// at the default 0.75 s `chunkSectionFadeInTime`).
-    pub fn player_section_compiled(&mut self, now: u64, fade_ms: u64) {
+    /// `LevelRenderer`'s check before that callback, for a client without a
+    /// renderer: the player's section `section` (block coordinates of the
+    /// camera, `>> 4`) is compiled while `compiled`, and
+    /// `isSectionCompiledAndVisible` holds once `RenderSection.getVisibility`
+    /// has reached 0.3 since that section was first seen compiled (225 ms at
+    /// the default 0.75 s `chunkSectionFadeInTime`). Another section, or one
+    /// no longer compiled, starts its fade-in again.
+    pub fn player_section_compiled(
+        &mut self,
+        section: [i32; 3],
+        compiled: bool,
+        now: u64,
+        fade_ms: u64,
+    ) {
         let Some(ClientState::WaitingForPlayerChunk {
             player_section_ready,
             section_compiled_at,
@@ -186,14 +195,19 @@ impl LevelLoadTracker {
         else {
             return;
         };
-        let uploaded = *section_compiled_at.get_or_insert(now);
-        let elapsed = now.saturating_sub(uploaded);
-        let visibility = if elapsed >= fade_ms {
-            1.0
-        } else {
-            elapsed as f32 / fade_ms as f32
+        if !compiled {
+            *section_compiled_at = None;
+            return;
+        }
+        let uploaded = match *section_compiled_at {
+            Some((at, uploaded)) if at == section => uploaded,
+            _ => {
+                *section_compiled_at = Some((section, now));
+                now
+            }
         };
-        if visibility >= 0.3 {
+        let visibility = crate::gfx::chunk_visibility(now.saturating_sub(uploaded), fade_ms);
+        if visibility >= crate::gfx::CHUNK_VISIBILITY_THRESHOLD {
             *player_section_ready = true;
         }
     }
@@ -878,25 +892,51 @@ mod tracker_tests {
     }
 
     #[test]
-    fn a_compiled_section_counts_as_shown_once_it_has_faded_in_to_three_tenths() {
+    fn without_a_renderer_the_section_shows_once_it_has_faded_in_to_three_tenths() {
         // RenderSection.getVisibility(now, 750) >= 0.3: 225 ms after the upload.
+        const AT: [i32; 3] = [0, 4, 0];
         let mut tracker = LevelLoadTracker::new(0);
         tracker.start_client_load(0, Reason::EndPortal);
         tracker.loading_packets_received();
-        tracker.player_section_compiled(1_000, 750);
-        tracker.player_section_compiled(1_224, 750);
+        tracker.player_section_compiled(AT, true, 1_000, 750);
+        tracker.player_section_compiled(AT, true, 1_224, 750);
         tracker.tick_client_load(1_224, ALIVE);
         assert!(!tracker.is_level_ready(1_224));
-        tracker.player_section_compiled(1_225, 750);
+        tracker.player_section_compiled(AT, true, 1_225, 750);
         tracker.tick_client_load(1_225, ALIVE);
         assert!(tracker.is_level_ready(1_225));
         // With the fade off, at once.
         let mut tracker = LevelLoadTracker::new(0);
         tracker.start_client_load(0, Reason::Other);
         tracker.loading_packets_received();
-        tracker.player_section_compiled(500, 0);
+        tracker.player_section_compiled(AT, true, 500, 0);
         tracker.tick_client_load(500, ALIVE);
         assert!(tracker.is_level_ready(500));
+    }
+
+    #[test]
+    fn without_a_renderer_a_new_section_does_not_take_the_old_ones_age() {
+        let mut tracker = LevelLoadTracker::new(0);
+        tracker.start_client_load(0, Reason::EndPortal);
+        tracker.loading_packets_received();
+        tracker.player_section_compiled([0, 4, 0], true, 1_000, 750);
+        // Teleported one section up, then 100 chunks away, while waiting.
+        tracker.player_section_compiled([0, 5, 0], true, 1_200, 750);
+        tracker.player_section_compiled([100, 5, 0], true, 1_300, 750);
+        tracker.tick_client_load(1_300, ALIVE);
+        assert!(!tracker.is_level_ready(1_300));
+        tracker.player_section_compiled([100, 5, 0], true, 1_524, 750);
+        tracker.tick_client_load(1_524, ALIVE);
+        assert!(!tracker.is_level_ready(1_524));
+        // A missing neighbour: no longer compiled, so its fade starts again.
+        tracker.player_section_compiled([100, 5, 0], false, 1_525, 750);
+        tracker.player_section_compiled([100, 5, 0], true, 1_600, 750);
+        tracker.player_section_compiled([100, 5, 0], true, 1_824, 750);
+        tracker.tick_client_load(1_824, ALIVE);
+        assert!(!tracker.is_level_ready(1_824));
+        tracker.player_section_compiled([100, 5, 0], true, 1_825, 750);
+        tracker.tick_client_load(1_825, ALIVE);
+        assert!(tracker.is_level_ready(1_825));
     }
 
     #[test]
