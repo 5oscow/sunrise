@@ -4,6 +4,7 @@
 the same code (`crates/sunrise-native-build`). Every SDK release carries the tool for each host it is built for, as
 `tool-<target>.tar.xz` holding `cargo-sunrise-mod` (`.exe` on Windows), so a caller that already checked the SDK's
 signed `sdk.json` gets a tool made from that build's own source.
+Use that SDK's tool for the JSON commands: its horizon-mixins revision and patch match the SDK by construction.
 
 The caller does what needs a player or their game: it checks that native code is allowed, fetches and verifies the
 SDK's slices, installs the pinned Rust, chooses the mods and which of them a build leaves out, and installs what the

@@ -13,6 +13,7 @@ use std::{
 pub struct Options<'a> {
     pub consent: Option<&'a dyn Fn(&super::RegistryInventory) -> bool>,
     pub adapter: &'a Path,
+    pub mixins: &'a super::MixinsIdentity,
 }
 
 fn compiler_plan(
@@ -300,7 +301,8 @@ pub fn compile(
     }
     // `[[native.mixin]]` rows: the patched crates join the workspace beside the mods, whose
     // crates their helpers call, and compile against the SDK like a mod.
-    let patch = super::patch::prepare(rust, game, &out.join("fnr"), projects, &sdk)?;
+    let patch =
+        super::patch::prepare(rust, game, &out.join("fnr"), projects, &sdk, options.mixins)?;
     if let Some(patch) = &patch {
         for name in &patch.names {
             let dir = patch.dir.join(name);
@@ -868,6 +870,7 @@ mod tests {
                     approve
                 }),
                 adapter: &adapter,
+                mixins: &crate::MixinsIdentity::resolve([&bundle], None).unwrap(),
             },
         );
         if approve {
