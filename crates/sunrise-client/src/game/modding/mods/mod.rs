@@ -1064,6 +1064,15 @@ pub(in crate::game) fn content_root(
     register_iterated_registries(overlay.root.prepared())?;
     sunrise_client::mod_content::set_fluid_looks(&overlay.mods);
     sunrise_client::mod_content::set_fluid_interactions(&overlay.mods);
+    // Freeze ownership with the startup registries, before preparing Parts. Pack and data
+    // reloads can change layers but cannot replace the registered blocks and block entity types.
+    mod_api::__private::install_content_owners(overlay.mods.iter().flat_map(|layer| {
+        layer
+            .content
+            .namespaces
+            .iter()
+            .map(|namespace| (namespace.as_str(), layer.id.as_str()))
+    }));
     Ok(overlay.root)
 }
 

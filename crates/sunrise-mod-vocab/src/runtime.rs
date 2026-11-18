@@ -70,7 +70,7 @@ pub(crate) struct Installed {
     pub(crate) subscribers: sunrise_mod_runtime::subscribers::Subscribers,
     pub(crate) disabled: Box<[std::sync::atomic::AtomicBool]>,
     mod_id_owners: std::collections::HashMap<&'static str, usize>,
-    namespace_owners: OnceLock<std::collections::HashMap<Box<str>, usize>>,
+    content_owners: OnceLock<std::collections::HashMap<Box<str>, Option<usize>>>,
     disabled_count: std::sync::atomic::AtomicUsize,
     /// The poison sets of the hooks whose dispatch isolates every listener
     /// (#2414 ruling): a listener that unwound is skipped by that one hook
@@ -120,7 +120,7 @@ impl Installed {
             subscribers,
             disabled,
             mod_id_owners,
-            namespace_owners: OnceLock::new(),
+            content_owners: OnceLock::new(),
             disabled_count: std::sync::atomic::AtomicUsize::new(0),
             poisons: std::sync::Mutex::new(None),
             poison_free: std::sync::atomic::AtomicBool::new(true),
@@ -287,20 +287,19 @@ pub(crate) fn mod_index_on(index: usize) -> bool {
     })
 }
 
-/// Publish ownership once both dispatch and package inventory are installed.
-pub(crate) fn install_namespace_owners(packages: &[PackageInfo]) {
+/// Freeze the admitted registry owners. A content-only owner has no dispatch slot.
+pub(crate) fn install_content_owners<'a>(owners: impl IntoIterator<Item = (&'a str, &'a str)>) {
     if let Some(installed) = installed() {
-        installed.namespace_owners.get_or_init(|| {
-            let mut owners = std::collections::HashMap::new();
-            for (index, entry) in installed.mods.iter().enumerate() {
-                owners.insert(entry.id.into(), index);
-                if let Some(package) = packages.iter().find(|package| package.id() == entry.id) {
-                    for namespace in package.namespaces() {
-                        owners.insert(namespace.into(), index);
-                    }
-                }
-            }
+        installed.content_owners.get_or_init(|| {
             owners
+                .into_iter()
+                .map(|(namespace, owner)| {
+                    (
+                        namespace.into(),
+                        installed.mod_id_owners.get(owner).copied(),
+                    )
+                })
+                .collect()
         });
     }
 }
@@ -313,8 +312,12 @@ pub(crate) fn content_owner_disabled(id: &str) -> bool {
 pub(crate) fn content_owner_index(id: &str) -> Option<usize> {
     let (namespace, _) = id.split_once(':')?;
     let installed = installed()?;
-    match installed.namespace_owners.get() {
-        Some(owners) => owners.get(namespace).copied(),
+    match installed
+        .content_owners
+        .get()
+        .and_then(|owners| owners.get(namespace))
+    {
+        Some(owner) => *owner,
         None => installed.mod_id_owners.get(namespace).copied(),
     }
 }
@@ -603,11 +606,26 @@ mod listener_lease_tests {
 mod toggle_tests {
     use super::*;
 
+    struct Quiet;
+    #[mod_api::__subscriptions]
+    impl Hooks for Quiet {}
+
+    #[test]
+    fn admitted_content_only_owner_takes_precedence_over_a_mod_id() {
+        crate::testing::with_dispatch(
+            vec![ModEntry::new("shared", Box::new(Quiet))].into(),
+            || {
+                assert!(set_mod_enabled("shared", false));
+                assert!(content_owner_disabled("shared:machine"));
+
+                install_content_owners([("shared", "content_only")]);
+                assert!(!content_owner_disabled("shared:machine"));
+            },
+        );
+    }
+
     #[test]
     fn cached_disabled_flag_tracks_repeated_and_independent_toggles() {
-        struct Quiet;
-        #[mod_api::__subscriptions]
-        impl crate::Hooks for Quiet {}
         crate::testing::with_dispatch(
             vec![
                 ModEntry::new("a", Box::new(Quiet)),

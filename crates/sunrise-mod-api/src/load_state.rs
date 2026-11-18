@@ -77,21 +77,13 @@ fn inventory(native: &[PackageInfo], content: &[PackageInfo]) -> Vec<PackageInfo
     packages
 }
 
-/// Records the package inventory and its dispatch owners once at startup; a second call panics.
+/// Records the package inventory once at startup; a second call panics.
 pub fn install_packages(native: &[PackageInfo], content: &[PackageInfo]) {
     let _ = crate::__private::initialize();
     assert!(
         PACKAGES.set(inventory(native, content).into()).is_ok(),
         "package inventory already installed"
     );
-    publish_namespace_owners();
-}
-
-// Either half can arrive first. Both call this after publishing so the later one binds the table.
-pub(crate) fn publish_namespace_owners() {
-    if let Some(packages) = PACKAGES.get() {
-        mod_vocab::__private::install_namespace_owners(packages);
-    }
 }
 
 /// Install the host's ordered package inventory in a guest at initialization.

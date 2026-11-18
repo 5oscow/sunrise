@@ -53,9 +53,9 @@ pub fn set_mod_enabled(id: &str, on: bool) -> bool {
     crate::set_mod_enabled(id, on)
 }
 
-/// Index the namespaces of the published packages against the installed dispatch order.
-pub fn install_namespace_owners(packages: &[crate::PackageInfo]) {
-    crate::runtime::install_namespace_owners(packages);
+/// Index the `(namespace, mod ID)` pairs admitted to the startup registries.
+pub fn install_content_owners<'a>(owners: impl IntoIterator<Item = (&'a str, &'a str)>) {
+    crate::runtime::install_content_owners(owners);
 }
 
 /// Whether the declaring package of this content is switched off.

@@ -177,58 +177,70 @@ mod tests {
         }
     }
 
-    fn with_inert_block(name: &str, test: impl FnOnce(&mut Game<'_>, BlockStateId, &Probe)) {
-        with_inert_block_cases(name, &["dispatch-first"], test);
-    }
+    struct ConflictingCode;
+    #[mod_api::__subscriptions]
+    impl Hooks for ConflictingCode {}
 
-    fn with_inert_block_cases(
-        name: &str,
-        cases: &[&str],
-        test: impl FnOnce(&mut Game<'_>, BlockStateId, &Probe),
-    ) {
-        const CHILD: &str = "SUNRISE_INERT_BLOCK_CHILD";
+    fn with_inert_block(name: &str, test: impl FnOnce(&mut Game<'_>, BlockStateId, &Probe)) {
         let name = format!("game::disabled_block_tests::tests::{name}");
-        if fixture::run_fresh_cases(&name, CHILD, cases) {
+        if fixture::run_fresh_cases(&name, "SUNRISE_INERT_BLOCK_CHILD", &["valid"]) {
             return;
         }
-        let packages_first = std::env::var(CHILD).is_ok_and(|case| case == "packages-first");
+        use mod_api::__private::native::BuiltMod;
+        use sunrise_mod_package::{mod_list::NATIVE_DIR, runtime::Runtime};
+        const BUILT: &[BuiltMod] = &[
+            BuiltMod {
+                id: "inert_test",
+                version: "1.0.0",
+                side: mod_api::Side::Both,
+            },
+            BuiltMod {
+                id: "inert_test_extra",
+                version: "1.0.0",
+                side: mod_api::Side::Both,
+            },
+        ];
+        let dir = tempfile::tempdir().unwrap();
+        // The second package's own ID conflicts with the first's extra namespace. The
+        // dependency orders admission; the second package's compiled code stays installed.
+        for (package, declarations) in BUILT.iter().zip([
+            "namespaces=['inert_test_extra']",
+            "[dependencies]\ninert_test='*'",
+        ]) {
+            let id = package.id;
+            let path = dir.path().join(NATIVE_DIR).join(id);
+            std::fs::create_dir_all(path.join("src")).unwrap();
+            std::fs::write(path.join("sunrise-mod.toml"), format!(
+                "id='{id}'\nname='{id}'\nversion='1.0.0'\napi='0.2'\nside='both'\ncapabilities=['registries']\n{declarations}\n[native]\ngame='26.3'\nsunrise='{}'\nmixins='{}'\n",
+                "a".repeat(40), "b".repeat(40),
+            )).unwrap();
+            std::fs::write(
+                path.join("Cargo.toml"),
+                format!("[package]\nname='{id}'\nversion='1.0.0'\n"),
+            )
+            .unwrap();
+            std::fs::write(path.join("src/lib.rs"), "").unwrap();
+        }
+        let sources = super::super::mods::ModsState {
+            native: Arc::new(Runtime::load(&dir.path().join("sunrise-client"), BUILT).unwrap()),
+            ..Default::default()
+        };
         let probe = Arc::new(Probe::default());
         let mods: mod_api::Mods = vec![
             mod_api::ModEntry::new("enabled_prefix", Box::new(EnabledPrefix(probe.clone()))),
             mod_api::ModEntry::new("inert_test", Box::new(Owner(probe.clone()))),
+            mod_api::ModEntry::new("inert_test_extra", Box::new(ConflictingCode)),
             mod_api::ModEntry::new("enabled_observer", Box::new(Observer(probe.clone()))),
         ]
         .into();
-        let install_packages = || {
-            crate::game::api_values::install_test_platform();
-            crate::game::api_values::install_packages(
-                &[sunrise_mod_package::packages::AdjacentManifest {
-                    path: Default::default(),
-                    manifest: sunrise_mod_package::Manifest::parse(
-                        "id='inert_test'\nname='Inert Test'\nversion='1'\napi='0.2'\n\
-                         namespaces=['inert_test_extra']\ncapabilities=['registries']",
-                    )
-                    .unwrap(),
-                    has_icon: false,
-                }],
-                &[],
-            )
-            .unwrap();
-        };
-        if packages_first {
-            install_packages();
-        }
         mod_platform::testing::with_mods(mods.clone(), || {
-            if packages_first {
-                mod_platform::__private::install(mods.clone());
-            } else {
-                install_packages();
-            }
+            crate::game::api_values::install_test_platform();
+            crate::game::api_values::install_packages(sources.native.packages(), &[]).unwrap();
             crate::game::api_values::install_parts(&mods).unwrap();
             mod_api::__private::mark_game_thread();
             let base =
                 std::path::PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap());
-            let root = super::super::mods::content_root(&base, &Default::default()).unwrap();
+            let root = super::super::mods::content_root(&base, &sources).unwrap();
             fixture::with_game_at(root.prepared().to_owned(), |game| {
                 game.options.dedicated = Some(Vec::new());
                 game.native_level_opened(Dim::Overworld);
@@ -318,9 +330,8 @@ mod tests {
     #[test]
     #[ignore = "daily"]
     fn disabled_blocks_survive_piston_pushes_without_authorizing_placement() {
-        with_inert_block_cases(
+        with_inert_block(
             "disabled_blocks_survive_piston_pushes_without_authorizing_placement",
-            &["dispatch-first", "packages-first"],
             |game, _, _| {
                 let base = BlockPos::new(3, 70, 5);
                 let registry = &game.pack.assets.registry;

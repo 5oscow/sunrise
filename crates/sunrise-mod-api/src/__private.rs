@@ -29,7 +29,6 @@ pub fn initialize() -> Result<(), &'static str> {
 pub fn install(mods: crate::Mods) {
     initialize().expect("platform initialization must succeed before publishing mods");
     mod_vocab::__private::install(mods);
-    crate::load_state::publish_namespace_owners();
 }
 
 #[doc(hidden)]
