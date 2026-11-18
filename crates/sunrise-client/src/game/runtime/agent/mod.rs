@@ -280,7 +280,8 @@ enum AttackAim {
     Turned(u64),
     /// Clicked: the next tick's input takes the click.
     Clicked,
-    /// The entity the pick held when the tick's input took the click.
+    /// The entity the pick held when the tick's input took the click (and dropped it unless
+    /// that is the ID).
     Taken(Option<u32>),
 }
 impl TaskKind {
@@ -2012,7 +2013,9 @@ impl Game<'_> {
 
     /// The tick's input is taking an attack click (`Minecraft.startAttack`): an `attack ID`
     /// that clicked keeps the entity this tick's pick holds, the pick the click is taken with.
-    pub(in crate::game) fn note_agent_attack_pick(&mut self) {
+    /// Whether that is not the ID: the click is then the command's, and is dropped. Other clicks
+    /// (no `attack ID` waiting on its click) go on.
+    pub(in crate::game) fn agent_attack_click_refused(&mut self) -> bool {
         let Some(Task {
             kind:
                 TaskKind::Attack {
@@ -2022,16 +2025,18 @@ impl Game<'_> {
             ..
         }) = self.agent.task
         else {
-            return;
+            return false;
         };
         let picked = self.mob_hit().map(|(i, _, _)| self.mobs[i].id);
-        if let Some(Task {
-            kind: TaskKind::Attack { aimed, .. },
+        let Some(Task {
+            kind: TaskKind::Attack { id, aimed, .. },
             ..
         }) = self.agent.task.as_mut()
-        {
-            *aimed = Some(AttackAim::Taken(picked));
-        }
+        else {
+            return false;
+        };
+        *aimed = Some(AttackAim::Taken(picked));
+        picked != *id
     }
 
     /// Advance the running agent task; reply when it ends.
@@ -2263,12 +2268,12 @@ impl Game<'_> {
                     return None;
                 }
                 // The check above read an earlier pick: the one the click was taken with
-                // decides what it hit.
+                // decides, and on another target the click was dropped.
                 if let Some(AttackAim::Taken(picked)) = *aimed
                     && picked != *id
                 {
                     return Some(json!({
-                        "error": "another target was under the crosshair when the click was taken",
+                        "error": "another target was under the crosshair when the click was taken; nothing was clicked",
                         "picked": picked,
                     }));
                 }

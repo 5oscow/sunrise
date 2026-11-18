@@ -120,6 +120,8 @@ fn with_pig_and_server(run: impl FnOnce(&mut Game<'_>, &Mutex<Listener>, &mut Co
             .unwrap();
             game.refresh_client_pick(1.0);
             assert!(game.mob_hit().is_none(), "the pig starts behind the view");
+            // The player is loaded: the tick's keybinds act.
+            game.remote.as_mut().unwrap().loaded_sent = true;
             listener.lock().unwrap().calls = 0;
             run(game, &listener, &mut server);
         })
@@ -143,37 +145,64 @@ fn frame(game: &mut Game<'_>) {
     game.advance_agent();
 }
 
-/// A game tick: its pick before its inputs, the attack clicks queued since the last tick
-/// (`handleKeybinds`' `startAttack`), then the control poll's agent step.
+/// A game tick's keybinds as in play (`remote_handle_input`): its pick, then the clicks the
+/// remote input queue holds, behind the same readiness checks; then the control poll's agent
+/// step.
 fn tick(game: &mut Game<'_>) {
     game.ticks += 1;
-    game.refresh_client_pick(1.0);
-    while game.toggles.0[2].consume_click() {
-        game.remote_start_attack();
-    }
+    game.remote_handle_input();
     game.advance_agent();
 }
 
-/// The entities the client has sent attacks on since the last call.
-fn attacks_sent(game: &Game<'_>, server: &mut Connection) -> Vec<i32> {
+/// What the client's attack clicks sent since the last call: `attack ID` and `punch` (the
+/// swing).
+fn clicks_sent(game: &Game<'_>, server: &mut Connection) -> Vec<String> {
     use sunrise_protocol::packets::{configuration::Ping, play::Serverbound as S};
     // A fence: everything before it was sent before this call.
     game.send(S::Pong(Ping { id: i32::MIN }));
-    let mut attacks = Vec::new();
+    let mut sent = Vec::new();
     loop {
         let (id, payload) = server.recv().unwrap();
         match S::decode(id, &payload).unwrap() {
-            S::Attack(hit) => attacks.push(hit.id),
-            S::Pong(ping) if ping.id == i32::MIN => return attacks,
+            S::Attack(hit) => sent.push(format!("attack {}", hit.id)),
+            S::Punch(_) => sent.push("punch".to_owned()),
+            S::Pong(ping) if ping.id == i32::MIN => return sent,
             _ => {}
         }
     }
 }
 
-/// The attack clicks `KeyMapping.click` has queued and nothing has consumed yet.
-fn attack_clicks(game: &Game<'_>) -> usize {
-    let mut attack = game.toggles.0[2].clone();
-    std::iter::from_fn(|| attack.consume_click().then_some(())).count()
+/// A second pig, entity 32, 1.5 blocks east and 1 south of the player.
+fn add_second_pig(game: &mut Game<'_>) {
+    let pig = game
+        .remote
+        .as_ref()
+        .unwrap()
+        .builtin
+        .get("minecraft:entity_type")
+        .unwrap()
+        .id("minecraft:pig")
+        .unwrap();
+    game.handle_packet(C::AddEntity(play::AddEntity {
+        id: 32,
+        uuid: 32,
+        kind: pig,
+        position: [2.0, 1.0, 1.5],
+        velocity: [0.0; 3],
+        pitch: 0,
+        yaw: 0,
+        head_yaw: 0,
+        data: 0,
+    }))
+    .unwrap();
+}
+
+/// The listener makes every later pick pig 32.
+fn pick_second_pig(game: &Game<'_>, listener: &Mutex<Listener>) {
+    listener.lock().unwrap().result = Some(Some(CrosshairTarget::Entity {
+        entity: game.entity(32).unwrap(),
+        point: [1.55, 1.45, 1.5],
+    }));
 }
 
 fn reply(replies: &mpsc::Receiver<String>) -> Value {
@@ -256,27 +285,26 @@ fn attack_by_id_hits_the_entity_it_turned_to() {
         );
         assert_eq!(game.agent.task.as_ref().map(|t| t.name), Some("attack"));
         assert_eq!(calls(listener), 0, "the command itself picks nothing");
-        assert_eq!(attack_clicks(game), 0, "no click before the tick's pick");
         let health = game.mobs.iter().find(|m| m.id == 31).unwrap().health;
         frame(game);
-        assert_eq!(
-            attack_clicks(game),
-            0,
-            "a frame is not the pick the click reads"
-        );
         tick(game);
         assert_eq!(calls(listener), 2, "the frame's and the tick's own picks");
-        assert_eq!(attack_clicks(game), 1);
         assert_eq!(game.mob_hit().map(|(i, _, _)| game.mobs[i].id), Some(31));
-        for _ in 0..4 {
+        assert_eq!(
+            clicks_sent(game, server),
+            Vec::<String>::new(),
+            "the click is queued after this tick's keybinds"
+        );
+        tick(game);
+        assert_eq!(
+            clicks_sent(game, server),
+            ["attack 31", "punch"],
+            "the next tick took the click"
+        );
+        for _ in 0..3 {
             assert!(replies.try_recv().is_err());
             tick(game);
         }
-        assert_eq!(
-            attacks_sent(game, server),
-            [31],
-            "the next tick took the click"
-        );
         let reply = reply(&replies);
         assert_eq!(reply["target"], json!(31), "{reply}");
         assert_eq!(reply["hit"], json!(true), "{reply}");
@@ -288,45 +316,27 @@ fn attack_by_id_hits_the_entity_it_turned_to() {
 #[ignore = "daily"]
 fn attack_by_id_reports_the_pick_the_click_was_taken_with() {
     with_pig_and_server(|game, listener, server| {
-        let pig = game
-            .remote
-            .as_ref()
-            .unwrap()
-            .builtin
-            .get("minecraft:entity_type")
-            .unwrap()
-            .id("minecraft:pig")
-            .unwrap();
-        game.handle_packet(C::AddEntity(play::AddEntity {
-            id: 32,
-            uuid: 32,
-            kind: pig,
-            position: [2.0, 1.0, 1.5],
-            velocity: [0.0; 3],
-            pitch: 0,
-            yaw: 0,
-            head_yaw: 0,
-            data: 0,
-        }))
-        .unwrap();
+        add_second_pig(game);
         let (_, replies) = command(game, "attack 31");
+        // The first tick's pick holds pig 31: the check passes and the click is queued.
         tick(game);
-        assert_eq!(attack_clicks(game), 1, "the first tick's pick held pig 31");
-        // The next tick's pick, the one its input takes the click with, holds pig 32.
-        listener.lock().unwrap().result = Some(Some(CrosshairTarget::Entity {
-            entity: game.entity(32).unwrap(),
-            point: [1.55, 1.45, 1.5],
-        }));
-        tick(game);
-        assert_eq!(attacks_sent(game, server), [32], "the click hit pig 32");
-        // Past the report tick: the reply is the error, never a hit on pig 31.
-        for _ in 0..4 {
+        assert!(replies.try_recv().is_err());
+        // The next tick's pick, the one its keybinds take the click with, holds pig 32.
+        pick_second_pig(game, listener);
+        for _ in 0..5 {
             tick(game);
         }
+        assert_eq!(
+            clicks_sent(game, server),
+            Vec::<String>::new(),
+            "no attack and no swing reached the server"
+        );
         let reply = reply(&replies);
         assert_eq!(
             reply["error"],
-            json!("another target was under the crosshair when the click was taken"),
+            json!(
+                "another target was under the crosshair when the click was taken; nothing was clicked"
+            ),
             "{reply}"
         );
         assert_eq!(reply["picked"], json!(32), "{reply}");
@@ -337,26 +347,42 @@ fn attack_by_id_reports_the_pick_the_click_was_taken_with() {
 #[test]
 #[ignore = "daily"]
 fn attack_by_id_reports_a_click_no_tick_took() {
-    with_pig_behind(|game, _| {
+    with_pig_and_server(|game, _, server| {
         let (_, replies) = command(game, "attack 31");
         tick(game);
-        assert_eq!(attack_clicks(game), 1);
-        // The click waits in its queue: no tick's input takes it before the report.
+        // A screen over the world: the tick's keybinds don't run, and its queued clicks go.
+        game.screen = Screen::GameModeSwitcher;
         for _ in 0..4 {
-            game.ticks += 1;
-            game.advance_agent();
+            tick(game);
         }
         assert_eq!(
             reply(&replies)["error"],
             json!("the attack click was not taken")
         );
+        game.screen = Screen::Playing;
+        tick(game);
+        assert_eq!(clicks_sent(game, server), Vec::<String>::new());
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn an_ordinary_click_attacks_what_the_pick_holds() {
+    with_pig_and_server(|game, listener, server| {
+        add_second_pig(game);
+        pick_second_pig(game, listener);
+        // A click with no `attack ID` waiting, through the mouse mapping as a player's.
+        game.agent_mouse(MouseButton::Left, true).unwrap();
+        game.agent_mouse(MouseButton::Left, false).unwrap();
+        tick(game);
+        assert_eq!(clicks_sent(game, server), ["attack 32", "punch"]);
     });
 }
 
 #[test]
 #[ignore = "daily"]
 fn attack_by_id_ends_without_a_click_on_death_or_without_ticks() {
-    with_pig_behind(|game, _| {
+    with_pig_and_server(|game, _, server| {
         let (_, replies) = command(game, "attack 31");
         game.screen = Screen::Dead;
         game.advance_agent();
@@ -375,14 +401,16 @@ fn attack_by_id_ends_without_a_click_on_death_or_without_ticks() {
         tick(game);
         let error = reply(&replies)["error"].as_str().unwrap().to_owned();
         assert!(error.ends_with("screen is open; close it first (close, or click-button)"));
-        assert_eq!(attack_clicks(game), 0);
+        game.screen = Screen::Playing;
+        tick(game);
+        assert_eq!(clicks_sent(game, server), Vec::<String>::new());
     });
 }
 
 #[test]
 #[ignore = "daily"]
 fn attack_by_id_follows_the_listener_decision() {
-    with_pig_behind(|game, listener| {
+    with_pig_and_server(|game, listener, server| {
         listener.lock().unwrap().result = Some(None);
         let (attacked, replies) = command(game, "attack 31");
         assert!(matches!(attacked, Ok(Handled::Deferred)));
@@ -394,7 +422,12 @@ fn attack_by_id_follows_the_listener_decision() {
             json!("that entity is out of reach or hidden; get closer")
         );
         assert!(game.agent.task.is_none());
-        assert_eq!(attack_clicks(game), 0, "nothing was clicked");
+        tick(game);
+        assert_eq!(
+            clicks_sent(game, server),
+            Vec::<String>::new(),
+            "nothing was clicked"
+        );
     });
 }
 

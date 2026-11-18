@@ -582,7 +582,8 @@ pub(super) struct Remote {
     /// holds its abilities from the login on; here the player is made at
     /// the first teleport, which takes them then.
     abilities: Option<play::PlayerAbilities>,
-    loaded_sent: bool,
+    /// ServerboundPlayerLoadedPacket went out: the tick's keybinds act from then on.
+    pub(in crate::game) loaded_sent: bool,
     /// The dimension of the client level the mods heard made
     /// (`native_client_level_load`), to be told dropped once.
     pub(super) heard_level: Option<String>,
@@ -8713,7 +8714,7 @@ impl Game<'_> {
         }
     }
 
-    fn remote_handle_input(&mut self) {
+    pub(in crate::game) fn remote_handle_input(&mut self) {
         let Some(r) = self.remote.as_mut() else {
             return;
         };

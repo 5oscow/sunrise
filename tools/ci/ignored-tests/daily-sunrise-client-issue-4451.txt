@@ -11,6 +11,7 @@ sunrise-client game::advancements::tests::mob_name_components_read_live_text_wit
 sunrise-client game::advancements::tests::mob_predicate_view_reads_active_effect_instances lib daily resources
 sunrise-client game::advancements::tests::toast_admission_cancels_edits_and_preserves_queue_behavior lib daily resources
 sunrise-client game::agent::face_pick_tests::a_turn_with_motion_replies_after_the_frame_that_turns_it lib daily resources
+sunrise-client game::agent::face_pick_tests::an_ordinary_click_attacks_what_the_pick_holds lib daily resources
 sunrise-client game::agent::face_pick_tests::attack_by_id_ends_without_a_click_on_death_or_without_ticks lib daily resources
 sunrise-client game::agent::face_pick_tests::attack_by_id_follows_the_listener_decision lib daily resources
 sunrise-client game::agent::face_pick_tests::attack_by_id_hits_the_entity_it_turned_to lib daily resources
