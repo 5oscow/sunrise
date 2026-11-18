@@ -76,7 +76,8 @@ impl Game<'_> {
                                 &turn.task_type,
                                 &mut finished,
                             );
-                            if finished {
+                            // A listener may also have called `finish` itself: one completion.
+                            if finished && !session.finished() {
                                 let _ = session.finish(&turn.task_type);
                             }
                         }
