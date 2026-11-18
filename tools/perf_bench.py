@@ -1271,7 +1271,8 @@ def judge(games, budget_pct, scenes):
             values = [g.get(scene, {}).get(figure) for g in games[:2 * pairs]]
             if not values or any(v is None for v in values):
                 if figure in gated:
-                    rows.append({"scene": scene, "figure": figure, "gated": True, "passed": False, "pairs": pairs,
+                    rows.append({"scene": scene, "figure": figure, "gated": True, "below_resolution": False,
+                                 "passed": False, "pairs": pairs,
                                  "a": None, "b": None, "diff": None, "diff_pct": None, "ci95": None,
                                  "confidence": None, "verdict": "missing"})
                 continue
@@ -1280,9 +1281,12 @@ def judge(games, budget_pct, scenes):
             a, _, diff, iv, _ = paired_raw(by_arm)
             budget = budget_pct / 100 * a
             margin = ROUNDING_MS.get(figure, 0.0)
+            # Rounding alone can exceed a budget this small: shown, but no regression signal either way.
+            below_resolution = figure in gated and margin > budget
+            judged = figure in gated and not below_resolution
             passed = bool(iv) and diff + margin <= budget
-            rows.append({"scene": scene, "figure": figure, "gated": figure in gated,
-                         "passed": passed if figure in gated else None,
+            rows.append({"scene": scene, "figure": figure, "gated": judged, "below_resolution": below_resolution,
+                         "passed": passed if judged else None,
                          "interval_within_budget": bool(iv) and iv[0][1] + margin <= budget, **paired(by_arm)})
     return rows
 
@@ -1296,7 +1300,8 @@ def print_judgement(rows, budget_pct):
             continue
         pct = f" ({r['diff_pct']:+.1f}%)" if r["diff_pct"] is not None else ""
         ci = "–" if r["ci95"] is None else f"{r['ci95'][0]:+.3f} to {r['ci95'][1]:+.3f}"
-        gate = "reported" if not r["gated"] else "pass" if r["passed"] else "FAIL"
+        gate = ("below resolution: not gated" if r["below_resolution"] else "reported" if not r["gated"]
+                else "pass" if r["passed"] else "FAIL")
         within = "yes" if r["interval_within_budget"] else "no"
         print(f"| {r['scene']} | {r['figure']} | {r['a']:.3f} | {r['b']:.3f} | {r['diff']:+.3f}{pct} | {ci} | {r['verdict']} | {within} | {gate} |")
 
