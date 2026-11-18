@@ -4589,6 +4589,20 @@ impl Game<'_> {
             day_time: self.world.day_time,
         })
     }
+    /// `native_text` scaled by `scale` about `at`, its top-left corner (a GUI pose's scale).
+    pub(in crate::game) fn native_text_scaled(
+        &self,
+        batch: &mut HudBatch,
+        text: &str,
+        at: [f32; 2],
+        scale: f32,
+        argb: u32,
+        shadow: bool,
+    ) {
+        let start = batch.vertices.len();
+        self.native_text(batch, text, at, argb, shadow);
+        batch.scale_since(start, at[0], at[1], scale, scale);
+    }
     /// The saved key and modifiers for an owner-bound registration, or its declared default.
     pub(in crate::game) fn mod_key(
         &self,
