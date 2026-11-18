@@ -87,6 +87,21 @@ pub trait BlockStatesServerHost {
 #[doc(hidden)]
 #[sunrise_mod_api_macros::host_area]
 pub trait BlockStatesBackend {
+    /// Side: both. The age read by `BlockStates::weathering_age`.
+    #[access(Metadata)]
+    fn block_weathering_age(&self, state: BlockStateRecord) -> Option<WeatheringAge>;
+    /// Side: both. The state read by `BlockStates::next_weathering_stage`.
+    #[access(Metadata)]
+    fn block_next_weathering_stage(&self, state: BlockStateRecord) -> Option<BlockState>;
+    /// Side: both. The state read by `BlockStates::previous_weathering_stage`.
+    #[access(Metadata)]
+    fn block_previous_weathering_stage(&self, state: BlockStateRecord) -> Option<BlockState>;
+    /// Side: both. The state read by `BlockStates::waxed`.
+    #[access(Metadata)]
+    fn block_state_waxed(&self, state: BlockStateRecord) -> Option<BlockState>;
+    /// Side: both. The state read by `BlockStates::unwaxed`.
+    #[access(Metadata)]
+    fn block_state_unwaxed(&self, state: BlockStateRecord) -> Option<BlockState>;
     /// Side: both.
     /// Borrow the canonical block name through the block metadata resource.
     #[access(Metadata)]
