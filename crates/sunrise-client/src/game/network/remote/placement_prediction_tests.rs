@@ -153,6 +153,47 @@ impl Hooks for NeighbourMod {
     }
 }
 
+type BreakRead = (
+    sunrise_core::position::BlockPos,
+    Option<BlockState>,
+    Option<BlockState>,
+);
+
+#[derive(Clone, Default)]
+struct BreakObserver(Arc<std::sync::Mutex<Vec<BreakRead>>>);
+
+#[mod_api::sunrise_part]
+impl BlockPart for BreakObserver {
+    fn on_block_state_change(
+        &self,
+        level: LevelSide<'_>,
+        event: &mut mod_api::OnBlockStateChangeEvent,
+    ) {
+        let LevelSide::Client(level) = level else {
+            panic!("prediction notice must be client-side");
+        };
+        if event.predicted {
+            self.0.lock().unwrap().push((
+                event.pos,
+                level.block_state([0, 65, 0]),
+                level.block_state([1, 65, 0]),
+            ));
+        }
+    }
+}
+
+struct BreakMod(BreakObserver);
+#[mod_api::__subscriptions]
+impl Hooks for BreakMod {
+    fn register(&self, r: &mut dyn Registrar, context: &mod_api::RegistrationContext) {
+        NeighbourMod.register(r, context);
+        for name in ["minecraft:dandelion", "minecraft:cobblestone"] {
+            let key = r.block_key(name);
+            r.block_part(key, self.0.clone());
+        }
+    }
+}
+
 /// A placement's shape update asks a neighbour's survival part over the prediction's own
 /// writes: the dandelion on stone, which its template pops off, stands because its part sees
 /// the cobblestone just predicted beside it.
@@ -192,9 +233,10 @@ fn a_neighbour_s_survival_part_reads_the_prediction_s_blocks() {
 #[test]
 #[ignore = "daily"]
 fn a_predicted_break_reconciles_its_neighbour_s_shape_change() {
+    let observer = BreakObserver::default();
     let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
-        "neighbour_test",
-        Box::new(NeighbourMod),
+        "break_test",
+        Box::new(BreakMod(observer.clone())),
     )]
     .into();
     on_a_client(mods, |game| {
@@ -209,6 +251,16 @@ fn a_predicted_break_reconciles_its_neighbour_s_shape_change() {
         game.world.set(1, 65, 0, cobblestone).unwrap();
 
         game.predict_break([1, 65, 0], cobblestone, 7);
+        let air_state = Some(air.try_into_api().unwrap());
+        let at = sunrise_core::position::BlockPos::new;
+        assert_eq!(
+            *observer.0.lock().unwrap(),
+            [
+                (at(0, 65, 0), air_state, air_state),
+                (at(1, 65, 0), air_state, air_state)
+            ],
+            "dependent notice precedes support notice; both read the completed shape writes"
+        );
         game.server_block([1, 65, 0], cobblestone.0 as i32);
         game.end_predictions(6);
         assert_eq!(game.world.block(1, 65, 0), air);

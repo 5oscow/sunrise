@@ -35,18 +35,35 @@ impl Game<'_> {
         // can correct them without running the local rules again.
         let [x, y, z] = pos;
         let pos = BlockPos::new(x, y, z);
-        let changes = self.with_level(|b, base, ticks| {
+        let (mut changes, order) = self.with_level(|b, base, ticks| {
             let mut level = DryLevel::new(base);
             level.reads = Some(ticks);
+            level.notice_order = Some(Default::default());
             b.remove_block(
                 &mut level,
                 &mut sunrise_world::level::Ticks::default(),
                 pos,
                 false,
             );
-            level.changed.into_iter().collect()
+            (
+                level.changed,
+                level.notice_order.unwrap_or_default().into_inner(),
+            )
         });
-        self.predict_blocks(&changes, sequence);
+        // Apply every final state before publishing anything. Emit one notice per net
+        // change, in the simulation's after-shape order (the last notice for each position).
+        let mut applied = Vec::with_capacity(changes.len());
+        for at in order.into_iter().rev() {
+            if let Some(state) = changes.remove(&at) {
+                let pos = [at.x, at.y, at.z];
+                if let Some(previous) = self.predict_block(pos, state, sequence) {
+                    applied.push((pos, previous, state));
+                }
+            }
+        }
+        for (pos, previous, state) in applied.into_iter().rev() {
+            self.finish_client_block_write(pos, Some(previous), state, true);
+        }
         self.mining = None;
     }
 

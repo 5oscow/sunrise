@@ -5,7 +5,7 @@ use sunrise_world::level::LevelAccess;
 use sunrise_world::level::Ticks;
 
 use crate::game::mod_api_host::{FireOddsLevel, PredictedLevel};
-use std::collections::HashSet;
+use std::{cell::RefCell, collections::HashSet};
 
 /// The live level behind a prediction, providing mod dispatch when it has a game host.
 pub(super) trait PredictionBase: LevelAccess {
@@ -35,6 +35,8 @@ pub(super) struct DryLevel<'w> {
     base: &'w dyn PredictionBase,
     pub(super) changed: sunrise_world::level::PreviewBlocks,
     removed_entities: HashSet<BlockPos>,
+    /// For a predicted break, the order in which the simulation reaches the after-shape notices.
+    pub(super) notice_order: Option<RefCell<Vec<BlockPos>>>,
     random: sunrise_core::random::LegacyRandom,
     /// The sounds the use plays (a door's creak).
     pub(super) sounds: Vec<DrySound>,
@@ -52,6 +54,7 @@ impl<'w> DryLevel<'w> {
             base,
             changed: HashMap::new(),
             removed_entities: HashSet::new(),
+            notice_order: None,
             random: sunrise_core::random::LegacyRandom::new(0),
             sounds: Vec::new(),
             reads: None,
@@ -130,6 +133,14 @@ impl sunrise_world::level::LevelAccess for DryLevel<'_> {
         let previous = self.block_state(pos);
         self.changed.insert(pos, state);
         Some(previous)
+    }
+    fn observes_block_state_change(&self, _: BlockStateId, _: BlockStateId) -> bool {
+        self.notice_order.is_some()
+    }
+    fn observe_block_state_change(&self, pos: BlockPos, _: BlockStateId, _: BlockStateId) {
+        if let Some(order) = &self.notice_order {
+            order.borrow_mut().push(pos);
+        }
     }
     fn is_loaded(&self, pos: sunrise_core::position::BlockPos) -> bool {
         self.base.is_loaded(pos)
