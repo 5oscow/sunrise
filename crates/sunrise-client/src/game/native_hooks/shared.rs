@@ -8,6 +8,7 @@ mod level_helpers;
 #[cfg(test)]
 #[path = "shared/particle_count_tests.rs"]
 pub(super) mod particle_count_tests;
+#[cfg(test)]
 use level_helpers::block_entity_for_block;
 #[cfg(test)]
 #[path = "shared/audio_math_tests.rs"]
