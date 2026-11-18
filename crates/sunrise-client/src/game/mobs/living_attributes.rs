@@ -9,7 +9,7 @@ use sunrise_client::mobs::{
     Mob,
     finalize::{self, Attr, Op},
 };
-use sunrise_items::items::Items;
+use sunrise_items::{equipment::Equipment, items::Items};
 use sunrise_world::attributes::{
     AttributeError, Instance, Modifier, Observer, Operation,
     entity::{AttributeId, Catalog},
@@ -19,7 +19,12 @@ use sunrise_world::attributes::{
 /// the map holds swaps the old stack's attribute modifiers for the new one's,
 /// full stacks with their components compared, as the tick's pass and a write
 /// both run it. The map is taken out so the seed can read the mob.
-pub(in crate::game) fn collect_equipment(catalog: &Arc<Catalog>, items: &Items, m: &mut Mob) {
+pub(in crate::game) fn collect_equipment(
+    catalog: &Arc<Catalog>,
+    items: &Items,
+    m: &mut Mob,
+    restore_worn: Option<&Equipment>,
+) {
     sunrise_client::mobs::armor::prepare(m, catalog);
     let mut live = std::mem::take(&mut m.extra.live);
     let seed = || {
@@ -28,8 +33,8 @@ pub(in crate::game) fn collect_equipment(catalog: &Arc<Catalog>, items: &Items, 
             .map(|(_, entry)| entry)
             .collect()
     };
-    let changed =
-        live.collect_equipment_changes(catalog, &m.kind.id, &m.extra.equipment, items, seed);
+    let equipment = restore_worn.unwrap_or(&m.extra.equipment);
+    let changed = live.collect_equipment_changes(catalog, &m.kind.id, equipment, items, seed);
     warn_failed(m.id, &m.kind.id, changed);
     m.extra.live = live;
 }
@@ -66,7 +71,7 @@ pub(in crate::game) fn write_unspawned_attribute(
     write: AttributeWrite,
 ) -> Option<bool> {
     let done = write_own_attribute(m, own_attribute(m, name)?, write);
-    collect_equipment(catalog, items, m);
+    collect_equipment(catalog, items, m, None);
     Some(done)
 }
 
@@ -86,7 +91,7 @@ impl Game<'_> {
             if m.extra.equipment.is_empty() && !m.extra.live.has_worn() {
                 continue;
             }
-            collect_equipment(&catalog, items, m);
+            collect_equipment(&catalog, items, m, None);
         }
         for a in self.armor_stands.iter_mut() {
             if a.equipment.is_empty() && !a.live.has_worn() {
@@ -128,7 +133,7 @@ impl Game<'_> {
         let Some(m) = self.mobs.iter_mut().find(|m| m.id == id && !m.removed) else {
             return;
         };
-        collect_equipment(&catalog, items, m);
+        collect_equipment(&catalog, items, m, None);
     }
 }
 

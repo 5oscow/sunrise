@@ -1222,6 +1222,52 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "daily"]
+    fn editing_a_raid_banners_name_preserves_its_other_components() {
+        use mod_api::Tag;
+        use sunrise_items::item_data::encode_extra_components;
+
+        with_game(|game| {
+            open_to_lan(game);
+            let banner = sunrise_client::mobs::raider::ominous_banner();
+            assert!(banner.data().unwrap().banner_patterns.is_empty());
+            let original = encode_extra_components(&banner).unwrap();
+            let mut player = guest(1);
+            player.inventory[3] = Some(banner);
+            game.lan.as_mut().unwrap().hub.guests.push(player);
+            let place = ItemPlace::PlayerSlot {
+                player: 123,
+                slot: 3,
+            };
+            let name = Tag::String("Renamed Raid Banner".into());
+            game.transaction(|host, tx| {
+                place.edit(host, tx, |stack| {
+                    stack
+                        .apply_components(&[("minecraft:item_name".into(), name.clone())].into())
+                        .unwrap();
+                })
+            })
+            .unwrap();
+            let banner = game.lan.as_ref().unwrap().hub.guests[0].inventory[3]
+                .as_ref()
+                .unwrap();
+            let edited = encode_extra_components(banner).unwrap();
+            assert_eq!(edited.get("minecraft:item_name"), Some(&name));
+            for id in [
+                "minecraft:banner_patterns",
+                "minecraft:rarity",
+                "minecraft:tooltip_display",
+            ] {
+                assert_eq!(
+                    edited.get(id).unwrap(),
+                    original.get(id).unwrap(),
+                    "{id} was not edited"
+                );
+            }
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
     fn nested_equipment_rollback_restores_the_live_modifiers_not_the_quiet_stack() {
         use mod_api::{EquipmentSlot, Tag};
 
@@ -1240,7 +1286,7 @@ pub(super) mod tests {
             };
             let before = armor(game);
             assert!(before >= 8.0);
-            for commit_child in [false, true] {
+            for (commit_child, gravity) in [(false, 0.1), (true, 0.2)] {
                 let rolled_back = game.transaction(|host, tx| {
                     place
                         .edit(host, tx, |stack| {
@@ -1264,9 +1310,14 @@ pub(super) mod tests {
                     let child = host.transaction(|host, tx| {
                         assert_eq!(place.extract(host, tx, &taken, 1), 1);
                         assert!(armor(host) < before);
+                        assert!(living.set_attribute_base(host, "minecraft:gravity", gravity));
                         commit_child.then_some(()).ok_or(())
                     });
                     assert_eq!(child.is_ok(), commit_child);
+                    assert_eq!(
+                        living.attribute_base(host, "minecraft:gravity"),
+                        Some(gravity)
+                    );
                     if !commit_child {
                         assert_eq!(
                             armor(host),
@@ -1278,6 +1329,10 @@ pub(super) mod tests {
                     Err::<(), ()>(())
                 });
                 assert_eq!(rolled_back, Err(()));
+                assert_eq!(
+                    living.attribute_base(game, "minecraft:gravity"),
+                    Some(gravity)
+                );
                 assert_eq!(
                     armor(game),
                     before,

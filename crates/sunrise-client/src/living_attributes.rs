@@ -250,7 +250,7 @@ pub struct LivingAttributes {
     map: OnceCell<Box<Live>>,
     /// The items whose modifiers the map holds, by `EquipmentSlot` ordinal
     /// (`LivingEntity.lastEquipmentItems`).
-    worn: Option<Box<[Option<ItemStack>; 8]>>,
+    worn: Option<Box<Equipment>>,
     /// The loaded `attributes` entries, applied when the map is built.
     saved: Option<Box<[Tag]>>,
     /// The transient modifiers mods added, by attribute: not saved, and put
@@ -303,9 +303,13 @@ impl LivingAttributes {
     /// Whether the map holds an item's modifiers, which a slot emptied since
     /// has to take away.
     pub fn has_worn(&self) -> bool {
-        self.worn
-            .as_ref()
-            .is_some_and(|w| w.iter().any(Option::is_some))
+        self.worn.as_ref().is_some_and(|w| !w.is_empty())
+    }
+
+    /// The equipment whose modifiers are in the live map, not the current slots.
+    /// An open transaction can change the slots without updating this state.
+    pub fn worn_equipment(&self) -> Box<Equipment> {
+        self.worn.clone().unwrap_or_default()
     }
 
     /// Drops the map, because what it was built from changed: the next use

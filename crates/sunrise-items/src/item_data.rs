@@ -831,6 +831,11 @@ impl ItemStack {
         }
         let data = self.data_mut();
         let mut replacement = replacement;
+        let changes = |id: &str| changed.iter().any(|entry| entry == id);
+        if changes("minecraft:banner_patterns") || changes("minecraft:item_name") {
+            data.ominous_banner = replacement.ominous_banner;
+        }
+        let banner_changed = prior_ominous_banner != data.ominous_banner;
         macro_rules! replace_fields {
             ($($field:ident),+) => {{ $(data.$field = std::mem::take(&mut replacement.$field);)+ }};
         }
@@ -846,9 +851,6 @@ impl ItemStack {
                 "minecraft:consumable" => replace_fields!(consumable),
                 "minecraft:kinetic_weapon" => replace_fields!(kinetic_weapon),
                 "minecraft:map_id" => replace_fields!(map_id),
-                "minecraft:banner_patterns" => {
-                    replace_fields!(banner_patterns, banner_patterns_set)
-                }
                 "minecraft:base_color" => replace_fields!(base_color),
                 "minecraft:writable_book_content" => replace_fields!(writable_pages),
                 "minecraft:written_book_content" => replace_fields!(written),
@@ -866,20 +868,15 @@ impl ItemStack {
                 _ => {}
             };
         }
-        // These components may be represented by a derived flag instead of opaque entries.
-        // If that representation changed, take those entries from the same decoded snapshot.
-        if changed.iter().any(|id| {
-            matches!(
-                id.as_str(),
-                "minecraft:banner_patterns" | "minecraft:item_name"
-            )
-        }) {
-            data.ominous_banner = replacement.ominous_banner;
+        // A raid banner can hold only the flag, without storing separate layers.
+        // If an edit changes its representation, take all implied components from
+        // the decoded snapshot, including the layers when only the name changed.
+        if banner_changed || changes("minecraft:banner_patterns") {
+            replace_fields!(banner_patterns, banner_patterns_set);
         }
-        let banner_changed = prior_ominous_banner != data.ominous_banner;
         let edited = |key: &str| {
             let id = key.strip_prefix('!').unwrap_or(key);
-            changed.iter().any(|entry| entry == id)
+            changes(id)
                 || (banner_changed
                     && matches!(
                         id,

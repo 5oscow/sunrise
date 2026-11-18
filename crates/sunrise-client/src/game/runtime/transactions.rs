@@ -266,7 +266,7 @@ struct KeptPlayer {
 enum KeptEquipment {
     Mob {
         stacks: Vec<Option<ItemStack>>,
-        live_before_refresh: Option<Box<sunrise_client::living_attributes::LivingAttributes>>,
+        worn_before_refresh: Option<Box<sunrise_items::equipment::Equipment>>,
     },
     Stand(Vec<Option<ItemStack>>),
 }
@@ -555,17 +555,17 @@ impl Game<'_> {
                         Entry::Occupied(mut entry) => {
                             if let (
                                 KeptEquipment::Mob {
-                                    live_before_refresh,
+                                    worn_before_refresh,
                                     ..
                                 },
                                 KeptEquipment::Mob {
-                                    live_before_refresh: child,
+                                    worn_before_refresh: child,
                                     ..
                                 },
                             ) = (entry.get_mut(), kept)
-                                && live_before_refresh.is_none()
+                                && worn_before_refresh.is_none()
                             {
-                                *live_before_refresh = child;
+                                *worn_before_refresh = child;
                             }
                         }
                     }
@@ -963,8 +963,8 @@ impl Game<'_> {
             level.board = Some(self.score.board.clone());
         }
     }
-    /// Keeps the equipment at the first slot write, and the independent live attribute map
-    /// at the first equipment refresh. A quiet edit can make those two snapshots disagree.
+    /// Keeps the equipment at the first slot write, and the stacks that supplied the live
+    /// equipment modifiers at the first refresh. A quiet edit can make the two differ.
     pub(super) fn journal_equipment(&mut self, id: u32, refreshes_attributes: bool) {
         let Some(level) = self.transactions.last_mut() else {
             return;
@@ -972,21 +972,21 @@ impl Game<'_> {
         let mob = || self.mobs.iter().find(|m| m.id == id && !m.removed);
         if let Some(kept) = level.equipment.get_mut(&id) {
             if let KeptEquipment::Mob {
-                live_before_refresh,
+                worn_before_refresh,
                 ..
             } = kept
                 && refreshes_attributes
-                && live_before_refresh.is_none()
+                && worn_before_refresh.is_none()
                 && let Some(mob) = mob()
             {
-                *live_before_refresh = Some(Box::new(mob.extra.live.clone()));
+                *worn_before_refresh = Some(mob.extra.live.worn_equipment());
             }
             return;
         }
         let kept = if let Some(mob) = mob() {
             KeptEquipment::Mob {
                 stacks: mob.equipment_stacks().iter().cloned().collect(),
-                live_before_refresh: refreshes_attributes.then(|| Box::new(mob.extra.live.clone())),
+                worn_before_refresh: refreshes_attributes.then(|| mob.extra.live.worn_equipment()),
             }
         } else if let Some(stand) = self.armor_stands.iter().find(|a| a.id == id) {
             KeptEquipment::Stand(stand.equipment.iter().cloned().collect())
@@ -1205,14 +1205,14 @@ impl Game<'_> {
         self.scratch_roll_back(std::mem::take(&mut level.scratch_kept));
         // Discard deferred effects before undoing tentative action storage.
         level.after.clear();
-        // Restore the live attribute state, not the state a new collection from the
-        // rolled-back equipment would create (the slot may have had a quiet edit).
+        // Restore only the equipment contribution. Collecting from the slot snapshot would
+        // adopt a quiet edit early; replacing the map would erase independent attribute writes.
         let equipment = std::mem::take(&mut level.equipment);
         for (id, kept) in equipment {
             match kept {
                 KeptEquipment::Mob {
                     stacks,
-                    live_before_refresh,
+                    worn_before_refresh,
                 } => {
                     let Some(mob) = self.mobs.iter_mut().find(|m| m.id == id && !m.removed) else {
                         continue;
@@ -1220,8 +1220,13 @@ impl Game<'_> {
                     for (slot, stack) in stacks.into_iter().enumerate() {
                         mob.set_equipment_stack(slot, stack);
                     }
-                    if let Some(live) = live_before_refresh {
-                        mob.extra.live = *live;
+                    if let Some(worn) = worn_before_refresh {
+                        super::living_attributes::collect_equipment(
+                            &self.motion.attributes,
+                            world_items!(self),
+                            mob,
+                            Some(&worn),
+                        );
                     }
                 }
                 // An armor stand keeps no live attribute map of its gear; the
