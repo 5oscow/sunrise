@@ -860,6 +860,21 @@ mod tests {
             param("&mut dyn LevelRandomHost", "self")
         );
         super::host_param::validate(&hit, "test", true, Some(true), false).unwrap();
+        // A read-only level view that is neither `GameLevel` nor a hit: a server `&self`
+        // receiver reads the level through the same `&dyn LevelHost`.
+        let read_level = Hook {
+            host: Some(HostAccess::Level),
+            ..Hook::sample(
+                "sunrise_client::game::native_hooks::block_path_type::ReadLevel<'_>::native_test",
+                Side::Server,
+            )
+        };
+        assert!(super::host_param::is_level(&read_level));
+        assert_eq!(
+            host_param(&read_level, Some(false), false),
+            param("&dyn LevelHost", "self")
+        );
+        super::host_param::validate(&read_level, "test", true, Some(false), false).unwrap();
         // The hit capability: a server hit with a `&mut self` receiver only.
         let capable = Hook {
             host: Some(HostAccess::Hit),
@@ -902,8 +917,14 @@ mod tests {
             super::host_param::validate(&hit_both, "test", true, Some(false), true).unwrap_err(),
             "test: this entry takes no host marker"
         );
+        // A read-only level receiver is not tied to the hit capability: any
+        // non-`GameLevel` level may take it.
+        assert_eq!(
+            host_param(&hit, Some(false), false),
+            param("&dyn LevelHost", "self")
+        );
+        super::host_param::validate(&hit, "test", true, Some(false), false).unwrap();
         for (hook, mutable) in [
-            (hit.clone(), Some(false)),
             (
                 Hook {
                     side: Side::Both,
