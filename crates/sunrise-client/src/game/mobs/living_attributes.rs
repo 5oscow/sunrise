@@ -5,11 +5,12 @@ use super::Game;
 use super::commands::Target;
 use std::convert::Infallible;
 use std::sync::Arc;
+use sunrise_client::living_attributes::EquipmentChanges;
 use sunrise_client::mobs::{
     Mob,
     finalize::{self, Attr, Op},
 };
-use sunrise_items::{equipment::Equipment, items::Items};
+use sunrise_items::items::Items;
 use sunrise_world::attributes::{
     AttributeError, Instance, Modifier, Observer, Operation,
     entity::{AttributeId, Catalog},
@@ -23,19 +24,33 @@ pub(in crate::game) fn collect_equipment(
     catalog: &Arc<Catalog>,
     items: &Items,
     m: &mut Mob,
-    restore_worn: Option<&Equipment>,
+    changes: Option<&mut EquipmentChanges>,
 ) {
     sunrise_client::mobs::armor::prepare(m, catalog);
     let mut live = std::mem::take(&mut m.extra.live);
-    let seed = || {
-        sunrise_client::entity_nbt::attribute_entries(m)
-            .into_iter()
-            .map(|(_, entry)| entry)
-            .collect()
-    };
-    let equipment = restore_worn.unwrap_or(&m.extra.equipment);
-    let changed = live.collect_equipment_changes(catalog, &m.kind.id, equipment, items, seed);
+    let changed = live.collect_equipment_recorded(
+        catalog,
+        &m.kind.id,
+        &m.extra.equipment,
+        items,
+        || equipment_seed(m),
+        changes,
+    );
     warn_failed(m.id, &m.kind.id, changed);
+    m.extra.live = live;
+}
+
+fn equipment_seed(m: &Mob) -> Vec<sunrise_core::nbt::Tag> {
+    sunrise_client::entity_nbt::attribute_entries(m)
+        .into_iter()
+        .map(|(_, entry)| entry)
+        .collect()
+}
+
+pub(super) fn undo_equipment(catalog: &Arc<Catalog>, m: &mut Mob, changes: EquipmentChanges) {
+    let mut live = std::mem::take(&mut m.extra.live);
+    let result = live.undo_equipment_changes(catalog, &m.kind.id, changes, || equipment_seed(m));
+    warn_failed(m.id, &m.kind.id, result);
     m.extra.live = live;
 }
 
@@ -124,7 +139,7 @@ impl Game<'_> {
     /// wrote through a handle takes its attribute modifiers on the live map
     /// at once — its armor and the reads of #940 — not at the tick's pass.
     /// The tick's own pass remains the safety net for the other writers.
-    pub(super) fn collect_mob_equipment_attributes(&mut self, id: u32) {
+    pub(super) fn collect_mob_equipment_attributes(&mut self, id: u32, record: bool) {
         if self.remote.is_some() || self.options.execution_role.is_client() {
             return;
         }
@@ -133,7 +148,12 @@ impl Game<'_> {
         let Some(m) = self.mobs.iter_mut().find(|m| m.id == id && !m.removed) else {
             return;
         };
-        collect_equipment(&catalog, items, m, None);
+        let changes = if record {
+            self.transactions.equipment_changes(id)
+        } else {
+            None
+        };
+        collect_equipment(&catalog, items, m, changes);
     }
 }
 
@@ -320,13 +340,22 @@ impl Game<'_> {
         name: &str,
         write: AttributeWrite,
     ) -> Option<bool> {
+        let explicit = if self.transactions.is_empty() || !matches!(t, Target::Mob(_)) {
+            None
+        } else {
+            write.transient_record().map(|(id, _)| id.to_owned())
+        };
         let done = self.apply_attribute_write(t, name, write)?;
         // A finalize write drops the mob's live map (its seed changed), which
         // takes the equipment's modifiers with it: collect them again at
         // once, so the next read — a hit's armor, the attribute sync — sees
         // them (#941).
         if let Target::Mob(id) = t {
-            self.collect_mob_equipment_attributes(id);
+            if done && let Some(modifier) = explicit {
+                self.transactions
+                    .keep_explicit_modifier_write(id, name, &modifier);
+            }
+            self.collect_mob_equipment_attributes(id, false);
         }
         Some(done)
     }

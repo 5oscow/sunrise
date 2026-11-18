@@ -12,6 +12,7 @@ pub use sunrise_world::custom_data;
 pub mod custom_model_data;
 #[path = "item_data/ingredient_components.rs"]
 pub mod ingredient_components;
+use crate::banner_layer::BannerLayer;
 use crate::items::{ItemInfo, ItemStack};
 use sunrise_core::nbt::{JavaString, Tag};
 
@@ -118,7 +119,7 @@ pub struct StackData {
     /// `minecraft:written_book_content`.
     pub written: Option<WrittenBook>,
     /// `minecraft:banner_patterns` (banners and shields).
-    pub banner_patterns: Vec<crate::banner_layer::BannerLayer>,
+    banner_patterns: Vec<BannerLayer>,
     /// `minecraft:base_color` (a shield's dye).
     pub base_color: Option<Arc<str>>,
     /// The raid captain's banner: `minecraft:banner_patterns` with the
@@ -483,7 +484,7 @@ impl StackData {
             // banner or shield wears; the renderer and the tooltip read them
             // from `banner_patterns`, not from a tag in `other`.
             "minecraft:banner_patterns" => {
-                self.banner_patterns = crate::banner_layer::layers_from_nbt(tag.as_ref());
+                *self.banner_layers_mut() = crate::banner_layer::layers_from_nbt(tag.as_ref());
                 self.banner_patterns_set = tag.is_some() && self.banner_patterns.is_empty();
             }
             // `set_book_cover` (and `set_components`) write the book's title,
@@ -566,6 +567,12 @@ impl StackData {
             self.consumable = replacement;
             return;
         }
+        let edits_raid_patch = (self.ominous_banner
+            || self.banner_patterns.len() == OMINOUS_LAYERS.len())
+            && is_ominous_component(id.strip_prefix('!').unwrap_or(id));
+        if edits_raid_patch {
+            self.materialize_ominous_banner();
+        }
         self.other.retain(|(k, _)| k != id);
         if id == "minecraft:kinetic_weapon" {
             self.kinetic_weapon = value.map(crate::kinetic_weapon::KineticComponent::new);
@@ -580,6 +587,9 @@ impl StackData {
         if let Some(v) = value {
             self.other.push((id.to_owned(), v));
             self.other.sort_by(|a, b| a.0.cmp(&b.0));
+        }
+        if edits_raid_patch {
+            self.compact_ominous_banner();
         }
     }
     /// `DebugStickState.properties().get(block)`: the property selected for
@@ -618,13 +628,47 @@ pub const OMINOUS_LAYERS: [(&str, &str); 8] = [
     ("border", "black"),
 ];
 
-/// The raid captain banner's default tooltip setting, stored by vanilla as a
-/// component but represented by `StackData::ominous_banner` in Sunrise.
-fn ominous_tooltip_display() -> Tag {
-    Tag::compound([(
-        "hidden_components",
-        Tag::List(vec![Tag::String("minecraft:banner_patterns".into())]),
-    )])
+fn ominous_banner_layers() -> &'static [BannerLayer; OMINOUS_LAYERS.len()] {
+    static LAYERS: std::sync::OnceLock<[BannerLayer; OMINOUS_LAYERS.len()]> =
+        std::sync::OnceLock::new();
+    LAYERS.get_or_init(|| {
+        OMINOUS_LAYERS
+            .map(|(pattern, color)| BannerLayer::new(&format!("minecraft:{pattern}"), color))
+    })
+}
+
+/// The independent component values represented by the compact raid-banner flag.
+fn ominous_banner_components() -> &'static [(&'static str, Tag); 4] {
+    static COMPONENTS: std::sync::OnceLock<[(&str, Tag); 4]> = std::sync::OnceLock::new();
+    COMPONENTS.get_or_init(|| {
+        [
+            (
+                "minecraft:banner_patterns",
+                crate::banner_layer::layers_to_nbt(ominous_banner_layers()),
+            ),
+            (
+                "minecraft:tooltip_display",
+                Tag::compound([(
+                    "hidden_components",
+                    Tag::List(vec![Tag::String("minecraft:banner_patterns".into())]),
+                )]),
+            ),
+            (
+                "minecraft:item_name",
+                Tag::compound([(
+                    "translate",
+                    Tag::String("block.minecraft.ominous_banner".into()),
+                )]),
+            ),
+            ("minecraft:rarity", Tag::String("uncommon".into())),
+        ]
+    })
+}
+
+fn is_ominous_component(id: &str) -> bool {
+    ominous_banner_components()
+        .iter()
+        .any(|(component, _)| *component == id)
 }
 
 /// `WrittenBookContent` with the pages as plain text.
@@ -642,6 +686,107 @@ pub struct WrittenBook {
     pub resolved: bool,
 }
 impl StackData {
+    /// Canonicalize only an exact match to the flag's independent values.
+    fn compact_ominous_banner(&mut self) {
+        if self.ominous_banner
+            || self.banner_patterns.len() != OMINOUS_LAYERS.len()
+            || self.banner_patterns.as_slice() != ominous_banner_layers()
+        {
+            return;
+        }
+        let components = ominous_banner_components();
+        if !components
+            .iter()
+            .filter(|(id, _)| *id != "minecraft:banner_patterns")
+            .all(|(id, value)| self.other(id) == Some(value))
+            || self
+                .other
+                .iter()
+                .any(|(id, _)| id.strip_prefix('!').is_some_and(is_ominous_component))
+        {
+            return;
+        }
+        self.banner_patterns = Vec::new();
+        self.banner_patterns_set = false;
+        self.other.retain(|(id, _)| !is_ominous_component(id));
+        self.ominous_banner = true;
+    }
+
+    /// The effective layers, including those stored as the compact raid patch.
+    pub fn banner_layers(&self) -> &[BannerLayer] {
+        if self.ominous_banner {
+            ominous_banner_layers()
+        } else {
+            &self.banner_patterns
+        }
+    }
+
+    /// A direct layer edit first expands the entire raid patch.
+    pub fn banner_layers_mut(&mut self) -> &mut Vec<BannerLayer> {
+        self.materialize_ominous_banner();
+        &mut self.banner_patterns
+    }
+
+    fn materialize_ominous_banner(&mut self) {
+        if self.ominous_banner {
+            let components = ominous_banner_components();
+            let tag = Tag::compound(components.iter().cloned());
+            let (_, extra) = decode_components_inner(Some(&tag), false);
+            self.ominous_banner = false;
+            self.apply_component_changes(extra, components.iter().map(|(key, _)| *key));
+        }
+    }
+
+    fn apply_component_changes<'a>(
+        &mut self,
+        extra: Option<Box<StackData>>,
+        changed: impl Iterator<Item = &'a str> + Clone,
+    ) {
+        let mut replacement = extra.map_or_else(StackData::default, |data| *data);
+        let changes = |id: &str| changed.clone().any(|entry| entry == id);
+        let data = self;
+        macro_rules! replace_fields {
+            ($($field:ident),+) => {{ $(data.$field = std::mem::take(&mut replacement.$field);)+ }};
+        }
+        for id in changed.clone() {
+            match id {
+                "minecraft:damage" => replace_fields!(damage_set, explicit_zero_damage),
+                "minecraft:enchantments" => replace_fields!(enchantments),
+                "minecraft:stored_enchantments" => replace_fields!(stored_enchantments),
+                "minecraft:repair_cost" => replace_fields!(repair_cost),
+                "minecraft:custom_name" => replace_fields!(custom_name),
+                "minecraft:potion_contents" => replace_fields!(potion, potion_extra),
+                "minecraft:death_protection" => replace_fields!(death_protection),
+                "minecraft:consumable" => replace_fields!(consumable),
+                "minecraft:kinetic_weapon" => replace_fields!(kinetic_weapon),
+                "minecraft:map_id" => replace_fields!(map_id),
+                "minecraft:banner_patterns" => {
+                    replace_fields!(banner_patterns, banner_patterns_set)
+                }
+                "minecraft:base_color" => replace_fields!(base_color),
+                "minecraft:writable_book_content" => replace_fields!(writable_pages),
+                "minecraft:written_book_content" => replace_fields!(written),
+                "minecraft:fireworks" => replace_fields!(fireworks),
+                "minecraft:firework_explosion" => replace_fields!(firework_explosion),
+                "minecraft:dyed_color" => replace_fields!(dyed_color),
+                "minecraft:pot_decorations" => replace_fields!(pot_decorations),
+                "minecraft:bundle_contents" => replace_fields!(bundle_contents, bundle_selected),
+                "minecraft:suspicious_stew_effects" => replace_fields!(stew_effects),
+                "minecraft:map_post_processing" => replace_fields!(map_post_processing),
+                "minecraft:charged_projectiles" => replace_fields!(charged),
+                "minecraft:container" => replace_fields!(container),
+                "minecraft:ominous_bottle_amplifier" => replace_fields!(ominous_amplifier),
+                "minecraft:trim" => replace_fields!(trim),
+                _ => {}
+            };
+        }
+        let edited = |key: &str| changes(key.strip_prefix('!').unwrap_or(key));
+        data.other.retain(|(key, _)| !edited(key));
+        data.other
+            .extend(replacement.other.into_iter().filter(|(key, _)| edited(key)));
+        data.other.sort_by(|a, b| a.0.cmp(&b.0));
+    }
+
     pub fn is_empty(&self) -> bool {
         self.wire.0.is_none() && *self == Self::default()
     }
@@ -823,78 +968,41 @@ impl ItemStack {
     /// runtime data, including in nested stacks. The caller supplies the changed names
     /// (without the removal prefix) and owns item/count validation.
     pub fn copy_changed_components_from(&mut self, snapshot: ItemStack, changed: &[String]) {
-        let replacement = snapshot.extra.map_or_else(StackData::default, |data| *data);
-        let prior_ominous_banner = self.data().is_some_and(|data| data.ominous_banner);
-        let damage_changed = changed.iter().any(|id| id == "minecraft:damage");
-        if damage_changed {
+        let names = changed.iter().map(String::as_str);
+        let mut snapshot = snapshot;
+        if (self.data().is_some_and(|d| d.ominous_banner)
+            || snapshot.data().is_some_and(|d| d.ominous_banner))
+            && names.clone().any(is_ominous_component)
+        {
+            // A canonical incoming snapshot may itself be compact, but the
+            // edit copies values. `tidy` compacts the result only if all agree.
+            if let Some(data) = self.extra.as_deref_mut() {
+                data.materialize_ominous_banner();
+            }
+            if let Some(data) = snapshot.extra.as_deref_mut() {
+                data.materialize_ominous_banner();
+            }
+        }
+        if names.clone().any(|id| id == "minecraft:damage") {
             self.damage = snapshot.damage;
         }
-        let data = self.data_mut();
-        let mut replacement = replacement;
-        let changes = |id: &str| changed.iter().any(|entry| entry == id);
-        if changes("minecraft:banner_patterns") || changes("minecraft:item_name") {
-            data.ominous_banner = replacement.ominous_banner;
-        }
-        let banner_changed = prior_ominous_banner != data.ominous_banner;
-        macro_rules! replace_fields {
-            ($($field:ident),+) => {{ $(data.$field = std::mem::take(&mut replacement.$field);)+ }};
-        }
-        for id in changed {
-            match id.as_str() {
-                "minecraft:damage" => replace_fields!(damage_set, explicit_zero_damage),
-                "minecraft:enchantments" => replace_fields!(enchantments),
-                "minecraft:stored_enchantments" => replace_fields!(stored_enchantments),
-                "minecraft:repair_cost" => replace_fields!(repair_cost),
-                "minecraft:custom_name" => replace_fields!(custom_name),
-                "minecraft:potion_contents" => replace_fields!(potion, potion_extra),
-                "minecraft:death_protection" => replace_fields!(death_protection),
-                "minecraft:consumable" => replace_fields!(consumable),
-                "minecraft:kinetic_weapon" => replace_fields!(kinetic_weapon),
-                "minecraft:map_id" => replace_fields!(map_id),
-                "minecraft:base_color" => replace_fields!(base_color),
-                "minecraft:writable_book_content" => replace_fields!(writable_pages),
-                "minecraft:written_book_content" => replace_fields!(written),
-                "minecraft:fireworks" => replace_fields!(fireworks),
-                "minecraft:firework_explosion" => replace_fields!(firework_explosion),
-                "minecraft:dyed_color" => replace_fields!(dyed_color),
-                "minecraft:pot_decorations" => replace_fields!(pot_decorations),
-                "minecraft:bundle_contents" => replace_fields!(bundle_contents, bundle_selected),
-                "minecraft:suspicious_stew_effects" => replace_fields!(stew_effects),
-                "minecraft:map_post_processing" => replace_fields!(map_post_processing),
-                "minecraft:charged_projectiles" => replace_fields!(charged),
-                "minecraft:container" => replace_fields!(container),
-                "minecraft:ominous_bottle_amplifier" => replace_fields!(ominous_amplifier),
-                "minecraft:trim" => replace_fields!(trim),
-                _ => {}
-            };
-        }
-        // A raid banner can hold only the flag, without storing separate layers.
-        // If an edit changes its representation, take all implied components from
-        // the decoded snapshot, including the layers when only the name changed.
-        if banner_changed || changes("minecraft:banner_patterns") {
-            replace_fields!(banner_patterns, banner_patterns_set);
-        }
-        let edited = |key: &str| {
-            let id = key.strip_prefix('!').unwrap_or(key);
-            changes(id)
-                || (banner_changed
-                    && matches!(
-                        id,
-                        "minecraft:item_name" | "minecraft:rarity" | "minecraft:tooltip_display"
-                    ))
-        };
-        data.other.retain(|(key, _)| !edited(key));
-        data.other
-            .extend(replacement.other.into_iter().filter(|(key, _)| edited(key)));
-        data.other.sort_by(|a, b| a.0.cmp(&b.0));
+        self.data_mut()
+            .apply_component_changes(snapshot.extra, names);
         self.tidy();
     }
-
-    /// Drops an all-default component box so equal stacks compare equal.
+    /// Canonicalizes the component representation and drops an all-default box.
     pub fn tidy(&mut self) {
-        if self.extra.as_ref().is_some_and(|d| d.is_empty()) {
-            self.extra = None;
+        if let Some(data) = self.extra.as_deref_mut() {
+            data.compact_ominous_banner();
+            if data.is_empty() {
+                self.extra = None;
+            }
         }
+    }
+
+    /// The effective banner pattern layers, including the compact raid patch.
+    pub fn banner_layers(&self) -> &[BannerLayer] {
+        self.data().map_or(&[], StackData::banner_layers)
     }
     pub fn enchantments(&self) -> &[(Arc<str>, u32)] {
         self.data().map_or(&[], |d| &d.enchantments)
@@ -1652,10 +1760,12 @@ fn components_tag_inner(
         if let Some(id) = d.map_id {
             entries.push(("minecraft:map_id", Tag::Int(id)));
         }
-        if !d.banner_patterns.is_empty() || d.banner_patterns_set {
+        if d.ominous_banner {
+            entries.extend(ominous_banner_components().iter().cloned());
+        } else if !d.banner_layers().is_empty() || d.banner_patterns_set {
             entries.push((
                 "minecraft:banner_patterns",
-                crate::banner_layer::layers_to_nbt(&d.banner_patterns),
+                crate::banner_layer::layers_to_nbt(d.banner_layers()),
             ));
         }
         if let Some(color) = &d.base_color {
@@ -1737,32 +1847,6 @@ fn components_tag_inner(
                 Tag::List(d.charged.iter().map(template_tag).collect()),
             ));
         }
-        if d.ominous_banner {
-            let layer = |pattern: &str, color: &str| {
-                Tag::compound([
-                    (
-                        "pattern",
-                        Tag::String(format!("minecraft:{pattern}").as_str().into()),
-                    ),
-                    ("color", Tag::String(color.into())),
-                ])
-            };
-            entries.push((
-                "minecraft:banner_patterns",
-                Tag::List(OMINOUS_LAYERS.iter().map(|(p, c)| layer(p, c)).collect()),
-            ));
-            if d.other("minecraft:tooltip_display").is_none() {
-                entries.push(("minecraft:tooltip_display", ominous_tooltip_display()));
-            }
-            entries.push((
-                "minecraft:item_name",
-                Tag::compound([(
-                    "translate",
-                    Tag::String("block.minecraft.ominous_banner".into()),
-                )]),
-            ));
-            entries.push(("minecraft:rarity", Tag::String("uncommon".into())));
-        }
         if let Some(a) = d.ominous_amplifier {
             entries.push(("minecraft:ominous_bottle_amplifier", Tag::Int(i32::from(a))));
         }
@@ -1819,7 +1903,6 @@ struct Seen<'a> {
     repair_cost: Option<&'a Tag>,
     custom_name: Option<&'a Tag>,
     map_id: Option<&'a Tag>,
-    banner_patterns: Option<&'a Tag>,
     base_color: Option<&'a Tag>,
     writable_book_content: Option<&'a Tag>,
     written_book_content: Option<&'a Tag>,
@@ -1832,7 +1915,6 @@ struct Seen<'a> {
     map_post_processing: Option<&'a Tag>,
     charged_projectiles: Option<&'a Tag>,
     container: Option<&'a Tag>,
-    item_name: Option<&'a Tag>,
     amplifier: Option<&'a Tag>,
     trim: Option<&'a Tag>,
 }
@@ -1852,7 +1934,6 @@ impl<'a> Seen<'a> {
                 Some("minecraft:repair_cost") => seen.repair_cost = Some(value),
                 Some("minecraft:custom_name") => seen.custom_name = Some(value),
                 Some("minecraft:map_id") => seen.map_id = Some(value),
-                Some("minecraft:banner_patterns") => seen.banner_patterns = Some(value),
                 Some("minecraft:base_color") => seen.base_color = Some(value),
                 Some("minecraft:writable_book_content") => seen.writable_book_content = Some(value),
                 Some("minecraft:written_book_content") => seen.written_book_content = Some(value),
@@ -1865,7 +1946,6 @@ impl<'a> Seen<'a> {
                 Some("minecraft:map_post_processing") => seen.map_post_processing = Some(value),
                 Some("minecraft:charged_projectiles") => seen.charged_projectiles = Some(value),
                 Some("minecraft:container") => seen.container = Some(value),
-                Some("minecraft:item_name") => seen.item_name = Some(value),
                 Some("minecraft:ominous_bottle_amplifier") => seen.amplifier = Some(value),
                 Some("minecraft:trim") => seen.trim = Some(value),
                 _ => {}
@@ -1876,6 +1956,13 @@ impl<'a> Seen<'a> {
 }
 /// Damage and extra components from a stack's `components` compound.
 pub fn decode_components(components: Option<&Tag>) -> (u32, Option<Box<StackData>>) {
+    decode_components_inner(components, true)
+}
+
+fn decode_components_inner(
+    components: Option<&Tag>,
+    compact_banner: bool,
+) -> (u32, Option<Box<StackData>>) {
     let Some(c) = components else {
         return (0, None);
     };
@@ -2010,15 +2097,7 @@ pub fn decode_components(components: Option<&Tag>) -> (u32, Option<Box<StackData
                 .collect(),
             _ => Vec::new(),
         },
-        ominous_banner: seen
-            .item_name
-            .and_then(|n| n.get("translate"))
-            .and_then(string)
-            .as_deref()
-            == Some("block.minecraft.ominous_banner")
-            && matches!(
-                seen.banner_patterns,
-                Some(Tag::List(layers)) if layers.len() == OMINOUS_LAYERS.len()),
+        ominous_banner: false,
         ominous_amplifier: seen
             .amplifier
             .and_then(crate::properties::component_int)
@@ -2039,9 +2118,6 @@ pub fn decode_components(components: Option<&Tag>) -> (u32, Option<Box<StackData
                 data.other
                     .push((key.clone(), canonical_other_component(&key, v)));
             }
-            let ominous_part = data.ominous_banner
-                && (matches!(key.as_str(), "minecraft:item_name" | "minecraft:rarity")
-                    || (key == "minecraft:tooltip_display" && v == &ominous_tooltip_display()));
             // An explicitly empty stored_enchantments still counts as present
             // (`ItemStack.has`); the list is modelled, so keep a marker.
             if key == "minecraft:stored_enchantments"
@@ -2050,7 +2126,7 @@ pub fn decode_components(components: Option<&Tag>) -> (u32, Option<Box<StackData
             {
                 data.other
                     .push((key, Tag::compound(Vec::<(&str, Tag)>::new())));
-            } else if !MODELLED.contains(&key.as_str()) && !ominous_part {
+            } else if !MODELLED.contains(&key.as_str()) {
                 // Loading has no error channel: keep malformed source values opaque,
                 // but never leave a valid flattened custom-data compound undecoded.
                 let value = if key == "minecraft:custom_data" {
@@ -2062,6 +2138,9 @@ pub fn decode_components(components: Option<&Tag>) -> (u32, Option<Box<StackData
             }
         }
         data.other.sort_by(|a, b| a.0.cmp(&b.0));
+    }
+    if compact_banner {
+        data.compact_ominous_banner();
     }
     (damage, (!data.is_empty()).then(|| Box::new(data)))
 }
@@ -2212,7 +2291,7 @@ mod tests {
                 .unwrap(),
             ),
         );
-        let layers = &stack.data().expect("a component box").banner_patterns;
+        let layers = stack.banner_layers();
         assert_eq!(
             layers,
             &[
@@ -2224,7 +2303,7 @@ mod tests {
         stack
             .data_mut()
             .set_loot_component("minecraft:banner_patterns", &None);
-        assert!(stack.data().is_none_or(|d| d.banner_patterns.is_empty()));
+        assert!(stack.banner_layers().is_empty());
     }
 
     /// `set_book_cover` (and `set_components`) hand a written book's content
@@ -3303,7 +3382,7 @@ mod tests {
     fn banner_layers_and_shield_base_round_trip() {
         let mut stack = ItemStack::new("minecraft:shield", 1);
         stack.data_mut().base_color = Some(Arc::from("red"));
-        stack.data_mut().banner_patterns = vec![
+        *stack.data_mut().banner_layers_mut() = vec![
             crate::banner_layer::BannerLayer::new("minecraft:flower", "black"),
             crate::banner_layer::BannerLayer::new("minecraft:border", "white"),
         ];
@@ -3311,7 +3390,7 @@ mod tests {
         let (_, extra) = decode_components(Some(&tag));
         let extra = extra.expect("data");
         assert_eq!(extra.base_color.as_deref(), Some("red"));
-        assert_eq!(extra.banner_patterns, stack.data().unwrap().banner_patterns);
+        assert_eq!(extra.banner_layers(), stack.banner_layers());
     }
 
     #[test]
@@ -3593,7 +3672,8 @@ mod tests {
                 let key = k.to_string_lossy();
                 let ominous_part = data.ominous_banner
                     && (matches!(key.as_str(), "minecraft:item_name" | "minecraft:rarity")
-                        || (key == "minecraft:tooltip_display" && v == &ominous_tooltip_display()));
+                        || (key == "minecraft:tooltip_display"
+                            && v == &ominous_banner_components()[1].1));
                 if key == "minecraft:stored_enchantments"
                     && data.stored_enchantments.is_empty()
                     && matches!(v, Tag::Compound(_))

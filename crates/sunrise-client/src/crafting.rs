@@ -660,7 +660,7 @@ impl Special {
                         Some(c) if c != this => return false,
                         _ => {}
                     }
-                    let layers = banner::layers(s).len();
+                    let layers = s.banner_layers().len();
                     if layers > banner::MAX_LAYERS {
                         return false;
                     }
@@ -688,7 +688,7 @@ impl Special {
                         }
                         patterned = true;
                     } else {
-                        if !tgt.test_in(ctx.context, s) || clear || !banner::layers(s).is_empty() {
+                        if !tgt.test_in(ctx.context, s) || clear || !s.banner_layers().is_empty() {
                             return false;
                         }
                         clear = true;
@@ -941,7 +941,7 @@ impl Special {
             Self::BannerDuplicate { result, .. } => {
                 let source = stacks
                     .iter()
-                    .find(|s| (1..=banner::MAX_LAYERS).contains(&banner::layers(s).len()))?;
+                    .find(|s| (1..=banner::MAX_LAYERS).contains(&s.banner_layers().len()))?;
                 // TransmuteRecipe.createWithOriginalComponents: the source's components.
                 result.over(source, 0)
             }
@@ -963,7 +963,7 @@ impl Special {
                 let data = out.data_mut();
                 data.set_other("!minecraft:base_color", None);
                 data.set_other("!minecraft:banner_patterns", None);
-                data.banner_patterns = banner::layers(banner_stack).to_vec();
+                *data.banner_layers_mut() = banner_stack.banner_layers().to_vec();
                 data.base_color = banner::banner_color(&banner_stack.item).map(Arc::from);
                 out
             }
@@ -2924,7 +2924,7 @@ mod tests {
     }
     fn patterned(item: &str) -> ItemStack {
         let mut s = ItemStack::new(item, 1);
-        s.data_mut().banner_patterns = vec![BannerLayer::new("minecraft:cross", "red")];
+        *s.data_mut().banner_layers_mut() = vec![BannerLayer::new("minecraft:cross", "red")];
         s
     }
     /// About vanilla's count of cooking recipes: four kinds, ingredients of
@@ -3432,7 +3432,7 @@ mod tests {
         let source = patterned("minecraft:white_banner");
         let blank = ItemStack::new("minecraft:white_banner", 1);
         let out = run(&recipe, &[source.clone(), blank.clone()]).expect("copy");
-        assert_eq!(out.data().unwrap().banner_patterns.len(), 1);
+        assert_eq!(out.banner_layers().len(), 1);
         // Two blanks, or two patterned banners, do not match.
         assert!(run(&recipe, &[blank.clone(), blank.clone()]).is_none());
         assert!(run(&recipe, &[source.clone(), source.clone()]).is_none());
@@ -3476,7 +3476,7 @@ mod tests {
         let out = run(&recipe, &[banner.clone(), shield]).expect("decorated");
         let data = out.data().unwrap();
         assert_eq!(data.base_color.as_deref(), Some("red"));
-        assert_eq!(data.banner_patterns.len(), 1);
+        assert_eq!(data.banner_layers().len(), 1);
         // A shield that already has patterns cannot be decorated again.
         assert!(run(&recipe, &[banner, out]).is_none());
     }

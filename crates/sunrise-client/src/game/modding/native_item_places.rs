@@ -184,7 +184,7 @@ impl Game<'_> {
                 .flatten()
                 .ok_or(ItemPlaceEditError::NotHeld)?;
             held.copy_changed_components_from(stack, changed);
-            self.journal_equipment(entity, false);
+            self.journal_equipment(entity);
             if let Some(mob) = self.mobs.iter_mut().find(|m| m.id == entity && !m.removed) {
                 mob.set_equipment_stack(slot as usize, Some(held));
                 self.after_commit(After::EquipmentSync(entity));
@@ -405,7 +405,7 @@ impl Game<'_> {
             let written = held.filter(|h| h.count > 0);
             // The journal keeps what was, only for a write that really lands:
             // a refused one (a client's copy, no epoch) moved nothing.
-            self.journal_equipment(*entity, true);
+            self.journal_equipment(*entity);
             if !self.write_entity_equipment(*entity, *slot, written) {
                 return 0;
             }
@@ -528,7 +528,7 @@ impl Game<'_> {
                 .as_ref()
                 .map(|held| left(held, took))
                 .filter(|kept| kept.count > 0);
-            self.journal_equipment(*entity, true);
+            self.journal_equipment(*entity);
             if !self.write_entity_equipment(*entity, *slot, kept) {
                 return 0;
             }
@@ -1229,7 +1229,6 @@ pub(super) mod tests {
         with_game(|game| {
             open_to_lan(game);
             let banner = sunrise_client::mobs::raider::ominous_banner();
-            assert!(banner.data().unwrap().banner_patterns.is_empty());
             let original = encode_extra_components(&banner).unwrap();
             let mut player = guest(1);
             player.inventory[3] = Some(banner);
@@ -1238,19 +1237,38 @@ pub(super) mod tests {
                 player: 123,
                 slot: 3,
             };
-            let name = Tag::String("Renamed Raid Banner".into());
-            game.transaction(|host, tx| {
-                place.edit(host, tx, |stack| {
-                    stack
-                        .apply_components(&[("minecraft:item_name".into(), name.clone())].into())
-                        .unwrap();
+            let edit = |game: &mut super::Game<'_>, id: &str, value: Tag| {
+                game.transaction(|host, tx| {
+                    place.edit(host, tx, |stack| {
+                        stack
+                            .apply_components(&[(id.into(), value)].into())
+                            .unwrap();
+                    })
                 })
-            })
-            .unwrap();
-            let banner = game.lan.as_ref().unwrap().hub.guests[0].inventory[3]
-                .as_ref()
                 .unwrap();
-            let edited = encode_extra_components(banner).unwrap();
+            };
+            let banner = |game: &super::Game<'_>| {
+                game.lan.as_ref().unwrap().hub.guests[0].inventory[3]
+                    .clone()
+                    .unwrap()
+            };
+            edit(
+                game,
+                "minecraft:custom_name",
+                Tag::String("Named Raid Banner".into()),
+            );
+            let compact = banner(game);
+            assert!(compact.data().unwrap().ominous_banner);
+            let mut named = sunrise_client::mobs::raider::ominous_banner();
+            named.data_mut().set_other(
+                "minecraft:custom_name",
+                Some(Tag::String("Named Raid Banner".into())),
+            );
+            assert!(compact.same_item_same_components(&named));
+
+            let name = Tag::String("Renamed Raid Banner".into());
+            edit(game, "minecraft:item_name", name.clone());
+            let edited = encode_extra_components(&banner(game)).unwrap();
             assert_eq!(edited.get("minecraft:item_name"), Some(&name));
             for id in [
                 "minecraft:banner_patterns",
@@ -1263,6 +1281,40 @@ pub(super) mod tests {
                     "{id} was not edited"
                 );
             }
+
+            let rare = Tag::String("rare".into());
+            edit(game, "minecraft:rarity", rare.clone());
+            edit(
+                game,
+                "minecraft:item_name",
+                original.get("minecraft:item_name").unwrap().clone(),
+            );
+            let saved = sunrise_items::item_nbt::item_to_nbt(&banner(game), game.items());
+            let loaded = sunrise_items::item_nbt::item_from_nbt(&saved).unwrap();
+            for stack in [banner(game), loaded] {
+                let components = encode_extra_components(&stack).unwrap();
+                assert_eq!(components.get("minecraft:rarity"), Some(&rare));
+                for id in [
+                    "minecraft:item_name",
+                    "minecraft:banner_patterns",
+                    "minecraft:tooltip_display",
+                ] {
+                    assert_eq!(components.get(id), original.get(id), "{id} must survive");
+                }
+            }
+            // Writing the last differing value restores the stock representation,
+            // so a resource reconstructed from the same components compares equal.
+            let fresh = sunrise_client::mobs::raider::ominous_banner();
+            let prototype = fresh.try_into_api().unwrap();
+            game.transaction(|host, tx| {
+                place.edit(host, tx, |stack| {
+                    for id in ["minecraft:rarity", "minecraft:custom_name"] {
+                        stack.copy_component_from(&prototype, id);
+                    }
+                })
+            })
+            .unwrap();
+            assert!(banner(game).same_item_same_components(&fresh));
         });
     }
 
@@ -1311,6 +1363,9 @@ pub(super) mod tests {
                         assert_eq!(place.extract(host, tx, &taken, 1), 1);
                         assert!(armor(host) < before);
                         assert!(living.set_attribute_base(host, "minecraft:gravity", gravity));
+                        // This disjoint write invalidates the live map. Rollback must use
+                        // the updated seed and restore armor without asking the item again.
+                        assert!(living.set_attribute_base(host, "minecraft:max_health", 30.0));
                         commit_child.then_some(()).ok_or(())
                     });
                     assert_eq!(child.is_ok(), commit_child);
@@ -1334,6 +1389,10 @@ pub(super) mod tests {
                     Some(gravity)
                 );
                 assert_eq!(
+                    living.attribute_base(game, "minecraft:max_health"),
+                    Some(30.0)
+                );
+                assert_eq!(
                     armor(game),
                     before,
                     "parent abort restores the original modifiers"
@@ -1348,6 +1407,86 @@ pub(super) mod tests {
                     "minecraft:diamond_chestplate"
                 );
             }
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn equipment_rollback_keeps_a_later_permanent_modifier_with_the_same_id() {
+        use mod_api::{
+            AttributeModifier, AttributeOperation, EquipmentSlot, Identifier, ModifierLifetime, Tag,
+        };
+
+        with_game(|game| {
+            let entity = zombie(game);
+            let living = game.living(game.entity(entity).unwrap()).unwrap();
+            let slot = EquipmentSlot::Chest;
+            let place = ItemPlace::Equipment { entity, slot };
+            let attribute = "minecraft:gravity";
+            let modifier = "test:bonus";
+            let gravity = |host: &dyn ServerHost| living.attribute_value(host, attribute).unwrap();
+            assert!(living.set_attribute_base(game, attribute, 0.125));
+            let mut armor = ItemStack::new("minecraft:diamond_chestplate", 1);
+            armor.data_mut().set_other(
+                "minecraft:attribute_modifiers",
+                Some(Tag::List(vec![Tag::compound([
+                    ("type", Tag::String(attribute.into())),
+                    ("id", Tag::String(modifier.into())),
+                    ("amount", Tag::Double(0.25f64.to_bits())),
+                    ("operation", Tag::String("add_value".into())),
+                    ("slot", Tag::String("chest".into())),
+                ])])),
+            );
+            assert!(game.living_set_equipment(living, slot, Some(armor)));
+            assert_eq!(gravity(game), 0.375);
+            let resource = place.resource(game).unwrap();
+            game.transaction(|host, _| {
+                let child = host.transaction(|host, tx| {
+                    assert_eq!(place.extract(host, tx, &resource, 1), 1);
+                    assert_eq!(gravity(host), 0.125);
+                    assert!(living.add_attribute_modifier(
+                        host,
+                        attribute,
+                        AttributeModifier::new(
+                            Identifier::parse(modifier).unwrap(),
+                            0.5,
+                            AttributeOperation::AddValue
+                        ),
+                        ModifierLifetime::Permanent,
+                    ));
+                    Err::<(), ()>(())
+                });
+                assert_eq!(child, Err(()));
+                assert_eq!(place.resource(host), Some(resource));
+                assert_eq!(gravity(host), 0.625);
+                Ok::<(), ()>(())
+            })
+            .unwrap();
+            assert_eq!(gravity(game), 0.625);
+            let saved = sunrise_client::entity_nbt::mob_to_nbt(
+                &game.mobs[0],
+                [0, 0, 0, 1],
+                None,
+                None,
+                |_| None,
+                game.items(),
+            );
+            let Some(Tag::List(attrs)) = saved.get("attributes") else {
+                panic!("the mob must save its permanent attribute modifier");
+            };
+            let attribute = Tag::String(attribute.into());
+            let entry = attrs
+                .iter()
+                .find(|entry| entry.get("id") == Some(&attribute))
+                .unwrap();
+            assert_eq!(
+                entry.get("modifiers"),
+                Some(&Tag::List(vec![Tag::compound([
+                    ("id", Tag::String(modifier.into())),
+                    ("amount", Tag::Double(0.5f64.to_bits())),
+                    ("operation", Tag::String("add_value".into())),
+                ])]))
+            );
         });
     }
 

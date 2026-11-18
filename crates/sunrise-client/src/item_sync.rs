@@ -2724,10 +2724,11 @@ mod tests {
                 .and_then(|ids| ids.id(name))
                 .or_else(|| dynamic.id(registry, name))
         };
+        let original = Some(crate::mobs::raider::ominous_banner());
         let wire = crate::lan::guest::stack_to_network(
             |name| id("minecraft:item", name).unwrap_or(0),
             id,
-            &Some(crate::mobs::raider::ominous_banner()),
+            &original,
         );
         // Read it as a peer does: the slot codec, then the components.
         let mut w = Writer::new();
@@ -2738,7 +2739,8 @@ mod tests {
         let back = from_network(&read, &builtin, &dynamic);
         let d = back.data().expect("components");
         assert!(d.ominous_banner, "the name reads as the ominous banner");
-        assert_eq!(d.banner_patterns.len(), layers.len());
+        assert_eq!(back.banner_layers().len(), layers.len());
+        assert!(back.matches(original.as_ref().unwrap()));
         // The modelled parts are not duplicated into `other`.
         assert_eq!(d.other("minecraft:item_name"), None);
         assert_eq!(d.other("minecraft:rarity"), None);

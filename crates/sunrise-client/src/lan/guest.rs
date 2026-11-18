@@ -1822,21 +1822,12 @@ pub(super) fn network_stack(
                 .added
                 .push((sunrise_protocol::item::component::TRIM, component));
         }
-        // BannerPatternLayers: each pattern a reference into the synced registry;
-        // a layer that has none leaves the stack without the component. An
-        // ominous banner made by the raid keeps only its flag, so its layers
-        // are the ones the NBT encoder synthesises from it.
-        let patterns: Vec<(&str, &str)> = if d.ominous_banner && d.banner_patterns.is_empty() {
-            crate::item_data::OMINOUS_LAYERS.to_vec()
-        } else {
-            d.banner_patterns
-                .iter()
-                .map(|layer| (&*layer.pattern, &*layer.color))
-                .collect()
-        };
-        let layers: Option<Vec<(i32, i32)>> = patterns
+        // A pattern without a synced registry id leaves out the component.
+        let layers: Option<Vec<(i32, i32)>> = d
+            .banner_layers()
             .iter()
-            .map(|(pattern, color)| {
+            .map(|layer| {
+                let (pattern, color) = (&*layer.pattern, &*layer.color);
                 let name = if pattern.contains(':') {
                     pattern.to_string()
                 } else {

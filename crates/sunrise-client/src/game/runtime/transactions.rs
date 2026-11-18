@@ -29,7 +29,9 @@
 use super::{BlockEntity, BlockStateId, Game, machines::HopperState, maps::MapData};
 use mod_api::{Transaction, TransactionLifecycle, TransactionSeal};
 use std::collections::{BTreeMap, HashMap};
-use sunrise_client::{items::ItemStack, world::BlockEntityExtras};
+use sunrise_client::{
+    items::ItemStack, living_attributes::EquipmentChanges, world::BlockEntityExtras,
+};
 use sunrise_core::position::BlockPos;
 use sunrise_mod_runtime::attachments::{Attachments, Holder};
 
@@ -69,6 +71,26 @@ pub(super) struct OpenTransactions {
 }
 
 impl OpenTransactions {
+    pub(super) fn equipment_changes(&mut self, id: u32) -> Option<&mut EquipmentChanges> {
+        match self.last_mut()?.equipment.get_mut(&id)? {
+            KeptEquipment::Mob {
+                attribute_changes, ..
+            } => Some(attribute_changes),
+            KeptEquipment::Stand(_) => None,
+        }
+    }
+
+    pub(super) fn keep_explicit_modifier_write(&mut self, mob: u32, attribute: &str, id: &str) {
+        for level in self.iter_mut() {
+            if let Some(KeptEquipment::Mob {
+                attribute_changes, ..
+            }) = level.equipment.get_mut(&mob)
+            {
+                attribute_changes.keep_explicit_write(attribute, id);
+            }
+        }
+    }
+
     /// The journaled-write epoch.
     pub(in crate::game) fn writes(&self) -> u64 {
         self.writes
@@ -262,11 +284,10 @@ struct KeptPlayer {
 
 /// A mob's or an armor stand's equipment as a transaction first wrote it
 /// (#932): the same eight slots, restored their own way.
-#[derive(Clone)]
 enum KeptEquipment {
     Mob {
         stacks: Vec<Option<ItemStack>>,
-        worn_before_refresh: Option<Box<sunrise_items::equipment::Equipment>>,
+        attribute_changes: EquipmentChanges,
     },
     Stand(Vec<Option<ItemStack>>),
 }
@@ -555,17 +576,15 @@ impl Game<'_> {
                         Entry::Occupied(mut entry) => {
                             if let (
                                 KeptEquipment::Mob {
-                                    worn_before_refresh,
-                                    ..
+                                    attribute_changes, ..
                                 },
                                 KeptEquipment::Mob {
-                                    worn_before_refresh: child,
+                                    attribute_changes: child,
                                     ..
                                 },
                             ) = (entry.get_mut(), kept)
-                                && worn_before_refresh.is_none()
                             {
-                                *worn_before_refresh = child;
+                                attribute_changes.merge(child);
                             }
                         }
                     }
@@ -963,30 +982,20 @@ impl Game<'_> {
             level.board = Some(self.score.board.clone());
         }
     }
-    /// Keeps the equipment at the first slot write, and the stacks that supplied the live
-    /// equipment modifiers at the first refresh. A quiet edit can make the two differ.
-    pub(super) fn journal_equipment(&mut self, id: u32, refreshes_attributes: bool) {
+    /// Keeps the slots at their first write. Equipment collection records any
+    /// actual modifier edits separately; a quiet edit does not run it.
+    pub(super) fn journal_equipment(&mut self, id: u32) {
         let Some(level) = self.transactions.last_mut() else {
             return;
         };
-        let mob = || self.mobs.iter().find(|m| m.id == id && !m.removed);
-        if let Some(kept) = level.equipment.get_mut(&id) {
-            if let KeptEquipment::Mob {
-                worn_before_refresh,
-                ..
-            } = kept
-                && refreshes_attributes
-                && worn_before_refresh.is_none()
-                && let Some(mob) = mob()
-            {
-                *worn_before_refresh = Some(mob.extra.live.worn_equipment());
-            }
+        if level.equipment.contains_key(&id) {
             return;
         }
+        let mob = || self.mobs.iter().find(|m| m.id == id && !m.removed);
         let kept = if let Some(mob) = mob() {
             KeptEquipment::Mob {
                 stacks: mob.equipment_stacks().iter().cloned().collect(),
-                worn_before_refresh: refreshes_attributes.then(|| mob.extra.live.worn_equipment()),
+                attribute_changes: EquipmentChanges::default(),
             }
         } else if let Some(stand) = self.armor_stands.iter().find(|a| a.id == id) {
             KeptEquipment::Stand(stand.equipment.iter().cloned().collect())
@@ -1205,14 +1214,14 @@ impl Game<'_> {
         self.scratch_roll_back(std::mem::take(&mut level.scratch_kept));
         // Discard deferred effects before undoing tentative action storage.
         level.after.clear();
-        // Restore only the equipment contribution. Collecting from the slot snapshot would
-        // adopt a quiet edit early; replacing the map would erase independent attribute writes.
+        // Restore slots and undo only their recorded modifier edits. Explicit
+        // attribute writes survive an abort, and no item query runs here.
         let equipment = std::mem::take(&mut level.equipment);
         for (id, kept) in equipment {
             match kept {
                 KeptEquipment::Mob {
                     stacks,
-                    worn_before_refresh,
+                    attribute_changes,
                 } => {
                     let Some(mob) = self.mobs.iter_mut().find(|m| m.id == id && !m.removed) else {
                         continue;
@@ -1220,14 +1229,11 @@ impl Game<'_> {
                     for (slot, stack) in stacks.into_iter().enumerate() {
                         mob.set_equipment_stack(slot, stack);
                     }
-                    if let Some(worn) = worn_before_refresh {
-                        super::living_attributes::collect_equipment(
-                            &self.motion.attributes,
-                            world_items!(self),
-                            mob,
-                            Some(&worn),
-                        );
-                    }
+                    super::living_attributes::undo_equipment(
+                        &self.motion.attributes,
+                        mob,
+                        attribute_changes,
+                    );
                 }
                 // An armor stand keeps no live attribute map of its gear; the
                 // plain write puts its slots back as they were.
