@@ -4608,7 +4608,7 @@ impl<G: ChunkGenerator> crate::streaming::LodSampler for SavedLodSampler<G> {
         }
         columns
     }
-    fn sample(&mut self, x: i32, z: i32) -> Option<crate::lod::Surface> {
+    fn sample(&mut self, x: i32, z: i32) -> Option<crate::columns::Surface> {
         self.column(x, z).surface
     }
     fn column(&mut self, x: i32, z: i32) -> crate::lod::Column {
@@ -4818,7 +4818,7 @@ fn decode_lod_surfaces(
                             if fluid {
                                 water[cell].get_or_insert((height, state));
                             } else {
-                                column.surface = Some(crate::lod::Surface {
+                                column.surface = Some(crate::columns::Surface {
                                     height,
                                     state,
                                     water: water[cell],
@@ -4958,7 +4958,12 @@ impl<G: ChunkGenerator> ChunkGenerator for Persistent<G> {
         chunk.entities.extend(self.save.load_entities(x, z));
         Some(chunk)
     }
-    fn lod_surface(&self, worker: &mut G::Worker, x: i32, z: i32) -> Option<crate::lod::Surface> {
+    fn lod_surface(
+        &self,
+        worker: &mut G::Worker,
+        x: i32,
+        z: i32,
+    ) -> Option<crate::columns::Surface> {
         // Resident/visited summaries override this procedural fallback in the LOD cache.
         self.inner.lod_surface(worker, x, z)
     }
@@ -6244,7 +6249,7 @@ mod tests {
         );
         struct SavedOnly(Vec<crate::streaming::LodDetail>);
         impl crate::streaming::LodSampler for SavedOnly {
-            fn sample(&mut self, _: i32, _: i32) -> Option<crate::lod::Surface> {
+            fn sample(&mut self, _: i32, _: i32) -> Option<crate::columns::Surface> {
                 panic!("saved data must win")
             }
             fn request_detail(&mut self, chunks: &[(i32, i32)], _: [i32; 2]) {

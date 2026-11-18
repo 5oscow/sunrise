@@ -14,6 +14,7 @@ mod kept;
 mod mesh;
 pub mod packed;
 mod samples;
+use crate::columns::Surface;
 use std::{
     collections::VecDeque,
     sync::{
@@ -227,14 +228,6 @@ const DETAIL_REQUEST: usize = 512;
 /// percentile, where the median frame was 6 ms. What the budget leaves waits
 /// in `Lod::detail_backlog` for the frames after it.
 const DETAIL_BUDGET: std::time::Duration = std::time::Duration::from_millis(3);
-/// Top solid face and optional fluid face, in absolute block coordinates.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Surface {
-    pub height: i32,
-    pub state: BlockStateId,
-    pub water: Option<(i32, BlockStateId)>,
-    pub biome: u16,
-}
 /// A half-open material run; gaps between runs remain air.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Span {
