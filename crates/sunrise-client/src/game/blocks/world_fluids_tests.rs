@@ -420,6 +420,48 @@ fn journal_level_host_retains_neighbour_updates_from_earlier_writes() {
     });
 }
 
+#[test]
+#[ignore = "daily"]
+fn staged_copper_chest_weathering_keeps_its_inventory() {
+    use crate::game::journal_level_write::JournalLevelWrite;
+    use mod_api::{LevelHost, LevelWriteHost};
+    use sunrise_client::items::ItemStack;
+    with_level(|game, level| {
+        let copper = state(game, "minecraft:copper_chest");
+        let exposed = state(game, "minecraft:exposed_copper_chest");
+        let pos = (AT[0], AT[1], AT[2]);
+        let content = ItemStack::new("minecraft:diamond", 3);
+        let mut slots = vec![None; 27];
+        slots[0] = Some(content.clone());
+        game.world.set(pos.0, pos.1, pos.2, copper).unwrap();
+        game.world
+            .block_entities
+            .insert(pos, BlockEntity::Chest(slots));
+        for commit in [false, true] {
+            let outer = game.transaction_open();
+            let mut host = JournalLevelWrite::new(game, level).unwrap();
+            let before = host.block_entity(AT).expect("chest before weathering");
+            let weathered = host
+                .block_state_id("minecraft:exposed_copper_chest")
+                .unwrap();
+            assert!(host.set_block(AT, weathered, mod_api::BlockUpdateFlags::CLIENTS));
+            assert_eq!(host.block_entity(AT), Some(before));
+            let side = mod_api::BlockSide {
+                level,
+                pos: AT,
+                side: None,
+            };
+            assert_eq!(host.container_stack(side, 0).unwrap().count(), 3);
+            game.transaction_close(&outer, commit);
+            assert_eq!(block(game), if commit { exposed } else { copper });
+            assert_eq!(
+                game.world.block_entities.get(&pos).unwrap().slots()[0].as_ref(),
+                Some(&content)
+            );
+        }
+    });
+}
+
 #[derive(Default)]
 struct LiquidCalls {
     queried: std::sync::Mutex<Vec<(bool, Option<u32>, mod_api::FluidKey)>>,

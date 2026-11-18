@@ -1,8 +1,8 @@
 //! `Level.setBlock`, `LevelChunk.setBlockState` and the
 //! `CollectingNeighborUpdater` that orders neighbour and shape updates.
 use super::{
-    LevelAccess, LevelEvent, Signals, Sim, classes::Class, flags, orientation::Orientation,
-    states::BlockId,
+    Behaviours, LevelAccess, LevelEvent, Signals, Sim, classes::Class, flags,
+    orientation::Orientation, states::BlockId,
 };
 use crate::{fluid::FluidState, registry::BlockStateId};
 use sunrise_core::{
@@ -11,6 +11,19 @@ use sunrise_core::{
     random::{LegacyRandom, RandomSource},
     ticks::{ScheduleResult, TickPriority},
 };
+
+impl Behaviours {
+    /// Whether an existing block entity survives this state change. Vanilla's
+    /// `shouldChangedStateKeepBlockEntity` also keeps copper chests and copper
+    /// golem statues across their weathering states.
+    pub fn keeps_block_entity(&self, old: BlockStateId, new: BlockStateId) -> bool {
+        let (old, new) = (self.block(old), self.block(new));
+        let tags = &self.tags;
+        old == new
+            || (tags.copper_chests.contains(old) && tags.copper_chests.contains(new))
+            || (tags.copper_golem_statues.contains(old) && tags.copper_golem_statues.contains(new))
+    }
+}
 
 /// `NeighborUpdater.UPDATE_ORDER`.
 pub(crate) const UPDATE_ORDER: [Direction; 6] = [
@@ -391,7 +404,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             && (self.b.has_flag(old, super::data::state_flags::BLOCK_ENTITY)
                 || self.level.has_native_block_entity(old)
                 || self.level.has_mod_block_entity(pos))
-            && !self.keeps_block_entity(state, old)
+            && !self.b.keeps_block_entity(old, state)
         {
             // BlockEntity.preRemoveSideEffects (unless UPDATE_SKIP_BLOCK_ENTITY_SIDEEFFECTS)
             // and removeBlockEntity, before the neighbours hear of the removal.
@@ -424,14 +437,6 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             self.level.ensure_block_entity(pos, landed);
         }
         Some(old)
-    }
-    /// `BlockState.shouldChangedStateKeepBlockEntity(oldState)`: copper chests
-    /// and copper golem statues keep theirs across their weathering states.
-    fn keeps_block_entity(&self, new: BlockStateId, old: BlockStateId) -> bool {
-        let (new, old) = (self.block_of(new), self.block_of(old));
-        let tags = &self.b.tags;
-        (tags.copper_chests.contains(new) && tags.copper_chests.contains(old))
-            || (tags.copper_golem_statues.contains(new) && tags.copper_golem_statues.contains(old))
     }
     /// `MovingPistonBlock.destroy`: a `moving_piston` that goes away takes the
     /// piston base behind it with it when that base is extended (a head that was

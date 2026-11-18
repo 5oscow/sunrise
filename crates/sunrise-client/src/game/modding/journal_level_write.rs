@@ -53,7 +53,7 @@ impl<'g, 'a> JournalLevelWrite<'g, 'a> {
             return false;
         }
         let b = self.game.res.behaviours();
-        if b.block(old) != b.block(state)
+        if !b.keeps_block_entity(old, state)
             && self.game.world.block_entities.get(&(x, y, z)).is_some()
         {
             self.game.journal_block_replacement((x, y, z));
