@@ -293,47 +293,62 @@ pub fn increased_repair_cost(cost: u32) -> u32 {
 /// owner's name, translatable so each viewer renders it in their own language.
 pub fn hover_name_text(names: &crate::creative::Names, stack: &ItemStack) -> crate::text::Text {
     use crate::text::Text;
+    let data = stack.data();
+    // `ItemStack.getCustomName`: the custom name, else a written book's non-blank title.
     if stack.custom_name().is_some()
-        && let Some(component) = stack.data().and_then(|d| d.custom_name.as_ref())
+        && let Some(component) = data.and_then(|d| d.custom_name.as_ref())
     {
         return crate::entity_nbt::name_text(component);
     }
-    if let Some(key) = crate::brewing::contents_name_key(stack) {
-        let fallback = names
-            .get(&key)
-            .map_or_else(|| names.item(&stack.item), str::to_owned);
-        return Text::translate_with_fallback(&key, &fallback, &[]);
-    }
-    if let Some(title) = stack
-        .data()
+    if let Some(title) = data
         .and_then(|d| d.written.as_ref())
         .map(|w| w.title.as_str())
         .filter(|t| !t.trim().is_empty())
     {
         return Text::literal(title);
     }
+    // `ItemStack.getItemName`: the item's own `getName`, which for a few items is not its
+    // `item_name` component.
+    if let Some(key) = crate::brewing::contents_name_key(stack) {
+        let fallback = names
+            .get(&key)
+            .map_or_else(|| names.item(&stack.item), str::to_owned);
+        return Text::translate_with_fallback(&key, &fallback, &[]);
+    }
+    if &*stack.item == "minecraft:shield"
+        && let Some(color) = data.and_then(|d| d.base_color.as_deref())
+    {
+        // `ShieldItem.getName`: the banner's base colour names the shield.
+        return Text::translate(&format!("item.minecraft.shield.{color}"), &[]);
+    }
+    if &*stack.item == "minecraft:compass"
+        && data.is_some_and(|d| d.other("minecraft:lodestone_tracker").is_some())
+    {
+        // `CompassItem.getName`: a lodestone tracker names it, over `item_name`.
+        return Text::translate("item.minecraft.lodestone_compass", &[]);
+    }
     if let Some(head) = crate::item_tooltip::player_head_name(stack) {
         // `PlayerHeadItem.getName`: a profile's name, else the item name.
         return head.text();
     }
+    // `Item.getName`: the stack's `item_name` component, the patch over the prototype.
     if stack.item_name().is_some()
-        && let Some(component) = stack.data().and_then(|d| d.other("minecraft:item_name"))
+        && let Some(component) = data.and_then(|d| d.other("minecraft:item_name"))
     {
         return crate::entity_nbt::name_text(component);
     }
-    if stack
-        .data()
-        .is_some_and(|d| d.other("!minecraft:item_name").is_some())
-    {
+    if data.is_some_and(|d| d.other("!minecraft:item_name").is_some()) {
         // `Item.getName` is `getOrDefault(ITEM_NAME, EMPTY)`.
         return Text::literal("");
     }
-    if stack.data().is_some_and(|d| d.ominous_banner) {
+    if data.is_some_and(|d| d.ominous_banner) {
         let key = "block.minecraft.ominous_banner";
         return Text::translate_with_fallback(key, names.get(key).unwrap_or("Ominous Banner"), &[]);
     }
-    // `Item.getDescriptionId`: the item's own default `item_name` component, else the item's
-    // key as `Util.makeDescriptionId("item", id)`. The English name is the fallback text.
+    // The prototype's default `item_name` (`Item.getDescriptionId`), else, for an item whose
+    // prototype carries none (a mod's), the key `Item.Properties` gives it: its block's for a
+    // block item (`useBlockDescriptionPrefix`), else `item.*` (`Util.makeDescriptionId`).
+    // The English name is the fallback text.
     let (namespace, path) = stack
         .item
         .split_once(':')
@@ -350,7 +365,14 @@ pub fn hover_name_text(names: &crate::creative::Names, stack: &ItemStack) -> cra
             },
             _ => crate::entity_nbt::name_text(&crate::scoreboard::json_to_tag(name)),
         },
-        None => Text::translate_with_fallback(&format!("item.{namespace}.{path}"), &fallback, &[]),
+        None => {
+            let prefix = if names.is_block_item(&stack.item) {
+                "block"
+            } else {
+                "item"
+            };
+            Text::translate_with_fallback(&format!("{prefix}.{namespace}.{path}"), &fallback, &[])
+        }
     }
 }
 /// `ItemStack.getHoverName` as plain text in the current language: the component of

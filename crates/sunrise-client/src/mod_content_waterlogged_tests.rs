@@ -161,6 +161,18 @@ fn declared_waterlogged_blocks_keep_their_class_and_gain_liquid_defaults() {
     assert_ne!(mobs.state(dry_plant).flags & VALID_EMPTY_SPAWN, 0);
     assert_eq!(mobs.path_type(wet_stone), PathType::Blocked);
     assert_eq!(b.fluid(stairs), FluidState::WATER);
+    // A mod block's item, whose prototype carries no `item_name`, is named by its block's key.
+    let blocks: &'static sunrise_world::registry::BlockRegistry = Box::leak(Box::new(
+        sunrise_world::level::data::load_registry(&root).unwrap(),
+    ));
+    let names = crate::creative::Names::default().with_item_names(&Default::default(), blocks);
+    for (item, key) in [
+        ("wet:stone", "block.wet.stone"),
+        ("wet:plain_item", "item.wet.plain_item"),
+    ] {
+        let name = crate::stations::hover_name_text(&names, &crate::items::ItemStack::new(item, 1));
+        assert_eq!(name.component()["translate"], key, "{item}");
+    }
     assert!(!mobs.pathfindable(stairs, PathComputationType::Water));
 
     let is_waterlogged = |state| b.table.bool(state, b.props.waterlogged);
