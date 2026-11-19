@@ -1,44 +1,60 @@
 //! Winning definitions for the synchronized registries that read world packs.
-use super::{PACK_REGISTRIES, json_to_nbt};
+use super::{PACK_REGISTRIES, condition_filter, json_to_nbt, synchronized_entries};
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, path::Path};
 use sunrise_core::{
     identifier::Identifier,
     nbt::{Compound, Tag},
 };
-use sunrise_world::loot::PackOverlay;
+use sunrise_items::{
+    enchant::{Enchantments, HolderSetBinding},
+    items::{Instrument, Items},
+};
+use sunrise_world::{item_defaults::ItemDefaults, loot::PackOverlay};
+
+type Registry = BTreeMap<(String, String), Option<(Definition, bool)>>;
 
 /// Validated once for the world session. A false condition suppresses the
 /// winning entry, including any prepared or lower-priority definition.
 #[derive(Default)]
 pub struct PackRegistryDefinitions {
-    entries: BTreeMap<&'static str, BTreeMap<(String, String), Option<Definition>>>,
+    entries: BTreeMap<&'static str, Registry>,
 }
 
-/// Enchantment holder-set binding still consumes JSON. Other definitions need
-/// no further binding here and can keep their codec's exact NBT numeric types.
+/// Keep the admitted item definitions alongside the exact wire encoding.
 enum Definition {
     Encoded(Tag),
     Enchantment(Value),
+    Instrument(Instrument, Tag),
 }
 
 impl PackRegistryDefinitions {
     /// RegistryDataLoader's collected errors: try every winning definition,
     /// then refuse the entire load and report each failure by registry and id.
-    pub fn load(
+    pub(super) fn load(
+        resources: &Path,
+        defaults: &ItemDefaults,
         overlay: &PackOverlay<'_>,
         read_errors: &BTreeMap<String, String>,
         text_registries: &crate::command::Registries,
         sound_exists: impl Fn(&str) -> bool,
     ) -> Result<Self, String> {
-        let (definitions, admitted) =
-            Self::stage(overlay, read_errors, text_registries, sound_exists);
+        let (definitions, admitted) = Self::stage(
+            resources,
+            defaults,
+            overlay,
+            read_errors,
+            text_registries,
+            sound_exists,
+        );
         admitted.map(|()| definitions)
     }
 
     /// Keep replaced keys even on failure, so the caller can collect errors
     /// from other registry files without checking a losing definition.
     pub(super) fn stage(
+        resources: &Path,
+        defaults: &ItemDefaults,
         overlay: &PackOverlay<'_>,
         read_errors: &BTreeMap<String, String>,
         text_registries: &crate::command::Registries,
@@ -76,13 +92,16 @@ impl PackRegistryDefinitions {
                         .map_err(|error| error.to_string())?;
                     let file = format!("data/{}/{kind}/{}.json", id.namespace(), id.path());
                     if overlay.conditions.allows_file_isolated(&value, &file)? {
-                        *definition = Some(decode_definition(
-                            registry,
-                            &id.to_string(),
-                            value,
-                            text_registries,
-                            &sound_exists,
-                        )?);
+                        *definition = Some((
+                            decode_definition(
+                                registry,
+                                &id.to_string(),
+                                value,
+                                text_registries,
+                                &sound_exists,
+                            )?,
+                            true,
+                        ));
                     }
                     Ok(())
                 };
@@ -91,6 +110,77 @@ impl PackRegistryDefinitions {
                         .entry(registry)
                         .or_default()
                         .insert(id.to_owned(), error);
+                }
+            }
+            if Self::includes_prepared_entries(registry) {
+                let mut prepared = synchronized_entries(
+                    &resources.join("data/minecraft"),
+                    resources,
+                    registry,
+                    overlay,
+                );
+                // The pack winner (even if refused or skipped) hides resources below it.
+                prepared.retain(|(key, _, _)| !entries.contains_key(key));
+                condition_filter::filter(&mut prepared, false, overlay.conditions, kind);
+                entries.extend(prepared.into_iter().map(|(key, value, from_pack)| {
+                    let definition = if kind == "enchantment" {
+                        Definition::Enchantment(value)
+                    } else {
+                        let wire = json_to_nbt(&value);
+                        match Instrument::decode(&value) {
+                            Ok(instrument) => Definition::Instrument(instrument, wire),
+                            Err(_) => Definition::Encoded(wire),
+                        }
+                    };
+                    (key, Some((definition, from_pack)))
+                }));
+            }
+        }
+        if let Some(entries) = definitions.entries.get_mut("minecraft:enchantment") {
+            let enchantments: Vec<_> = entries
+                .iter_mut()
+                .filter_map(|((namespace, path), entry)| {
+                    let (Definition::Enchantment(value), from_pack) = entry.as_mut()? else {
+                        return None;
+                    };
+                    Some((format!("{namespace}:{path}"), value, *from_pack))
+                })
+                .collect();
+            let binding = enchantments
+                .iter()
+                .any(|(_, value, _)| HolderSetBinding::needed(value))
+                .then(|| {
+                    HolderSetBinding::load(
+                        resources,
+                        overlay,
+                        defaults,
+                        enchantments.iter().map(|(id, _, _)| id.clone()).collect(),
+                    )
+                });
+            for (id, value, from_pack) in enchantments {
+                let result = if let Some(binding) =
+                    binding.as_ref().filter(|_| HolderSetBinding::needed(value))
+                {
+                    match binding {
+                        Ok(binding) => binding.bind(&id, value).map_err(|error| error.to_string()),
+                        Err(error) => Err(error.to_string()),
+                    }
+                } else {
+                    Ok(())
+                };
+                // Holder binding may change the transmitted shape. Preflight
+                // the exact JSON-to-NBT projection the registry packet uses.
+                let result = result.and_then(|()| {
+                    if from_pack {
+                        check_network_nbt(&json_to_nbt(value))?;
+                    }
+                    Ok(())
+                });
+                if let Err(error) = result {
+                    errors
+                        .entry("minecraft:enchantment")
+                        .or_default()
+                        .insert(id, error);
                 }
             }
         }
@@ -117,13 +207,8 @@ impl PackRegistryDefinitions {
         }
     }
 
-    pub(super) fn append_enchantments(&self, entries: &mut Vec<((String, String), Value, bool)>) {
-        if let Some(pack) = self.entries.get("minecraft:enchantment") {
-            entries.extend(pack.iter().filter_map(|(key, value)| match value {
-                Some(Definition::Enchantment(value)) => Some((key.clone(), value.clone(), true)),
-                _ => None,
-            }));
-        }
+    pub(super) fn includes_prepared_entries(registry: &str) -> bool {
+        matches!(registry, "minecraft:enchantment" | "minecraft:instrument")
     }
 
     pub(super) fn append_encoded(
@@ -132,12 +217,64 @@ impl PackRegistryDefinitions {
         entries: &mut Vec<((String, String), Tag, bool)>,
     ) {
         if let Some(pack) = self.entries.get(registry) {
-            entries.extend(pack.iter().filter_map(|(key, value)| match value {
-                Some(Definition::Encoded(value)) => Some((key.clone(), value.clone(), true)),
-                _ => None,
+            entries.extend(pack.iter().filter_map(|(key, value)| {
+                let (definition, from_pack) = value.as_ref()?;
+                let tag = match definition {
+                    Definition::Encoded(tag) | Definition::Instrument(_, tag) => tag.clone(),
+                    Definition::Enchantment(json) => json_to_nbt(json),
+                };
+                Some((key.clone(), tag, *from_pack))
             }));
         }
     }
+
+    /// Use the same selected definitions as the synchronized registry packets.
+    pub fn install_items(
+        &self,
+        items: &mut Items,
+        resources: &Path,
+        overlay: &PackOverlay<'_>,
+        defaults: &ItemDefaults,
+    ) -> sunrise_items::Result<()> {
+        let enchantments: Vec<_> = self
+            .entries
+            .get("minecraft:enchantment")
+            .into_iter()
+            .flatten()
+            .filter_map(|((namespace, path), entry)| match entry {
+                Some((Definition::Enchantment(value), _)) => {
+                    Some((format!("{namespace}:{path}"), value))
+                }
+                _ => None,
+            })
+            .collect();
+        let enchantments = Enchantments::load_selected(
+            resources,
+            overlay,
+            defaults,
+            enchantments.iter().map(|(id, value)| (id.as_str(), *value)),
+        )?;
+        let instruments = self
+            .entries
+            .get("minecraft:instrument")
+            .into_iter()
+            .flatten()
+            .filter_map(|((namespace, path), entry)| match entry {
+                Some((Definition::Instrument(instrument, _), _)) => {
+                    Some((format!("{namespace}:{path}"), instrument.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        items.install_registries(enchantments, instruments);
+        Ok(())
+    }
+}
+
+fn check_network_nbt(tag: &Tag) -> Result<(), String> {
+    sunrise_core::nbt::write_network(tag, sunrise_core::nbt::Limits::default())
+        .map(|_| ())
+        .map_err(|error| format!("network NBT: {error}"))
 }
 
 fn decode_definition(
@@ -284,7 +421,7 @@ fn decode_definition(
             Tag::Compound(fields)
         }
         "minecraft:instrument" => {
-            let instrument = sunrise_items::items::Instrument::decode(&value)?;
+            let instrument = Instrument::decode(&value)?;
             let float = |v: f32| Tag::Float(v.to_bits());
             let sound = match instrument.inline_sound_range {
                 None if !sound_exists(&instrument.sound) => {
@@ -315,7 +452,9 @@ fn decode_definition(
                     Tag::Int(instrument.durability_damage),
                 );
             }
-            Tag::Compound(fields)
+            let tag = Tag::Compound(fields);
+            check_network_nbt(&tag)?;
+            return Ok(Definition::Instrument(instrument, tag));
         }
         "minecraft:banner_pattern" => {
             let pattern = crate::banner::Pattern::decode(id, &value)?;
@@ -333,14 +472,192 @@ fn decode_definition(
         }
         _ => unreachable!("only selected registry families are decoded"),
     };
-    sunrise_core::nbt::write_network(&encoded, sunrise_core::nbt::Limits::default())
-        .map_err(|error| format!("network NBT: {error}"))?;
+    check_network_nbt(&encoded)?;
     Ok(Definition::Encoded(encoded))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    fn enchantment(description: &str) -> Value {
+        json!({
+            "description": description, "weight": 1, "max_level": 1, "anvil_cost": 1,
+            "min_cost": {"base": 1, "per_level_above_first": 0},
+            "max_cost": {"base": 5, "per_level_above_first": 0},
+            "supported_items": "minecraft:stick", "slots": ["hand"]
+        })
+    }
+
+    #[test]
+    fn a_set_object_reaches_clients_as_ids_and_plain_forms_are_untouched() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("items.json"),
+            json!({"minecraft:stick": {}, "minecraft:iron_sword": {}, "test:custom": {}})
+                .to_string(),
+        )
+        .unwrap();
+        let mut sticky = enchantment("Sticky");
+        sticky["supported_items"] = json!({"type": "neoforge:or",
+            "values": ["#minecraft:swords", "minecraft:stick"]});
+        sticky["primary_items"] = json!({"type": "neoforge:any"});
+        sticky["exclusive_set"] = json!({"type": "neoforge:any"});
+        let mut plain = enchantment("Plain");
+        plain["supported_items"] = json!("#minecraft:swords");
+        let files = [
+            (
+                "tags/minecraft:item/swords".into(),
+                vec![
+                    json!({"values": ["test:custom", "minecraft:iron_sword"]})
+                        .to_string()
+                        .into_bytes(),
+                ],
+            ),
+            (
+                "enchantment/test:sticky".into(),
+                vec![sticky.to_string().into_bytes()],
+            ),
+            (
+                "enchantment/test:plain".into(),
+                vec![plain.to_string().into_bytes()],
+            ),
+        ];
+        let defaults = sunrise_world::item_defaults::read(root.path()).unwrap();
+        let packed = PackRegistryDefinitions::load(
+            root.path(),
+            &defaults,
+            &PackOverlay::new(&files),
+            &Default::default(),
+            &Default::default(),
+            |_| true,
+        )
+        .unwrap();
+        let mut wire = Vec::new();
+        packed.append_encoded("minecraft:enchantment", &mut wire);
+        assert_eq!(wire[0].0.1, "plain");
+        assert_eq!(wire[1].0.1, "sticky");
+        let ids =
+            |ids: &[&str]| Tag::List(ids.iter().map(|id| Tag::String((*id).into())).collect());
+        for (field, expected) in [
+            (
+                "supported_items",
+                ids(&["test:custom", "minecraft:iron_sword", "minecraft:stick"]),
+            ),
+            (
+                "primary_items",
+                ids(&["minecraft:iron_sword", "minecraft:stick", "test:custom"]),
+            ),
+            ("exclusive_set", ids(&["test:plain", "test:sticky"])),
+        ] {
+            assert_eq!(wire[1].1.get(field), Some(&expected));
+        }
+        assert_eq!(
+            wire[0].1.get("supported_items"),
+            Some(&Tag::String("#minecraft:swords".into()))
+        );
+    }
+
+    #[test]
+    fn bound_tag_conditions_select_the_same_item_definitions_for_gameplay_and_wire() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("items.json"),
+            br#"{"minecraft:stick": {}}"#,
+        )
+        .unwrap();
+        let defaults = sunrise_world::item_defaults::read(root.path()).unwrap();
+        let mut enchantment = enchantment("Conditional");
+        let lower_instrument = root.path().join("data/test/instrument");
+        let lower_enchantment = root.path().join("data/test/enchantment");
+        std::fs::create_dir_all(&lower_instrument).unwrap();
+        std::fs::create_dir_all(&lower_enchantment).unwrap();
+        std::fs::write(lower_instrument.join("conditional.json"),
+            br#"{"sound_event":"test:lower","use_duration":3,"range":32,"description":"Lower horn"}"#).unwrap();
+        std::fs::write(
+            lower_enchantment.join("conditional.json"),
+            enchantment.to_string(),
+        )
+        .unwrap();
+        let guard = json!([{"type": "neoforge:tag_empty", "tag": "test:gate"}]);
+        enchantment["neoforge:conditions"] = guard.clone();
+        let files = [
+            (
+                "instrument/test:conditional".into(),
+                vec![
+                json!({"sound_event": {"sound_id": "test:horn"}, "use_duration": 5, "range": 64,
+                    "description": "Conditional horn", "neoforge:conditions": guard})
+                    .to_string().into_bytes()
+            ],
+            ),
+            (
+                "enchantment/test:conditional".into(),
+                vec![enchantment.to_string().into_bytes()],
+            ),
+        ];
+        for (tag, admitted) in [("test:unrelated", true), ("test:gate", false)] {
+            let mut items = Items::for_tests(std::collections::HashMap::from([(
+                tag.to_owned(),
+                std::collections::HashSet::from(["minecraft:stick".to_owned()]),
+            )]));
+            let conditions =
+                sunrise_world::conditions::LoadConditions::new([]).with_tags(items.bound_tags());
+            let overlay = PackOverlay {
+                conditions: &conditions,
+                files: &files,
+            };
+            let packed = super::super::SyncData::stage_registry_definitions(
+                root.path(),
+                &defaults,
+                &overlay,
+                &Default::default(),
+                &Default::default(),
+                |_| true,
+            )
+            .unwrap();
+            // Gameplay must not evaluate the definition conditions with this other context.
+            packed
+                .install_items(
+                    &mut items,
+                    root.path(),
+                    &PackOverlay::new(&files),
+                    &defaults,
+                )
+                .unwrap();
+            assert_eq!(
+                items
+                    .instruments
+                    .get("test:conditional")
+                    .map(|i| i.sound.as_str()),
+                admitted.then_some("test:horn")
+            );
+            assert_eq!(
+                items.enchantments.get("test:conditional").is_some(),
+                admitted
+            );
+            assert_eq!(
+                items
+                    .component_registry
+                    .enchantments
+                    .contains(&"test:conditional".to_owned()),
+                admitted
+            );
+            for registry in ["minecraft:instrument", "minecraft:enchantment"] {
+                let mut wire = Vec::new();
+                packed.append_encoded(registry, &mut wire);
+                assert_eq!(
+                    wire.first().map(|((ns, id), _, from_pack)| (
+                        ns.as_str(),
+                        id.as_str(),
+                        *from_pack
+                    )),
+                    admitted.then_some(("test", "conditional", true)),
+                    "{registry}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn every_bad_winning_definition_is_reported_in_one_error() {
@@ -390,6 +707,10 @@ mod tests {
             ),
             ("enchantment/test:not_read".into(), vec![b"{}".to_vec()]),
             ("enchantment/test:wrong_level".into(), vec![br#"{"max_level":"seven"}"#.to_vec()]),
+            (
+                "enchantment/test:unencodable".into(),
+                vec![enchantment(&"\0".repeat(32_768)).to_string().into_bytes()],
+            ),
             ("painting_variant/test:numeric_style".into(), vec![br#"{"asset_id":"test:mural","width":1,"height":1,"title":{"text":"No","bold":1}}"#.to_vec()]),
             ("painting_variant/test:numeric_object".into(), vec![br#"{"asset_id":"test:mural","width":1,"height":1,"author":{"object":7,"sprite":"test:icon"}}"#.to_vec()]),
             ("painting_variant/test:wrong_atlas".into(), vec![br#"{"asset_id":"test:mural","width":1,"height":1,"author":{"object":"atlas","atlas":7,"sprite":"test:icon","player":"Steve"}}"#.to_vec()]),
@@ -418,7 +739,12 @@ mod tests {
             ),
         ];
         let io = BTreeMap::from([("enchantment/test:not_read".into(), "read failed".into())]);
-        let Err(error) = PackRegistryDefinitions::load(
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("items.json"), b"{}").unwrap();
+        let defaults = sunrise_world::item_defaults::read(root.path()).unwrap();
+        let Err(error) = super::super::SyncData::stage_registry_definitions(
+            root.path(),
+            &defaults,
             &PackOverlay::new(&files),
             &io,
             &Default::default(),
@@ -448,7 +774,11 @@ mod tests {
             ),
             (
                 "enchantment",
-                &[("not_read", "read failed"), ("wrong_level", "max_level")],
+                &[
+                    ("not_read", "read failed"),
+                    ("wrong_level", "max_level"),
+                    ("unencodable", "modified UTF-8"),
+                ],
             ),
             (
                 "painting_variant",

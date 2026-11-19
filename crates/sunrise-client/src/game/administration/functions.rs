@@ -283,7 +283,10 @@ impl Game<'_> {
                 &self.res.core.item_data,
                 &super::pack_files(&tables.tables),
                 &tables.health.damage,
-                tables.packed_registry_definitions.clone(),
+                tables
+                    .tables
+                    .as_ref()
+                    .map(|tables| tables.packed_registries.clone()),
                 tables.advancements.clone(),
             )
             .map_err(|error| ReloadStageError::DataSource(format!("world registries: {error}")))?;
