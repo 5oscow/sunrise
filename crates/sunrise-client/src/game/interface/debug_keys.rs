@@ -370,7 +370,7 @@ impl Game<'_> {
                 scale, scale,
             )]));
             draws.extend(charts);
-            if self.debug_charts.lightmap
+            if self.debug_shows_lightmap()
                 && let Some(r) = &self.renderer
             {
                 draws.extend(sunrise_client::debug_chart::lightmap(
@@ -385,6 +385,12 @@ impl Game<'_> {
         self.debug_paint
             .borrow_mut()
             .store(now, layout, &batch.vertices[first_vertex..]);
+    }
+    /// Whether F3's lightmap chart (F3+4) is on screen: the overlay drawn, open and charting
+    /// the lightmap. Only then does the renderer read a pack-drawn light texture back for it
+    /// (`Renderer::set_lightmap_readback`).
+    pub(in crate::game) fn debug_shows_lightmap(&self) -> bool {
+        self.debug_overlay_visible() && self.debug && self.debug_charts.lightmap
     }
     /// Whether the overlay is listing GPU pass times (its `system_specs` lines), the only reason
     /// it has to time passes.
@@ -1464,3 +1470,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "tests/lightmap_chart_tests.rs"]
+mod lightmap_chart_tests;

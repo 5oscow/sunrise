@@ -49,9 +49,13 @@ fn the_lightmap_info_block_is_laid_out_as_std140() {
     assert_eq!([f[6], f[7], f[11], f[15], f[19], f[23]], [0.0; 6]);
 }
 
-fn device() -> (wgpu::Device, wgpu::Queue) {
-    let (_, device, queue) = crate::gfx::test_gpu::optional_device().expect("a GPU");
-    (device, queue)
+/// The adapter's device, or none (said on stderr) where the machine has no adapter.
+fn device() -> Option<(wgpu::Device, wgpu::Queue)> {
+    let device = crate::gfx::test_gpu::optional_device();
+    if device.is_none() {
+        eprintln!("skipped: no adapter");
+    }
+    device.map(|(_, device, queue)| (device, queue))
 }
 
 /// A 16x16 light texture to draw into.
@@ -113,10 +117,12 @@ const SCREENQUAD_VSH: &str = "#version 330\nlayout(location = 0) out vec2 texCoo
 /// block level `n` (GL's rows run from the bottom), reads `LightmapInfo` where `Lightmap.render`
 /// writes it, and its pixels come back for F3's lightmap chart.
 #[test]
-#[ignore = "requires a Vulkan/Metal/DX12 adapter"]
+#[ignore = "daily"]
 fn a_pack_lightmap_shader_fills_the_texture_by_sky_row_and_block_column() {
     let _gpu = crate::gfx::test_gpu::lock();
-    let (device, queue) = device();
+    let Some((device, queue)) = device() else {
+        return;
+    };
     let program = crate::core_shader::translate_core_with(
         SCREENQUAD_VSH,
         PROBE_FSH,
@@ -127,6 +133,7 @@ fn a_pack_lightmap_shader_fills_the_texture_by_sky_row_and_block_column() {
     )
     .expect("the shaders translate");
     let mut core = CoreLightmap::new(&device, &program).expect("the lightmap pipeline");
+    core.set_readback(&device, true);
     let pixels = draw(&device, &queue, &mut core, &STATES[1]);
     for sky in 0..16usize {
         for block in 0..16usize {
@@ -172,7 +179,7 @@ fn resources() -> std::path::PathBuf {
 /// Vanilla's own `screenquad` and `lightmap` through the pack path draw the texture the
 /// native path computes, row by sky level and column by block level, in two lighting states.
 #[test]
-#[ignore = "requires a Vulkan/Metal/DX12 adapter"]
+#[ignore = "daily"]
 fn vanillas_lightmap_shaders_draw_the_native_lightmap() {
     let _gpu = crate::gfx::test_gpu::lock();
     let root = crate::resource_source::ResourceSource::directory(resources());
@@ -194,8 +201,11 @@ fn vanillas_lightmap_shaders_draw_the_native_lightmap() {
             b == INFO_BLOCK
         })
         .expect("vanilla's lightmap shaders translate");
-    let (device, queue) = device();
+    let Some((device, queue)) = device() else {
+        return;
+    };
     let mut core = CoreLightmap::new(&device, &program).expect("the lightmap pipeline");
+    core.set_readback(&device, true);
     for info in STATES {
         let gpu = draw(&device, &queue, &mut core, &info);
         let native = native_lightmap(&info);
@@ -216,10 +226,12 @@ fn vanillas_lightmap_shaders_draw_the_native_lightmap() {
 /// A shader reading a block the lightmap pass doesn't give is not used: the texture stays
 /// native, rather than failing at the draw.
 #[test]
-#[ignore = "requires a Vulkan/Metal/DX12 adapter"]
+#[ignore = "daily"]
 fn a_lightmap_shader_reading_another_block_is_not_used() {
     let _gpu = crate::gfx::test_gpu::lock();
-    let (device, _) = device();
+    let Some((device, _)) = device() else {
+        return;
+    };
     let fragment = PROBE_FSH
         .replace("lightmapInfo.SkyFactor", "other.Value")
         .replace(
@@ -236,4 +248,61 @@ fn a_lightmap_shader_reading_another_block_is_not_used() {
     )
     .expect("the shaders translate");
     assert!(CoreLightmap::new(&device, &program).is_none());
+}
+
+/// F3's lightmap chart closed (the default), a frame draws the texture and copies nothing:
+/// no readback buffer exists and nothing is mapped after the submission. Opened, the frame's
+/// texture comes back; closed again, the buffers go, and a chart opened later starts from new
+/// buffers rather than an old frame's copy.
+#[test]
+#[ignore = "daily"]
+fn the_light_texture_is_read_back_only_while_f3_charts_it() {
+    let _gpu = crate::gfx::test_gpu::lock();
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let program = crate::core_shader::translate_core_with(
+        SCREENQUAD_VSH,
+        PROBE_FSH,
+        &[],
+        &|_| None,
+        &GLUE,
+        &|b| b == INFO_BLOCK,
+    )
+    .expect("the shaders translate");
+    let mut core = CoreLightmap::new(&device, &program).expect("the lightmap pipeline");
+    // One frame: its uniforms, its draw, its submission, and the readback it starts (if any).
+    let frame = |core: &mut CoreLightmap, info: &LightmapInfo| {
+        queue.write_buffer(&core.uniform, 0, &CoreLightmap::uniforms([0; 48], info));
+        let mut encoder = device.create_command_encoder(&Default::default());
+        core.draw(&mut encoder, &target(&device));
+        queue.submit([encoder.finish()]);
+        let started = core.submitted().map(|read| read()).is_some();
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        started
+    };
+    assert!(core.readback.is_none(), "closed when made");
+    assert!(!frame(&mut core, &STATES[1]), "no copy while closed");
+    let mut pixels = [7u8; 16 * 16 * 4];
+    assert!(!core.collect(&mut pixels));
+    assert_eq!(pixels, [7; 16 * 16 * 4], "nothing read while closed");
+
+    core.set_readback(&device, true);
+    assert!(frame(&mut core, &STATES[1]), "a copy while open");
+    assert!(core.collect(&mut pixels));
+    // STATES[1]'s SkyFactor (0.7, 178.5 of 255) in blue.
+    assert!(pixels[2].abs_diff(179) <= 1, "{}", pixels[2]);
+
+    // A copy is mapped and waiting when the chart closes: the buffers go with it.
+    assert!(frame(&mut core, &STATES[0]));
+    core.set_readback(&device, false);
+    assert!(core.readback.is_none());
+    assert!(!frame(&mut core, &STATES[0]), "no copy once closed");
+    core.set_readback(&device, true);
+    let mut fresh = [7u8; 16 * 16 * 4];
+    assert!(
+        !core.collect(&mut fresh),
+        "the copy from before the close is gone"
+    );
+    assert_eq!(fresh, [7; 16 * 16 * 4]);
 }

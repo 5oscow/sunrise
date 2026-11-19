@@ -8789,6 +8789,7 @@ impl Game<'_> {
         // Renderer encoding and GPU waiting belong to render, not prepare.
         drop(prepare);
         let debug_passes = self.debug_lists_gpu_passes();
+        let lightmap_chart = self.debug_shows_lightmap();
         let mut prepared_draws = std::mem::take(&mut *self.prepared_model_draws.borrow_mut());
         let result = match self.renderer.as_mut() {
             Some(renderer) => {
@@ -8796,6 +8797,7 @@ impl Game<'_> {
                 let capture_gpu = self.profile.gpu();
                 let recording = capture_gpu != GpuSwitch::Off;
                 renderer.set_pass_timing(debug_passes || self.gpu_passes || recording);
+                renderer.set_lightmap_readback(lightmap_chart);
                 renderer.set_keep_timed_frames(recording);
                 renderer.set_pass_detail(self.gpu_pass_detail || capture_gpu == GpuSwitch::Detail);
                 // `gpu_passes` and a capture's `--gpu` are measurements: they take every sample they can.

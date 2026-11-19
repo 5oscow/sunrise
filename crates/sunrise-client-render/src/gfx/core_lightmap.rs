@@ -120,7 +120,9 @@ const MAPPED: u8 = 3;
 const ROW: u64 = 256;
 
 /// The pack-drawn texture read back for F3's lightmap chart (`Renderer::lightmap_pixels`), one
-/// frame late, through two buffers in turn.
+/// frame late, through two buffers in turn. It exists only while the chart is shown
+/// ([`CoreLightmap::set_readback`]): its buffers are made when the chart opens and dropped when
+/// it closes, so a chart opened again never shows a copy from before.
 struct Readback {
     buffers: [(wgpu::Buffer, Arc<AtomicU8>); 2],
     /// The buffer this frame copies into, to be mapped once it is submitted.
@@ -130,12 +132,35 @@ struct Readback {
     next: u64,
 }
 
-/// The packs' lightmap pipeline, its uniforms and its readback.
+impl Readback {
+    fn new(device: &wgpu::Device) -> Self {
+        let buffer = || {
+            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Resource pack lightmap readback"),
+                size: ROW * 16,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            (buffer, Arc::new(AtomicU8::new(IDLE)))
+        };
+        Self {
+            buffers: [buffer(), buffer()],
+            copied: None,
+            serials: [0; 2],
+            next: 0,
+        }
+    }
+}
+
+/// The packs' lightmap pipeline, its uniforms and, while F3 charts it, its readback.
+///
+/// It holds nothing of the level: a level change keeps it, and a pack change or reload makes a
+/// new renderer, which loads the packs' shader again (`set_lightmap_shader`).
 pub(super) struct CoreLightmap {
     pipeline: wgpu::RenderPipeline,
     group: wgpu::BindGroup,
     uniform: wgpu::Buffer,
-    readback: Readback,
+    readback: Option<Readback>,
 }
 
 impl CoreLightmap {
@@ -235,26 +260,20 @@ impl CoreLightmap {
             log::warn!("the resource pack's lightmap shader is not used: {e}");
             return None;
         }
-        let buffer = || {
-            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Resource pack lightmap readback"),
-                size: ROW * 16,
-                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            (buffer, Arc::new(AtomicU8::new(IDLE)))
-        };
         Some(Self {
             pipeline,
             group,
             uniform,
-            readback: Readback {
-                buffers: [buffer(), buffer()],
-                copied: None,
-                serials: [0; 2],
-                next: 0,
-            },
+            readback: None,
         })
+    }
+
+    /// Whether the drawn texture is read back (`on`: F3's lightmap chart is shown). Off, the
+    /// two buffers are dropped and a frame copies nothing.
+    pub(super) fn set_readback(&mut self, device: &wgpu::Device, on: bool) {
+        if on != self.readback.is_some() {
+            self.readback = on.then(|| Readback::new(device));
+        }
     }
 
     /// The frame's blocks in the uniform buffer's layout: `globals` at 0, `info` at its own.
@@ -265,8 +284,8 @@ impl CoreLightmap {
         data
     }
 
-    /// `Lightmap.render`'s pass: the screen quad over the whole of `texture`, then its copy
-    /// for the readback when a buffer is free.
+    /// `Lightmap.render`'s pass: the screen quad over the whole of `texture`, then, while F3
+    /// charts it, its copy for the readback when a buffer is free.
     fn draw(&mut self, encoder: &mut wgpu::CommandEncoder, texture: &wgpu::Texture) {
         let view = texture.create_view(&Default::default());
         {
@@ -287,7 +306,9 @@ impl CoreLightmap {
             pass.set_bind_group(0, &self.group, &[]);
             pass.draw(0..3, 0..1);
         }
-        let readback = &mut self.readback;
+        let Some(readback) = self.readback.as_mut() else {
+            return;
+        };
         // A copy no submission mapped (a frame submitted another way): its buffer is free.
         if let Some(i) = readback.copied.take() {
             readback.buffers[i].1.store(IDLE, Ordering::Release);
@@ -316,8 +337,9 @@ impl CoreLightmap {
 
     /// The readback to start once the frame is submitted: mapping the buffer it copied into.
     pub(super) fn submitted(&mut self) -> Option<super::submit::AfterSubmit> {
-        let i = self.readback.copied.take()?;
-        let (buffer, state) = self.readback.buffers[i].clone();
+        let readback = self.readback.as_mut()?;
+        let i = readback.copied.take()?;
+        let (buffer, state) = readback.buffers[i].clone();
         state.store(MAPPING, Ordering::Release);
         Some(Box::new(move || {
             let mapped = state.clone();
@@ -334,7 +356,9 @@ impl CoreLightmap {
 
     /// The newest texture read back, into `pixels`; whether one was.
     fn collect(&self, pixels: &mut [u8; 16 * 16 * 4]) -> bool {
-        let readback = &self.readback;
+        let Some(readback) = &self.readback else {
+            return false;
+        };
         let mut any = false;
         let mut order = [0, 1];
         order.sort_by_key(|&i| readback.serials[i]);
@@ -359,9 +383,23 @@ impl CoreLightmap {
 /// The renderer's light texture: the pack's shader draws it, or it is computed here.
 impl super::Renderer {
     /// The resource packs' `core/lightmap` (`HudAtlas::lightmap_shader`), or the native one.
+    /// The pipeline is built here, so a shader the backend refuses leaves the native texture
+    /// from the first frame. Unlike the sky's and the block outline's, a pack's lightmap is kept
+    /// on a frame of linear light (docs/hdr-passes.md): it draws the 8-bit light texture, never
+    /// the frame, and the world's shaders read that texture the same way under either encoding
+    /// (they decode their result at the end, `linear_blend`), as they do the native one.
     pub fn set_lightmap_shader(&mut self, program: Option<&CoreProgram>) {
         self.core_lightmap = program.and_then(|p| CoreLightmap::new(&self.device, p));
         self.lightmap_uploaded = false;
+    }
+
+    /// Whether F3's lightmap chart is shown (the game's `debug_shows_lightmap`): only then is a
+    /// pack-drawn light texture read back into `lightmap_pixels`. Without a pack's shader it
+    /// does nothing: the native pixels are there already.
+    pub fn set_lightmap_readback(&mut self, on: bool) {
+        if let Some(core) = self.core_lightmap.as_mut() {
+            core.set_readback(&self.device, on);
+        }
     }
 
     /// The frame's light texture (`LightmapRenderStateExtractor.extract`, then

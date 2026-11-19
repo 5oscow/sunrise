@@ -53,30 +53,13 @@ pub(super) fn load_core(
 pub(super) fn load_pair(
     root: &ResourceSource,
     defaults: &ResourceSource,
-    (vertex_name, name): (&str, &str),
+    names: (&str, &str),
     defines: &[&str],
     glue: &Glue,
     provided: &dyn Fn(&str) -> bool,
 ) -> Option<Arc<CoreProgram>> {
-    let read = |base: &ResourceSource, path: &str| base.read_to_string(path).ok();
-    let own =
-        |path: &str| read(root, path).filter(|text| read(defaults, path).as_ref() != Some(text));
-    let vertex_path = format!("assets/minecraft/shaders/core/{vertex_name}.vsh");
-    let fragment_path = format!("assets/minecraft/shaders/core/{name}.fsh");
-    let (own_vertex, own_fragment) = (own(&vertex_path), own(&fragment_path));
-    if own_vertex.is_none() && own_fragment.is_none() {
-        return None;
-    }
-    let vertex = own_vertex.or_else(|| read(defaults, &vertex_path))?;
-    let fragment = own_fragment.or_else(|| read(defaults, &fragment_path))?;
-    let include = |id: &str| {
-        let (namespace, path) = id.split_once(':')?;
-        let path = format!("assets/{namespace}/{path}");
-        read(root, &path).or_else(|| read(defaults, &path))
-    };
-    match crate::core_shader::translate_core_with(
-        &vertex, &fragment, defines, &include, glue, provided,
-    ) {
+    let name = names.1;
+    match translate_pair(root, defaults, names, defines, glue, provided)? {
         Ok(program) => {
             log::info!("the resource pack's {name} shader is used");
             Some(Arc::new(program))
@@ -86,6 +69,73 @@ pub(super) fn load_pair(
             None
         }
     }
+}
+
+/// [`load_pair`]'s program: none when no pack replaces either stage, else the translation, or
+/// why the shader is refused. Each stage and include is read only up to the translator's budget
+/// ([`read_shader_file`]); a file over it, in a pack or the defaults, refuses the shader by its
+/// path, rather than leaving the stage or include to another file of that name.
+fn translate_pair(
+    root: &ResourceSource,
+    defaults: &ResourceSource,
+    (vertex_name, name): (&str, &str),
+    defines: &[&str],
+    glue: &Glue,
+    provided: &dyn Fn(&str) -> bool,
+) -> Option<Result<CoreProgram, String>> {
+    let rejected = std::cell::RefCell::new(Vec::new());
+    let read = |base: &ResourceSource, path: &str| {
+        read_shader_file(base, path).unwrap_or_else(|e| {
+            rejected.borrow_mut().push(e);
+            None
+        })
+    };
+    let refused = || Some(Err(rejected.borrow().join("; ")));
+    let own =
+        |path: &str| read(root, path).filter(|text| read(defaults, path).as_ref() != Some(text));
+    let vertex_path = format!("assets/minecraft/shaders/core/{vertex_name}.vsh");
+    let fragment_path = format!("assets/minecraft/shaders/core/{name}.fsh");
+    let (own_vertex, own_fragment) = (own(&vertex_path), own(&fragment_path));
+    if !rejected.borrow().is_empty() {
+        return refused();
+    }
+    if own_vertex.is_none() && own_fragment.is_none() {
+        return None;
+    }
+    let vertex = own_vertex.or_else(|| read(defaults, &vertex_path));
+    let fragment = own_fragment.or_else(|| read(defaults, &fragment_path));
+    if !rejected.borrow().is_empty() {
+        return refused();
+    }
+    let (vertex, fragment) = (vertex?, fragment?);
+    let include = |id: &str| {
+        let (namespace, path) = id.split_once(':')?;
+        let path = format!("assets/{namespace}/{path}");
+        read(root, &path).or_else(|| read(defaults, &path))
+    };
+    let translated = crate::core_shader::translate_core_with(
+        &vertex, &fragment, defines, &include, glue, provided,
+    );
+    if !rejected.borrow().is_empty() {
+        return refused();
+    }
+    Some(translated)
+}
+
+/// A shader file (a stage or an include) of `base`, read only up to the translator's budget
+/// for a whole shader (`core_shader::MAX_EXPANDED`, 1 MiB): none when `base` hasn't it, an
+/// error naming its path when it is over the budget or isn't text.
+fn read_shader_file(base: &ResourceSource, path: &str) -> Result<Option<String>, String> {
+    if !base.contains(path) {
+        return Ok(None);
+    }
+    let max = crate::core_shader::MAX_EXPANDED as u64;
+    let bytes = base
+        .read_limited(path, max)
+        .map_err(|e| format!("{path}: {e}"))?;
+    String::from_utf8(bytes)
+        .map(Some)
+        .map_err(|_| format!("{path}: not UTF-8 text"))
 }
 
 /// The packs' `core/lightmap` with `core/screenquad`, when a pack replaces either stage: the
@@ -423,6 +473,77 @@ mod tests {
     fn lightmap(own: &[(&str, &str)]) -> Option<Arc<CoreProgram>> {
         let (root, defaults) = lightmap_packs(own);
         load_lightmap(&root, &defaults)
+    }
+
+    /// [`lightmap`]'s translation, with why it is refused.
+    fn lightmap_translation(own: &[(&str, &str)]) -> Option<Result<CoreProgram, String>> {
+        let (root, defaults) = lightmap_packs(own);
+        translate_pair(
+            &root,
+            &defaults,
+            ("screenquad", "lightmap"),
+            &[],
+            &crate::gfx::core_lightmap::GLUE,
+            &|block| block == crate::gfx::core_lightmap::INFO_BLOCK,
+        )
+    }
+
+    /// A pack's `lightmap.fsh` importing `"tint.glsl"`.
+    const IMPORTING_FSH: &str = "#version 330\n#moj_import \"tint.glsl\"\n\
+        layout(std140) uniform LightmapInfo {\n    float SkyFactor;\n} info;\n\
+        layout(location = 0) in vec2 texCoord;\nlayout(location = 0) out vec4 fragColor;\n\
+        void main() {\n    fragColor = tint(info.SkyFactor);\n}\n";
+    const TINT_GLSL: &str = "vec4 tint(float f) { return vec4(f, 0.5 * f, 0.0, 1.0); }\n";
+
+    /// A quoted import in a pack's `core/lightmap` is read from the shader's own folder,
+    /// `minecraft:shaders/core/`, not from `shaders/include/`.
+    #[test]
+    fn a_lightmap_shaders_quoted_import_is_read_from_its_own_folder() {
+        let fsh = "assets/minecraft/shaders/core/lightmap.fsh";
+        let beside = "assets/minecraft/shaders/core/tint.glsl";
+        let program = lightmap_translation(&[(fsh, IMPORTING_FSH), (beside, TINT_GLSL)])
+            .expect("the pack replaces a stage")
+            .expect("the import beside the shader is found");
+        assert_eq!(program.other, ["LightmapInfo"]);
+        let include = "assets/minecraft/shaders/include/tint.glsl";
+        let why = lightmap_translation(&[(fsh, IMPORTING_FSH), (include, TINT_GLSL)])
+            .expect("the pack replaces a stage")
+            .expect_err("an import only under shaders/include is not beside the shader");
+        assert!(
+            why.contains("minecraft:shaders/core/tint.glsl not found"),
+            "{why}"
+        );
+    }
+
+    /// A shader file is read only up to the translator's 1 MiB budget: an import or a stage
+    /// over it refuses the pack's lightmap, naming the file, and one at the budget is read.
+    #[test]
+    fn a_lightmap_shader_file_over_the_budget_is_refused_by_its_path() {
+        let fsh = "assets/minecraft/shaders/core/lightmap.fsh";
+        let tint = "assets/minecraft/shaders/core/tint.glsl";
+        // A comment pads the include to exactly `len` bytes.
+        let padded = |len: usize| {
+            let pad = len - TINT_GLSL.len() - 4;
+            format!("// {}\n{TINT_GLSL}", "x".repeat(pad))
+        };
+        let at_budget = padded(1 << 20);
+        assert_eq!(at_budget.len(), 1_048_576);
+        let over = padded((1 << 20) + 1);
+        let refused = |files: &[(&str, &str)]| {
+            lightmap_translation(files)
+                .expect("the pack replaces a stage")
+                .expect_err("refused")
+        };
+        let why = refused(&[(fsh, IMPORTING_FSH), (tint, &over)]);
+        assert!(why.starts_with(tint) && why.contains("size limit"), "{why}");
+        // The same file at the budget gets past the read (and the translator then finds the
+        // expanded shader too long, a refusal of its own).
+        let why = refused(&[(fsh, IMPORTING_FSH), (tint, &at_budget)]);
+        assert!(!why.contains(tint), "{why}");
+        let big_stage = format!("// {}\n{IMPORTING_FSH}", "x".repeat(1 << 20));
+        let why = refused(&[(fsh, &big_stage), (tint, TINT_GLSL)]);
+        assert!(why.starts_with(fsh), "{why}");
+        assert!(lightmap(&[(fsh, &big_stage), (tint, TINT_GLSL)]).is_none());
     }
 
     /// A pack's `core/lightmap` is loaded with vanilla's `core/screenquad` (a stage of another
