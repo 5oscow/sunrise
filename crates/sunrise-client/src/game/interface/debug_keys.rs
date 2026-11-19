@@ -424,7 +424,7 @@ impl Game<'_> {
                 _ => "",
             });
         let refresh = self.debug_refresh_rate().map_or("0".into(), |mhz| {
-            debug_overlay::refresh_rate_label(mhz as f32 / 1000.0)
+            sunrise_client_input::window::refresh_rate_label(mhz as f32 / 1000.0)
         });
         // Sunrise: with frame generation running, the frames reaching the screen too.
         let generated = self

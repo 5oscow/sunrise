@@ -4562,6 +4562,7 @@ dependencies = [
  "log",
  "png",
  "sunrise-client-core",
+ "sunrise-core",
  "sunrise-engine-slots",
  "sunrise-mod-api-macros",
  "sunrise-theme",
