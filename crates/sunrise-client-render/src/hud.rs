@@ -1199,13 +1199,10 @@ impl HudAtlas {
                 .flatten(),
         }
     }
-    /// The rect of a texture by its name: the packed sprite, else a registered atlas's sprite of
-    /// the name. The raw lookup of the camera draw; a GUI id goes through [`HudAtlas::gui_lookup`].
+    /// The rect of a texture by its exact name: the packed sprite, else a registered atlas's
+    /// sprite. The raw lookup of the camera draw; a GUI id goes through [`HudAtlas::gui_lookup`].
     pub fn texture_rect(&self, name: &str) -> Option<&Rect> {
-        self.sprites.get(name).or_else(|| {
-            self.registered
-                .get(name.strip_prefix("minecraft:").unwrap_or(name))
-        })
+        self.sprites.get(name).or_else(|| self.registered.get(name))
     }
     /// The rect of a `Blit` texture by its name: a live texture's first, else
     /// [`HudAtlas::texture_rect`]. One lookup for the refusal and the draw.
@@ -4160,6 +4157,14 @@ mod tests {
             r#"{"animation":{"width":1,"height":1,"frames":[1,0]}}"#,
         )
         .unwrap();
+        let raw_name = "gui/atlases/icons/demo/raw";
+        let raw_file = root.join(format!("assets/minecraft/textures/{raw_name}.png"));
+        write_pixel(&raw_file, [200, 100, 0, 255]);
+        std::fs::write(
+            raw_file.with_extension("png.mcmeta"),
+            r#"{"texture":{"blur":true,"clamp":true}}"#,
+        )
+        .unwrap();
         let atlas = HudAtlas::build(&ResourceSource::directory(root.clone())).unwrap();
         std::fs::remove_dir_all(&root).unwrap();
         let registered = *atlas.gui_rect(name).expect("the registered sprite");
@@ -4181,6 +4186,18 @@ mod tests {
         assert_eq!(atlas.texture_rect(name), atlas.sprites.get(name));
         let model = *atlas.sprites.get(name).expect("the model's sprite");
         assert_eq!(texel_at(&atlas, model, 0, 0), [255, 0, 0, 255]);
+        let raw = atlas.texture_rect(raw_name).expect("the exact raw name");
+        assert_eq!(texel_at(&atlas, *raw, 0, 0), [200, 100, 0, 255]);
+        assert_eq!(
+            atlas.flags[raw_name],
+            TextureFlags {
+                blur: true,
+                clamp: true,
+            }
+        );
+        let prefixed = format!("minecraft:{raw_name}");
+        assert!(atlas.texture_rect(&prefixed).is_none());
+        assert_eq!(atlas.gui_rect(&prefixed), Some(raw));
         assert!(
             atlas
                 .sprites
