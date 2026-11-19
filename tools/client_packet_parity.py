@@ -22,11 +22,15 @@ The PvP routes (pvp_*) fight a second player, Opp0: sunrise-bots --behaviour sta
 `cargo build --profile fast -p sunrise-bots`), which stands where the console puts it; the knockback the client
 takes comes from `damage ... by Opp0` at set times of the route.
 
-Runs land in .local/packet-parity/runs/<client>-<n>/ (capture.jsonl, logs, a screenshot after each route);
---label names them otherwise, and `client_packet_diff.py RUNS --a <label> --b <label>` compares any two sets.
+Runs land in .local/packet-parity/runs/<client>-<n>/ (run.json, capture.jsonl, logs, a screenshot after each
+route); --label names them otherwise, and `client_packet_diff.py RUNS --a <label> --b <label>` compares any two
+sets. A run's folder is never replaced unless --replace says so. run.json is its manifest: what it played (the
+recording's, settings' and course's hashes, the routes), whether it finished, and the fixture each route started
+from; `diff --strict` compares only finished runs whose manifests match, and fails on any difference.
 Run it at low priority beside other work: `nice -n 19 ionice -c3 python3 tools/client_packet_parity.py ...`.
 """
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -73,6 +77,11 @@ GAMERULES = ["advance_time false", "advance_weather false", "spawn_mobs false", 
              "random_tick_speed 0", "respawn_radius 0"]
 TERRAIN_CANDIDATES = [(-40, 20), (-40, 60), (-40, 100), (-44, -8), (96, 20), (96, 100)]
 LVP = Path("/usr/share/vulkan/icd.d/lvp_icd.json")
+# A run's label becomes part of its folder's name: one plain component.
+LABEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,47}")
+# Console answers that say a command did nothing it was meant to (a parse error, an unloaded or too large area).
+COMMAND_ERRORS = re.compile(r"<--\[HERE\]|Unknown or incomplete command|Incorrect argument|That position is not "
+                            r"loaded|out of the world|Too many blocks in the specified area")
 
 
 def server_command():
@@ -104,6 +113,34 @@ def ask(server, command, pattern, timeout=60):
     raise RuntimeError(f"no answer to {command!r} matching {pattern!r}:\n" + "\n".join(server.lines[-10:]))
 
 
+def checked(server, commands, tag):
+    """Runs console commands and fails when the server answers any of them with an error (COMMAND_ERRORS)."""
+    seen = len(server.lines)
+    for command in commands:
+        server.console(command)
+    ask(server, f"say {tag}-done", rf"\b{tag}-done\b", timeout=120)
+    errors = [line for line in server.lines[seen:] if COMMAND_ERRORS.search(line)]
+    if errors:
+        raise RuntimeError(f"{tag}: the server refused a command:\n" + "\n".join(errors[:10]))
+
+
+def fixture(server):
+    """What a route starts from, as the server reports it: the player's inventory, game mode, and effects by id and
+    amplifier (their remaining durations count down while the reset settles)."""
+    out = {}
+    for key, path in (("inventory", "Inventory"), ("mode", "playerGameType"), ("effects", "active_effects")):
+        line = ask(server, f"data get entity {PLAYER} {path}",
+                   rf"{PLAYER} has the following entity data|Found no elements matching")
+        out[key] = line.split("]: ", 1)[-1]
+    out["effects"] = sorted(re.findall(r'amplifier: (-?\d+)b?[^}]*?id: "([^"]+)"|id: "([^"]+)"[^}]*?amplifier: '
+                                       r'(-?\d+)b?', out["effects"]))
+    return out
+
+
+def digest(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
+
+
 def build_world():
     """The seeded world with the course built, its terrain spot found, saved as the snapshot every run restores."""
     folder = WORK / "world-build"
@@ -117,20 +154,18 @@ def build_world():
             server.console(f"gamerule {rule}")
         server.console("time set 6000")
         server.console("weather clear")
-        width = routes.COLUMNS * 8 - 1
-        depth = (len(routes.ORDER) + routes.COLUMNS - 1) // routes.COLUMNS * 40 - 1
-        server.console(f"forceload add -48 -32 {width + 48} {depth}")
+        x0, z0, x1, z1 = routes.course_bounds()
+        checked(server, [f"forceload add {x0} {z0} {x1} {z1}"], "forceload")
+        corners = " ".join(f"if loaded {x} {routes.FLOOR} {z}" for x in (x0, x1) for z in (z0, z1))
         deadline = time.time() + 900
         while True:
             try:
-                ask(server, f"execute if loaded {width} 100 {depth} if loaded -48 100 -32 run say course-loaded",
-                    r"course-loaded", timeout=3)
+                ask(server, f"execute {corners} run say course-loaded", r"course-loaded", timeout=3)
                 break
             except RuntimeError:
                 if time.time() > deadline:
                     raise
-        for command in routes.course_commands():
-            server.console(command)
+        checked(server, routes.course_commands(), "course")
         spot = None
         for x, z in TERRAIN_CANDIDATES:
             try:
@@ -154,7 +189,8 @@ def build_world():
         server.stop()
     shutil.rmtree(SNAPSHOT, ignore_errors=True)
     shutil.copytree(folder / "world", SNAPSHOT)
-    (WORK / "course.json").write_text(json.dumps({"seed": SEED, "terrain": spot, "routes": routes.ORDER}))
+    (WORK / "course.json").write_text(json.dumps({"seed": SEED, "terrain": spot, "routes": routes.ORDER,
+                                                  "commands": routes.course_commands()}))
     print(f"world snapshot: {SNAPSHOT} (terrain spot {spot})")
 
 
@@ -278,12 +314,32 @@ def scaled(events, scale):
     return out
 
 
-def run_once(client, index, recording, bins, label=None, mouse_scale=1.0):
-    """One client, one pass over every route of the recording, on a restored world."""
-    course = json.loads((WORK / "course.json").read_text())
-    run = WORK / "runs" / f"{label or client}-{index}"
-    shutil.rmtree(run, ignore_errors=True)
+def run_folder(client, index, label=None, replace=False):
+    """The run's own folder under WORK/runs, emptied only with `replace`; a label that isn't one plain name is refused."""
+    name = label or client
+    if not LABEL.fullmatch(name):
+        raise SystemExit(f"--label {name!r}: letters, digits, '.', '_' and '-', starting with a letter or digit")
+    runs = WORK / "runs"
+    run = runs / f"{name}-{index}"
+    if run.exists():
+        if not replace:
+            raise SystemExit(f"{run} exists: pass --replace to run it again, or another --label or --first")
+        shutil.rmtree(run)
     run.mkdir(parents=True)
+    return run
+
+
+def run_once(client, index, recording, bins, label=None, mouse_scale=1.0, replace=False):
+    """One client, one pass over every route of the recording, on a restored world."""
+    course_text = (WORK / "course.json").read_text()
+    course = json.loads(course_text)
+    played_routes = input_recording.routes(recording)
+    run = run_folder(client, index, label, replace)
+    manifest = {"client": client, "index": index, "label": label or client, "complete": False,
+                "recording": digest(recording), "settings": digest([PROPERTIES, OPTIONS, GAMERULES]),
+                "course": hashlib.sha256(course_text.encode()).hexdigest(), "mouse_scale": mouse_scale,
+                "diagnostic": mouse_scale != 1.0, "routes": [name for name, _ in played_routes]}
+    (run / "run.json").write_text(json.dumps(manifest, indent=1))
     port, listen = lab.free_port(), lab.free_port()
     server_folder(run / "server", port)
     shutil.copytree(SNAPSHOT, run / "server" / "world")
@@ -295,7 +351,7 @@ def run_once(client, index, recording, bins, label=None, mouse_scale=1.0):
     try:
         server.wait_for(r"Done \(", timeout=900)
         stop = net_capture.start_background(listen, f"127.0.0.1:{port}", capture, full=True)
-        if any(routes.ROUTES.get(name, {}).get("opponent") for name, _ in input_recording.routes(recording)):
+        if any(routes.ROUTES.get(name, {}).get("opponent") for name, _ in played_routes):
             opponent = start_opponent(run, port, bins)
             server.wait_for(rf"{routes.OPPONENT} joined the game", timeout=120)
         display = Display(logs["xvfb"])
@@ -305,11 +361,11 @@ def run_once(client, index, recording, bins, label=None, mouse_scale=1.0):
         game_window(display.name)
         counts = ClientCounts(capture)
         wait_in_game(counts, process)
-        game_window(display.name, timeout=10)
-        injector = input_recording.Injector(display.name)
+        _, window = game_window(display.name, timeout=10)
+        injector = input_recording.Injector(display.name, window.id)
         display.screenshot(run / "joined.png")
         played = []
-        for name, events in input_recording.routes(recording):
+        for number, (name, events) in enumerate(played_routes, 1):
             if process.poll() is not None:
                 raise RuntimeError(f"the client exited ({process.returncode}) before {name}")
             injector.play([{"t": 0.0, "type": "key", "code": "KEY_1", "down": True},
@@ -317,20 +373,23 @@ def run_once(client, index, recording, bins, label=None, mouse_scale=1.0):
             commands = (routes.reset_commands(name, course["terrain"]) if name in routes.ROUTES
                         else [f"tp {PLAYER} {PLAYER}"])
             accepted = counts.update().accepted + sum(c.startswith(f"tp {PLAYER} ") for c in commands)
-            for command in commands:
-                server.console(command)
+            checked(server, commands, f"reset-{number}")
             settle(counts, accepted)
+            start = fixture(server)
             timers = [threading.Timer(t, server.console, [c]) for t, c in routes.ROUTES.get(name, {}).get("during", [])]
             for timer in timers:
                 timer.start()
-            seconds = injector.play(scaled(events, mouse_scale))
+            seconds = injector.play(scaled(events, mouse_scale), number=number)
             for timer in timers:
                 timer.join()
             time.sleep(1.0)
+            played.append({"route": name, "mark": number, "seconds": round(seconds, 2),
+                           "end_tick": counts.update().ticks, "fixture": start})
             display.screenshot(run / f"{name}.png")
-            played.append({"route": name, "seconds": round(seconds, 2)})
             print(f"  {run.name} {name}: {seconds:.1f} s", flush=True)
         (run / "played.json").write_text(json.dumps(played))
+        manifest.update(complete=True, played=played)
+        (run / "run.json").write_text(json.dumps(manifest, indent=1))
     finally:
         if opponent and opponent.poll() is None:
             opponent.kill()
@@ -366,9 +425,12 @@ def main():
         p.add_argument("--bin", type=Path, default=lab.ROOT / "target/fast", help="sunrise-client's folder")
         p.add_argument("--label", help="the runs' folder name instead of the client's (runs/<label>-N)")
         p.add_argument("--mouse-scale", type=float, default=1.0,
-                       help="diagnostic: scale relative mouse moves, to look past a known turning difference")
+                       help="diagnostic: scale relative mouse moves, to look past a known turning difference "
+                            "(the run is marked diagnostic and left out of --strict)")
+        p.add_argument("--replace", action="store_true", help="run again over existing runs of the same name")
     d = sub.add_parser("diff")
     d.add_argument("--out", type=Path, default=WORK / "report.json")
+    d.add_argument("--strict", action="store_true", help="exit 1 unless every packet of every route matches")
     args = parser.parse_args()
     if args.command == "world":
         build_world()
@@ -382,13 +444,15 @@ def main():
         for client in clients:
             for i in range(args.first, args.first + args.runs):
                 print(f"{client} run {i}", flush=True)
-                run_once(client, i, recording, args.bin, args.label, args.mouse_scale)
+                run_once(client, i, recording, args.bin, args.label, args.mouse_scale, args.replace)
         if args.command == "run":
             return
     import client_packet_diff
     report = client_packet_diff.report_runs(WORK / "runs")
     (args.out if args.command == "diff" else WORK / "report.json").write_text(json.dumps(report, indent=1))
     print(client_packet_diff.describe(report))
+    if getattr(args, "strict", False) and not report["strict"]["bit_exact"]:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

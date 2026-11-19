@@ -395,10 +395,16 @@ PVP = [name for name in ORDER if name.startswith("pvp_")]
 assert sorted(ORDER) == sorted(ROUTES)
 
 
+def course_bounds():
+    """(x0, z0, x1, z1): every block the course builds, its outer floor included."""
+    rows = (len(ORDER) + COLUMNS - 1) // COLUMNS
+    return -MARGIN, -MARGIN, COLUMNS * 8 + MARGIN - 1, rows * 40 + MARGIN - 1
+
+
 def course_commands():
     """What the world gets once: every cell's floor, cleared air above it, and the routes' own blocks."""
-    rows = (len(ORDER) + COLUMNS - 1) // COLUMNS
-    out = [f"fill -{MARGIN} {FLOOR} -{MARGIN} {COLUMNS * 8 + MARGIN - 1} {FLOOR} {rows * 40 + MARGIN - 1} minecraft:stone"]
+    x0, z0, x1, z1 = course_bounds()
+    out = [f"fill {x0} {FLOOR} {z0} {x1} {FLOOR} {z1} minecraft:stone"]
     for name in ORDER:
         ox, oz = cell(ROUTES[name]["index"])
         out += [f"fill {ox} {FLOOR + 1} {oz} {ox + 7} {FLOOR + 30} {oz + 39} minecraft:air",

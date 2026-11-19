@@ -130,6 +130,11 @@ def self_id(entries):
     return None
 
 
+def is_mark(command):
+    """Whether a chat command is a scenario marker: /wire-mark, or /wire-mark NN naming the scenario's number."""
+    return command is not None and command.split(' ', 1)[0] == 'wire-mark'
+
+
 def scenarios(entries):
     """One list of ticks for each /wire-mark in the play stream, in order (the ticks after a mark run to the
     next mark); a tick is {'packets': [(name, fields)], 'frame': [(name, fields)], 'misplaced': [name]}.
@@ -152,7 +157,7 @@ def scenarios(entries):
         if name == 'container_click':
             last = server_state.get(fields['container'], fields['state'])
             fields = {'container': fields['container'], 'stale': last - fields.pop('state'), **fields}
-        if name == 'chat_command' and fields.get('command') == 'wire-mark':
+        if name == 'chat_command' and is_mark(fields.get('command')):
             current = [new_tick()]
             runs.append(current)
             continue
