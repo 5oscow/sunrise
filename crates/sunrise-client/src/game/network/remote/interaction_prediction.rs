@@ -485,7 +485,7 @@ impl Game<'_> {
                 if let Some(mud) = self.pack.assets.registry.default_state("minecraft:mud") {
                     let pos =
                         sunrise_core::position::BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]);
-                    self.predict_blocks(&vec![(pos, mud)], seq);
+                    self.predict_blocks(&[(pos, mud)], seq);
                 }
                 self.with_hand(hand, |g| {
                     g.filled_result(ItemStack::new("minecraft:glass_bottle", 1))
