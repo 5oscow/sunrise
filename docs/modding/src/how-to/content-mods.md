@@ -21,8 +21,8 @@ cargo sunrise-mod check target/sunrise-mod/my_mod.smod   # the registry's checks
   Nightly (players have it), or to `--sunrise`'s: `nightly-<YYYY-MM-DD>`, or a commit sha (7 hex digits are enough when
   they name one build). A native mod pins it in `[native] sunrise`, a wasm mod in `Cargo.toml`'s
   `[package.metadata.sunrise] sdk`. `Cargo.toml` names the API by path,
-  `sunrise-mod-api = { path = ".sunrise/sdk/api/crates/sunrise-mod-api" }`, the only form the tool and the launcher
-  take. Every other form is refused under `E_SDK_SOURCE`, naming why: the old git form, a version alone (Cargo
+  `sunrise-mod-api = { path = ".sunrise/sdk/api/crates/sunrise-mod-api" }`, the only form a build
+  takes. Every other form is refused under `E_SDK_SOURCE`, naming why: the old git form, a version alone (Cargo
   would take the crate from crates.io, where anyone can publish its name), another source, or another path. `new` fetches that build's SDK into `.sunrise/sdk/`,
   and every command that compiles the mod fetches it again when it is missing or another build's, so a fresh clone
   works after one command; your editor needs that first command too. `.sunrise/` is in the template's `.gitignore`
@@ -147,8 +147,8 @@ tier = 3
 
 The optional fields fill the game's Mods screen, which lists every mod with its icon, name, version, id, license,
 authors, credits and description, as NeoForge's mod list does. A link must be `http` or `https` and at most 2048
-characters; the others are plain text. The screen has no switch: a mod runs or not by what the launcher and
-`sunrise-mods.txt` say.
+characters; the others are plain text. The screen has no switch: a mod runs or not by what
+`sunrise-mods.txt` says ([installing and using mods](../players/installing-mods.md)).
 
 Unknown keys are refused, so a typo is an error that names the nearest valid key. `side` is `"client"` (the default), `"both"` or `"server"`.
 `api` and `capabilities` are not written: `cargo sunrise-mod build` puts `api = "0.2"` and `capabilities = ["registries"]` into the package. A manifest that does write them must write exactly those values, and is refused with both values otherwise.
