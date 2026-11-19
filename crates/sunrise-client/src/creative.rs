@@ -801,8 +801,18 @@ impl Creative {
         self.search_items
             .iter()
             .map(|stack| {
-                let named = || vec![item_tooltip::name_line(stack, translate)];
                 let display = item_tooltip::tooltip_display(stack);
+                let named = || {
+                    let mut lines = vec![item_tooltip::name_line(stack, translate)];
+                    if display.shows("minecraft:lore") {
+                        lines.extend(
+                            item_tooltip::lore_texts(stack)
+                                .into_iter()
+                                .map(|text| text.plain()),
+                        );
+                    }
+                    lines
+                };
                 let lines = match stack.item.as_ref() {
                     "minecraft:enchanted_book" => {
                         let mut lines = named();
@@ -1546,6 +1556,21 @@ mod tests {
         };
         assert_eq!(rebuild("Sharpness"), (vec![0], vec![]));
         assert_eq!(rebuild("Honed Edge"), (vec![], vec![0]));
+    }
+
+    #[test]
+    fn search_matches_visible_lore_on_a_holder_backed_stack() {
+        let visible = r#"{id:"minecraft:enchanted_book",count:1,components:{"minecraft:lore":["Ink under moonlight"]}}"#;
+        let hidden = r#"{id:"minecraft:enchanted_book",count:1,components:{"minecraft:lore":["Ink under moonlight"],"minecraft:tooltip_display":{hidden_components:["minecraft:lore"]}}}"#;
+        let creative = fixture(serde_json::json!([
+            {"id":"minecraft:ingredients", "type":"CATEGORY", "build":[row(visible), row(hidden)]},
+            {"id":"minecraft:search", "type":"SEARCH", "build":[]}
+        ]));
+        assert_eq!(creative.search_items().len(), 2);
+        assert_eq!(
+            creative.search_results("under moonlight", &Names::default()),
+            [0]
+        );
     }
 
     #[test]
