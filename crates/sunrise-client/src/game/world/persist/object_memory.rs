@@ -262,6 +262,8 @@ impl Game<'_> {
                 drop_item,
                 fall_distance,
                 on_ground: entity_nbt::flag(&tag, "OnGround"),
+                fire_ticks: crate::game::boats::saved_fire(&tag),
+                sync_velocity: false,
                 stuck: Vec3::ZERO,
                 damage: sunrise_client::falling_block::Damage::from_nbt(
                     &tag,

@@ -36,6 +36,23 @@ impl Game<'_> {
                 vanilla,
             )
     }
+    /// `Entity.isInvulnerableToBase` for lava's `lavaHurt` of a non-living
+    /// entity: `vanilla` (its saved invulnerability, which lava does not
+    /// bypass), as the mods' check answers it.
+    pub(in crate::game) fn refuses_lava_hurt(
+        &mut self,
+        id: u32,
+        kind: &str,
+        vanilla: bool,
+    ) -> bool {
+        let source = sunrise_client::health::HurtSource {
+            damage_type: "minecraft:lava",
+            causing: 0,
+            direct: 0,
+            position: None,
+        };
+        self.native_nonliving_invulnerable(id, kind, source, vanilla)
+    }
     /// A player's body, where it is kept now.
     pub(super) fn native_player_body(
         &self,

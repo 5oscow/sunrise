@@ -860,6 +860,18 @@ impl Game<'_> {
         }
     }
 
+    /// `Projectile.hurtServer` from lava's `lavaHurt` this tick: `markHurt`,
+    /// unless the projectile is invulnerable to lava (`isInvulnerableToBase`).
+    pub(in crate::game) fn lava_mark_hurt(&mut self, shot: &mut Projectile) {
+        if !shot.take_lava_marked() {
+            return;
+        }
+        let vanilla = self.saved_refuses_damage(shot.id, "minecraft:lava", false);
+        if !self.refuses_lava_hurt(shot.id, shot.entity_type(), vanilla) {
+            shot.sync_velocity = true;
+        }
+    }
+
     /// A typed entity write for a projectile, applied in its own tick. A
     /// projectile takes no effects, no damage table and keeps no stuck
     /// multiplier: `Hurt` and `AddEffect` are skipped, `StuckIn` scales the
