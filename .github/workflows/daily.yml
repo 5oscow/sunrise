@@ -154,8 +154,8 @@ jobs:
     uses: ./.github/workflows/windows-runtime-leases.yml
     with:
       commit: ${{ needs.resolve.outputs.commit }}
-  # The wasm std member built on Linux and on Windows exports the same names, so a wasm mod built on either host loads
-  # with the other's std (wasm-std-names.yml).
+  # The wasm std member built on Linux and on Windows has exactly the same import and export name lists
+  # (wasm-std-names.yml).
   wasm-std-names:
     needs: resolve
     if: needs.resolve.outputs.skip == 'false'
