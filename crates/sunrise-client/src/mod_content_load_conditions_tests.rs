@@ -7,11 +7,14 @@ fn worldgen_entry_reads_the_feature_folder() {
         worldgen_entry("data/zinc/worldgen/feature/ore_zinc.json"),
         Some(("worldgen/features.json", "zinc:ore_zinc".to_owned()))
     );
-    for folder in ["configured_feature", "nope"] {
-        assert_eq!(
-            worldgen_entry(&format!("data/zinc/worldgen/{folder}/ore_zinc.json")),
-            None
-        );
+    for file in [
+        "data/zinc/worldgen/configured_feature/ore_zinc.json",
+        "data/zinc/worldgen/nope/ore_zinc.json",
+        "data/zinc/data_maps/worldgen/biome/zinc_patch.json",
+        "data/zinc/custom/worldgen/feature/ore_zinc.json",
+        "data/minecraft/worldgen/biome/zinc_patch.json",
+    ] {
+        assert_eq!(worldgen_entry(file), None, "{file}");
     }
 }
 
