@@ -129,7 +129,7 @@ impl Game<'_> {
         delta: [f64; 3],
         cause: MoveCause,
     ) -> Option<[f64; 3]> {
-        if self.remote.is_some() || !delta.iter().all(|v| v.is_finite() && v.abs() <= 64.0) {
+        if self.remote.is_some() || !sunrise_client::move_gate::valid_mod_move_delta(delta) {
             return None;
         }
         let mover = sunrise_client::move_gate::mover_of(cause)?;

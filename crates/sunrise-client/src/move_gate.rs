@@ -117,9 +117,14 @@ pub fn arm_with<'k>(
     // Design #2308: replacement components lie in ±64 blocks and are finite;
     // a malformed result is rejected whole — like the requested delta would
     // be — never clamped.
-    if replaced.iter().all(|v| v.is_finite() && v.abs() <= 64.0) {
+    if valid_mod_move_delta(replaced) {
         gate.decide(Vec3::new(replaced[0], replaced[1], replaced[2]));
     }
+}
+
+/// The finite, per-axis range shared by a mod's move request and a move hook's replacement.
+pub fn valid_mod_move_delta(delta: [f64; 3]) -> bool {
+    delta.iter().all(|v| v.is_finite() && v.abs() <= 64.0)
 }
 
 /// [`arm_with`] for a mover whose type name is already a borrowed `&str`.

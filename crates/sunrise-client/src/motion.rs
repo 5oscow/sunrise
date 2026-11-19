@@ -2070,14 +2070,11 @@ impl MotionWorld<'_, '_, '_> {
         }
         Ok(())
     }
-    /// `Entity.move(MoverType.SHULKER_BOX, SHULKER or PISTON, movement)`: a
-    /// shulker box's or a shulker's lid, or a piston, pushed the player. An
-    /// ordinary move (a piston's limited by `limitPistonMovement`): the
-    /// collision scan steps and reads the ground flag, and the move's end writes
-    /// the ground and collision state (`Entity.setOnGroundWithMovement`), so a
-    /// push lifting the body off the ground or sideways leaves it airborne until
-    /// the next tick's own move lands it again.
-    pub fn block_push(&mut self, mover: MoverType, movement: Vec3) -> Result<()> {
+    /// One ordinary `Entity.move(mover, movement)`, outside travel. The collision
+    /// scan reads the ground flag to step, and the move's end updates the ground
+    /// and collision state (`Entity.setOnGroundWithMovement`). A piston's move
+    /// uses its per-tick budget (`limitPistonMovement`).
+    pub fn move_with_cause(&mut self, mover: MoverType, movement: Vec3) -> Result<()> {
         let gate = crate::move_gate::armed(
             self.loop_context,
             self.player.entity_id as u32,
@@ -4325,7 +4322,7 @@ mod tests {
         };
         for _ in 0..2 {
             world
-                .block_push(MoverType::Piston, Vec3::new(0.0, 0.0, 0.3))
+                .move_with_cause(MoverType::Piston, Vec3::new(0.0, 0.0, 0.3))
                 .unwrap();
         }
         assert!(!player.ground.on_ground);

@@ -134,7 +134,7 @@ impl Prepared {
 }
 
 thread_local! {
-    static PLACED: RefCell<Arc<Index>> = RefCell::new(Prepared::empty().0);
+    static PLACED: RefCell<Option<Arc<Index>>> = const { RefCell::new(None) };
     /// The entity whose move is being resolved, for the moves that do not say who they are.
     static MOVER: Cell<u64> = const { Cell::new(0) };
     static SCRATCH: RefCell<Vec<u32>> = const { RefCell::new(Vec::new()) };
@@ -147,21 +147,25 @@ thread_local! {
 /// outlives its tick. The level's tick holds one (like `block_contact::in_level`), and so
 /// does a client's tick of the level it shows.
 pub struct Scope {
-    before: Arc<Index>,
+    before: Option<Arc<Index>>,
 }
 
 impl Scope {
+    /// A level already installed its colliders, even if there were none to place.
+    pub fn is_active() -> bool {
+        PLACED.with_borrow(Option::is_some)
+    }
+
     pub fn enter(placed: Prepared) -> Self {
         Self {
-            before: PLACED.with(|cell| std::mem::replace(&mut *cell.borrow_mut(), placed.0)),
+            before: PLACED.with_borrow_mut(|current| current.replace(placed.0)),
         }
     }
 }
 
 impl Drop for Scope {
     fn drop(&mut self) {
-        let before = std::mem::replace(&mut self.before, Prepared::empty().0);
-        PLACED.with(|cell| *cell.borrow_mut() = before);
+        PLACED.with_borrow_mut(|current| *current = self.before.take());
     }
 }
 
@@ -252,7 +256,11 @@ fn visit_scene(area: Aabb, mover: u64, mut f: impl FnMut(&OrientedCollider) -> b
         }
         return;
     }
-    PLACED.with(|cell| visit(&cell.borrow(), area, mover, |p| f(&p.collider)));
+    PLACED.with_borrow(|current| {
+        if let Some(index) = current {
+            visit(index, area, mover, |p| f(&p.collider));
+        }
+    });
 }
 
 /// The entity whose move [`as_mover`] names, or 0 outside one.

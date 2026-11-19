@@ -1,9 +1,9 @@
-//! A client mod's writes to the player it moves itself (`ClientHost::set_local_player_velocity`
-//! and `set_local_player_on_ground`): what a prediction such as a belt's push or a boots'
-//! hover sets before the tick's own move. Nothing is sent; the server hears of the result in
-//! the position report the move produces and checks it as it checks any report.
+//! A client mod's writes to the player it moves itself, before the tick's own move.
+//! Nothing is sent; the server hears of the result in the normal position report.
 use super::Game;
+use mod_api::LevelWriteError;
 use sunrise_core::geometry::Vec3;
+use sunrise_world::entity_move::MoverType;
 
 impl Game<'_> {
     /// `Entity.setDeltaMovement` on the local player. `false`, with the velocity unchanged,
@@ -29,6 +29,29 @@ impl Game<'_> {
             }
             None => false,
         }
+    }
+
+    pub(super) fn move_local_player_by(
+        &mut self,
+        delta: [f64; 3],
+    ) -> Result<Option<[f64; 3]>, LevelWriteError> {
+        if !sunrise_client::move_gate::valid_mod_move_delta(delta) {
+            return Ok(None);
+        }
+        let [x, y, z] = delta;
+        let move_player =
+            |game: &mut Self| game.move_local_player(MoverType::SelfMovement, Vec3::new(x, y, z));
+        // Ticks already scope their collision data. A writable client hook can
+        // also run between ticks (for example input_key), so install it there.
+        let moved = if sunrise_client_render::moving_colliders::Scope::is_active() {
+            move_player(self)
+        } else {
+            let _parts = self.collision_parts();
+            self.in_this_levels_colliders(move_player)
+        };
+        moved
+            .map(|moved| moved.map(Vec3::components))
+            .map_err(|_| LevelWriteError::Unavailable)
     }
 }
 
@@ -116,6 +139,48 @@ mod tests {
                 let moved = body.position.x - before.x;
                 assert!((moved - 0.25).abs() < 1.0e-9, "moved {moved}");
                 assert!(!body.ground.on_ground, "the move set the flag from the air");
+            });
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn a_local_displacement_stops_at_a_wall_and_reports_how_far_it_moved() {
+        struct Push(Arc<Mutex<Option<[f64; 3]>>>);
+        #[mod_api::__subscriptions]
+        impl mod_api::Hooks for Push {
+            fn player_tick_pre(&self, host: HostSide<'_>, event: &mut mod_api::PlayerTickPreEvent) {
+                if let HostSide::Client(host) = host
+                    && host.local_player() == Some(event.player)
+                {
+                    *self.0.lock().unwrap() = host.move_local_player_by([3.0, 0.0, 0.0]).unwrap();
+                }
+            }
+        }
+
+        let moved = Arc::new(Mutex::new(None));
+        let mods = vec![mod_api::ModEntry::new(
+            "push",
+            Box::new(Push(Arc::clone(&moved))),
+        )]
+        .into();
+        mod_platform::testing::with_mods(mods, || {
+            crate::game::native_entity_refs::tests::with_client_game(|game| {
+                loaded_client(game);
+                let stone = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:stone")
+                    .unwrap();
+                for y in 63..67 {
+                    game.world.set(2, y, 0, stone).unwrap();
+                }
+                game.tick_remote().unwrap();
+                // Standing players are 0.6 blocks wide. Their right edge stops at x = 2.
+                let stopped_at = 2.0 - f64::from(0.6_f32 / 2.0);
+                assert_eq!(*moved.lock().unwrap(), Some([stopped_at - 0.5, 0.0, 0.0]));
+                assert_eq!(game.player.as_ref().unwrap().position.x, stopped_at);
             });
         });
     }
