@@ -280,7 +280,31 @@ struct PlacementAttempt {
 struct PlacementEntity {
     pos: Pos,
     revision: sunrise_client::chunk::block_entity::ModRevision,
-    snapshot: Option<mod_api::ModBlockEntity>,
+    snapshot: PlacementSnapshot,
+}
+
+enum PlacementSnapshot {
+    Unsubscribed,
+    Unrepresentable,
+    Ready(mod_api::ModBlockEntity),
+}
+
+#[derive(Clone, Copy)]
+enum Insertion {
+    Automation(Option<Pos>),
+    /// The pull transaction keeps just the receiving hopper's slot.
+    Pull,
+    /// A capability write may need to keep the whole entity.
+    Capability,
+}
+
+#[derive(PartialEq, Eq)]
+enum MoveIn {
+    /// The offer was refused or had no room; a pull can try the next slot.
+    Skipped,
+    /// A fitting slot failed to take the stack; a pull must abort.
+    Blocked,
+    Moved,
 }
 
 impl PlacementAttempt {
@@ -302,25 +326,49 @@ impl PlacementAttempt {
             .as_ref()
             .is_none_or(|seen| seen.pos != pos || seen.revision != revision)
         {
-            let snapshot = mod_api::__private::block_entity_type_listens(
+            let snapshot = if mod_api::__private::block_entity_type_listens(
                 mod_api::HookId::CanPlaceItem,
                 entity.id(),
-            )
-            .then(|| entity.try_into_api().ok())
-            .flatten();
+            ) {
+                match entity.try_into_api() {
+                    Ok(snapshot) => PlacementSnapshot::Ready(snapshot),
+                    Err(error) => {
+                        log::debug!(
+                            "Sunrise: can_place_item could not read {} at {pos:?}: {error:?}",
+                            entity.id()
+                        );
+                        PlacementSnapshot::Unrepresentable
+                    }
+                }
+            } else {
+                PlacementSnapshot::Unsubscribed
+            };
             self.entity = Some(PlacementEntity {
                 pos,
                 revision,
                 snapshot,
             });
         }
-        let snapshot = self.entity.as_ref()?.snapshot.as_ref()?;
-        let offered = self
-            .stack
-            .get_or_insert_with(|| stack.try_into_api().ok())
-            .as_mut()?;
-        if offered.count() != stack.count {
-            offered.set_count(stack.count).ok()?;
+        let snapshot = match &self.entity.as_ref()?.snapshot {
+            PlacementSnapshot::Unsubscribed => return None,
+            PlacementSnapshot::Unrepresentable => return Some(false),
+            PlacementSnapshot::Ready(snapshot) => snapshot,
+        };
+        let Some(offered) = self.stack.get_or_insert_with(|| {
+            stack
+                .try_into_api()
+                .inspect_err(|error| {
+                    log::debug!(
+                        "Sunrise: can_place_item could not read the offered {}: {error:?}",
+                        stack.item
+                    );
+                })
+                .ok()
+        }) else {
+            return Some(false);
+        };
+        if offered.count() != stack.count && offered.set_count(stack.count).is_err() {
+            return Some(false);
         }
         let mut allowed = None;
         Game::native_can_place_item(snapshot, slot, offered, &mut allowed);
@@ -640,14 +688,16 @@ impl Containers<'_> {
         if !self.accepts(view, slot, stack) {
             return 0;
         }
+        self.slot_stack_limit(view, slot, stack)
+    }
+    fn slot_stack_limit(&self, view: &View, slot: usize, stack: &ItemStack) -> u32 {
         let capacity = view.slot_limit().min(self.max_stack(stack));
         view.locate(slot)
             .and_then(|(pos, _)| self.world.container_stack_limit(pos))
             .map_or(capacity, |limit| capacity.min(limit))
     }
-    /// How many of `stack` slot `slot` takes now: none where `can_place` refuses it, else
-    /// `capacity` less what it holds.
-    fn fits(
+    /// Physical room in a slot that admits `stack`, zero if admission refuses the offer.
+    fn admitted_room(
         &self,
         view: &View,
         slot: usize,
@@ -659,10 +709,9 @@ impl Containers<'_> {
         }
         self.insertion_room(view, slot, stack)
     }
-    /// Room for the stack in a slot, apart from the per-slot `can_place` decision.
     fn insertion_room(&self, view: &View, slot: usize, stack: &ItemStack) -> u32 {
         room(
-            self.capacity(view, slot, stack),
+            self.slot_stack_limit(view, slot, stack),
             self.get(view, slot),
             stack,
         )
@@ -740,13 +789,13 @@ impl Containers<'_> {
     }
 }
 
-/// How many of `stack` go into a slot holding `current`, up to `limit`: into an empty slot, or
-/// onto the same item and components (`HopperBlockEntity.canMergeItems`).
+/// Physical room for this item and components, in an empty or matching stack
+/// (`HopperBlockEntity.canMergeItems`).
 fn room(limit: u32, current: Option<&ItemStack>, stack: &ItemStack) -> u32 {
     match current {
-        None => stack.count.min(limit),
+        None => limit,
         Some(current) if current.same_item_same_components(stack) => {
-            stack.count.min(limit.saturating_sub(current.count))
+            limit.saturating_sub(current.count)
         }
         Some(_) => 0,
     }
@@ -1023,14 +1072,14 @@ impl Game<'_> {
     /// `HopperBlockEntity.tryMoveInItem`.
     fn try_move_in_item(
         &mut self,
-        from_hopper: Option<Pos>,
+        insertion: Insertion,
         view: &View,
         stack: ItemStack,
         slot: usize,
         attempt: &mut PlacementAttempt,
-    ) -> Option<ItemStack> {
-        let (rest, moved) = self.move_in_item(from_hopper, view, stack, slot, attempt);
-        if moved {
+    ) -> (Option<ItemStack>, MoveIn) {
+        let (rest, result) = self.move_in_item(insertion, view, stack, slot, attempt);
+        if result == MoveIn::Moved {
             self.view_changed(view);
             // JukeboxBlockEntity.setTheItem through a hopper's or a dropper's
             // transfer: the disc it lands on starts playing.
@@ -1039,21 +1088,40 @@ impl Game<'_> {
                 self.jukebox_inserted([x, y, z]);
             }
         }
-        rest
+        (rest, result)
     }
-    /// `tryMoveInItem` before `setChanged`: the remainder and whether anything moved.
+    /// `tryMoveInItem` before `setChanged`: ask about the full offer, then keep and
+    /// write the admitted slot. A skipped slot is never journaled.
     fn move_in_item(
         &mut self,
-        from_hopper: Option<Pos>,
+        insertion: Insertion,
         view: &View,
         mut stack: ItemStack,
         slot: usize,
         attempt: &mut PlacementAttempt,
-    ) -> (Option<ItemStack>, bool) {
+    ) -> (Option<ItemStack>, MoveIn) {
         let c = self.containers();
         if !c.can_place(view, slot, &stack, attempt) {
-            return (Some(stack), false);
+            return (Some(stack), MoveIn::Skipped);
         }
+        let (from_hopper, count) = match insertion {
+            Insertion::Automation(from_hopper) => (from_hopper, stack.count),
+            Insertion::Pull | Insertion::Capability => {
+                let count = c.insertion_room(view, slot, &stack).min(stack.count);
+                if count == 0 {
+                    return (Some(stack), MoveIn::Skipped);
+                }
+                if matches!(insertion, Insertion::Pull) {
+                    let Some((pos, index)) = view.locate(slot) else {
+                        return (Some(stack), MoveIn::Blocked);
+                    };
+                    self.journal_block_entity_slot(pos, index);
+                } else {
+                    self.journal_view_slot(view, slot);
+                }
+                (None, count)
+            }
+        };
         self.unpack_inventory_slot(view, slot);
         let was_empty = self.inventory_is_empty(view);
         let c = self.containers();
@@ -1064,7 +1132,7 @@ impl Game<'_> {
         let restricted = override_limit.is_some_and(|limit| limit < vanilla_max);
         let max = override_limit.map_or(vanilla_max, |limit| vanilla_max.min(limit));
         if restricted && max == 0 {
-            return (Some(stack), false);
+            return (Some(stack), MoveIn::Blocked);
         }
 
         let mut success = false;
@@ -1074,7 +1142,7 @@ impl Game<'_> {
             let Some(tag) = spill::saved_entity(&self.world, [pos.0, pos.1, pos.2])
                 .or_else(|| self.pot_data([pos.0, pos.1, pos.2]))
             else {
-                return (Some(stack), false);
+                return (Some(stack), MoveIn::Blocked);
             };
             let item = tag.get("item").and_then(save::item_from_nbt);
             Some((tag, item))
@@ -1085,10 +1153,12 @@ impl Game<'_> {
             item
         } else {
             let Some(target) = self.slot_mut_at(view, slot) else {
-                return (Some(stack), false);
+                return (Some(stack), MoveIn::Blocked);
             };
             target
         };
+        let beyond_slot = stack.count - count;
+        stack.count = count;
         // An empty stack a mod left in its slot: the slot is free (`isEmpty`).
         if target.as_ref().is_some_and(|s| s.count == 0) {
             *target = None;
@@ -1149,10 +1219,14 @@ impl Game<'_> {
                 state.cooldown = 8 - skip;
             }
         }
-        if success {
+        let result = if success {
             attempt.wrote_entity();
-        }
-        ((stack.count > 0).then_some(stack), success)
+            MoveIn::Moved
+        } else {
+            MoveIn::Blocked
+        };
+        stack.count += beyond_slot;
+        ((stack.count > 0).then_some(stack), result)
     }
     /// `HopperBlockEntity.addItem(from, container, stack, direction)`; the remainder.
     fn add_item(
@@ -1170,7 +1244,15 @@ impl Game<'_> {
         let mut rest = Some(stack);
         for slot in view.slots_to_add_iter(face) {
             let Some(stack) = rest.take() else { break };
-            rest = self.try_move_in_item(from_hopper, view, stack, slot, &mut attempt);
+            rest = self
+                .try_move_in_item(
+                    Insertion::Automation(from_hopper),
+                    view,
+                    stack,
+                    slot,
+                    &mut attempt,
+                )
+                .0;
         }
         rest
     }
@@ -1551,17 +1633,12 @@ impl Game<'_> {
                 let mut attempt = PlacementAttempt::default();
                 let mut rest = one;
                 for target in 0..hopper.len() {
-                    if game.containers().insertion_room(hopper, target, &rest) == 0 {
-                        continue;
+                    match game.try_move_in_item(Insertion::Pull, hopper, rest, target, &mut attempt)
+                    {
+                        (Some(remainder), MoveIn::Skipped) => rest = remainder,
+                        (None, MoveIn::Moved) => return Ok(()),
+                        _ => return Err(()),
                     }
-                    let (pos, slot) = hopper.locate(target).ok_or(())?;
-                    game.journal_block_entity_slot(pos, slot);
-                    let Some(remainder) =
-                        game.try_move_in_item(None, hopper, rest, target, &mut attempt)
-                    else {
-                        return Ok(());
-                    };
-                    rest = remainder;
                 }
                 Err(())
             });
@@ -2792,7 +2869,7 @@ mod capacity_tests {
             let offered = ItemStack::new(offered, 1);
             assert_eq!(c.capacity(&view, 0, &offered), 1, "{block}");
             assert_eq!(
-                c.fits(&view, 0, &offered, &mut super::PlacementAttempt::default()),
+                c.admitted_room(&view, 0, &offered, &mut super::PlacementAttempt::default()),
                 0,
                 "{block}"
             );

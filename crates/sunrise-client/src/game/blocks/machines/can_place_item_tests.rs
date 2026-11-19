@@ -24,6 +24,7 @@ impl BlockEntityPart for Filter {
         match event.entity.data.first() {
             Some(1) => return Some(false),
             Some(2) => return None,
+            Some(3) => return Some(event.slot == 2 && event.stack.count() == 1),
             _ => {}
         }
         match event.slot {
@@ -199,6 +200,125 @@ fn default_items_insert_checks_admission_and_overrides_the_declared_rule() {
             target(game).items,
             [None, Some(ItemStack::new("minecraft:stone", 3)), None]
         );
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn refusing_a_capability_insert_does_not_journal_the_slot() {
+    fixture(|game| {
+        let level = game.level("minecraft:overworld").unwrap();
+        let at = [TARGET.0, TARGET.1, TARGET.2];
+        let handler = level
+            .capability(game, &ITEMS, at, Some(Direction::Up))
+            .unwrap();
+        use super::super::api_values::TryIntoApi;
+        let resource =
+            ItemResource::of(&ItemStack::new("minecraft:stone", 1).try_into_api().unwrap());
+        let before = (target(game).revision(), game.transactions.writes());
+        let aborted = mod_api::run_transaction(game, |game, tx| {
+            assert_eq!(handler.insert(game, tx, 0, &resource, 1), 0);
+            assert_eq!(game.journal_kept(), (0, 0));
+            Err::<(), ()>(())
+        });
+        assert_eq!(aborted, Err(()));
+        assert_eq!(target(game).items, [None, None, None]);
+        assert_eq!(
+            (target(game).revision(), game.transactions.writes()),
+            before
+        );
+    });
+}
+
+fn prepare_single_item_admission(game: &mut Game<'_>) -> ItemResource {
+    let Some(BlockEntity::Mod(entity)) = game.world.block_entities.get_mut(&TARGET) else {
+        unreachable!();
+    };
+    entity.data = vec![3];
+    entity.items[2] = Some(ItemStack::new("minecraft:stone", 63));
+    use super::super::api_values::TryIntoApi;
+    ItemResource::of(&ItemStack::new("minecraft:stone", 1).try_into_api().unwrap())
+}
+
+#[test]
+#[ignore = "daily"]
+fn admission_checks_the_offer_before_clamping_to_room() {
+    fixture(|game| {
+        let resource = prepare_single_item_admission(game);
+        let level = game.level("minecraft:overworld").unwrap();
+        let at = [TARGET.0, TARGET.1, TARGET.2];
+        let items = level
+            .capability(game, &ITEMS, at, Some(Direction::Up))
+            .unwrap();
+        let storage = level
+            .capability(game, &STORAGE, at, Some(Direction::Up))
+            .unwrap();
+        assert_eq!(
+            mod_api::run_transaction(game, |game, tx| {
+                let indexed = items.insert(game, tx, 2, &resource, 2);
+                let by_kind = storage.insert(game, tx, &resource, 2);
+                Ok::<_, ()>((indexed, by_kind))
+            }),
+            Ok((0, 0))
+        );
+        assert_eq!(
+            target(game).items[2],
+            Some(ItemStack::new("minecraft:stone", 63))
+        );
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn storage_transfer_plans_with_one_item_and_checks_the_real_write() {
+    fixture(|game| {
+        source(game, "minecraft:hopper", HOPPER_SLOTS);
+        let resource = prepare_single_item_admission(game);
+        let level = game.level("minecraft:overworld").unwrap();
+        let from = level
+            .capability(game, &STORAGE, [ABOVE.0, ABOVE.1, ABOVE.2], None)
+            .unwrap();
+        let to = level
+            .capability(
+                game,
+                &STORAGE,
+                [TARGET.0, TARGET.1, TARGET.2],
+                Some(Direction::Up),
+            )
+            .unwrap();
+        assert_eq!(to.space_for(game, &resource), Ok(1));
+        assert_eq!(
+            mod_api::run_transaction(game, |game, tx| {
+                mod_api::transfer(game, &from, &to, &resource, 1, tx)
+            }),
+            Ok(1)
+        );
+        assert_eq!(
+            target(game).items[2],
+            Some(ItemStack::new("minecraft:stone", 64))
+        );
+        assert_eq!(from.amount(game, &resource), Ok(1));
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn unrepresentable_hook_inputs_refuse_insertion_instead_of_using_any() {
+    fixture(|game| {
+        let view = game.containers().view(TARGET, false).unwrap();
+        let unknown = ItemStack::new("admission:not_registered", 1);
+        assert_eq!(
+            game.add_item(None, &view, unknown.clone(), None),
+            Some(unknown.clone())
+        );
+        assert_eq!(target(game).items, [None, None, None]);
+        let Some(BlockEntity::Mod(entity)) = game.world.block_entities.get_mut(&TARGET) else {
+            unreachable!();
+        };
+        entity.items[2] = Some(unknown.clone());
+        let stone = ItemStack::new("minecraft:stone", 1);
+        assert_eq!(game.add_item(None, &view, stone.clone(), None), Some(stone));
+        assert_eq!(target(game).items, [None, None, Some(unknown)]);
     });
 }
 
