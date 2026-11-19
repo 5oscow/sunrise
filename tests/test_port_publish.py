@@ -1,7 +1,11 @@
 import json
 from pathlib import Path
+import subprocess
+import sys
 import unittest
 from unittest import mock
+
+ROOT = Path(__file__).resolve().parents[1]
 
 from tools import port_publish as publish
 
@@ -13,7 +17,7 @@ DIFF = {"classes": {"changed": {"net/minecraft/world/food/FoodData": {
 def items():
     return [
         {"rank": 1, "kind": "protocol", "title": "Protocol: packets play/clientbound +1 -0 ~3",
-         "files": ["crates/horizon-protocol/src/ids.rs"], "details": {"packets": {"play/clientbound": {
+         "files": ["crates/sunrise-protocol/src/ids.rs"], "details": {"packets": {"play/clientbound": {
              "added": {"minecraft:punch": 3}, "removed": {}, "renumbered": {"minecraft:x": [1, 2]}}}}},
         {"rank": 2, "kind": "rerun", "title": "crates/w/src/food.rs: 1 vanilla classes changed", "harnesses": ["food"],
          "failed": [], "classes": {}},
@@ -36,11 +40,11 @@ class PublishTests(unittest.TestCase):
         self.assertEqual([publish.published(i) for i in items()], [True, False, True, True, False, False])
 
     def test_body_has_names_and_signatures_only(self):
-        text = publish.body(items()[3], REPORT, DIFF, Path.home() / "code/horizon-parity/versions/diff-26.3-26.4")
-        self.assertIn("`net.minecraft.world.food.FoodData`: 1 methods changed; Horizon's comments name tick", text)
+        text = publish.body(items()[3], REPORT, DIFF, Path.home() / "code/sunrise-parity/versions/diff-26.3-26.4")
+        self.assertIn("`net.minecraft.world.food.FoodData`: 1 methods changed; Sunrise's comments name tick", text)
         self.assertIn("methods changed: `tick(Lnet/minecraft/server/level/ServerPlayer;)V`", text)
         self.assertIn("fields added: `exhaustionLevel F`", text)
-        self.assertIn("`~/code/horizon-parity/versions/diff-26.3-26.4`", text)
+        self.assertIn("`~/code/sunrise-parity/versions/diff-26.3-26.4`", text)
         self.assertTrue(text.startswith(publish.START) and text.rstrip().endswith(publish.END))
 
     def test_refuses_code(self):
@@ -103,6 +107,16 @@ class PublishTests(unittest.TestCase):
         with mock.patch.object(publish.subprocess, "run", side_effect=run):
             self.assertEqual(json.loads(publish.gh("issue", "view"))["body"], "a → b")
             self.assertEqual(publish.kira("board_list", {})["body"], "a → b")
+
+
+class UsedThroughVersionPortTests(unittest.TestCase):
+    """The module is used through `tools/version_port.py`; run on its own it says so."""
+
+    def test_it_says_how_it_is_used(self):
+        result = subprocess.run([sys.executable, str(ROOT / "tools/port_publish.py"), "--help"],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("version_port.py", result.stdout + result.stderr)
 
 
 if __name__ == "__main__":

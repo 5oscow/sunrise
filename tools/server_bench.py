@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
-"""Server benchmark: the same bots on Horizon's server and on vanilla 26.3's (docs/server.md, section 9).
+"""Server benchmark: the same bots on Sunrise's server and on vanilla 26.3's (docs/server.md, section 9).
 
 Every run starts a fresh server from the same server.properties (seed, view and simulation distance 10,
-offline, creative so the bots can fly), waits for `Done`, lets `horizon-bots` join one a second, warms up,
+offline, creative so the bots can fly), waits for `Done`, lets `sunrise-bots` join one a second, warms up,
 then measures for a while:
 
 - MSPT (average, P50, P95, P99) from each server's own `/tick query`, asked every 5 seconds on the console:
-  vanilla's ServerTickRateManager numbers, which Horizon reproduces, so both measure themselves the same way;
+  vanilla's ServerTickRateManager numbers, which Sunrise reproduces, so both measure themselves the same way;
 - RSS and CPU of the server's whole process tree, once a second;
 - chunks the bots receive per second (new terrain while the `explore` bots fly outwards), chunks sent again
   while a bot still held them, and the moves the server refused (pull-backs; "moved too quickly" and
   "moved wrongly" lines);
 - the start time to `Done`, and every bot that failed to join or was dropped.
 
-    python3 tools/server_bench.py --servers horizon,vanilla --bots 1,10,25 --behaviour walk,explore
+    python3 tools/server_bench.py --servers sunrise,vanilla --bots 1,10,25 --behaviour walk,explore
 
 The bots can run on another machine, so they don't take the server's CPU: `--bots-via 'ssh macmini'` with
-`--bots-bin` naming horizon-bots there and `--connect` the address it reaches this machine at. `--nice 19`
+`--bots-bin` naming sunrise-bots there and `--connect` the address it reaches this machine at. `--nice 19`
 runs every server at the lowest priority (a shared machine). The explore bots fly as fast as each server
 sends them chunks, so a faster server gets more terrain to generate; `--explore-speed` slows them to a rate
 both servers keep up with, for equal work. After the runs, the work table compares the servers at each bot
@@ -24,8 +24,8 @@ count: chunks sent and new chunks generated a second, against the busiest server
 than 10 % apart isn't a fair comparison of its tick times.
 
 The vanilla side runs the pinned server jar from tools/lab.py prepare (your own copy). It needs Java 25. The
-Horizon side runs target/release/horizon-server with the engine beside it; build both first:
-    cargo build --release -p horizon-game --bin horizon-client -p horizon-server -p horizon-bots
+Sunrise side runs target/release/sunrise-server with the engine beside it; build both first:
+    cargo build --release -p sunrise-game --bin sunrise-client -p sunrise-server -p sunrise-bots
 
 Two more Java servers, both dev-only downloads into .local/server-bench/jars (never committed or shipped):
 - `paper`: Paper's newest build for the pinned version, from PaperMC's download API, checked against the
@@ -35,6 +35,8 @@ Two more Java servers, both dev-only downloads into .local/server-bench/jars (ne
 - `fabric`: the pinned vanilla server on the pinned Fabric loader (tools/benchmark-deps/fabric.lock.json) with Lithium from
   tools/benchmark-deps/mods.lock.json (and Fabric API only if Lithium asks for it), checked against the lock's SHA-512.
 Both run with the same heap as vanilla (`--heap`).
+
+`--profile[=ARGS]` has Sunrise record its measure window with `sunrise-report ARGS` and attaches the run's record with `sunrise-perf attach` (docs/hosting.md).
 
 `pumpkin` runs Pumpkin (github.com/Pumpkin-MC/Pumpkin, GPL-3.0), a binary you built yourself and name with
 `--pumpkin`: a black box, nothing of it is read or shipped. A first start in a scratch folder (on 127.0.0.1
@@ -69,8 +71,16 @@ except ImportError:
 
 ROOT = lab.ROOT
 EXE = '.exe' if os.name == 'nt' else ''
-# Where horizon-server and horizon-bots are (the engine is found beside horizon-server or on the PATH).
-BIN = Path(os.environ.get('HORIZON_BENCH_BIN', ROOT / 'target/release'))
+# Where sunrise-server and sunrise-bots are (the engine is found beside sunrise-server or on the PATH).
+BIN = Path(os.environ.get('SUNRISE_BENCH_BIN', ROOT / 'target/release'))
+
+PERF = BIN / f'sunrise-perf{EXE}'
+# The longest window sunrise-report records.
+REPORT_MAX_SECONDS = 600
+# What a run's record is called inside the capture it is attached to.
+RUN_RECORD = 'server-bench-run'
+# The line the server logs once the capture is on disk.
+SAVED = re.compile(r'Saved (.+?\.hzperf) \(the file stays')
 
 PROPERTIES = {
     'level-seed': '12345',
@@ -171,7 +181,7 @@ class Server:
         self.log.close()
 
 
-# The line every server logs once it is up: vanilla, Fabric and Horizon `[time] [Server thread/INFO]: Done (`,
+# The line every server logs once it is up: vanilla, Fabric and Sunrise `[time] [Server thread/INFO]: Done (`,
 # Paper `[time INFO]: Done (`.
 DONE = r'INFO\]: Done \('
 # Pumpkin's, once it listens.
@@ -190,7 +200,7 @@ def paper_jar():
     lock, _ = lab.config()
     version = lock['minecraft']['version']
     request = urllib.request.Request(PAPER_API.format(version=version),
-                                     headers={'User-Agent': 'horizon-server-bench (github.com/horizon-rust/horizon)'})
+                                     headers={'User-Agent': 'sunrise-server-bench (github.com/horizon-rust/horizon)'})
     with urllib.request.urlopen(request, timeout=30) as response:
         build = json.load(response)
     download = build['downloads']['server:default']
@@ -363,35 +373,79 @@ def server_command(kind, directory, args):
             (directory / name).parent.mkdir(parents=True, exist_ok=True)
             (directory / name).write_text(pumpkin_config(text, args.port, args) if '[networking.java]' in text else text)
         return [args.pumpkin]
-    server = BIN / f'horizon-server{EXE}'
+    server = BIN / f'sunrise-server{EXE}'
     subprocess.run([server, '--dir', directory, 'import', directory / 'server.properties'], check=True,
                    capture_output=True)
     toml = directory / 'server.toml'
     # The same settings, without the web panel.
     toml.write_text(re.sub(r'(?m)^bind = "127\.0\.0\.1:8130"', 'bind = ""', toml.read_text()))
-    if args.anticheat:
-        # Every check on with its defaults (docs/anticheat.md), to measure what it costs. The bots move
-        # by their own rules, not vanilla's: the prediction plays every move again but, with this
-        # tolerance, flags none (an honest player's moves agree).
-        toml.write_text(toml.read_text()
-                        + '\n[anticheat]\nenabled = true\n[anticheat.prediction]\ntolerance = 1000.0\n')
-    else:
-        # The anticheat is on by default: off, to measure the server without it.
-        toml.write_text(toml.read_text() + '\n[anticheat]\nenabled = false\n')
     return [server, '--dir', directory, 'run']
 
 
-def flag_count(directory):
-    """The lines of Horizon's anticheat log: one a flag (none when it is off)."""
-    log = directory / 'logs/anticheat.log'
-    return len(log.read_text().splitlines()) if log.exists() else 0
+def report_line(seconds, extra=''):
+    """The console line that records the measure window; the game ends a report at REPORT_MAX_SECONDS."""
+    return ' '.join(['sunrise-report', str(min(seconds, REPORT_MAX_SECONDS)), *extra.split()])
+
+
+def saved_capture(lines, directory):
+    """The capture the server said it saved (it prints the path from its own folder), or None."""
+    for line in lines:
+        if found := SAVED.search(line):
+            return directory / found.group(1)
+    return None
+
+
+def attach_run(capture, record, directory, run=subprocess.run):
+    """Adds the run's record to the capture as an attachment, with sunrise-perf."""
+    body = directory / 'run-record.json'
+    body.write_text(json.dumps(record))
+    run([PERF, 'attach', capture, '--name', RUN_RECORD, '--body', body], check=True, capture_output=True, text=True)
+
+
+def start_profile(server, kind, args):
+    """Has Sunrise's console record the measure window; true when it was asked to (only Sunrise writes captures)."""
+    if args.profile is None or kind != 'sunrise':
+        return False
+    server.console(report_line(args.seconds, args.profile))
+    return True
+
+
+def finish_profile(server, directory, result, run=subprocess.run):
+    """Waits for the capture and attaches the run's record to it; a failure is noted, the run stands."""
+    try:
+        server.wait_for(SAVED.pattern, 120)
+        capture = saved_capture(server.since(0), directory)
+        attach_run(capture, {k: v for k, v in result.items() if k != 'bots_failed'}, directory, run)
+        result['profile'] = str(capture)
+    except (RuntimeError, subprocess.CalledProcessError, OSError) as e:
+        result['profile_error'] = str(e)
 
 
 def bots_command(args):
-    """horizon-bots here, or through `--bots-via` (for example `ssh macmini`) on another machine."""
+    """sunrise-bots here, or through `--bots-via` (for example `ssh macmini`) on another machine."""
     if args.bots_via:
-        return [*args.bots_via.split(), args.bots_bin or 'horizon-bots']
-    return [args.bots_bin or BIN / f'horizon-bots{EXE}']
+        return [*args.bots_via.split(), args.bots_bin or 'sunrise-bots']
+    return [args.bots_bin or BIN / f'sunrise-bots{EXE}']
+
+
+def populate(server, spec, seed):
+    """Fills the level around the players with `spec` = "items,carts,mobs" (counts), as a busy server has it: the
+    entity tracker and the entity states cost by what is in the level, not only by how many players walk in it.
+    Each one goes at a random offset of up to 120 blocks from a random player: the offsets
+    come from the same seed on every run, but `execute at @r` picks the player with the server's own RNG, so the
+    placements still differ between runs."""
+    import random
+    rng = random.Random(seed)
+    counts = [int(n) for n in (spec.split(',') + ['0', '0'])[:3]]
+    things = [
+        ('item', '{Item:{id:"minecraft:cobblestone",count:1},Age:-32768s}'),
+        ('minecart', ''),
+        ('chicken', '{PersistenceRequired:1b}'),
+    ]
+    for count, (kind, data) in zip(counts, things):
+        for _ in range(count):
+            dx, dz = rng.randint(-120, 120), rng.randint(-120, 120)
+            server.console(f'execute at @r run summon {kind} ~{dx} ~3 ~{dz} {data}'.rstrip())
 
 
 def run_once(kind, bots, behaviour, args, out):
@@ -418,6 +472,13 @@ def run_once(kind, bots, behaviour, args, out):
         server.console('gamerule respawn_radius 0')
         for rule in filter(None, args.gamerule.split(',')):
             server.console('gamerule ' + rule.replace('=', ' '))
+        if args.farm:
+            # A farm of mobs ~100 blocks east of the spawn, inside the simulation distance and far from
+            # the bots: the mobs a player is not near. Cows and villagers (zombies would burn in daylight), two blocks apart so cramming leaves them be.
+            for i in range(args.farm):
+                x, z = 90 + i % 40 * 2, -80 + i // 40 * 2
+                kind = 'minecraft:villager' if i % 2 else 'minecraft:cow'
+                server.console(f'summon {kind} {x} 100 {z} {{PersistenceRequired:1b}}')
         time.sleep(5)
         report = out / f'{name}-bots.json'
         total = bots * args.join_every + args.warmup + args.seconds
@@ -428,12 +489,19 @@ def run_once(kind, bots, behaviour, args, out):
              '--behaviour', behaviour, '--join-every', str(args.join_every), '--seconds', str(int(total)),
              '--seed', str(args.seed), '--report', '-',
              *(['--explore-speed', str(args.explore_speed)] if args.explore_speed else []),
-             *(['--height', '0', '--ground'] if args.ground else [])],
+             *(['--height', '0', '--ground'] if args.ground else []),
+             *(['--capture', str(args.capture)] if args.capture else [])],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         bot_lines = []
         threading.Thread(target=lambda: bot_lines.extend(bot_process.stdout), daemon=True).start()
         # All bots in, then the warm-up.
-        time.sleep(bots * args.join_every + args.warmup)
+        if args.entities:
+            time.sleep(bots * args.join_every)
+            populate(server, args.entities, args.seed)
+            time.sleep(args.warmup)
+        else:
+            time.sleep(bots * args.join_every + args.warmup)
+        profiling = start_profile(server, kind, args)
         measure_start = time.time()
         rss, cpu, ticks = [], [], []
         _, last_cpu = tree_usage(server.process.pid)
@@ -461,7 +529,7 @@ def run_once(kind, bots, behaviour, args, out):
             if isinstance(sample, dict) and 't' in sample:
                 measured.append(sample)
             elif isinstance(sample, dict) and set(sample) == {'spawn'}:
-                # The first bot's spawn position (horizon-bots prints it for perf_bench --server-bots).
+                # The first bot's spawn position (sunrise-bots prints it for perf_bench --server-bots).
                 continue
             else:
                 rest.append(line)
@@ -494,7 +562,6 @@ def run_once(kind, bots, behaviour, args, out):
             'resent': summary.get('resent'),
             'pulled_back': summary.get('pulled_back'),
             'moved_too_quickly': sum('moved too quickly!' in l for l in server.since(0)),
-            'anticheat_flags': flag_count(directory),
             'moved_wrongly': sum('moved wrongly!' in l for l in server.since(0)),
             'bots_joined': summary.get('joined'),
             # From the bot's first packet to its spawn position, in ms.
@@ -502,6 +569,8 @@ def run_once(kind, bots, behaviour, args, out):
             'bots_failed': [b for b in summary.get('per_bot', []) if b.get('error')],
             'tick_queries': len(ticks),
         })
+        if profiling:
+            finish_profile(server, directory, result)
     except Exception as e:  # a failed run is reported, and the next one still runs
         result['error'] = str(e)
     finally:
@@ -553,10 +622,11 @@ def versions(kinds):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
-    parser.add_argument('--servers', default='horizon,vanilla', help='horizon, vanilla, paper, fabric (Lithium), pumpkin')
+    parser.add_argument('--servers', default='sunrise,vanilla', help='sunrise, vanilla, paper, fabric (Lithium), pumpkin')
     parser.add_argument('--bots', default='1,10,25,50')
     parser.add_argument('--behaviour', default='walk,explore', help='one pass per behaviour (comma-separated)')
     parser.add_argument('--join-every', type=float, default=1.0)
+    parser.add_argument('--capture', type=Path, help='capture first bot play packets for protocol replay (overwritten each run)')
     parser.add_argument('--warmup', type=int, default=60)
     parser.add_argument('--seconds', type=int, default=300)
     parser.add_argument('--seed', type=int, default=12345)
@@ -564,20 +634,24 @@ def main():
                         help='blocks a second the explore bots fly (default: the bots\' 22, as fast as chunks '
                              'come); a speed both servers keep up with makes the explore pass equal work')
     parser.add_argument('--gamerule', default='',
-                        help="more game rules for both servers, 'name=value,...' (locator_bar=false: Horizon has "
+                        help="more game rules for both servers, 'name=value,...' (locator_bar=false: Sunrise has "
                              "no locator bar yet)")
+    parser.add_argument('--entities', default='', metavar='ITEMS,CARTS,MOBS',
+                        help='fill the level with this many dropped items, minecarts and chickens once the bots are in')
     parser.add_argument('--heap', default='4g', help='the Java heap, -Xms and -Xmx (vanilla, Paper, Fabric)')
     parser.add_argument('--out', type=Path, default=None, help='the report (JSON)')
     parser.add_argument('--nice', type=int, default=0, help='run the servers under nice -n N')
-    parser.add_argument('--anticheat', action='store_true',
-                        help="turn Horizon's anticheat on (server.toml [anticheat]); its flags are counted")
+    parser.add_argument('--farm', type=int, default=0,
+                        help='summon this many mobs ~100 blocks from the spawn, away from the bots')
     parser.add_argument('--ground', action='store_true',
-                        help='a flat survival world, the bots walking on its ground and saying so in every move '
-                             "(what the anticheat's ground check judges)")
+                        help='a flat survival world, the bots walking on its ground and saying so in every move')
     parser.add_argument('--bots-via', default='', help="a command prefix to run the bots elsewhere ('ssh host')")
-    parser.add_argument('--bots-bin', default='', help='horizon-bots (on the --bots-via machine)')
+    parser.add_argument('--bots-bin', default='', help='sunrise-bots (on the --bots-via machine)')
     parser.add_argument('--connect', default='127.0.0.1', help='the address the bots reach the server at')
     parser.add_argument('--pumpkin', type=Path, default=None, help='the Pumpkin binary (--servers pumpkin)')
+    parser.add_argument('--profile', nargs='?', const='', default=None, metavar='ARGS',
+                        help="record Sunrise's measure window with sunrise-report (ARGS: its flags, as "
+                             "--profile=--no-samples) and attach the run's record to the capture")
     parser.add_argument('--repeat', type=int, default=1,
                         help='rounds: every server and bot count once per round, the servers alternated')
     args = parser.parse_args()
@@ -595,14 +669,15 @@ def main():
                     runs.append(result)
                     print(json.dumps(result), flush=True)
     report = {
-        'kind': 'horizon-server-benchmark',
+        'kind': 'sunrise-server-benchmark',
         'date': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
         'machine': {'system': platform.system(), 'machine': platform.machine(), 'cpus': os.cpu_count()},
         'commit': subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=ROOT, capture_output=True, text=True).stdout.strip(),
         'java': subprocess.run(['java', '--version'], capture_output=True, text=True).stdout.splitlines()[:1],
         'versions': versions(args.servers.split(',')),
         'settings': {**{k: v for k, v in vars(args).items() if k != 'pumpkin_files'}, 'out': str(args.out),
-                     'pumpkin': str(args.pumpkin) if args.pumpkin else None, 'properties': PROPERTIES},
+                     'pumpkin': str(args.pumpkin) if args.pumpkin else None,
+                     'capture': str(args.capture) if args.capture else None, 'properties': PROPERTIES},
         'runs': runs,
         'work': work(runs),
     }

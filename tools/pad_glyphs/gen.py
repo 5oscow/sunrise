@@ -13,7 +13,7 @@ import glyphlib as G
 from glyphlib import bowl, clip, minus, rect, rrect, seg, union
 from pngio import write_png
 
-TEXTURES = os.path.join(HERE, '..', '..', 'crates', 'horizon-client', 'assets', 'horizon',
+TEXTURES = os.path.join(HERE, '..', '..', 'crates', 'sunrise-client', 'assets', 'sunrise',
                         'textures', 'gui', 'controller')
 OUT = sys.argv[1] if len(sys.argv) > 1 else TEXTURES
 SW = 1.50  # measured stem width: a full pixel and half the next
@@ -142,6 +142,10 @@ GLYPHS = {
     'psx_create': (D22, 32, create_icon(), ICON),
     'psx_options': (D22, 32, options_icon(), ICON),
 }
+
+if __name__ == '__main__' and any(argument.startswith('-') for argument in sys.argv[1:]):
+    # A flag is not an output directory: it used to create ./--help and fill it with glyphs.
+    sys.exit(__doc__.strip() + '\nUsage: python3 tools/pad_glyphs/gen.py [outdir] [name ...]')
 
 if __name__ == '__main__':
     os.makedirs(OUT, exist_ok=True)

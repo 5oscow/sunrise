@@ -26,9 +26,12 @@ def corpus():
         for tool in tools:
             for block in ['stone', 'dirt', 'cobweb']:
                 yield dict(item='minecraft:' + item + tool, block='minecraft:' + block)
-    # MAX_DAMAGE alone does not add DAMAGE. Non-durable prototypes with an
-    # explicit zero DAMAGE need a separate item-aware component-codec fix.
+    # MAX_DAMAGE alone does not add DAMAGE. A non-durable prototype with both
+    # components is damageable, and removing either takes that away.
     yield dict(item='minecraft:stick[minecraft:max_stack_size=1,minecraft:max_damage=20,minecraft:tool={rules:[],damage_per_block:3}]', block='minecraft:stone')
+    for suffix in [',minecraft:damage=0', ',minecraft:damage=0,minecraft:unbreakable={}',
+                   ',minecraft:damage=2']:
+        yield dict(item='minecraft:stick[minecraft:max_stack_size=1,minecraft:max_damage=20,minecraft:tool={rules:[],damage_per_block:3}' + suffix + ']', block='minecraft:stone')
     for damage in ['', ',minecraft:damage=0', ',minecraft:damage=2', ',!minecraft:damage', ',minecraft:damage=0,minecraft:unbreakable={}']:
         yield dict(item='minecraft:diamond_pickaxe[minecraft:max_damage=20,minecraft:tool={rules:[],damage_per_block:3}' + damage + ']', block='minecraft:stone')
     for item in ['minecraft:diamond_pickaxe', 'minecraft:stick[minecraft:tool={rules:[],default_mining_speed:17.0f}]']:
@@ -43,11 +46,11 @@ def main():
     report.unlink(missing_ok=True)
     sources = [Path(__file__), lab.ROOT / 'tools/oracle_harness.py', lab.ROOT / 'tools/lab.py',
                lab.ROOT / 'tools/test_rust_parity.py', lab.ROOT / 'tools/test_model_baking_parity.py',
-               lab.ROOT / 'mods/horizon/src/test/java/dev/horizonlab/parity/VanillaStackMiningOracle.java',
-               lab.ROOT / 'mods/horizon/src/test/java/dev/horizonlab/parity/ParityData.java',
-               lab.ROOT / 'crates/horizon-client/examples/probe/stack_mining_probe.rs',
-               lab.ROOT / 'crates/horizon-items/src/items.rs', lab.ROOT / 'crates/horizon-items/src/item_data.rs',
-               lab.ROOT / 'crates/horizon-items/src/item_nbt.rs', lab.ROOT / 'Cargo.toml', lab.ROOT / 'Cargo.lock']
+               lab.ROOT / 'mods/sunrise/src/test/java/dev/sunriselab/parity/VanillaStackMiningOracle.java',
+               lab.ROOT / 'mods/sunrise/src/test/java/dev/sunriselab/parity/ParityData.java',
+               lab.ROOT / 'crates/sunrise-client/examples/probe/stack_mining_probe.rs',
+               lab.ROOT / 'crates/sunrise-items/src/items.rs', lab.ROOT / 'crates/sunrise-items/src/item_data.rs',
+               lab.ROOT / 'crates/sunrise-items/src/item_nbt.rs', lab.ROOT / 'Cargo.toml', lab.ROOT / 'Cargo.lock']
     tested = base.source_hashes(sources)
     inputs = build / 'inputs.jsonl'
     rows = list(corpus())
@@ -55,10 +58,10 @@ def main():
     input_hash = lab.digest(inputs, 'sha256')
     classes, dependencies, _ = harness.compile_oracle(build, 'VanillaStackMiningOracle', jars, baking.client_libraries(), lock['minecraft']['java_major'])
     harness.java_run(build, classes, dependencies, 'VanillaStackMiningOracle', [inputs, build / 'vanilla.txt'], 'java')
-    harness.run_logged(['cargo', 'build', '--locked', '-p', 'horizon-client-lib', '--example', 'client_probe'], build, 'rust-build', env=dict(os.environ, CARGO_BUILD_JOBS='2'))
+    harness.run_logged(['cargo', 'build', '--locked', '-p', 'sunrise-client-lib', '--example', 'client_probe'], build, 'rust-build', env=dict(os.environ, CARGO_BUILD_JOBS='2'))
     metadata = json.loads(subprocess.check_output(['cargo', 'metadata', '--locked', '--no-deps', '--format-version', '1'], cwd=lab.ROOT))
     binary = Path(metadata['target_directory']) / 'debug/examples' / ('client_probe.exe' if os.name == 'nt' else 'client_probe')
-    resources = Path(os.environ.get('HORIZON_TEST_RESOURCES', lab.RESOURCES))
+    resources = Path(os.environ.get('SUNRISE_TEST_RESOURCES', lab.RESOURCES))
     harness.run_logged([binary, 'stack_mining_probe', inputs, build / 'rust.txt', resources], build, 'rust', env=lab.game_env())
     harness.compare(build / 'vanilla.txt', build / 'rust.txt', len(rows))
     base.ensure_sources_unchanged(sources, tested)
@@ -67,12 +70,12 @@ def main():
     lab.write_json(report, dict(schema=1, minecraft=lab.VERSION, units=len(rows),
         sources_sha256=tested, inputs_sha256=input_hash,
         client_jar_sha256=lab.digest(jars['client'], 'sha256'),
-        oracle_class_sha256=lab.digest(classes / 'dev/horizonlab/parity/VanillaStackMiningOracle.class', 'sha256'),
+        oracle_class_sha256=lab.digest(classes / 'dev/sunriselab/parity/VanillaStackMiningOracle.class', 'sha256'),
         rust_binary_sha256=lab.digest(binary, 'sha256'),
         output_sha256=lab.digest(build / 'rust.txt', 'sha256'),
-        scope='Actual Java item-command admission, TOOL mining speed/drop/wear amount and durable-prototype '
-              'capacity queries before/after saved-stack round trips. Custom durability on non-durable '
-              'prototypes is deferred. Eye immersion is covered separately by source-derived Game regressions; '
+        scope='Actual Java item-command admission, TOOL mining speed/drop/wear amount and damageable-stack '
+              'capacity queries before/after saved-stack round trips, including custom durability on non-durable '
+              'prototypes. Eye immersion is covered separately by source-derived Game regressions; '
               'this differential does not execute block destruction, durability mutation or statistics.'))
     print(f'{len(rows)} stack mining command/save cases match pinned vanilla {lab.VERSION}')
 

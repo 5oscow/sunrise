@@ -5,6 +5,7 @@ import unittest
 import sys
 from unittest.mock import patch
 import os
+import re
 import tempfile
 import io
 import json
@@ -124,7 +125,7 @@ class BoatHealthTests(unittest.TestCase):
             self.assertTrue(run.call_args_list[1].args[0][4].endswith("/cancel"))
 
     def test_controller_limits_to_first_fork_attempt(self):
-        run = dict(workflow_id=123, event="pull_request", run_attempt=1, status="queued", head_repository=dict(full_name="other/horizon"))
+        run = dict(workflow_id=123, event="pull_request", run_attempt=1, status="queued", head_repository=dict(full_name="other/sunrise"))
         self.assertTrue(controller.eligible(run, "arismoko/horizon", 123))
         for key, value in [("run_attempt", 2), ("event", "push"), ("workflow_id", 999), ("head_repository", dict(full_name="arismoko/horizon"))]:
             self.assertFalse(controller.eligible(dict(run, **{key: value}), "arismoko/horizon", 123))
@@ -203,7 +204,7 @@ class BoatHealthTests(unittest.TestCase):
         self.assertIn("status=failure", urls[3])
 
     def test_real_fork_shape_uses_validated_recorded_base(self):
-        # Observed API shape: run 42566379987 (KBroneZ/horizon), no PR association.
+        # Observed API shape: run 42566379987 (KBroneZ/sunrise), no PR association.
         run = dict(id=42566379987, head_sha="72d5f90f5aacc33db72a0592ffd7c58ace36dbf0", pull_requests=[])
         metadata = dict(run_id=str(run["id"]), attempt="1", head=run["head_sha"], base="b" * 40)
         for field, value in [(None, None), ("run_id", "123"), ("head", "c" * 40), ("base", "not-a-sha"), ("attempt", "2")]:
@@ -336,8 +337,8 @@ class BoatRoutingTests(unittest.TestCase):
 
     def test_untrusted_runs_are_never_read(self):
         for run in (routing_run(path=".github/workflows/dyna-ci.yml"), routing_run(head_branch="feature"),
-                    routing_run(event="pull_request"), routing_run(head_repository=dict(full_name="fork/horizon")),
-                    routing_run(repository=dict(full_name="fork/horizon"))):
+                    routing_run(event="pull_request"), routing_run(head_repository=dict(full_name="fork/sunrise")),
+                    routing_run(repository=dict(full_name="fork/sunrise"))):
             (result, reason), download = self.read(runs=[run])
             self.assertIsNone(result)
             self.assertIn("no recent", reason)
@@ -424,6 +425,10 @@ class BoatRoutingTests(unittest.TestCase):
         read.assert_not_called()
 
 
+def rust_pin():
+    return (Path(__file__).parents[1] / "tools/ci/rust-version").read_text().strip()
+
+
 class RustupRetryTests(unittest.TestCase):
     def run_script(self, failures):
         script = Path(__file__).parents[1] / "tools/ci/rustup_install.sh"
@@ -434,18 +439,59 @@ class RustupRetryTests(unittest.TestCase):
             (bin_dir / "sleep").write_text("#!/bin/sh\n")
             for name in ("rustup", "sleep"):
                 (bin_dir / name).chmod(0o755)
-            result = subprocess.run(["bash", str(script), "stable", "--profile", "minimal"], capture_output=True, text=True,
-                                    env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"})
+            env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+            env.pop("GITHUB_ENV", None)
+            result = subprocess.run(["bash", str(script), "--profile", "minimal"], capture_output=True, text=True,
+                                    env=env)
             return result.returncode, count.read_text().splitlines()
 
     @unittest.skipIf(os.name == "nt", "a bash script for Linux runners")
     def test_transient_failures_are_retried_then_bounded(self):
+        pin = rust_pin()
         status, calls = self.run_script(failures=2)
-        self.assertEqual((status, len(calls)), (0, 3))
-        self.assertEqual(calls[0], "toolchain install stable --profile minimal")
+        installs = [call for call in calls if call.startswith("toolchain install")]
+        self.assertEqual((status, len(installs)), (0, 3))
+        self.assertEqual(installs[0], f"toolchain install {pin} --profile minimal")
         status, calls = self.run_script(failures=10)
         self.assertNotEqual(status, 0)
-        self.assertEqual(len(calls), 4)
+        self.assertEqual(calls, [f"toolchain install {pin} --profile minimal"] * 4)
+
+
+class PinnedToolchainTests(unittest.TestCase):
+    """The job runs on the pin, with rustfmt and clippy: the mod API generator runs rustfmt under it."""
+
+    def run_script(self, installed):
+        root = Path(__file__).parents[1]
+        with tempfile.TemporaryDirectory() as directory:
+            bin_dir = Path(directory)
+            calls = bin_dir / "calls"
+            job_env = bin_dir / "github_env"
+            components = "\\n".join(f"{c}-x86_64-unknown-linux-gnu" for c in installed)
+            (bin_dir / "rustup").write_text(
+                f'#!/bin/sh\necho "$@" >> {calls}\n'
+                f'case "$1 $2" in "component list") printf "{components}\\n";; esac\n')
+            (bin_dir / "rustup").chmod(0o755)
+            env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "GITHUB_ENV": str(job_env)}
+            # From another folder: a job may run its steps in a subfolder.
+            result = subprocess.run(["bash", str(root / "tools/ci/rustup_install.sh"), "--profile", "minimal"],
+                                    cwd=directory, capture_output=True, text=True, env=env)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return calls.read_text().splitlines(), job_env.read_text()
+
+    @unittest.skipIf(os.name == "nt", "a bash script for Linux runners")
+    def test_the_pin_becomes_the_jobs_toolchain(self):
+        pin = rust_pin()
+        calls, job_env = self.run_script(installed=["rustfmt", "clippy"])
+        self.assertEqual(calls[:2], [f"toolchain install {pin} --profile minimal", f"default {pin}"])
+        self.assertEqual(job_env, f"RUSTUP_TOOLCHAIN={pin}\n")
+
+    @unittest.skipIf(os.name == "nt", "a bash script for Linux runners")
+    def test_missing_components_are_added_and_present_ones_cost_nothing(self):
+        pin = rust_pin()
+        calls, _ = self.run_script(installed=["rust-src", "rustfmt"])
+        self.assertIn(f"component add --toolchain {pin} clippy", calls)
+        calls, _ = self.run_script(installed=["rustfmt", "clippy"])
+        self.assertFalse([call for call in calls if call.startswith("component add")])
 
 
 class RunnerPackagesTests(unittest.TestCase):
@@ -467,6 +513,7 @@ class RunnerPackagesTests(unittest.TestCase):
         image = ("FROM ${DYNA_CI_BASE}\nRUN apt-get update && apt-get install -y --no-install-recommends \\\n"
                  "    xvfb xauth x11-xkb-utils xkb-data pkg-config libasound2-dev libudev-dev libxkbcommon-x11-dev \\\n"
                  "    libwayland-dev libx11-xcb-dev libfontconfig-dev libvulkan-dev libxcursor1 libxi6 libxrandr2 \\\n"
+                 "    valgrind libc6-dbg gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 \\\n"
                  "    && rm -rf /var/lib/apt/lists/*\n")
         listed = check.LIST.read_text()
         with tempfile.TemporaryDirectory() as directory:
@@ -484,6 +531,6 @@ class RunnerPackagesTests(unittest.TestCase):
             self.assertIsNone(outcome(image, listed))
             for dropped in ("xauth", "x11-xkb-utils", "xkb-data"):
                 self.assertIn(f"lacks: {dropped}", outcome(image, listed.replace(f"\n{dropped}\n", "\n")))
-            self.assertIn("lacks: extra-package", outcome(image.replace("libxrandr2", "libxrandr2 extra-package"), listed))
+            self.assertIn("lacks: extra-package", outcome(image.replace("libxrandr2 ", "libxrandr2 extra-package "), listed))
             self.assertIn("beyond the image: mesa-vulkan-drivers", outcome(image, listed + "mesa-vulkan-drivers\n"))
             self.assertIn("no apt-get install", outcome("FROM base\n", listed))

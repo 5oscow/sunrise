@@ -1,8 +1,8 @@
 //! Windows executables' resources, shared by the build scripts of the game's executables
-//! (`crates/horizon-client/build.rs`, `crates/horizon-official/build.rs`, which include it with
-//! `#[path]`). Embeds Horizon's icon (`packaging/icons/horizon.ico`) as icon resource 1: Explorer
+//! (`crates/sunrise-client/build.rs`, `crates/sunrise-official/build.rs`, which include it with
+//! `#[path]`). Embeds Sunrise's icon (`packaging/icons/sunrise.ico`) as icon resource 1: Explorer
 //! and the task bar show it, and the window takes it as its icon. The optional Segment Heap
-//! manifest (`crates/horizon-client/windows-segment-heap.manifest`, the package's
+//! manifest (`crates/sunrise-client/windows-segment-heap.manifest`, the package's
 //! `windows-segment-heap` feature) is embedded in the same resource compilation.
 
 #[path = "../executable_link.rs"]
@@ -14,19 +14,32 @@ pub fn resources(bin: &str) {
     let manifest_dir = std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
     let ico = manifest_dir
         .join("../..")
-        .join("packaging/icons/horizon.ico");
+        .join("packaging/icons/sunrise.ico");
     let target_os =
         std::env::var("CARGO_CFG_TARGET_OS").expect("Cargo must provide the build target OS");
     println!("cargo:rerun-if-changed={}", ico.display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        manifest_dir
+            .join("../../packaging/executable_link.rs")
+            .display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        manifest_dir
+            .join("../sunrise-guest-stack/src/guest_stack_constants.rs")
+            .display()
+    );
+    let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+    for arg in executable_link::arguments(&target_os, &target_env) {
+        println!("cargo:rustc-link-arg-bin={bin}={arg}");
+    }
     if target_os == "windows" {
         println!("cargo:rerun-if-env-changed=WINDRES");
         println!("cargo:rerun-if-env-changed=AR");
         println!("cargo:rerun-if-env-changed=RC_PATH");
         let target_env = std::env::var("CARGO_CFG_TARGET_ENV")
             .expect("Cargo must provide the target environment");
-        for arg in executable_link::arguments(&target_os, &target_env) {
-            println!("cargo:rustc-link-arg-bin={bin}={arg}");
-        }
         let (resource_manifest_dir, resource_icon) = match resource_path(&manifest_dir, &target_env)
             .and_then(|dir| Ok((dir, resource_path(&ico, &target_env)?)))
         {
@@ -35,7 +48,7 @@ pub fn resources(bin: &str) {
             // on a volume without 8.3 names, still builds (the launcher's native mod builds use
             // that toolchain), without the icon. CI never does.
             Err(e) if std::env::var_os("CI").is_none() => {
-                println!("cargo:warning=building without Horizon's icon: {e}");
+                println!("cargo:warning=building without Sunrise's icon: {e}");
                 return;
             }
             Err(e) => panic!("{e}"),
@@ -43,7 +56,7 @@ pub fn resources(bin: &str) {
         let mut resource = winresource::WindowsResource::new();
         resource.set_icon(&resource_icon);
         if std::env::var_os("CARGO_FEATURE_WINDOWS_SEGMENT_HEAP").is_some() {
-            let manifest = manifest_dir.join("../horizon-client/windows-segment-heap.manifest");
+            let manifest = manifest_dir.join("../sunrise-client/windows-segment-heap.manifest");
             println!("cargo:rerun-if-changed={}", manifest.display());
             let resource_manifest =
                 resource_path(&manifest, &target_env).unwrap_or_else(|e| panic!("{e}"));
@@ -63,7 +76,7 @@ pub fn resources(bin: &str) {
         if cfg!(windows) && target_env == "gnu" {
             unsafe { std::env::set_var("CARGO_MANIFEST_DIR", original_manifest_dir) };
         }
-        result.expect("embedding Horizon's icon in Windows resources");
+        result.expect("embedding Sunrise's icon in Windows resources");
     }
 }
 

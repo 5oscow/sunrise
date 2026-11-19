@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Compare Horizon's command execution with vanilla's real command implementations.
+"""Compare Sunrise's command execution with vanilla's real command implementations.
 
 Java (VanillaCommandExecOracle) starts a stand-in integrated server: a real
 MinecraftServer with a generated world, Commands.CommandSelection.INTEGRATED
 and one single-player owner named Player. Rust runs the same script through
-Horizon's integrated server with a connected headless client (HORIZON_COMMAND_SCRIPT). Both run each command as
+Sunrise's integrated server with a connected headless client (SUNRISE_COMMAND_SCRIPT). Both run each command as
 the player through Commands.performPrefixedCommand and record every system or
 chat message the player receives (text and resolved style: colour, bold,
 italic, underlined, strikethrough, obfuscated) together with the results the
@@ -108,7 +108,7 @@ def main():
     parser.add_argument('--sulfur-power-load-diagnostic', action='store_true',
                         help='retain the immediate-load powered sulfur cube H249 diagnostic')
     parser.add_argument('--merchant-gate-fixture', action='store_true')
-    parser.add_argument('--binary', type=Path, help='use an already built Horizon game instead of building it')
+    parser.add_argument('--binary', type=Path, help='use an already built Sunrise game instead of building it')
     parser.add_argument('--trader-llama-discard-fixture', action='store_true',
                         help='an AI trader llama is gone after the tick its delay runs out (H182)')
     parser.add_argument('--hurt-cooldown-incoming-fixture', action='store_true',
@@ -128,6 +128,7 @@ def main():
     parser.add_argument('--orb-water-raw-diagnostic', action='store_true', help='add whole Pos/Motion records')
     parser.add_argument('--orb-lava-fixture', action='store_true', help='guarded server orb lava contact scene')
     parser.add_argument('--orb-lava-raw-diagnostic', action='store_true', help='retain random Pos/Motion as exact raw diagnostics')
+    parser.add_argument('--orb-fire-fixture', action='store_true', help='server orb saved Fire and its burn, tick by tick')
     parser.add_argument('--mob-home-fixture', action='store_true')
     parser.add_argument('--mob-home-holder-removal-diagnostic', action='store_true')
     parser.add_argument('--mob-home-late-detach-control', action='store_true')
@@ -180,6 +181,7 @@ def main():
     parser.add_argument('--mob-health-boost-raw-diagnostic', action='store_true', help='add each mob\'s whole entity data')
     parser.add_argument('--sulfur-body-attributes-fixture', action='store_true', help='a sulfur cube\'s body archetype attribute modifiers through /attribute')
     parser.add_argument('--sulfur-body-replace-fixture', action='store_true', help='a sulfur cube\'s body replaced and removed through /data')
+    parser.add_argument('--sulfur-body-item-fixture', action='store_true', help='/item replace on a sulfur cube\'s armor.body')
     parser.add_argument('--sulfur-body-attributes-raw-diagnostic', action='store_true', help='add the whole attributes lists and entity data')
     parser.add_argument('--mob-absorption-fixture', action='store_true', help='a mob\'s Absorption effect once the absorption is used up')
     parser.add_argument('--mob-absorption-infinite-fixture', action='store_true', help='infinite Absorption used up, kept, and beside another infinite effect')
@@ -204,7 +206,7 @@ def main():
     if args.prepare:
         lab.prepare()
     lock, jars, libraries = base.verify_artifacts()
-    oracle = lab.ROOT / 'mods/horizon/src/test/java/dev/horizonlab/parity/VanillaCommandExecOracle.java'
+    oracle = lab.ROOT / 'mods/sunrise/src/test/java/dev/sunriselab/parity/VanillaCommandExecOracle.java'
     classes = build / 'classes'
     classes.mkdir(exist_ok=True)
     dependency_path = os.pathsep.join(map(str, libraries))
@@ -227,6 +229,8 @@ def main():
     if not args.only:
         groups = [g for g in groups if g[0] not in corpus_module.ISOLATED_JUKEBOX_CLOCK]
         groups = [g for g in groups if g[0] not in corpus_module.ISOLATED_GUEST_CLOSE]
+        groups = [g for g in groups if g[0] not in corpus_module.ISOLATED_ITEM_COUNT]
+        groups = [g for g in groups if g[0] not in corpus_module.ISOLATED_SHULKER_LOCK]
         groups = [g for g in groups if g[0] not in corpus_module.ISOLATED_POT_HOPPER]
     if args.vehicle_container_diagnostic:
         try:
@@ -373,6 +377,12 @@ def main():
             from orb_lava_corpus import orb_lava
         groups = [('setup', corpus_module.group_setup()),
                   ('orb lava contact', orb_lava(args.orb_lava_raw_diagnostic))]
+    if args.orb_fire_fixture:
+        try:
+            from .orb_fire_corpus import orb_fire
+        except ImportError:
+            from orb_fire_corpus import orb_fire
+        groups = [('setup', corpus_module.group_setup()), ('orb fire', orb_fire())]
     if args.mob_home_fixture:
         try:
             from .mob_home_corpus import mob_home
@@ -398,7 +408,7 @@ def main():
     if args.pufferfish_contact_fixture:
         from pufferfish_contact_corpus import contact_fixture
         groups = [("pufferfish player contact", contact_fixture(args.pufferfish_body_diagnostic))]
-    if args.only == 'hopper pot saved slot':
+    if args.only in ('hopper pot saved slot', 'shulker external lock drop'):
         groups = [g for g in groups if g[0] == args.only]
     elif args.only:
         groups = [g for g in groups if args.only in g[0] or g[0] == 'setup']
@@ -417,11 +427,17 @@ def main():
     if args.vehicle_kill_diagnostic:
         from vehicle_kill_corpus import vehicle_kill_contents
         groups = [('setup', corpus_module.group_setup()), ('vehicle kill contents', vehicle_kill_contents(corpus_module.cmd, True))]
+    if args.only in corpus_module.ISOLATED_ITEM_COUNT:
+        groups = [g for g in groups if g[0] == args.only]
     if args.slot_codec_diagnostic:
         groups.append(('slot source codec diagnostic', [corpus_module.cmd(
             '/item fill block 4 200 4 {type:"minecraft:slot_range",slots:"container.99"} with diamond')]))
     if any(name in corpus_module.ISOLATED_JUKEBOX_CLOCK for name, _ in groups) and len(groups) != 1:
         parser.error('jukebox clock fixture requires --only with its exact group')
+    if any(name in corpus_module.ISOLATED_ITEM_COUNT for name, _ in groups) and len(groups) != 1:
+        parser.error('item count fixture requires --only with its exact group')
+    if any(name in corpus_module.ISOLATED_SHULKER_LOCK for name, _ in groups) and len(groups) != 1:
+        parser.error('shulker lock fixture requires --only with its exact group')
     if any(name in corpus_module.ISOLATED_POT_HOPPER for name, _ in groups) and len(groups) != 1:
         parser.error('pot hopper fixture requires --only with its exact group')
     if any(name in isolated_reinforcements for name, _ in groups) and sum(name != 'setup' for name, _ in groups) != 1:
@@ -467,6 +483,9 @@ def main():
     if args.sulfur_body_replace_fixture:
         from sulfur_body_attributes_corpus import sulfur_body_replace
         groups = [('setup', corpus_module.group_setup()), ('sulfur body replace', sulfur_body_replace())]
+    if args.sulfur_body_item_fixture:
+        from sulfur_body_attributes_corpus import sulfur_body_item_replace
+        groups = [('setup', corpus_module.group_setup()), ('sulfur body item replace', sulfur_body_item_replace())]
     if args.mob_absorption_fixture:
         from mob_absorption_corpus import mob_absorption
         groups = [('setup', corpus_module.group_setup()), ('mob depleted absorption', mob_absorption(args.mob_absorption_raw_diagnostic))]
@@ -492,9 +511,7 @@ def main():
         # Generated scripts (tools/parity_fuzz.py): the common setup, then the file's [name, ops] groups only.
         groups = [('setup', corpus_module.group_setup()),
                   *[(name, ops) for name, ops in json.loads(args.groups_file.read_text(encoding='utf-8'))]]
-    script = []
-    for _, lines in groups:
-        script.extend(op for op in lines if not (args.unsynced_randoms and op['op'] == 'sync_randoms'))
+    script = assemble(groups, args.unsynced_randoms)
     # docs/parity-workflow.md "Randoms that repeat": both engines' unseeded randoms repeat for a script that syncs them.
     synced = any(op['op'] == 'sync_randoms' for op in script)
     script_path = build / 'script.jsonl'
@@ -512,7 +529,7 @@ def main():
     advancements = corpus_module.advancement_reward_fixtures([name for name, _ in groups])
     loot_advancements, loot_tables = corpus_module.advancement_loot_fixtures([name for name, _ in groups])
     advancements.update(loot_advancements)
-    if os.environ.get('HORIZON_FISHING_FALLBACK_FIXTURE') == '1':
+    if os.environ.get('SUNRISE_FISHING_FALLBACK_FIXTURE') == '1':
         # No random_sequence: FishingHook.retrieve must use the level stream.
         loot_tables['minecraft:gameplay/fishing'] = {
             'type': 'minecraft:fishing', 'pools': [{'rolls': 1, 'entries': [
@@ -531,20 +548,20 @@ def main():
     install_datapack_fixtures(vanilla_dir / 'universe/harness', predicates, functions, jars['server'], advancements, loot_tables, recipes=recipes)
     java_options = ['-DMC_DEBUG_ENABLED=true', '-DMC_DEBUG_DEV_COMMANDS=true'] if args.raid_village_fixture else []
     if args.merchant_gate_fixture:
-        java_options.append('-Dhorizon.merchantFixture=true')
+        java_options.append('-Dsunrise.merchantFixture=true')
     if args.merchant_crafted_fixture:
-        java_options.append('-Dhorizon.merchantCraftedFixture=true')
+        java_options.append('-Dsunrise.merchantCraftedFixture=true')
     if args.orb_water_fixture:
         (build / 'orb-water-reference.json').unlink(missing_ok=True)
         direct_input = build / 'orb-water-inputs.json'
         direct_input.write_text(json.dumps(arithmetic_inputs()), encoding='utf-8')
-        java_options = ['-Dhorizon.orbWaterArithmetic=' + str(direct_input)]
+        java_options = ['-Dsunrise.orbWaterArithmetic=' + str(direct_input)]
     if args.function_admission_fixture:
-        java_options.append('-Dhorizon.functionAdmissionFixture=true')
+        java_options.append('-Dsunrise.functionAdmissionFixture=true')
     if synced:
         java_options.append(seed_agent.java_option(build, lock['minecraft']['java_major']))
-    run(['java', '-Xmx3G', '-Duser.timezone=UTC', *(['-Dhorizon.loadedFixture=true'] if args.loaded_fixture else []), *java_options, '-cp', os.pathsep.join([str(classes), str(jars['server']), dependency_path]),
-         'dev.horizonlab.parity.VanillaCommandExecOracle', vanilla_dir / 'universe', script_path, build / 'vanilla.jsonl', SEED], 'java', cwd=vanilla_dir)
+    run(['java', '-Xmx3G', '-Duser.timezone=UTC', *(['-Dsunrise.loadedFixture=true'] if args.loaded_fixture else []), *java_options, '-cp', os.pathsep.join([str(classes), str(jars['server']), dependency_path]),
+         'dev.sunriselab.parity.VanillaCommandExecOracle', vanilla_dir / 'universe', script_path, build / 'vanilla.jsonl', SEED], 'java', cwd=vanilla_dir)
 
     if any(op['op'] == 'raid_state' for op in script):
         from raid_village_corpus import validate_java_inputs
@@ -581,9 +598,9 @@ def main():
     if args.binary:
         binary = args.binary.resolve(strict=True)
     else:
-        run(['cargo', 'build', '--profile', 'fast', '-p', 'horizon-game', '--bin', 'horizon-client'], 'compile-rust', cwd=lab.ROOT)
+        run(['cargo', 'build', '--profile', 'fast', '-p', 'sunrise-game', '--bin', 'sunrise-client'], 'compile-rust', cwd=lab.ROOT)
         metadata = json.loads(subprocess.check_output(['cargo', 'metadata', '--no-deps', '--format-version', '1'], cwd=lab.ROOT, text=True))
-        binary = Path(metadata['target_directory']) / 'fast' / ('horizon-client.exe' if os.name == 'nt' else 'horizon-client')
+        binary = Path(metadata['target_directory']) / 'fast' / ('sunrise-client.exe' if os.name == 'nt' else 'sunrise-client')
     rust_dir = build / 'rust'
     shutil.rmtree(rust_dir, ignore_errors=True)
     rust_dir.mkdir()
@@ -595,17 +612,17 @@ def main():
         shutil.copyfile(source, target)
     # The oracle's Services resolve no profile (/fetchprofile fails on the next tick): the game gets no services
     # either, a discovery address that refuses at once, rather than Mojang's over the network.
-    env = lab.game_env(HORIZON_PLAYER_NAME="Player", HORIZON_COMMAND_SCRIPT=script_path,
-                       HORIZON_COMMAND_OUTPUT=build / 'rust.jsonl', HORIZON_API_DISCOVERY='http://127.0.0.1:9/')
+    env = lab.game_env(SUNRISE_PLAYER_NAME="Player", SUNRISE_COMMAND_SCRIPT=script_path,
+                       SUNRISE_COMMAND_OUTPUT=build / 'rust.jsonl', SUNRISE_API_DISCOVERY='http://127.0.0.1:9/')
     if synced:
         env.update(seed_agent.ENV)
     if args.raid_village_fixture and not args.raid_release_command_diagnostic:
-        env['HORIZON_DEV_COMMANDS'] = '1'
+        env['SUNRISE_DEV_COMMANDS'] = '1'
     elif args.raid_release_command_diagnostic:
-        env.pop('HORIZON_DEV_COMMANDS', None)
+        env.pop('SUNRISE_DEV_COMMANDS', None)
     if args.loaded_fixture:
-        env['HORIZON_HARNESS_LOADED_FIXTURE'] = '1'
-        env['HORIZON_HARNESS_CLIENT_CONFIG'] = str(build / 'rust-client-config.json')
+        env['SUNRISE_HARNESS_LOADED_FIXTURE'] = '1'
+        env['SUNRISE_HARNESS_CLIENT_CONFIG'] = str(build / 'rust-client-config.json')
     run([binary, '--resources', lab.RESOURCES, '--world', 'harness', '--seed', SEED, '--radius', 2 if args.loaded_fixture else 4], 'rust', game=True, cwd=rust_dir, env=env)
 
     if any(op['op'] == 'raid_state' for op in script):
@@ -698,11 +715,21 @@ def main():
               'scope': 'Feedback and failure messages (text and resolved style), chat lines, and CommandResultCallback results of commands run by the single-player owner of an integrated server; world, entity and item effects through probe commands. Explicit positive_result operations compare presence only; their unmodified raw counts remain in the records and comparison_overrides.'}
     for override in report['comparison_overrides']:
         print(f'{override["comparison"]}: {override["cmd"]}: '
-              f'Java {override["vanilla_results"]}, Horizon {override["rust_results"]}', flush=True)
+              f'Java {override["vanilla_results"]}, Sunrise {override["rust_results"]}', flush=True)
     lab.write_json(report_path, report)
     if mismatches and not args.allow_gaps:
         sys.exit(f'{len(mismatches)} command execution mismatches; see {build}')
     print(f'Command execution parity report: {report_path}')
+
+
+def assemble(groups, unsynced_randoms=False):
+    """The script: the groups in order, with corpus_module.group_cleanup() between two groups."""
+    script = []
+    for index, (name, lines) in enumerate(groups):
+        if index and groups[index - 1][0] != 'setup' and name not in corpus_module.CONTINUES_PREVIOUS:
+            script.extend(corpus_module.group_cleanup())
+        script.extend(op for op in lines if not (unsynced_randoms and op['op'] == 'sync_randoms'))
+    return script
 
 
 def require_anger_reference(op, record):
@@ -733,6 +760,103 @@ MASKS = [
 
 
 GAMERULES = re.compile(r'/gamerule \(([^)]*)\)')
+
+
+ATTRIBUTES_LIST = re.compile(r'attributes: \[')
+
+
+def unordered_attributes(record):
+    """Sort only the root attributes list in full `/data get entity` feedback.
+
+    `AttributeMap.pack` lists the instances in the iteration order of an `Object2ObjectOpenHashMap` keyed by
+    `Holder.Reference`, which keeps `Object.hashCode`: an identity hash, so the order changes with the JVM's
+    startup (the same script gives another order under another main class). Each entry keeps its text and
+    styles; only the entries' order is normalised. parity_fuzz compares these lists unordered too."""
+    out = json.loads(json.dumps(record))
+    if not re.fullmatch(r'/data get entity \S+', out.get('cmd', '')):
+        return out
+    for line in out.get('messages') or []:
+        if not isinstance(line, list) or not all(isinstance(span, list) and len(span) == 2
+                                               and isinstance(span[0], str) for span in line):
+            continue
+        chars = [(ch, span[1]) for span in line for ch in span[0]]
+        text = ''.join(ch for ch, _ in chars)
+        prefix = ' has the following entity data: '
+        body = text.find(prefix)
+        if body < 0 or text[body + len(prefix):body + len(prefix) + 1] != '{':
+            continue
+        # Find actual root keys, not quoted text, suffixes of other keys or nested custom data.
+        root = body + len(prefix)
+        stack, quote, matches = [], None, []
+        i = root
+        while i < len(text):
+            ch = text[i]
+            if quote:
+                if ch == '\\':
+                    i += 1
+                elif ch == quote:
+                    quote = None
+            elif ch in ('"', "'"):
+                quote = ch
+            elif ch in '[{':
+                stack.append(']' if ch == '[' else '}')
+            elif ch in ']}':
+                if not stack or stack.pop() != ch:
+                    break
+                if not stack:
+                    i += 1
+                    break
+            elif stack == ['}'] and (i == root + 1 or text[i - 2:i] == ', '):
+                match = ATTRIBUTES_LIST.match(text, i)
+                if match:
+                    matches.append(match)
+            i += 1
+        # Malformed or truncated SNBT stays exact, rather than being repaired by sorting.
+        if i != len(text) or stack or quote or not matches:
+            continue
+        for match in reversed(matches):
+            start = i = match.end()
+            depth, quoted, cuts = 0, None, [start]
+            while i < len(text):
+                ch = text[i]
+                if quoted:
+                    if ch == '\\':
+                        i += 1
+                    elif ch == quoted:
+                        quoted = None
+                elif ch in ('"', "'"):
+                    quoted = ch
+                elif ch in '[{':
+                    depth += 1
+                elif ch in ']}':
+                    if depth == 0:
+                        break
+                    depth -= 1
+                elif ch == ',' and depth == 0 and text[i + 1:i + 2] == ' ':
+                    cuts += [i, i + 2]
+                    i += 1
+                i += 1
+            if len(cuts) == 1:
+                continue
+            cuts.append(i)
+            entries = [chars[a:b] for a, b in zip(cuts[0::2], cuts[1::2])]
+            if not all(entry and entry[0][0] == '{' and entry[-1][0] == '}' for entry in entries):
+                continue
+            separators = [chars[a:b] for a, b in zip(cuts[1::2], cuts[2::2])]
+            ordered = sorted(entries, key=lambda e: json.dumps(e))
+            joined = ordered[0]
+            for separator, entry in zip(separators, ordered[1:]):
+                joined = joined + separator + entry
+            chars[start:i] = joined
+            text = ''.join(ch for ch, _ in chars)
+        spans = []
+        for ch, style in chars:
+            if spans and spans[-1][1] == style:
+                spans[-1][0] += ch
+            else:
+                spans.append([ch, style])
+        line[:] = spans
+    return out
 
 
 def masked(record):

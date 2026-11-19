@@ -8,8 +8,8 @@ import unittest
 from test_world_input_capture import method
 
 ROOT = Path(__file__).resolve().parents[1]
-LEVEL = ROOT / "crates/horizon-world/src/level"
-CLIENT = ROOT / "crates/horizon-client/src"
+LEVEL = ROOT / "crates/sunrise-world/src/level"
+CLIENT = ROOT / "crates/sunrise-client/src"
 
 
 def between(source, start, end):
@@ -26,10 +26,14 @@ struct Facts { block_entity: bool }
 struct Res;
 impl Res { fn facts(&self) -> &Self { self } fn get(&self, s: BlockStateId) -> Facts { Facts { block_entity: s.0 == 1 } } }
 struct Blocks { templated: Vec<BlockStateId> }
-impl Blocks { fn has_flag(&self, s: BlockStateId, _f: u32) -> bool { self.templated.contains(&s) } }
+impl Blocks {
+    fn has_flag(&self, s: BlockStateId, _f: u32) -> bool { self.templated.contains(&s) }
+    // The fixture's distinct states represent different non-copper blocks.
+    fn keeps_block_entity(&self, old: BlockStateId, new: BlockStateId) -> bool { old == new }
+}
 #[derive(Default)] struct Entities(std::collections::HashMap<(i32, i32, i32), BlockEntity>);
 impl std::ops::Deref for Entities { type Target = std::collections::HashMap<(i32, i32, i32), BlockEntity>; fn deref(&self) -> &Self::Target { &self.0 } }
-// BlockEntities::mods_near has its own test in horizon-client-render; here every mod entity is near.
+// BlockEntities::mods_near has its own test in sunrise-client-render; here every mod entity is near.
 impl Entities {
     fn stateful_entity(&self, state: u32) -> bool { state == 2 }
     fn has_mods(&self) -> bool { self.0.values().any(|e| matches!(e, BlockEntity::Mod(_))) }
@@ -41,10 +45,11 @@ struct DVec3 { x: f64, z: f64 }
 const VIEW_DISTANCE: f64 = 64.0;
 struct World { block_entities: Entities }
 impl World { fn block(&self, x: i32, y: i32, z: i32) -> BlockStateId { BlockStateId((x != 0) as u32) } }
-struct GameLevel { world: World }
+struct GameLevel { world: World, carries: Option<bool> }
 impl GameLevel {
     HAS_MOD
     HAS_NATIVE
+    fn adjust_piston_carries_block_entity(&self, _pos: BlockPos, _state: BlockStateId) -> Option<bool> { self.carries }
 }
 struct ViewDistances { furthest: f64 }
 struct Game { world: World, res: Res }
@@ -55,7 +60,6 @@ impl Game {
 }
 struct Sim { b: Blocks, level: GameLevel }
 impl Sim {
-    fn keeps_block_entity(&self, _n: BlockStateId, _o: BlockStateId) -> bool { false }
     fn removes(&self, block_changed: bool, old: BlockStateId, state: BlockStateId, pos: BlockPos) -> bool {
         block_changed
             REMOVAL
@@ -69,7 +73,7 @@ fn at(x: i32) -> BlockPos { BlockPos { x, y: 64, z: 0 } }
 fn level(entities: &[(i32, BlockEntity)]) -> GameLevel {
     GameLevel { world: World { block_entities: Entities(entities.iter()
         .map(|(x, e)| ((*x, 64, 0), match e { BlockEntity::Mod(_) => BlockEntity::Mod(0), BlockEntity::Chest(_) => BlockEntity::Chest(0) }))
-        .collect()) } }
+        .collect()) }, carries: None }
 }
 #[test]
 fn a_mod_block_entity_on_a_template_without_one_is_removed_and_not_pushed() {
@@ -94,6 +98,26 @@ fn a_mod_block_entity_on_a_template_without_one_is_removed_and_not_pushed() {
     assert!(!sim.removes(true, stone, BlockStateId(9), at(5)));
 }
 #[test]
+fn a_carry_answer_moves_mod_and_vanilla_block_entities_alike() {
+    let stone = BlockStateId(0);
+    let mut sim = Sim { b: Blocks { templated: vec![BlockStateId(1)] },
+                        level: level(&[(5, BlockEntity::Mod(0)), (6, BlockEntity::Chest(0))]) };
+    sim.level.carries = Some(true);
+    // a mod entity moves, whatever its template
+    assert!(sim.pushable_tail(stone, at(5)));
+    assert!(sim.pushable_tail(BlockStateId(1), at(5)));
+    // #3453: one block-entity rule, so a vanilla one moves too, and so does a template
+    // with one before it loaded; the carry machinery moves their position-owned state
+    assert!(sim.pushable_tail(BlockStateId(1), at(6)));
+    assert!(sim.pushable_tail(BlockStateId(1), at(7)));
+    // a native factory's state whose entity has not loaded is the mod's own
+    assert!(sim.pushable_tail(BlockStateId(2), at(7)));
+    // a refusal holds even a block without one
+    sim.level.carries = Some(false);
+    assert!(!sim.pushable_tail(stone, at(7)));
+    assert!(!sim.pushable_tail(stone, at(5)));
+}
+#[test]
 fn the_render_list_holds_mod_entities_of_templates_without_one() {
     let game = Game {
         world: World { block_entities: Entities([((0, 64, 0), BlockEntity::Mod(0)), ((1, 64, 0), BlockEntity::Mod(0)),
@@ -111,12 +135,13 @@ fn the_render_list_holds_mod_entities_of_templates_without_one() {
 class ModBlockEntityAnyTemplateTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("rustc"), "requires Rust")
     def test_removal_piston_and_render_list(self):
-        game = (CLIENT / "game.rs").read_text(encoding="utf-8")
+        game = ((CLIENT / "game.rs").read_text(encoding="utf-8")
+                + (CLIENT / "game/blocks/level_access.rs").read_text(encoding="utf-8"))
         draw = (next(CLIENT.glob('game/*/native_block_entity_draw.rs'))).read_text(encoding="utf-8")
         update = (LEVEL / "update.rs").read_text(encoding="utf-8")
         pistons = (LEVEL / "pistons.rs").read_text(encoding="utf-8")
         removal = between(update, "} else if block_changed\n", "        {\n            // BlockEntity.preRemoveSideEffects")
-        tail = between(pistons, "        } else if b.table.bool(state, b.props.extended) {\n            return false;\n        }\n", "    }\n    fn is_slime_or_honey")
+        tail = between(pistons, "        } else if b.table.bool(state, b.props.extended) {\n            return false;\n        }\n", "    }\n    /// `IBlockExtension.isSlimeBlock`")
         fixture = (FIXTURE.replace("HAS_MOD", method(game, "has_mod_block_entity"))
                    .replace("HAS_NATIVE", method(game, "has_native_block_entity"))
                    .replace("UNTEMPLATED", method(draw.replace("pub(super) fn", "fn"), "untemplated_mod_block_entities"))

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The port ledger: every vanilla method next to the Horizon functions that port it, both ways, and the gaps.
+"""The port ledger: every vanilla method next to the Sunrise functions that port it, both ways, and the gaps.
 
 vanilla_map.py maps vanilla classes to the files that name them. The ledger goes one level down and both
 ways: each vanilla method (from the game jar's bytecode and the decompiled sources) to the Rust functions,
@@ -34,7 +34,7 @@ method-by-method reading misses:
     python3 tools/port_ledger.py build                         # index into .local/port-ledger/ledger.json
     python3 tools/port_ledger.py where KineticWeapon.damageEntities
     python3 tools/port_ledger.py where ShulkerBulletRenderer   # a whole class
-    python3 tools/port_ledger.py what crates/horizon-client/src/game/items/spear.rs:150
+    python3 tools/port_ledger.py what crates/sunrise-client/src/game/items/spear.rs:150
     python3 tools/port_ledger.py class Shulker                 # every method: ported where, or not
     python3 tools/port_ledger.py issue 3123                    # the classes, code and gaps a report points at
     python3 tools/port_ledger.py blame blaze v                 # what computes a field a parity trace shows differ
@@ -45,10 +45,11 @@ method-by-method reading misses:
     python3 tools/port_ledger.py diff OTHER/ledger.json        # against another build
     python3 tools/port_ledger.py todo [--package world/entity] # the next methods with no answer
 
-Add --json to any query for machine output. `build` reads the game jar (the lab's or the launcher's; --jar,
---no-jar) and the lab's decompiled sources (.local/minecraft/<version>/sources/{client,server},
-tools/lab.py decompile; --sources takes any directory of decompiled Java). Queries read the last build;
-`build` again after pulling. docs/port-ledger.md has the details.
+Add --json to any query for machine output, before or after the query's name. `build` reads the game jar
+(the lab's or the launcher's; --jar, --no-jar) and the lab's decompiled sources
+(.local/minecraft/<version>/sources/{client,server}, tools/lab.py decompile; --sources takes any directory
+of decompiled Java). Queries read the last build; `build` again after pulling. docs/port-ledger.md has the
+details.
 """
 
 import argparse
@@ -64,6 +65,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
+
+try:
+    import lab
+except ImportError:
+    from . import lab
 
 ROOT = Path(os.environ.get("PORT_LEDGER_ROOT") or Path(__file__).resolve().parents[1])
 OUT = Path(os.environ.get("PORT_LEDGER_OUT") or ROOT / ".local" / "port-ledger")
@@ -337,10 +343,10 @@ MAP_DIR = ROOT / "tools" / "port_map"
 # Why a vanilla method or class needs no port of its own (`skip:<reason>` in the verdict map).
 SKIP_REASONS = {
     "java": "Java plumbing Rust doesn't need: codecs, builders, collections, caches, JIT-minded optimisations",
-    "data": "data Horizon reads from tables or files instead of code: registries, bootstraps, datagen",
-    "ui": "layout or drawing Horizon's own UI and renderer do differently, with no behaviour of its own",
+    "data": "data Sunrise reads from tables or files instead of code: registries, bootstraps, datagen",
+    "ui": "layout or drawing Sunrise's own UI and renderer do differently, with no behaviour of its own",
     "debug": "debug and developer tooling",
-    "service": "an online service Horizon doesn't offer: Realms, telemetry, chat reporting, social",
+    "service": "an online service Sunrise doesn't offer: Realms, telemetry, chat reporting, social",
     "server": "dedicated-server and JVM tooling: RCON, JMX, the server GUI, profilers",
     "other": "see the note",
 }
@@ -714,7 +720,7 @@ def parse_class_bytes(item):
 
 def default_jars():
     lock = json.loads((ROOT / "research-lock.json").read_text()) if (ROOT / "research-lock.json").exists() else {}
-    version = str((lock.get("minecraft") or {}).get("version") or lock.get("version") or "26.3")
+    version = str((lock.get("minecraft") or {}).get("version") or lock.get("version") or lab.VERSION)
     home = Path.home()
     candidates = sorted((ROOT / ".local" / "minecraft" / version).glob("*.jar")) + [
         home / "Library/Application Support/minecraft/versions" / version / f"{version}.jar",
@@ -967,7 +973,7 @@ def parse_rust(path):
 
 
 def rust_files():
-    out = subprocess.run(["git", "ls-files", "crates/*.rs", "launcher/*.rs"], cwd=ROOT, capture_output=True, text=True).stdout
+    out = subprocess.run(["git", "ls-files", "crates/*.rs"], cwd=ROOT, capture_output=True, text=True).stdout
     return [f for f in out.split() if f.endswith(".rs")]
 
 
@@ -976,7 +982,7 @@ def rust_files():
 
 def default_sources():
     lock = json.loads((ROOT / "research-lock.json").read_text()) if (ROOT / "research-lock.json").exists() else {}
-    version = (lock.get("minecraft") or {}).get("version") or lock.get("version") or "26.3"
+    version = (lock.get("minecraft") or {}).get("version") or lock.get("version") or lab.VERSION
     base = ROOT / ".local" / "minecraft" / str(version) / "sources"
     return [str(base / side) for side in ("client", "server") if (base / side).is_dir()]
 
@@ -1089,12 +1095,12 @@ def registry_aliases(sources, van):
     return out
 
 
-ORACLE_DIR = ROOT / "mods" / "horizon" / "src" / "test" / "java" / "dev" / "horizonlab" / "parity"
+ORACLE_DIR = ROOT / "mods" / "sunrise" / "src" / "test" / "java" / "dev" / "sunriselab" / "parity"
 
 
 def harness_coverage(van, methods, fns, edges, known):
     """The parity harnesses that cover each ported method. A harness (tools/test_*_parity.py) runs a vanilla oracle
-    (mods/horizon/src/test/java/.../parity/*.java) and a Rust fixture (crates/*/examples/**/*_fixture.rs) on the same
+    (mods/sunrise/src/test/java/.../parity/*.java) and a Rust fixture (crates/*/examples/**/*_fixture.rs) on the same
     inputs. It covers a method when its fixture reaches the method's port and the vanilla side is in reach too: the
     oracle calls into the method, or the harness or oracle names the method's class (oracles often reach vanilla
     through an interface, a block state for the block, which a call graph can't follow)."""
@@ -1389,7 +1395,7 @@ def build(sources, jars, jobs):
         return lineage_cache[cp]
 
     def resembles_a_class(name):
-        """HurtByTarget is HurtByTargetGoal's port; Game and MotionWorld are Horizon's own containers."""
+        """HurtByTarget is HurtByTargetGoal's port; Game and MotionWorld are Sunrise's own containers."""
         n = name.lower()
         i = bisect.bisect_left(simple_names, n)
         return i < len(simple_names) and simple_names[i].startswith(n)
@@ -1397,7 +1403,7 @@ def build(sources, jars, jobs):
     def owner_fits(fid, class_path):
         """Whether a fn's impl type lets it port a method of `class_path`: `impl HurtByTarget` doesn't port
         AvoidEntityGoal.canUse however alike the names; `impl Mob` may port LivingEntity's or Zombie's; a fn
-        on one of Horizon's own containers (Game, Sim, MotionWorld) may port anything."""
+        on one of Sunrise's own containers (Game, Sim, MotionWorld) may port anything."""
         owner = fns[fid].get("owner")
         if not owner:
             return True
@@ -1805,7 +1811,7 @@ def build(sources, jars, jobs):
         return set()
 
     def substantial(c):
-        """Worth reporting as a missing call: Horizon ports it as a function of its own (or an override
+        """Worth reporting as a missing call: Sunrise ports it as a function of its own (or an override
         of it), or it is more than a getter."""
         if any(ported.get(o) for o in [c] + overrides(c)):
             return True
@@ -1923,7 +1929,7 @@ def build(sources, jars, jobs):
         gaps.append({"kind": "stale", **s})
     for row in map_problems:
         gaps.append({"kind": "map", "src": row["src"], "row": row["vanilla"], "problem": row["problem"]})
-    # Whole classes nothing ports, in packages where Horizon ports the neighbours (a renderer, a sound
+    # Whole classes nothing ports, in packages where Sunrise ports the neighbours (a renderer, a sound
     # instance, a goal): the kind of gap no call graph shows, since the game reaches them by registration.
     by_class = defaultdict(list)
     for k, m in methods.items():
@@ -2333,7 +2339,7 @@ def issue_text(ref):
 
 
 REPORT_BOILERPLATE = re.compile(
-    r"^\W*(\*\*)?(version|os|horizon version|os, cpu, gpu|reported on discord|attachments|opened by|tags)\b.*$"
+    r"^\W*(\*\*)?(version|os|sunrise version|os, cpu, gpu|reported on discord|attachments|opened by|tags)\b.*$"
     r"|^\W*(what i did|what happened|what i expected)\s*:", re.I | re.M)
 
 
@@ -2634,7 +2640,7 @@ def changed_ranges(base):
     mb = subprocess.run(["git", "merge-base", base, "HEAD"], cwd=ROOT, capture_output=True, text=True)
     if mb.returncode:
         sys.exit(f"No merge base with {base}: {mb.stderr.strip()}")
-    diff = subprocess.run(["git", "diff", "-U0", mb.stdout.strip(), "--", "crates", "launcher"],
+    diff = subprocess.run(["git", "diff", "-U0", mb.stdout.strip(), "--", "crates"],
                           cwd=ROOT, capture_output=True, text=True).stdout
     ranges, path = defaultdict(list), None
     for line in diff.splitlines():
@@ -2996,39 +3002,48 @@ def write_html(led, rows, tot):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--json", action="store_true", help="machine-readable output")
+    # The same flag on every query, so `--json` reads the same before or after the query's name. A query
+    # parses into its own namespace that argparse then copies over the top-level one, so its default would
+    # wipe a --json given before the query; SUPPRESS keeps it out of the namespace unless it is passed.
+    query_flags = argparse.ArgumentParser(add_help=False)
+    query_flags.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
+                             help="machine-readable output")
     sub = parser.add_subparsers(dest="cmd", required=True)
     b = sub.add_parser("build")
     b.add_argument("--sources", action="append", help="a directory of decompiled vanilla Java (repeatable)")
     b.add_argument("--jar", action="append", help="a vanilla game jar (repeatable; default: the lab's or the launcher's)")
     b.add_argument("--no-jar", action="store_true", help="read the sources only")
     b.add_argument("--jobs", type=int, default=os.cpu_count())
-    sub.add_parser("where").add_argument("query")
-    sub.add_parser("what").add_argument("location")
-    sub.add_parser("class").add_argument("query")
-    c = sub.add_parser("coverage")
+    sub.add_parser("where", parents=[query_flags]).add_argument("query")
+    sub.add_parser("what", parents=[query_flags]).add_argument("location")
+    sub.add_parser("class", parents=[query_flags]).add_argument("query")
+    c = sub.add_parser("coverage", parents=[query_flags])
     c.add_argument("--package")
     c.add_argument("--depth", type=int, default=2)
-    g = sub.add_parser("gaps")
+    g = sub.add_parser("gaps", parents=[query_flags])
     g.add_argument("--kind", choices=["seam", "client", "float", "drift", "class", "callee", "stale", "map", "unported", "untested"])
     g.add_argument("--package")
     g.add_argument("--limit", type=int, default=50)
     sub.add_parser("report")
     mc = sub.add_parser("map-check", help="check verdict-map files against the last build, without rebuilding")
     mc.add_argument("paths", nargs="+")
-    t = sub.add_parser("todo", help="the next methods with no answer, for the verdict map (tools/port_map)")
+    t = sub.add_parser("todo", parents=[query_flags], help="the next methods with no answer, for the verdict map (tools/port_map)")
     t.add_argument("--package", help="e.g. world/entity/animal")
     t.add_argument("--limit", type=int, default=150, help="about this many methods, whole classes at a time")
     t.add_argument("--after", help="start after this class path (the last batch's last class)")
-    d = sub.add_parser("diff", help="what changed against another ledger.json")
+    d = sub.add_parser("diff", parents=[query_flags], help="what changed against another ledger.json")
     d.add_argument("other")
-    ck = sub.add_parser("check", help="what a branch's changes touch: ports, their open gaps, citations to add")
+    ck = sub.add_parser("check", parents=[query_flags],
+                        help="what a branch's changes touch: ports, their open gaps, citations to add")
     ck.add_argument("--base", default="origin/main")
     ck.add_argument("--no-compare", action="store_true", help="skip building the base to list gaps opened and closed")
-    bl = sub.add_parser("blame", help="which vanilla methods compute a traced field of an entity, and their ports")
+    bl = sub.add_parser("blame", parents=[query_flags],
+                        help="which vanilla methods compute a traced field of an entity, and their ports")
     bl.add_argument("entity", help="a class (Blaze) or registry name (blaze)")
     bl.add_argument("fields", nargs="+", help="trace keys (p v r g hp target in move look) or field/setter names")
     bl.add_argument("--limit", type=int, default=8)
-    sub.add_parser("issue", help="the vanilla classes, Rust code and gaps a bug report points at").add_argument(
+    sub.add_parser("issue", parents=[query_flags],
+                   help="the vanilla classes, Rust code and gaps a bug report points at").add_argument(
         "ref", help=f"an issue number on {ISSUE_REPO}, the report's text, or - to read it from stdin")
     args = parser.parse_args()
     if args.cmd == "build":

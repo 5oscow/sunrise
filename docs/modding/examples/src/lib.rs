@@ -20,7 +20,7 @@ static COUNTER: AttachmentType<i32> = AttachmentType {
 // ANCHOR_END: counter
 
 // ANCHOR: tick_hook
-#[mod_api::horizon_mod]
+#[mod_api::sunrise_mod]
 impl Hooks for Mod {
     fn server_tick(&self, host: &mut dyn ServerHost, _: &mut ServerTickEvent<'_>) {
         let _ = count(host);
@@ -64,19 +64,10 @@ pub mod at_a_point {
         }
     }
 
-    #[mod_api::horizon_mod]
+    #[mod_api::sunrise_mod]
     impl Hooks for Mod {}
     // ANCHOR_END: points
 }
 
-/// A mod screen built from `mod_api::client::widgets`.
-pub mod widget_screen;
-
-/// A mod's own tooltip for a text component's item hover.
-pub mod hover_tooltip;
-
-/// Reload-stable custom recipe definitions.
-pub mod reload_recipes;
-
-/// Worldgen states resolved at construction and saved-piece load.
-pub mod worldgen;
+// Every standalone snippet module under src is compiled.
+include!(concat!(env!("OUT_DIR"), "/example_modules.rs"));

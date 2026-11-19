@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """A fishing bobber against armor stands and boats on a dedicated server, against vanilla's, seen by a vanilla client.
 
-A vanilla dedicated server and Horizon's (`horizon-client --dedicated --nogui`) each serve a copy of one flat world
+A vanilla dedicated server and Sunrise's (`sunrise-client --dedicated --nogui`) each serve a copy of one flat world
 vanilla generated first, with Alice an operator in survival holding a fishing rod. LocatorBarClient (a player made of
 vanilla's protocol code) casts the rod ahead and down at an armor stand, a marker armor stand and a boat two and a half
 blocks away (ServerboundUseItemPacket) and reels it in. `Projectile.canHitEntity` lets the bobber hook what
@@ -18,8 +18,10 @@ except ImportError:
     import test_locator_bar_parity as locator
 
 NAME = 'fishing-hook-entities-parity'
-# server_dir and generate_world write these server.properties.
-locator.PROPERTIES = dict(locator.PROPERTIES, gamemode='survival')
+# server_dir and generate_world write these server.properties. Peaceful: the flat world lies below y 40 and seed
+# 12345 has slime chunks within the view distance, so either server may spawn a slime
+# (`Slime.checkSlimeSpawnRules`) that pushes the boat off the bobber's line and kills Alice (#15323).
+locator.PROPERTIES = dict(locator.PROPERTIES, gamemode='survival', difficulty='peaceful')
 # Alice stands at the world spawn (0.5 -60 0.5) looking along +z; the target is 2.5 blocks ahead. The throw is
 # randomised (each axis of FishingHook's velocity takes triangle(0.5, 0.0103365)): at 3.0 the bobber's second tick
 # reaches the stand's front face (z=2.75) only on the faster ~80% of throws, and a slower one starts its third tick
