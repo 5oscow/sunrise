@@ -28,9 +28,9 @@ PARITY_ORACLE_KEEP names a folder that outlives the checkout (the daily's
 per-repository CI keep). There a run is also kept by content: its command,
 the content of the JDK it ran on (toolchain()), and the hash of every file
 under its named paths before it ran, with its stdout, stderr and the content
-of its outputs. Only a launcher inside a JDK home (its `release` file beside
-bin/) is kept: behind a wrapper or selector the JDK that runs is unknown, so
-such a run always runs. A checkout with no record of its own replays a kept
+of its outputs. With a keep, only the JDK's own launcher ($JAVA_HOME/bin/java
+or javac) is reused at all, from either cache: behind a wrapper or selector
+the JDK that runs is unknown, so such a run always runs. A checkout with no record of its own replays a kept
 run whose command, JDK and files match exactly, writing its outputs back where
 none of them exists yet; an output already in place makes it a miss. Entries are
 written under a temporary name in the keep and moved into place, so a reader
@@ -226,12 +226,15 @@ def reusable(saved, paths, hashes):
     return all(hashes.file(path) == sha for path, sha in saved["inputs"].items())
 
 
+def direct_jdk(program, name):
+    """Whether `program` is $JAVA_HOME's own `name`: a wrapper's or selector's JDK can change behind the same file."""
+    home = os.environ.get("JAVA_HOME")
+    return bool(home) and os.path.realpath(program) == os.path.realpath(os.path.join(home, "bin", name))
+
+
 def toolchain(program, hashes):
-    """The content of the JDK `program` belongs to: the launcher and JDK_FILES that exist. None when `program` is not
-    a JDK's own launcher (no `release` in its home): a wrapper's or selector's JDK can change behind the same file."""
+    """The content of the JDK `program` belongs to: the launcher and JDK_FILES that exist."""
     home = Path(program).parent.parent
-    if not (home / "release").is_file():
-        return None
     files = [Path(program), *(home / name for name in JDK_FILES)]
     return {str(path): hashes.file(str(path)) for path in files if path.is_file()}
 
@@ -261,6 +264,8 @@ def restore(entry):
         if not isinstance(kept["outputs"], list) or not all(isinstance(path, str) and os.path.isabs(path)
                                                              and "\0" not in path for path in kept["outputs"]):
             return None
+        for path in kept["outputs"]:
+            os.fsencode(path)  # a path this system can't name (UnicodeEncodeError, a ValueError) is a miss
         # Replay only adds files: one already in place (a stale output, a folder in the way) leaves the oracle to run.
         if any(os.path.lexists(path) for path in kept["outputs"]):
             return None
@@ -268,8 +273,11 @@ def restore(entry):
         for index, path in enumerate(kept["outputs"]):
             os.makedirs(os.path.dirname(path), exist_ok=True)
             temporary = f"{path}.{os.getpid()}.restore"
-            staged.append((temporary, path))
-            shutil.copyfile(entry / "files" / str(index), temporary)
+            # Created here or not at all: a file already at that name is never written over, nor removed.
+            with open(temporary, "xb") as target:
+                staged.append((temporary, path))
+                with open(entry / "files" / str(index), "rb") as source:
+                    shutil.copyfileobj(source, target)
     except (OSError, ValueError, KeyError, TypeError):
         discard(temporary for temporary, _ in staged)
         return None
@@ -327,7 +335,8 @@ def main():
     arguments = sys.argv[1:]
     program = real(name)
     enter()
-    if os.environ.get("PARITY_JAVA_CACHE") == "0" or "-version" in arguments or "--version" in arguments:
+    if (os.environ.get("PARITY_JAVA_CACHE") == "0" or "-version" in arguments or "--version" in arguments
+            or KEEP and not direct_jdk(program, name)):
         os.execv(program, [program, *arguments])
     hashes = Hashes()
     stdin = stdin_identity(hashes)
@@ -347,8 +356,7 @@ def main():
         return 0
     before = snapshot(paths)
     inputs = {path: hashes.file(path) for path in files_under(paths)}
-    jdk = toolchain(command["program"], hashes) if KEEP else None
-    entry = keep_entry(command, jdk, inputs) if jdk else None
+    entry = keep_entry(command, toolchain(command["program"], hashes), inputs) if KEEP else None
     kept = restore(entry) if entry else None
     if kept:
         paths_written, stdout, stderr = kept

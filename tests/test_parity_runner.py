@@ -535,7 +535,7 @@ class OracleReuseTests(unittest.TestCase):
                         "runs.write_text(str(int(runs.read_text() or 0) + 1) if runs.exists() else '1')\n"
                         "pathlib.Path(sys.argv[2]).write_text(pathlib.Path(sys.argv[1]).read_text())\nprint('done')\n")
         fake.chmod(0o755)
-        # bin's parent is the fake launcher's JDK home: its release file makes it a JDK's own launcher.
+        # bin's parent is the fake launcher's JDK home (JAVA_HOME below); an update in place changes its release file.
         (root / "release").write_text('JAVA_VERSION="25.0.1"\n')
         (self.shim / "java").symlink_to(Path(parity.__file__).with_name("parity_shim.py"))
         self.input, self.output = root / "work" / "in.txt", root / "work" / "out.txt"
@@ -548,7 +548,7 @@ class OracleReuseTests(unittest.TestCase):
         (python / "python3").symlink_to(sys.executable)
         self.python = sys.executable
         self.env = dict(os.environ, PATH=f"{self.shim}:{self.bin}:{python}", PARITY_SHIM_REAL_PATH=str(self.bin),
-                        PARITY_SHIM_CACHE=str(root / "cache"))
+                        PARITY_SHIM_CACHE=str(root / "cache"), JAVA_HOME=str(root))
         self.subprocess = subprocess
 
     def tearDown(self):
@@ -593,7 +593,7 @@ class OracleReuseTests(unittest.TestCase):
 
     def new_checkout(self):
         import shutil
-        shutil.rmtree(self.env["PARITY_SHIM_CACHE"])
+        shutil.rmtree(self.env["PARITY_SHIM_CACHE"], ignore_errors=True)
         self.output.unlink()
 
     def test_a_kept_run_is_not_replayed_for_another_jdk_or_jvm_options(self):
@@ -666,8 +666,8 @@ class OracleReuseTests(unittest.TestCase):
         self.assertEqual(self.oracle(), 1)
         self.assertEqual(self.oracle(), 1)
 
-    def test_a_run_through_a_wrapper_is_never_kept(self):
-        # A JDK selector in front of the JDK: the JDK behind it changes while the wrapper's file stays the same.
+    def test_with_a_keep_a_run_through_a_wrapper_is_never_reused(self):
+        # A JDK selector in front of $JAVA_HOME's JDK: the JDK behind it changes while the wrapper's file stays the same.
         keep = self.bin.parent / "keep"
         self.env["PARITY_ORACLE_KEEP"] = str(keep)
         wrapper = self.bin.parent / "selector" / "bin"
@@ -675,9 +675,11 @@ class OracleReuseTests(unittest.TestCase):
         self.env["PATH"] = f"{self.shim}:{wrapper}:{self.bin}:{self.bin.parent / 'python'}"
         self.env["PARITY_SHIM_REAL_PATH"] = f"{wrapper}:{self.bin}"
         self.assertEqual(self.oracle(), 1)
-        self.new_checkout()
         (self.bin.parent / "release").write_text('JAVA_VERSION="25.0.2"\n')
-        self.assertEqual(self.oracle(), 2)  # the other JDK ran: nothing of the first one replayed
+        self.assertEqual(self.oracle(), 2)  # warm: the checkout's own record replays nothing either
+        self.new_checkout()
+        (self.bin.parent / "release").write_text('JAVA_VERSION="25.0.3"\n')
+        self.assertEqual(self.oracle(), 3)  # cold: nothing of the earlier JDKs replayed from the keep
         self.assertEqual(self.output.read_text(), "a")
         self.assertEqual(list(keep.glob("??/*")), [])
 
@@ -778,9 +780,25 @@ class OracleKeepTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             entry = self.kept_run(root, [root / "out" / "a.txt"])
-            (entry / "run.json").write_text('{"outputs": ["' + str(root / "out") + '/b\\u0000c"]}')
+            for name in ("b\\u0000c", "b\\ud800c"):  # an embedded NUL; a lone surrogate no file system can name
+                with self.subTest(name=name):
+                    (entry / "run.json").write_text('{"outputs": ["' + str(root / "out") + "/" + name + '"]}')
+                    self.assertIsNone(parity_shim.restore(entry))
+                    self.assertFalse((root / "out").exists())
+
+    def test_a_replay_never_writes_over_a_file_at_its_staging_name(self):
+        import os
+        from tools import parity_shim
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first, second = root / "out" / "a.txt", root / "out" / "b.txt"
+            entry = self.kept_run(root, [first, second])
+            first.parent.mkdir()
+            staging = Path(f"{second}.{os.getpid()}.restore")
+            staging.write_text("someone else's")
             self.assertIsNone(parity_shim.restore(entry))
-            self.assertFalse((root / "out").exists())
+            self.assertEqual(staging.read_text(), "someone else's")
+            self.assertEqual(sorted(path.name for path in first.parent.iterdir()), [staging.name])
 
     def test_a_run_whose_streams_are_too_large_or_whose_keep_is_unwritable_is_not_kept(self):
         from tools import parity_shim

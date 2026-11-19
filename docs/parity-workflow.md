@@ -63,9 +63,9 @@ Vanilla oracle runs are reused as well. `tools/parity_shim.py` stands in for `ja
 checkout's own cache. The daily names its CI host's keep (`$DYNA_CI_KEEP/oracles`). Replay applies only to the launches the
 shim supports (`java` and `javac` found on PATH, stdin not a pipe) and to the input files it tracks: those under the
 paths the arguments and the oracle variables name. A run is replayed only for the same command, JVM option and oracle
-variables and JDK content on byte-identical tracked inputs, while every harness's Rust side runs. Only a `java` or
-`javac` inside a JDK home (with its `release` file) is kept there: one reached through a wrapper or JDK selector always
-runs, since the JDK behind it can change. A kept run is replayed only where none of its outputs exists yet. A harness
+variables and JDK content on byte-identical tracked inputs, while every harness's Rust side runs. With a keep, only
+`$JAVA_HOME/bin/java` and `javac` themselves are reused, from either cache: one reached through a wrapper or JDK selector
+always runs, since the JDK behind it can change. A kept run is replayed only where none of its outputs exists yet. A harness
 that failed with reuse enabled and then passed fresh runs fresh for 30 days.
 
 Probes build into `.local/parity-target/` with release optimisation but no LTO and 16 codegen units. On ludodesktop that rebuilds every `sunrise-world` probe in 3 seconds after a one-line change, against 122 seconds with the release profile. Rust gives these settings identical results (no fast-math; overflow checks as in release), and the full harness suite passes under them. Probes that harnesses build in the dev profile get `opt-level = 3` too, keeping their overflow checks and debug assertions. Harnesses must locate binaries through `cargo metadata` or `lab.cargo_target()`, never a hard-coded `target/`.
