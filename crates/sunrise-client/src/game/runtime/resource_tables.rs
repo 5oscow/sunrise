@@ -313,12 +313,7 @@ impl PackResources {
         let (names, clouds, forcefield, custom_sky, environments, polytone_particles) =
             std::thread::scope(|scope| {
                 let names = named_scope(scope, "pack.names", || Names::load(root.source()));
-                let clouds = named_scope(scope, "pack.clouds", || {
-                    let game = sunrise_assets::resource_source::ResourceSource::directory(
-                        root.prepared().to_path_buf(),
-                    );
-                    sunrise_client::clouds::load(root.source(), &game)
-                });
+                let clouds = named_scope(scope, "pack.clouds", || pack_clouds(root));
                 let forcefield =
                     named_scope(scope, "pack.forcefield", || load_forcefield(root.source()));
                 let custom_sky = named_scope(scope, "pack.custom_sky", || {
@@ -404,6 +399,14 @@ fn pack_environments(
     }
 }
 
+/// The packs' cloud texture, or the game's own (its prepared base, under every pack) when vanilla
+/// would refuse theirs.
+fn pack_clouds(root: &sunrise_assets::resource_source::ResourceRoot) -> (u32, u32, Vec<bool>) {
+    let game =
+        sunrise_assets::resource_source::ResourceSource::directory(root.prepared().to_path_buf());
+    sunrise_client::clouds::load(root.source(), &game)
+}
+
 /// The custom particles and block emitters of the packs merged at `root` (#11486); `None` when
 /// no pack has any.
 fn pack_particles(
@@ -442,5 +445,56 @@ mod plain_text_tests {
             texts.with(&i.to_string(), |_| ());
         }
         assert!(texts.0.borrow().len() <= PlainTexts::MAX);
+    }
+}
+
+#[cfg(test)]
+mod pack_clouds_tests {
+    use sunrise_assets::resource_source::{Resource, ResourceRoot, ResourceSource};
+
+    const PATH: &str = "assets/minecraft/textures/environment/clouds.png";
+
+    /// A `w` by `h` texture with the cells at `filled` opaque.
+    fn png(w: u32, h: u32, filled: &[[u32; 2]]) -> Vec<u8> {
+        let mut rgba = vec![0u8; (w * h * 4) as usize];
+        for [x, y] in filled {
+            rgba[((y * w + x) * 4 + 3) as usize] = 255;
+        }
+        let mut out = Vec::new();
+        let mut encoder = png::Encoder::new(&mut out, w, h);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_image_data(&rgba).unwrap();
+        writer.finish().unwrap();
+        out
+    }
+
+    /// The game's resource root with a pack's tall texture vanilla refuses (its first column's
+    /// cell wraps west past the image): the clouds are the game's base texture's, not the pack's.
+    #[test]
+    fn a_refused_pack_cloud_texture_leaves_the_base_ones() {
+        let base = tempfile::tempdir().unwrap();
+        let file = base.path().join(PATH);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, png(2, 2, &[[1, 1]])).unwrap();
+        let pack = |bytes| {
+            ResourceSource::indexed(
+                [(PATH.to_owned(), Resource::bytes(bytes))]
+                    .into_iter()
+                    .collect(),
+            )
+        };
+        let root = |source| {
+            ResourceRoot::new(base.path().to_path_buf(), base.path().join("cache"), source)
+        };
+        let refused = root(pack(png(4, 6, &[[0, 2]])));
+        assert_eq!(
+            super::pack_clouds(&refused),
+            (2, 2, vec![false, false, false, true])
+        );
+        let accepted = root(pack(png(4, 6, &[[1, 2]])));
+        let (w, h, filled) = super::pack_clouds(&accepted);
+        assert_eq!((w, h, filled[2 * 4 + 1]), (4, 6, true));
     }
 }

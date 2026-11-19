@@ -101,9 +101,8 @@ fn faces_wrap_the_texture_as_vanilla_does() {
 }
 
 /// The textures vanilla 26.3 reads past, as its own load reported them (the bench mod's hook
-/// loading each through `CloudRenderer.prepare`, `.local/clouddump`): a tall texture with a
-/// filled cell in its first column throws `(5, 2) outside of image bounds (4, 6)`, one in its
-/// last column `(4, 4) outside of image bounds (4, 6)`; a tall one with filled cells inside
+/// loading each through `CloudRenderer.prepare`, `.local/clouddump`): `NativeImage.getPixel`'s
+/// message for the first pixel it asks for outside the image. A tall one with filled cells inside
 /// only, a square one with them at both edges, and a wide one load.
 #[test]
 fn a_texture_vanilla_reads_past_is_named_by_the_pixel_it_asks_for() {
@@ -114,16 +113,30 @@ fn a_texture_vanilla_reads_past_is_named_by_the_pixel_it_asks_for() {
         }
         (w, h, filled)
     };
-    let tall_edge = outside_image(&texture(4, 6, &[[0, 2], [2, 1]]));
-    assert_eq!(
-        tall_edge.map(|p| p.to_string()).as_deref(),
-        Some("(5, 2) outside of image bounds (4, 6)")
-    );
-    let tall_last = outside_image(&texture(4, 6, &[[3, 4]]));
-    assert_eq!(
-        tall_last.map(|p| p.to_string()).as_deref(),
-        Some("(4, 4) outside of image bounds (4, 6)")
-    );
+    let refused: [(u32, u32, &[[u32; 2]], &str); 4] = [
+        // A cell in the first column: its west neighbour wraps to column 5.
+        (
+            4,
+            6,
+            &[[0, 2], [2, 1]],
+            "(5, 2) outside of image bounds (4, 6)",
+        ),
+        // A cell in the last column: its east neighbour is column 4.
+        (4, 6, &[[3, 4]], "(4, 4) outside of image bounds (4, 6)"),
+        // Both neighbours of a one-column texture's cell are outside: the east one is read first.
+        (1, 6, &[[0, 0]], "(1, 0) outside of image bounds (1, 6)"),
+        // Two cells read outside: the first row's first.
+        (
+            4,
+            6,
+            &[[3, 0], [0, 1]],
+            "(4, 0) outside of image bounds (4, 6)",
+        ),
+    ];
+    for (w, h, cells, java) in refused {
+        let pixel = outside_image(&texture(w, h, cells));
+        assert_eq!(pixel.map(|p| p.to_string()).as_deref(), Some(java));
+    }
     for (name, w, h, cells) in JAVA_TEXTURES {
         assert_eq!(outside_image(&texture(*w, *h, cells)), None, "{name}");
     }
@@ -134,10 +147,11 @@ fn a_texture_vanilla_reads_past_is_named_by_the_pixel_it_asks_for() {
 #[test]
 fn a_refused_cloud_texture_leaves_the_games_own() {
     use crate::resource_source::{Resource, ResourceSource};
-    let png = |w: u32, h: u32, cells: &[[u32; 2]]| {
+    // Pixels as x, y and alpha; the rest are transparent.
+    let png = |w: u32, h: u32, cells: &[[u32; 3]]| {
         let mut rgba = vec![0u8; (w * h * 4) as usize];
-        for [x, y] in cells {
-            rgba[((y * w + x) * 4 + 3) as usize] = 255;
+        for [x, y, alpha] in cells {
+            rgba[((y * w + x) * 4 + 3) as usize] = *alpha as u8;
         }
         let mut out = Vec::new();
         let mut encoder = png::Encoder::new(&mut out, w, h);
@@ -160,13 +174,14 @@ fn a_refused_cloud_texture_leaves_the_games_own() {
             .collect(),
         )
     };
-    let game = source(png(2, 2, &[[0, 0]]));
-    let refused = source(png(4, 6, &[[0, 2]]));
+    // `CloudRenderer.isCellEmpty`: a cell with alpha under 10 is empty.
+    let game = source(png(2, 2, &[[0, 0, 10], [1, 0, 9]]));
+    let refused = source(png(4, 6, &[[0, 2, 255]]));
     assert_eq!(
         load(&refused, &game),
         (2, 2, vec![true, false, false, false])
     );
-    let accepted = source(png(4, 6, &[[1, 0]]));
+    let accepted = source(png(4, 6, &[[1, 0, 255]]));
     let (w, h, filled) = load(&accepted, &game);
     assert_eq!(
         (w, h, filled.iter().filter(|f| **f).count(), filled[1]),
@@ -228,11 +243,24 @@ const JAVA_TEXTURES: &[(&str, u32, u32, &[[u32; 2]])] = &[
 
 /// Frames `CloudRenderer.prepare` took in vanilla 26.3: the ARGB colour, fancy, the camera, the
 /// game time and the partial tick, at the overworld's cloud height (192.33) and range.
-const JAVA_FRAMES: &[(u32, bool, i32, [f64; 3], i64, f32)] = &[
+///
+/// The partial tick is Sunrise's double; vanilla's is a float. The last frame's is a hair above
+/// the float vanilla took (1.2207031e-4f, 2^-13 exactly): narrowed first and added to the game
+/// time's remainder in float, as vanilla adds them, it ties to the remainder itself; summed in
+/// double it would round up a float step.
+const JAVA_FRAMES: &[(u32, bool, i32, [f64; 3], i64, f64)] = &[
     (0xFFFF_FFFF, true, 1, [37.25, 200.5, -5.5], 12345, 0.37),
     (0x00FF_0001, false, 1, [-3.75, 194.0, 30.125], 0, 0.0),
     (0xFE7F_80FF, true, 2, [0.5, 150.25, 0.5], 999_999, 0.99),
     (0x0180_7F00, true, 1, [11.999, 196.33, 23.5], 400, 0.5),
+    (
+        0xFFFF_FFFF,
+        true,
+        1,
+        [0.5, 150.25, 0.5],
+        2048,
+        1.220_703_135e-4,
+    ),
 ];
 
 struct Case {
@@ -394,6 +422,45 @@ const JAVA: &[Case] = &[
             0, 211, 0, 0, 212, 0, 0, 213,
         ],
     },
+    Case {
+        texture: "square_edge",
+        frame: 4,
+        info: Some(&[
+            0, 0, 128, 63, 0, 0, 128, 63, 0, 0, 128, 63, 0, 0, 128, 63, 16, 82, 248, 191, 236, 81,
+            40, 66, 82, 184, 142, 192, 0, 0, 0, 0, 0, 0, 64, 65, 0, 0, 128, 64, 0, 0, 64, 65,
+        ]),
+        faces: &[
+            255, 0, 192, 255, 0, 194, 255, 0, 197, 255, 0, 208, 255, 0, 209, 255, 0, 210, 255, 0,
+            211, 255, 0, 212, 255, 0, 213,
+        ],
+    },
+    Case {
+        texture: "tall_inner",
+        frame: 4,
+        info: Some(&[
+            0, 0, 128, 63, 0, 0, 128, 63, 0, 0, 128, 63, 0, 0, 128, 63, 16, 82, 248, 191, 236, 81,
+            40, 66, 82, 184, 142, 192, 0, 0, 0, 0, 0, 0, 64, 65, 0, 0, 128, 64, 0, 0, 64, 65,
+        ]),
+        faces: &[
+            0, 0, 0, 0, 0, 16, 0, 0, 17, 0, 0, 18, 0, 0, 19, 0, 0, 20, 0, 0, 21, 0, 255, 192, 0,
+            255, 195, 0, 255, 196, 0, 255, 208, 0, 255, 209, 0, 255, 210, 0, 255, 211, 0, 255, 212,
+            0, 255, 213, 0, 0, 192, 0, 0, 194, 0, 0, 196, 0, 0, 208, 0, 0, 209, 0, 0, 210, 0, 0,
+            211, 0, 0, 212, 0, 0, 213,
+        ],
+    },
+    Case {
+        texture: "wide",
+        frame: 4,
+        info: Some(&[
+            0, 0, 128, 63, 0, 0, 128, 63, 0, 0, 128, 63, 0, 0, 128, 63, 0, 82, 248, 191, 236, 81,
+            40, 66, 82, 184, 142, 192, 0, 0, 0, 0, 0, 0, 64, 65, 0, 0, 128, 64, 0, 0, 64, 65,
+        ]),
+        faces: &[
+            0, 0, 64, 0, 0, 66, 0, 0, 80, 0, 0, 81, 0, 0, 82, 0, 0, 83, 0, 0, 84, 0, 0, 85, 255,
+            255, 192, 255, 255, 195, 255, 255, 197, 255, 255, 208, 255, 255, 209, 255, 255, 210,
+            255, 255, 211, 255, 255, 212, 255, 255, 213, 1, 0, 0, 1, 0, 4,
+        ],
+    },
 ];
 
 /// The input a frame gives Sunrise: the ARGB colour as `environment` gives it (each channel over
@@ -406,7 +473,7 @@ fn java_input<'a>(texture: &'a (u32, u32, Vec<bool>), frame: usize) -> Input<'a>
         uv: [0.0; 2],
         camera: glam::DVec3::from_array(camera),
         time,
-        partial_tick: f64::from(partial),
+        partial_tick: partial,
         range,
         fast: !fancy,
         color: [channel(16), channel(8), channel(0), channel(24)],
