@@ -237,23 +237,6 @@ impl Session {
     pub fn serial(&self) -> u64 {
         self.serial
     }
-    /// The negotiated wire release, once the connection has been established.
-    pub fn server_version(&self) -> sunrise_protocol::adapter::ServerVersion {
-        self.writer.lock().unwrap().as_ref().map_or(
-            sunrise_protocol::adapter::ServerVersion::Current,
-            QueuedWriter::server_version,
-        )
-    }
-
-    /// Secure-chat enforcement synchronized later than login on older servers.
-    pub fn legacy_secure_chat_enforcement(&self) -> Option<bool> {
-        self.writer
-            .lock()
-            .unwrap()
-            .as_ref()
-            .and_then(QueuedWriter::legacy_secure_chat_enforcement)
-    }
-
     /// Start connecting in the background, as `auth`'s account when there is one.
     pub fn connect(
         address: &str,
@@ -870,24 +853,6 @@ fn connect_tcp(
     Ok((c, host, port))
 }
 
-/// Whether joining servers of older releases is on (roadmap `older-servers`): off by default while the
-/// adapter is incomplete; `SUNRISE_OLDER_SERVERS=1` turns it on.
-pub fn older_servers_enabled() -> bool {
-    std::env::var_os("SUNRISE_OLDER_SERVERS").is_some_and(|v| v == "1")
-}
-
-/// The older release a server speaks, by its status ping, when Sunrise can translate it; `None` for the
-/// pinned version, an unknown one, a failed ping, or with the feature off.
-fn older_server(address: &str) -> Option<sunrise_protocol::adapter::ServerVersion> {
-    use sunrise_protocol::adapter::ServerVersion;
-    if !older_servers_enabled() {
-        return None;
-    }
-    let (json, _) = ping(address, Duration::from_secs(5)).ok()?;
-    let protocol = i32::try_from(json["version"]["protocol"].as_i64()?).ok()?;
-    ServerVersion::from_protocol(protocol).filter(|v| *v != ServerVersion::Current)
-}
-
 /// `Connection.exceptionCaught`: a read that timed out ends with
 /// `disconnect.timeout`, any other failure with `disconnect.genericReason`
 /// ("Internal Exception: ..."); a stream the server closed ends with
@@ -959,12 +924,6 @@ fn run(
             c.writer
                 .write_raw(&token)
                 .map_err(|e| Reason::plain(e.to_string()))?;
-        }
-        if !address.starts_with(FRIEND)
-            && let Some(version) = older_server(address)
-        {
-            log::info!("Joining {address} as a {} server", version.name());
-            c.adapt(version);
         }
         (host, port, c)
     };

@@ -317,15 +317,7 @@ fn ping_all(servers: &[ServerEntry], pings: &Pings, icons: &Icons, file: &Path) 
                             }
                         }
                         // OnlineServerEntry: SUCCESSFUL only for this game's protocol.
-                        let joinable = protocol == i64::from(sunrise_protocol::PROTOCOL_VERSION)
-                            || (crate::net::older_servers_enabled()
-                                && i32::try_from(protocol)
-                                    .ok()
-                                    .and_then(
-                                        sunrise_protocol::adapter::ServerVersion::from_protocol,
-                                    )
-                                    .is_some());
-                        if joinable {
+                        if protocol == i64::from(sunrise_protocol::PROTOCOL_VERSION) {
                             Ping::Ok {
                                 motd,
                                 players,

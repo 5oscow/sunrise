@@ -99,7 +99,6 @@ Sunrise server settings (docs/server.md). The server writes them into server.pro
 | `max_viewed_loaded_chunks_per_level` | `16384` | `sunrise-max-viewed-loaded-chunks-per-level` | the same for all players together, per level |
 | `max_viewed_ticking_chunks_per_level` | `3528` | `sunrise-max-viewed-ticking-chunks-per-level` | ticking, all players together, per level |
 | `admin_feedback_to_ops` | `true` | `sunrise-admin-feedback-to-ops` | operators see each other's commands ([name: ...], vanilla); false: only the log |
-| `accept_older_clients` | `false` | `sunrise-accept-older-clients` | true: 26.2 clients join too, their packets translated (docs/hosting.md) |
 
 ### `[world]`
 
