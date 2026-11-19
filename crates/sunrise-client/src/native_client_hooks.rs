@@ -8,7 +8,7 @@ use sunrise_world::registry::BlockStateId;
 
 /// Client-library hooks, installed before any menu, entity or recipe is used.
 pub struct NativeClientHooks {
-    pub menu_still_valid: fn(&LoopContext, u128, &str, [i32; 3], [f64; 3], &mut bool),
+    pub menu_still_valid: fn(&LoopContext, u128, &str, Option<[i32; 3]>, [f64; 3], &mut bool),
     pub menu_still_valid_listens: fn(&str) -> bool,
     pub living_heal: fn(&LoopContext, u32, &mut f32, &mut bool),
     pub living_breathe: fn(&LoopContext, u32, &str, &mut bool, &mut i32, &mut i32),
@@ -78,7 +78,7 @@ pub(crate) fn menu_still_valid(
     context: &LoopContext,
     player: u128,
     menu: &str,
-    pos: [i32; 3],
+    pos: Option<[i32; 3]>,
     eye: [f64; 3],
     valid: &mut bool,
 ) {

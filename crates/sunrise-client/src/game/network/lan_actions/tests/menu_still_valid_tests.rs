@@ -1,6 +1,6 @@
 //! `menu_still_valid` through a real `MenuPart` on a server's guest: the
-//! per-tick close and the click check ask it, vanilla menus (even with a part
-//! attached) and chest vehicles never do, and respawn and disconnect close a menu it keeps open.
+//! per-tick close and the click check ask it for block and blockless mod menus. Vanilla menus
+//! (even with a part attached) and chest vehicles never ask.
 
 use mod_api::{Hooks, MenuPart, MenuStillValidEvent, ModEntry, Mods, Registrar};
 use std::sync::{
@@ -207,5 +207,100 @@ fn a_mod_menu_part_decides_whether_its_menu_stays_open() {
             assert!(menu.still_valid(&host.hub.loop_context, &game.world, &host.hub.guests[0]));
             assert_eq!(asked(), before);
         });
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn a_blockless_mod_menu_closes_when_its_part_answers_false() {
+    // Use a prepared registry slot for a synthetic mod menu definition.
+    const MENU: &str = "minecraft:generic_9x1";
+    struct Blockless(Arc<AtomicBool>);
+    #[mod_api::sunrise_part]
+    impl MenuPart for Blockless {
+        fn menu_still_valid(
+            &self,
+            _: &dyn mod_api::LoopContext,
+            event: &mut MenuStillValidEvent<'_>,
+        ) {
+            assert_eq!(event.menu, MENU);
+            assert_eq!(
+                event.pos, None,
+                "the screen position is not a backing block"
+            );
+            assert!(event.valid, "a blockless menu starts valid");
+            event.valid = self.0.load(Ordering::Relaxed);
+        }
+    }
+
+    struct BlocklessMod(Arc<AtomicBool>);
+    #[mod_api::__subscriptions]
+    impl Hooks for BlocklessMod {
+        fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
+            r.menu_part(MENU, Blockless(self.0.clone()));
+        }
+    }
+
+    let keep = Arc::new(AtomicBool::new(true));
+    let mods: Mods = vec![ModEntry::new(
+        "blockless",
+        Box::new(BlocklessMod(keep.clone())),
+    )]
+    .into();
+    mod_platform::testing::with_mods(mods.clone(), || {
+        crate::game::api_values::install_parts(&mods).unwrap();
+        crate::entry::install_client_hooks();
+        sunrise_client::containers::with_mod_menu_types(
+            [(MENU.into(), 9, 0, Vec::new(), None, None)],
+            || {
+                super::super::native_guest_turn_tests::with_guests(|game| {
+                    let pos = Some((0, 100, 100)); // Only a screen position, far beyond reach.
+                    let open = |game: &mut crate::game::Game<'_>| {
+                        game.lan
+                            .as_mut()
+                            .unwrap()
+                            .hub
+                            .open_menu_window(
+                                12,
+                                MENU,
+                                sunrise_core::nbt::Tag::String("test".into()),
+                                pos,
+                                Slots::Native,
+                                vec![None; 9],
+                                None,
+                            )
+                            .unwrap()
+                    };
+                    let window_of_guest = |game: &crate::game::Game<'_>| {
+                        game.lan.as_ref().unwrap().hub.guests[0]
+                            .menu
+                            .as_ref()
+                            .map(|menu| menu.window)
+                    };
+                    let window = open(game);
+                    game.lan_containers_tick();
+                    assert_eq!(window_of_guest(game), Some(window));
+
+                    keep.store(false, Ordering::Relaxed);
+                    game.lan_containers_tick();
+                    assert_eq!(window_of_guest(game), None);
+
+                    let window = open(game);
+                    game.lan_guest_packet(
+                        12,
+                        Serverbound::ContainerClick(ContainerClick {
+                            container: window,
+                            state: 0,
+                            slot: -999,
+                            button: 0,
+                            input: 0,
+                            changed: Vec::new(),
+                            carried: None,
+                        }),
+                    );
+                    assert_eq!(window_of_guest(game), None);
+                });
+            },
+        );
     });
 }

@@ -1045,7 +1045,7 @@ mod's own screen (`screen`); without one it closes again. Clients join a server 
 types, as with its blocks, and a client that isn't Sunrise's is never sent one: the block opens nothing for it. Its
 clicks run on the server's vanilla menu engine (`menu::Kind::Mod`), shift-clicks routed as `ChestMenu`'s, and a native
 mod can decide what a slot takes in code with `menu_slot_rules` ([hook notes](https://github.com/sunrise-org/sunrise/blob/main/crates/sunrise-mod-vocab/src/hooks/menu_slot_rules.rs))
-and how far away the menu stays open with `menu_still_valid` ([hook notes](https://github.com/sunrise-org/sunrise/blob/main/crates/sunrise-mod-vocab/src/hooks/menu_still_valid.rs)).
+and whether the menu stays open, with or without a backing block, with [`menu_still_valid`](../concepts/capabilities/menu-slots.md#keeping-a-mod-menu-open).
 The declaration specifies per-slot rules through `results`; clicks are handled by the server.
 
 ##### Lending ingredients and linking containers
