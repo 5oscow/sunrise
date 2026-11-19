@@ -1,6 +1,6 @@
 //! Native mods compile and link against the pinned prebuilt game.
 //! Unsupported inputs and unavailable SDKs are refused, never rebuilt locally.
-use super::{Target, api, dependencies, internals};
+use super::{MixinsIdentity, Target, api, dependencies, internals};
 use crate::host::{tr, trf};
 use crate::rust::Toolchain;
 use sha2::{Digest, Sha256};
@@ -639,6 +639,7 @@ pub fn compile(
     // Each mod is its own library: told which one starts, and how far through them.
     on_mod: &dyn Fn(&str, usize, usize),
 ) -> Result<(PathBuf, Vec<PathBuf>), String> {
+    let mixins = MixinsIdentity::resolve(projects.iter().map(|project| project.bundle), None)?;
     let mut names = reserved_library_names();
     for item in fs::read_dir(package.runtime.join("deps")).map_err(|e| e.to_string())? {
         names.insert(
@@ -686,6 +687,7 @@ pub fn compile(
             super::registry_compile::Options {
                 consent,
                 adapter: &std::env::current_exe().map_err(|e| e.to_string())?,
+                mixins: &mixins,
             },
         )?;
         // The Storage page's Build files row ages this unit by its last use.
@@ -787,6 +789,7 @@ pub fn compile(
         &rlibs,
         &crate_names,
         &sdk,
+        &mixins,
         |edition| rustc(rust, game, out, edition),
     )?;
     let mut installed = runtime_libraries(rust, &sdk, game)?;

@@ -3117,10 +3117,10 @@ impl Game<'_> {
     /// name and before its components' (enchantments, lore, attributes). Add
     /// lines to `lines`, which arrives empty, each with a colour as `rgba` packs
     /// it (`u32::MAX` keeps the text's own); `Text::legacy` reads `§` codes.
-    /// The stack has its components (`stack.data()`). Asked each frame the
-    /// tooltip shows, never for one the stack hides or a crossbow's loaded
-    /// projectile. `context` shares the player, flags and vanilla client-level
-    /// tick rate with component tooltip appenders.
+    /// The stack has its components (`stack.data()`). Asked when lines are built for
+    /// display or `ItemResource::tooltip`, except during reentrant line queries, when
+    /// the stack hides its tooltip or for a crossbow's loaded projectile. `context` shares
+    /// the player, flags and vanilla client-level tick rate with component tooltip appenders.
     pub(in crate::game) fn native_tooltip(
         &self,
         stack: &ItemStack,

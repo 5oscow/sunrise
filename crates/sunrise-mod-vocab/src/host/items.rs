@@ -246,7 +246,9 @@ pub trait ItemsBackend {
         target: EntityRef,
         base_damage: f32,
     ) -> Option<f32>;
-    /// Side: client. The item's standard tooltip lines before mod callbacks or drawing.
+    /// Side: client. Inventory tooltip lines including mod edits, before drawing.
+    /// A request during item tooltip line construction returns base lines without dispatching
+    /// line callbacks again. No request gathers images or draws.
     #[access(WorldOnly)]
     fn item_resource_tooltip(
         &self,

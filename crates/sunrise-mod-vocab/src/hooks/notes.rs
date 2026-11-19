@@ -939,11 +939,11 @@ handle, an entity the client doesn't track and a level it doesn't show:
   (in their own turn) and mobs, and answer false for armor stands and the dragon.
   `living.last_attacker(host)` is `LivingEntity.getLastHurtByMob`: who last hurt the entity, within a hundred
   ticks of the hurt, as an `EntityRef` of the current open; `None` once the window has passed or the attacker
-  is gone, and for armor stands, the dragon and clients.
+  is gone, and for armor stands, the dragon and clients. A mob attacker that changed dimension is found in its
+  loaded level under the id it arrived with, never another entity holding its UUID.
   `living.kill_credit(host)` is `LivingEntity.getKillCredit`: it returns the remembered player first, or the
   last hurting mob if there is no remembered player. A remembered player that cannot be resolved gives `None`,
-  not the mob. Player credit resolves across dimensions; the mob fallback currently resolves only in the
-  victim's level.
+  not the mob. Both resolve across loaded dimensions; a credited mob there answers only `kind`, `uuid`, `level`.
 - An `EntityRef` holds the world's open (`WorldEpoch`) and the entity's id, which no other entity of that open
   gets. A handle of an earlier open, of an entity that is gone or moved to another level (it gets a new id there, as in
   vanilla), or used on a client reads as `None`.
@@ -2749,8 +2749,8 @@ registration path.
   after the name and before the components, with the same `TooltipAppendContext` as appenders in `event.context`.
   `Hooks::item_tooltip` (NeoForge's `ItemTooltipEvent`) then gets every item's whole tooltip once it is
   complete, with the local player, the stack's `TooltipDisplay` and its `TooltipFlag` (`advanced`, `creative`),
-  and may add, change or remove any line. Sunrise's creative search reads vanilla's exported tooltip text, so it
-  does not fire with no player while search trees are built.
+  and may add, change or remove any line. Version 2 also fires for `ItemResource::tooltip` queries;
+  reentrant queries return base lines. Creative search uses exported lines and does not fire it.
 
 - Data component tooltip lines: `Registrar::register_tooltip_appender(component, placement, appender)` (NeoForge's
   `RegisterTooltipAppendersEvent`) gives one component's `TooltipAppender` a `TooltipPlacement`: `BeforeAll`, `AfterAll`,

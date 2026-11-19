@@ -24,6 +24,9 @@ pub use collections::{
 pub const ENTRIES: &str = "mods";
 /// The list of files taken down.
 pub const REVOKED: &str = "revoked.toml";
+/// What `cargo sunrise-mod publish` writes into a field it cannot fill from the manifest; an entry
+/// that still holds it is refused ([`Entry::check_fields`]).
+pub const TODO: &str = "TODO(publish)";
 /// A project's submission or cache can contain its full release history.
 const MAX_PROJECT_BYTES: u64 = 16 << 20;
 /// A collection only holds a page and member ids, not a release history.
@@ -208,6 +211,25 @@ impl Entry {
                 ));
             }
         }
+        let unfinished = [
+            ("name", self.name.as_str()),
+            ("summary", &self.summary),
+            ("description", &self.description),
+            ("license", &self.license),
+            ("source", &self.source),
+        ]
+        .into_iter()
+        .chain(self.owners.iter().map(|o| ("owner", o.as_str())))
+        .chain(self.authors.iter().map(|a| ("author", a.as_str())))
+        .chain(self.categories.iter().map(|c| ("category", c.as_str())))
+        .chain(self.tags.iter().map(|t| ("tag", t.as_str())));
+        for (field, value) in unfinished {
+            if value.trim_start().starts_with(TODO) {
+                errors.push(format!(
+                    "{id}: the {field} is still the {TODO} that `cargo sunrise-mod publish` wrote: replace it with your own text in mods/{id}.toml"
+                ));
+            }
+        }
         errors.extend(
             rules::check_title(&self.name, &self.summary)
                 .into_iter()
@@ -335,7 +357,7 @@ pub fn load(registry: &Path) -> Result<Checkout, Vec<String>> {
                 Vec::new()
             }
         },
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Vec::new(),
         Err(e) => {
             errors.push(format!("{REVOKED}: {e}"));
             Vec::new()
@@ -484,7 +506,7 @@ fn utf8(bytes: Vec<u8>) -> io::Result<String> {
 }
 
 /// A version string that is also a plain release tag and file name part.
-fn plain_version(v: &str) -> bool {
+pub fn plain_version(v: &str) -> bool {
     !v.is_empty()
         && v.len() <= 64
         && v.as_bytes()[0].is_ascii_alphanumeric()

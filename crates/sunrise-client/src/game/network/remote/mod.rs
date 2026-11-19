@@ -671,7 +671,7 @@ pub(super) struct Remote {
     /// (`handleRespawn`: `newPlayer.setDeltaMovement(oldPlayer.getDeltaMovement())`),
     /// for the player made at the next teleport: a portal's teleport adds to it.
     respawn_velocity: Option<Vec3>,
-    loaded_sent: bool,
+    pub(in crate::game) loaded_sent: bool,
     /// The dimension of the client level the mods heard made
     /// (`native_client_level_load`), to be told dropped once.
     pub(super) heard_level: Option<String>,
@@ -6229,7 +6229,6 @@ impl Game<'_> {
         if let Some(r) = &self.remote {
             r.session.send_far_terrain();
         }
-        self.tick_chat_session();
         // Minecraft.tick sends this even when the player cannot tick yet,
         // including while waiting for chunks. Keep it outside early returns.
         if self.remote.as_ref().is_some_and(Remote::has_level) {
@@ -7860,6 +7859,22 @@ impl Game<'_> {
             }));
         }
     }
+    /// `MultiPlayerGameMode.handleCreativeModeItemAdd` for inventory slot `i` (0 to 35): the
+    /// stack goes out now and counts as synced. Nothing without a server.
+    pub(in crate::game) fn remote_creative_slot_add(&mut self, i: usize) {
+        let stack = self.inventory.get(i).cloned().flatten();
+        let Some(r) = self.remote.as_mut() else {
+            return;
+        };
+        if let Some(synced) = r.synced.get_mut(i) {
+            *synced = stack.clone();
+        }
+        let item = self.to_network(&stack);
+        self.send(S::SetCreativeModeSlot(play::SetCreativeModeSlot {
+            slot: creative_sync_slot(i),
+            item,
+        }));
+    }
     /// Inventory as the server last described it.
     fn remote_synced(&mut self) {
         let stacks = self.creative_stacks();
@@ -8961,10 +8976,6 @@ impl Game<'_> {
             && self.screen == Screen::Playing
             && self.sleeping.is_none()
             && !self.screen_over_playing();
-        // MultiPlayerGameMode.tick, first in Minecraft.tick, screen or not: the slot
-        // chosen since the last tick (the wheel, the last tick's number keys, the
-        // server's SetHeldSlot) goes out before anything else of this tick.
-        self.remote_send_carried();
         self.refresh_client_pick(1.0);
         if stop || !ready {
             self.stop_remote_mining();
@@ -8978,7 +8989,7 @@ impl Game<'_> {
         }
         let (attack, use_item) = (self.left, self.right);
         input.tick(&mut RemoteInputWorld(self), attack, use_item);
-        self.remote_queued_keys();
+        self.remote_count_miss_time();
         if let Some(r) = self.remote.as_mut() {
             input.merge_queued(std::mem::take(&mut r.input));
             r.input = input;
@@ -9006,17 +9017,7 @@ impl Game<'_> {
         if mod_api::__private::mods().is_empty() {
             return;
         }
-        let speed = self
-            .own_attribute("minecraft:attack_speed")
-            .unwrap_or_else(|| self.main_hand_attack_speed());
-        let scale = self.hand_strength.scale(0.5, speed);
-        let spin = self.player.as_ref().map_or(0.0, |p| p.auto_spin_attack_dmg);
-        let damage = if spin > 0.0 {
-            spin
-        } else {
-            self.own_attribute("minecraft:attack_damage")
-                .map_or(1.0, |v| v as f32)
-        };
+        let (damage, scale) = self.remote_attack_damage();
         let magic = scale * (self.enchanted_damage(target, damage, None) - damage);
         if damage <= 0.0 && magic <= 0.0 {
             return;
@@ -9047,9 +9048,8 @@ impl Game<'_> {
     /// `MultiPlayerGameMode.attack` runs `Player.attack` on this client too.
     /// For a mob `hurtOrSimulate` fails here (`Entity.hurtClient`), so the
     /// hit has no attacker side; but `RemotePlayer.hurtClient` is true, so a
-    /// hit on another player with extra knockback runs the attacker's side of
-    /// `causeExtraKnockback`: the 0.6 horizontal speed cut and the sprint
-    /// stop. Without it the next move outruns the server's player.
+    /// hit on another player runs the attacker's side: a critical hit's
+    /// particles and `causeExtraKnockback` (`remote_attacker_knockback`).
     fn remote_player_attack(&mut self, mob: usize) {
         // Java dispatches this through the target's RemotePlayer type. The
         // level_players map is profile bookkeeping and can lag the entity;
@@ -9057,26 +9057,7 @@ impl Game<'_> {
         if self.mobs[mob].kind.id != "minecraft:player" {
             return;
         }
-        // `getAttackStrengthScale(0.5)`: here the ticker is `hand_strength`'s
-        // (`attack_ticks` only counts in the local world), and the attack
-        // speed is the player's synced attribute, which a server may change.
-        let speed = self
-            .own_attribute("minecraft:attack_speed")
-            .unwrap_or_else(|| self.main_hand_attack_speed());
-        let strength = self.hand_strength.scale(0.5, speed);
-        // Player.attack's damage: a riptide spin's, or this client's own
-        // ATTACK_DAMAGE, which the held item and effects don't change here.
-        let spin = self.player.as_ref().map_or(0.0, |p| p.auto_spin_attack_dmg);
-        let damage = if spin > 0.0 {
-            spin
-        } else {
-            self.own_attribute("minecraft:attack_damage")
-                .map_or(1.0, |v| v as f32)
-        };
-        let knockback = self
-            .own_attribute("minecraft:attack_knockback")
-            .map_or(0.0, |v| v as f32);
-        let sprinting = self.player.as_ref().is_some_and(|p| p.sprinting);
+        let (damage, strength) = self.remote_attack_damage();
         // attackVisualEffects: a RemotePlayer's hurtClient is true, so a
         // critical hit (full strength, canCriticalAttack) with damage left
         // after baseDamageScaleFactor runs LocalPlayer.crit, this client's
@@ -9091,20 +9072,7 @@ impl Game<'_> {
                 mob_tracking_body(m),
             );
         }
-        if !sunrise_client::attack_strength::attacker_slows_after_hit(
-            damage, knockback, strength, sprinting,
-        ) {
-            return;
-        }
-        if let Some(p) = self.player.as_mut() {
-            let slowdown = sunrise_client::attack_strength::ATTACKER_SLOWDOWN;
-            p.velocity = Vec3::new(
-                p.velocity.x * slowdown,
-                p.velocity.y,
-                p.velocity.z * slowdown,
-            );
-        }
-        self.stop_sprint_after_extra_knockback();
+        self.remote_attacker_knockback(damage, strength);
     }
     /// The latency the server's player list gives this player
     /// (`PlayerInfo.getLatency`), none before the server lists it. A new entry reads 0 until the
@@ -9272,8 +9240,12 @@ impl Game<'_> {
     pub(super) fn remote_drop(&mut self, all: bool) {
         // ensureHasSentCarriedItem: the server drops from the slot just chosen.
         self.remote_send_carried();
+        // MultiPlayerGameMode.dropItem predicts the removal and sends only the drop: the
+        // server's stack agrees, so no creative slot edit follows at the end of the tick.
+        let before = self.creative_stacks();
         let dropped =
             sunrise_client::items::take_held_drop(&mut self.inventory[self.selected], all, false);
+        self.remote_synced_since(&before);
         self.send_action(if all { 4 } else { 5 });
         if dropped.is_some() {
             self.swing_hand(Hand::Main, SwingAnimation::DEFAULT);
@@ -10099,6 +10071,9 @@ impl sunrise_client::interaction_input::TargetUseWorld for RemoteUseWorld<'_, '_
 impl sunrise_client::interaction_input::InteractionWorld for RemoteInputWorld<'_, '_> {
     fn pick_hit_result(&mut self) {
         self.0.pick_tick_targets();
+    }
+    fn handle_keys(&mut self) {
+        self.0.remote_queued_keys();
     }
     fn release_hit_result(&mut self) {
         self.0.release_tick_targets();

@@ -30,6 +30,7 @@ import lzma
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
@@ -164,23 +165,30 @@ def package_format(root: Path) -> int:
     return int(text)
 
 
-def tracked_blobs(root: Path, commit: str, paths: tuple[str, ...] = ()):
-    """Each regular file `commit` tracks under `paths` (everywhere when empty), with its bytes as the commit holds them:
-    the bytes GitHub's archive of the commit serves, which the launcher downloads and checks against the function
-    index, whatever line endings the working tree was checked out with (Git for Windows' core.autocrlf) and whatever
-    it has that is not committed. Links are left out, as the launcher's download leaves them out."""
+def tracked_files(root: Path, commit: str, paths: tuple[str, ...] = ()):
+    """Yield the name, committed bytes and archive mode of each tracked regular file under `paths` (all if empty),
+    as GitHub's archive of the commit serves them, whatever line endings the working tree was checked out with (Git
+    for Windows' core.autocrlf) and whatever it has that is not committed. Links are left out, as the launcher's
+    download leaves them out."""
     # `git archive` converts line endings as a checkout would (core.autocrlf, core.eol); both are turned off so the
-    # bytes are the commit's on every runner. Git writes a file, read once it has exited, with no pipe between the
-    # two processes: Windows SDK legs streaming it through a pipe sat silent here until their timeout. A git that
-    # never ends fails the step with a traceback after ARCHIVE_SECONDS.
+    # bytes are the commit's on every runner, and tar.umask keeps Git's executable bit. Git writes a file, read once
+    # it has exited, with no pipe between the two processes: Windows SDK legs streaming it through a pipe sat silent
+    # here until their timeout. A git that never ends fails the step with a traceback after ARCHIVE_SECONDS.
     with tempfile.TemporaryDirectory(prefix="archive-") as folder:
         tar = Path(folder) / "commit.tar"
-        run(["git", "-c", "core.autocrlf=false", "-c", "core.eol=lf", "archive", "--format=tar", "-o", str(tar),
-             commit, *(["--", *paths] if paths else [])], cwd=root, timeout=ARCHIVE_SECONDS)
+        run(["git", "-c", "core.autocrlf=false", "-c", "core.eol=lf", "-c", "tar.umask=002", "archive",
+             "--format=tar", "-o", str(tar), commit, *(["--", *paths] if paths else [])],
+            cwd=root, timeout=ARCHIVE_SECONDS)
         with tarfile.open(tar, mode="r:") as archive:
             for member in archive:
                 if member.isfile():
-                    yield member.name, archive.extractfile(member).read()
+                    yield member.name, archive.extractfile(member).read(), member.mode
+
+
+def tracked_blobs(root: Path, commit: str, paths: tuple[str, ...] = ()):
+    """The bytes GitHub's archive serves, which the launcher downloads and checks against the function index."""
+    for name, data, _ in tracked_files(root, commit, paths):
+        yield name, data
 
 
 def head() -> str:
@@ -188,11 +196,12 @@ def head() -> str:
 
 
 def sync_stage(source: Path, destination: Path) -> None:
-    """Mirror the new tree without touching identical files: Cargo uses mtimes for path crate freshness."""
+    """Mirror directories, file bytes and POSIX execute bits, leaving symlinks out.
+    Don't rewrite identical bytes: Cargo uses mtimes for path crate freshness."""
     if destination.is_symlink():
         destination.unlink()
     destination.mkdir(exist_ok=True)
-    entries = {path.name: path for path in source.iterdir()}
+    entries = {path.name: path for path in source.iterdir() if not path.is_symlink()}
     for path in destination.iterdir():
         incoming = entries.get(path.name)
         if path.is_symlink():
@@ -210,10 +219,15 @@ def sync_stage(source: Path, destination: Path) -> None:
             data = path.read_bytes()
             if not dest.exists() or dest.read_bytes() != data:
                 dest.write_bytes(data)
+            if os.name == "posix":
+                mode = stat.S_IMODE(dest.stat().st_mode)
+                expected = (mode & ~0o111) | (path.stat().st_mode & 0o111)
+                if mode != expected:
+                    dest.chmod(expected)
 
 
 def stage(target_dir: Path, stage_tool: Path | None = None, *, sdk_dylibs: bool = False) -> Path:
-    """Stage HEAD's tracked bytes, never the working tree's. Run the staging pass (#589) on a fresh copy so
+    """Stage HEAD's tracked files on an exclusively owned target. Run the staging pass (#589) on a fresh copy so
     it can edit the source and emit build data, then sync the result. SDK builds also stage dylib manifests."""
     setup_started = time.monotonic()
     faulthandler.dump_traceback_later(COPY_WATCH_SECONDS, repeat=True)
@@ -222,10 +236,12 @@ def stage(target_dir: Path, stage_tool: Path | None = None, *, sdk_dylibs: bool 
     commit = head()
     with tempfile.TemporaryDirectory(prefix="next-", dir=target_dir) as scratch:
         scratch = Path(scratch)
-        for name, data in tracked_blobs(ROOT, commit):
+        for name, data, mode in tracked_files(ROOT, commit):
             path = scratch / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
+            if os.name == "posix" and mode & 0o111:
+                path.chmod(stat.S_IMODE(path.stat().st_mode) | (mode & 0o111))
         arguments = [str(scratch), str(scratch / POINTS), str(scratch / INTERNALS), commit]
         if stage_tool is None:
             # Build the tool from a stable copy of the unmodified commit, not the disposable rewrite tree.
@@ -483,9 +499,36 @@ def assert_externs(out: Path, eligible: list[str]) -> None:
 
 
 def build(out: Path, server: bool) -> None:
+    # Resolve before entering the staged copy. Keep its source and Cargo outputs exclusively owned until collection
+    # and validation are done. Closing the file releases the lock; leave its name in place for future builds.
+    configured_target = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")).resolve() / "prebuilt"
+    target_dir = configured_target.resolve()
+    # Collection empties the output. It must neither remove a path to the build's lock and stage
+    # nor overlap the actual work directory when `prebuilt` is a symlink or junction.
+    output = out.resolve()
+    for target in (configured_target, target_dir):
+        if target.is_relative_to(output) or output.is_relative_to(target):
+            sys.exit(f"E_SDK_OUT_OVERLAPS_TARGET: The SDK output {out} overlaps the build's target folder {target}: "
+                     "choose another output.")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    with (target_dir / ".sdk-build.lock").open("a+b") as lock:
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                lock.seek(0)
+                msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as error:
+            sys.exit(f"Cannot acquire the SDK build lock in {target_dir}: {error}. Use a separate CARGO_TARGET_DIR.")
+        _build_locked(output, server, target_dir)
+
+
+def _build_locked(out: Path, server: bool, target_dir: Path) -> None:
     layout = package_format(ROOT)
-    # Resolved here: the staging and build steps run from the staged copy.
-    target_dir = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")).resolve() / "prebuilt"
     staged = stage(target_dir, sdk_dylibs=True)
     host = rustc_host()
 
