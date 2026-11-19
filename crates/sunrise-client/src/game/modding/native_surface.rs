@@ -621,9 +621,9 @@ mod tests {
                 (0, 0),
                 std::sync::Arc::new(sunrise_client::chunk::Chunk::empty(0, 0)),
             );
-            let dir = std::env::temp_dir()
-                .join(format!("sunrise-friction-view-tags-{}", std::process::id()));
-            game.session_lock = Some(sunrise_client::save::SessionLock::acquire(&dir).unwrap());
+            let dir = tempfile::tempdir().unwrap();
+            game.session_lock =
+                Some(sunrise_client::save::SessionLock::acquire(dir.path()).unwrap());
             game.world.block_entities.insert(
                 (3, 64, 3),
                 sunrise_client::containers::BlockEntity::Chest(vec![None; 27]),
