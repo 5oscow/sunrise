@@ -24,22 +24,6 @@ pub mod fonts {
     pub const GEIST_MEDIUM: &[u8] = include_bytes!("../fonts/Geist-Medium.ttf");
     pub const GEIST_SEMIBOLD: &[u8] = include_bytes!("../fonts/Geist-SemiBold.ttf");
     pub const GEIST_MONO: &[u8] = include_bytes!("../fonts/GeistMono-Regular.ttf");
-    pub const PIXEL_MEDIUM: &[u8] = include_bytes!("../fonts/PixelifySans-Medium.ttf");
-    pub const PIXEL_SEMIBOLD: &[u8] = include_bytes!("../fonts/PixelifySans-SemiBold.ttf");
-    pub const PIXEL_BOLD: &[u8] = include_bytes!("../fonts/PixelifySans-Bold.ttf");
-    /// [`crate::night`]'s faces, cut from upstream's variable font by `tools/bake_bricolage.py`.
-    pub const BRICOLAGE_REGULAR: &[u8] = include_bytes!("../fonts/BricolageGrotesque-Regular.ttf");
-    pub const BRICOLAGE_MEDIUM: &[u8] = include_bytes!("../fonts/BricolageGrotesque-Medium.ttf");
-    pub const BRICOLAGE_SEMIBOLD: &[u8] =
-        include_bytes!("../fonts/BricolageGrotesque-SemiBold.ttf");
-    pub const BRICOLAGE_BOLD: &[u8] = include_bytes!("../fonts/BricolageGrotesque-Bold.ttf");
-    pub const BRICOLAGE_DISPLAY_BOLD: &[u8] =
-        include_bytes!("../fonts/BricolageGrotesqueDisplay-Bold.ttf");
-    /// The glass look's headings ([`crate::glass`]): SemiBold at optical sizes 56 and 28.
-    pub const BRICOLAGE_DISPLAY_SEMIBOLD: &[u8] =
-        include_bytes!("../fonts/BricolageGrotesqueDisplay-SemiBold.ttf");
-    pub const BRICOLAGE_HEADING_SEMIBOLD: &[u8] =
-        include_bytes!("../fonts/BricolageGrotesqueHeading-SemiBold.ttf");
 }
 
 /// The glass look's icons: Hugeicons' free set (MIT, `icons/glass/LICENSE-hugeicons.txt`), the
