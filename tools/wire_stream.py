@@ -137,7 +137,9 @@ def is_mark(command):
 
 def scenarios(entries):
     """One list of ticks for each /wire-mark in the play stream, in order (the ticks after a mark run to the
-    next mark); a tick is {'packets': [(name, fields)], 'frame': [(name, fields)], 'misplaced': [name]}.
+    next mark); a tick is {'packets': [(name, fields)], 'frame': [(name, fields)], 'misplaced': [name],
+    'raw': [(where, name, payload hex)]}: 'raw' holds every serverbound packet as it was on the wire, in order,
+    before any of the rewrites below.
 
     A click's state id becomes `stale`: how far it is behind the last one the server sent for that container
     (0 = up to date). The ids themselves count every change the server made since the login, so two runs
@@ -164,6 +166,7 @@ def scenarios(entries):
         if current is None:
             continue
         tick = current[-1]
+        tick['raw'].append(('frame' if name in FRAME else 'packets', name, e.get('data', '')))
         if 'entity' in fields and fields['entity'] == me:
             fields['entity'] = 'self'
         if name in FRAME:
@@ -185,7 +188,7 @@ def first_frame(run, name):
 
 
 def new_tick():
-    return {'packets': [], 'frame': [], 'misplaced': []}
+    return {'packets': [], 'frame': [], 'misplaced': [], 'raw': []}
 
 
 def name_entities(run):

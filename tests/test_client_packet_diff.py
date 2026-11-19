@@ -1,14 +1,27 @@
 """tools/client_packet_diff.py: the strict verdict compares every packet in order; its summary keeps the
 differences every run reproduces, whatever tick real-time input landed on. tools/input_recording.py cuts a
 recording at its markers."""
+import json
+import sys
+import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
 
 from tools import client_packet_diff as diff
 from tools import input_recording as recording
+from tools import packet_parity_runs as parity_runs
 
 
-def tick(*packets):
-    return {'packets': [*packets, ('client_tick_end', {})], 'frame': [], 'misplaced': []}
+def wire(fields):
+    return json.dumps(fields, sort_keys=True).encode().hex()
+
+
+def tick(*packets, raw=None):
+    """A decoded tick whose wire payloads follow its fields, unless `raw` gives other ones."""
+    packets = [*packets, ('client_tick_end', {})]
+    return {'packets': packets, 'frame': [], 'misplaced': [],
+            'raw': raw if raw is not None else [('packets', n, wire(f)) for n, f in packets]}
 
 
 def move(z, yaw=0.0):
@@ -19,9 +32,10 @@ def move(z, yaw=0.0):
 MANIFEST = {'complete': True, 'recording': 'r', 'settings': 's', 'course': 'c', 'routes': ['walk']}
 
 
-def run(name, ticks, **manifest):
-    return {'run': name, 'routes': {'walk': diff.features(ticks)}, 'ticks': {'walk': ticks}, 'keep_alive': [],
-            'manifest': dict(MANIFEST, **manifest), 'problems': []}
+def run(name, ticks, keep_alive=(), **manifest):
+    return {'run': name, 'number': int(name.rsplit('-', 1)[1]), 'routes': {'walk': diff.features(ticks)},
+            'ticks': {'walk': ticks}, 'keep_alive': list(keep_alive), 'manifest': dict(MANIFEST, **manifest),
+            'problems': []}
 
 
 def c2s(name, data=''):
@@ -95,6 +109,116 @@ class ClientPacketDiffTests(unittest.TestCase):
         self.assertEqual(ends[0]['sunrise'], [119.7, 119.7])
 
 
+class StrictTests(unittest.TestCase):
+    def strict(self, a, b):
+        return diff.report([run('vanilla-1', a)], [run('sunrise-1', b)])['strict']
+
+    def test_bytes_the_decoder_hides_still_differ(self):
+        decoded = ('attack', {'entity': 'e1'})
+        for name, x, y in (('a trailing byte', '0a', '0a00'), ('another entity id', '0a', '0b'),
+                           ('another click state id', '0a0001', '0a0002')):
+            with self.subTest(name):
+                a = [tick(decoded, raw=[('packets', 'attack', x), ('packets', 'client_tick_end', '')])]
+                b = [tick(decoded, raw=[('packets', 'attack', y), ('packets', 'client_tick_end', '')])]
+                self.assertFalse(self.strict(a, b)['bit_exact'])
+
+    def test_shifted_repeated_missing_and_extra_packets_differ(self):
+        one, two, three = ('swing', {'raw': '00'}), ('swing', {'raw': '01'}), ('swing', {'raw': '02'})
+        base = [tick(one, two)]
+        for name, other in (('shifted', [tick(two, one)]), ('repeated', [tick(one, one, two)]),
+                            ('missing', [tick(one)]), ('extra', [tick(one, two, three)])):
+            with self.subTest(name):
+                self.assertFalse(self.strict(base, other)['bit_exact'])
+        self.assertTrue(self.strict(base, [tick(one, two)])['bit_exact'])
+
+    def test_server_picked_ids_are_left_to_the_keep_alive_check(self):
+        a = [tick(('pong', {'raw': '01'}), raw=[('frame', 'pong', '01'), ('packets', 'client_tick_end', '')])]
+        b = [tick(('pong', {'raw': '02'}), raw=[('frame', 'pong', '02'), ('packets', 'client_tick_end', '')])]
+        self.assertTrue(self.strict(a, b)['bit_exact'])
+
+    def test_runs_pair_by_number_and_a_pending_keep_alive_is_a_note(self):
+        same = [tick(move(0.6))]
+        rep = diff.report([run('vanilla-1', same), run('vanilla-2', same)],
+                          [run('sunrise-2', same, keep_alive=[{'kind': 'keep_alive_pending', 'id': '07'}])])
+        self.assertEqual([p['kind'] for p in rep['strict']['problems']], ['unpaired'])
+        self.assertEqual([n['kind'] for n in rep['strict']['notes']], ['keep_alive_pending'])
+
+    def test_a_route_that_started_from_another_fixture_is_a_problem(self):
+        same = [tick(move(0.6))]
+        played = [{'route': 'walk', 'mark': 1, 'end_tick': 1, 'fixture': {'mode': '0'}}]
+        other = [dict(played[0], fixture={'mode': '1'})]
+        rep = diff.report([run('vanilla-1', same, played=played)], [run('sunrise-1', same, played=other)])
+        self.assertEqual([p['kind'] for p in rep['strict']['problems']], ['fixture_differs'])
+
+
+class StrictExitTests(unittest.TestCase):
+    """client_packet_diff.py --strict on run folders: exit 1 on problems alone and on differences alone."""
+
+    def write_run(self, folder, name, swing, **manifest):
+        run = folder / name
+        run.mkdir()
+        entries = [mark(1), c2s('swing', swing), c2s('client_tick_end')]
+        (run / 'capture.jsonl').write_text(''.join(json.dumps(e) + '\n' for e in entries))
+        played = [{'route': 'walk', 'mark': 1, 'end_tick': 1, 'fixture': {}}]
+        (run / 'run.json').write_text(json.dumps(dict(MANIFEST, played=played, **manifest)))
+
+    def strict_exit(self, sunrise_swing, **sunrise_manifest):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.write_run(Path(tmp), 'vanilla-1', '00')
+            self.write_run(Path(tmp), 'sunrise-1', sunrise_swing, **sunrise_manifest)
+            with mock.patch.object(sys, 'argv', ['client_packet_diff.py', tmp, '--strict']), \
+                    mock.patch('builtins.print'):
+                try:
+                    diff.main()
+                except SystemExit as stop:
+                    return stop.code
+                return 0
+
+    def test_strict_exits_1_on_a_problem_or_a_difference_alone(self):
+        self.assertEqual(self.strict_exit('00'), 0)
+        self.assertEqual(self.strict_exit('00', recording='other'), 1, 'a problem alone')
+        self.assertEqual(self.strict_exit('01'), 1, 'a difference alone')
+
+
+class RunFolderTests(unittest.TestCase):
+    def test_a_run_folder_stays_one_plain_name_and_is_never_replaced_silently(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for label in ('../x', '/abs', 'a/b', ''):
+                with self.subTest(label), self.assertRaises(ValueError):
+                    parity_runs.run_folder(tmp, 'vanilla', 1, label or '..')
+            first = parity_runs.run_folder(tmp, 'vanilla', 1, 'x')
+            other = parity_runs.run_folder(tmp, 'sunrise', 1, 'x')
+            self.assertNotEqual(first, other, 'two clients of one label keep their own folders')
+            self.assertEqual(first.parent, Path(tmp))
+            with self.assertRaises(FileExistsError):
+                parity_runs.run_folder(tmp, 'vanilla', 1, 'x')
+            (first / 'capture.jsonl').write_text('kept')
+            parity_runs.run_folder(tmp, 'vanilla', 1, 'x', replace=True)
+            self.assertFalse((first / 'capture.jsonl').exists())
+
+    def test_folders_that_are_not_numbered_runs_are_skipped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for name in ('vanilla-old', 'x-vanilla-1', 'vanilla-2'):
+                (Path(tmp) / name).mkdir()
+            self.assertEqual([r['run'] for r in diff.runs_of(Path(tmp), 'vanilla')], ['vanilla-2'])
+
+
+class RecordingCheckTests(unittest.TestCase):
+    def test_input_before_the_first_marker_or_an_unknown_event_is_refused(self):
+        late = recording.MARKER_SECONDS + 0.1
+        for name, events in (
+                ('before the marker', [{'t': 0.0, 'type': 'key', 'code': 'KEY_W', 'down': True},
+                                       {'t': 1.0, 'type': 'marker', 'route': 'walk'}]),
+                ('an unknown kind', [{'t': 0.0, 'type': 'marker', 'route': 'walk'},
+                                     {'t': late, 'type': 'joystick'}]),
+                ('a key with no X code', [{'t': 0.0, 'type': 'marker', 'route': 'walk'},
+                                          {'t': late, 'type': 'key', 'code': 'KEY_NOPE', 'down': True}]),
+                ('half a count', [{'t': 0.0, 'type': 'marker', 'route': 'walk'},
+                                  {'t': late, 'type': 'rel', 'dx': 0.5, 'dy': 0}])):
+            with self.subTest(name), self.assertRaises(ValueError):
+                recording.routes(events)
+
+
 class StreamTests(unittest.TestCase):
     def test_a_route_runs_from_its_own_marker_to_its_recorded_end(self):
         entries = [c2s('client_tick_end'), mark(1), c2s('client_tick_end'), c2s('client_tick_end'),
@@ -116,9 +240,9 @@ class StreamTests(unittest.TestCase):
             return {'dir': direction, 'state': 'play', 'name': 'keep_alive', 'data': data}
         good = [ka('s2c', '01'), ka('c2s', '01'), ka('s2c', '02'), ka('c2s', '02')]
         self.assertEqual(diff.keep_alive_problems(good), [])
-        twice = [ka('s2c', '01'), ka('c2s', '01'), ka('c2s', '01'), ka('s2c', '02')]
+        twice = [ka('s2c', '01'), ka('c2s', '01'), ka('c2s', '01'), ka('s2c', '02'), ka('s2c', '03')]
         self.assertEqual([p['kind'] for p in diff.keep_alive_problems(twice)],
-                         ['keep_alive_unasked', 'keep_alive_unanswered'])
+                         ['keep_alive_unasked', 'keep_alive_unanswered', 'keep_alive_pending'])
 
 
 class InputRecordingTests(unittest.TestCase):

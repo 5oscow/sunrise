@@ -23,10 +23,15 @@ The PvP routes (pvp_*) fight a second player, Opp0: sunrise-bots --behaviour sta
 takes comes from `damage ... by Opp0` at set times of the route.
 
 Runs land in .local/packet-parity/runs/<client>-<n>/ (run.json, capture.jsonl, logs, a screenshot after each
-route); --label names them otherwise, and `client_packet_diff.py RUNS --a <label> --b <label>` compares any two
-sets. A run's folder is never replaced unless --replace says so. run.json is its manifest: what it played (the
-recording's, settings' and course's hashes, the routes), whether it finished, and the fixture each route started
-from; `diff --strict` compares only finished runs whose manifests match, and fails on any difference.
+route); --label puts a set in runs/<label>-<client>-<n>/ (tools/packet_parity_runs.py), and `diff --label` or
+`client_packet_diff.py RUNS --a <label>-vanilla --b <label>-sunrise` compares it. `all` compares the runs it just
+made. Two sets of one client (`--a x-vanilla --b y-vanilla`) show how much real-time input alone differs: run one
+before reading a Sunrise difference as a finding. A run's folder is never replaced unless --replace says so.
+run.json is its manifest: what it played (the recording's, settings' and course's hashes, the vanilla server jar's
+and the client's own checksums, the routes), whether it finished, and the fixture each route started from; `diff
+--strict` compares only finished runs whose manifests match, and fails on any difference. A recording's route that
+client_packet_routes.py doesn't define gets no reset beyond a teleport in place, so its setup is neither reset nor
+checked: the manifest lists it under `unchecked_routes`.
 Run it at low priority beside other work: `nice -n 19 ionice -c3 python3 tools/client_packet_parity.py ...`.
 """
 import argparse
@@ -46,6 +51,7 @@ import client_packet_routes as routes  # noqa: E402
 import input_recording  # noqa: E402
 import lab  # noqa: E402
 import net_capture  # noqa: E402
+import packet_parity_runs  # noqa: E402
 import test_rust_parity as base  # noqa: E402
 from test_dedicated_server_parity import Server  # noqa: E402
 from test_wire_stream_parity import ClientCounts, settle  # noqa: E402
@@ -77,11 +83,14 @@ GAMERULES = ["advance_time false", "advance_weather false", "spawn_mobs false", 
              "random_tick_speed 0", "respawn_radius 0"]
 TERRAIN_CANDIDATES = [(-40, 20), (-40, 60), (-40, 100), (-44, -8), (96, 20), (96, 100)]
 LVP = Path("/usr/share/vulkan/icd.d/lvp_icd.json")
-# A run's label becomes part of its folder's name: one plain component.
-LABEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,47}")
 # Console answers that say a command did nothing it was meant to (a parse error, an unloaded or too large area).
 COMMAND_ERRORS = re.compile(r"<--\[HERE\]|Unknown or incomplete command|Incorrect argument|That position is not "
-                            r"loaded|out of the world|Too many blocks in the specified area")
+                            r"loaded|out of the world|Too many blocks in the specified area|Too many chunks")
+
+
+def server_jar():
+    """The verified vanilla server jar every run starts."""
+    return base.verify_artifacts()[1]["server"]
 
 
 def server_command():
@@ -150,10 +159,7 @@ def build_world():
     server = Server(server_command(), folder, "world-build")
     try:
         server.wait_for(r"Done \(", timeout=900)
-        for rule in GAMERULES:
-            server.console(f"gamerule {rule}")
-        server.console("time set 6000")
-        server.console("weather clear")
+        checked(server, [f"gamerule {rule}" for rule in GAMERULES] + ["time set 6000", "weather clear"], "rules")
         x0, z0, x1, z1 = routes.course_bounds()
         checked(server, [f"forceload add {x0} {z0} {x1} {z1}"], "forceload")
         corners = " ".join(f"if loaded {x} {routes.FLOOR} {z}" for x in (x0, x1) for z in (z0, z1))
@@ -218,8 +224,13 @@ class Display:
         return env
 
     def screenshot(self, path):
-        subprocess.run(["import", "-display", self.name, "-window", "root", str(path)], capture_output=True,
-                       timeout=30)
+        """Saves the display's picture to `path`; False, with a note on stderr, when `import` couldn't."""
+        done = subprocess.run(["import", "-display", self.name, "-window", "root", str(path)], capture_output=True,
+                              timeout=30)
+        if done.returncode or not path.exists():
+            print(f"  screenshot {path.name} missing: import exited {done.returncode}", file=sys.stderr)
+            return False
+        return True
 
     def close(self):
         self.process.terminate()
@@ -314,19 +325,11 @@ def scaled(events, scale):
     return out
 
 
-def run_folder(client, index, label=None, replace=False):
-    """The run's own folder under WORK/runs, emptied only with `replace`; a label that isn't one plain name is refused."""
-    name = label or client
-    if not LABEL.fullmatch(name):
-        raise SystemExit(f"--label {name!r}: letters, digits, '.', '_' and '-', starting with a letter or digit")
-    runs = WORK / "runs"
-    run = runs / f"{name}-{index}"
-    if run.exists():
-        if not replace:
-            raise SystemExit(f"{run} exists: pass --replace to run it again, or another --label or --first")
-        shutil.rmtree(run)
-    run.mkdir(parents=True)
-    return run
+def client_build(client, bins):
+    """The checksum of what the client runs: the verified vanilla client jar, or the sunrise-client binary."""
+    if client == "vanilla":
+        return lab.digest(base.verify_artifacts()[1]["client"], "sha256")
+    return lab.digest(lab.binary(bins, "sunrise-client"), "sha256")
 
 
 def run_once(client, index, recording, bins, label=None, mouse_scale=1.0, replace=False):
@@ -334,11 +337,17 @@ def run_once(client, index, recording, bins, label=None, mouse_scale=1.0, replac
     course_text = (WORK / "course.json").read_text()
     course = json.loads(course_text)
     played_routes = input_recording.routes(recording)
-    run = run_folder(client, index, label, replace)
-    manifest = {"client": client, "index": index, "label": label or client, "complete": False,
+    try:
+        run = packet_parity_runs.run_folder(WORK / "runs", client, index, label, replace)
+    except (ValueError, FileExistsError) as error:
+        raise SystemExit(str(error))
+    manifest = {"client": client, "index": index, "label": label, "complete": False,
                 "recording": digest(recording), "settings": digest([PROPERTIES, OPTIONS, GAMERULES]),
                 "course": hashlib.sha256(course_text.encode()).hexdigest(), "mouse_scale": mouse_scale,
-                "diagnostic": mouse_scale != 1.0, "routes": [name for name, _ in played_routes]}
+                "diagnostic": mouse_scale != 1.0, "routes": [name for name, _ in played_routes],
+                "unchecked_routes": [name for name, _ in played_routes if name not in routes.ROUTES],
+                "server_jar": lab.digest(server_jar(), "sha256"), "client_build": client_build(client, bins),
+                "missing_screenshots": []}
     (run / "run.json").write_text(json.dumps(manifest, indent=1))
     port, listen = lab.free_port(), lab.free_port()
     server_folder(run / "server", port)
@@ -363,7 +372,8 @@ def run_once(client, index, recording, bins, label=None, mouse_scale=1.0, replac
         wait_in_game(counts, process)
         _, window = game_window(display.name, timeout=10)
         injector = input_recording.Injector(display.name, window.id)
-        display.screenshot(run / "joined.png")
+        if not display.screenshot(run / "joined.png"):
+            manifest["missing_screenshots"].append("joined.png")
         played = []
         for number, (name, events) in enumerate(played_routes, 1):
             if process.poll() is not None:
@@ -383,9 +393,14 @@ def run_once(client, index, recording, bins, label=None, mouse_scale=1.0, replac
             for timer in timers:
                 timer.join()
             time.sleep(1.0)
+            if process.poll() is not None:
+                raise RuntimeError(f"the client exited ({process.returncode}) during {name}")
+            if any(f"{PLAYER} lost connection" in line for line in server.lines):
+                raise RuntimeError(f"{PLAYER} disconnected during {name}")
             played.append({"route": name, "mark": number, "seconds": round(seconds, 2),
                            "end_tick": counts.update().ticks, "fixture": start})
-            display.screenshot(run / f"{name}.png")
+            if not display.screenshot(run / f"{name}.png"):
+                manifest["missing_screenshots"].append(f"{name}.png")
             print(f"  {run.name} {name}: {seconds:.1f} s", flush=True)
         (run / "played.json").write_text(json.dumps(played))
         manifest.update(complete=True, played=played)
@@ -423,32 +438,51 @@ def main():
         p.add_argument("--route", action="append", help="only these scripted routes")
         p.add_argument("--recording", type=Path, help="an input recording instead of the scripted routes")
         p.add_argument("--bin", type=Path, default=lab.ROOT / "target/fast", help="sunrise-client's folder")
-        p.add_argument("--label", help="the runs' folder name instead of the client's (runs/<label>-N)")
+        p.add_argument("--label", help="a set of runs of its own, runs/<label>-<client>-N")
         p.add_argument("--mouse-scale", type=float, default=1.0,
                        help="diagnostic: scale relative mouse moves, to look past a known turning difference "
                             "(the run is marked diagnostic and left out of --strict)")
         p.add_argument("--replace", action="store_true", help="run again over existing runs of the same name")
     d = sub.add_parser("diff")
     d.add_argument("--out", type=Path, default=WORK / "report.json")
+    d.add_argument("--label", help="compare the set made with this --label")
     d.add_argument("--strict", action="store_true", help="exit 1 unless every packet of every route matches")
     args = parser.parse_args()
     if args.command == "world":
         build_world()
         return
+    indices = None
     if args.command in ("run", "all"):
+        try:
+            names = [packet_parity_runs.prefix(c, args.label) for c in ("vanilla", "sunrise")]
+            recording = (input_recording.read(args.recording) if args.recording
+                         else routes.recording(args.route or routes.ORDER))
+            input_recording.routes(recording)
+        except KeyError as error:
+            parser.error(f"--route {error}: no such route in client_packet_routes.py")
+        except ValueError as error:
+            parser.error(f"{error}")
+        if args.runs < 1 or args.first < 1:
+            parser.error("--runs and --first count from 1")
+        if not args.mouse_scale > 0:
+            parser.error("--mouse-scale must be above 0")
         if args.command == "all" or not (WORK / "course.json").exists():
             build_world()
-        recording = (input_recording.read(args.recording) if args.recording
-                     else routes.recording(args.route or routes.ORDER))
         clients = [args.client] if args.command == "run" else ["vanilla", "sunrise"]
+        indices = set(range(args.first, args.first + args.runs))
         for client in clients:
-            for i in range(args.first, args.first + args.runs):
+            for i in sorted(indices):
                 print(f"{client} run {i}", flush=True)
                 run_once(client, i, recording, args.bin, args.label, args.mouse_scale, args.replace)
         if args.command == "run":
             return
+    else:
+        try:
+            names = [packet_parity_runs.prefix(c, args.label) for c in ("vanilla", "sunrise")]
+        except ValueError as error:
+            parser.error(f"{error}")
     import client_packet_diff
-    report = client_packet_diff.report_runs(WORK / "runs")
+    report = client_packet_diff.report_runs(WORK / "runs", tuple(names), indices)
     (args.out if args.command == "diff" else WORK / "report.json").write_text(json.dumps(report, indent=1))
     print(client_packet_diff.describe(report))
     if getattr(args, "strict", False) and not report["strict"]["bit_exact"]:

@@ -4,7 +4,7 @@ so two game clients get exactly the same input (tools/client_packet_parity.py).
 
   input_recording.py record run.jsonl --device /dev/input/event5 --device /dev/input/event7   # F8 marks, F9 stops
   input_recording.py record run.jsonl --all-devices      # every keyboard and mouse this user can read
-  input_recording.py replay run.jsonl --display :42      # into that display's focused window, never the desktop's
+  input_recording.py replay run.jsonl --display :42      # into that display's focused window
   input_recording.py show run.jsonl
 
 A recording is JSON lines. The first is the header ({"format": "sunrise-input-recording", "version": 1}); every
@@ -22,9 +22,12 @@ a recording whose input comes sooner, and `record` keeps that time free after ea
 Recording reads /dev/input (the `input` group) without grabbing the devices: the game keeps getting them, and so does
 the recording, from every window, passwords included, so it names its devices (or --all-devices) and its file is
 readable by this user only. It starts at the first marker key and stops at the stop key; the marker and stop keys
-themselves are not recorded.
+themselves are not recorded, and an existing file is never overwritten.
+
 Replay sets the display's pointer acceleration to 1 so a relative move reaches the game as the same counts the
-device sent (raw input), as on a desktop with a flat acceleration profile.
+device sent (raw input), as on a desktop with a flat acceleration profile, and turns its key repeat off; it types
+into whatever window has that display's focus. So give it a display of its own (Xvfb): it refuses only the display
+it runs on ($DISPLAY) and :0, the ones it can tell are a desktop's.
 """
 import argparse
 import json
@@ -71,7 +74,7 @@ def char_key(c):
 
 
 def write(path, events):
-    with open(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as out:
+    with open(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as out:
         out.write(json.dumps(FORMAT) + "\n")
         for e in sorted(events, key=lambda e: e["t"]):
             out.write(json.dumps(e) + "\n")
@@ -84,11 +87,37 @@ def read(path):
     return lines[1:]
 
 
+KINDS = {"marker", "key", "button", "rel", "wheel"}
+
+
+def check_event(e):
+    """Refuses an event replay couldn't send as it says: an unknown kind, a key or button with no X code, a move
+    or a wheel that isn't whole counts."""
+    kind = e.get("type")
+    if kind not in KINDS or not isinstance(e.get("t"), (int, float)):
+        raise ValueError(f"event {e!r}: an unknown kind or no time")
+    if kind == "key":
+        keysym_name(e["code"])
+    elif kind == "button" and e.get("code") not in BUTTONS:
+        raise ValueError(f"event {e!r}: no X button for {e.get('code')}")
+    elif kind == "rel" and not (isinstance(e.get("dx"), int) and isinstance(e.get("dy"), int)):
+        raise ValueError(f"event {e!r}: a move is whole counts dx, dy")
+    elif kind == "wheel" and not isinstance(e.get("dy"), int):
+        raise ValueError(f"event {e!r}: a wheel turn is whole notches dy")
+    if kind in ("key", "button") and not isinstance(e.get("down"), bool):
+        raise ValueError(f"event {e!r}: down is true or false")
+
+
 def routes(events):
-    """The recording cut at its markers: [(route name, events with t from that marker)]; a name that isn't one plain
-    file name, a repeated name, or input sooner than MARKER_SECONDS after its marker is refused."""
+    """The recording cut at its markers: [(route name, events with t from that marker)]. Every event is checked
+    first (check_event); input before the first marker, a name that isn't one plain file name, a repeated name, or
+    input sooner than MARKER_SECONDS after its marker is refused."""
+    for e in events:
+        check_event(e)
     out = []
     for e in events:
+        if not out and e["type"] != "marker":
+            raise ValueError(f"input at {e['t']:.3f} s comes before the first marker")
         if e["type"] == "marker":
             out.append((e.get("route", f"route{len(out) + 1}"), [], e["t"]))
         if out:
@@ -129,8 +158,8 @@ MARKER_SENT = 0.3 + (len(mark(1)) + 2) * 0.12
 
 
 class Injector:
-    """XTEST input into one X display: into `window` (an X window id), given the focus before each route and
-    checked to keep it, or else whatever window has the display's focus."""
+    """XTEST input into one X display: into `window` (an X window id), given the focus before each route and checked
+    to have it at the route's start and end, or else whatever window has the display's focus."""
 
     def __init__(self, display_name, window=None):
         from Xlib import X, display
@@ -184,23 +213,32 @@ class Injector:
     def release_all(self):
         for kind, code in sorted(self.held):
             self.send({"type": kind, "code": code, "down": False})
+        self.held.clear()
 
     def play(self, events, start=None, number=1):
-        """Sends each event at its time from `start` (default now); a marker becomes route `number`'s chat command."""
+        """Sends each event at its time from `start` (default now); a marker becomes route `number`'s chat command.
+        Whatever it pressed is released even when sending fails, and with a window, the route fails if that window
+        lost the focus while it played."""
+        for e in events:
+            check_event(e)
         self.focus()
         expanded = []
         for e in events:
             expanded += marker_events(e["t"], mark(number)) if e["type"] == "marker" else [e]
         expanded.sort(key=lambda e: e["t"])
         start = time.perf_counter() if start is None else start
-        for e in expanded:
-            wait = start + e["t"] - time.perf_counter()
-            if wait > 0.002:
-                time.sleep(wait - 0.001)
-            while time.perf_counter() < start + e["t"]:
-                pass
-            self.send(e)
-        self.release_all()
+        try:
+            for e in expanded:
+                wait = start + e["t"] - time.perf_counter()
+                if wait > 0.002:
+                    time.sleep(wait - 0.001)
+                while time.perf_counter() < start + e["t"]:
+                    pass
+                self.send(e)
+        finally:
+            self.release_all()
+        if self.window is not None and self.d.get_input_focus().focus.id != self.window:
+            raise RuntimeError(f"window {self.window:#x} lost the input focus during the route")
         return time.perf_counter() - start
 
 

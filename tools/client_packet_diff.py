@@ -5,13 +5,18 @@
   client_packet_diff.py RUNS --a vanilla --b sunrise --json report.json
   client_packet_diff.py RUNS --strict                                # exit 1 unless bit for bit
 
-The verdict is `strict`: run N of one client against run N of the other, every serverbound packet of every route
-in order with all its fields as decoded, unrounded, and every difference listed, timing ones included. It counts
-only finished runs whose manifests (run.json) agree on the recording, the settings and the course and that aren't
-diagnostic; each route runs from its own numbered marker (/wire-mark NN) to the client tick the harness recorded
-at its end. A run that is missing, unfinished, mismatched or cut short, a marker missing or out of place, and a
-keep-alive answered late, twice, with another id or not at all are listed as problems, and any problem or
-difference means not bit for bit.
+The verdict is `strict`: run N of one client against run N of the other (by the manifest's run number), every
+serverbound packet of every route in order, compared by its payload bytes as they were on the wire, and every
+difference listed, timing ones included. Each row also shows the packet as tools/wire_stream.py decodes it, for
+reading only: that form renames entity ids (`self`, `e1`...), turns a click's state id into `stale` and leaves out
+bytes it doesn't decode. keep_alive and pong carry ids the server picks, so they are left out of the rows and
+checked per connection instead. It counts only finished runs whose manifests (run.json) agree on the recording,
+the settings, the course and the vanilla server jar, with one client build per client, and that aren't diagnostic;
+each route runs from its own numbered marker (/wire-mark NN) to the client tick the harness recorded at its end, and
+must start from the same fixture in both runs of a pair. A run that is missing, unpaired, unfinished, mismatched or
+cut short, a marker missing or out of place, and a keep-alive answered with no request, twice, with another id, or
+not before the next request are listed as problems, and any problem or difference means not bit for bit. A request
+still open when the capture ends is a note: nothing shows it was dropped.
 
 The rest is a summary of what every run reproduces, for reading past real-time input (a key can land a tick
 earlier in one run than in another), never a verdict: nothing in it compares tick i with tick i. Per run, each
@@ -44,7 +49,9 @@ POSITION_TOLERANCE = 1e-3
 # Counts of a packet differ by a few between runs of one client: where a key lands decides a move or two.
 COUNT_SLACK = 2
 # What a manifest must agree on for two runs to be compared.
-MANIFEST_KEYS = ("recording", "settings", "course", "routes")
+MANIFEST_KEYS = ("recording", "settings", "course", "routes", "server_jar")
+# Serverbound packets whose payload is an id the server picked: checked by keep_alive_problems, not as rows.
+SERVER_IDS = {"keep_alive", "pong"}
 
 
 def load(path):
@@ -157,8 +164,8 @@ def features(ticks):
 
 
 def keep_alive_problems(entries):
-    """Keep-alives in connection order: each request answered once, with its id, before the next one comes; the
-    last one unanswered when the capture ends is listed as well."""
+    """Keep-alives in connection order: each request answered once, with its id, before the next one comes; one
+    still open when the capture ends is listed as `keep_alive_pending`."""
     problems, waiting = [], None
     for e in entries:
         if e.get("name") != "keep_alive" or e.get("state") != "play":
@@ -172,17 +179,26 @@ def keep_alive_problems(entries):
         else:
             waiting = None
     if waiting is not None:
-        problems.append({"kind": "keep_alive_unanswered", "id": waiting, "last": True})
+        problems.append({"kind": "keep_alive_pending", "id": waiting})
     return problems
 
 
-def runs_of(folder, client):
-    """Every run folder of `client`, in number order, with what it played and the problems that keep it out."""
+def run_number(path, client):
+    """The run number of a folder named `<client>-<n>`, or None for any other name (`vanilla-old`, `x-vanilla-1`)."""
+    rest = path.name[len(client) + 1:]
+    return int(rest) if path.name.startswith(client + "-") and rest.isdigit() else None
+
+
+def runs_of(folder, client, indices=None):
+    """Every run folder of `client` (a prefix: `vanilla`, `x-sunrise`), in number order, with what it played and the
+    problems that keep it out; only the run numbers in `indices` when given."""
     out = []
-    for run in sorted(folder.glob(f"{client}-*"), key=lambda p: int(p.name.rsplit("-", 1)[1])):
+    numbered = [(run_number(p, client), p) for p in folder.glob(f"{client}-*")]
+    for number, run in sorted((n, p) for n, p in numbered if n is not None and (indices is None or n in indices)):
         manifest_path, capture = run / "run.json", run / "capture.jsonl"
         manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
-        entry = {"run": run.name, "manifest": manifest, "routes": {}, "ticks": {}, "keep_alive": [], "problems": []}
+        entry = {"run": run.name, "number": number, "manifest": manifest, "routes": {}, "ticks": {}, "keep_alive": [],
+                 "problems": []}
         if not manifest.get("complete") or not capture.exists():
             entry["problems"].append({"kind": "unfinished" if manifest else "no_manifest"})
         else:
@@ -197,12 +213,21 @@ def runs_of(folder, client):
 
 
 def rows(ticks):
-    """A route's serverbound packets as lossless ordered text rows: tick, where (tick or frame), name, every field."""
+    """A route's serverbound packets as (wire, shown) rows in order: `wire` is tick, place (tick or frame), name and
+    payload hex, what strict compares; `shown` adds the decoded fields for reading. SERVER_IDS are left out."""
     out = []
     for i, tick in enumerate(ticks):
+        decoded = {}
         for where in ("packets", "frame"):
             for name, fields in tick[where]:
-                out.append(f"{i} {where} {name} {json.dumps(fields, sort_keys=True)}")
+                decoded.setdefault((where, name), []).append(fields)
+        for where, name, payload in tick["raw"]:
+            queue = decoded.get((where, name))
+            fields = queue.pop(0) if queue else None
+            if name in SERVER_IDS:
+                continue
+            wire = f"{i} {where} {name} {payload}"
+            out.append((wire, f"{wire} | {json.dumps(fields, sort_keys=True)}"))
     return out
 
 
@@ -215,24 +240,36 @@ def strict(a, b, names=("vanilla", "sunrise")):
         for r in runs:
             problems += [dict(p, run=r["run"]) for p in r["problems"]]
             problems += [dict(p, run=r["run"]) for p in r["keep_alive"]]
-    if len(a) != len(b):
-        problems.append({"kind": "run_counts", names[0]: len(a), names[1]: len(b)})
+    notes = [p for p in problems if p["kind"] == "keep_alive_pending"]
+    problems = [p for p in problems if p["kind"] != "keep_alive_pending"]
     manifests = [r["manifest"] for r in a + b if r["manifest"]]
     for key in MANIFEST_KEYS:
         if len({json.dumps(m.get(key), sort_keys=True) for m in manifests}) > 1:
             problems.append({"kind": "manifests_differ", "key": key})
-    for ra, rb in zip(a, b):
+    for runs, name in ((a, names[0]), (b, names[1])):
+        if len({r["manifest"].get("client_build") for r in runs if r["manifest"]}) > 1:
+            problems.append({"kind": "client_builds_differ", "client": name})
+    pairs = ({r["number"]: r for r in a}, {r["number"]: r for r in b})
+    for number in sorted(set(pairs[0]) ^ set(pairs[1])):
+        problems.append({"kind": "unpaired", "number": number})
+    for number in sorted(set(pairs[0]) & set(pairs[1])):
+        ra, rb = pairs[0][number], pairs[1][number]
+        fixtures = [{p["route"]: p.get("fixture") for p in r["manifest"].get("played", [])} for r in (ra, rb)]
         for route in sorted(set(ra["ticks"]) | set(rb["ticks"])):
             if route not in ra["ticks"] or route not in rb["ticks"]:
                 continue
+            if fixtures[0].get(route) != fixtures[1].get(route):
+                problems.append({"kind": "fixture_differs", "route": route, "runs": [ra["run"], rb["run"]]})
             xs, ys = rows(ra["ticks"][route]), rows(rb["ticks"][route])
-            if xs == ys:
+            if [wire for wire, _ in xs] == [wire for wire, _ in ys]:
                 continue
-            lines = list(difflib.unified_diff(xs, ys, ra["run"], rb["run"], n=0, lineterm=""))
+            lines = list(difflib.unified_diff([shown for _, shown in xs], [shown for _, shown in ys], ra["run"],
+                                              rb["run"], n=0, lineterm=""))
             changed = sum(1 for line in lines if line[:1] in "+-" and not line.startswith(("+++", "---")))
             differences.append({"route": route, "runs": [ra["run"], rb["run"]], "rows": [len(xs), len(ys)],
                                 "changed": changed, "diff": lines[2:]})
-    return {"bit_exact": not problems and not differences, "problems": problems, "differences": differences}
+    return {"bit_exact": not problems and not differences, "problems": problems, "differences": differences,
+            "notes": notes}
 
 
 def everywhere(runs, route, kind, key):
@@ -330,8 +367,8 @@ def report(a, b, names=("vanilla", "sunrise")):
             "routes": routes, "findings": findings}
 
 
-def report_runs(folder, names=("vanilla", "sunrise")):
-    return report(runs_of(Path(folder), names[0]), runs_of(Path(folder), names[1]), names)
+def report_runs(folder, names=("vanilla", "sunrise"), indices=None):
+    return report(runs_of(Path(folder), names[0], indices), runs_of(Path(folder), names[1], indices), names)
 
 
 def describe(rep):
@@ -340,6 +377,8 @@ def describe(rep):
              f"{len(verdict['problems'])} problems, {len(verdict['differences'])} routes differ"]
     for p in verdict["problems"]:
         lines.append(f"- problem: {json.dumps(p)[:300]}")
+    for n in verdict["notes"]:
+        lines.append(f"- note: {json.dumps(n)[:300]}")
     for d in verdict["differences"]:
         lines.append(f"- [{d['route']}] {d['runs'][0]} vs {d['runs'][1]}: {d['changed']} rows of {d['rows']}")
         for line in d["diff"][:6]:
