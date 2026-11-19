@@ -273,6 +273,15 @@ pub fn run(entry_point: mod_surface::child::ChildEntry, args: &[String]) -> Resu
             checkout.display(),
             errors.join("; ")
         ))?;
+        if loaded
+            .collections
+            .iter()
+            .any(|collection| &collection.id == id)
+        {
+            return Err(format!(
+                "{id} is already a registry collection: choose a different `id` in {MANIFEST}"
+            ));
+        }
         // The registry loader has bound every entry's id to its file name; select this project's id.
         loaded.entries.into_iter().find(|e| &e.id == id)
     } else {
