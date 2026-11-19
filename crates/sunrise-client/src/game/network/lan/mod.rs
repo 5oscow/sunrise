@@ -4062,15 +4062,20 @@ mod tests {
             "dialog/demo:before".into(),
             vec![br#"{"type":"minecraft:notice","title":"Before"}"#.to_vec()],
         )];
-        let mut cache = SyncCache::default();
-        initialize_world_sync_data(
-            &mut cache,
+        let initial = PackOverlay::new(&initial);
+        let packed = sunrise_client::lan::data::SyncData::stage_registry_definitions(
             &root,
-            &PackOverlay::new(&initial),
-            &damage,
-            &item_data,
+            &initial,
+            &Default::default(),
+            &Default::default(),
+            |_| true,
         )
         .unwrap();
+        let mut cache = SyncCache {
+            packed_registries: Some(std::sync::Arc::new(packed)),
+            ..SyncCache::default()
+        };
+        initialize_world_sync_data(&mut cache, &root, &initial, &damage, &item_data).unwrap();
         assert!(cache.data.is_none());
         // A late vanilla helper cannot install its overlay over this world.
         cached_sync_data(&mut cache, &root, &PackOverlay::NONE, &item_data).unwrap();
@@ -4102,11 +4107,8 @@ mod tests {
         let wire = cached_sync_data(&mut cache, &root, &overlay, &item_data).unwrap();
         assert!(wire.id("minecraft:damage_type", "demo:too_late").is_none());
         assert!(health.id("demo:too_late").is_none());
-        assert!(wire.id("minecraft:dialog", "demo:before").is_none());
-        assert!(
-            wire.id("minecraft:dialog", "demo:after").is_some(),
-            "unrelated registries stay lazy"
-        );
+        assert!(wire.id("minecraft:dialog", "demo:before").is_some());
+        assert!(wire.id("minecraft:dialog", "demo:after").is_none());
         let fall = wire.id("minecraft:damage_type", "minecraft:fall").unwrap();
         let packets = wire.registry_packets(false, &sunrise_client::chunk::LevelShapes::VANILLA);
         let packet = packets

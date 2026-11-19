@@ -31,12 +31,29 @@ impl PackRegistryDefinitions {
         text_registries: &crate::command::Registries,
         sound_exists: impl Fn(&str) -> bool,
     ) -> Result<Self, String> {
+        let (definitions, admitted) =
+            Self::stage(overlay, read_errors, text_registries, sound_exists);
+        admitted.map(|()| definitions)
+    }
+
+    /// Keep replaced keys even on failure, so the caller can collect errors
+    /// from other registry files without checking a losing definition.
+    pub(super) fn stage(
+        overlay: &PackOverlay<'_>,
+        read_errors: &BTreeMap<String, String>,
+        text_registries: &crate::command::Registries,
+        sound_exists: impl Fn(&str) -> bool,
+    ) -> (Self, Result<(), String>) {
         let mut definitions = Self::default();
         let mut errors = BTreeMap::<_, BTreeMap<_, _>>::new();
         for &registry in PACK_REGISTRIES {
             let kind = registry.trim_start_matches("minecraft:");
+            let entries = definitions.entries.entry(registry).or_default();
             for (key, error) in read_errors {
                 if let Some(id) = key.strip_prefix(kind).and_then(|id| id.strip_prefix('/')) {
+                    if let Ok(id) = Identifier::parse(id) {
+                        entries.insert((id.namespace().to_owned(), id.path().to_owned()), None);
+                    }
                     errors
                         .entry(registry)
                         .or_default()
@@ -50,43 +67,35 @@ impl PackRegistryDefinitions {
                 {
                     continue;
                 }
-                let decode = || -> Result<_, String> {
+                let mut decode = || -> Result<(), String> {
                     let id = Identifier::parse(id).map_err(|error| error.to_string())?;
                     let key = (id.namespace().to_owned(), id.path().to_owned());
+                    // Reserve the winner even if it fails admission or its condition is false.
+                    let definition = entries.entry(key).or_insert(None);
                     let value: Value = serde_json::from_slice(PackOverlay::top(files))
                         .map_err(|error| error.to_string())?;
                     let file = format!("data/{}/{kind}/{}.json", id.namespace(), id.path());
-                    if !overlay.conditions.allows_file_isolated(&value, &file)? {
-                        return Ok((key, None));
+                    if overlay.conditions.allows_file_isolated(&value, &file)? {
+                        *definition = Some(decode_definition(
+                            registry,
+                            &id.to_string(),
+                            value,
+                            text_registries,
+                            &sound_exists,
+                        )?);
                     }
-                    let value = decode_definition(
-                        registry,
-                        &id.to_string(),
-                        value,
-                        text_registries,
-                        &sound_exists,
-                    )?;
-                    Ok((key, Some(value)))
+                    Ok(())
                 };
-                match decode() {
-                    Ok((key, value)) => {
-                        definitions
-                            .entries
-                            .entry(registry)
-                            .or_default()
-                            .insert(key, value);
-                    }
-                    Err(error) => {
-                        errors
-                            .entry(registry)
-                            .or_default()
-                            .insert(id.to_owned(), error);
-                    }
+                if let Err(error) = decode() {
+                    errors
+                        .entry(registry)
+                        .or_default()
+                        .insert(id.to_owned(), error);
                 }
             }
         }
         if errors.is_empty() {
-            return Ok(definitions);
+            return (definitions, Ok(()));
         }
         let mut report = String::from("failed to load world registry definitions:");
         for (registry, entries) in errors {
@@ -95,7 +104,7 @@ impl PackRegistryDefinitions {
                 report.push_str(&format!("\n  {id}: {error}"));
             }
         }
-        Err(report)
+        (definitions, Err(report))
     }
 
     pub(super) fn discard_replaced(
@@ -324,6 +333,8 @@ fn decode_definition(
         }
         _ => unreachable!("only selected registry families are decoded"),
     };
+    sunrise_core::nbt::write_network(&encoded, sunrise_core::nbt::Limits::default())
+        .map_err(|error| format!("network NBT: {error}"))?;
     Ok(Definition::Encoded(encoded))
 }
 
@@ -392,8 +403,18 @@ mod tests {
                 vec![br#"{"sound_event":"minecraft:item.goat_horn.sound.0","use_duration":-1,"range":128,"description":"Broken"}"#.to_vec()],
             ),
             (
+                "instrument/test:wrong_sound_range".into(),
+                vec![br#"{"sound_event":{"sound_id":"test:sound","range":"near"},"use_duration":4,"range":128,"description":"Horn"}"#.to_vec()],
+            ),
+            (
                 "banner_pattern/test:bad".into(),
                 vec![br#"{"asset_id":"test:banner","translation_key":7}"#.to_vec()],
+            ),
+            (
+                "banner_pattern/test:unencodable".into(),
+                vec![serde_json::json!({"asset_id": "test:banner", "translation_key": "\0".repeat(32_768)})
+                    .to_string()
+                    .into_bytes()],
             ),
         ];
         let io = BTreeMap::from([("enchantment/test:not_read".into(), "read failed".into())]);
@@ -439,8 +460,20 @@ mod tests {
                     ("bad", "width"),
                 ],
             ),
-            ("instrument", &[("bad", "use_duration")]),
-            ("banner_pattern", &[("bad", "translation_key")]),
+            (
+                "instrument",
+                &[
+                    ("bad", "use_duration"),
+                    ("wrong_sound_range", "sound_event.range"),
+                ],
+            ),
+            (
+                "banner_pattern",
+                &[
+                    ("bad", "translation_key"),
+                    ("unencodable", "modified UTF-8"),
+                ],
+            ),
         ] {
             let header = format!("\nminecraft:{registry}:\n");
             let group = error
