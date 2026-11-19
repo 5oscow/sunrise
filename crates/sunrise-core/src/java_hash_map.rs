@@ -64,7 +64,6 @@ const MIN_TREE_CAPACITY: usize = 64;
 /// When a tree bin splits, a half with at most this many nodes becomes a plain bin.
 const UNTREEIFY_LEN: usize = 6;
 
-#[derive(Clone)]
 struct Node<K, V> {
     key: K,
     value: V,
@@ -126,6 +125,89 @@ pub struct JavaHashMap<K, V> {
     mod_count: u64,
 }
 
+pub struct Iter<'a, K, V> {
+    map: &'a JavaHashMap<K, V>,
+    next: u32,
+    remaining: usize,
+}
+
+impl<'a, K: JavaKey, V> Iterator for Iter<'a, K, V> {
+    type Item = (&'a K, &'a V);
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.next == NIL {
+            return None;
+        }
+        let index = self.next;
+        let node = self.map.node(index);
+        self.next = self.map.successor(index);
+        self.remaining -= 1;
+        Some((&node.key, &node.value))
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.remaining, Some(self.remaining))
+    }
+}
+impl<K: JavaKey, V> ExactSizeIterator for Iter<'_, K, V> {}
+impl<K: JavaKey, V> std::iter::FusedIterator for Iter<'_, K, V> {}
+
+/// Consuming traversal moves keys and values out of the existing slab.
+pub struct IntoIter<K, V> {
+    map: JavaHashMap<K, V>,
+    next: u32,
+}
+impl<K: JavaKey, V> Iterator for IntoIter<K, V> {
+    type Item = (K, V);
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.next == NIL {
+            return None;
+        }
+        let index = self.next;
+        self.next = self.map.successor(index);
+        let node = self.map.nodes[index as usize].take().expect("live node");
+        self.map.len -= 1;
+        Some((node.key, node.value))
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.map.len, Some(self.map.len))
+    }
+}
+impl<K: JavaKey, V> ExactSizeIterator for IntoIter<K, V> {}
+impl<K: JavaKey, V> std::iter::FusedIterator for IntoIter<K, V> {}
+
+pub struct Entry<'a, K, V> {
+    map: &'a mut JavaHashMap<K, V>,
+    key: K,
+    hash: i32,
+    index: Option<u32>,
+}
+impl<'a, K: JavaKey, V> Entry<'a, K, V> {
+    pub fn or_insert(self, value: V) -> &'a mut V {
+        self.or_insert_with(|| value)
+    }
+    pub fn or_insert_with(self, make: impl FnOnce() -> V) -> &'a mut V {
+        let index = self.index.unwrap_or_else(|| {
+            let index = self
+                .map
+                .free
+                .last()
+                .copied()
+                .unwrap_or(self.map.nodes.len() as u32);
+            self.map.put_hashed(self.key, make(), self.hash);
+            index
+        });
+        &mut self.map.node_mut(index).value
+    }
+}
+
+impl<K: JavaKey, V> IntoIterator for JavaHashMap<K, V> {
+    type Item = (K, V);
+    type IntoIter = IntoIter<K, V>;
+    fn into_iter(self) -> Self::IntoIter {
+        let next = self.first_node_from(0);
+        IntoIter { map: self, next }
+    }
+}
+
 pub struct Cursor {
     map: u64,
     expected_mod_count: u64,
@@ -166,16 +248,7 @@ impl<K: JavaKey, V> Default for JavaHashMap<K, V> {
 impl<K: JavaKey + Clone, V: Clone> Clone for JavaHashMap<K, V> {
     /// A Rust clone preserves the Java table state, unlike [`Self::copied`].
     fn clone(&self) -> Self {
-        Self {
-            nodes: self.nodes.clone(),
-            free: self.free.clone(),
-            links: self.links.clone(),
-            buckets: self.buckets.clone(),
-            initial_capacity: self.initial_capacity,
-            threshold: self.threshold,
-            len: self.len,
-            ..Self::default()
-        }
+        self.clone_with(Clone::clone)
     }
 }
 
@@ -203,6 +276,38 @@ impl<K: JavaKey, V> JavaHashMap<K, V> {
             ..Self::default()
         }
     }
+    /// Preserve the table history while copying values in slab order.
+    pub(crate) fn clone_with(&self, mut clone_value: impl FnMut(&V) -> V) -> Self
+    where
+        K: Clone,
+    {
+        Self {
+            nodes: self
+                .nodes
+                .iter()
+                .map(|node| {
+                    node.as_ref().map(|node| Node {
+                        key: node.key.clone(),
+                        value: clone_value(&node.value),
+                        hash: node.hash,
+                        next: node.next,
+                    })
+                })
+                .collect(),
+            free: self.free.clone(),
+            links: self.links.clone(),
+            buckets: self.buckets.clone(),
+            initial_capacity: self.initial_capacity,
+            threshold: self.threshold,
+            len: self.len,
+            ..Self::default()
+        }
+    }
+    pub(crate) fn values_in_storage_order(&self) -> impl Iterator<Item = &V> {
+        self.nodes
+            .iter()
+            .filter_map(|node| node.as_ref().map(|node| &node.value))
+    }
     pub fn len(&self) -> usize {
         self.len
     }
@@ -217,16 +322,23 @@ impl<K: JavaKey, V> JavaHashMap<K, V> {
         K: Clone,
         V: Clone,
     {
-        let mut copy = if self.is_empty() {
-            Self::default()
-        } else {
-            Self::with_expected_entries(self.len)
-        };
-        if !self.is_empty() {
-            copy.nodes.reserve(self.len);
-            for (key, value) in self.entries() {
-                copy.put(key.clone(), value.clone());
-            }
+        Self::from_copy_entries(
+            self.len,
+            self.entries().map(|(k, v)| (k.clone(), v.clone())),
+        )
+    }
+    /// Rebuild at the Java copy-constructor capacity, moving the owned entries.
+    pub(crate) fn into_copy(self) -> Self {
+        Self::from_copy_entries(self.len, self)
+    }
+    fn from_copy_entries(size: usize, entries: impl IntoIterator<Item = (K, V)>) -> Self {
+        if size == 0 {
+            return Self::default();
+        }
+        let mut copy = Self::with_expected_entries(size);
+        copy.nodes.reserve(size);
+        for (key, value) in entries {
+            copy.put(key, value);
         }
         copy
     }
@@ -247,19 +359,72 @@ impl<K: JavaKey, V> JavaHashMap<K, V> {
         let (_, i) = self.find(key)?;
         Some(&self.node(i).value)
     }
-    pub fn entries(&self) -> impl Iterator<Item = (&K, &V)> {
+    pub fn entries(&self) -> Iter<'_, K, V> {
+        Iter {
+            map: self,
+            next: self.first_node_from(0),
+            remaining: self.len,
+        }
+    }
+    pub fn get_mut<Q: JavaKey + ?Sized>(&mut self, key: &Q) -> Option<&mut V>
+    where
+        K: Borrow<Q>,
+    {
+        let (_, index) = self.find(key)?;
+        Some(&mut self.node_mut(index).value)
+    }
+    pub fn entry(&mut self, key: K) -> Entry<'_, K, V> {
+        let hash = spread(key.java_hash());
+        let index = if self.buckets.is_empty() {
+            None
+        } else {
+            self.find_hashed(&key, hash).map(|(_, index)| index)
+        };
+        Entry {
+            map: self,
+            key,
+            hash,
+            index,
+        }
+    }
+    /// Mutate values in Java traversal order without allocating or cloning keys.
+    /// The callback cannot structurally change the map or retain a mutable value.
+    pub fn for_each_mut(&mut self, mut visit: impl FnMut(&K, &mut V)) {
         let mut next = self.first_node_from(0);
-        std::iter::from_fn(move || {
-            if next == NIL {
-                return None;
+        while next != NIL {
+            let index = next;
+            next = self.successor(index);
+            let node = self.node_mut(index);
+            visit(&node.key, &mut node.value);
+        }
+    }
+    pub fn retain(&mut self, mut keep: impl FnMut(&K, &mut V) -> bool) {
+        let mut cursor = self.cursor();
+        while cursor.has_next() {
+            self.next_entry(&mut cursor)
+                .expect("exclusive traversal")
+                .expect("entry");
+            let node = self.node_mut(cursor.current);
+            if !keep(&node.key, &mut node.value) {
+                self.remove_current(&mut cursor)
+                    .expect("exclusive traversal");
             }
-            let node = self.node(next);
-            next = self.successor(next);
-            Some((&node.key, &node.value))
-        })
+        }
+    }
+    /// Requested heap storage, excluding the keys' and values' own allocations.
+    pub fn storage_bytes(&self) -> usize {
+        self.nodes
+            .capacity()
+            .saturating_mul(size_of::<Option<Node<K, V>>>())
+            .saturating_add(self.free.capacity().saturating_mul(size_of::<u32>()))
+            .saturating_add(self.links.capacity().saturating_mul(size_of::<Links>()))
+            .saturating_add(self.buckets.capacity().saturating_mul(size_of::<Bucket>()))
     }
     pub fn put(&mut self, key: K, value: V) -> Option<V> {
         let hash = spread(key.java_hash());
+        self.put_hashed(key, value, hash)
+    }
+    fn put_hashed(&mut self, key: K, value: V, hash: i32) -> Option<V> {
         if self.buckets.is_empty() {
             self.grow();
         }
@@ -403,7 +568,12 @@ impl<K: JavaKey, V> JavaHashMap<K, V> {
         if self.buckets.is_empty() {
             return None;
         }
-        let hash = spread(key.java_hash());
+        self.find_hashed(key, spread(key.java_hash()))
+    }
+    fn find_hashed<Q: JavaKey + ?Sized>(&self, key: &Q, hash: i32) -> Option<(usize, u32)>
+    where
+        K: Borrow<Q>,
+    {
         let b = self.bucket_index(hash);
         let Bucket { head, root } = self.buckets[b];
         let found = if root != NIL {
@@ -1065,10 +1235,11 @@ mod tests {
         map.remove(&key(9, 3));
         assert_eq!(order(&map), [4, 0, 2, 6, 8, 10, 11, 5, 1, 3, 7, 12]);
         // 12 entries fit 16 buckets, where the source has 32.
-        let mut copy = map.copied();
-        assert_eq!(order(&copy), [4, 5, 0, 2, 1, 3, 6, 8, 7, 10, 11, 12]);
-        copy.put(key(9, 3), 9);
-        assert_eq!(order(&copy), [4, 0, 2, 6, 8, 10, 9, 11, 5, 1, 3, 7, 12]);
+        for mut copy in [map.copied(), map.into_copy()] {
+            assert_eq!(order(&copy), [4, 5, 0, 2, 1, 3, 6, 8, 7, 10, 11, 12]);
+            copy.put(key(9, 3), 9);
+            assert_eq!(order(&copy), [4, 0, 2, 6, 8, 10, 9, 11, 5, 1, 3, 7, 12]);
+        }
 
         let mut one = JavaHashMap::default();
         one.put(key(0, 1), 0);

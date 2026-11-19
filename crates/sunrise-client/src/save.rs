@@ -672,38 +672,14 @@ pub fn block_entity_id<'a>(e: &'a crate::containers::BlockEntity, block: &'a str
 fn merge_block_entity(original: &Tag, loaded: &Tag, current: &Tag) -> Tag {
     let mut merged = crate::block_entity_nbt::overlay(original, loaded, current);
     let has_items = matches!(current.get("Items"), Some(Tag::List(items)) if !items.is_empty());
-    if has_items && let Tag::Compound(map) = &mut merged {
+    if has_items
+        && current.get("LootTable").is_none()
+        && let Tag::Compound(map) = &mut merged
+    {
         map.remove(&"LootTable".into());
         map.remove(&"LootTableSeed".into());
     }
     merged
-}
-/// `BlockDataAccessor.getData` (`BlockEntity.saveWithFullMetadata`): the tag
-/// `data get block` shows and `data merge block` changes, without the
-/// chunk-only `keepPacked`, and with the fields Sunrise keeps outside its
-/// model: a container's `lock` (`LockCode`), from the tag it was loaded or set
-/// with.
-/// Command-visible block-entity data, saved against loaded item prototypes.
-pub fn block_entity_data(
-    p: (i32, i32, i32),
-    e: &crate::containers::BlockEntity,
-    block: &str,
-    lock: Option<&Tag>,
-    items: &crate::items::Items,
-) -> Tag {
-    let tag = block_entity_encode::encode(p, e, block, items);
-    command_block_entity_data(tag, lock)
-}
-
-/// Apply the command data view to an encoded block entity.
-pub fn command_block_entity_data(mut tag: Tag, lock: Option<&Tag>) -> Tag {
-    if let Tag::Compound(map) = &mut tag {
-        map.remove(&"keepPacked".into());
-        if let Some(lock) = lock {
-            map.insert("lock".into(), lock.clone());
-        }
-    }
-    tag
 }
 /// `BannerBlockEntity.loadAdditional` (and the `components` a block entity keeps).
 pub fn decode_banner(tag: &Tag) -> crate::containers::Banner {
@@ -1094,12 +1070,12 @@ fn keep_claims(saved: &mut NamedTag, old: &NamedTag) {
     let Some(Tag::Compound(sections)) = root.get_mut(&"Sections".into()) else {
         return;
     };
-    for section in sections.values_mut() {
+    sections.for_each_mut(|_, section| {
         let Tag::Compound(section) = section else {
-            continue;
+            return;
         };
         let Some(Tag::List(records)) = section.get_mut(&"Records".into()) else {
-            continue;
+            return;
         };
         for r in records {
             let Some(&tickets) = key(r).and_then(|k| claims.get(&k)) else {
@@ -1113,7 +1089,7 @@ fn keep_claims(saved: &mut NamedTag, old: &NamedTag) {
                 }
             }
         }
-    }
+    });
 }
 fn poi_root(sections: Compound) -> NamedTag {
     NamedTag {
@@ -1409,63 +1385,119 @@ fn encode_full(
         .filter(|(_, e)| !block_entity_placeholder(e))
         .map(|(p, e)| {
             let block = block_name(p);
-            let mut current = block_entity_encode::encode_with(*p, e, &block, items, |_, _| {
-                if apply_block_entity_edits {
-                    extras?.block_entity_save_edits.as_ref()?.get(p).cloned()
-                } else {
-                    None
-                }
-            });
-            if let Some((_, name)) = chunk.block_names.iter().find(|(q, _)| q == p)
-                && let Tag::Compound(map) = &mut current
-            {
-                map.insert("CustomName".into(), name.clone());
-            }
-            let source = extras
+            let stored = extras
                 .and_then(|x| x.block_entity_sources.iter().find(|(q, _)| q == p))
-                .map(|(_, tag)| tag)
-                .filter(|tag| {
-                    crate::block_entity_nbt::id(tag) == crate::block_entity_nbt::id(&current)
-                });
-            let merged = match source {
+                .map(|(_, tag)| tag);
+            let source = stored.filter(|tag| {
+                crate::block_entity_nbt::id(tag).as_deref() == Some(block_entity_id(e, &block))
+            });
+            let pending = extras.and_then(|x| x.pending_loot.get(p));
+            let lock = source.and_then(|tag| tag.get("lock"));
+            let hopper_cooldown = (block == "minecraft:hopper").then(|| {
+                source
+                    .and_then(|tag| number(tag.get("TransferCooldown")))
+                    .unwrap_or(-1) as i32
+            });
+            let current = block_entity_encode::encode_with(
+                *p,
+                e,
+                &block,
+                block_entity_encode::DataFields {
+                    lock,
+                    custom_name: chunk
+                        .block_names
+                        .iter()
+                        .find(|(q, _)| q == p)
+                        .map(|(_, name)| name),
+                    pending,
+                    hopper_cooldown,
+                },
+                items,
+                |_, _| {
+                    if apply_block_entity_edits {
+                        extras?.block_entity_save_edits.as_ref()?.get(p).cloned()
+                    } else {
+                        None
+                    }
+                },
+            );
+            let mut saved = match source {
                 Some(original) => {
                     let loaded = decode_block_entity(original).map_or_else(
                         || current.clone(),
                         |(q, e)| {
-                            let mut loaded = block_entity_encode::encode(q, &e, &block, items);
-                            if !matches!(
+                            // External name removal must win over the source overlay.
+                            let custom_name = (!matches!(
                                 e,
                                 crate::containers::BlockEntity::Banner(_)
                                     | crate::containers::BlockEntity::Sign(_)
                                     | crate::containers::BlockEntity::Mod(_)
-                            ) && let Some(name) = original
-                                .get("CustomName")
-                                .and_then(crate::block_entity_nbt::component)
-                                && let Tag::Compound(map) = &mut loaded
-                            {
-                                // BaseContainerBlockEntity.loadAdditional: the
-                                // external name is also part of the loaded model.
-                                // Its removal must win over the source overlay.
-                                map.insert("CustomName".into(), name);
-                            }
-                            loaded
+                            ))
+                            .then(|| {
+                                original
+                                    .get("CustomName")
+                                    .and_then(crate::block_entity_nbt::component)
+                            })
+                            .flatten();
+                            block_entity_encode::encode_with(
+                                q,
+                                &e,
+                                &block,
+                                block_entity_encode::DataFields {
+                                    lock,
+                                    custom_name: custom_name.as_ref(),
+                                    pending: PendingContainerLoot::from_tag(original).as_ref(),
+                                    hopper_cooldown,
+                                },
+                                items,
+                                |_, _| None,
+                            )
                         },
                     );
                     merge_block_entity(original, &loaded, &current)
                 }
                 None => current,
             };
-            // The source overlay may restore an unchanged stack's original patch.
-            // Apply the loaded catalog after merging, without rebuilding opaque metadata.
-            let mut saved = crate::block_entity_nbt::canonical_with_stack(&merged, &|tag| {
-                crate::block_entity_nbt::stack(tag)
-                    .and_then(|tag| item_from_nbt(&tag))
-                    .map(|stack| item_to_nbt(&stack, items))
-            })
-            .unwrap_or(merged);
-            if let Some(limit) = extras
-                .and_then(|x| x.block_entity_sources.iter().find(|(q, _)| q == p))
-                .and_then(|(_, tag)| tag.get("sunrise:stack_limit"))
+            // A consumed loot table must not be restored from an opaque source.
+            let chest = matches!(e, crate::containers::BlockEntity::Chest(_));
+            if chest
+                && pending.is_none()
+                && let Tag::Compound(map) = &mut saved
+            {
+                map.remove(&"LootTable".into());
+                map.remove(&"LootTableSeed".into());
+            }
+            // The overlay may restore an unchanged stack's original patch. Apply
+            // catalog validation without rebuilding the Java table when replacing or
+            // dropping fields. If normalization supplies missing defaults, use its
+            // fresh field order, including the common metadata tail.
+            let live_items = (chest && pending.is_some() && e.slots().iter().any(Option::is_some))
+                .then(|| encode_items(e.slots(), items));
+            if let Some(mut canonical) = crate::block_entity_nbt::canonical_with_stack(
+                &saved,
+                &|tag| {
+                    crate::block_entity_nbt::stack(tag)
+                        .and_then(|tag| item_from_nbt(&tag))
+                        .map(|stack| item_to_nbt(&stack, items))
+                },
+                live_items,
+            ) {
+                if let Tag::Compound(map) = &mut saved
+                    && canonical.keys().all(|key| map.contains_key(key))
+                {
+                    map.retain(|key, value| {
+                        if let Some(admitted) = canonical.remove(key) {
+                            *value = admitted;
+                            true
+                        } else {
+                            false
+                        }
+                    });
+                } else {
+                    saved = Tag::Compound(canonical);
+                }
+            }
+            if let Some(limit) = stored.and_then(|tag| tag.get("sunrise:stack_limit"))
                 && let Tag::Compound(map) = &mut saved
             {
                 map.insert("sunrise:stack_limit".into(), limit.clone());
@@ -1480,18 +1512,6 @@ fn encode_full(
                     map.remove(&ATTACHMENTS_KEY.into());
                 } else {
                     map.insert(ATTACHMENTS_KEY.into(), Tag::Compound(data));
-                }
-            }
-            if matches!(e, crate::containers::BlockEntity::Chest(_))
-                && let Tag::Compound(map) = &mut saved
-            {
-                map.remove(&"LootTable".into());
-                map.remove(&"LootTableSeed".into());
-                if let Some(pending) = extras.and_then(|x| x.pending_loot.get(p)) {
-                    pending.write_tags(map);
-                    if e.slots().iter().any(Option::is_some) {
-                        map.insert("Items".into(), encode_items(e.slots(), items));
-                    }
                 }
             }
             saved
@@ -7182,17 +7202,16 @@ mod tests {
         // The command path keeps an empty inventory and the pending table/seed
         // for data get and saving. No loot resources are needed to keep that state.
         let pending = PendingContainerLoot::from_tag(&saved).unwrap();
-        let mut stored = block_entity_data(
+        let stored = block_entity_encode::data(
             (1, 2, 3),
             &chest,
             "minecraft:chest",
-            None,
+            block_entity_encode::DataFields {
+                pending: Some(&pending),
+                ..Default::default()
+            },
             &Default::default(),
         );
-        let Tag::Compound(fields) = &mut stored else {
-            panic!("compound");
-        };
-        pending.write_tags(fields);
         assert_eq!(stored.get("LootTable"), saved.get("LootTable"));
         assert_eq!(stored.get("LootTableSeed"), saved.get("LootTableSeed"));
         assert!(stored.get("Items").is_none());
@@ -7231,12 +7250,16 @@ mod tests {
                 "{id}: loadAdditional ignores Items when a loot table loads"
             );
             let pending = PendingContainerLoot::from_tag(&saved).unwrap();
-            let mut stored =
-                block_entity_data((1, 2, 3), &container, id, None, &Default::default());
-            let Tag::Compound(fields) = &mut stored else {
-                panic!("compound");
-            };
-            pending.write_tags(fields);
+            let stored = block_entity_encode::data(
+                (1, 2, 3),
+                &container,
+                id,
+                block_entity_encode::DataFields {
+                    pending: Some(&pending),
+                    ..Default::default()
+                },
+                &Default::default(),
+            );
             assert_eq!(stored.get("LootTable"), saved.get("LootTable"), "{id}");
             assert_eq!(
                 stored.get("LootTableSeed"),
@@ -7299,11 +7322,14 @@ mod tests {
             block_entity_encode::encode(pos, &chest, "minecraft:chest", &Default::default());
         assert!(plain.get("lock").is_none());
         // ...so `data get` puts back the one it was loaded with.
-        let data = block_entity_data(
+        let data = block_entity_encode::data(
             pos,
             &chest,
             "minecraft:chest",
-            saved.get("lock"),
+            block_entity_encode::DataFields {
+                lock: saved.get("lock"),
+                ..Default::default()
+            },
             &Default::default(),
         );
         let lock = sunrise_core::nbt::parse_snbt(r#"{items:"minecraft:gold_ingot"}"#)
@@ -10280,8 +10306,13 @@ mod jukebox_song_clock_tests {
             assert_eq!(j.loaded_clock, clock.is_some());
             let saved =
                 block_entity_encode::encode(pos, &model, "minecraft:jukebox", &Default::default());
-            let command =
-                block_entity_data(pos, &model, "minecraft:jukebox", None, &Default::default());
+            let command = block_entity_encode::data(
+                pos,
+                &model,
+                "minecraft:jukebox",
+                Default::default(),
+                &Default::default(),
+            );
             check(label, &saved, clock);
             check(label, &command, clock);
             if with_record {

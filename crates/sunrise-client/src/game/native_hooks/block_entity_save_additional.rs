@@ -26,11 +26,8 @@ fn save_additional(
     // The raw attachment field stays available for the disk overlay (including
     // opaque or malformed rows), but is never part of the Part's payload.
     let key = ATTACHMENTS_KEY.into();
-    let mut output: Compound = tag
-        .iter()
-        .filter(|(name, _)| **name != key)
-        .map(|(name, value)| (name.clone(), value.clone()))
-        .collect();
+    let mut output = tag.clone();
+    output.remove(&key);
     fire(id, entity, &mut output);
     // Admit the listener's output once, before any consumer sees it. Disk
     // encoding still owns the size limit for its complete record.
@@ -111,9 +108,14 @@ impl Game<'_> {
         block: &str,
         items: &sunrise_client::items::Items,
     ) -> Tag {
-        block_entity_encode::encode_with(pos, entity, block, items, |kind, tag| {
-            self.capture_block_entity_payload_at(pos, generation, kind, tag)
-        })
+        block_entity_encode::encode_with(
+            pos,
+            entity,
+            block,
+            Default::default(),
+            items,
+            |kind, tag| self.capture_block_entity_payload_at(pos, generation, kind, tag),
+        )
     }
 
     /// Save the live entity for a command, a template, an item or a loot copy.
@@ -124,9 +126,14 @@ impl Game<'_> {
         block: &str,
         items: &sunrise_client::items::Items,
     ) -> Tag {
-        block_entity_encode::encode_with(pos, entity, block, items, |kind, tag| {
-            self.capture_block_entity_payload(pos, kind, tag)
-        })
+        block_entity_encode::encode_with(
+            pos,
+            entity,
+            block,
+            Default::default(),
+            items,
+            |kind, tag| self.capture_block_entity_payload(pos, kind, tag),
+        )
     }
 }
 
@@ -138,24 +145,31 @@ impl GameLevel<'_> {
         entity: &BlockEntity,
         block: &str,
     ) -> Tag {
-        block_entity_encode::encode_with(pos, entity, block, self.items, |kind, tag| {
-            if self.native_authoritative
-                && let Some(level) = self.api_level
-            {
-                save_additional(
-                    level,
-                    pos,
-                    self.world.block_entities.generation(&pos),
-                    kind,
-                    tag,
-                    |id, entity, tag| {
-                        self.native_block_entity_save_additional(id, entity, tag);
-                    },
-                )
-            } else {
-                None
-            }
-        })
+        block_entity_encode::encode_with(
+            pos,
+            entity,
+            block,
+            Default::default(),
+            self.items,
+            |kind, tag| {
+                if self.native_authoritative
+                    && let Some(level) = self.api_level
+                {
+                    save_additional(
+                        level,
+                        pos,
+                        self.world.block_entities.generation(&pos),
+                        kind,
+                        tag,
+                        |id, entity, tag| {
+                            self.native_block_entity_save_additional(id, entity, tag);
+                        },
+                    )
+                } else {
+                    None
+                }
+            },
+        )
     }
 
     pub(in crate::game) fn native_block_entity_save_additional(
