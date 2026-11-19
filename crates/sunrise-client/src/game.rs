@@ -743,6 +743,8 @@ struct WorldTables {
     /// them), for the advancement tree reload and the loot data.
     files: Vec<(String, Vec<Vec<u8>>)>,
     items: Arc<Items>,
+    /// Registry definitions stay frozen at world open, even when tags reload.
+    packed_registries: Arc<sunrise_client::lan::data::PackRegistryDefinitions>,
     loot: Arc<sunrise_world::loot::LootData>,
     loot_modifier_manager: Arc<mod_api::GlobalLootModifierManager>,
     recipes: Recipes,
