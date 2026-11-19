@@ -141,3 +141,10 @@ pub fn contain_refusal<T>(mod_id: &'static str, f: impl FnOnce() -> T) -> Result
         },
     }
 }
+
+/// [`contain_refusal`] for a hand-written call of mod code outside generated dispatch, on the
+/// current native mod, and only outside `World`: in `World` it is the plain call. A call site
+/// answers the refusal as "the mod did not answer" and reports it.
+pub fn contain_outside_world<T>(f: impl FnOnce() -> T) -> Result<T, PhaseRefusal> {
+    crate::runtime::refusable(crate::runtime::outside_world(), f)
+}

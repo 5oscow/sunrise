@@ -12,6 +12,6 @@ mod __private {
         check_access, current_phase,
     };
     pub use crate::world::phase_refusal::{
-        OuterScope, PhaseRefusal, contain_refusal, enter_scope, latched, leave_scope, refuse,
+        OuterScope, PhaseRefusal, contain_outside_world, contain_refusal, enter_scope, latched, leave_scope, refuse,
     };
 }
