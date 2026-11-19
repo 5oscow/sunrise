@@ -628,6 +628,7 @@ fn a_click_on_a_cushion_with_a_synced_passenger_passes_to_the_item() {
     with_picked_cushion(|game, server, target| {
         game.refresh_client_pick(1.0);
         assert_eq!(game.crosshair_target(), Some(target));
+        game.spawn_entity(77, "minecraft:marker", [0.5, 70.0, 0.5], [0.0; 3]);
         game.handle_packet(C::SetPassengers(play::SetPassengers {
             vehicle: 31,
             passengers: vec![77],

@@ -334,7 +334,14 @@ mod tests {
                         .unwrap();
                     game.handle_packet(snapshot(id as u32, None)).unwrap();
                 }
-                game.spawn_entity(4, "minecraft:marker", [0.5, 70.0, 0.5], [0.0; 3]);
+                game.spawn_entity(4, "minecraft:area_effect_cloud", [0.5, 70.0, 0.5], [0.0; 3]);
+                game.spawn_entity(5, "minecraft:marker", [0.5, 70.0, 0.5], [0.0; 3]);
+                game.spawn_entity(
+                    6,
+                    "minecraft:ominous_item_spawner",
+                    [0.5, 70.0, 0.5],
+                    [0.0; 3],
+                );
                 let set = |vehicle, passengers| {
                     C::SetPassengers(play::SetPassengers {
                         vehicle,
@@ -343,7 +350,7 @@ mod tests {
                 };
                 let vehicle = game.entity(9).unwrap();
                 let row = game.entity(12).unwrap();
-                let marker = game.entity(4).unwrap();
+                let cloud = game.entity(4).unwrap();
                 let me = game.entity(7).unwrap();
                 let unknown = EntityRef::new(vehicle.epoch(), 99);
                 let stale = EntityRef::new(
@@ -362,8 +369,8 @@ mod tests {
                 assert_eq!(vehicle.is_vehicle(host), Some(true));
                 assert_eq!(row.vehicle(host), Some(vehicle));
                 assert_eq!(me.vehicle(host), Some(vehicle));
-                assert_eq!(marker.is_passenger(host), Some(true));
-                assert_eq!(marker.root_vehicle(host), Some(vehicle));
+                assert_eq!(cloud.is_passenger(host), Some(true));
+                assert_eq!(cloud.root_vehicle(host), Some(vehicle));
                 assert_eq!(unknown.vehicle(host), None);
                 assert_eq!(unknown.passengers(host), None);
                 assert_eq!(stale.passengers(host), None);
@@ -381,8 +388,17 @@ mod tests {
 
                 game.handle_packet(set(4, vec![9])).unwrap();
                 assert_eq!(vehicle.vehicle(game), None);
-                assert_eq!(marker.is_vehicle(game), Some(false));
-                assert_eq!(marker.root_vehicle(game), Some(vehicle));
+                assert_eq!(cloud.is_vehicle(game), Some(false));
+                assert_eq!(cloud.root_vehicle(game), Some(vehicle));
+
+                // Known entities that cannot accept a passenger do not displace
+                // an existing ride either, even on a forced client mount.
+                for refused in [5, 6] {
+                    let cannot_carry = game.entity(refused).unwrap();
+                    game.handle_packet(set(refused as i32, vec![12])).unwrap();
+                    assert_eq!(cannot_carry.passengers(game), Some(vec![]));
+                    assert_eq!(row.vehicle(game), Some(vehicle));
+                }
 
                 game.handle_packet(set(7, vec![99])).unwrap();
                 assert_eq!(late.vehicle(game), Some(me));
@@ -400,11 +416,11 @@ mod tests {
                 assert_eq!(me.passengers(host), Some(vec![]));
                 assert_eq!(late.is_passenger(host), Some(false));
                 assert_eq!(vehicle.passengers(host), Some(vec![row]));
-                assert_eq!(marker.root_vehicle(host), Some(vehicle));
+                assert_eq!(cloud.root_vehicle(host), Some(vehicle));
 
                 game.handle_packet(set(9, vec![])).unwrap();
                 assert_eq!(vehicle.passengers(game), Some(vec![]));
-                assert_eq!(marker.root_vehicle(game), Some(row));
+                assert_eq!(cloud.root_vehicle(game), Some(row));
             })
         });
     }

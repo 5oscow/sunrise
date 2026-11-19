@@ -291,6 +291,12 @@ impl Game<'_> {
             log::warn!("Sunrise: ignoring passenger list for unknown vehicle {vehicle}");
             return;
         }
+        // Forced client startRiding still respects Entity.couldAcceptPassenger.
+        if remote.tracked(vehicle).is_some_and(|(kind, _)| {
+            matches!(kind, "minecraft:marker" | "minecraft:ominous_item_spawner")
+        }) {
+            return;
+        }
         let vehicle_id = vehicle as u32;
         remote.forget_passengers(vehicle_id);
         let mut index = 0;

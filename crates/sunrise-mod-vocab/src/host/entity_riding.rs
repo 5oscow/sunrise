@@ -11,7 +11,8 @@ pub trait EntityRidingBackend {
     /// nothing, its actual vehicle is retained off-level and has no resident handle,
     /// or the supplied handle is stale. `is_passenger` still reports the relationship.
     /// On a client, the vehicle the passenger has boarded from the server's list, if
-    /// this window has a handle for it. A list for an unknown vehicle has no effect.
+    /// this window has a handle for it. Lists for unknown vehicles or entities that
+    /// cannot accept passengers (markers and ominous item spawners) have no effect.
     #[access(WorldOnly)]
     fn entity_vehicle(&self, entity: EntityRef) -> Option<EntityRef>;
     /// Side: both.

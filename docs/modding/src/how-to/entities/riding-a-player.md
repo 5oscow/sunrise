@@ -37,7 +37,8 @@ vehicle, forced or not, as vanilla's `startRiding` callers and `/ride` do.
   `entity_mount` hears each of these; one a listener cancels still takes the mob off, since no save holds a player
   vehicle and a player can't carry a mob out of its level.
 - **Reads.** `vehicle`, `is_passenger`, `passengers`, `is_vehicle` and `root_vehicle` answer as for any other
-  vehicle, on the server and on clients that track it (including the player's own client).
+  vehicle, on the server and on a client after it applies a passenger list for the vehicle,
+  including the player's own client when it receives that list.
 
 ## Refusals
 
