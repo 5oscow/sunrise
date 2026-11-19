@@ -63,7 +63,7 @@ fn refusal(atlas: &HudAtlas, draw: &GuiDraw) -> Option<Undrawable> {
         GuiDraw::Blit {
             texture, uv, tex, ..
         } => {
-            if !atlas.sprites.contains_key(texture.as_ref()) {
+            if atlas.blit_rect(texture.as_ref()).is_none() {
                 Some(Undrawable::BlitTexture(texture.to_string()))
             } else if tex[0] <= 0 || tex[1] <= 0 || !uv.iter().all(|v| v.is_finite()) {
                 Some(Undrawable::BlitSize)

@@ -877,7 +877,7 @@ fn paint_with(
                 tex,
                 color,
             } => {
-                let Some(mut r) = atlas.sprites.get(texture.as_ref()).copied() else {
+                let Some(mut r) = atlas.blit_rect(texture.as_ref()).copied() else {
                     continue;
                 };
                 let (du, dv) = (r.u1 - r.u0, r.v1 - r.v0);

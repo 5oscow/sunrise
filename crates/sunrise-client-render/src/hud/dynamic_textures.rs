@@ -147,6 +147,8 @@ pub struct Names<'a> {
     pub live: &'a mut HashMap<String, Rect>,
     /// The GUI atlas's entries by id: the first owner of an id keeps it.
     pub gui: &'a mut HashMap<String, GuiSprite>,
+    /// A registered atlas's sprites by GUI name: a name it holds is taken.
+    pub registered: &'a HashMap<String, Rect>,
 }
 
 /// An image's key in the live and GUI tables: its id with `minecraft:` dropped.
@@ -177,6 +179,7 @@ impl DynamicTextures {
         let name = id.to_string();
         let key = lane_key(&name);
         if names.sprites.contains_key(&name)
+            || names.registered.contains_key(key)
             || matches!(names.gui.get(key), Some(GuiSprite::Present { .. }))
         {
             return Err(DynamicTextureError::NameTaken);
@@ -380,6 +383,7 @@ mod tests {
         sprites: HashMap<String, Rect>,
         live: HashMap<String, Rect>,
         gui: HashMap<String, GuiSprite>,
+        registered: HashMap<String, Rect>,
     }
     impl Tables {
         fn names(&mut self) -> Names<'_> {
@@ -387,6 +391,7 @@ mod tests {
                 sprites: &mut self.sprites,
                 live: &mut self.live,
                 gui: &mut self.gui,
+                registered: &self.registered,
             }
         }
     }
@@ -613,6 +618,7 @@ mod tests {
             sprites: &mut atlas.sprites,
             live: &mut atlas.live,
             gui: &mut atlas.gui,
+            registered: &atlas.registered,
         };
         textures.rebind(Some(&pool), &mut names);
         for (id, gui, model) in cases {
@@ -639,6 +645,7 @@ mod tests {
             sprites: &mut atlas.sprites,
             live: &mut atlas.live,
             gui: &mut atlas.gui,
+            registered: &atlas.registered,
         };
         for (id, ..) in cases {
             textures

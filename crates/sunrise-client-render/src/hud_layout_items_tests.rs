@@ -329,7 +329,7 @@ fn checked_paint_refuses_what_the_gui_atlas_lacks_and_atlas_sprites_use_the_bloc
             {"type":"minecraft:filter","pattern":{"namespace":"demo","path":"item/modeled"}}]}"#,
     )
     .unwrap();
-    let atlas = HudAtlas::build(&crate::resource_source::ResourceSource::directory(
+    let mut atlas = HudAtlas::build(&crate::resource_source::ResourceSource::directory(
         root.clone(),
     ))
     .unwrap();
@@ -362,6 +362,16 @@ fn checked_paint_refuses_what_the_gui_atlas_lacks_and_atlas_sprites_use_the_bloc
         [model.u0, model.v0],
         "the block atlas's sprite"
     );
+    // A live texture replayed at the model's name: a `Blit` takes the live one, an `AtlasSprite`
+    // keeps the packed model's, and the refusal and the draw agree.
+    let live = atlas.sprites["sunrise/white"];
+    atlas.live.insert("demo:item/modeled".into(), live);
+    let blit = blit("demo:item/modeled", Blend::Textured, [8, 8]);
+    assert_eq!(undrawable(&atlas, std::slice::from_ref(&blit)), None);
+    let mut batch = HudBatch::scratch([64, 64]);
+    paint(&mut batch, &atlas, &[blit]);
+    assert_eq!(batch.vertices[0].uv, [live.u0, live.v0], "the live texture");
+    assert_ne!([live.u0, live.v0], [model.u0, model.v0]);
 }
 
 #[test]

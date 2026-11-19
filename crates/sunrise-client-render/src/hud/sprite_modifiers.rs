@@ -139,6 +139,7 @@ impl SpriteModifiers {
         at: [f32; 4],
         color: u32,
     ) -> Option<Vec<SpriteDraw>> {
+        let key = key.strip_prefix("minecraft:").unwrap_or(key);
         let (change, overlays) = self.by_sprite.get(key)?;
         let base = apply(atlas, key, Some(rect), change, at, color);
         let base_at = base.as_ref().map_or(at, |b| b.at);
@@ -232,6 +233,17 @@ mod tests {
             .unwrap()[0];
         assert_eq!(hotbar.at, [80.0, 200.0, 222.0, 22.0]);
         assert_eq!((hotbar.rect.u0, hotbar.color), (0.0, white));
+        // The namespaced spelling of the vanilla key is the same sprite.
+        let spelled = &mods
+            .draws(
+                &atlas,
+                "minecraft:hud/hotbar",
+                rect(0.0),
+                [100.0, 200.0, 182.0, 22.0],
+                white,
+            )
+            .unwrap()[0];
+        assert_eq!(spelled.at, hotbar.at);
         // The heart's atlas UVs: u0 and u1 replaced, v kept.
         let heart = &mods
             .draws(&atlas, "hud/heart/full", rect(0.4), [0.0; 4], white)

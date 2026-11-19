@@ -93,6 +93,9 @@ pub struct HudAtlas {
     /// The packed names no GUI lookup of an id the GUI list lacks answers with: the model atlases'
     /// sprites and the walked files a GUI entry stands on.
     pub non_gui: HashSet<String>,
+    /// A registered atlas's sprites by their GUI names (`mymod:gui/atlases/icons/mymod/heart`),
+    /// each packed under a key of its own so that no model or GUI sprite can take its place.
+    pub registered: HashMap<String, Rect>,
     /// The live (dynamic) textures by GUI id, a lane of their own: the GUI lookup reads it first,
     /// and no reload of another lane writes it ([`dynamic_textures::Names`]).
     pub live: HashMap<String, Rect>,
@@ -901,6 +904,8 @@ fn atlas_sprites(root: &ResourceSource, packed: &[PackedImage]) -> AtlasSprites 
 }
 /// The prefix of the name a GUI atlas sprite is packed under when a model's sprite has its name.
 const GUI_KEY: &str = "#gui:";
+/// The prefix of the name a registered atlas's sprite is packed under.
+const REGISTERED_KEY: &str = "#registered:";
 
 /// `MissingTextureAtlasSprite`: what a sprite the atlas lacks draws as.
 pub const MISSING_SPRITE: &str = "sunrise/missing";
@@ -1045,9 +1050,9 @@ impl HudAtlas {
             Some(GuiSprite::Present { rect, scaling }) => Some((rect, *scaling)),
             Some(GuiSprite::Missing) => None,
             None => self
-                .sprites
+                .registered
                 .get(id)
-                .filter(|_| !self.non_gui.contains(id))
+                .or_else(|| self.sprites.get(id).filter(|_| !self.non_gui.contains(id)))
                 .map(|rect| (rect, None)),
         }
     }
@@ -1079,6 +1084,13 @@ impl HudAtlas {
                 .flatten(),
         }
     }
+    /// The rect of a `Blit` texture by its packed name: a live texture's first, else the packed
+    /// sprite. One lookup for the refusal and the draw, apart from the GUI lookup.
+    pub fn blit_rect(&self, texture: &str) -> Option<&Rect> {
+        self.live
+            .get(texture.strip_prefix("minecraft:").unwrap_or(texture))
+            .or_else(|| self.sprites.get(texture))
+    }
     /// The pool and the tables a client mod's dynamic texture is named in.
     pub fn dynamic_names(
         &mut self,
@@ -1089,6 +1101,7 @@ impl HudAtlas {
                 sprites: &mut self.sprites,
                 live: &mut self.live,
                 gui: &mut self.gui,
+                registered: &self.registered,
             },
         )
     }
@@ -1238,6 +1251,7 @@ impl HudAtlas {
             sprites: HashMap::new(),
             gui: HashMap::new(),
             non_gui: HashSet::new(),
+            registered: HashMap::new(),
             live: HashMap::new(),
             object_skins: HashMap::new(),
             object_skins_revision: Self::next_revision(),
@@ -1314,6 +1328,7 @@ impl HudAtlas {
             flags: HashMap::new(),
             gui: HashMap::new(),
             non_gui: HashSet::new(),
+            registered: HashMap::new(),
             live: HashMap::new(),
             object_skins: HashMap::new(),
             object_skins_revision: Self::next_revision(),
@@ -1622,6 +1637,28 @@ impl HudAtlas {
             }
             images.push(image);
         }
+        // A registered atlas's sprites (`ns:gui/atlases/...`) are packed under keys of their own,
+        // so no model's or GUI entry's sprite of the same name can displace or be taken for one.
+        for image in &mut images {
+            let path = image.0.split_once(':').map_or(image.0.as_str(), |(_, p)| p);
+            if !path.starts_with("gui/atlases/") {
+                continue;
+            }
+            let key = format!("{REGISTERED_KEY}{}", image.0);
+            let old = std::mem::replace(&mut image.0, key.clone());
+            if let Some(value) = flags.remove(&old) {
+                flags.insert(key.clone(), value);
+            }
+            if let Some(value) = gui_sizes.remove(&old) {
+                gui_sizes.insert(key.clone(), value);
+            }
+            if let Some(value) = maps.remove(&old) {
+                maps.insert(key.clone(), value);
+            }
+            for name in animated.iter_mut().filter(|name| **name == old) {
+                name.clone_from(&key);
+            }
+        }
         let mut cit_names = HashSet::new();
         let mut gui_files = HashMap::new();
         let mut gui_names = Vec::new();
@@ -1843,7 +1880,11 @@ impl HudAtlas {
                 (id, sprite)
             })
             .collect();
-        sprites.retain(|name, _| !name.starts_with(GUI_KEY));
+        let registered: HashMap<String, Rect> = sprites
+            .iter()
+            .filter_map(|(key, rect)| Some((key.strip_prefix(REGISTERED_KEY)?.to_owned(), *rect)))
+            .collect();
+        sprites.retain(|name, _| !name.starts_with(GUI_KEY) && !name.starts_with(REGISTERED_KEY));
         Ok(Self {
             pictures: std::sync::Mutex::new(pictures::Cache::new(root, defaults)),
             revision: Self::next_revision(),
@@ -1856,6 +1897,7 @@ impl HudAtlas {
             sprites,
             gui,
             non_gui,
+            registered,
             live: HashMap::new(),
             object_skins: HashMap::new(),
             object_skins_revision: Self::next_revision(),
@@ -3925,13 +3967,43 @@ mod tests {
         let atlas = HudAtlas::build(&ResourceSource::directory(root.clone())).unwrap();
         let name = "demo:gui/atlases/icons/demo/heart";
         let packed = *atlas
-            .sprites
+            .registered
             .get(name)
             .expect("the projection stays packed");
         assert_eq!(texel_at(&atlas, packed, 0, 0), [0, 200, 0, 255]);
         // The GUI list removed the id: the GUI lane says so, whatever else is packed under the name.
         assert!(matches!(atlas.gui_lookup(name), Some(GuiSprite::Missing)));
         std::fs::remove_dir_all(&root).unwrap();
+    }
+    /// A registered atlas's sprite and an items atlas entry of the same name (`mymod:gui/atlases/..`)
+    /// each keep their own packed sprite: the GUI lookup finds the registered sprite, and the
+    /// model lookup its own.
+    #[test]
+    fn a_registered_atlas_sprite_and_a_model_of_one_name_both_survive() {
+        let name = "demo:gui/atlases/icons/demo/heart";
+        let items = format!(
+            r#"{{"sources":[{{"type":"minecraft:single","resource":"demo:item/sheet","sprite":"{name}"}}]}}"#
+        );
+        let root = model_atlas_root("gui-registered-model", &items, r#"{"sources":[]}"#);
+        write_vanilla_gui_definition(&root);
+        // The staged file of the registered atlas's sprite, as its projection lays it down.
+        write_pixel(
+            &root.join("assets/demo/textures/gui/atlases/icons/demo/heart.png"),
+            [0, 200, 0, 255],
+        );
+        let atlas = HudAtlas::build(&ResourceSource::directory(root.clone())).unwrap();
+        std::fs::remove_dir_all(&root).unwrap();
+        let registered = *atlas.gui_rect(name).expect("the registered sprite");
+        assert_eq!(texel_at(&atlas, registered, 0, 0), [0, 200, 0, 255]);
+        let model = *atlas.sprites.get(name).expect("the model's sprite");
+        assert_eq!(texel_at(&atlas, model, 0, 0), [255, 0, 0, 255]);
+        assert!(
+            atlas
+                .sprites
+                .keys()
+                .all(|key| !key.starts_with(REGISTERED_KEY)),
+            "the internal keys stay internal"
+        );
     }
     /// A resource tree with only a GUI definition publishes its GUI sprites.
     #[test]
