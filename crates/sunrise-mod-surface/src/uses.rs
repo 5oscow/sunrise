@@ -55,9 +55,8 @@
 //! [`fits`] compares such a list with a target build's surface. The mod fits when every entry
 //! exists there with an equal hash and under every path the mod writes, every type keeps the
 //! trait impls it had, every struct the mod builds can still be built and keeps its field set
-//! when built in full, and every hook the source or the manifest names keeps its version (a
-//! version changes when a listener sees a new meaning under the same signature, which no compile
-//! catches). The per-member hashes make this exact about additions: a new `Host` method or
+//! when built in full, and every hook in the list keeps its version (a version changes when a
+//! listener sees a new meaning under the same signature, which no compile catches). The per-member hashes make this exact about additions: a new `Host` method or
 //! sub-host trait, a new hook, a new hook argument, a new field on a struct the mod does not
 //! build in full, or a new trait impl changes nothing for the mod.
 //!
@@ -137,7 +136,8 @@ pub struct Entry {
     /// `&mut dyn ServerHost`), sorted. The target must still lead from each to the owner.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reached_from: Vec<String>,
-    /// For a hook the source or the manifest names: its version in the build the list was made for.
+    /// For a hook: its version in the build the list was made for. A list of the schema before
+    /// this one holds none until [`UsesTable::pin_hook_versions`] fills it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<u64>,
 }
@@ -2175,9 +2175,7 @@ fn list(
                             .get(id)
                             .map(|paths| paths.iter().cloned().collect())
                             .unwrap_or_default(),
-                        version: (!matches!(origin, Origin::Via(_)))
-                            .then(|| hook_versions.get(id).copied())
-                            .flatten(),
+                        version: hook_versions.get(id).copied(),
                         reached_from: reached_from
                             .get(id)
                             .into_iter()
@@ -2563,6 +2561,38 @@ impl UsesTable {
             return Err(UsesError::DuplicateId(pair[0].id.clone()));
         }
         Ok(table)
+    }
+
+    /// Gives each hook entry that holds no version the one `made_for`, the surface of the build
+    /// the list was made for, has: a list of the schema before this one says none.
+    pub fn pin_hook_versions(&mut self, made_for: &Surface) {
+        let versions: BTreeMap<&str, u64> = made_for
+            .hooks
+            .iter()
+            .map(|h| (h.id.as_str(), h.contract.version))
+            .collect();
+        for entry in &mut self.entries {
+            entry.version = entry
+                .version
+                .or_else(|| versions.get(entry.id.as_str()).copied());
+        }
+    }
+
+    /// Whether the list cannot say that some hook of it keeps its version in `target`: the entry
+    /// holds no version, and the hook there is past version 1, the one every hook starts at.
+    /// [`fits`] does not judge such a hook, so a caller that cannot [`Self::pin_hook_versions`]
+    /// treats the list as none.
+    pub fn lacks_a_hook_version(&self, target: &Surface) -> bool {
+        let unversioned: BTreeSet<&str> = self
+            .entries
+            .iter()
+            .filter(|e| e.version.is_none())
+            .map(|e| e.id.as_str())
+            .collect();
+        target
+            .hooks
+            .iter()
+            .any(|h| h.contract.version != 1 && unversioned.contains(h.id.as_str()))
     }
 
     /// The table as written: pretty JSON, entries sorted by id, ending in a newline.

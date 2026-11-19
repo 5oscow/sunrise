@@ -19,7 +19,7 @@ The launcher asks, for each enabled native mod of an instance, in this order:
    - a type keeps every trait impl it had;
    - a struct the mod builds with a literal can still be built that way, and, built field by field (no `..`), still
      has the same fields;
-   - a hook the mod's source or manifest names still has the version it had;
+   - a hook in the list still has the version it had;
    - a trait member the mod reaches through a trait it calls (a sub-host trait's method called on
      `&mut dyn ServerHost`) is still reached from that trait.
 5. **Do its `[[inject]]` points hold?** Each row's point must be the same in this build's `points.json`.
@@ -46,7 +46,7 @@ reads source, and what it leaves to the compile, is in
 
 | Field | What it is |
 |---|---|
-| `schema` | The table's schema number (2). A reader also takes schema 1, whose lists recorded a build wherever the scan was in doubt: it does not read how they say a struct is built. It refuses any other number, unknown fields, repeated ids and a table over 4 MiB. |
+| `schema` | The table's schema number (2). A reader also takes schema 1, whose lists recorded a build wherever the scan was in doubt and held no hook versions: it does not read how they say a struct is built, and it treats one as no list when a hook in it is past version 1 in this build, unless the build the list was made for is at hand to give the versions (`cargo sunrise-mod fits` fetches it). Packing the mod again writes schema 2. It refuses any other number, unknown fields, repeated ids and a table over 4 MiB. |
 | `made_for` | The build id the hashes come from: the mod's pin. |
 | `entries[].id`, `entries[].hash` | A record the mod uses, and its hash at `made_for`. |
 | `entries[].impls` | A type's trait impls at `made_for`. |
@@ -55,7 +55,7 @@ reads source, and what it leaves to the compile, is in
 | `entries[].built_at` | `file:line` of the first literal that builds it. |
 | `entries[].paths` | The public paths the mod writes the item by, besides its id's. |
 | `entries[].reached_from` | For a trait's member: the traits the mod calls that lead to its owner. |
-| `entries[].version` | For a hook the source or the manifest names: its version at `made_for`. |
+| `entries[].version` | For a hook: its version at `made_for`. |
 
 A struct built with `..` (for example `..Default::default()`) keeps fitting when the struct gains a field; one built
 field by field does not. `cargo sunrise-mod check --uses` says which of the mod's literals are which.

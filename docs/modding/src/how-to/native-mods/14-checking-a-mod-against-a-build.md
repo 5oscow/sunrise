@@ -67,7 +67,7 @@ The real compile on the player's machine is always the final check. A mod judged
 left out by name, with a note that it needs an update from its author, and the other mods still build.
 
 Two changes always refuse, because no compile can see them or repair them: an item the mod uses that is removed,
-renamed or changed, and a hook the mod names whose version changed (the same signature with a new meaning).
+renamed or changed, and a hook the mod uses whose version changed (the same signature with a new meaning).
 
 Some sources cannot be judged at all:
 - a file that does not parse as Rust (the message gives its line);

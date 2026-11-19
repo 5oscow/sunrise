@@ -615,6 +615,29 @@ fn a_used_hook_whose_version_changed_is_named() {
     )
     .unwrap();
     assert_eq!(fits(other.entries(), &version_two), Fit::Fits);
+    // A list of the schema before this one holds no versions: the build it was made for gives
+    // them, and without it a hook past its first version cannot be shown unchanged.
+    let old = |pinned: bool| {
+        let mut table = UsesTable {
+            schema: 1,
+            made_for: "x".into(),
+            entries: made.entries().cloned().collect(),
+        };
+        for entry in &mut table.entries {
+            entry.version = None;
+        }
+        if pinned {
+            table.pin_hook_versions(&base().build());
+        }
+        table
+    };
+    assert_eq!(
+        words(fits(&old(true).entries, &version_two)),
+        ["the hook `player_logged_in` is now version 2; this mod was made for version 1"]
+    );
+    assert!(old(false).lacks_a_hook_version(&version_two));
+    assert!(!old(false).lacks_a_hook_version(&base().build()));
+    assert!(!old(true).lacks_a_hook_version(&version_two));
 }
 
 #[test]
