@@ -359,8 +359,8 @@ fn invalid_and_generated_sprites_match_vanilla() {
     fs::write(path, atlas.to_string()).unwrap();
     for (name, w, h, color) in [
         ("trim", 8, 16, [255; 4]),
-        ("palettes/key", 1, 1, [255; 4]),
-        ("palettes/red", 1, 1, [255, 0, 0, 255]),
+        ("key", 1, 1, [255; 4]),
+        ("red", 1, 1, [255, 0, 0, 255]),
     ] {
         png(
             &root.join(format!("assets/test/textures/{name}.png")),
