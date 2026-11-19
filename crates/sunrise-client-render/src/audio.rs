@@ -1717,9 +1717,11 @@ impl Audio {
     ) {
         self.backend.streams.follow_entities(resolve);
     }
-    /// The listener left its level: every positional stream is unplaced until its mod places it
-    /// again.
-    pub fn unplace_streams(&self) {
+    /// The listener left its level (`updateLevelInEngines(null)`): every vanilla sound stops, and
+    /// every positional mod stream is unplaced until its mod places it again; flat streams play
+    /// on. The one thing every way out of a level calls, so none can forget the streams.
+    pub fn leave_level(&mut self) {
+        self.stop_all();
         self.backend.streams.unplace();
     }
     /// The player's "Mod audio streams" switch: off, every mod stream plays on unheard.

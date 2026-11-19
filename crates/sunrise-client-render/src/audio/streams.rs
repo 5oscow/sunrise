@@ -284,13 +284,10 @@ impl AudioStreamSource for StreamHandle {
         if !c.playing.load(Acquire) {
             return AudioStreamState::Buffering;
         }
-        // A writer is never in the middle for long: wait it out.
-        let view = loop {
-            if let Some(view) = c.view() {
-                break view;
-            }
-        };
-        if view.positional && !view.placed {
+        // One atomic holds both flags, so what this reads is a whole placement even while a writer
+        // is in the middle of publishing the position: the old one or the new.
+        let flags = c.flags.load(Acquire);
+        if flags & POSITIONAL != 0 && flags & PLACED == 0 {
             AudioStreamState::Unplaced
         } else {
             AudioStreamState::Playing
@@ -610,6 +607,7 @@ pub(super) fn mix(
 
 #[cfg(test)]
 mod tests {
+    use super::super::Audio;
     use super::super::{Mixer, mix as mix_output};
     use super::*;
     use mod_api::SoundSource;
@@ -958,6 +956,34 @@ mod tests {
         drop(mod_api::AudioStreamRef::new(stream));
         rig.pool.reap(&rig.mixer);
         assert_eq!(rig.voices(), 0);
+    }
+
+    #[test]
+    fn leaving_a_level_unplaces_positional_streams_and_leaves_flat_ones_playing() {
+        let mut audio = Audio::silent(&sunrise_assets::resource_source::ResourceSource::directory(
+            std::path::PathBuf::from("/nonexistent/sunrise-test-audio"),
+        ));
+        audio.backend_live_for_bench();
+        let positional = audio
+            .open_stream(
+                "mod",
+                &spec().with_placement(StreamPlacement::At([0.0, 0.0, 1.0])),
+            )
+            .unwrap();
+        let flat = audio.open_stream("mod", &spec()).unwrap();
+        for stream in [&positional, &flat] {
+            stream.push(&half(2_000));
+        }
+        mix_output(
+            &mut audio.backend.mixer.lock().unwrap(),
+            &mut [0.0; 16],
+            2,
+            48_000,
+        );
+        assert_eq!(positional.state(), AudioStreamState::Playing);
+        audio.leave_level();
+        assert_eq!(positional.state(), AudioStreamState::Unplaced);
+        assert_eq!(flat.state(), AudioStreamState::Playing);
     }
 
     #[test]

@@ -75,7 +75,6 @@ impl AudioClientHost for Client {
 
 #[test]
 fn wire_loopback_a_guest_holds_an_audio_stream_by_id_and_drops_it_to_stop_it() {
-    mod_api::__private::initialize().unwrap();
     let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
     let client = Client::default();
     let mut frame = boundary::Frame::default();
@@ -127,7 +126,6 @@ fn wire_loopback_a_guest_holds_an_audio_stream_by_id_and_drops_it_to_stop_it() {
 
 #[test]
 fn wire_loopback_an_open_in_the_wrong_phase_is_refused_by_name_without_reaching_the_host() {
-    mod_api::__private::initialize().unwrap();
     // Packages allows no host call; the client is never reached, so none is bound.
     let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::Packages);
     let cx = Box::into_raw(Box::new(boundary::Cx::default()));

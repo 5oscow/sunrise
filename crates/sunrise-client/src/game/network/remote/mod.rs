@@ -1660,9 +1660,7 @@ impl Game<'_> {
         // otherwise play on over the title screen until the next world.
         self.ambience.clear(&mut self.audio);
         self.music.stop_playing(None, &mut self.audio);
-        self.audio.stop_all();
-        // Mods' streams play on, but no place of the level that is gone is heard.
-        self.audio.unplace_streams();
+        self.audio.leave_level();
         self.mod_sounds.clear();
         // A world is leaving either way: its icon attempt goes with it.
         self.world_icon = None;
