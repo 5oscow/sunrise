@@ -4970,6 +4970,7 @@ impl Game<'_> {
             .push(sunrise_world::level::LevelEvent::Sound {
                 pos: BlockPos::new(pos[0], pos[1], pos[2]),
                 sound: "minecraft:block.amethyst_block.chime".into(),
+                source: None,
                 volume: 1.0,
                 pitch,
             });

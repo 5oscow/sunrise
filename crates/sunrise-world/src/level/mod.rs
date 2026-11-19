@@ -332,6 +332,12 @@ pub enum EntityQuery {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LevelEventPlayer(pub u128);
 
+/// A sound category selected at its level call site, independently of the event ID.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LevelSoundSource {
+    Blocks,
+}
+
 /// Side effects reported to the caller, in vanilla call order.
 #[derive(Clone, Debug, PartialEq)]
 pub enum LevelEvent {
@@ -345,10 +351,12 @@ pub enum LevelEvent {
         data: i32,
         source: Option<LevelEventPlayer>,
     },
-    /// `Level.playSound(null, pos, sound, BLOCKS, volume, pitch)`.
+    /// `Level.playSound` at a block position.
     Sound {
         pos: BlockPos,
         sound: Arc<str>,
+        /// None keeps the caller's existing category inference.
+        source: Option<LevelSoundSource>,
         volume: f32,
         pitch: f32,
     },

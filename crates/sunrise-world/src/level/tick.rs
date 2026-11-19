@@ -73,6 +73,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                         self.emit(LevelEvent::Sound {
                             pos,
                             sound: "minecraft:block.composter.ready".into(),
+                            source: None,
                             volume: 1.0,
                             pitch: 1.0,
                         });
@@ -605,6 +606,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         self.emit(LevelEvent::Sound {
             pos,
             sound: "minecraft:block.big_dripleaf.tilt_down".into(),
+            source: None,
             volume: 1.0,
             pitch,
         });
