@@ -332,11 +332,26 @@ pub fn hover_name_text(names: &crate::creative::Names, stack: &ItemStack) -> cra
         let key = "block.minecraft.ominous_banner";
         return Text::translate_with_fallback(key, names.get(key).unwrap_or("Ominous Banner"), &[]);
     }
-    Text::translate_with_fallback(
-        &names.description_key(&stack.item),
-        &names.item(&stack.item),
-        &[],
-    )
+    // `Item.getDescriptionId`: the item's own default `item_name` component, else the item's
+    // key as `Util.makeDescriptionId("item", id)`. The English name is the fallback text.
+    let (namespace, path) = stack
+        .item
+        .split_once(':')
+        .unwrap_or(("minecraft", &stack.item));
+    let fallback = names.item(&stack.item);
+    match names.item_name(&stack.item) {
+        Some(name) => match name.as_object() {
+            Some(component) if component.len() == 1 => match component
+                .get("translate")
+                .and_then(serde_json::Value::as_str)
+            {
+                Some(key) => Text::translate_with_fallback(key, &fallback, &[]),
+                None => crate::entity_nbt::name_text(&crate::scoreboard::json_to_tag(name)),
+            },
+            _ => crate::entity_nbt::name_text(&crate::scoreboard::json_to_tag(name)),
+        },
+        None => Text::translate_with_fallback(&format!("item.{namespace}.{path}"), &fallback, &[]),
+    }
 }
 /// `ItemStack.getHoverName` as plain text in the current language: the component of
 /// [`hover_name_text`], rendered.

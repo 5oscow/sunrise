@@ -229,6 +229,7 @@ struct Shown {
 #[derive(Default)]
 pub struct Names {
     map: HashMap<String, String>,
+    item_names: HashMap<String, serde_json::Value>,
 }
 impl Names {
     pub fn load(root: &sunrise_assets::resource_source::ResourceSource) -> Self {
@@ -247,17 +248,32 @@ impl Names {
         {
             map.extend(read(&namespace));
         }
-        Self { map }
+        Self {
+            map,
+            item_names: HashMap::new(),
+        }
     }
-    /// The translation key of an item's name, as the pinned English map has it: `item.*` or,
-    /// for a block item, `block.*`. The choice does not depend on the selected language.
-    pub fn description_key(&self, id: &str) -> String {
-        let (namespace, path) = id.split_once(':').unwrap_or(("minecraft", id));
-        ["item", "block"]
-            .map(|prefix| format!("{prefix}.{namespace}.{path}"))
-            .into_iter()
-            .find(|key| self.map.contains_key(key))
-            .unwrap_or_else(|| format!("item.{namespace}.{path}"))
+    /// Keep each item's default `minecraft:item_name` component from the items' prototypes:
+    /// `Item.getDescriptionId` is its translation key, so the key is the item's own, never
+    /// guessed from the language.
+    pub fn with_item_names(
+        mut self,
+        prototypes: &std::collections::BTreeMap<
+            String,
+            std::collections::BTreeMap<String, serde_json::Value>,
+        >,
+    ) -> Self {
+        self.item_names = prototypes
+            .iter()
+            .filter_map(|(id, components)| {
+                Some((id.clone(), components.get("minecraft:item_name")?.clone()))
+            })
+            .collect();
+        self
+    }
+    /// An item's default `minecraft:item_name` component, as its prototype has it.
+    pub fn item_name(&self, id: &str) -> Option<&serde_json::Value> {
+        self.item_names.get(id)
     }
     pub fn item(&self, id: &str) -> String {
         let (namespace, path) = id.split_once(':').unwrap_or(("minecraft", id));
