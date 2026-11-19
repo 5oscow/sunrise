@@ -240,10 +240,6 @@ pub fn bundle_in(dir: &Path) -> Result<Option<Bundle>, String> {
     package::read(dir)
 }
 
-pub fn is_revision(text: &str) -> bool {
-    text.len() == 40 && text.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
-}
-
 /// Appends `text` to the build log, the way a compiler warning reads.
 pub fn log_warning(text: &str) {
     if let Ok(mut log) = fs::OpenOptions::new()
