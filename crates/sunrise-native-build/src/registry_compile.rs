@@ -1,5 +1,7 @@
 //! Cargo builds each mod as a Rust dylib; the SDK executable remains unchanged.
-use super::{api, dependencies, internals, prebuilt, registry_plan, registry_rustc};
+use super::{
+    api, dependencies, internals, prebuilt, registry_plan, registry_rustc, registry_shared,
+};
 use crate::{
     host::{tr, trf},
     rust::Toolchain,
@@ -97,6 +99,22 @@ pub fn compile(
     let mut members = Vec::new();
     let mut wrapper_deps = toml::Table::new();
     let deps = game.join("deps");
+    // A mod library's link arguments: only the rpath ones, putting the library's own folder on
+    // its search path (not the game executable's link policy).
+    let mod_link_args = || {
+        let mut link_args = Vec::new();
+        if cfg!(target_os = "linux") {
+            link_args.push("-Wl,--disable-new-dtags".into());
+            link_args.push("-Wl,-rpath,$ORIGIN".into());
+        }
+        if cfg!(target_os = "macos") {
+            link_args.push("-Wl,-rpath,@loader_path".into());
+        }
+        link_args
+    };
+    // Each mod's staged folder and library root, for the shared registry library.
+    let mut mod_dirs = BTreeMap::new();
+    let mut mod_roots = BTreeMap::new();
     let packages: BTreeMap<_, _> = projects
         .iter()
         .map(|project| {
@@ -205,7 +223,9 @@ pub fn compile(
                 if project.uses_wasmtime() {
                     source.push_str(prebuilt::WASMTIME_LINK);
                 }
-                fs::write(root, source).map_err(|e| e.to_string())?;
+                fs::write(&root, source).map_err(|e| e.to_string())?;
+                mod_dirs.insert(id.clone(), dest.clone());
+                mod_roots.insert(id.clone(), root);
             }
             fs::write(path, manifest.to_string()).map_err(|e| e.to_string())?;
         }
@@ -287,15 +307,13 @@ pub fn compile(
                 toml::toml! { path = facade_relative package = facade_package }.into(),
             );
         }
-        let mut link_args = Vec::new();
-        if cfg!(target_os = "linux") {
-            link_args.push("-Wl,--disable-new-dtags".into());
-            link_args.push("-Wl,-rpath,$ORIGIN".into());
-        }
-        if cfg!(target_os = "macos") {
-            link_args.push("-Wl,-rpath,@loader_path".into());
-        }
-        bindings.insert(dest, registry_rustc::Bindings { externs, link_args });
+        bindings.insert(
+            dest,
+            registry_rustc::Bindings {
+                externs,
+                link_args: mod_link_args(),
+            },
+        );
         members.push(relative);
     }
     // `[[native.mixin]]` rows: the patched crates join the workspace beside the mods, whose
@@ -414,8 +432,54 @@ pub fn compile(
     )
     .map_err(|e| e.to_string())?;
     plan.fetch_with_patches(rust, out, &patches)?;
-    let metadata = super::registry_inventory::read(rust, out)
+    let mut metadata = super::registry_inventory::read(rust, out)
         .map_err(|error| plan.explain_resolution(error))?;
+    // When two or more mods link registry crates, those crates, as cargo just resolved them, come
+    // from one library, so a mod depending on several mods doesn't reach a copy of each through
+    // each of them (`registry_shared`). The mods' manifests were checked above without it; it adds
+    // no package cargo hasn't already resolved and locked.
+    let shared = registry_shared::Shared::select(metadata.runtime_uses(out, &mod_dirs)?);
+    if let Some(shared) = &shared {
+        shared.check_name(&metadata.packages, out)?;
+        shared.write(out)?;
+        for id in &shared.users {
+            let path = mod_dirs[id].join("Cargo.toml");
+            let mut manifest: toml::Table = fs::read_to_string(&path)
+                .map_err(|e| e.to_string())?
+                .parse()
+                .map_err(|e| format!("Cargo.toml: {e}"))?;
+            let root = &mod_roots[id];
+            let mut source = fs::read_to_string(root).map_err(|e| e.to_string())?;
+            registry_shared::link(&mut manifest, &mut source).map_err(|e| format!("{id}: {e}"))?;
+            fs::write(&path, manifest.to_string()).map_err(|e| e.to_string())?;
+            fs::write(root, source).map_err(|e| e.to_string())?;
+        }
+        let path = out.join("Cargo.toml");
+        let mut manifest: toml::Table = fs::read_to_string(&path)
+            .map_err(|e| e.to_string())?
+            .parse()
+            .map_err(|e| format!("Cargo.toml: {e}"))?;
+        manifest
+            .get_mut("workspace")
+            .and_then(|workspace| workspace.get_mut("members"))
+            .and_then(toml::Value::as_array_mut)
+            .ok_or("generated workspace")?
+            .push(registry_shared::RELATIVE.into());
+        fs::write(&path, manifest.to_string()).map_err(|e| e.to_string())?;
+        // Bindings with no `--extern`, so the compiler wrapper still links it like a mod: dynamic
+        // linking, and the mods' rpath arguments.
+        bindings.insert(
+            out.join(registry_shared::RELATIVE),
+            registry_rustc::Bindings {
+                externs: BTreeMap::new(),
+                link_args: mod_link_args(),
+            },
+        );
+        // Cargo records the new local package in the lock, offline: every crate it names is
+        // already resolved there, at that exact version.
+        metadata = super::registry_inventory::read(rust, out)
+            .map_err(|error| plan.explain_resolution(error))?;
+    }
     plan.allowed
         .check_pins(&super::registry_lock::RegistryLock::parse(
             &super::read_lock(out)?,
@@ -510,6 +574,12 @@ pub fn compile(
             &project.bundle.manifest.version.to_string(),
             false,
         )?;
+        runtime.push(library);
+    }
+    if shared.is_some() {
+        // Installed beside the mods with no identity record: a library they load, not a mod.
+        let library = release.join(prebuilt::dylib_name(registry_shared::CRATE));
+        super::library_record::validate_exports(&library, registry_shared::CRATE)?;
         runtime.push(library);
     }
     let library = release.join(prebuilt::dylib_name("sunrise_patch"));
