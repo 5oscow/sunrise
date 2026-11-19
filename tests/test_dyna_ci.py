@@ -711,6 +711,30 @@ class ParityWorkflowTests(unittest.TestCase):
         self.assertEqual((self.slot / "loot_a.first-run.log").read_text(), "private retry reason")
         self.assertEqual((self.root / "parity-private-summary").read_text(), "private retry reason")
 
+    def test_merging_verdicts_keeps_current_failures_beside_bad_evidence(self):
+        from test_ci_concurrency import expression_value, yaml
+        verdict = yaml.load(PARITY.read_text(), Loader=yaml.BaseLoader)["jobs"]["verdict"]
+        step = next(step for step in verdict["steps"] if step.get("name") == "Merge the shares' verdicts")
+        scope = {"run_id": "77", "run_attempt": "2", "commit": "selected-main-commit"}
+        expected_commit = expression_value(step["env"]["COMMIT"].strip("${} "), {}, inputs={"commit": scope["commit"]})
+        env = dict(self.env, SHARDED="true", BUCKETS="3", COMMIT=expected_commit, GITHUB_SHA="workflow-source")
+        plan = self.root / "plan/selection.json"
+        plan.parent.mkdir()
+        plan.write_text('["loot_a", "loot_b", "loot_c"]')
+        for bucket, name in enumerate(("loot_a", "loot_b", "loot_c")):
+            report = self.root / f"shares/artifact-{bucket}/parity.json"
+            report.parent.mkdir(parents=True)
+            run = scope | {"run_attempt": "1"} if bucket == 1 else scope
+            report.write_text(json.dumps({"bucket": bucket, "of": 3, "selected": [name], "passed": [],
+                                          "failed": [name], "complete": True, "scope": run}) if bucket != 2 else "{")
+        result = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=self.root, env=env,
+                                capture_output=True, text=True, check=True)
+        self.assertEqual(result.stdout.splitlines(), ["FAIL loot_a"])
+        merged = json.loads((self.root / "parity.json").read_text())
+        self.assertEqual((merged["passed"], merged["failed"], merged["complete"], merged["scope"]),
+                         ([], ["loot_a"], False, scope))
+        self.assertEqual(merged["shares"], {"reported": 1, "expected": 3})
+
     def test_vanilla_derived_scratch_is_deleted_when_the_job_ends(self):
         self.initialise()
         build = self.root

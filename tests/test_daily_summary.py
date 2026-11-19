@@ -262,27 +262,55 @@ class DailySummaryTests(unittest.TestCase):
                     "failed": list(failed), "complete": complete, "scope": run or scope}
         plan = ["loot_a", "loot_b"]
         first, second = share(0, ["loot_a"], passed=["loot_a"]), share(1, ["loot_b"], failed=["loot_b"])
-        merged = parity_verdict.merge([first, second], 2, plan)
+        merged = parity_verdict.merge([first, second], 2, plan, scope)
         self.assertEqual((merged["passed"], merged["failed"], merged["complete"], merged["problems"]),
                          (["loot_a"], ["loot_b"], True, []))
         self.assertEqual(merged["scope"], scope)
         # A share that never reported leaves the run unfinished, and an unfinished run proves no pass.
-        missing = parity_verdict.merge([first], 2, plan)
+        missing = parity_verdict.merge([first], 2, plan, scope)
         self.assertEqual((missing["passed"], missing["complete"]), ([], False))
         self.assertIn("shares [0] reported, not 0..1", missing["problems"])
         # The same share twice is not a run.
-        self.assertIn("share 0 reported twice", parity_verdict.merge([first, share(0, ["loot_b"])], 2, plan)["problems"])
-        # Two attempts' verdicts never merge into one run.
-        foreign = parity_verdict.merge([first, share(1, ["loot_b"], run={"run_id": "78"})], 2, plan)
-        self.assertIn("the shares do not agree on the run", foreign["problems"])
+        duplicate = parity_verdict.merge([first, dict(second, bucket=0)], 2, plan, scope)
+        self.assertIn("share 0 reported twice", duplicate["problems"])
+        # Two attempts' verdicts never merge into one run, even for the same commit and run ID.
+        older = share(0, ["loot_a"], failed=["loot_a"], run=scope | {"run_attempt": "1"})
+        foreign = parity_verdict.merge([older, second], 2, plan, scope)
+        self.assertEqual((foreign["passed"], foreign["failed"], foreign["complete"], foreign["scope"]),
+                         ([], ["loot_b"], False, scope))
         # Two shares that ran the same entries and left others to nobody are not a run either.
-        overlapping = parity_verdict.merge([share(0, ["loot_a"]), share(1, ["loot_a"])], 2, plan)
+        overlapping = parity_verdict.merge([first, dict(first, bucket=1)], 2, plan, scope)
         self.assertFalse(overlapping["complete"])
         self.assertIn("two shares ran the same harness", overlapping["problems"])
         self.assertIn("1 planned harnesses ran in no share, 0 ran outside the plan", overlapping["problems"])
         # A share that did not finish keeps the failures it saw, and proves no pass.
-        partial = parity_verdict.merge([first, share(1, ["loot_b"], failed=["loot_b"], complete=False)], 2, plan)
+        partial = parity_verdict.merge([first, dict(second, complete=False)], 2, plan, scope)
         self.assertEqual((partial["passed"], partial["failed"], partial["complete"]), ([], ["loot_b"], False))
+
+    def test_malformed_share_evidence_does_not_erase_a_current_failure(self):
+        scope = {"run_id": "77", "run_attempt": "1", "commit": COMMIT}
+        current = {"bucket": 0, "of": 2, "selected": ["loot_a#2"], "passed": [], "failed": ["loot_a"],
+                   "complete": True, "scope": scope}
+        other = dict(current, bucket=1, selected=["loot_b"], failed=["loot_b"])
+        malformed = [None, [], dict(other, scope=None), dict(other, bucket=True), dict(other, of=3),
+                     dict(other, complete="true"), dict(other, selected="loot_b"), dict(other, selected=[["loot_b"]]),
+                     dict(other, selected=["loot_b", "loot_b"]), dict(other, failed="loot_b"),
+                     dict(other, failed=["loot_a"]), dict(other, failed=[])]
+        for report in malformed:
+            with self.subTest(report=report):
+                merged = parity_verdict.merge([current, report], 2, ["loot_a#2", "loot_b"], scope)
+                self.assertEqual((merged["passed"], merged["failed"], merged["complete"], merged["scope"]),
+                                 ([], ["loot_a"], False, scope))
+
+    def test_malformed_plan_cannot_prove_complete_coverage(self):
+        scope = {"run_id": "77", "run_attempt": "1", "commit": COMMIT}
+        report = {"bucket": 0, "of": 1, "selected": ["loot_a#1"], "passed": [], "failed": ["loot_a"],
+                  "complete": True, "scope": scope}
+        for plan in (None, [], "loot_a#1", {"loot_a#1": True}, [["loot_a#1"]], ["loot_a#1", "loot_a#1"]):
+            with self.subTest(plan=plan):
+                merged = parity_verdict.merge([report], 1, plan, scope)
+                self.assertEqual((merged["passed"], merged["failed"], merged["complete"], merged["scope"]),
+                                 ([], ["loot_a"], False, scope))
 
     def test_a_red_share_files_its_harness_and_no_infrastructure_issue(self):
         api = Api([job("parity / vanilla-parity (0/2)", "success", ["Run every automatic harness"]),

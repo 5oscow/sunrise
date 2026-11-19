@@ -2,17 +2,20 @@
 """Reduce this attempt's private parity log to harness names and outcomes for the daily summary.
 
 One share: `parity_verdict.py FOLDER REPORT --bucket I/N`. Every share:
-`parity_verdict.py --merge REPORT VERDICT... --expect N [--plan SELECTION]`, which is complete only when the
-shares reported exactly once each, agree on the run, and cover the planned selection.
+`parity_verdict.py --merge REPORT VERDICT... --expect N --plan SELECTION`, which is complete only when the
+shares reported exactly once each for GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT and COMMIT, and cover the planned selection.
 """
 import argparse
 import json
+import os
 import re
 import shutil
 import sys
 from pathlib import Path
 
-RECORD = re.compile(r"^(PASS|FAIL) ([a-z0-9_]+(?:#\d+)?) \d+s(?: |$)")
+NAME = r"[a-z0-9_]+"
+LABEL = rf"{NAME}(?:#\d+)?"
+RECORD = re.compile(rf"^(PASS|FAIL) ({LABEL}) \d+s(?: |$)")
 FINISHED = re.compile(r"^(\d+) passed, (\d+) failed in [\d.]+ min\.$")
 
 
@@ -38,56 +41,69 @@ def verdict(log, expected, status):
              "complete": complete}, labels)
 
 
-def merge(reports, expected, plan=None):
-    """One verdict from the shares' verdicts.
+def unique_names(value, pattern):
+    if isinstance(value, list) and all(isinstance(name, str) and re.fullmatch(pattern, name) for name in value):
+        names = set(value)
+        if len(names) == len(value):
+            return names
+    return None
 
-    A run is complete only when each expected share reported exactly once, every report finished, they agree
-    on the run, and their selections are disjoint and cover the planned selection. Anything else is an
-    unfinished run: it keeps the failures it saw, and proves no pass."""
-    by_share, problems = {}, []
+
+def merge(reports, expected, plan, scope):
+    """Require one finished verdict per share of this exact run and disjoint coverage of its plan.
+
+    An unfinished run proves no passes, but keeps the failures from valid reports of this run.
+    """
+    planned = unique_names(plan, LABEL)
+    problems = [] if planned else ["the planned selection is missing, empty or malformed"]
+    shares, selected, passed, failed = set(), set(), set(), set()
     for report in reports:
-        share = report.get("bucket")
-        if not isinstance(share, int):
-            if expected != 1:
-                problems.append("a report names no share")
-                continue
-            share = 0
-        if share in by_share:
+        if not isinstance(report, dict):
+            problems.append("a share verdict is unreadable or not an object")
+            continue
+        if report.get("scope") != scope:
+            problems.append("a share verdict does not match this run's scope")
+            continue
+        share, count = report.get("bucket"), report.get("of")
+        if type(share) is not int or not 0 <= share < expected or type(count) is not int or count != expected:
+            problems.append("a share verdict has an invalid bucket or share count")
+            continue
+        complete = report.get("complete")
+        labels = unique_names(report.get("selected"), LABEL)
+        share_passed = unique_names(report.get("passed"), NAME)
+        share_failed = unique_names(report.get("failed"), NAME)
+        if type(complete) is not bool or labels is None or share_passed is None or share_failed is None:
+            problems.append(f"share {share} has a malformed selection or verdict")
+            continue
+        names = {label.split("#", 1)[0] for label in labels}
+        outcomes = share_passed | share_failed
+        if not outcomes <= names or share_passed & share_failed or (
+                complete and (not labels or outcomes != names)) or (not complete and share_passed):
+            problems.append(f"share {share} has outcomes inconsistent with its selection or completeness")
+            continue
+        passed.update(share_passed)
+        failed.update(share_failed)
+        if share in shares:
             problems.append(f"share {share} reported twice")
             continue
-        by_share[share] = report
-    shares = sorted(by_share)
-    if shares != list(range(expected)):
-        problems.append(f"shares {shares or 'none'} reported, not 0..{expected - 1}")
-    runs = {json.dumps(by_share[share].get("scope"), sort_keys=True) for share in shares}
-    if len(runs) != 1 or "null" in runs:
-        problems.append("the shares do not agree on the run")
-    selected = []
-    for share in shares:
-        report = by_share[share]
-        selected.extend(report.get("selected") or ())
-        if not report.get("complete"):
-            problems.append(f"share {share} did not finish")
-    if plan is not None:
-        if len(selected) != len(set(selected)):
+        shares.add(share)
+        if selected & labels:
             problems.append("two shares ran the same harness")
-        if set(selected) != set(plan):
-            problems.append(f"{len(set(plan) - set(selected))} planned harnesses ran in no share, "
-                            f"{len(set(selected) - set(plan))} ran outside the plan")
-    complete = not problems
-    harnesses = {}
-    for report in reports:
-        for name in report.get("passed", ()):
-            harnesses[name] = harnesses.get(name, True)
-        for name in report.get("failed", ()):
-            harnesses[name] = False
+        selected.update(labels)
+        if not complete:
+            problems.append(f"share {share} did not finish")
+    if shares != set(range(expected)):
+        problems.append(f"shares {sorted(shares) or 'none'} reported, not 0..{expected - 1}")
+    if planned and selected != planned:
+        problems.append(f"{len(planned - selected)} planned harnesses ran in no share, "
+                        f"{len(selected - planned)} ran outside the plan")
     return {
-        "passed": sorted(name for name, passed in harnesses.items() if passed) if complete else [],
-        "failed": sorted(name for name, passed in harnesses.items() if not passed),
-        "complete": complete,
+        "passed": sorted(passed - failed) if not problems else [],
+        "failed": sorted(failed),
+        "complete": not problems,
         "problems": problems,
-        "shares": {"reported": len(reports), "expected": expected},
-        "scope": json.loads(runs.pop()) if len(runs) == 1 and "null" not in runs else None,
+        "shares": {"reported": len(shares), "expected": expected},
+        "scope": scope,
     }
 
 
@@ -128,26 +144,25 @@ def main(*arguments):
             shutil.copyfile(path, folder / path.name)
 
 
+def read_evidence(path):
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError):
+        return None
+
+
 def merge_main(arguments):
     parser = argparse.ArgumentParser(description="Merge the daily run's share verdicts into one parity.json.")
     parser.add_argument("report", help="the merged verdict to write")
-    parser.add_argument("sources", nargs="*", help="each share's verdict")
+    parser.add_argument("sources", nargs="*", type=Path, help="each share's verdict")
     parser.add_argument("--expect", type=int, required=True, help="how many shares the run has")
-    parser.add_argument("--plan", type=Path, help="the planned selection every share was carved from")
+    parser.add_argument("--plan", type=Path, required=True, help="the planned selection every share was carved from")
     args = parser.parse_args(arguments)
-    reports = []
-    for path in args.sources:
-        try:
-            reports.append(json.loads(Path(path).read_text()))
-        except (OSError, ValueError):
-            continue  # an unreadable report is a share that did not report; the count check names it
-    plan = None
-    if args.plan:
-        try:
-            plan = json.loads(args.plan.read_text())
-        except (OSError, ValueError):
-            plan = []  # no plan to cover: the coverage check says so, and the run is unfinished
-    result = merge(reports, args.expect, plan)
+    if args.expect < 1:
+        parser.error("--expect must be positive")
+    scope = {"run_id": os.environ["GITHUB_RUN_ID"], "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+             "commit": os.environ["COMMIT"]}
+    result = merge((read_evidence(path) for path in args.sources), args.expect, read_evidence(args.plan), scope)
     Path(args.report).write_text(json.dumps(result, indent=2) + "\n")
     print_verdict(result)
     for problem in result["problems"]:

@@ -1728,17 +1728,18 @@ def main():
               f"depend on them, {len(chosen)} without a pass for their current inputs.", flush=True)
     else:
         chosen = [name for name in found if stale(name, state, hasher, environment)]
-    chosen = [name for name in chosen if base_name(name) not in args.exclude]
-    skips = platform_skips(host_config())
-    for name in [name for name in chosen if base_name(name) in skips and not args.names]:
-        print(f"skipped on {HOST} ({sys.platform}): {name}: {skips[base_name(name)]}", flush=True)
-        chosen.remove(name)
-    manual = {} if args.names or (args.all and not args.skip_named_only) else named_only(host_config())
-    for name in [name for name in chosen if base_name(name) in manual]:
-        print(f"not selected (named-only): {name}: {manual[base_name(name)]}", flush=True)
-        chosen.remove(name)
+    if share is None:
+        chosen = [name for name in chosen if base_name(name) not in args.exclude]
+        skips = platform_skips(host_config())
+        for name in [name for name in chosen if base_name(name) in skips and not args.names]:
+            print(f"skipped on {HOST} ({sys.platform}): {name}: {skips[base_name(name)]}", flush=True)
+            chosen.remove(name)
+        manual = {} if args.names or (args.all and not args.skip_named_only) else named_only(host_config())
+        for name in [name for name in chosen if base_name(name) in manual]:
+            print(f"not selected (named-only): {name}: {manual[base_name(name)]}", flush=True)
+            chosen.remove(name)
     rounds = {name: args.repeat for name in chosen} if args.repeat > 1 else {}
-    if args.flake_check:
+    if share is None and args.flake_check:
         changed = {name for name in changed_harnesses(found, records, args.flake_check)
                    if base_name(name) not in manual and base_name(name) not in args.exclude}
         for name in sorted(changed):

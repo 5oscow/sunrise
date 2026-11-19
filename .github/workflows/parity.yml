@@ -263,6 +263,7 @@ jobs:
         env:
           SHARDED: ${{ needs.plan.outputs.sharded }}
           BUCKETS: ${{ needs.plan.outputs.of }}
+          COMMIT: ${{ inputs.commit }}
         run: |
           files=("$RUNNER_TEMP"/shares/*/parity.json)
           if [ "${SHARDED:-false}" = true ]; then
