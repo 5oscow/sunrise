@@ -2547,7 +2547,10 @@ fn mob_from_nbt_at(
     ) {
         // AbstractCubeMob.readAdditionalSaveData: the size's attributes, then
         // the saved health, the max health when there is none.
-        crate::mobs::cube::set_size(&mut m, number(tag.get("Size")).unwrap_or(0) as i32 + 1);
+        crate::mobs::cube::set_size(
+            &mut m,
+            (number(tag.get("Size")).unwrap_or(0) as i32).wrapping_add(1),
+        );
         if let Some(h) = float(tag.get("Health")) {
             m.health = h as f32;
         }
