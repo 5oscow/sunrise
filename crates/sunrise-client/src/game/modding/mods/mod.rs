@@ -2219,6 +2219,7 @@ mod tests {
                 passenger_attachment: None,
                 save_policy: mod_api::GeneralSavePolicy::Save,
                 summonable: true,
+                pickable: false,
                 tracking_chunks: 8,
                 update_interval: 3,
                 payload_version: 1,

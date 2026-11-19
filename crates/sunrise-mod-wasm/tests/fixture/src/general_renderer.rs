@@ -34,6 +34,7 @@ pub fn register(registrar: &mut dyn Registrar) {
             None,
             GeneralSavePolicy::Save,
             true,
+            false,
             8,
             1,
             1,
