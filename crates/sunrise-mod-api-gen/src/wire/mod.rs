@@ -909,7 +909,11 @@ pub(crate) fn owned_types(
     let providers = crate::capability_providers::generate(root, included)?.0;
     let mut with_providers = included.to_vec();
     with_providers.push(("capability_providers_generated.rs", providers.as_str()));
-    let mut surface = surface(root, &with_providers)?;
+    point_types(&mut surface(root, &with_providers)?)
+}
+
+/// Owned point values from an already resolved Wire surface.
+pub(super) fn point_types(surface: &mut Surface<'_>) -> Result<crate::points::WireTypes, String> {
     // Every owned signature def appears in the generated wire code with a Wire bound.
     // That compile-time guarantee covers macro-generated slot keys/handle codecs too;
     // no owned field traversal or second Wire-implementation discovery is needed.
