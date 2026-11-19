@@ -122,6 +122,7 @@ pub(crate) fn share_names(
     names: sunrise_mod_runtime::registry_keys::Names,
 ) -> sunrise_mod_runtime::registry_keys::Names {
     use sunrise_mod_runtime::registry_keys::{Names, Table};
+    #[cfg(any(test, feature = "testing"))]
     static SHARED: std::sync::Mutex<Vec<Arc<Table>>> = std::sync::Mutex::new(Vec::new());
     let shared = SHARED
         .lock()
