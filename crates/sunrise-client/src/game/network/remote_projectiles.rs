@@ -1623,7 +1623,8 @@ mod entity_tick_tests {
     use std::sync::{Arc, Mutex};
 
     /// The tick hooks a listener heard: whether on a client, the phase, entities and kinds.
-    type Heard = Arc<Mutex<Vec<(bool, &'static str, Vec<u32>, Vec<String>)>>>;
+    type Event = (bool, &'static str, Vec<u32>, Vec<String>, Vec<[f64; 3]>);
+    type Heard = Arc<Mutex<Vec<Event>>>;
 
     struct Listener(Heard);
 
@@ -1637,8 +1638,17 @@ mod entity_tick_tests {
         ) {
             let client = matches!(host, mod_api::HostSide::Client(_));
             let kinds = kinds.iter().map(|kind| (*kind).to_owned()).collect();
-            let mut heard = self.0.lock().unwrap();
-            heard.push((client, phase, entities.to_vec(), kinds));
+            let positions = match host {
+                mod_api::HostSide::Client(host) => entities
+                    .iter()
+                    .map(|&id| host.entity(id).unwrap().position(*host).unwrap())
+                    .collect(),
+                _ => Vec::new(),
+            };
+            self.0
+                .lock()
+                .unwrap()
+                .push((client, phase, entities.to_vec(), kinds, positions));
         }
     }
 
@@ -1709,6 +1719,7 @@ mod entity_tick_tests {
             Box::new(Named(heard.clone())),
         )]
         .into();
+        let mut positions = Vec::new();
         mod_platform::testing::with_mods(mods, || {
             crate::game::native_entity_refs::tests::with_client_game(|game| {
                 game.world.chunks.insert(
@@ -1736,13 +1747,18 @@ mod entity_tick_tests {
                     ));
                 }
                 game.tick_remote_projectiles(|_, at| at);
+                positions.extend(
+                    game.creatures
+                        .projectiles
+                        .iter()
+                        .map(|p| [p.position.x, p.position.y, p.position.z]),
+                );
             });
         });
+        let heard = heard.lock().unwrap();
         let phases: Vec<_> = heard
-            .lock()
-            .unwrap()
             .iter()
-            .map(|(client, phase, entities, _)| (*client, *phase, entities.clone()))
+            .map(|(client, phase, entities, _, _)| (*client, *phase, entities.clone()))
             .collect();
         assert_eq!(
             phases,
@@ -1753,6 +1769,11 @@ mod entity_tick_tests {
                 (true, "post", vec![72]),
             ]
         );
+        assert_eq!(heard[0].4, [[3.5, 80.0, 3.5]]);
+        assert_eq!(heard[1].4, [positions[0]]);
+        assert_eq!(heard[2].4, [[3.5, 80.0, 5.5]]);
+        assert_eq!(heard[3].4, [positions[1]]);
+        assert!(positions.iter().all(|p| p[0] > 3.5));
     }
 
     /// A client's listener hears a remote arrow's own tick there, between the server's
@@ -1766,6 +1787,7 @@ mod entity_tick_tests {
             Box::new(Listener(heard.clone())),
         )]
         .into();
+        let mut after = [0.0; 3];
         mod_platform::testing::with_mods(mods, || {
             crate::game::native_entity_refs::tests::with_client_game(|game| {
                 game.world.chunks.insert(
@@ -1792,7 +1814,9 @@ mod entity_tick_tests {
                 ));
                 game.tick_remote_projectiles(|_, at| at);
                 let arrow = game.creatures.projectiles.iter().find(|p| p.id == 71);
-                assert!(arrow.unwrap().position.x > 3.5, "the arrow flew on");
+                let p = arrow.unwrap().position;
+                after = [p.x, p.y, p.z];
+                assert!(after[0] > 3.5, "the arrow flew on");
             });
         });
         let arrow = || (vec![71], vec!["minecraft:arrow".to_owned()]);
@@ -1800,8 +1824,8 @@ mod entity_tick_tests {
         assert_eq!(
             *heard,
             [
-                (true, "pre", arrow().0, arrow().1),
-                (true, "post", arrow().0, arrow().1)
+                (true, "pre", arrow().0, arrow().1, vec![[3.5, 80.0, 3.5]]),
+                (true, "post", arrow().0, arrow().1, vec![after])
             ]
         );
     }

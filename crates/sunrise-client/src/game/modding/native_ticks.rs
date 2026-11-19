@@ -177,6 +177,8 @@ pub(in crate::game) struct TickRound {
     ticking: Vec<(u32, TickKind)>,
     /// The entities a Pre canceled.
     canceled: Vec<u32>,
+    /// Scratch output owned by one hook dispatch, never shared with earlier turns.
+    call_canceled: Vec<u32>,
     /// The items whose part ended their tick (`on_entity_item_update`): they are not
     /// canceled, so they still hear their Post.
     halted: Vec<u32>,
@@ -222,17 +224,15 @@ impl TickRound {
     pub(super) fn let_through(&self, n: usize) -> Option<u32> {
         self.ticking.get(n).map(|(id, _)| *id)
     }
-    /// Keeps in `canceled`, from `from` on, only the entities of `ticking` a mod canceled, each
-    /// once and in their order, and takes them out of `ticking`.
-    fn take_canceled(&mut self, from: usize) {
-        let end = self.canceled.len();
-        if end == from {
+    /// Applies the call's output to this batch only, keeping existing cancellations intact.
+    fn take_canceled(&mut self) {
+        if self.call_canceled.is_empty() {
             return;
         }
         let mut kept = 0;
         for i in 0..self.ticking.len() {
             let id = self.ticking[i].0;
-            if self.canceled[from..end].contains(&id) {
+            if self.call_canceled.contains(&id) {
                 self.canceled.push(id);
             } else {
                 self.ticking.swap(kept, i);
@@ -240,7 +240,7 @@ impl TickRound {
             }
         }
         self.ticking.truncate(kept);
-        self.canceled.drain(from..end);
+        self.call_canceled.clear();
     }
     /// The entity `id`, told its Pre, went before it ticked (an item merged into an earlier
     /// one): it hears no Post.
@@ -266,6 +266,7 @@ impl Game<'_> {
                 Vec::new()
             },
             canceled: Vec::new(),
+            call_canceled: Vec::new(),
             halted: Vec::new(),
         }
     }
@@ -293,10 +294,9 @@ impl Game<'_> {
         let (mut ids, mut kinds): (_, Vec<&str>) = (buffers.ids, buffers.kinds);
         ids.extend(round.ticking.iter().map(|(id, _)| *id));
         kinds.extend(round.ticking.iter().map(|(_, kind)| kind.id()));
-        let from = round.canceled.len();
-        self.native_entity_tick_pre(self.dim.id(), &ids, &kinds, &mut round.canceled);
+        self.native_entity_tick_pre(self.dim.id(), &ids, &kinds, &mut round.call_canceled);
         self.creatures.tick_hooks = TickBuffers::emptied(ids, kinds, buffers.names);
-        round.take_canceled(from);
+        round.take_canceled();
     }
 
     /// `native_entity_tick_post`, once for the family's entities the round let through, after
@@ -326,15 +326,14 @@ impl Game<'_> {
         if !round.told.listening {
             return true;
         }
-        let from = round.canceled.len();
         self.native_entity_tick_pre(
             self.dim.id(),
             std::slice::from_ref(&id),
             std::slice::from_ref(&kind),
-            &mut round.canceled,
+            &mut round.call_canceled,
         );
-        let canceled = round.canceled[from..].contains(&id);
-        round.canceled.truncate(from);
+        let canceled = round.call_canceled.contains(&id);
+        round.call_canceled.clear();
         if canceled {
             round.canceled.push(id);
         }
@@ -554,8 +553,8 @@ mod tests {
         for id in [1, 2, 3, 4] {
             r.add(id, TickKind::Fixed("minecraft:item"));
         }
-        r.canceled.extend([3, 7, 1, 3]);
-        r.take_canceled(1);
+        r.call_canceled.extend([3, 7, 1, 3]);
+        r.take_canceled();
         let through: Vec<_> = (0..).map_while(|n| r.let_through(n)).collect();
         assert_eq!(through, [2, 4]);
         assert_eq!(r.canceled, [9, 1, 3]);

@@ -110,10 +110,13 @@ impl Game<'_> {
                 };
                 i = at;
             }
-            if round.canceled(items[i].id) || round.halted(items[i].id) {
+            if round.canceled(items[i].id) {
                 continue;
             }
             'tick: {
+                if round.halted(items[i].id) {
+                    break 'tick;
+                }
                 self.tick_saved_invulnerable_time(items[i].id);
                 let item = &mut items[i];
                 let mut at_turn = |item: &mut ItemEntity| {

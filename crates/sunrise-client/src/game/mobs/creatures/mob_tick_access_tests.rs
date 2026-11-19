@@ -523,6 +523,7 @@ fn a_mob_outside_the_entity_tick_list_checks_no_despawn() {
 /// of them stands. Names the types of `named` to `entity_tick_each`.
 struct TickTiming {
     named: &'static [&'static str],
+    replace_cancels: bool,
     heard: Arc<Mutex<TickCalls>>,
 }
 
@@ -537,6 +538,12 @@ impl mod_api::Hooks for TickTiming {
     fn entity_tick_pre(&self, _: HostSide<'_>, event: &mut EntityTickPreEvent<'_>) {
         let mut heard = self.heard.lock().unwrap();
         heard.push(("pre", event.entities.to_vec(), None));
+        if self.replace_cancels {
+            event.canceled.clear();
+            if event.entities == [71] {
+                event.canceled.push(71);
+            }
+        }
     }
     fn entity_tick_post(&self, host: HostSide<'_>, event: &mut mod_api::EntityTickPostEvent<'_>) {
         let HostSide::Server(host) = host else {
@@ -556,12 +563,13 @@ impl mod_api::Hooks for TickTiming {
 }
 
 /// The two pigs' tick hooks through the real creature pass; the first pig falls in its tick.
-fn pig_ticks(named: bool) -> TickCalls {
+fn pig_ticks(named: bool, replace_cancels: bool) -> TickCalls {
     let heard = Arc::new(Mutex::new(Vec::new()));
     let mods: mod_api::Mods = vec![ModEntry::new(
         "mob-tick-timing",
         Box::new(TickTiming {
             named: if named { &["minecraft:pig"] } else { &[] },
+            replace_cancels,
             heard: heard.clone(),
         }),
     )]
@@ -588,7 +596,7 @@ fn pig_ticks(named: bool) -> TickCalls {
 #[test]
 #[ignore = "daily"]
 fn a_named_type_hears_each_entitys_own_pre_and_post() {
-    let heard = pig_ticks(true);
+    let heard = pig_ticks(true, false);
     let phases: Vec<_> = heard
         .iter()
         .map(|(phase, entities, _)| (*phase, entities.clone()))
@@ -607,12 +615,25 @@ fn a_named_type_hears_each_entitys_own_pre_and_post() {
     assert_eq!(heard[3].2, Some([2.0, 80.0, 0.5]), "the second pig stayed");
 }
 
+#[test]
+#[ignore = "daily"]
+fn a_named_pre_cannot_clear_an_earlier_turns_cancellation() {
+    let phases: Vec<_> = pig_ticks(true, true)
+        .into_iter()
+        .map(|(phase, entities, _)| (phase, entities))
+        .collect();
+    assert_eq!(
+        phases,
+        [("pre", vec![71]), ("pre", vec![72]), ("post", vec![72])]
+    );
+}
+
 /// With no type named, the mobs are told as one family: one Pre before the first tick, one
 /// Post after the last, as before.
 #[test]
 #[ignore = "daily"]
 fn an_unnamed_family_hears_one_pre_and_one_post() {
-    let phases: Vec<_> = pig_ticks(false)
+    let phases: Vec<_> = pig_ticks(false, false)
         .into_iter()
         .map(|(phase, entities, _)| (phase, entities))
         .collect();
@@ -629,6 +650,7 @@ fn named_projectiles_hear_each_their_own_pre_and_post() {
         "projectile-tick-timing",
         Box::new(TickTiming {
             named: &["minecraft:arrow"],
+            replace_cancels: false,
             heard: heard.clone(),
         }),
     )]

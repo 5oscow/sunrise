@@ -140,7 +140,7 @@ mod on_entity_item_update_tests {
         }
     }
 
-    struct Mod(Vec<Update>);
+    struct Mod(Vec<Update>, bool);
 
     thread_local! { static ORDER: std::cell::RefCell<Vec<(u32, &'static str)>> = const { std::cell::RefCell::new(Vec::new()) }; }
 
@@ -176,6 +176,9 @@ mod on_entity_item_update_tests {
             told(event.entities, "post");
         }
         fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+            if self.1 {
+                r.entity_tick_each("minecraft:item");
+            }
             for part in &self.0 {
                 let key = r.item_key(part.item);
                 r.item_part(key, part.clone());
@@ -230,11 +233,20 @@ mod on_entity_item_update_tests {
     fn a_canceling_part_holds_its_own_item_and_nothing_else() {
         crate::game::in_own_process(
             "game::native_hooks::on_entity_item_update::on_entity_item_update_tests::a_canceling_part_holds_its_own_item_and_nothing_else",
-            a_canceling_part_holds_its_own_item_and_nothing_else_isolated,
+            || a_canceling_part_holds_its_own_item_and_nothing_else_isolated(false),
         );
     }
 
-    fn a_canceling_part_holds_its_own_item_and_nothing_else_isolated() {
+    #[test]
+    #[ignore = "daily"]
+    fn a_named_item_still_hears_post_when_its_part_halts_physics() {
+        crate::game::in_own_process(
+            "game::native_hooks::on_entity_item_update::on_entity_item_update_tests::a_named_item_still_hears_post_when_its_part_halts_physics",
+            || a_canceling_part_holds_its_own_item_and_nothing_else_isolated(true),
+        );
+    }
+
+    fn a_canceling_part_holds_its_own_item_and_nothing_else_isolated(named: bool) {
         use crate::game::native_entity_refs::tests::with_game;
         let iron = Update {
             item: "minecraft:iron_ingot",
@@ -252,24 +264,27 @@ mod on_entity_item_update_tests {
         };
         let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
             "item_update",
-            Box::new(Mod(vec![
-                iron.clone(),
-                gold.clone(),
-                Update {
-                    item: "minecraft:emerald",
-                    cancels: false,
-                    remove: true,
-                    mixed: false,
-                    heard: Default::default(),
-                },
-                Update {
-                    item: "minecraft:copper_ingot",
-                    cancels: true,
-                    remove: false,
-                    mixed: true,
-                    heard: Default::default(),
-                },
-            ])),
+            Box::new(Mod(
+                vec![
+                    iron.clone(),
+                    gold.clone(),
+                    Update {
+                        item: "minecraft:emerald",
+                        cancels: false,
+                        remove: true,
+                        mixed: false,
+                        heard: Default::default(),
+                    },
+                    Update {
+                        item: "minecraft:copper_ingot",
+                        cancels: true,
+                        remove: false,
+                        mixed: true,
+                        heard: Default::default(),
+                    },
+                ],
+                named,
+            )),
         )]
         .into();
         mod_platform::testing::with_mods(mods.clone(), || {
