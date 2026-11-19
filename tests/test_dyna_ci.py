@@ -292,9 +292,9 @@ class DynaRoutingTests(unittest.TestCase):
         # verify-static routes as verify does, except that a pull request outside the gate and a contributor's
         # pull request stay on GitHub's runners, and our pool gives it a medium runner (it compiles nothing heavy).
         for field, outside, fork in (
-                ("runs-on", "needs.changes.outputs.heavy != 'true' && 'ubuntu-latest' || ",
+                ("runs-on", "needs.changes.outputs.heavy == 'false' && 'ubuntu-latest' || ",
                  "needs.changes.outputs.trusted != 'true' && 'ubuntu-latest' || "),
-                ("RUNNER_KIND", "needs.changes.outputs.heavy != 'true' && 'github' || ",
+                ("RUNNER_KIND", "needs.changes.outputs.heavy == 'false' && 'github' || ",
                  "needs.changes.outputs.trusted != 'true' && 'github' || ")):
             shared = runtime.split(f"{field}:", 1)[1].split("\n", 1)[0]
             if field == "runs-on":
@@ -334,11 +334,11 @@ class DynaRoutingTests(unittest.TestCase):
         select = changes["Select checks once for this pull request"]
         # Ordinary pull requests only: main's pushes, rollups and syncs (heavy) select nothing, so every gate job keeps
         # running there.
-        ordinary = "github.event_name == 'pull_request' && steps.gate.outputs.heavy != 'true'"
+        ordinary = "github.event_name == 'pull_request' && steps.gate.outputs.heavy == 'false'"
         for step in (listing, select):
             self.assertEqual(step["if"], ordinary)
-        for name in ("rust_required", "launcher_required", "tooling_required"):
-            self.assertEqual(jobs["changes"]["outputs"][name], f"${{{{ steps.selection.outputs.{name} || 'true' }}}}")
+        for name in ("rust_required", "tooling_required"):
+            self.assertEqual(jobs["changes"]["outputs"][name], f"${{{{ steps.reuse.outputs.reused == 'true' && 'false' || steps.selection.outputs.{name} || 'true' }}}}")
         # The list is the comparison of this run's two commits, not the pull request's current files.
         self.assertNotIn("PR", listing["env"])
         self.assertEqual(listing["env"]["BASE_SHA"], "${{ github.event.pull_request.base.sha }}")
@@ -361,13 +361,14 @@ class DynaRoutingTests(unittest.TestCase):
             base = git("rev-parse", "HEAD")
             Path(directory, "lib.rs").write_text("fn b() {}\n")
             git("commit", "-qam", "head")
+            head = git("rev-parse", "HEAD")
             listing_file = Path(directory, "pr-files")
             listing_file.write_bytes(b"M\0docs/setup.md\0")
             for files, rust in (("", "true"), (str(listing_file), "false")):
                 with self.subTest(files=files):
                     output = Path(directory, "output")
                     output.write_text("")
-                    env = dict(os.environ, BASE_SHA=base, HEAD_SHA="HEAD", FILES=files, GITHUB_OUTPUT=str(output))
+                    env = dict(os.environ, BASE_SHA=base, HEAD_SHA=head, FILES=files, GITHUB_OUTPUT=str(output))
                     subprocess.run(["bash", "-e", "-c", select["run"].replace("tools/ci/", f"{ROOT}/tools/ci/")],
                                    cwd=directory, env=env, check=True)
                     self.assertIn(f"rust_required={rust}\n", output.read_text())

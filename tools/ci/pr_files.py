@@ -52,6 +52,8 @@ def entries(files):
 def listed():
     """The (status, path) pairs, or the reason they can't stand for git's diff."""
     base, head, expected = os.environ["BASE_SHA"], os.environ["HEAD_SHA"], int(os.environ["CHANGED_FILES"])
+    if expected <= 0:
+        return "the event did not name a nonempty diff"
     if expected >= API_LIMIT:
         return f"{expected} files: the comparison lists at most {API_LIMIT}"
     # Full commit ids, not names that could move: the comparison is of exactly these two commits.
@@ -61,12 +63,16 @@ def listed():
     comparison = get(f"compare/{base}...{head}?per_page=1")
     if comparison.get("base_commit", {}).get("sha") != base:
         return "the comparison is not of this run's base"
-    files = comparison.get("files", [])
+    files = comparison.get("files")
+    if not isinstance(files, list):
+        return "the comparison has no file list"
     if len(files) != expected:
         return f"the comparison lists {len(files)} files, the event {expected}"
     changes = entries(files)
     if changes is None:
         return "a file status with no exact git equivalent: " + ", ".join(sorted({f["status"] for f in files}))
+    if any(not isinstance(path, str) or not path or "\0" in path for _, path in changes):
+        return "the comparison has an invalid file path"
     return changes
 
 

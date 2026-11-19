@@ -124,9 +124,8 @@ class RustChangesTests(unittest.TestCase):
         self.assertFalse(needs_tooling([]))
 
     def test_documentation_the_python_suite_reads_keeps_it(self):
-        # The status page's gap count and badge (tests/test_parity_gaps.py), the launcher's copy of a game image
-        # (tests/test_launcher_copies.py): an edit to either alone still runs the Python tests.
-        for path in ["docs/status.md", "docs/media/village.webp"]:
+        # The status page's gap count and the book's build entry are read by the Python tests.
+        for path in ["docs/status.md", "docs/modding-book.md"]:
             with self.subTest(path=path):
                 self.assertTrue(selections([("M", path)])["tooling_required"])
         self.assertFalse(selections([("M", "docs/setup.md")])["tooling_required"])
@@ -207,9 +206,9 @@ class RustChangesTests(unittest.TestCase):
                 ("A", "docs/renamed.md"), ("A", "docs/added.md"), ("T", "docs/type.md"),
             })
             import sys
-            output = subprocess.check_output(
-                [sys.executable, str(selector), "--all", base, "HEAD"], cwd=directory, text=True,
-            )
+            head = subprocess.check_output(["git", "-C", directory, "rev-parse", "HEAD"], text=True).strip()
+            command = [sys.executable, str(selector), "--all"]
+            output = subprocess.check_output([*command, base, head], cwd=directory, text=True)
             self.assertEqual(dict(line.split("=") for line in output.splitlines()), {
                 "rust_required": "false", "tooling_required": "true",
             })
@@ -298,6 +297,23 @@ class RustChangesTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertTrue(selections([("M", path)])["rust_required"])
         self.assertFalse(selections([("M", "tools/parity.py")])["rust_required"])
+
+    def test_pr_selection_uses_the_full_gate_on_invalid_or_empty_changes(self):
+        unknown = [("?", UNKNOWN_CHANGE)]
+        with tempfile.TemporaryDirectory() as directory:
+            listing = Path(directory, "list")
+            sha = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+            for data in [b"", b"M\0docs/setup.md", b"M\0", b"X\0docs/setup.md\0"]:
+                listing.write_bytes(data)
+                with self.subTest(data=data):
+                    self.assertEqual(rust_changes.pr_entries(sha, sha, listing), unknown)
+            listing.write_bytes(b"M\0docs/setup.md\0")
+            self.assertEqual(rust_changes.pr_entries("", sha, listing), unknown)
+            self.assertEqual(rust_changes.pr_entries(sha, sha, listing), [("M", "docs/setup.md")])
+            self.assertEqual(selections(unknown), {"rust_required": True, "tooling_required": True})
+
+    def test_pr_file_producer_changes_require_formatting(self):
+        self.assertTrue(selections([("M", "tools/ci/pr_files.py")])["rust_required"])
 
     def test_a_base_missing_from_the_checkout_means_everything_changed(self):
         with tempfile.TemporaryDirectory() as directory:

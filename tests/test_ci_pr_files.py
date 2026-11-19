@@ -73,10 +73,27 @@ class PrFilesTests(unittest.TestCase):
         self.assertEqual(out, "listed=true\n")
         self.assertEqual(len(listed), pr_files.API_LIMIT - 1)
 
+    def test_a_same_count_branch_round_trip_cannot_replace_the_pinned_listing(self):
+        paths = []
+        def get(path):
+            paths.append(path)
+            if path.startswith("pulls/"):
+                # The branch briefly shows only a doc edit, then returns to the original head.
+                return [{"status": "modified", "filename": "docs/setup.md"}] if "/files" in path else {
+                    "head": {"sha": HEAD}, "base": {"sha": BASE}, "changed_files": 1,
+                }
+            return api([{"status": "modified", "filename": "src/lib.rs"}])(path)
+        out, listed = self.run_main(get, 1)
+        self.assertEqual((out, listed), ("listed=true\n", [("M", "src/lib.rs")]))
+        self.assertEqual(paths, [f"compare/{BASE}...{HEAD}?per_page=1"])
+
     def test_any_doubt_falls_back_to_the_history(self):
         one = [{"status": "modified", "filename": "docs/setup.md"}]
         for name, get, changed in [
             ("a count other than the event's", api(one), 2),
+            ("an empty event diff", api([]), 0),
+            ("a missing list", lambda _: {"base_commit": {"sha": BASE}}, 1),
+            ("a truncated path", api([{"status": "added", "filename": "docs/\0setup.md"}]), 1),
             ("the comparison's limit", api(one), pr_files.API_LIMIT),
             ("a comparison of another base", api(one, base="n" * 40), 1),
             ("a status git has no exact twin for", api([{"status": "changed", "filename": "docs/a.md"}]), 1),

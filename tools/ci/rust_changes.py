@@ -26,7 +26,7 @@ ROOT_RUST = {"Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "rustfmt.toml", 
 # it (Rust does read tools/native-hook-fragments/*.json and tools/ci/*.sh, so those still count). The scripts a step
 # gated on this selection runs are its inputs all the same (gated_by). This script and the module it imports decide
 # whether Rust runs at all, so a change to them runs it.
-RUST_DECIDES = {"tools/ci/rust_changes.py", "tools/release_train.py"}
+RUST_DECIDES = {"tools/ci/rust_changes.py", "tools/ci/pr_files.py", "tools/release_train.py"}
 # Cargo's own inputs, wherever they are: a manifest, lock file, build script, toolchain or lint setting, or a Rust
 # source. Deleted or renamed ones count too, so a package under docs/ that loses its manifest still runs Rust.
 CARGO_NAMES = {"Cargo.toml", "Cargo.lock", "build.rs", "rust-toolchain", "rust-toolchain.toml", "rustfmt.toml",
@@ -482,6 +482,18 @@ def selections(changes):
             "tooling_required": needs_tooling(changes)}
 
 
+def framed_entries(data):
+    """Complete nonempty `git diff --name-status --no-renames -z` records, or None."""
+    fields = data.split(b"\0")
+    if len(fields) < 3 or fields[-1] or len(fields) % 2 != 1:
+        return None
+    try:
+        rows = [(status.decode("ascii"), path.decode("utf-8")) for status, path in zip(fields[:-1:2], fields[1::2])]
+    except UnicodeError:
+        return None
+    return rows if all(status in {"A", "D", "M", "T"} and path for status, path in rows) else None
+
+
 def changed_entries(base, head):
     # Disable rename folding: retain both deleted and added paths, including source moved into docs.
     command = ["git", "diff", "--name-status", "--no-renames", "-z", f"{base}...{head}", "--"]
@@ -492,8 +504,10 @@ def changed_entries(base, head):
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         diff = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False)
         if diff.returncode == 0:
-            fields = diff.stdout.decode("utf-8").split("\0")[:-1]
-            return list(zip(fields[::2], fields[1::2]))
+            rows = framed_entries(diff.stdout)
+            if rows is not None:
+                return rows
+            break
     # Never an error and never "nothing changed": assume everything did.
     print(f"rust_changes: no diff for {base}...{head}; treating everything as changed", file=sys.stderr)
     return [("?", UNKNOWN_CHANGE)]
@@ -501,8 +515,18 @@ def changed_entries(base, head):
 
 def listed_entries(path):
     """The (status, path) pairs of a `git diff --name-status -z` listing saved in a file (tools/ci/pr_files.py)."""
-    fields = Path(path).read_bytes().decode("utf-8").split("\0")[:-1]
-    return list(zip(fields[::2], fields[1::2]))
+    try:
+        return framed_entries(Path(path).read_bytes())
+    except OSError:
+        return None
+
+
+def pr_entries(base, head, listing=None):
+    if not all(re.fullmatch(r"[0-9a-f]{40}", sha) for sha in (base, head)):
+        print("rust_changes: invalid event commits; treating everything as changed", file=sys.stderr)
+        return [("?", UNKNOWN_CHANGE)]
+    cached = listed_entries(listing) if listing else None
+    return cached if cached is not None else changed_entries(base, head)
 
 
 def changed_paths(base, head):
@@ -517,12 +541,17 @@ if __name__ == "__main__":
     parser.add_argument("--files", metavar="LIST", help="read base...head's changes from this listing (pr_files.py) "
                         "instead of git")
     args = parser.parse_args()
-    changes = listed_entries(args.files) if args.files else changed_entries(args.base, args.head)
-    paths = [path for _, path in changes]
     if args.all:
-        for name, required in selections(changes).items():
+        changes = pr_entries(args.base, args.head, args.files)
+        try:
+            required_checks = selections(changes)
+        except Exception as error:  # Selection is an optimization, never a reason not to run checks.
+            print(f"rust_changes: cannot classify changes: {error}; running all checks", file=sys.stderr)
+            required_checks = {"rust_required": True, "tooling_required": True}
+        for name, required in required_checks.items():
             print(f"{name}={str(required).lower()}")
     else:
+        paths = changed_paths(args.base, args.head)
         print(f"required={str(needs_rust(paths)).lower()}")
         print(f"sample={str(needs_sample(paths)).lower()}")
         print(f"server_build={str(needs_server_build(paths)).lower()}")
