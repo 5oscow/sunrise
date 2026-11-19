@@ -3454,11 +3454,11 @@ impl PackPost {
     }
 
     /// `Renderer::finish_sequence_frame`: the centre depth the finished frame copied.
-    pub fn take_center_depth(&mut self, device: &wgpu::Device) -> Result<(), String> {
+    pub fn take_center_depth(&mut self) -> Result<(), String> {
         self.center_depth
             .as_mut()
             .ok_or("the shader pack copied no centre depth")?
-            .take_completed(device)
+            .take_completed()
             .map(|_| ())
     }
 
@@ -5300,7 +5300,7 @@ impl PackPost {
         self.uniforms.center_depth_raw = self
             .center_depth
             .get_or_insert_with(|| super::pack_center_depth::CenterDepth::new(device))
-            .collect(device);
+            .collect();
         self.uniforms.update(frame, inputs, size);
         // `smooth` starts on the first frame that knows the camera's biome.
         self.custom.world_frame(inputs.biome_known);

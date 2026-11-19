@@ -242,7 +242,7 @@ impl GpuTimer {
         self.next = (slot + 1) % SLOTS;
     }
     /// GPU milliseconds of frames whose timestamps have arrived, oldest first: the caller
-    /// polls the device first, and only a live one (`Renderer::poll_live`).
+    /// polls the device first, and only a live one (`in_flight::poll_live`).
     pub fn collect(&mut self, out: &mut Vec<f32>) {
         for i in 0..SLOTS {
             let slot = &self.slots[(self.next + i) % SLOTS];
