@@ -783,3 +783,75 @@ fn an_active_vault_ends_a_held_item_s_click_on_the_client() {
         assert!(!unlocking.consumes_action());
     });
 }
+
+#[test]
+#[ignore = "daily"]
+fn blocks_answer_a_held_item_s_click_on_the_client_as_vanilla() {
+    on_a_client(Vec::new().into(), |game| {
+        let registry = game.pack.assets.registry;
+        let state = |name: &str, properties: &[(&str, &str)]| {
+            registry
+                .resolve(&sunrise_world::chunk::BlockState {
+                    name: name.into(),
+                    properties: properties
+                        .iter()
+                        .map(|(key, value)| ((*key).into(), (*value).into()))
+                        .collect(),
+                })
+                .unwrap()
+        };
+        let click = |game: &mut Game<'_>, item: &str| {
+            let held = ItemStack::new(item, 1);
+            game.remote_block_reacts(&top_of(0, 0), Some(&held), true).0
+        };
+        // RedStoneOreBlock.useItemOn: SUCCESS, unless a block item would go on top (PASS).
+        game.world
+            .set(
+                0,
+                64,
+                0,
+                state("minecraft:redstone_ore", &[("lit", "false")]),
+            )
+            .unwrap();
+        assert!(click(game, "minecraft:stick").should_swing());
+        assert!(!click(game, "minecraft:cobblestone").consumes_action());
+        // PumpkinBlock.useItemOn: shears are SUCCESS; anything else goes on.
+        game.world
+            .set(0, 64, 0, state("minecraft:pumpkin", &[]))
+            .unwrap();
+        assert!(click(game, "minecraft:shears").should_swing());
+        assert!(!click(game, "minecraft:stick").consumes_action());
+        // WeatheringCopperGolemStatueBlock.useItemOn: an axe on an unaffected statue is SUCCESS.
+        game.world
+            .set(
+                0,
+                64,
+                0,
+                state(
+                    "minecraft:copper_golem_statue",
+                    &[
+                        ("copper_golem_pose", "standing"),
+                        ("facing", "north"),
+                        ("waterlogged", "false"),
+                    ],
+                ),
+            )
+            .unwrap();
+        assert!(click(game, "minecraft:iron_axe").should_swing());
+        // BeehiveBlock.useItemOn on a client level: a full hive takes a glass bottle; its
+        // shears are the server's, so they go on.
+        game.world
+            .set(
+                0,
+                64,
+                0,
+                state(
+                    "minecraft:beehive",
+                    &[("facing", "north"), ("honey_level", "5")],
+                ),
+            )
+            .unwrap();
+        assert!(click(game, "minecraft:glass_bottle").consumes_action());
+        assert!(!click(game, "minecraft:shears").consumes_action());
+    });
+}
