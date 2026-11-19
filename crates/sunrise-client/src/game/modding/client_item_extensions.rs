@@ -917,4 +917,96 @@ mod tests {
             },
         );
     }
+
+    /// Asks the Host for a level in its tint callback.
+    struct Gated(Arc<std::sync::atomic::AtomicUsize>);
+    impl ClientItemExtensions for Gated {
+        fn armor_layer_tint_color(
+            &self,
+            host: &dyn ClientHost,
+            _: &mod_api::ItemStack,
+            _: &EquipmentLayer,
+            _: u32,
+            _: u32,
+        ) -> u32 {
+            let _ = host.level("minecraft:overworld");
+            self.0.fetch_add(1, Ordering::Relaxed);
+            0xFFFF_FFFF
+        }
+    }
+
+    /// Armour is drawn in frames, after the thread reached World. Fired in Setup and in Reloading
+    /// anyway, a callback's world read comes back as the catch arm's `PhaseRefusal` (the piece is
+    /// refused, vanilla draws), never the no-scope panic or the `callback failed` arm; in World
+    /// the same callback is answered.
+    #[test]
+    #[ignore = "daily"]
+    fn client_item_extensions_outside_the_world_are_refused_not_a_panic() {
+        use mod_api::__private::{ModPhase, PhaseOwner};
+        crate::game::native_entity_refs::tests::with_client_game(|game| {
+            mod_platform::testing::with_mods(
+                vec![mod_api::ModEntry::new("gated", Box::new(Empty))].into(),
+                || {
+                    let item = mod_api::__private::item_key("minecraft:iron_chestplate").unwrap();
+                    let layers = [EquipmentAssetLayer {
+                        texture: "original".into(),
+                        dyeable: false,
+                        use_player_texture: false,
+                        color_when_undyed: None,
+                    }];
+                    let piece = EquipmentPiece {
+                        asset: "minecraft:iron".into(),
+                        slot: ArmorSlot::Chest,
+                        kind: "humanoid",
+                        layers: &layers,
+                        overlay: 0,
+                    };
+                    let binding = Binding {
+                        name: "original",
+                        uv: [0.0, 0.0, 1.0, 1.0],
+                    };
+                    let answered = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+                    for phase in [Some(false), Some(true), None] {
+                        let mut registry = Registration {
+                            state: Default::default(),
+                            sprite_exists: &|_| true,
+                            refused: None,
+                        };
+                        {
+                            let _owner = owner("gated");
+                            registry.register_texture("original").unwrap();
+                            registry
+                                .client_item_extensions(item, Arc::new(Gated(answered.clone())))
+                                .unwrap();
+                        }
+                        let part = &registry.state.items[&item];
+                        let setup =
+                            PhaseOwner::scope(phase.map_or(ModPhase::World, |_| ModPhase::Setup));
+                        let _reload = (phase == Some(true)).then(|| setup.reloading().unwrap());
+                        let out = dispatch_equipment(
+                            &*game,
+                            &registry.state,
+                            part,
+                            &mod_api::ItemStack::of(item),
+                            &piece,
+                            EquipmentBindings {
+                                trim: None,
+                                default: &mut |_| Some(binding),
+                                binding: &|_| Some(binding),
+                                emissive: &mut |_| None,
+                            },
+                        );
+                        if phase.is_some() {
+                            assert!(out.is_empty(), "a refused piece draws as vanilla");
+                            assert!(part.failed.load(Ordering::Relaxed));
+                            assert_eq!(answered.load(Ordering::Relaxed), 0, "the read was refused");
+                        } else {
+                            assert_eq!(out.len(), 1, "in World the callback is answered");
+                            assert_eq!(answered.load(Ordering::Relaxed), 1);
+                        }
+                    }
+                },
+            );
+        });
+    }
 }
