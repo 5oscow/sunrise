@@ -22,7 +22,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no sign-editing event)",
-        cancellable = true
+        cancellable = true,
+        version = 2
     )]
     fn sign_changed(
         player: u128,

@@ -17,7 +17,8 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "ServerChatEvent",
-        cancellable = true
+        cancellable = true,
+        version = 2
     )]
     fn server_chat(
         player_id: i32,
