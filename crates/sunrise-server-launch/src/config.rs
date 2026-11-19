@@ -765,10 +765,12 @@ impl Config {
         for (key, value) in &written {
             properties.put(key, value.clone());
         }
+        // Use the Java OutputStream form: escapes preserve every unit in
+        // keys we didn't set. The game, not the overlay, does the Writer pass.
         let text = properties.store(
             Some("Minecraft server properties"),
             &date_string(now_millis()),
-            false,
+            true,
         );
         replace(&path, &text)?;
         Ok(written)
@@ -794,7 +796,7 @@ impl Config {
         let mut table = toml::Table::try_from(Self::default()).map_err(|e| e.to_string())?;
         for (section, field, key) in TYPED {
             let (Some(text), Some(slot)) = (
-                parsed.raw.get(key),
+                parsed.raw.get_java(key),
                 table
                     .get_mut(section)
                     .and_then(|s| s.as_table_mut())
@@ -802,25 +804,42 @@ impl Config {
             ) else {
                 continue;
             };
-            if let Some(value) = typed_value(text, slot) {
+            let text = text.to_utf8().map_err(|_| toml_value_refusal(key))?;
+            if let Some(value) = typed_value(&text, slot) {
                 *slot = value;
             }
         }
         let mut extra = toml::Table::new();
-        let mut keys: Vec<&String> = source.map.keys().collect();
-        keys.sort();
+        let mut keys: Vec<_> = source.iter().map(|(key, _)| key).collect();
+        keys.sort_unstable();
         for key in keys {
-            let value = parsed.raw.get(key).unwrap_or_default();
-            if TYPED.iter().any(|t| t.2 == key) || defaults.raw.get(key) == Some(value) {
+            let key = key.to_utf8().map_err(|_| {
+                format!("Cannot import server.properties key {:04X?}: TOML cannot represent an unpaired UTF-16 surrogate", key.as_units())
+            })?;
+            if TYPED.iter().any(|t| t.2 == key) {
                 continue;
             }
-            extra.insert(key.clone(), loose_value(value));
+            let value = parsed.raw.get_java(&key);
+            if value.is_some() && defaults.raw.get_java(&key) == value {
+                continue;
+            }
+            let text = value
+                .map(|value| value.to_utf8().map_err(|_| toml_value_refusal(&key)))
+                .transpose()?
+                .unwrap_or_default();
+            extra.insert(key, loose_value(&text));
         }
         table.insert("properties".into(), toml::Value::Table(extra));
         let config: Self = table.try_into().map_err(|e| e.to_string())?;
         config.check()?;
         Ok(config)
     }
+}
+
+fn toml_value_refusal(key: &str) -> String {
+    format!(
+        "Cannot copy server.properties value for {key:?}: TOML cannot represent an unpaired UTF-16 surrogate"
+    )
 }
 
 /// `server.toml` for a configuration: the template's comments with this configuration's values.
@@ -882,14 +901,15 @@ pub fn sync_back(dir: &Path, written: &[(String, String)]) -> Result<Vec<String>
     let Ok(now) = read_properties(&dir.join(PROPERTIES)) else {
         return Ok(Vec::new());
     };
-    let changed: Vec<(&str, &str)> = written
-        .iter()
-        .filter_map(|(key, value)| {
-            now.get(key)
-                .filter(|v| v != value)
-                .map(|v| (key.as_str(), v))
-        })
-        .collect();
+    let mut changed = Vec::new();
+    for (key, previous) in written {
+        if let Some(value) = now.get_java(key) {
+            let value = value.to_utf8().map_err(|_| toml_value_refusal(key))?;
+            if &value != previous {
+                changed.push((key.as_str(), value));
+            }
+        }
+    }
     if changed.is_empty() {
         return Ok(Vec::new());
     }
@@ -1232,8 +1252,28 @@ mod tests {
                 assert_eq!(value, vanilla_like, "{key}");
                 continue;
             }
-            assert_eq!(vanilla.raw.get(&key), Some(value.as_str()), "{key}");
+            assert_eq!(
+                vanilla.raw.get(&key).as_deref(),
+                Some(value.as_str()),
+                "{key}"
+            );
         }
+    }
+
+    #[test]
+    fn import_refuses_properties_toml_cannot_represent() {
+        let keys = Properties::load_str("?=literal\n\\uD800=surrogate\n").unwrap();
+        let error = Config::import(&keys).unwrap_err();
+        assert!(
+            error.contains("key [D800]: TOML cannot represent"),
+            "{error}"
+        );
+        let value = Properties::load_str("level-seed=\\uD800\n").unwrap();
+        let error = Config::import(&value).unwrap_err();
+        assert!(
+            error.contains("value for \"level-seed\": TOML cannot represent"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -1382,12 +1422,26 @@ mod tests {
         c.properties
             .insert("spawn-protection".into(), toml::Value::Integer(0));
         std::fs::write(dir.join(FILE), render(&c)).unwrap();
-        std::fs::write(dir.join(PROPERTIES), "rcon.port=25576\nmotd=old\n").unwrap();
+        std::fs::write(
+            dir.join(PROPERTIES),
+            "rcon.port=25576\nmotd=old\n?=literal\n\\uD800=surrogate\ncustom=\\uDC00\n",
+        )
+        .unwrap();
         let written = c.write_properties(&dir).unwrap();
         let p = read_properties(&dir.join(PROPERTIES)).unwrap();
-        assert_eq!(p.get("motd"), Some("A Minecraft Server"));
-        assert_eq!(p.get("rcon.port"), Some("25576"), "other keys are kept");
-        assert_eq!(p.get("spawn-protection"), Some("0"));
+        assert_eq!(p.get("motd").as_deref(), Some("A Minecraft Server"));
+        assert_eq!(
+            p.get("rcon.port").as_deref(),
+            Some("25576"),
+            "other keys are kept"
+        );
+        assert_eq!(p.get("spawn-protection").as_deref(), Some("0"));
+        assert_eq!(p.get("?").as_deref(), Some("literal"));
+        assert!(
+            p.iter().any(|(key, value)| key.as_units() == [0xd800]
+                && value.to_utf8().unwrap() == "surrogate")
+        );
+        assert_eq!(p.get_java("custom").unwrap().as_units(), [0xdc00]);
         // The game turns the whitelist off and changes spawn protection.
         let mut p = p;
         p.put("white-list", "false".into());
