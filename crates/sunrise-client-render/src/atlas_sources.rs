@@ -295,11 +295,15 @@ pub struct Listed {
     pub sprites: BTreeMap<String, SpriteOrigin>,
     /// The ids whose origin a mod's source set: its pixels, or the texture it named.
     pub by_mods: BTreeSet<String>,
+    /// The ids a filter or a mod's `Remove` took out and no later source listed again: listed
+    /// once, absent from the final list.
+    pub removed: BTreeSet<String>,
 }
 impl Listed {
     /// `id`'s origin replaced by the built-in source that lists it now.
     fn put(&mut self, id: String, origin: SpriteOrigin) {
         self.by_mods.remove(&id);
+        self.removed.remove(&id);
         self.sprites.insert(id, origin);
     }
 }
@@ -339,8 +343,11 @@ pub fn list(sources: &[SpriteSource], textures: &[String], ask: &mut Ask<'_>) ->
                     !(namespace.as_ref().is_none_or(|m| m.is_match(ns))
                         && path.as_ref().is_none_or(|m| m.is_match(p)))
                 };
+                let gone: Vec<String> =
+                    out.sprites.keys().filter(|id| !kept(id)).cloned().collect();
                 out.sprites.retain(|id, _| kept(id));
                 out.by_mods.retain(kept);
+                out.removed.extend(gone);
             }
             SpriteSource::Unstitch {
                 resource,
@@ -400,6 +407,7 @@ fn apply(kind: &str, output: SpriteSourceOutput, exists: &dyn Fn(&str) -> bool, 
     let mut make = |sprite: Identifier, origin| {
         let id = sprite.to_string();
         out.by_mods.insert(id.clone());
+        out.removed.remove(&id);
         out.sprites.insert(id, origin);
     };
     match output {
@@ -440,7 +448,9 @@ fn apply(kind: &str, output: SpriteSourceOutput, exists: &dyn Fn(&str) -> bool, 
         }
         SpriteSourceOutput::Remove { sprite } => {
             let id = sprite.to_string();
-            out.sprites.remove(&id);
+            if out.sprites.remove(&id).is_some() {
+                out.removed.insert(id.clone());
+            }
             out.by_mods.remove(&id);
         }
     }
@@ -626,15 +636,6 @@ fn list_atlas(
 ) -> Listed {
     list(sources, textures, &mut |kind, config| {
         if !asked {
-            if atlas.to_string() == "minecraft:gui" {
-                log::warn!(
-                    "Sunrise: the {atlas} atlas's definition lists a source of type {kind} (registered by the \
-                 mod `{}`), which only runs in the blocks and items atlases and the atlases a mod \
-                 registers: its sprites are ignored",
-                    kind.split_once(':')
-                        .map_or(kind, |(namespace, _)| namespace),
-                );
-            }
             return Vec::new();
         }
         let resources = Arc::new(LoadResources(Mutex::new(Some(source.clone()))));
@@ -675,12 +676,12 @@ pub fn registered(
         .collect()
 }
 
-/// The game atlases whose registered source types are asked: the blocks and items atlases.
-const ASKED_ATLASES: [&str; 2] = ["minecraft:blocks", "minecraft:items"];
+/// The game atlases whose registered source types are asked: the blocks, items and GUI atlases.
+const ASKED_ATLASES: [&str; 3] = ["minecraft:blocks", "minecraft:items", "minecraft:gui"];
 
 /// Every atlas definition of a resource tree with the sprites its merged definition lists, from one
-/// listing of the textures. The registered types of mods are asked for the game's blocks and
-/// items atlases (`SpriteSource.run` runs a source of any registered type in any atlas), each
+/// listing of the textures. The registered types of mods are asked for the game's blocks, items and
+/// GUI atlases (`SpriteSource.run` runs a source of any registered type in any atlas), each
 /// entry once; every other definition lists its built-in sources. One load has one listing
 /// ([`shared`]), which the block sprites, the item masks, the HUD atlas and the glint atlas all
 /// read. The atlases a mod registers are asked by [`registered`].
@@ -690,7 +691,7 @@ pub struct Listing {
 }
 impl Listing {
     /// The listing of `source`, asking `mods` for each entry of a registered type in an atlas
-    /// the game has that mods may add sprites to.
+    /// the game has that mods may add sprites to (blocks, items and GUI).
     pub fn build(source: &crate::resource_source::ResourceSource, mods: &dyn ModSources) -> Self {
         let textures = sorted_textures(source);
         let atlases = atlases(source, mods, &|_| true)
@@ -712,6 +713,13 @@ impl Listing {
         self.atlases
             .get(atlas)
             .map_or(&NONE, |listed| &listed.sprites)
+    }
+    /// The sprites a filter or a mod's source took out of `atlas`'s list.
+    pub fn removed(&self, atlas: &str) -> impl Iterator<Item = &String> {
+        self.atlases
+            .get(atlas)
+            .into_iter()
+            .flat_map(|listed| &listed.removed)
     }
     /// The sprites a mod's source made in `atlas`.
     pub fn by_mods(&self, atlas: &str) -> impl Iterator<Item = &String> {
@@ -1245,11 +1253,10 @@ mod tests {
             asked,
             [
                 ("minecraft:blocks".to_owned(), "srcgame:own".to_owned()),
+                ("minecraft:gui".to_owned(), "srcgame:own".to_owned()),
                 ("minecraft:items".to_owned(), "srcgame:own".to_owned()),
-            ],
-            "the blocks and items atlases are asked; another game atlas lists its built-in sources only"
+            ]
         );
-        assert!(first.sprites("minecraft:gui").is_empty());
         let materials = Materials::over(first, &source);
         let red = |origin: &SpriteOrigin| match origin {
             SpriteOrigin::Pixels((_, _, rgba)) => Some(rgba[0]),

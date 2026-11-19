@@ -581,17 +581,12 @@ pub(super) fn load_resources_for_mods(
     let role = load_role.execution;
     let mut root = resolved.prepared().to_path_buf();
     let headless = !role.is_client();
-    let (runtime_sprites, texture_atlases) = if headless {
-        (Vec::new(), Vec::new())
+    let texture_atlases = if headless {
+        Vec::new()
     } else {
-        (
-            client_reload::collect_runtime_sprites(),
-            client_reload::collect_texture_atlases(),
-        )
+        client_reload::collect_texture_atlases()
     };
-    // Every atlas is listed over the packs' files before any generated texture joins them.
     resolved = client_reload::stage_texture_atlases(resolved, &texture_atlases);
-    resolved = client_reload::stage_runtime_sprites(resolved, &runtime_sprites);
     let threads = settings.sunrise.worker_threads();
     // One pool of workers for every level's streaming, the client's and the
     // server thread's (sunrise_threads::jobs), sized before any world opens.
@@ -693,7 +688,6 @@ pub(super) fn load_resources_for_mods(
             sunrise_assets::resource_source::ResourceRoot::directory(root.clone()),
             &texture_atlases,
         );
-        resolved = client_reload::stage_runtime_sprites(resolved, &runtime_sprites);
     };
     // Every loaded game publishes scalar registry keys, including callers that
     // load a prepared root directly instead of building a mod content overlay.
@@ -772,7 +766,6 @@ pub(super) fn load_resources_for_mods(
     progress.set(4);
     if !menu {
         use sunrise_client::lang::{self, Language};
-        sunrise_client::ui::load_metadata(resolved.source());
         // An integrated server shares the client's loaded resources and
         // language; it doesn't run this loader in production.
         lang::set(if role.is_dedicated_server() {
