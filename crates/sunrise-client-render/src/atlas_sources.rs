@@ -295,11 +295,15 @@ pub struct Listed {
     pub sprites: BTreeMap<String, SpriteOrigin>,
     /// The ids whose origin a mod's source set: its pixels, or the texture it named.
     pub by_mods: BTreeSet<String>,
+    /// The ids a filter or a mod's `Remove` took out and no later source listed again: listed
+    /// once, absent from the final list.
+    pub removed: BTreeSet<String>,
 }
 impl Listed {
     /// `id`'s origin replaced by the built-in source that lists it now.
     fn put(&mut self, id: String, origin: SpriteOrigin) {
         self.by_mods.remove(&id);
+        self.removed.remove(&id);
         self.sprites.insert(id, origin);
     }
 }
@@ -339,8 +343,11 @@ pub fn list(sources: &[SpriteSource], textures: &[String], ask: &mut Ask<'_>) ->
                     !(namespace.as_ref().is_none_or(|m| m.is_match(ns))
                         && path.as_ref().is_none_or(|m| m.is_match(p)))
                 };
+                let gone: Vec<String> =
+                    out.sprites.keys().filter(|id| !kept(id)).cloned().collect();
                 out.sprites.retain(|id, _| kept(id));
                 out.by_mods.retain(kept);
+                out.removed.extend(gone);
             }
             SpriteSource::Unstitch {
                 resource,
@@ -400,6 +407,7 @@ fn apply(kind: &str, output: SpriteSourceOutput, exists: &dyn Fn(&str) -> bool, 
     let mut make = |sprite: Identifier, origin| {
         let id = sprite.to_string();
         out.by_mods.insert(id.clone());
+        out.removed.remove(&id);
         out.sprites.insert(id, origin);
     };
     match output {
@@ -440,7 +448,9 @@ fn apply(kind: &str, output: SpriteSourceOutput, exists: &dyn Fn(&str) -> bool, 
         }
         SpriteSourceOutput::Remove { sprite } => {
             let id = sprite.to_string();
-            out.sprites.remove(&id);
+            if out.sprites.remove(&id).is_some() {
+                out.removed.insert(id.clone());
+            }
             out.by_mods.remove(&id);
         }
     }
@@ -703,6 +713,13 @@ impl Listing {
         self.atlases
             .get(atlas)
             .map_or(&NONE, |listed| &listed.sprites)
+    }
+    /// The sprites a filter or a mod's source took out of `atlas`'s list.
+    pub fn removed(&self, atlas: &str) -> impl Iterator<Item = &String> {
+        self.atlases
+            .get(atlas)
+            .into_iter()
+            .flat_map(|listed| &listed.removed)
     }
     /// The sprites a mod's source made in `atlas`.
     pub fn by_mods(&self, atlas: &str) -> impl Iterator<Item = &String> {

@@ -96,9 +96,9 @@ impl Game<'_> {
     /// (`gui/sprites/container/slot`) and a mod's with its namespace (`mymod:gui/panel`).
     pub(super) fn gui_sprite(&self, sprite: &Identifier) -> Option<AtlasRegion> {
         let r = if sprite.namespace() == "minecraft" {
-            self.gui.atlas.sprites.get(sprite.path())
+            self.gui.atlas.gui_rect(sprite.path())
         } else {
-            self.gui.atlas.sprites.get(&sprite.to_string())
+            self.gui.atlas.gui_rect(&sprite.to_string())
         }?;
         Some(AtlasRegion::new([r.u0, r.v0, r.u1, r.v1], [r.w, r.h]))
     }

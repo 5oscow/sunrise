@@ -4404,7 +4404,7 @@ impl Game<'_> {
         dst: [f32; 4],
         tint: Option<u32>,
     ) -> bool {
-        let Some(mut r) = self.gui.atlas.sprites.get(name).copied() else {
+        let Some(mut r) = self.gui.atlas.gui_rect(name).copied() else {
             return false;
         };
         let (du, dv) = ((r.u1 - r.u0) / r.w as f32, (r.v1 - r.v0) / r.h as f32);

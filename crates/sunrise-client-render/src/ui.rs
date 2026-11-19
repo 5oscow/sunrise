@@ -172,7 +172,7 @@ pub fn nine_slice(
     h: f32,
     color: u32,
 ) {
-    if let Some(r) = atlas.sprites.get(sprite) {
+    if let Some(r) = atlas.gui_rect(sprite) {
         match crate::hud::sprite_modifiers::draws(atlas, sprite, *r, [x, y, w, h], color) {
             Some(draws) => {
                 for d in draws {
@@ -196,7 +196,7 @@ pub fn blit_sprite(
     h: f32,
     color: u32,
 ) {
-    if let Some(r) = atlas.sprites.get(sprite) {
+    if let Some(r) = atlas.gui_rect(sprite) {
         match crate::hud::sprite_modifiers::draws(atlas, sprite, *r, [x, y, w, h], color) {
             Some(draws) => {
                 for d in draws {
@@ -221,7 +221,7 @@ pub fn blit_sprite_region(
     h: f32,
     color: u32,
 ) {
-    if let Some(r) = atlas.sprites.get(sprite) {
+    if let Some(r) = atlas.gui_rect(sprite) {
         let size = [r.w as f32, r.h as f32];
         batch.rect_uv(x, y, w, h, sub(*r, size, src), color);
     }
