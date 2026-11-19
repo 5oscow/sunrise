@@ -14,6 +14,7 @@ use sunrise_mod_package::{
     manifest::{MANIFEST, MAX_MANIFEST, MAX_USES, revision},
     sdk::{self, ChangeNote, Index},
 };
+use sunrise_native_build::game_uses;
 
 /// One searchable record: its id, its doc text and its names in other mod APIs.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -227,6 +228,8 @@ enum Subject {
     Table {
         name: String,
         table: UsesTable,
+        /// The mod's manifest: the game code it declares is judged with the list.
+        manifest: Box<Manifest>,
     },
     /// The answer to print, with exit status 2.
     NotApplicable(String),
@@ -239,9 +242,11 @@ fn package_subject(path: &Path) -> Result<Subject, String> {
         .ok_or_else(|| format!("{}: no {MANIFEST}", path.display()))?;
     let manifest = String::from_utf8(manifest).map_err(|e| format!("{MANIFEST}: {e}"))?;
     let name = display_name(&manifest)?;
-    let table: toml::Table = toml::from_str(&manifest).map_err(|e| format!("{MANIFEST}: {e}"))?;
-    if let Some(why) = mod_source::mod_uses::exact(&table) {
-        return Ok(Subject::NotApplicable(exact_text(&name, &why)));
+    if let Some(table) = game_uses::unjudged(&package.manifest) {
+        return Ok(Subject::NotApplicable(exact_text(
+            &name,
+            &format!("it has a {table} table"),
+        )));
     }
     if package.manifest.native.is_none() && package.manifest.wasm.is_none() {
         return Ok(Subject::NotApplicable(content_text(&name)));
@@ -280,7 +285,11 @@ fn package_subject(path: &Path) -> Result<Subject, String> {
             table.made_for
         )));
     }
-    Ok(Subject::Table { name, table })
+    Ok(Subject::Table {
+        name,
+        table,
+        manifest: Box::new(package.manifest),
+    })
 }
 
 /// The table of the mod folder at `root`, scanned against its pinned build.
@@ -288,19 +297,22 @@ fn folder_subject(entry: ChildEntry, root: &Path) -> Result<Subject, String> {
     let manifest =
         std::fs::read_to_string(root.join(MANIFEST)).map_err(|e| format!("{MANIFEST}: {e}"))?;
     let parsed = Manifest::parse(&manifest)?;
-    let name = parsed.name;
+    let name = parsed.name.clone();
     if parsed.native.is_none() && parsed.wasm.is_none() {
         return Ok(Subject::NotApplicable(content_text(&name)));
     }
-    let table: toml::Table = toml::from_str(&manifest).map_err(|e| format!("{MANIFEST}: {e}"))?;
-    if let Some(why) = mod_source::mod_uses::exact(&table) {
-        return Ok(Subject::NotApplicable(exact_text(&name, &why)));
+    if let Some(table) = game_uses::unjudged(&parsed) {
+        return Ok(Subject::NotApplicable(exact_text(
+            &name,
+            &format!("it has a {table} table"),
+        )));
     }
     let sdk = ensure_sdk(root)?;
     match uses_table::scan(entry, root, &surface_of(&sdk)?)? {
         Scanned::Uses(uses) => Ok(Subject::Table {
             name,
-            table: uses.table(sdk.build),
+            table: uses_table::table(&uses, root, &sdk)?,
+            manifest: Box::new(parsed),
         }),
         Scanned::Exact(why) => Ok(Subject::NotApplicable(exact_text(&name, &why))),
         Scanned::Unread(why) => Err(why),
@@ -360,8 +372,12 @@ fn fits_lines(entry: ChildEntry, args: &[String]) -> Result<Answer, String> {
         Some(path) => package_subject(path)?,
         None => folder_subject(entry, project)?,
     };
-    let (name, mut table) = match subject {
-        Subject::Table { name, table } => (name, table),
+    let (name, mut table, manifest) = match subject {
+        Subject::Table {
+            name,
+            table,
+            manifest,
+        } => (name, table, manifest),
         Subject::NotApplicable(text) => return Ok(Answer::NotApplicable(text)),
     };
     // Whether the build the list was made for gave the hook versions a list of an older tool
@@ -376,7 +392,29 @@ fn fits_lines(entry: ChildEntry, args: &[String]) -> Result<Answer, String> {
             continue;
         }
         let target_surface = surface_of(&target)?;
-        let mut answer = fit(&table.entries, &target_surface);
+        // The mod API's items are judged by the surface, the game code the mod declares by the
+        // target's build data: one list holds both.
+        let api = |table: &UsesTable| {
+            fit(
+                table
+                    .entries
+                    .iter()
+                    .filter(|entry| !entry.id.starts_with(game_uses::PREFIX)),
+                &target_surface,
+            )
+        };
+        let (changed, unrecorded) = if game_uses::declared(&manifest) {
+            let recorded: Vec<_> = table
+                .entries
+                .iter()
+                .filter(|entry| entry.id.starts_with(game_uses::PREFIX))
+                .collect();
+            let data = crate::sdk_fetch::build_data(project, &target.build)?;
+            game_uses::compare(&recorded, game_uses::entries(&manifest, &data)?)
+        } else {
+            (Vec::new(), false)
+        };
+        let mut answer = api(&table);
         let mut unfetched = None;
         if matches!(answer, Fit::Unversioned(_)) && table.schema != USES_SCHEMA {
             let fetched = baseline.get_or_insert_with(|| {
@@ -385,11 +423,27 @@ fn fits_lines(entry: ChildEntry, args: &[String]) -> Result<Answer, String> {
                 Ok(())
             });
             match fetched {
-                Ok(()) => answer = fit(&table.entries, &target_surface),
+                Ok(()) => answer = api(&table),
                 Err(why) => unfetched = Some(why.clone()),
             }
         }
+        if !changed.is_empty() {
+            let mut misfits = match answer {
+                Fit::DoesNotFit(misfits) => misfits,
+                Fit::Fits | Fit::Unversioned(_) => Vec::new(),
+            };
+            misfits.extend(changed);
+            misfits.sort();
+            answer = Fit::DoesNotFit(misfits);
+        }
         match answer {
+            Fit::Fits if unrecorded => {
+                known = false;
+                println!(
+                    "{}  not known: nothing the list can judge changed, but it holds no record of game code the mod declares. Pack the mod again with `cargo sunrise-mod build`, which records it.",
+                    target.name
+                );
+            }
             Fit::Fits => println!("{}  fits", target.name),
             Fit::Unversioned(hooks) => {
                 known = false;
@@ -470,13 +524,13 @@ pub(crate) fn update_report(
     let exact_line = || {
         println!("{name} is made for exactly one build; its declarations are checked as it moves.")
     };
-    let table: toml::Table = toml::from_str(&manifest).map_err(|e| format!("{MANIFEST}: {e}"))?;
+    let parsed = Manifest::parse(&manifest)?;
     // A wasm mod links by interface: there is no API-use report and no compatibility check.
-    if !table.contains_key("native") {
+    if parsed.native.is_none() {
         return Ok(());
     }
     // Known from the manifest: such a mod has no table to compare, so nothing is fetched for it.
-    if mod_source::mod_uses::exact(&table).is_some() {
+    if game_uses::unjudged(&parsed).is_some() {
         exact_line();
         return Ok(());
     }
@@ -497,6 +551,23 @@ pub(crate) fn update_report(
         "{}",
         report(&name, &old, &new, &uses, &old_surface, &new_surface, &notes)
     );
+    // The game code the mod declares, by the two builds' build data.
+    if game_uses::declared(&parsed) {
+        let made = uses_table::table(&uses, root, &old)?;
+        let recorded: Vec<_> = made
+            .entries
+            .iter()
+            .filter(|entry| entry.id.starts_with(game_uses::PREFIX))
+            .collect();
+        let data = crate::sdk_fetch::build_data(root, &new.build)?;
+        let (changed, _) = game_uses::compare(&recorded, game_uses::entries(&parsed, &data)?);
+        if changed.is_empty() {
+            println!("None of the game code it declares changed.");
+        }
+        for misfit in changed {
+            println!("{misfit}");
+        }
+    }
     Ok(())
 }
 

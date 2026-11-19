@@ -3,10 +3,12 @@
 use crate::sdk_fetch::PinnedSdk;
 use mod_source::mod_uses::{self, ModInput, ReadError};
 use mod_surface::child::ChildEntry;
-use mod_surface::uses::{Built, ManifestFacts, Origin, Uses, uses_contained};
+use mod_surface::uses::{Built, Entry, ManifestFacts, Origin, Uses, UsesTable, uses_contained};
 use mod_surface::{Surface, leaf};
 use std::collections::BTreeMap;
 use std::path::Path;
+use sunrise_mod_package::Manifest;
+use sunrise_native_build::game_uses;
 
 /// The surface export a fetched SDK holds.
 pub(crate) fn surface_of(sdk: &PinnedSdk) -> Result<Surface, String> {
@@ -23,7 +25,8 @@ fn read_surface(path: &Path) -> Result<Surface, String> {
 pub(crate) enum Scanned {
     /// What the mod uses of the surface.
     Uses(Uses),
-    /// The mod is made for exactly one build (a `[native.*]` table or internals): why.
+    /// The mod has rows no list can judge ([`game_uses::unjudged`]), so it is made for exactly
+    /// one build: why.
     Exact(String),
     /// The scan cannot judge the source (a computed `include!`, a file it does not read, more
     /// source than it reads, a file it cannot parse): why. Such a mod has no table and counts as
@@ -31,15 +34,39 @@ pub(crate) enum Scanned {
     Unread(String),
 }
 
-/// The mod folder at `root` read for the scan, or what the scan answers without one. A folder
-/// that cannot be read at all, or a manifest that is not TOML, is an error.
+/// The manifest of the mod folder at `root`.
+fn manifest(root: &Path) -> Result<Manifest, String> {
+    let name = sunrise_mod_package::manifest::MANIFEST;
+    let text = std::fs::read_to_string(root.join(name)).map_err(|e| format!("{name}: {e}"))?;
+    Manifest::parse(&text)
+}
+
+/// The source of the mod folder at `root` read for the scan, or what the scan answers without
+/// one. A folder that cannot be read at all, or a manifest that does not parse, is an error.
 fn read(root: &Path) -> Result<Result<ModInput, Scanned>, String> {
-    match mod_uses::read(root) {
-        Ok(input) => Ok(Ok(input)),
-        Err(ReadError::Exact(why)) => Ok(Err(Scanned::Exact(why))),
-        Err(e @ (ReadError::Io { .. } | ReadError::Manifest(_))) => Err(e.to_string()),
-        Err(e) => Ok(Err(Scanned::Unread(e.to_string()))),
+    let manifest = manifest(root)?;
+    if let Some(table) = game_uses::unjudged(&manifest) {
+        return Ok(Err(Scanned::Exact(format!("it has a {table} table"))));
     }
+    let mut input = match mod_uses::read(root) {
+        Ok(input) => input,
+        Err(e @ (ReadError::Io { .. } | ReadError::Manifest(_))) => return Err(e.to_string()),
+        Err(e) => return Ok(Err(Scanned::Unread(e.to_string()))),
+    };
+    // A helper is compiled inside the game's code, where a name is the game's own, never the
+    // mod API's: what it uses is declared by its row.
+    if let Some(native) = &manifest.native {
+        let helpers: Vec<&str> = native
+            .mixin
+            .iter()
+            .map(|row| row.helper.as_str())
+            .chain(native.r#loop.iter().map(|row| row.helper.as_str()))
+            .collect();
+        input
+            .sources
+            .retain(|(path, _)| !helpers.contains(&path.as_str()));
+    }
+    Ok(Ok(input))
 }
 
 /// What the mod at `root` uses of `surface`.
@@ -62,6 +89,25 @@ pub(crate) fn scan(entry: ChildEntry, root: &Path, surface: &Surface) -> Result<
             Err(e) => Scanned::Unread(e.to_string()),
         },
     )
+}
+
+/// The table the mod at `root`, pinned to `sdk`, packs: what the scan found, then the game code
+/// its manifest declares, each with its hash at the pinned build ([`game_uses::entries`]). The
+/// build data is fetched only for a mod that declares some.
+pub(crate) fn table(uses: &Uses, root: &Path, sdk: &PinnedSdk) -> Result<UsesTable, String> {
+    let mut table = uses.table(sdk.build.clone());
+    let manifest = manifest(root)?;
+    if game_uses::declared(&manifest) {
+        let data = crate::sdk_fetch::build_data(root, &sdk.build)?;
+        // An item the pinned build lacks is refused by the build, by name; the list records
+        // only what is there.
+        table.entries.extend(
+            game_uses::entries(&manifest, &data)?
+                .into_iter()
+                .filter_map(|(id, hash)| Some(Entry::plain(id, hash?))),
+        );
+    }
+    Ok(table)
 }
 
 /// `Greeter uses 14 items of the API (6 hooks, 5 methods, 3 types). Made for nightly-….`, then
@@ -166,6 +212,41 @@ mod tests {
         let read = read(&dir);
         std::fs::remove_dir_all(&dir).unwrap();
         assert!(matches!(read, Ok(Err(Scanned::Unread(_)))));
+    }
+
+    #[test]
+    fn a_helper_compiled_inside_the_game_is_not_scanned_and_a_module_row_is_exact() {
+        let dir = tempfile::tempdir().unwrap();
+        let manifest = format!(
+            "id = \"blur\"\nname = \"Blur\"\nversion = \"0.1.0\"\napi = \"0.2\"\n[native]\ngame = \"26.3\"\nsunrise = \"{}\"\n[[native.mixin]]\nid = \"m\"\ntarget = \"game::f\"\nkind = \"HEAD\"\nhelper = \"src/mixins/m.rs\"\n",
+            "a".repeat(40)
+        );
+        std::fs::create_dir_all(dir.path().join("src/mixins")).unwrap();
+        std::fs::write(dir.path().join("sunrise-mod.toml"), &manifest).unwrap();
+        std::fs::write(dir.path().join("src/lib.rs"), "fn a() {}").unwrap();
+        std::fs::write(
+            dir.path().join("src/mixins/m.rs"),
+            "{ World::game_only(); }",
+        )
+        .unwrap();
+        let input = read(dir.path()).unwrap().ok().unwrap();
+        let files: Vec<&str> = input
+            .sources
+            .iter()
+            .map(|(path, _)| path.as_str())
+            .collect();
+        assert_eq!(files, ["src/lib.rs"]);
+        std::fs::write(
+            dir.path().join("sunrise-mod.toml"),
+            manifest
+                + "[[native.module]]\nid = \"x\"\nfile = \"game.rs\"\nname = \"x\"\nsource = \"src/x.rs\"\n",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("src/x.rs"), "pub fn x() {}").unwrap();
+        assert!(matches!(
+            read(dir.path()),
+            Ok(Err(Scanned::Exact(why))) if why.contains("[[native.module]]")
+        ));
     }
 
     #[test]

@@ -44,6 +44,16 @@ fn project_dir(name: &str, uses: Option<&[(&str, &str)]>, made_for: Option<&str>
 }
 
 fn judged(dir: &Path, build: &str, target: &mod_surface::Surface) -> Verdict {
+    judged_with(dir, build, target, None)
+}
+
+/// As [`judged`], with the build's build data in `data` when the mod declares game code.
+fn judged_with(
+    dir: &Path,
+    build: &str,
+    target: &mod_surface::Surface,
+    data: Option<&Path>,
+) -> Verdict {
     let bundle = crate::bundle_in(dir).unwrap().unwrap();
     let project = api::Project::read(&bundle).unwrap();
     let target = Rc::new(target.clone());
@@ -52,6 +62,10 @@ fn judged(dir: &Path, build: &str, target: &mod_surface::Surface) -> Verdict {
         build,
         &mut || Ok::<_, String>(target.clone()),
         &mut || Err("no [[inject]] rows: never read".to_owned()),
+        &mut || match data {
+            Some(data) => game_uses::entries(&bundle.manifest, data),
+            None => Err("no game code declared: never read".to_owned()),
+        },
     )
     .unwrap()
 }
@@ -231,7 +245,100 @@ fn without_a_list_for_its_pin_a_mod_works_on_its_own_build_only() {
 }
 
 #[test]
-fn a_mod_that_changes_game_code_is_exact_whatever_its_list_says() {
+fn a_mod_with_a_mixin_fits_while_its_target_is_what_its_list_records() {
+    const TARGET: &str = "sunrise_client::game::f";
+    let dir = project_dir("fit-mixin", None, None);
+    let manifest = dir.join(crate::NATIVE_MANIFEST);
+    let text = std::fs::read_to_string(&manifest)
+        .unwrap()
+        .replace(crate::tests::B, crate::MIXINS_REV)
+        + &format!(
+            "[[native.mixin]]\nid = \"m\"\ntarget = \"{TARGET}\"\nkind = \"HEAD\"\nhelper = \"src/m.rs\"\n"
+        );
+    std::fs::write(&manifest, text).unwrap();
+    std::fs::write(dir.join("src/m.rs"), "{}").unwrap();
+    let made_for = pin(&dir);
+    let list = |entries: serde_json::Value| {
+        let table = serde_json::json!({
+            "schema": uses::USES_SCHEMA, "made_for": made_for, "entries": entries,
+        });
+        std::fs::write(dir.join(uses::USES_FILE), table.to_string()).unwrap();
+    };
+    // The installed build's function index: the target with this body, or without the target.
+    let data = crate::tests::dir("fit-mixin-data");
+    std::fs::create_dir_all(&data).unwrap();
+    let index = |body: Option<&str>| {
+        let functions = match body {
+            Some(body) => serde_json::json!({TARGET: {
+                "module": "sunrise_client::game", "file": "crates/sunrise-client/src/game.rs",
+                "span": [0, 1], "signature_hash": "sig", "sha256": body,
+            }}),
+            None => serde_json::json!({}),
+        };
+        let file = serde_json::json!({
+            "schema": 1, "build": {"commit": OTHER_BUILD},
+            "crates": {}, "functions": functions, "refused": {},
+        });
+        std::fs::write(data.join("functions.json"), file.to_string()).unwrap();
+    };
+    let id = format!("game:fn:{TARGET}");
+    let judged = || judged_with(&dir, OTHER_BUILD, &surface(&[]), Some(&data));
+    let misfit = |change| Verdict::DoesNotFit {
+        made_for: made_for.clone(),
+        misfits: vec![Misfit {
+            id: id.clone(),
+            change,
+        }],
+    };
+    list(serde_json::json!([{"id": id, "hash": "sig:body"}]));
+    index(Some("body"));
+    assert_eq!(
+        judged(),
+        Verdict::Fits {
+            made_for: made_for.clone()
+        }
+    );
+    // A replacement written for the old body could undo what the game changed in it.
+    index(Some("another body"));
+    assert_eq!(judged(), misfit(Change::Changed));
+    index(None);
+    assert_eq!(judged(), misfit(Change::Removed));
+    // The mod pins a horizon-mixins revision this tool does not build with.
+    index(Some("body"));
+    let pinned = std::fs::read_to_string(&manifest).unwrap();
+    std::fs::write(
+        &manifest,
+        pinned.replace(crate::MIXINS_REV, crate::tests::B),
+    )
+    .unwrap();
+    assert_eq!(
+        judged(),
+        Verdict::DoesNotFit {
+            made_for: made_for.clone(),
+            misfits: vec![Misfit {
+                id: "game:tool:horizon-mixins".into(),
+                change: Change::Changed
+            }],
+        }
+    );
+    std::fs::write(&manifest, pinned).unwrap();
+    // A list that does not record the target cannot show it unchanged.
+    list(serde_json::json!([]));
+    index(Some("body"));
+    assert_eq!(
+        judged(),
+        Verdict::NoList {
+            made_for: made_for.clone(),
+            why: Unlisted::GameCode,
+            hooks: Vec::new(),
+        }
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+    std::fs::remove_dir_all(data).unwrap();
+}
+
+#[test]
+fn a_mod_with_rows_no_list_can_judge_is_exact_whatever_its_list_says() {
     let dir = project_dir("fit-exact", Some(&[("fn:give", "h1")]), None);
     let manifest = dir.join(crate::NATIVE_MANIFEST);
     let text = std::fs::read_to_string(&manifest).unwrap()

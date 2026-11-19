@@ -33,8 +33,6 @@ pub enum ReadError {
     /// A `#[path]` or `include!` in `file` brings in a file of the folder the scan does not read:
     /// not a `.rs` file, under the root `target/` or a hidden folder, or missing.
     NotScanned { file: String, target: String },
-    /// The mod is made for exactly one build (a `[native.*]` table or internals): why.
-    Exact(String),
     /// More source than is read: a file, or the whole mod.
     TooLarge { what: String, size: u64, most: u64 },
     /// `sunrise-mod.toml` is not valid TOML.
@@ -57,10 +55,6 @@ impl std::fmt::Display for ReadError {
             Self::NotScanned { file, target } => write!(
                 f,
                 "{file} brings in `{target}`, which the scan does not read; the mod's source cannot be judged"
-            ),
-            Self::Exact(why) => write!(
-                f,
-                "this mod is tied to one build ({why}); fit checks do not apply"
             ),
             Self::TooLarge { what, size, most } => {
                 write!(f, "{what} is {size} bytes; the most read is {most}")
@@ -257,31 +251,9 @@ fn read_bounded(path: &Path, shown: &str, most: u64) -> Result<String, ReadError
     })
 }
 
-/// Why a mod whose manifest is `manifest` is made for exactly one build: a `[native.*]` table, or
-/// game internals it names; `None` for a mod a fit check applies to.
-pub fn exact(manifest: &toml::Table) -> Option<String> {
-    let native_table = manifest
-        .get("native")
-        .and_then(toml::Value::as_table)
-        .and_then(|native| {
-            native
-                .iter()
-                .find(|(_, v)| v.is_table() || v.is_array())
-                .map(|(k, _)| k)
-        });
-    if let Some(table) = native_table {
-        return Some(format!("it has a [native.{table}] table"));
-    }
-    manifest
-        .get("internals")
-        .and_then(toml::Value::as_array)
-        .is_some_and(|rows| !rows.is_empty())
-        .then(|| "it names game internals".to_owned())
-}
-
 /// Reads `dir`: every `.rs` file outside the mod's `target/` and hidden folders, and
-/// `sunrise-mod.toml` when there is one. A mod made for exactly one build is refused
-/// ([`ReadError::Exact`]), and so is a `#[path]` or `include!` of a file the scan does not read.
+/// `sunrise-mod.toml` when there is one. A `#[path]` or `include!` of a file the scan does not
+/// read is refused.
 pub fn read(dir: &Path) -> Result<ModInput, ReadError> {
     let mut input = ModInput::default();
     let mut total = 0u64;
@@ -354,9 +326,6 @@ pub fn read(dir: &Path) -> Result<ModInput, ReadError> {
                 .map(str::to_owned)
                 .collect();
         }
-        if let Some(why) = exact(&value) {
-            return Err(ReadError::Exact(why));
-        }
     }
     Ok(input)
 }
@@ -403,29 +372,6 @@ mod tests {
             ]
         );
         assert_eq!(input.manifest_names, ["registries"]);
-    }
-
-    #[test]
-    fn a_mod_tied_to_one_build_gets_no_table() {
-        let dir = tempfile::tempdir().unwrap();
-        write(
-            dir.path(),
-            "sunrise-mod.toml",
-            "capabilities = []\n[native]\ngame = \"26.3\"\n[[native.mixin]]\nid = \"x\"\n",
-        );
-        assert_eq!(
-            read(dir.path()).unwrap_err().to_string(),
-            "this mod is tied to one build (it has a [native.mixin] table); fit checks do not apply"
-        );
-        write(
-            dir.path(),
-            "sunrise-mod.toml",
-            "capabilities = []\n[[internals]]\npath = \"x\"\n",
-        );
-        assert_eq!(
-            read(dir.path()).unwrap_err(),
-            ReadError::Exact("it names game internals".into())
-        );
     }
 
     #[test]

@@ -1,7 +1,8 @@
 # Fitting another build
 
-A mod is **made for** the build it pins. A native mod on the mod API alone also **fits** another build when nothing
-it uses changed there, and the launcher then compiles it against that build on the player's computer. Only the built
+A mod is **made for** the build it pins. A native mod also **fits** another build when nothing it uses changed
+there (the mod API's items, and the game code a `[native]` row or an `internals` list declares), and the launcher
+then compiles it against that build on the player's computer. Only the built
 binary is exact to the build; the loader's build-id check is unchanged.
 
 ## The rule
@@ -9,9 +10,8 @@ binary is exact to the build; the loader's build-id check is unchanged.
 The launcher asks, for each enabled native mod of an instance, in this order:
 
 1. **Made for this build?** Then it is built, as always.
-2. **Exact by nature?** A mod with a `[native.*]` table (`mixin`, `module`, `bridge`, `state`, `loop`) or game
-   internals (an `internals` list, or a dependency on `sunrise-internals`) changes or reads game code, so it works on
-   the build it was made for only. No test runs.
+2. **Rows no list can judge?** A mod with a `[[native.module]]`, `[[native.bridge]]` or `[[native.state]]` row
+   names game code that no build data describes, so it works on the build it was made for only. No test runs.
 3. **Does its package say what it uses?** Its `uses.json` must be one this launcher reads and be made for the mod's
    pin. A package without one (not packed by `cargo sunrise-mod build`, which writes it) works on the build it was made for only.
 4. **Is every item it uses unchanged?** Each entry of the list must hold in this build's `surface.json`:
@@ -22,6 +22,15 @@ The launcher asks, for each enabled native mod of an instance, in this order:
    - a hook in the list still has the version it had;
    - a trait member the mod reaches through a trait it calls (a sub-host trait's method called on
      `&mut dyn ServerHost`) is still reached from that trait.
+
+   And each piece of game code the mod declares must be, in this build's build data, what the list records:
+   - a `[[native.mixin]]` row's target function has the same signature and the same body (a replacement written
+     for an old body could undo what the game changed in it);
+   - an `internals` entry has the same signature;
+   - a `[[native.loop]]` row's loop is published the same way.
+
+   What changed is named: the function, type or loop. A list with no record of something the mod declares cannot
+   show a fit.
 5. **Do its `[[inject]]` points hold?** Each row's point must be the same in this build's `points.json`.
 6. **Do the mods it needs fit?** A mod whose library mod is left out is left out too: "it needs Corelib, which
    doesn't fit".
@@ -38,9 +47,15 @@ contract, as for any library.
 ## `uses.json`
 
 `cargo sunrise-mod build` packs `uses.json` beside `sunrise-mod.toml` in every code mod's package, except a mod with
-a `[native.*]` table or an `internals` list, or one whose source the scan cannot judge (the build says so and packs none). The list holds
+a row no list can judge (step 2), or one whose source the scan cannot judge (the build says so and packs none). The list holds
 every surface item whose name occurs as an identifier in the mod's source or that its manifest names, then every
-item those items' signatures reference, transitively. A member counts only when its owner is reached. How the scan
+item those items' signatures reference, transitively. A member counts only when its owner is reached. A mixin's or
+a loop's helper file is not scanned: it is compiled inside the game's code, where a name is the game's own. The
+game code the manifest declares is listed as `game:fn:<path>`, `game:<kind>:<path>` (an internal) and
+`game:loop:<name>`, each with its hash at the pinned build, read from that build's build data.
+
+A helper can call game code its row does not declare. The compile catches a changed signature there; nothing
+catches a changed body in a function the mod did not declare. How the scan
 reads source, and what it leaves to the compile, is in
 [Checking a mod against a build](../../how-to/native-mods/14-checking-a-mod-against-a-build.md).
 
