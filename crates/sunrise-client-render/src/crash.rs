@@ -69,16 +69,28 @@ fn attributed(message: String) -> String {
 /// Runs `f`, and returns a panic in it as an error with the panic's message instead of letting
 /// it end the game. For work that is not the game's own and whose failure the caller recovers
 /// from, such as handing a shader pack's programs to the GPU driver's compiler: the panic goes
-/// to the log with its stack, and no crash report is made for it.
+/// to the log with its stack, and no crash report is made for it. A mod's Host call refused by
+/// the load phase comes back as an error that names it.
 pub fn contain<T>(f: impl FnOnce() -> T) -> Result<T, String> {
     CONTAINED.with(|c| c.set(c.get() + 1));
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        mod_api::__private::contain_refusal(
+            mod_api::content::crash::current_native_mod().unwrap_or("unknown"),
+            f,
+        )
+    }));
     CONTAINED.with(|c| c.set(c.get() - 1));
-    result.map_err(|payload| {
-        CAUGHT
+    match result {
+        Ok(Ok(value)) => Ok(value),
+        // A mod's Host call the load phase does not admit: named, not a panic, and no crash report.
+        Ok(Err(refusal)) => {
+            refusal.report();
+            Err(refusal.to_string())
+        }
+        Err(payload) => Err(CAUGHT
             .with(|c| c.borrow_mut().take())
-            .unwrap_or_else(|| payload_text(&*payload))
-    })
+            .unwrap_or_else(|| payload_text(&*payload))),
+    }
 }
 
 /// For the hook: a panic inside `contain` is logged with its stack and kept for `contain` to
