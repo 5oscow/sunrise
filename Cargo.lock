@@ -5428,7 +5428,6 @@ dependencies = [
  "sunrise-core",
  "sunrise-java-properties",
  "sunrise-protocol",
- "sunrise-world",
  "ureq",
  "windows-sys 0.61.2",
 ]
