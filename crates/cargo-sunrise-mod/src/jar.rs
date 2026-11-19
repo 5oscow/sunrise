@@ -98,7 +98,18 @@ pub(crate) fn stage_for_run(
                 path.display()
             ));
         }
-        if !wanted.contains(&path) {
+        if !wanted.contains(&path)
+            && entry
+                .file_name()
+                .to_str()
+                .and_then(|name| name.strip_suffix(".jar"))
+                .is_some_and(|hash| {
+                    hash.len() == 128
+                        && hash
+                            .bytes()
+                            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                })
+        {
             stale.push(path);
         }
     }
@@ -129,18 +140,18 @@ pub(crate) fn stage_for_run(
         }
         let file = fs::File::open(&original).map_err(|e| unavailable(&e.to_string()))?;
         let staged = jar.cache_path(&dest);
-        let reusable = fs::symlink_metadata(&staged).is_ok_and(|metadata| {
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::MetadataExt;
-                if metadata.nlink() != 1 {
-                    return false;
-                }
-            }
-            metadata.is_file() && !is_link(&metadata)
-        }) && fs::File::open(&staged)
-            .and_then(|staged| hash_reader::<sha2::Sha512>(staged, io::sink()))
-            .is_ok_and(|hash| format!("{hash:x}") == jar.sha512());
+        #[cfg(unix)]
+        let reusable = {
+            use std::os::unix::fs::MetadataExt;
+            fs::symlink_metadata(&staged).is_ok_and(|metadata| {
+                metadata.is_file() && !is_link(&metadata) && metadata.nlink() == 1
+            }) && fs::File::open(&staged)
+                .and_then(|staged| hash_reader::<sha2::Sha512>(staged, io::sink()))
+                .is_ok_and(|hash| format!("{hash:x}") == jar.sha512())
+        };
+        // Without a link count check, an existing file could share the original's bytes.
+        #[cfg(not(unix))]
+        let reusable = false;
         let hash = if reusable {
             // Still verify the selected original; a previous run must not mask a bad input.
             hash_reader::<sha2::Sha512>(file, io::sink())
@@ -156,7 +167,7 @@ pub(crate) fn stage_for_run(
         }
     }
     // All originals have passed. Publish their verified bytes without linking to the source and
-    // prune old entries non-recursively; an input failure above leaves the old snapshot set intact.
+    // prune old cache entries non-recursively; an input failure leaves the old snapshot set intact.
     for (copy, staged) in pending {
         copy.persist(&staged)
             .map_err(|e| format!("{}: {e}", staged.display()))?;
@@ -271,7 +282,10 @@ mod tests {
         let jars = home.join("jars");
         fs::write(source.join("unrelated.jar"), b"do not stage").unwrap();
         fs::create_dir_all(&jars).unwrap();
-        fs::write(jars.join("stale.jar"), b"previous run").unwrap();
+        let stale = jars.join(format!("{}.jar", "0".repeat(128)));
+        fs::write(&stale, b"previous run").unwrap();
+        let sentinel = jars.join("notes.jar");
+        fs::write(&sentinel, b"keep me").unwrap();
 
         assert_eq!(
             stage_for_run(&manifest, root.path(), Some(&source), &[]).unwrap(),
@@ -279,7 +293,9 @@ mod tests {
         );
         let staged = manifest.jar[0].cache_path(&jars);
         assert_eq!(fs::read(&staged).unwrap(), b"abc");
-        assert_eq!(fs::read_dir(&jars).unwrap().count(), 1);
+        assert!(!stale.exists());
+        assert_eq!(fs::read(&sentinel).unwrap(), b"keep me");
+        assert_eq!(fs::read_dir(&jars).unwrap().count(), 2);
         assert_eq!(fs::read(&original).unwrap(), b"abc");
         assert_eq!(fs::read_dir(&source).unwrap().count(), 2);
 
@@ -295,7 +311,7 @@ mod tests {
             assert!(error.contains(expected), "{error}");
         }
         assert_eq!(fs::read(&staged).unwrap(), b"abc");
-        assert_eq!(fs::read_dir(&jars).unwrap().count(), 1);
+        assert_eq!(fs::read_dir(&jars).unwrap().count(), 2);
     }
 
     #[test]
@@ -311,11 +327,15 @@ mod tests {
         fs::write(&original, b"abc").unwrap();
         stage().unwrap();
         let staged = manifest.jar[0].cache_path(&jars);
-        let handle = fs::File::options().write(true).open(&staged).unwrap();
-        let stamp = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000);
-        handle.set_modified(stamp).unwrap();
-        drop(handle);
+        #[cfg(unix)]
+        let stamp = {
+            let handle = fs::File::options().write(true).open(&staged).unwrap();
+            let stamp = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000);
+            handle.set_modified(stamp).unwrap();
+            stamp
+        };
         stage().unwrap();
+        #[cfg(unix)]
         assert_eq!(fs::metadata(&staged).unwrap().modified().unwrap(), stamp);
 
         fs::write(&original, b"in-place edit").unwrap();

@@ -179,8 +179,9 @@ The list is ordered: new references are appended, not sorted.
 `use-jar` stores the exact file as `<sha512>.jar` in the usual game home's `jars/` directory (`SUNRISE_HOME` if set,
 otherwise `sunrise` in your platform's data folder). Run `cargo sunrise-mod run` after adding the jar; `run` verifies
 and stages only the jars in your manifest in `target/sunrise-mod/run/home/jars/` before building. The first run copies
-each original while checking its SHA-512, using space for one extra copy per jar. Later runs verify both the original and
-the staged copy and reuse the copy if it still matches. Editing or replacing the original cannot change the staged bytes.
+each original while checking its SHA-512, using space for one extra copy per jar. Later runs still verify the original.
+On Unix, `run` reuses a matching staged copy only after checking its link count to confirm it is independent.
+On other platforms, it writes a fresh copy. Editing or replacing the original cannot change the staged bytes.
 Leave the game's `--home` unset to use this development home; the staging path must not go through directory links.
 To read originals from a different folder, supply its `<sha512>.jar` files with `cargo sunrise-mod run --jars <dir>`.
 Neither command downloads jars.
