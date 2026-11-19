@@ -983,7 +983,23 @@ mod tests {
     #[test]
     #[ignore = "daily"]
     fn retained_handles_reject_replacements_and_rollback_restores_identity() {
-        use super::super::native_entity_refs::tests::with_game;
+        use super::super::native_entity_refs::tests::{run_fresh_cases, with_game};
+        if run_fresh_cases(
+            "game::native_block_entity_refs::tests::retained_handles_reject_replacements_and_rollback_restores_identity",
+            "SUNRISE_RETAINED_HANDLES_CHILD",
+            &["holder"],
+        ) {
+            return;
+        }
+        // Loading saved data into a mod block entity needs its type valid for the block, which
+        // startup freezes once per process: the holder sits on air here, in a process of its own.
+        sunrise_client::block_entity_types::install(
+            sunrise_client::block_entity_types::BlockEntityTypes::new(
+                [("minecraft:air".into(), "test:holder".into())].into(),
+                vec!["test:holder".into()],
+            ),
+        )
+        .unwrap();
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world
