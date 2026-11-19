@@ -35,7 +35,9 @@ movement:
   with the displacement actually made, or `Ok(None)` for no local player, a non-finite component or one outside
   ±64 blocks. An unavailable world phase or a move the engine cannot finish returns
   `Err(LevelWriteError::Unavailable)`. Other hooks with a writable client world host, such as `client_tick_pre` and
-  `input_key`, can also call it. The client does not fire the server's `entity_move` hook.
+  `input_key`, can also call it. The client does not fire the server's `entity_move` hook. Each displacement that
+  changes the player's section notifies `entity_entering_section`, even when another move returns the player to
+  its starting section in the same tick.
 - `host.set_local_player_velocity([x, y, z])` replaces the local player's velocity, in blocks per tick (`false`, and
   nothing changes, for a value that is not finite or with no player of its own).
 - `host.set_local_player_on_ground(flag)` sets its on-ground flag, which this tick's jump decision reads and the move

@@ -95,7 +95,8 @@ pub trait PlayersClientHost {
     /// and fall state, including the usual effects of collisions and blocks on velocity.
     /// Available to client hooks with world access. For per-tick movement call from the local
     /// player's client-side `player_tick_pre`, before its own movement. This sends no packet
-    /// and fires no `entity_move` hook (that hook is server-only).
+    /// and fires no `entity_move` hook (that hook is server-only). A section change is
+    /// reported through `entity_entering_section` at the displacement, not at tick end.
     /// The normal position report carries the result and the server checks it as usual.
     /// Returns the displacement actually made, or `Ok(None)` for no local player, a
     /// non-finite component or one outside ±64 blocks. `Err(LevelWriteError::Unavailable)`

@@ -12,7 +12,7 @@ impl MotionWorld<'_, '_, '_> {
             &mut self.movement_collisions(),
             &self.player.collision_exclusions,
             CollisionCheckRequest {
-                entity: EntityIdentity(0),
+                entity: player_collision_identity(self.player),
                 context,
                 bounds,
                 candidate_budget: 1_000_000,

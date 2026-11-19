@@ -998,13 +998,17 @@ enum TickInput {
     Living([f32; 3]),
     PreparedLocal { direction: [f32; 2], jumping: bool },
 }
+fn player_collision_identity(player: &PlayerMotion) -> EntityIdentity {
+    EntityIdentity(u64::from(player.entity_id as u32))
+}
+
 /// The context `player` moves through: a player at its height holding `held`, as
 /// `CollisionContext.of(player)`. It names the player by its entity id, so a block's parts are
 /// asked about the same entity as when the server checks this move inside `as_mover`.
 fn player_context<'a>(player: &PlayerMotion, held: Option<&'a str>) -> CollisionContext<'a> {
     CollisionContext::for_entity(
         CollisionEntity {
-            identity: EntityIdentity(u64::from(player.entity_id as u32)),
+            identity: player_collision_identity(player),
             kind: sunrise_world::collision_context::EntityContextKind::Player,
             y: player.position.y,
             descending: player.shift_key_down,
@@ -2275,7 +2279,7 @@ impl EntityMoveWorld for MotionWorld<'_, '_, '_> {
             &mut self.movement_collisions(),
             &self.player.collision_exclusions,
             MovementRequest {
-                entity: EntityIdentity(0),
+                entity: player_collision_identity(self.player),
                 context: self.context(),
                 bounds: self.player.bounds(),
                 movement,

@@ -6397,13 +6397,14 @@ impl Game<'_> {
             || mod_api::__private::listened(mod_api::HookId::PlayerTickPost))
         .then(|| self.local_player())
         .flatten();
-        let player_from = entity_section_steps::player_before(self);
         // The entities that tick before the player pushed it before its tick began, so
         // before Pre.
         self.apply_remote_push(pushed);
         if let Some(player) = player {
             self.native_player_tick_pre(mod_api::__private::PlayerTickPreCall { player });
         }
+        // A displacement from Pre has already filed its own crossing.
+        let player_from = entity_section_steps::player_before(self);
         self.native_local_player_fit_sizes();
         let result = self.tick_local_player(entity_collisions, sprint_window);
         entity_section_steps::player_after(self, player_from);

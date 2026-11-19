@@ -38,12 +38,23 @@ impl Game<'_> {
         if !sunrise_client::move_gate::valid_mod_move_delta(delta) {
             return Ok(None);
         }
+        let Some(before) = self.player.as_ref().map(|p| p.position) else {
+            return Ok(None);
+        };
         let [x, y, z] = delta;
-        self.in_this_levels_colliders(|game| {
+        let moved = self.in_this_levels_colliders(|game| {
             game.move_local_player(MoverType::SelfMovement, Vec3::new(x, y, z))
-        })
-        .map(|moved| moved.map(Vec3::components))
-        .map_err(|_| LevelWriteError::Unavailable)
+        });
+        // File the actual write, even if a later step of movement returned an error.
+        if let Some(after) = self.player.as_ref().map(|p| p.position)
+            && before != after
+            && let Ok(id) = u32::try_from(self.own_entity_id())
+        {
+            self.entity_section_step(id, before.components(), after.components());
+        }
+        moved
+            .map(|moved| moved.map(Vec3::components))
+            .map_err(|_| LevelWriteError::Unavailable)
     }
 }
 
@@ -88,11 +99,13 @@ mod tests {
         remote.profile = 456;
         remote.entity_id = 42;
         remote.loaded_sent = true;
-        game.player = sunrise_client::motion::PlayerMotion::new(
+        let mut player = sunrise_client::motion::PlayerMotion::new(
             game.motion,
             sunrise_core::geometry::Vec3::new(0.5, 64.0, 0.5),
         )
-        .ok();
+        .unwrap();
+        player.entity_id = remote.entity_id;
+        game.player = Some(player);
         game.streaming
             .insert_remote(&mut game.world, sunrise_client::chunk::Chunk::empty(0, 0));
     }
@@ -173,6 +186,124 @@ mod tests {
                 let stopped_at = 2.0 - f64::from(0.6_f32 / 2.0);
                 assert_eq!(*moved.lock().unwrap(), Some([stopped_at - 0.5, 0.0, 0.0]));
                 assert_eq!(game.player.as_ref().unwrap().position.x, stopped_at);
+            });
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn a_local_displacement_respects_collider_exemptions_when_moving_and_sneaking() {
+        use sunrise_client_render::moving_colliders::{Placed, Prepared, Scope};
+        use sunrise_core::geometry::{
+            Aabb, Vec3,
+            oriented::{ColliderBoxes, Frame, OrientedCollider},
+        };
+
+        crate::game::native_entity_refs::tests::with_client_game(|game| {
+            loaded_client(game);
+            let start = game.player.as_ref().unwrap().position;
+            let player_id = game.own_entity_id() as u32;
+            let level = game.collider_level().unwrap();
+            let mut sweep = |min: Vec3, size: Vec3, sneaking: bool, exempt: bool| {
+                let player = game.player.as_mut().unwrap();
+                player.position = start;
+                player.shift_key_down = sneaking;
+                player.ground.on_ground = sneaking;
+                let _scope = Scope::enter_level(
+                    Some(level),
+                    Prepared::new(vec![Placed {
+                        id: 900,
+                        collider: OrientedCollider::new(
+                            Frame::translation(min),
+                            Arc::new(ColliderBoxes::new(vec![Aabb::new(Vec3::ZERO, size)])),
+                        ),
+                        exempt: if exempt {
+                            vec![900, player_id]
+                        } else {
+                            vec![900]
+                        },
+                    }]),
+                );
+                game.move_local_player_by([2.0, 0.0, 0.0]).unwrap().unwrap()
+            };
+
+            let wall = Vec3::new(1.5, 63.0, 0.0);
+            let wall_size = Vec3::new(1.0, 4.0, 1.0);
+            assert_eq!(sweep(wall, wall_size, false, true), [2.0, 0.0, 0.0]);
+            let to_wall = 1.5 - 0.5 - f64::from(0.6_f32 / 2.0);
+            assert_eq!(sweep(wall, wall_size, false, false), [to_wall, 0.0, 0.0]);
+
+            // Only the collider below the destination could provide support. Sneaking
+            // leaves the player in place when it doesn't count for this player.
+            let platform = Vec3::new(2.0, 63.0, 0.0);
+            let platform_size = Vec3::new(1.0, 0.875, 1.0);
+            assert_eq!(sweep(platform, platform_size, true, true), [0.0; 3]);
+            assert_eq!(sweep(platform, platform_size, true, false), [2.0, 0.0, 0.0]);
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn local_displacements_out_and_back_notify_both_section_crossings() {
+        type Crossing = ([i32; 3], [i32; 3], [f64; 3]);
+        #[derive(Default)]
+        struct Walk(Arc<Mutex<Vec<Crossing>>>);
+        #[mod_api::__subscriptions]
+        impl mod_api::Hooks for Walk {
+            fn player_tick_pre(&self, host: HostSide<'_>, event: &mut mod_api::PlayerTickPreEvent) {
+                if let HostSide::Client(host) = host
+                    && host.local_player() == Some(event.player)
+                {
+                    assert_eq!(
+                        host.move_local_player_by([16.0, 0.0, 0.0]),
+                        Ok(Some([16.0, 0.0, 0.0]))
+                    );
+                    assert_eq!(self.0.lock().unwrap().len(), 1);
+                    assert_eq!(
+                        host.move_local_player_by([-16.0, 0.0, 0.0]),
+                        Ok(Some([-16.0, 0.0, 0.0]))
+                    );
+                    assert_eq!(self.0.lock().unwrap().len(), 2);
+                }
+            }
+
+            fn entity_entering_section(
+                &self,
+                host: HostSide<'_>,
+                event: &mut mod_api::EntityEnteringSectionEvent,
+            ) {
+                if let HostSide::Client(host) = host
+                    && host
+                        .local_player()
+                        .is_some_and(|p| p.entity() == event.entity)
+                {
+                    self.0.lock().unwrap().push((
+                        event.old_section,
+                        event.new_section,
+                        event.entity.position(host).unwrap(),
+                    ));
+                }
+            }
+        }
+
+        let walk = Walk::default();
+        let crossings = Arc::clone(&walk.0);
+        let mods = vec![mod_api::ModEntry::new("walk", Box::new(walk))].into();
+        mod_platform::testing::with_mods(mods, || {
+            crate::game::native_entity_refs::tests::with_client_game(|game| {
+                loaded_client(game);
+                // Keep the tick's normal gravity away from a section boundary.
+                game.player.as_mut().unwrap().position.y = 64.5;
+                game.streaming
+                    .insert_remote(&mut game.world, sunrise_client::chunk::Chunk::empty(1, 0));
+                game.tick_remote().unwrap();
+                assert_eq!(
+                    *crossings.lock().unwrap(),
+                    [
+                        ([0, 4, 0], [1, 4, 0], [16.5, 64.5, 0.5]),
+                        ([1, 4, 0], [0, 4, 0], [0.5, 64.5, 0.5])
+                    ],
+                );
             });
         });
     }
