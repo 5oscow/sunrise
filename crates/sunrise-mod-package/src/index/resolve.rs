@@ -749,23 +749,39 @@ impl<'a> Catalog<'a> {
                 // They never add a target to the closure. Check the fixed installed owners
                 // only once no pending selection can replace them.
                 if needs.keys().all(|id| selected.contains_key(id)) {
+                    let mut optional_refusal = None;
                     for (&owner, c) in &selected {
                         for range in &c.optional {
                             let target = range.row.id.as_str();
-                            if let Some(need) = needs.get_mut(target) {
-                                range.parsed.as_ref().map_err(Clone::clone)?;
+                            let need = needs.get_mut(target);
+                            let installed = installed.get(target);
+                            if need.is_none() && installed.is_none() {
+                                continue;
+                            }
+                            let req = match &range.parsed {
+                                Ok(req) => req,
+                                Err(error) => {
+                                    optional_refusal.get_or_insert_with(|| error.clone());
+                                    continue;
+                                }
+                            };
+                            if let Some(need) = need {
                                 need.ranges.push((owner, range));
-                            } else if let Some(row) = installed.get(target) {
-                                let req = range.parsed.as_ref().map_err(Clone::clone)?;
-                                if !row.number.as_ref().is_some_and(|n| req.matches(n)) {
-                                    replacements.insert(target);
-                                    return Err(format!(
+                            } else if let Some(row) = installed
+                                && !row.number.as_ref().is_some_and(|n| req.matches(n))
+                            {
+                                replacements.insert(target);
+                                optional_refusal.get_or_insert_with(|| {
+                                    format!(
                                         "{target} {} is installed, but {owner} needs {}",
                                         row.version, range.row.version
-                                    ));
-                                }
+                                    )
+                                });
                             }
                         }
+                    }
+                    if let Some(error) = optional_refusal {
+                        return Err(error);
                     }
                     for (&owner, &c) in installed {
                         if !selected.contains_key(owner) {
