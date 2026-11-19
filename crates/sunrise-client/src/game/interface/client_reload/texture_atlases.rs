@@ -106,8 +106,7 @@ fn stage_with(
             }
         }
     }
-    let blocks = root.runtime_block_sprites().to_vec();
-    root.with_runtime_textures(files, blocks)
+    root.with_runtime_textures(files)
 }
 
 fn admit(registration: &TextureAtlasRegistration, seen: &[Identifier]) -> Result<(), &'static str> {
@@ -591,77 +590,6 @@ mod tests {
             3,
             "and nothing is asked again"
         );
-    }
-
-    /// No reader at startup or on reload sees a generated runtime sprite as a file, and no
-    /// `directory` source lists it, in a game atlas or in a registered one: every atlas is listed
-    /// over the packs' files, the registered atlases' sprites are staged, and the runtime
-    /// sprites are projected last, in the order the game stages them.
-    #[test]
-    fn a_runtime_sprite_is_no_file_to_a_reader_at_startup_or_on_reload() {
-        use mod_api::{RuntimeSprite, TextureAtlas};
-        let blocks = r#"{"sources":[
-            {"type":"directory","source":"block","prefix":"block/"},
-            {"type":"staged_mod:own"}]}"#;
-        let icons = r#"{"sources":[
-            {"type":"directory","source":"block","prefix":"icons/"},
-            {"type":"staged_mod:own"}]}"#;
-        for generation in 0..2 {
-            let packs = root(&[
-                ("assets/minecraft/atlases/blocks.json", blocks.into()),
-                ("assets/minecraft/atlases/pack_icons.json", icons.into()),
-                (
-                    "assets/icons_mod/textures/block/from_pack.png",
-                    fixture_png(1, 1, 1),
-                ),
-            ]);
-            let sprites = [RuntimeSprite {
-                atlas: TextureAtlas::Blocks,
-                id: Identifier::parse("marker:block/generated").unwrap(),
-                png: fixture_png(2, 2, 9),
-            }];
-            let mods = Recording {
-                prefix: "assets/",
-                seen: Default::default(),
-            };
-            let staged = stage_with(
-                packs,
-                &[registration("icons_mod:first", "minecraft:pack_icons")],
-                &mods,
-            );
-            let staged = super::super::runtime_sprites::stage_runtime_with(staged, &sprites, &mods);
-            assert!(
-                staged
-                    .source()
-                    .contains("assets/marker/textures/block/generated.png"),
-                "generation {generation}: the sprite is projected for stitching"
-            );
-            let mut seen = mods.seen.lock().unwrap().clone();
-            seen.sort();
-            assert_eq!(
-                seen.iter()
-                    .map(|(atlas, _)| atlas.as_str())
-                    .collect::<Vec<_>>(),
-                ["icons_mod:first", "minecraft:blocks"],
-                "generation {generation}: the game atlas and the registered one are each asked once"
-            );
-            for (atlas, listed) in &seen {
-                assert!(
-                    listed
-                        .iter()
-                        .any(|name| name.ends_with("block/from_pack.png"))
-                        && !listed.iter().any(|name| name.contains("generated")),
-                    "generation {generation}: the {atlas} reader lists the packs' files, not a generated one: {listed:?}"
-                );
-            }
-            let listing = atlas_sources::listing(staged.source());
-            assert!(
-                !listing
-                    .sprites("minecraft:blocks")
-                    .contains_key("marker:block/generated"),
-                "generation {generation}: a directory source lists no generated texture"
-            );
-        }
     }
 
     #[test]

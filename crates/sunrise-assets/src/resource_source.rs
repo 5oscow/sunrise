@@ -138,7 +138,6 @@ struct Root {
     data: ResourceSource,
     data_changes: ResourceSource,
     mod_layers: Arc<[ResourceSource]>,
-    runtime_block_sprites: Vec<String>,
 }
 impl ResourceRoot {
     pub fn directory(path: PathBuf) -> Self {
@@ -153,7 +152,6 @@ impl ResourceRoot {
             data,
             data_changes: ResourceSource::default(),
             mod_layers: Arc::from([]),
-            runtime_block_sprites: Vec::new(),
         }))
     }
     /// Passive server data is independent of the client's selected asset packs.
@@ -173,22 +171,13 @@ impl ResourceRoot {
     }
     /// Add generated client textures as the highest asset layer, keeping the
     /// prepared tables and passive server data on their original sources.
-    pub fn with_runtime_textures(
-        mut self,
-        textures: BTreeMap<String, Resource>,
-        block_sprites: Vec<String>,
-    ) -> Self {
+    pub fn with_runtime_textures(mut self, textures: BTreeMap<String, Resource>) -> Self {
         if textures.is_empty() {
             return self;
         }
         let root = Arc::make_mut(&mut self.0);
         root.source = root.source.extended(textures);
-        root.runtime_block_sprites = block_sprites;
         self
-    }
-    /// Runtime block sprites to stitch even when no baked model names them.
-    pub fn runtime_block_sprites(&self) -> &[String] {
-        &self.0.runtime_block_sprites
     }
     pub fn data_changes(&self) -> &ResourceSource {
         &self.0.data_changes
@@ -726,15 +715,12 @@ mod tests {
             .with_data(data.clone(), ResourceSource::default());
         let name = "assets/demo/textures/block/generated.png";
         let texture = |byte| BTreeMap::from([(name.into(), Resource::bytes(vec![byte]))]);
-        let first = root
-            .clone()
-            .with_runtime_textures(texture(2), vec!["demo:block/generated".into()]);
-        let second = root.with_runtime_textures(texture(3), vec!["demo:block/generated".into()]);
+        let first = root.clone().with_runtime_textures(texture(2));
+        let second = root.with_runtime_textures(texture(3));
         assert_eq!(first.source().list("assets/").len(), 2);
         assert_eq!(first.source().read(name).unwrap(), [2]);
         assert!(!source.contains(name));
         assert!(first.data().same_generation(&data));
-        assert_eq!(first.runtime_block_sprites(), ["demo:block/generated"]);
         assert_ne!(
             first.source().fingerprint_under("assets", &["textures"]),
             second.source().fingerprint_under("assets", &["textures"]),

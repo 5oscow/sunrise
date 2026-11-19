@@ -415,7 +415,6 @@ impl Game<'_> {
         // the game, before the staging worker starts: each listener keeps its
         // registering mod for crash attribution.
         let client_listeners = self.register_client_reload_listeners();
-        let runtime_sprites = super::client_reload::collect_runtime_sprites();
         let texture_atlases = super::client_reload::collect_texture_atlases();
         super::mods::register_fluid_models(self.options.execution_role);
         let stage = move |progress: &crate::game::Progress| {
@@ -425,7 +424,6 @@ impl Game<'_> {
                 &server,
                 &mod_sources,
                 client_listeners,
-                &runtime_sprites,
                 &texture_atlases,
                 &assets,
                 &res,
@@ -704,7 +702,6 @@ pub(super) fn stage_pack(
     server: &[Pack],
     mod_sources: &super::mods::ModsState,
     client_listeners: mod_api::ClientListenerRegistry,
-    runtime_sprites: &[mod_api::RuntimeSprite],
     texture_atlases: &[mod_api::TextureAtlasRegistration],
     assets: &Arc<Assets>,
     res: &Resources,
@@ -715,7 +712,6 @@ pub(super) fn stage_pack(
 ) -> sunrise_client::Result<StagedPack> {
     let resource_root = startup_root(vanilla_root, selected, server, mod_sources)?;
     let resource_root = super::client_reload::stage_texture_atlases(resource_root, texture_atlases);
-    let resource_root = super::client_reload::stage_runtime_sprites(resource_root, runtime_sprites);
     let root = resource_root.prepared().to_path_buf();
     let source = resource_root.source().clone();
     progress.set(1);
