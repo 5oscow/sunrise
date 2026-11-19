@@ -557,6 +557,27 @@ impl Game<'_> {
     ) -> ItemRenderState {
         self.resolve_item_in_level(stack, display, owner, Some(&self.item_level()), seed, hand)
     }
+    /// Tint only the resolved draw, never the model shared by other holders or contexts.
+    pub(super) fn tint_held_item(
+        &self,
+        state: &mut ItemRenderState,
+        stack: &ItemStack,
+        entity_id: u32,
+        hand: mod_api::Hand,
+        partial_tick: f32,
+    ) {
+        // Resolving an empty stack produces no layers.
+        if state.is_empty()
+            || !mod_api::__private::item_listens(mod_api::HookId::HeldItemTint, &stack.item)
+        {
+            return;
+        }
+        let mut tint = None;
+        self.native_held_item_tint(entity_id, hand, stack, partial_tick, &mut tint);
+        if let Some(rgb) = tint {
+            state.set_held_tint(rgb);
+        }
+    }
     /// [`Self::resolve_item_in_hand`] with the level the model reads given: `None` for a
     /// resolution that has no level, whose `context_dimension` selects take their fallback.
     pub(super) fn resolve_item_in_level(

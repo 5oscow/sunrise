@@ -221,8 +221,14 @@ pub struct ItemRenderState {
     /// In HDR output, the block light of an item that glows: its block's, as a placed one has
     /// it, so a torch doesn't go dark in the shade while it shines. 0 for the rest.
     pub hdr_light: u8,
+    /// A third-person held-item submission's opaque ARGB multiplier, never cached with the model.
+    held_tint: Option<u32>,
 }
 impl ItemRenderState {
+    /// Apply a held-item Part's RGB answer to this draw only, preserving model alpha.
+    pub fn set_held_tint(&mut self, rgb: u32) {
+        self.held_tint = Some(rgb | 0xFF00_0000);
+    }
     pub fn is_empty(&self) -> bool {
         self.layers.is_empty()
     }
@@ -282,6 +288,13 @@ impl ItemRenderState {
         pose: Mat4,
         sink: &mut dyn ItemSink,
     ) {
+        let mut tinted;
+        let sink: &mut dyn ItemSink = if let Some(tint) = self.held_tint {
+            tinted = TintedItemSink { sink, tint };
+            &mut tinted
+        } else {
+            sink
+        };
         for layer in &self.layers {
             let m = pose * layer.matrix;
             match &layer.geometry {
@@ -370,7 +383,10 @@ impl ItemRenderState {
                 } else {
                     -1
                 };
-                let colors = AXES.map(|d| shaded(argb(color), normals.face(d), lights));
+                let color = self.held_tint.map_or(argb(color), |tint| {
+                    crate::hud_layout::multiply(argb(color), tint)
+                });
+                let colors = AXES.map(|d| shaded(color, normals.face(d), lights));
                 let frame = &mut *skin.frame;
                 frame.jobs.push(SkinJob {
                     first: run.first,
@@ -390,6 +406,18 @@ impl ItemRenderState {
             skin.grow_bounds(m, bounds);
         }
         true
+    }
+}
+
+/// Multiplies every submitted quad's RGB, including special models, before the world sink lights it.
+struct TintedItemSink<'a> {
+    sink: &'a mut dyn ItemSink,
+    tint: u32,
+}
+impl ItemSink for TintedItemSink<'_> {
+    fn quad(&mut self, mut quad: ItemQuad) {
+        quad.color = crate::hud_layout::multiply(quad.color, self.tint);
+        self.sink.quad(quad);
     }
 }
 
@@ -1211,6 +1239,7 @@ impl ItemRenderer {
             cit_glint: None,
             hdr_tier: 0,
             hdr_light: 0,
+            held_tint: None,
         }
     }
     /// `GrassColor.get` over the loaded colormap.
@@ -1950,6 +1979,7 @@ mod tests {
             cit_glint: None,
             hdr_tier: 0,
             hdr_light: 0,
+            held_tint: None,
         };
         let poses = [
             Mat4::from_translation(Vec3::new(2.0, 0.0, 0.0)),

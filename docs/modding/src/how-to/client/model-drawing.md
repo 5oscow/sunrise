@@ -30,6 +30,36 @@ The selection affects the third-person avatar and its skin layers, first-person
 arms, and inventory and creative previews. It does not change the cape, tab
 list, or anyone else's view. Native and wasm mods use the same hook.
 
+## Third-person held items
+
+Attach an `ItemPart` with `Registrar::item_part` (or `item_part_tag`) to tint an
+item in players', mobs' or armor stands' hands in the world, including vanilla
+items. `held_item_tint` runs on the client just before the resolved item is
+submitted. Use the holder's current level entity ID and logical `Hand::Main`
+or `Hand::Off`, not the left or right arm:
+
+```rust,ignore
+#[mod_api::sunrise_part]
+impl ItemPart for ChargedTint {
+    fn held_item_tint(
+        &self,
+        _host: &dyn ClientHost,
+        event: &mut HeldItemTintEvent<'_>,
+    ) -> Option<u32> {
+        self.is_charged(event.entity_id, event.hand).then_some(0xFFA040)
+    }
+}
+```
+
+The event also borrows the rendered stack and carries the frame's `partial_tick`.
+The first `Some(0xRRGGBB)` wins; return `None` to let the next Part answer or keep
+the model's colors. The multiplier applies to that draw's RGB before lighting,
+including a shield's base and banner patterns. It leaves alpha, glint, outline
+and pose alone, and does not affect first person, GUI previews, worn armor, item
+frames or dropped items. Keep the handler fast: it can run once for each held
+stack submitted during a frame. Rendering is not a source of combat state; see
+[Syncing remote item cooldowns](networking.md#syncing-remote-item-cooldowns).
+
 ## Worn humanoid equipment
 
 An item attaches one `ClientItemExtensions` Part in
