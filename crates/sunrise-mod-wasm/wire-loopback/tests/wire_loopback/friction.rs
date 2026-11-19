@@ -78,6 +78,16 @@ fn wire_loopback_friction_preserves_context_inputs_and_float_writeback() {
                 .map_err(|e| format!("{e:?}"))
         })
         .unwrap();
+        // Block parts dispatch from the resolved table the game installs at load.
+        mod_api::__private::resolve_parts(
+            &Default::default(),
+            &Default::default(),
+            mod_api::__private::KnownIds {
+                block: &|_| true,
+                item: &|_| true,
+            },
+        )
+        .unwrap();
         let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
         let state = mod_api::BlockStateRecord::new(REGISTERED_BLOCK.get().unwrap(), 0).into();
         let world = World(state);
