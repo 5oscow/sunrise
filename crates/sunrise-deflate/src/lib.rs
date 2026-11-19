@@ -11,8 +11,13 @@
 //!
 //! A [`Deflater`] holds zlib's encoder state (about 250 KiB) and is reused
 //! from call to call; each call compresses one whole input, as one
-//! `deflate(Z_FINISH)`, and appends the stream to the caller's vector. A call
-//! allocates nothing once the vector has room for the result.
+//! `deflate(Z_FINISH)`, and appends the stream to the caller's vector. Each
+//! call first reserves zlib's worst-case bound for its input (about the input's
+//! size, plus the wrapper), so it allocates nothing only once the vector's
+//! spare capacity covers that bound, however well the input compresses.
+//!
+//! "The JDK's bytes" below means a JDK that bundles zlib 1.3.2, as Temurin
+//! 25.0.5 does; a JDK built against another zlib writes other bytes.
 //!
 //! zlib's notice is in this crate's LICENSE; the ported files say what was
 //! altered.
@@ -53,7 +58,7 @@ impl Deflater {
 
     /// Appends a zlib stream of `input` (RFC 1950: header `78 9c`, deflate,
     /// Adler-32), byte-identical to `java.util.zip.Deflater` at its defaults,
-    /// and to `DeflaterOutputStream` around it.
+    /// and to `DeflaterOutputStream` around it, on a JDK bundling zlib 1.3.2.
     pub fn zlib(&mut self, input: &[u8], out: &mut Vec<u8>) {
         out.reserve(bound(input.len()) + 6);
         out.extend_from_slice(&[0x78, 0x9c]);
@@ -62,7 +67,7 @@ impl Deflater {
     }
 
     /// Appends a gzip member of `input` as `java.util.zip.GZIPOutputStream`
-    /// writes it: its fixed header, raw deflate, CRC-32 and the length mod 2³²,
+    /// writes it on a JDK bundling zlib 1.3.2: its fixed header, raw deflate, CRC-32 and the length mod 2³²,
     /// both little-endian.
     pub fn gzip(&mut self, input: &[u8], out: &mut Vec<u8>) {
         out.reserve(bound(input.len()) + 18);
@@ -73,7 +78,8 @@ impl Deflater {
     }
 
     /// Appends a raw deflate stream of `input` (RFC 1951, no wrapper), as
-    /// `new Deflater(Deflater.DEFAULT_COMPRESSION, true)` writes it.
+    /// `new Deflater(Deflater.DEFAULT_COMPRESSION, true)` writes it on a JDK
+    /// bundling zlib 1.3.2.
     pub fn raw(&mut self, input: &[u8], out: &mut Vec<u8>) {
         out.reserve(bound(input.len()));
         self.state.compress(input, &mut BitWriter::new(out));

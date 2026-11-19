@@ -35,9 +35,19 @@ fn mixed() -> Vec<u8> {
         .collect()
 }
 
+/// A lazy match at the window's full distance, still pending when the window
+/// slides: the 4 bytes at 65273 match those at 32767, 32506 back, and the
+/// lone 8 keeps anything earlier from taking them.
+fn far_match() -> Vec<u8> {
+    let mut far = vec![0; 65277];
+    far[32766..32772].copy_from_slice(&[9, 1, 2, 3, 4, 5]);
+    far[65272..].copy_from_slice(&[8, 1, 2, 3, 4]);
+    far
+}
+
 #[test]
 fn matches_the_jdk() {
-    let cases: [(&str, Vec<u8>, &[u8], &[u8]); 4] = [
+    let cases: [(&str, Vec<u8>, &[u8], &[u8]); 5] = [
         (
             "empty",
             Vec::new(),
@@ -61,6 +71,12 @@ fn matches_the_jdk() {
             mixed(),
             include_bytes!("fixtures/mixed.zlib"),
             include_bytes!("fixtures/mixed.gz"),
+        ),
+        (
+            "far_match",
+            far_match(),
+            include_bytes!("fixtures/far_match.zlib"),
+            include_bytes!("fixtures/far_match.gz"),
         ),
     ];
     // One deflater for every call: a stream must not depend on the one before.

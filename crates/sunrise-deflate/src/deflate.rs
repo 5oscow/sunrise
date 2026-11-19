@@ -56,6 +56,10 @@ pub(crate) struct State {
     ins_h: usize,
     match_length: usize,
     prev_length: usize,
+    /// Where the match found at `strstart` starts. A slide moves it back by
+    /// `W_SIZE` with wrapping, so a pending match at the full distance can sit
+    /// at -1 (`usize::MAX`), as zlib's unsigned `match_start` does; distances
+    /// from it are taken with `wrapping_sub`.
     match_start: usize,
     prev_match: usize,
     match_available: bool,
@@ -324,7 +328,7 @@ impl State {
             if self.prev_length >= MIN_MATCH && self.match_length <= self.prev_length {
                 let max_insert = self.strstart + self.lookahead - MIN_MATCH;
                 let bflush = self.trees.tally_dist(
-                    self.strstart - 1 - self.prev_match,
+                    (self.strstart - 1).wrapping_sub(self.prev_match),
                     self.prev_length - MIN_MATCH,
                 );
                 self.lookahead -= self.prev_length - 1;
