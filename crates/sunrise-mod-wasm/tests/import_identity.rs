@@ -41,6 +41,35 @@ fn changed(module: &[u8], prefix: &[u8]) -> (Vec<u8>, String) {
     (out, String::from_utf8(module[start..end].to_vec()).unwrap())
 }
 
+/// Every import of module `sunrise` the module names, in the import section's order.
+fn sunrise_imports(module: &[u8]) -> Vec<String> {
+    let mut found = Vec::new();
+    for payload in wasmparser::Parser::new(0).parse_all(module) {
+        if let wasmparser::Payload::ImportSection(section) = payload.unwrap() {
+            for import in section.into_imports() {
+                let import = import.unwrap();
+                if import.module == "sunrise" {
+                    found.push(import.name.to_owned());
+                }
+            }
+            break;
+        }
+    }
+    found
+}
+
+/// The module with the last digit of the import `name` changed, wherever it is in the section.
+fn changed_import(module: &[u8], name: &str) -> Vec<u8> {
+    let start = module
+        .windows(name.len())
+        .position(|window| window == name.as_bytes())
+        .expect("the module imports the name");
+    let end = start + name.len();
+    let mut out = module.to_vec();
+    out[end - 1] = if out[end - 1] == b'0' { b'1' } else { b'0' };
+    out
+}
+
 #[test]
 #[ignore = "needs SUNRISE_WASM_FIXTURE and SUNRISE_WASM_STD, which the wasm-mods workflow builds"]
 fn the_fixture_loads_on_the_games_table() {
@@ -76,6 +105,56 @@ fn a_changed_call_the_fixture_uses_refuses_it_by_name() {
             );
         }
     })
+}
+
+/// A mark names an item once per item: a mod's several hooks, the several methods of a Part and
+/// its injection points each appear in the import section, and a changed one is refused by name
+/// whichever of them it is, not only the first of its kind.
+#[test]
+#[ignore = "daily"]
+fn every_hook_part_and_point_the_fixture_implements_is_imported_and_checked() {
+    let (package, _) = fixture();
+    let imports = sunrise_imports(&package.module);
+    let marks = |kind: &str| -> Vec<&String> {
+        imports
+            .iter()
+            .filter(|name| name.starts_with(kind))
+            .collect()
+    };
+    // Independent of the generator: hooks and Part methods the fixture's source implements.
+    for expected in [
+        "hook:Hooks::register#",
+        "hook:Hooks::server_tick@",
+        "hook:Hooks::living_death@",
+        "hook:Hooks::server_started@",
+        "hook:Hooks::mob_split@",
+        "part:BlockEntityPart::block_entity_tick#",
+    ] {
+        assert!(
+            imports.iter().any(|name| name.starts_with(expected)),
+            "the fixture implements {expected} but does not import it: {:?}",
+            marks("hook:")
+        );
+    }
+    assert!(marks("hook:").len() >= 20, "{:?}", marks("hook:"));
+    assert!(marks("point:").len() >= 2, "{:?}", marks("point:"));
+    for name in imports.iter().filter(|name| {
+        ["hook:", "part:", "point:"]
+            .iter()
+            .any(|kind| name.starts_with(kind))
+    }) {
+        let module = changed_import(&package.module, name);
+        let refused = sunrise_mod_wasm::fixture::mismatches_with_added_call(
+            &module,
+            "call:Host::a_method_added_after_this_mod_was_built#00112233445566778899aabbccddeeff",
+        )
+        .unwrap();
+        let item = name.split('#').next().unwrap();
+        assert!(
+            refused.len() == 1 && refused[0].starts_with(&format!("{item} changed")),
+            "a changed {name} is not refused by name: {refused:?}"
+        );
+    }
 }
 
 /// A mod built before a method was added to the API loads on the game that has it: the table is
