@@ -578,6 +578,22 @@ pub struct Material {
     pub resource: Option<String>,
 }
 
+/// Whether a texture of `size` tiles into the frames its animation declares (the whole image
+/// when it has none): or the sprite is no sprite.
+pub fn frames_fit(
+    (width, height): (u32, u32),
+    animation: Option<&sunrise_assets::animation::AnimationMetadata>,
+) -> bool {
+    let [frame_width, frame_height] = animation
+        .map_or([width as i32, height as i32], |animation| {
+            animation.frame_size(width as i32, height as i32)
+        });
+    u32::try_from(frame_width)
+        .ok()
+        .zip(u32::try_from(frame_height).ok())
+        .is_some_and(|(w, h)| w > 0 && h > 0 && width % w == 0 && height % h == 0)
+}
+
 /// The finished sprite of one origin: a file whose frames fit its size, with the resource it was
 /// read from, or the pixels a cut, a palette or a mod made. None where it can't be finished.
 pub fn finish_origin(
@@ -593,16 +609,7 @@ pub fn finish_origin(
             let image = decode(texture)?;
             let mcmeta = source.read_to_string(&format!("{resource}.mcmeta")).ok();
             let animation = crate::hud::animation_of(mcmeta.as_deref());
-            let [frame_width, frame_height] = animation
-                .map_or([image.0 as i32, image.1 as i32], |animation| {
-                    animation.frame_size(image.0 as i32, image.1 as i32)
-                });
-            // The frames must tile the image, or the sprite is no sprite.
-            let fits = u32::try_from(frame_width)
-                .ok()
-                .zip(u32::try_from(frame_height).ok())
-                .is_some_and(|(w, h)| w > 0 && h > 0 && image.0 % w == 0 && image.1 % h == 0);
-            fits.then_some(Material {
+            frames_fit((image.0, image.1), animation.as_ref()).then_some(Material {
                 image,
                 resource: Some(resource),
             })

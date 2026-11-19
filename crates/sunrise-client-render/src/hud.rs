@@ -594,6 +594,14 @@ fn walked_minecraft_texture(name: &str) -> bool {
         .any(|folder| name.starts_with(folder) && name.as_bytes().get(folder.len()) == Some(&b'/'))
 }
 
+/// Whether the file a walk packed under its own name tiles into its animation's frames.
+fn walked_frames_fit(root: &ResourceSource, texture: &str) -> bool {
+    let file = crate::atlas_sources::texture_resource(texture, "textures");
+    let mcmeta = root.read_to_string(&format!("{file}.mcmeta")).ok();
+    png_size(root, &file).is_some_and(|size| {
+        crate::atlas_sources::frames_fit(size, animation_of(mcmeta.as_deref()).as_ref())
+    })
+}
 /// What the atlas definitions (`atlases/*.json`) change in the texture files already packed:
 /// the sprites to add (generated ones such as the armour trim palettes and `unstitch` regions,
 /// and files listed under another id), the animated ones' names, and the packed names to drop.
@@ -605,7 +613,12 @@ fn walked_minecraft_texture(name: &str) -> bool {
 fn atlas_sprites(
     root: &ResourceSource,
     packed: &[PackedImage],
-) -> (Vec<PackedImage>, Vec<String>, HashSet<String>) {
+) -> (
+    Vec<PackedImage>,
+    Vec<String>,
+    HashSet<String>,
+    HashMap<String, TextureFlags>,
+) {
     use crate::atlas_sources::{self, Materials, SpriteOrigin};
     let have: HashSet<&str> = packed.iter().map(|i| i.0.as_str()).collect();
     let mut listed = atlas_sources::listed(root);
@@ -619,7 +632,12 @@ fn atlas_sprites(
         .zip(crate::par::par_map(&ids, |id| {
             let name = id.strip_prefix("minecraft:").unwrap_or(id);
             materials.resolve(id, |origin| match origin {
-                SpriteOrigin::File(texture) if texture == id && have.contains(name) => Some(None),
+                // The walked file stands if its frames tile it, as a finished sprite's do.
+                SpriteOrigin::File(texture)
+                    if texture == id && have.contains(name) && walked_frames_fit(root, texture) =>
+                {
+                    Some(None)
+                }
                 // A file under a walked folder is packed under its own name or was too large
                 // for the atlas: either way it is not added again.
                 SpriteOrigin::File(texture)
@@ -632,9 +650,14 @@ fn atlas_sprites(
             })
         }))
         .collect();
+    let model_names: HashSet<&str> = winners
+        .keys()
+        .map(|id| id.strip_prefix("minecraft:").unwrap_or(id))
+        .collect();
     let mut dropped = HashSet::new();
     let mut out = Vec::new();
     let mut animated = Vec::new();
+    let mut flags = HashMap::new();
     if !materials.is_bare() {
         for (name, ..) in packed {
             let path = name.split_once(':').map_or(name.as_str(), |(_, p)| p);
@@ -663,6 +686,12 @@ fn atlas_sprites(
                     if animation.is_some() {
                         animated.push(name.clone());
                     }
+                    // The winner's own render flags (blur, clamp), as the walk reads them.
+                    if let Some(texture_flags) =
+                        mcmeta.as_deref().and_then(TextureFlags::from_mcmeta)
+                    {
+                        flags.insert(name.clone(), texture_flags);
+                    }
                     if animation.is_some()
                         || path.starts_with("block/")
                         || path.starts_with("item/")
@@ -686,7 +715,11 @@ fn atlas_sprites(
     for (_, listing) in listed {
         for (id, origin) in listing {
             let name = id.strip_prefix("minecraft:").unwrap_or(&id).to_owned();
-            if matches!(origin, SpriteOrigin::File(_)) || have.contains(name.as_str()) {
+            // A model's sprite is the model atlases' winner above, not another atlas's output.
+            if matches!(origin, SpriteOrigin::File(_))
+                || have.contains(name.as_str())
+                || model_names.contains(name.as_str())
+            {
                 continue;
             }
             let slot = *slots.entry(name.clone()).or_insert_with(|| {
@@ -709,7 +742,7 @@ fn atlas_sprites(
         .into_iter()
         .flatten(),
     );
-    (out, animated, dropped)
+    (out, animated, dropped, flags)
 }
 /// `MissingTextureAtlasSprite`: what a sprite the atlas lacks draws as.
 pub const MISSING_SPRITE: &str = "sunrise/missing";
@@ -1357,7 +1390,7 @@ impl HudAtlas {
         }
         let mut cit_names = HashSet::new();
         if full {
-            let (more, more_animated, dropped) = atlas_sprites(root, &images);
+            let (more, more_animated, dropped, more_flags) = atlas_sprites(root, &images);
             images.retain(|image| !dropped.contains(&image.0));
             flags.retain(|name, _| !dropped.contains(name));
             gui_sizes.retain(|name, _| !dropped.contains(name));
@@ -1365,6 +1398,7 @@ impl HudAtlas {
             animated.retain(|name| !dropped.contains(name));
             images.extend(more);
             animated.extend(more_animated);
+            flags.extend(more_flags);
             for (image, image_flags, is_animated) in cit_sprites(root, &images) {
                 cit_names.insert(image.0.clone());
                 if let Some(f) = image_flags {
@@ -3147,12 +3181,82 @@ mod tests {
             &cut("demo:item/cut", 0),
         );
         let packed = vec![("demo:item/cut".to_owned(), 1, 1, vec![9, 9, 9, 9])];
-        let (images, _, dropped) = atlas_sprites(&ResourceSource::directory(root.clone()), &packed);
+        let (images, _, dropped, _) =
+            atlas_sprites(&ResourceSource::directory(root.clone()), &packed);
         assert_eq!(
             images,
             [("demo:item/cut".to_owned(), 1, 1, vec![0, 255, 0, 0])]
         );
         assert_eq!(dropped, HashSet::from(["demo:item/cut".to_owned()]));
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+    /// A walked file whose animation frames can't tile it does not stand: as the item mask does,
+    /// the pack takes the blocks atlas's sprite of the id instead.
+    #[test]
+    fn a_walked_file_with_unfitting_frames_gives_way_to_the_blocks_cut() {
+        let items = r#"{"sources":[{"type":"minecraft:single","resource":"demo:item/target"}]}"#;
+        let root = model_atlas_root("unfitting", items, &cut("demo:item/target", 1));
+        let textures = root.join("assets/demo/textures/item");
+        // A 1 x 1 file declaring frames 2 wide.
+        let mut encoder = png::Encoder::new(
+            std::fs::File::create(textures.join("target.png")).unwrap(),
+            1,
+            1,
+        );
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder
+            .write_header()
+            .unwrap()
+            .write_image_data(&[9, 9, 9, 9])
+            .unwrap();
+        std::fs::write(
+            textures.join("target.png.mcmeta"),
+            r#"{"animation":{"width":2}}"#,
+        )
+        .unwrap();
+        let packed = vec![("demo:item/target".to_owned(), 1, 1, vec![9, 9, 9, 9])];
+        let (images, _, dropped, _) =
+            atlas_sprites(&ResourceSource::directory(root.clone()), &packed);
+        assert_eq!(
+            images,
+            [("demo:item/target".to_owned(), 1, 1, vec![0, 255, 0, 0])]
+        );
+        assert_eq!(dropped, HashSet::from(["demo:item/target".to_owned()]));
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+    /// The winning renamed file's own render flags come with its pixels, and another atlas's
+    /// output of a model id does not replace the model atlases' winner.
+    #[test]
+    fn a_winner_carries_its_flags_and_no_other_atlas_replaces_it() {
+        let items = r#"{"sources":[
+            {"type":"minecraft:single","resource":"demo:item/sheet","sprite":"demo:item/blurred"}]}"#;
+        let root = model_atlas_root("flags", items, &cut("demo:item/cut", 0));
+        std::fs::write(
+            root.join("assets/demo/textures/item/sheet.png.mcmeta"),
+            r#"{"texture":{"blur":true}}"#,
+        )
+        .unwrap();
+        // The GUI atlas cuts the other quadrant under the id the blocks atlas cuts.
+        std::fs::write(
+            root.join("assets/minecraft/atlases/gui.json"),
+            cut("demo:item/cut", 1),
+        )
+        .unwrap();
+        let (images, _, _, flags) = atlas_sprites(&ResourceSource::directory(root.clone()), &[]);
+        let names: Vec<&str> = images.iter().map(|image| image.0.as_str()).collect();
+        assert_eq!(names, ["demo:item/blurred", "demo:item/cut"]);
+        let cut = images
+            .iter()
+            .find(|image| image.0 == "demo:item/cut")
+            .unwrap();
+        assert_eq!(
+            cut.3,
+            [255, 0, 0, 255],
+            "the blocks atlas's quadrant, not the GUI atlas's"
+        );
+        assert_eq!(flags.len(), 1);
+        assert!(flags["demo:item/blurred"].blur);
         std::fs::remove_dir_all(&root).unwrap();
     }
     /// The items atlas keeps the walked file of its name; the blocks atlas's lower cut of that
@@ -3168,7 +3272,8 @@ mod tests {
             ("item/unlisted".to_owned(), 1, 1, vec![8, 8, 8, 8]),
             ("gui/not_a_model".to_owned(), 1, 1, vec![7, 7, 7, 7]),
         ];
-        let (images, _, dropped) = atlas_sprites(&ResourceSource::directory(root.clone()), &packed);
+        let (images, _, dropped, _) =
+            atlas_sprites(&ResourceSource::directory(root.clone()), &packed);
         assert_eq!(images, []);
         assert_eq!(dropped, HashSet::from(["item/unlisted".to_owned()]));
         std::fs::remove_dir_all(&root).unwrap();
