@@ -50,6 +50,7 @@ sunrise-client-lib entities::orb_lava_tests::an_invulnerable_orb_keeps_its_healt
 sunrise-client-lib entities::orb_lava_tests::boundary_case_surviving_and_discarding_and_multi_contact_in_one_tick lib daily resources
 sunrise-client-lib entities::orb_lava_tests::legacy_orb_in_air_or_water_or_non_lava_does_not_play_sound_or_consume_random lib daily resources
 sunrise-client-lib entities::orb_lava_tests::negative_case_non_contact_or_client_orb_does_not_play_burn_sound lib daily resources
+sunrise-client-lib entities::orb_lava_tests::nonpositive_health_orbs_age_in_air_and_take_damage_in_lava lib daily resources
 sunrise-client-lib entities::orb_lava_tests::positive_case_server_orb_in_lava_plays_generic_burn_sound lib daily resources
 sunrise-client-lib entities::slime_bounce_tests::a_slime_bounce_marks_the_item_for_immediate_sync lib daily resources
 sunrise-client-lib entities::world_border_tests::a_dropped_item_on_soul_sand_or_honey_is_slowed_by_the_move lib daily resources
