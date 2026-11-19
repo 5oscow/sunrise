@@ -485,6 +485,8 @@ pub(super) fn emit<'a>(
         // The fields an isolated dispatch rolls back to the requested values on a listener's
         // unwind (#2414 ruling), each with whether the event holds it behind a `&mut`.
         let mut rollback: Vec<(String, bool)> = Vec::new();
+        // The rolled-back fields a snapshot copies by `Clone` rather than by `Copy`.
+        let mut cloned: Vec<String> = Vec::new();
         // The `&mut dyn Trait` fields: registrars and draw surfaces, with no value to snapshot.
         let mut surfaces: Vec<String> = Vec::new();
         let stack_outputs: Vec<_> = args
@@ -583,6 +585,9 @@ pub(super) fn emit<'a>(
                          of them",
                         hook.name
                     ));
+                }
+                if !rollback_pointee_is_copy(&field_ty) {
+                    cloned.push(name.clone());
                 }
                 rollback.push((name.clone(), true));
             }
@@ -1013,8 +1018,10 @@ pub(super) fn emit<'a>(
             .filter(|(field, _)| !surfaces.contains(field))
         {
             let index = snaps.len();
-            snaps.push(if *by_reference {
+            snaps.push(if cloned.contains(field) {
                 format!("(*{event}.{field}).clone()")
+            } else if *by_reference {
+                format!("*{event}.{field}")
             } else {
                 format!("{event}.{field}")
             });
@@ -1030,8 +1037,14 @@ pub(super) fn emit<'a>(
         let snapshot_statement = if snaps.is_empty() {
             String::new()
         } else {
+            // A snapshot that only copies is no work to defer: `then_some`.
+            let (then, arm) = if cloned.is_empty() {
+                ("then_some", "")
+            } else {
+                ("then", "|| ")
+            };
             format!(
-                "let {snapshot} = contained.then(|| ({},)); ",
+                "let {snapshot} = contained.{then}({arm}({},)); ",
                 snaps.join(", ")
             )
         };
@@ -1280,12 +1293,12 @@ pub(super) fn emit<'a>(
             let params = dispatch_params[1..].join(", ");
             let (host, _) = host.as_ref().unwrap();
             dispatch.push_str(&format!(
-                "#[doc(hidden)] #[allow(clippy::clone_on_copy, clippy::unnecessary_lazy_evaluations)] pub fn dispatch_{name}({dispatch_signature}) {{ dispatch_{name}_with({args}, |part, event| part.{name}(&mut *{host}, event)); }}\n\
-                 #[doc(hidden)] #[allow(clippy::clone_on_copy, clippy::unnecessary_lazy_evaluations)] pub fn dispatch_{name}_with({params}, mut {invoke_part}: impl FnMut(&dyn {part_trait}, &mut {event_type}{elided}){result}) {{ {unpack}{early_return}\n{body} }}\n"
+                "#[doc(hidden)] pub fn dispatch_{name}({dispatch_signature}) {{ dispatch_{name}_with({args}, |part, event| part.{name}(&mut *{host}, event)); }}\n\
+                 #[doc(hidden)] pub fn dispatch_{name}_with({params}, mut {invoke_part}: impl FnMut(&dyn {part_trait}, &mut {event_type}{elided}){result}) {{ {unpack}{early_return}\n{body} }}\n"
             ));
         } else {
             dispatch.push_str(&format!(
-                "#[doc(hidden)] #[allow(clippy::clone_on_copy, clippy::unnecessary_lazy_evaluations)] pub fn dispatch_{name}({dispatch_signature}) {{ {unpack}{early_return}\n{body} }}\n"
+                "#[doc(hidden)] pub fn dispatch_{name}({dispatch_signature}) {{ {unpack}{early_return}\n{body} }}\n"
             ));
         }
     }
@@ -2327,6 +2340,10 @@ static OWNERS: [Owner; 2] = [Owner {{ id: "a" }}, Owner {{ id: "b" }}];
 fn listened(_: generated::HookId) -> bool {{ true }}
 fn listening(_: generated::HookId) -> impl Iterator<Item=(bool, &'static Owner)> {{ OWNERS.iter().map(|m| (false, m)) }}
 mod runtime {{
+    pub struct Refusal;
+    impl Refusal {{ pub fn report(&self) {{}} }}
+    pub fn outside_world() -> bool {{ false }}
+    pub fn refusable<T>(_: bool, call: impl FnOnce() -> T) -> Result<T, Refusal> {{ Ok(call()) }}
     pub struct ListenerScope;
     impl ListenerScope {{
         pub fn new() -> Self {{ Self }}
@@ -2584,6 +2601,12 @@ struct Gatherer {{ pushes: &'static [u32] }}
 static MODS: [(&str, Gatherer); 3] = [("a", Gatherer {{ pushes: &[1, 2] }}), ("quiet", Gatherer {{ pushes: &[] }}), ("b", Gatherer {{ pushes: &[3] }})];
 fn listened(_: generated::HookId) -> bool {{ true }}
 fn entered_with_id(_: generated::HookId, _: &str) -> impl Iterator<Item = (&'static str, &'static Gatherer)> {{ MODS.iter().map(|(id, m)| (*id, m)) }}
+mod runtime {{
+    pub struct Refusal;
+    impl Refusal {{ pub fn report(&self) {{}} }}
+    pub fn outside_world() -> bool {{ false }}
+    pub fn refusable<T>(_: bool, call: impl FnOnce() -> T) -> Result<T, Refusal> {{ Ok(call()) }}
+}}
 impl Gatherer {{ fn gather(&self, _: &mut dyn generated::ServerHost, event: &mut generated::GatherEvent<'_>) {{ assert!(event.entries.is_empty()); event.entries.extend(self.pushes); }} }}
 mod generated {{
 pub trait ServerHost {{}}
