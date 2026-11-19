@@ -1000,13 +1000,6 @@ impl Game<'_> {
         // end crystal) the player is that guest. The blast's source is the
         // same for all of them (`onExplosionHit(this.source)`).
         let attacker = self.blast_attacker();
-        // The live mob cause's UUID, made now if it has none yet (a built
-        // wither), before any victim records the cause for its kill credit.
-        let cause_uuid = attacker
-            .as_ref()
-            .map(|&(id, _)| id)
-            .filter(|&id| self.mobs.iter().any(|m| m.id == id && !m.removed))
-            .map(|id| (id, self.uuid_for(id)));
         let blast_source = self.combat.explosion_cause.clone();
         let context = ExplosionHookContext {
             center,
@@ -1113,12 +1106,6 @@ impl Game<'_> {
         // `VehicleEntity.hurtServer` credits its ENTITY_DAMAGE to
         // `DamageSource.getEntity`, which for a blast is its indirect source.
         let blast_by = self.explosion_kill_credit();
-        // The mob victims' hits land in the enclosing attack, which need not
-        // name the blast's cause: it carries the cause's UUID for their credit.
-        let mut mob_attack = self.combat.attack().clone();
-        if cause_uuid.is_some() {
-            mob_attack.attacker_uuid = cause_uuid;
-        }
         let mut destroyed_contents = Vec::new();
         macro_rules! blocked_damage {
             ($id:expr, $kind:expr) => {{
@@ -1234,7 +1221,12 @@ impl Game<'_> {
                         // ravagers are pushed.
                         let victim = m.id;
                         let hurt = hurt_mob(
-                            crate::game::entity::damage_level_of!(self, &mob_attack, no_push, None),
+                            crate::game::entity::damage_level_of!(
+                                self,
+                                self.combat.attack(),
+                                no_push,
+                                None
+                            ),
                             m,
                             hurtable,
                             cause,
@@ -3240,9 +3232,7 @@ mod explicit_source_tests {
                     ))
                 );
                 assert_eq!(
-                    game.combat
-                        .kill_credit(game.world.game_time)
-                        .map(|(id, _)| id),
+                    game.combat.kill_credit(game.world.game_time),
                     (mode == 2).then_some(43)
                 );
                 if mode == 1 || mode == 3 || nested {

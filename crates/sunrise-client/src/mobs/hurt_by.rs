@@ -10,16 +10,14 @@ use super::{Damage, DamageKind, Mob, MobWorld, Species, Who};
 impl Ai {
     /// `LivingEntity.setLastHurtByMob(who)`: the new record replaces a
     /// reference read back that was not resolved.
-    pub fn hurt_by(&mut self, who: Who, uuid: Option<[i32; 4]>, tick: i32) {
+    pub fn hurt_by(&mut self, who: Who, tick: i32) {
         self.last_hurt_by = Some(who);
-        self.last_hurt_by_uuid = uuid;
         self.last_hurt_by_ref = None;
         self.last_hurt_by_time = tick;
     }
     /// `LivingEntity.setLastHurtByMob(null)`, which also stamps the time.
     pub fn forget_hurt_by(&mut self, tick: i32) {
         self.last_hurt_by = None;
-        self.last_hurt_by_uuid = None;
         self.last_hurt_by_ref = None;
         self.last_hurt_by_time = tick;
     }
@@ -38,16 +36,11 @@ impl Mob {
 /// `resolvePlayerResponsibleForDamage` after a hit landed: a mob's hit names
 /// its attacker, unless the type is in `#no_anger` (`DamageTypeTagsProvider`
 /// holds `mob_attack_no_aggro` alone, a goat's ram), which skips only the mob
-/// record: a player's hit still counts for the kill credit. A mob's UUID
-/// comes from the hit's attack when that names the same mob.
-pub(super) fn resolve(m: &mut Mob, source: &Damage, attack: &crate::health::Attack) {
+/// record: a player's hit still counts for the kill credit.
+pub(super) fn resolve(m: &mut Mob, source: &Damage) {
     let Some(who) = source.attacker else { return };
     if !matches!(source.kind, DamageKind::MobAttackNoAggro) {
-        let uuid = match (who, attack.attacker_uuid) {
-            (Who::Mob(id), Some((named, uuid))) if named == id => Some(uuid),
-            _ => None,
-        };
-        m.ai.hurt_by(who, uuid, m.age as i32);
+        m.ai.hurt_by(who, m.age as i32);
     }
     if who == Who::Player {
         m.ai.last_hurt_by_player = 100;

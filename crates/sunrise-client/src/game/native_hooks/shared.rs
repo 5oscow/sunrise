@@ -1564,9 +1564,6 @@ impl Game<'_> {
                 .and_then(|host| host.hub.guests.iter().find(|g| g.entity_id == attacker))
                 .map(|g| sunrise_client::lan::playerdata::uuid_ints(g.uuid))
         };
-        let attacker_uuid = u32::try_from(attacker)
-            .ok()
-            .and_then(|id| Some((id, self.known_entity_uuid(id)?)));
         Attack {
             attacker,
             held,
@@ -1576,7 +1573,6 @@ impl Game<'_> {
             position: None,
             projectile_weapon: None,
             player_uuid,
-            attacker_uuid,
         }
     }
     /// [`Self::attack_of`] for the attacker a damage source names: the player, a mob, or (none)

@@ -54,8 +54,8 @@ pub trait GoalHost {
     fn mob_player_credit(&self, mob: &Mob) -> Option<Option<u32>>;
     /// The mob `attacker` that hurt a lent mob, when it is not in this level
     /// under that id: in another loaded level, or under the id a dimension
-    /// change gave it, by the UUID recorded with the hurt.
-    fn mob_attacker_elsewhere(&self, mob: &Mob, attacker: u32) -> Option<mod_api::EntityRef>;
+    /// change gave it.
+    fn mob_attacker_elsewhere(&self, attacker: u32) -> Option<mod_api::EntityRef>;
     /// Whether `entity` is a mob resident in another loaded level, whose
     /// identity reads the game answers (a credited mob that changed dimension).
     fn mob_in_other_level(&self, entity: mod_api::EntityRef) -> bool;

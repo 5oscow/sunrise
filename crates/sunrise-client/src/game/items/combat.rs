@@ -34,8 +34,6 @@ struct Entry {
 struct PendingAttacker {
     damage_type: String,
     attacker: (u32, Text),
-    /// The attacker's UUID when the hit landed, for the kill credit.
-    uuid: Option<[i32; 4]>,
     item: Option<Text>,
     living: bool,
     credit: bool,
@@ -82,10 +80,8 @@ pub(super) struct CombatTracker {
     /// The lengths of `pending` and `pending_direct` before the first
     /// attacker noted for the hurt being dealt now (`forget_noted`).
     noted_since: Option<(usize, usize)>,
-    /// `LivingEntity.lastHurtByMob` (the kill credit): the attacker's id and
-    /// name, its UUID (`EntityReference`, which names it after a dimension
-    /// change gives it a new id) and the timestamp.
-    last_hurt_by: Option<((u32, Text), Option<[i32; 4]>, i64)>,
+    /// `LivingEntity.lastHurtByMob` and its timestamp (the kill credit).
+    last_hurt_by: Option<((u32, Text), i64)>,
     /// `LivingEntity.lastHurtByPlayer` and its timestamp.
     last_hurt_by_player: Option<(PlayerCredit, i64)>,
     /// The mob the player last hurt (`getLastHurtMob`) and when.
@@ -234,10 +230,10 @@ impl CombatTracker {
         self.noted_since.get_or_insert(marks);
     }
     /// `CombatTracker.getKiller`'s credited attacker: the entity that last
-    /// hurt the body, by id and UUID, within a hundred ticks of the hurt.
-    pub(super) fn kill_credit(&self, now: i64) -> Option<(u32, Option<[i32; 4]>)> {
-        let ((id, _), uuid, at) = self.last_hurt_by.as_ref()?;
-        (now - at <= 100).then_some((*id, *uuid))
+    /// hurt the body, within a hundred ticks of the hurt.
+    pub(super) fn kill_credit(&self, now: i64) -> Option<u32> {
+        let ((id, _), at) = self.last_hurt_by.as_ref()?;
+        (now - at <= 100).then_some(*id)
     }
     /// `LivingEntity.getLastDamageSource` for an advancement's
     /// `killing_blow`: the newest combat entry's type and causing entity.
@@ -348,7 +344,7 @@ impl Game<'_> {
     }
     /// `getLastHurtByMob`: the last mob to hurt the player, for 100 ticks.
     pub(super) fn player_hurt_by(&self) -> Option<(sunrise_client::mobs::Who, i64)> {
-        let ((id, _), _, at) = self.combat.last_hurt_by.as_ref()?;
+        let ((id, _), at) = self.combat.last_hurt_by.as_ref()?;
         (self.world.game_time - at <= 100).then_some((sunrise_client::mobs::Who::Mob(*id), *at))
     }
     /// Remember who deals the next `damage_type` damage to the player.
@@ -371,12 +367,10 @@ impl Game<'_> {
         name: Text,
         item: Option<Text>,
     ) {
-        let uuid = self.known_entity_uuid(id);
         self.combat.mark();
         self.combat.pending.push(PendingAttacker {
             damage_type: damage_type.to_owned(),
             attacker: (id, name),
-            uuid,
             item,
             living: true,
             credit: true,
@@ -396,7 +390,6 @@ impl Game<'_> {
         self.combat.pending.push(PendingAttacker {
             damage_type: damage_type.to_owned(),
             attacker: (id, name),
-            uuid: None,
             item,
             living,
             credit: false,
@@ -464,7 +457,7 @@ impl Game<'_> {
         let id = pending.attacker.0;
         self.combat.last_hurt_by = pending
             .credit
-            .then(|| (pending.attacker.clone(), pending.uuid, self.world.game_time));
+            .then(|| (pending.attacker.clone(), self.world.game_time));
         self.resolve_player_responsible_for_player(
             id,
             attack.and_then(|attack| attack.player_uuid),
@@ -525,7 +518,7 @@ impl Game<'_> {
                 }
                 _ => continue,
             };
-            let (attacker, uuid, item, living, credit) = self
+            let (attacker, item, living, credit) = self
                 .combat
                 .pending
                 .iter()
@@ -533,13 +526,12 @@ impl Game<'_> {
                 .map(|i| {
                     let PendingAttacker {
                         attacker,
-                        uuid,
                         item,
                         living,
                         credit,
                         ..
                     } = self.combat.pending.remove(i);
-                    (Some(attacker), uuid, item, living, credit)
+                    (Some(attacker), item, living, credit)
                 })
                 .unwrap_or_default();
             let direct = match attacker {
@@ -555,7 +547,7 @@ impl Game<'_> {
             let now = self.world.game_time;
             if let Some(a) = &attacker {
                 if living {
-                    self.combat.last_hurt_by = credit.then(|| (a.clone(), uuid, now));
+                    self.combat.last_hurt_by = credit.then(|| (a.clone(), now));
                 }
                 recorded = Some((name.clone(), a.0));
                 if living && !self.combat.in_combat {
@@ -764,7 +756,7 @@ impl Game<'_> {
             return Text::translate(&key, &[me, name]);
         }
         // getKillCredit: the last mob that hurt the player in the past 100 ticks.
-        if let Some(((_, name), _, at)) = &self.combat.last_hurt_by
+        if let Some(((_, name), at)) = &self.combat.last_hurt_by
             && self.world.game_time - at <= 100
         {
             return Text::translate(&format!("{key}.player"), &[me, name.clone()]);
@@ -906,7 +898,7 @@ impl Game<'_> {
             entries,
             last_damage: now,
             in_combat: m.combat.in_combat,
-            last_hurt_by: credit.map(|c| (c, None, now)),
+            last_hurt_by: credit.map(|c| (c, now)),
             ..CombatTracker::default()
         };
         std::mem::swap(&mut self.combat, &mut tracker);
@@ -1136,7 +1128,6 @@ mod noted_tests {
             c.pending.push(PendingAttacker {
                 damage_type: "minecraft:arrow".into(),
                 attacker: (id, Text::literal("skeleton")),
-                uuid: None,
                 item: None,
                 living: true,
                 credit: true,
@@ -1189,11 +1180,11 @@ mod kill_credit_tests {
     #[test]
     fn the_hundredth_tick_after_the_hurt_still_counts_and_the_next_does_not() {
         let hurt_at = |at: i64| CombatTracker {
-            last_hurt_by: Some(((7, Text::literal("zombie")), None, at)),
+            last_hurt_by: Some(((7, Text::literal("zombie")), at)),
             ..CombatTracker::default()
         };
-        assert_eq!(hurt_at(1_000).kill_credit(1_099), Some((7, None)));
-        assert_eq!(hurt_at(1_000).kill_credit(1_100), Some((7, None)));
+        assert_eq!(hurt_at(1_000).kill_credit(1_099), Some(7));
+        assert_eq!(hurt_at(1_000).kill_credit(1_100), Some(7));
         assert_eq!(hurt_at(1_000).kill_credit(1_101), None);
     }
 }

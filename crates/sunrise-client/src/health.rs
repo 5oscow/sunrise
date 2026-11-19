@@ -735,9 +735,6 @@ pub struct Attack {
     pub projectile_weapon: Option<crate::items::ItemStack>,
     /// The verified causing player's UUID, when the attacker is a player.
     pub player_uuid: Option<[i32; 4]>,
-    /// The id and UUID of the mob a victim's kill credit names, when known:
-    /// the attacker's, or a blast's cause's.
-    pub attacker_uuid: Option<(u32, [i32; 4])>,
     /// What it holds, or none when it is not known (no native mod listens: the game only
     /// records it then).
     pub held: Held,
@@ -751,7 +748,6 @@ pub static NO_ATTACK: Attack = Attack {
     position: None,
     projectile_weapon: None,
     player_uuid: None,
-    attacker_uuid: None,
     held: [None, None],
 };
 /// Whether vanilla's factory for `damage_type` passes the projectile as

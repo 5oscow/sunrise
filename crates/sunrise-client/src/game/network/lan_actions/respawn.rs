@@ -534,7 +534,7 @@ impl Game<'_> {
         let who = if let Some(credit) = player_credit {
             self.resolve_player_credit(credit)
         } else {
-            combat.and_then(|c| c.kill_credit(now)).and_then(|(id, _)| {
+            combat.and_then(|c| c.kill_credit(now)).and_then(|id| {
                 if self.lan_acting.is_none()
                     && self
                         .player
@@ -657,7 +657,6 @@ impl Game<'_> {
             .guest_combat
             .get(&conn)
             .and_then(|c| c.kill_credit(now))
-            .map(|(id, _)| id)
         else {
             return;
         };
@@ -676,7 +675,7 @@ impl Game<'_> {
     /// no longer resolves), a mob whose own blast this tick killed the guest,
     /// or the ender dragon.
     fn guest_kill_credit_type(&self, conn: u32) -> Option<String> {
-        let (id, _) = self
+        let id = self
             .guest_combat
             .get(&conn)?
             .kill_credit(self.world.game_time)?;

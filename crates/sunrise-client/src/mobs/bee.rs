@@ -65,7 +65,6 @@ struct StungUndo {
     angry_at: Option<Who>,
     last_hurt_by: Option<Who>,
     last_hurt_by_ref: Option<[i32; 4]>,
-    last_hurt_by_uuid: Option<[i32; 4]>,
     last_hurt_by_time: i32,
     target: Option<Who>,
 }
@@ -396,7 +395,6 @@ pub fn sting(m: &mut Mob, who: Who, cx: &mut Cx) {
         angry_at: get(m).and_then(|b| b.angry_at),
         last_hurt_by: m.ai.last_hurt_by,
         last_hurt_by_ref: m.ai.last_hurt_by_ref,
-        last_hurt_by_uuid: m.ai.last_hurt_by_uuid,
         last_hurt_by_time: m.ai.last_hurt_by_time,
         target: m.ai.target,
     };
@@ -419,7 +417,6 @@ pub fn sting_refused(m: &mut Mob) {
     };
     m.ai.last_hurt_by = undo.last_hurt_by;
     m.ai.last_hurt_by_ref = undo.last_hurt_by_ref;
-    m.ai.last_hurt_by_uuid = undo.last_hurt_by_uuid;
     m.ai.last_hurt_by_time = undo.last_hurt_by_time;
     m.ai.target = undo.target;
     let b = st(m);

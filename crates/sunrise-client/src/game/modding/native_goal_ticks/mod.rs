@@ -676,8 +676,8 @@ impl mobs::part_goals::GoalHost for Game<'_> {
         self.native_mob_is_climbing(mob)
     }
 
-    fn mob_attacker_elsewhere(&self, mob: &Mob, attacker: u32) -> Option<EntityRef> {
-        self.credited_elsewhere(attacker, mob.ai.last_hurt_by_uuid)
+    fn mob_attacker_elsewhere(&self, attacker: u32) -> Option<EntityRef> {
+        self.credited_elsewhere(attacker)
     }
 
     fn mob_in_other_level(&self, entity: EntityRef) -> bool {
