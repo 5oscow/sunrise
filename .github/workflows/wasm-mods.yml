@@ -243,5 +243,5 @@ jobs:
       - run: cargo test --locked -p sunrise-mod-wasm --lib deep_guest_stack_and_overflow_attribution
       - run: cargo test --locked -p sunrise-mod-wasm --lib sixty_thousand_frames_exceed_wasmtime_default
       - run: cargo test --locked -p sunrise-mod-wasm --lib generated_client_and_server_hooks_complete_sixty_thousand_frames
-      - run: cargo test --locked -p sunrise-mod-wasm --features runtime-fixture --test main_stack_probe -- --nocapture
+      - run: cargo test --locked -p sunrise-mod-wasm --features runtime-fixture,test-copy-probe --test main_stack_probe -- --nocapture
       - run: cargo test --locked -p sunrise-mod-wasm --features runtime-fixture --test pulley_policy -- --nocapture
