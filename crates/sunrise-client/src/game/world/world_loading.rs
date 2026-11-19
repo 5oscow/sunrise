@@ -47,6 +47,48 @@ fn fall_back_to_level_dat_old_without_asking(
     }
 }
 
+/// Settle level.dat before applying any on-disk choice for the world's generator.
+fn prepare_level_data(
+    role: execution_role::ExecutionRole,
+    save_root: &std::path::Path,
+    folder: &str,
+    game_dir: &std::path::Path,
+) -> Result<()> {
+    // openWorldLoadLevelData: level data that does not read is RecoverWorldDataScreen's to
+    // handle (the title screen shows it); a world opened another way must not become a
+    // new one with a random seed under the same name.
+    fall_back_to_level_dat_old_without_asking(role, save_root, folder);
+    if let Some(issue) = sunrise_client::save::level_data_needs_recovery(save_root) {
+        let why = match issue {
+            sunrise_client::save::DatIssue::Missing => "level.dat is missing".to_owned(),
+            sunrise_client::save::DatIssue::Unreadable(why) => why,
+        };
+        return Err(format!(
+            "Failed to load world \"{folder}\": its level data does not read ({why}). \
+             Open it from the world list to try restoring level.dat_old."
+        )
+        .into());
+    }
+    // LevelSummary.isCompatible, which the dedicated server's `Main` checks before it fixes
+    // a world: a world from another series is refused, never upgraded in place.
+    if let Some(version) = sunrise_client::save::incompatible_version(save_root) {
+        let version = if version.is_empty() {
+            "unknown".to_owned()
+        } else {
+            version
+        };
+        return Err(format!(
+            "Failed to load world \"{folder}\": it was last played in version {version}, \
+             which cannot be opened in this version."
+        )
+        .into());
+    }
+    if role.is_dedicated_server() && save_root.join("level.dat").exists() {
+        super::dedicated::biome_regions::choose(save_root, &game_dir.join("server.toml"))?;
+    }
+    Ok(())
+}
+
 impl WorldRequest {
     pub fn new(
         folder: &str,
@@ -102,41 +144,27 @@ impl WorldRequest {
             create
         });
         let create = create.as_ref();
-        // openWorldLoadLevelData: level data that does not read is RecoverWorldDataScreen's to
-        // handle (the title screen shows it); a world opened another way must not become a
-        // new one with a random seed under the same name.
-        fall_back_to_level_dat_old_without_asking(options.execution_role, &save_root, &folder);
-        if let Some(issue) = sunrise_client::save::level_data_needs_recovery(&save_root) {
-            let why = match issue {
-                sunrise_client::save::DatIssue::Missing => "level.dat is missing".to_owned(),
-                sunrise_client::save::DatIssue::Unreadable(why) => why,
-            };
-            return Err(format!(
-                "Failed to load world \"{folder}\": its level data does not read ({why}). \
-                 Open it from the world list to try restoring level.dat_old."
-            )
-            .into());
-        }
-        // LevelSummary.isCompatible, which the dedicated server's `Main` checks before it fixes
-        // a world: a world from another series is refused, never upgraded in place.
-        if let Some(version) = sunrise_client::save::incompatible_version(&save_root) {
-            let version = if version.is_empty() {
-                "unknown".to_owned()
-            } else {
-                version
-            };
-            return Err(format!(
-                "Failed to load world \"{folder}\": it was last played in version {version}, \
-                 which cannot be opened in this version."
-            )
-            .into());
-        }
+        prepare_level_data(
+            options.execution_role,
+            &save_root,
+            &folder,
+            options
+                .game_dir
+                .as_deref()
+                .unwrap_or(std::path::Path::new(".")),
+        )?;
         sunrise_client::save::upgrade_older_world_with(&save_root, upgrade)?;
         sunrise_client::save::migrate_legacy(&save_root)?;
         let session_lock = sunrise_client::save::SessionLock::acquire(&save_root)?;
         // RandomSequences: the world's data/minecraft/random_sequences.dat.
         let rand_sequences = super::trading::read_random_sequences(&save_root);
-        let existing = Level::read_with_registry(&save_root, rule_registry.clone());
+        let existing = if options.execution_role.is_dedicated_server() {
+            Level::read_for_dedicated(&save_root, rule_registry.clone(), || {
+                sunrise_client::random_source::create().next_long()
+            })
+        } else {
+            Level::read_with_registry(&save_root, rule_registry.clone())
+        };
         let created = existing.is_none();
         let level = existing.unwrap_or_else(|| Level {
             name: name.unwrap_or(&folder).to_owned(),
@@ -244,18 +272,15 @@ impl WorldRequest {
         }
         // Bone meal's and saplings' features, over the world's data packs like its generator:
         // a pack's tree is a feature here too. The same entries, so the bundle loads once.
-        growth::install_live_features(
-            res,
-            pack,
-            options,
-            &live_feature_overrides(
-                &save_root,
-                &options.resources,
-                res.biomes(),
-                &level.enabled_features,
-                &pack.additional_data,
-            ),
+        let overrides = live_feature_overrides(
+            &save_root,
+            &options.resources,
+            res.biomes(),
+            &level.enabled_features,
+            &pack.additional_data,
         );
+        level.recover_world_gen_dimensions(&overrides);
+        growth::install_live_features(res, pack, options, &overrides);
         let shapes = level_shapes(
             &save_root,
             &options.resources,
@@ -1274,6 +1299,65 @@ pub(super) fn make_streaming(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unreadable_level_backup_refuses_before_biome_adoption() {
+        use sunrise_client::save;
+        use sunrise_core::nbt::Tag;
+        use sunrise_world::worldgen::biome_source::regions::SelectorParams;
+
+        let game = tempfile::tempdir().unwrap();
+        let world = game.path().join("world");
+        let record = world.join("data/sunrise/biome_regions.dat");
+        let backup = world.join("level.dat_old");
+        std::fs::create_dir_all(record.parent().unwrap()).unwrap();
+        std::fs::write(&backup, b"unreadable backup").unwrap();
+        std::fs::write(
+            game.path().join("server.toml"),
+            "[biome_regions]\nadopt_installed = true\n",
+        )
+        .unwrap();
+        let selector = SelectorParams::current();
+        let layout = Tag::compound([
+            (
+                "selector",
+                Tag::compound([
+                    ("version", Tag::Int(selector.version as i32)),
+                    ("cell", Tag::Int(selector.cell as i32)),
+                    ("salt", Tag::String(selector.salt.as_str().into())),
+                    ("vanilla_weight", Tag::Int(selector.vanilla_weight as i32)),
+                ]),
+            ),
+            ("regions", Tag::List(Vec::new())),
+        ]);
+        save::write_dat(
+            &record,
+            Tag::compound([
+                ("version", Tag::Int(1)),
+                (
+                    "dimensions",
+                    Tag::compound([("minecraft:overworld", layout)]),
+                ),
+            ]),
+        )
+        .unwrap();
+        assert!(save::biome_regions::adoptable(&world));
+        let before = std::fs::read(&record).unwrap();
+        let role = execution_role::ExecutionRole::DedicatedServer;
+        let refused = prepare_level_data(role, &world, "world", game.path()).unwrap_err();
+        assert!(refused.to_string().contains("its level data does not read"));
+        assert_eq!(std::fs::read(&record).unwrap(), before);
+        assert_eq!(std::fs::read(&backup).unwrap(), b"unreadable backup");
+
+        // The explicit opt-in does change this layout when recovery can proceed.
+        save::write_dat(
+            &backup,
+            Tag::compound([("Data", Tag::Compound(Default::default()))]),
+        )
+        .unwrap();
+        prepare_level_data(role, &world, "world", game.path()).unwrap();
+        assert_ne!(std::fs::read(&record).unwrap(), before);
+    }
 
     /// A world whose level.dat does not read but whose level.dat_old does: only the
     /// dedicated server restores it unasked. Every role here carries the launch configuration
