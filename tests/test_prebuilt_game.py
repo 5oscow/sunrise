@@ -538,13 +538,39 @@ class AllocatorSelectionTests(unittest.TestCase):
                              ["--no-default-features", "--features", "system-allocator"])
 
     def test_sdk_build_refuses_an_output_that_overlaps_its_target_folder(self):
-        with tempfile.TemporaryDirectory() as directory, \
-             patch.dict(os.environ, CARGO_TARGET_DIR=str(Path(directory) / "target")), \
-             patch.object(prebuilt_game, "_build_locked") as build_locked:
-            for out in (Path(directory), Path(directory) / "target" / "prebuilt" / "stage"):
-                with self.subTest(out=out), self.assertRaises(SystemExit):
-                    prebuilt_game.build(out, server=False)
-            build_locked.assert_not_called()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "target" / "prebuilt"
+            with patch.dict(os.environ, CARGO_TARGET_DIR=str(target.parent)), \
+                    patch.object(prebuilt_game, "_build_locked") as build_locked:
+                for out in (root, target, target / "stage"):
+                    with self.subTest(out=out), self.assertRaisesRegex(SystemExit, "E_SDK_OUT_OVERLAPS_TARGET"):
+                        prebuilt_game.build(out, server=False)
+                build_locked.assert_not_called()
+            self.assertFalse(target.exists())
+
+    def test_sdk_build_preserves_a_stage_under_a_linked_target(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "sdk"
+            work = output / "work"
+            stage = work / "stage"
+            stage.mkdir(parents=True)
+            source = stage / "keep.rs"
+            source.write_text("// staged source\n")
+            target = root / "target" / "prebuilt"
+            target.parent.mkdir()
+            try:
+                target.symlink_to(work, target_is_directory=True)
+            except OSError:
+                self.skipTest("directory symlinks unavailable")
+            with patch.dict(os.environ, CARGO_TARGET_DIR=str(target.parent)), \
+                    patch.object(prebuilt_game, "_build_locked") as build_locked:
+                with self.assertRaisesRegex(SystemExit, "E_SDK_OUT_OVERLAPS_TARGET"):
+                    prebuilt_game.build(output, server=False)
+                build_locked.assert_not_called()
+            self.assertEqual(source.read_text(), "// staged source\n")
+            self.assertFalse((work / ".sdk-build.lock").exists())
 
     def test_linux_keeps_mimalloc(self):
         self.assertEqual(prebuilt_game.cargo_features(False, "linux"), [])

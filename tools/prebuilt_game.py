@@ -491,12 +491,15 @@ def assert_externs(out: Path, eligible: list[str]) -> None:
 def build(out: Path, server: bool) -> None:
     # Resolve before entering the staged copy. Keep its source and Cargo outputs exclusively owned until collection
     # and validation are done. Closing the file releases the lock; leave its name in place for future builds.
-    target_dir = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")).resolve() / "prebuilt"
-    # Collection empties `out`: it must neither hold the build's target folder (its lock file) nor sit inside it
-    # (the stage that Cargo still reads).
+    configured_target = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")).resolve() / "prebuilt"
+    target_dir = configured_target.resolve()
+    # Collection empties the output. It must neither remove a path to the build's lock and stage
+    # nor overlap the actual work directory when `prebuilt` is a symlink or junction.
     output = out.resolve()
-    if target_dir.is_relative_to(output) or output.is_relative_to(target_dir):
-        sys.exit(f"The SDK output {out} overlaps the build's target folder {target_dir}: choose another output.")
+    for target in (configured_target, target_dir):
+        if target.is_relative_to(output) or output.is_relative_to(target):
+            sys.exit(f"E_SDK_OUT_OVERLAPS_TARGET: The SDK output {out} overlaps the build's target folder {target}: "
+                     "choose another output.")
     target_dir.mkdir(parents=True, exist_ok=True)
     with (target_dir / ".sdk-build.lock").open("a+b") as lock:
         try:
@@ -511,7 +514,7 @@ def build(out: Path, server: bool) -> None:
                 fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as error:
             sys.exit(f"Cannot acquire the SDK build lock in {target_dir}: {error}. Use a separate CARGO_TARGET_DIR.")
-        _build_locked(out, server, target_dir)
+        _build_locked(output, server, target_dir)
 
 
 def _build_locked(out: Path, server: bool, target_dir: Path) -> None:
