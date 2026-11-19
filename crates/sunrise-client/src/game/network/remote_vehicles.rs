@@ -13,13 +13,54 @@
 //! also move on their rider's client when saddled and steered with the right stick.
 //! A minecart
 //! moves on the server with the rider's input, and the rider sits in it.
-use super::{Game, Keys, ray_box};
+use super::{Game, Keys, ray_box, remote::Remote};
 use crate::Result;
+use std::collections::HashMap;
 use sunrise_client::mobs::{Mob, equine, happy_ghast};
 use sunrise_client::{keybinds, text::Text};
 use sunrise_core::geometry::{Aabb, Vec3};
 use sunrise_protocol::packets::play::{self, Serverbound as S};
 use sunrise_world::stepped_interpolation::PosRot;
+
+/// One edge of the riding graph sent by `SetPassengers`.
+pub(super) struct PassengerSeat {
+    pub vehicle: u32,
+    pub index: usize,
+}
+
+/// Walks to the root without allocating. In a cycle, returns the last reached
+/// ID for the collision code's bounded stack walk; there is no actual root.
+pub(super) fn passenger_root(
+    vehicles: &HashMap<u32, PassengerSeat>,
+    mut id: u32,
+) -> std::result::Result<u32, u32> {
+    for _ in 0..=vehicles.len() {
+        let Some(seat) = vehicles.get(&id) else {
+            return Ok(id);
+        };
+        id = seat.vehicle;
+    }
+    Err(id)
+}
+
+impl Remote {
+    pub(super) fn passenger_vehicle(&self, passenger: u32) -> Option<u32> {
+        self.passenger_vehicles
+            .get(&passenger)
+            .map(|seat| seat.vehicle)
+    }
+
+    /// Passenger IDs and their packet indices, not sorted.
+    pub(super) fn passenger_seats(&self, vehicle: u32) -> impl Iterator<Item = (u32, usize)> + '_ {
+        self.passenger_vehicles
+            .iter()
+            .filter_map(move |(&id, seat)| (seat.vehicle == vehicle).then_some((id, seat.index)))
+    }
+
+    pub(super) fn has_passengers(&self, vehicle: u32) -> bool {
+        self.passenger_seats(vehicle).next().is_some()
+    }
+}
 
 /// An object under the crosshair: its entity id, how far along the view it
 /// was hit, and where (`EntityHitResult.getLocation` minus the entity's
@@ -226,9 +267,15 @@ impl Game<'_> {
         let vehicle_id = vehicle as u32;
         if let Some(r) = self.remote.as_mut() {
             r.passenger_vehicles
-                .retain(|_, parent| *parent != vehicle_id);
-            for &passenger in passengers {
-                r.passenger_vehicles.insert(passenger as u32, vehicle_id);
+                .retain(|_, seat| seat.vehicle != vehicle_id);
+            for (index, &passenger) in passengers.iter().enumerate() {
+                r.passenger_vehicles.insert(
+                    passenger as u32,
+                    PassengerSeat {
+                        vehicle: vehicle_id,
+                        index,
+                    },
+                );
             }
         }
         self.remote_seat_passengers(vehicle_id, passengers);

@@ -269,6 +269,67 @@ mod tests {
         game.remote.as_ref().unwrap().general.rows.clone()
     }
 
+    #[test]
+    #[ignore = "daily"]
+    fn riding_reads_follow_the_server_passenger_lists() {
+        use mod_api::{ClientHost, EntityRef};
+        use sunrise_client::motion::PlayerMotion;
+        use sunrise_core::geometry::Vec3;
+
+        mod_platform::__private::initialize().unwrap();
+        let _phase =
+            mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::Registration);
+        let declare = || vec![mod_api::ModEntry::new("mymod", Box::new(Declare))];
+        mod_platform::testing::with_mods(declare().into(), || {
+            mod_platform::__private::part_tests::install_parts_fixture(&declare()).unwrap();
+            crate::game::item_entities::thrown_items_tests::with_remote_game(|game| {
+                let remote = game.remote.as_mut().unwrap();
+                remote.logged_in = true;
+                remote.entity_id = 7;
+                game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+                game.native_lifecycle_open_started();
+                game.native_lifecycle_world_ready();
+                let _world =
+                    mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+                for id in [9, 12] {
+                    game.handle_packet(spawn(id, "mymod:missile", [0.5, 70.0, 0.5]))
+                        .unwrap();
+                    game.handle_packet(snapshot(id as u32, None)).unwrap();
+                }
+                game.spawn_entity(4, "minecraft:marker", [0.5, 70.0, 0.5], [0.0; 3]);
+                let set = |vehicle, passengers| {
+                    C::SetPassengers(play::SetPassengers {
+                        vehicle,
+                        passengers,
+                    })
+                };
+                game.handle_packet(set(9, vec![12, 99, 7])).unwrap();
+                game.handle_packet(set(12, vec![4])).unwrap();
+                let vehicle = game.entity(9).unwrap();
+                let row = game.entity(12).unwrap();
+                let marker = game.entity(4).unwrap();
+                let me = game.entity(7).unwrap();
+                let unknown = EntityRef::new(vehicle.epoch(), 99);
+                let host: &dyn ClientHost = game;
+                assert_eq!(vehicle.passengers(host), Some(vec![row, me]));
+                assert_eq!(vehicle.is_vehicle(host), Some(true));
+                assert_eq!(row.vehicle(host), Some(vehicle));
+                assert_eq!(me.vehicle(host), Some(vehicle));
+                assert_eq!(marker.is_passenger(host), Some(true));
+                assert_eq!(marker.root_vehicle(host), Some(vehicle));
+                assert_eq!(unknown.vehicle(host), None);
+                assert_eq!(unknown.passengers(host), None);
+
+                game.handle_packet(set(9, vec![])).unwrap();
+                let host: &dyn ClientHost = game;
+                assert_eq!(vehicle.passengers(host), Some(vec![]));
+                assert_eq!(vehicle.is_vehicle(host), Some(false));
+                assert_eq!(me.is_passenger(host), Some(false));
+                assert_eq!(marker.root_vehicle(host), Some(row));
+            })
+        });
+    }
+
     /// The window's side of a general row: a spawn adds it in the client's catalog slot, an
     /// unknown key and a second spawn of one id change nothing; it is shown only once its first
     /// snapshot is here too, whichever comes first, with that snapshot's value; a position sync

@@ -27,6 +27,7 @@ mod block_entity_data;
 mod block_entity_data_tests;
 use super::raw_backlog::Received;
 use super::remote_chunks::{ChunkDecoder, ChunkFormat, Next};
+use super::remote_vehicles::PassengerSeat;
 use super::render_tick::{mob_tracking_body, player_tracking_body};
 use super::{Dim, Game, Mining, Screen, item_use::ticks_left, level_sounds::LevelSound};
 use crate::game::api_values::TryIntoApi;
@@ -711,7 +712,7 @@ pub(super) struct Remote {
     tick_standings: Vec<Option<String>>,
     tick_water_fx: Vec<sunrise_client::mobs::MobEvent>,
     /// Complete network riding graph, including invisible plugin seat entities.
-    pub(super) passenger_vehicles: HashMap<u32, u32>,
+    pub(super) passenger_vehicles: HashMap<u32, PassengerSeat>,
     pub(super) lerps: HashMap<i32, Lerp>,
     /// A native mod's general rows the server shows the window (`general.rs`).
     pub(super) general: general::RemoteGenerals,
@@ -6716,10 +6717,11 @@ impl Game<'_> {
         self.seat_own_stands();
         // Other players on this player (possibly through a plugin seat) follow this tick too;
         // the full pass only when something rides this player.
-        if self.remote.as_ref().is_some_and(|r| {
-            let me = r.entity_id as u32;
-            r.passenger_vehicles.values().any(|&v| v == me)
-        }) {
+        if self
+            .remote
+            .as_ref()
+            .is_some_and(|r| r.has_passengers(r.entity_id as u32))
+        {
             self.position_riders();
         }
         // The server owns health and hunger.
