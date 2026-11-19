@@ -1694,11 +1694,13 @@ impl Game<'_> {
     }
 
     /// `MinecraftServer.createCommandSourceStack`: the console's source is
-    /// bound to the overworld, whichever level the last server tick left in
-    /// place (the last one ticked, often the nether). Its commands run there
-    /// and the level in place is put back afterwards.
-    pub(super) fn as_console_in_overworld<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
-        let back = console_level(self.dim).and_then(|dim| self.enter_command_level(dim));
+    /// bound to the world spawn's level (`findRespawnDimension`), whichever
+    /// level the last server tick left in place (the last one ticked, often
+    /// the nether). Its commands run there and the level in place is put back
+    /// afterwards.
+    pub(super) fn as_console_in_spawn_level<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
+        let back = console_level(self.dim, self.world_spawn_level())
+            .and_then(|dim| self.enter_command_level(dim));
         let source = super::commands::execute::Source {
             silent: false,
             ..self.server_source()
@@ -1725,7 +1727,7 @@ impl Game<'_> {
         let lit = |s: &str| Text::literal(s.to_owned());
         #[cfg(feature = "state-digest")]
         if command == "digest-sync" {
-            match self.as_console_in_overworld(|g| g.state_digest_sync(&rest)) {
+            match self.as_console_in_spawn_level(|g| g.state_digest_sync(&rest)) {
                 Ok(()) => log("INFO", "digest-sync done"),
                 Err(e) => log("WARN", &format!("digest-sync: {e}")),
             }
@@ -2080,7 +2082,7 @@ impl Game<'_> {
                 // A command a native mod registered goes to the mods first,
                 // looked up by the same first word the match above read.
                 if !self.perform_native_console_command(line.trim()) {
-                    self.as_console_in_overworld(|g| g.run_command(line));
+                    self.as_console_in_spawn_level(|g| g.run_command(line));
                 }
                 for text in self.chat_capture.take().unwrap_or_default() {
                     self.console_reply(text);
@@ -2396,8 +2398,9 @@ fn png_size(bytes: &[u8]) -> Option<(u32, u32)> {
 /// The level a console command runs in when `active` is in place: always
 /// the overworld (`MinecraftServer.createCommandSourceStack` uses
 /// `overworld()`), so None when it already is.
-fn console_level(active: super::Dim) -> Option<super::Dim> {
-    (active != super::Dim::Overworld).then_some(super::Dim::Overworld)
+/// The level a console line runs in, when it is not the one in place: the world spawn's.
+fn console_level(active: super::Dim, spawn: super::Dim) -> Option<super::Dim> {
+    (active != spawn).then_some(spawn)
 }
 
 impl Game<'_> {
@@ -2468,13 +2471,19 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
-    /// A console line runs in the overworld even after a server tick left the nether in place.
+    /// A console line runs in the world spawn's level whichever level a server tick left in place.
     #[test]
-    fn console_commands_run_in_the_overworld() {
+    fn console_commands_run_in_the_world_spawn_level() {
         use super::super::Dim;
-        assert_eq!(super::console_level(Dim::Nether), Some(Dim::Overworld));
-        assert_eq!(super::console_level(Dim::End), Some(Dim::Overworld));
-        assert_eq!(super::console_level(Dim::Overworld), None);
+        let overworld = Dim::Overworld;
+        assert_eq!(
+            super::console_level(Dim::Nether, overworld),
+            Some(overworld)
+        );
+        assert_eq!(super::console_level(Dim::End, overworld), Some(overworld));
+        assert_eq!(super::console_level(overworld, overworld), None);
+        assert_eq!(super::console_level(overworld, Dim::End), Some(Dim::End));
+        assert_eq!(super::console_level(Dim::End, Dim::End), None);
     }
 
     /// `BanIpCommands.banIp`: the info line names the affected players, one or several, and is
@@ -2892,7 +2901,7 @@ mod console_source_tests {
     /// Runs `command` as the console does and returns whether it worked and every message it printed.
     fn console(game: &mut Game<'_>, command: &str) -> (bool, String) {
         game.chat_capture = Some(Vec::new());
-        let ok = game.as_console_in_overworld(|g| g.run_command(command));
+        let ok = game.as_console_in_spawn_level(|g| g.run_command(command));
         let said = game.chat_capture.take().unwrap_or_default();
         let said = said
             .iter()
