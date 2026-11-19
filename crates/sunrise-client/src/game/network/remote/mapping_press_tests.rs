@@ -68,6 +68,8 @@ fn with_callback_game(
             game.title = None;
             game.screen = Screen::Playing;
             game.remote.as_mut().unwrap().loaded_sent = true;
+            // The tick's first packet, the held slot (`MultiPlayerGameMode.tick`), then its keys.
+            game.remote_send_carried();
             game.remote_handle_input();
             packets.lock().unwrap().clear();
             test(game, &packets, &triggered);
@@ -241,7 +243,7 @@ fn the_host_presses_by_name_and_refuses_the_others() {
         assert_eq!(game.selected, 2);
         assert_eq!(sent(packets), Vec::<String>::new());
         // `MultiPlayerGameMode.tick` tells the server first thing in the next tick.
-        game.remote_handle_input();
+        game.remote_send_carried();
         assert_eq!(sent(packets), ["minecraft:set_carried_item"]);
         assert_eq!(
             ClientInputClientHost::click_mapping(game, "key.screenshot"),
