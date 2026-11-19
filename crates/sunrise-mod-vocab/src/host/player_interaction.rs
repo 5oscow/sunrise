@@ -154,7 +154,7 @@ pub trait PlayerInteractionBackendMut {
     /// not given the player as placer. The player is only whose turn `setPlacedBy` runs in, so it is
     /// not "as player" in the sense of a use-on. The state is written as given. Refuses, writing
     /// nothing, with `PlayerWorldRefusal`: `Client`, `Stale`, `Dead`, `StaleLevel`, `OtherLevel`
-    /// (that `level` is not the level in place, where the player is: both placement steps, the write
+    /// (that `level` is not the level in place: both placement steps, the write
     /// and `setPlacedBy`, use the supplied level), `UnknownState`, `OutOfWorld`, `NotLoaded`
     /// and `Unchanged` (that state already stands there, or the write was refused as
     /// `level_set_block` returns false).
