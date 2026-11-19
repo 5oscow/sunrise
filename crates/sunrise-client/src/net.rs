@@ -1844,6 +1844,8 @@ mod tests {
             let (client, server) = sunrise_protocol::connection::Pipe::pair();
             let mut client = Connection::local(client);
             send_identity(&mut client, &identity).unwrap();
+            // Closed before reading, so a packet too many shows as one more read, not a wait.
+            drop(client);
             let mut server = Connection::local(server);
             for (channel, data) in expected {
                 let (id, body) = server.recv().unwrap();
@@ -1854,6 +1856,7 @@ mod tests {
                 };
                 assert_eq!((p.channel.as_str(), p.data), (channel, data));
             }
+            assert!(server.recv().is_err(), "a packet after the expected ones");
         }
     }
 
