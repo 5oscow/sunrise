@@ -15,7 +15,23 @@ impl Hooks for StackProbe {
 }
 
 #[test]
+#[ignore = "daily"]
 fn asynchronous_chunk_save_hook_runs_with_a_guest_stack() {
+    // Subscribed saves consult a process-wide lease. A parallel test must not block this save.
+    const CHILD: &str = "SUNRISE_REGION_WRITER_STACK_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--ignored",
+                "--exact",
+                "save::chunk_disk_tests::writer_stack::asynchronous_chunk_save_hook_runs_with_a_guest_stack",
+            ])
+            .env(CHILD, "1")
+            .status()
+            .unwrap();
+        assert!(status.success());
+        return;
+    }
     let probe = StackProbe::default();
     let stack = probe.stack.clone();
     let mods = vec![mod_api::ModEntry::new("stack_probe", Box::new(probe))].into();
