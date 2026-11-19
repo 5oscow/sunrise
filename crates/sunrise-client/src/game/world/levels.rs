@@ -726,7 +726,7 @@ impl Game<'_> {
             dim,
             self.level_shapes.get(dim.id()),
             seed,
-            &self.level.enabled_features,
+            &self.level,
             self.world_biomes
                 .as_ref()
                 .unwrap_or_else(|| self.res.biomes())

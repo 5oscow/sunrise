@@ -39,7 +39,7 @@ use sunrise_core::nbt::{JavaString, Tag};
 use sunrise_perf_format::v1::{StopReason, Trigger};
 use sunrise_protocol::text::translatable;
 
-mod biome_regions;
+pub(super) mod biome_regions;
 mod missing_mods;
 pub(crate) use missing_mods::is_missing_mods_refusal;
 pub(super) mod events;
@@ -599,6 +599,26 @@ impl Game<'_> {
         self.native_server_starting(true);
     }
 
+    /// `LevelStorageAccess.hasWorldData`: a backup alone still belongs to an
+    /// existing world. Let world loading recover it instead of replacing the
+    /// world's saved generator settings with server.properties. Returns whether
+    /// the world is new.
+    fn prepare_world_metadata(
+        &mut self,
+        dir: &std::path::Path,
+        props: &ServerProperties,
+        allow_missing_mods: bool,
+    ) -> Result<bool> {
+        let new_world = !dir.join("level.dat").exists() && !dir.join("level.dat_old").exists();
+        if new_world {
+            self.write_world_gen(dir, props)?;
+        } else {
+            // Before anything writes the world: a refusal leaves it as it was saved.
+            self.check_missing_mods(dir, allow_missing_mods)?;
+        }
+        Ok(new_world)
+    }
+
     /// DedicatedServerProperties.createDimensions for a world that doesn't
     /// exist yet: `level-type`'s preset, a flat world's `generator-settings`
     /// and `generate-structures`, written before the world opens so that
@@ -848,16 +868,8 @@ impl Game<'_> {
             .get()
             .and_then(|m| m.lock().unwrap().take())
             .ok_or("dedicated server not prepared")?;
-        // Main's WorldLoader: a new world's dimensions come from
-        // server.properties before the server starts.
         let world_dir = std::env::current_dir()?.join(&universe).join(&level_name);
-        let new_world = !world_dir.join("level.dat").exists();
-        if new_world {
-            self.write_world_gen(&world_dir, &props)?;
-        } else {
-            // Before anything writes the world: a refusal leaves it as it was saved.
-            self.check_missing_mods(&world_dir, allow_missing_mods)?;
-        }
+        let new_world = self.prepare_world_metadata(&world_dir, &props, allow_missing_mods)?;
         // The console thread starts first, as in initServer.
         let (tx, console) = mpsc::channel();
         std::thread::Builder::new()
@@ -959,9 +971,6 @@ impl Game<'_> {
         let folder = world_dir.to_string_lossy().into_owned();
         // The mods' common and server configs, read before the server starts.
         self.native_configs_server_start(&world_dir, true);
-        if !new_world {
-            biome_regions::choose(&world_dir)?;
-        }
         let prepared = self.prepare_world_and_rules(WorldRequest::new(
             &folder,
             Some(&level_name),
@@ -2514,6 +2523,42 @@ mod tests {
             assert_eq!(game.ip_ban_players("0.0.0.0"), [12]);
             assert_eq!(game.ip_ban_players("127.0.0.1"), [13]);
         });
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn a_missing_level_file_keeps_the_existing_world_generator() {
+        use sunrise_client::save::Level;
+        use sunrise_java_properties::Properties;
+
+        let world = tempfile::tempdir().unwrap();
+        let dir = world.path();
+        Level {
+            seed: 12345,
+            ..Level::default()
+        }
+        .write_without_player(dir)
+        .unwrap();
+        let settings_path = dir.join("data/minecraft/world_gen_settings.dat");
+        assert!(settings_path.is_file(), "test world has no saved generator");
+        fs::rename(dir.join("level.dat"), dir.join("level.dat_old")).unwrap();
+        let mut properties = Properties::default();
+        properties.put("level-seed", "54321".into());
+        let props =
+            super::ServerProperties::new(properties, &mut super::SystemEntropy::default()).unwrap();
+        let resources = std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap().into();
+        crate::game::native_entity_refs::tests::with_game_role(
+            resources,
+            crate::game::execution_role::ExecutionRole::DedicatedServer,
+            |game| {
+                game.prepare_world_metadata(dir, &props, false).unwrap();
+            },
+        );
+        let generation = sunrise_client::save::read_dat(&settings_path).unwrap();
+        assert_eq!(
+            generation.get("data").and_then(|data| data.get("seed")),
+            Some(&sunrise_core::nbt::Tag::Long(12345)),
+        );
     }
 
     /// A server folder that still has the forwarding secret is told what to do.
