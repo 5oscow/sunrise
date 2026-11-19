@@ -12,6 +12,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from tools import sunrise_mod_binstall
 from tools.ci import daily_summary as summary, parity_verdict
 
 COMMIT = "c" * 40
@@ -30,10 +31,12 @@ GREEN_JOBS = [job("shards / plan"), job("shards / ignored-tests-shards (sunrise-
               job("fn-replace-check / route"), job("fn-replace-check / fn-replace-check"),
               job("windows-runtime-leases / test"),
               job("windows-runtime-leases / runtime-leases"), job("windows-runtime-leases / launcher-processes"),
-              job("cargo-sunrise-mod / plan"), job("cargo-sunrise-mod / build aarch64-apple-darwin"),
+              job("cargo-sunrise-mod / plan"),
               job("machine-sample / route"), job("machine-sample / build"),
               job("sdk / fresh"), job("sdk / build linux"), job("sdk / build linux-server"),
               job("sdk / fresh"), job("sdk / build windows"), job("sdk / build macos"), job(PARITY_JOB)]
+# Every binstall archive the daily builds (cargo-sunrise-mod-build.yml), with no publish job: it never publishes.
+GREEN_JOBS += [job(f"cargo-sunrise-mod / build {platform['target']}") for platform in sunrise_mod_binstall.PLATFORMS]
 # Every other shard of the daily matrix, green (the summary expects each by name: summary.expected_shards).
 GREEN_JOBS += [job(name) for name in summary.expected_shards() if name != "shards / ignored-tests-shards (sunrise-world)"]
 
@@ -593,6 +596,16 @@ class DailySummaryTests(unittest.TestCase):
         bodies = " ".join(body["body"] for _, path, body in api.writes if path == "issues")
         self.assertIn("`Refusals by name`", bodies)
         self.assertIn("no daily run has been green yet", bodies)
+
+    def test_every_mod_tool_archive_green_is_green_and_one_that_fails_holds_the_nightly(self):
+        _, out = self.run_summary(Api(GREEN_JOBS))
+        self.assertEqual(out.splitlines(), ["green=true", "sdk_green=true"])
+        failed = "cargo-sunrise-mod / build aarch64-apple-darwin"
+        api = Api([job(failed, "failure", ["Build"]) if entry["name"] == failed else entry for entry in GREEN_JOBS])
+        _, out = self.run_summary(api, results=dict(LEGS, **{"cargo-sunrise-mod": {"result": "failure"}}))
+        self.assertEqual(out.splitlines(), ["green=false", "sdk_green=true"])
+        self.assertEqual([body["title"] for _, path, body in api.writes if path == "issues"],
+                         [f"Daily: {failed} did not complete"])
 
     def test_a_shard_killed_for_memory_says_by_what_with_its_memory_time_and_running_tests(self):
         stuck = [f"game::slow::case_{n}" for n in range(7)]
