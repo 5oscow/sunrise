@@ -540,6 +540,24 @@ impl Game<'_> {
     ) -> EntityView {
         self.entity_view_asking(t, adv::facts_asked_in(predicate))
     }
+    /// [`Self::entity_view_asked`] with the holder's live scoreboard scores,
+    /// which `entity_scores` reads.
+    pub(in crate::game) fn entity_view_scored(
+        &mut self,
+        t: super::commands::Target,
+        predicate: &Value,
+    ) -> EntityView {
+        let mut view = self.entity_view_asked(t, predicate);
+        view.scores = self.holder_name(t).map(|holder| {
+            self.score
+                .board
+                .holder_scores(&holder)
+                .into_iter()
+                .map(|(objective, value)| (objective.name.clone(), value))
+                .collect()
+        });
+        view
+    }
     /// [`Self::entity_view_of`] with the player's records `asked` names.
     pub(super) fn entity_view_asking(
         &self,

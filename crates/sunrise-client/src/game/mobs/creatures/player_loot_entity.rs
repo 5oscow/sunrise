@@ -42,6 +42,20 @@ impl Game<'_> {
         }
         own(self)
     }
+    /// The acting player as `INTERACTING_ENTITY`: [`Self::killer_loot_entity`]
+    /// with the fire and vehicle state the loot predicates test.
+    pub(in crate::game) fn interacting_loot_entity(&mut self) -> sunrise_world::loot::LootEntity {
+        let mut entity = self.killer_loot_entity(None);
+        entity.on_fire = self
+            .player
+            .as_ref()
+            .is_some_and(sunrise_client::motion::PlayerMotion::is_on_fire);
+        entity.vehicle = self
+            .player_entity_looking(false)
+            .vehicle
+            .map(|vehicle| Box::new(sunrise_world::loot::LootEntity::new(&vehicle.kind)));
+        entity
+    }
     /// `Player.getLuck`: the luck attribute (the Luck and Bad Luck effects).
     pub(in crate::game) fn acting_luck(&mut self) -> f32 {
         self.player

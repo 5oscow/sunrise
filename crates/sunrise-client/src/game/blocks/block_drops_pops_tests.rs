@@ -164,3 +164,61 @@ fn block_drops_on_keeps_the_pop() {
         }
     }
 }
+
+/// `SweetBerryBushBlock.useWithoutItem` drops through `BLOCK_INTERACT`: the
+/// clicking player is `interacting_entity` with the fire it is in, nothing is
+/// `this`, and `location_check` reads around the block (`ORIGIN`). A table of
+/// those conditions, run through the real click, drops what each one holds for.
+#[test]
+#[ignore = "daily"]
+fn a_harvest_rolls_with_its_interacting_player_and_block_origin() {
+    use serde_json::json;
+    let mut resources = None;
+    let mut game = game(&mut resources);
+    let item = |name: &str| json!({"type": "minecraft:item", "name": name});
+    let pool = |condition: serde_json::Value, name: &str| json!({"rolls": 1, "condition": condition, "entries": [item(name)]});
+    let who = |who: &str, predicate: serde_json::Value| json!({"condition": "minecraft:entity_properties", "entity": who, "predicate": predicate});
+    let below = |block: &str| {
+        json!({"condition": "minecraft:location_check", "offsetY": -1,
+            "predicate": {"block": {"blocks": block}}})
+    };
+    let table = json!({"type": "minecraft:block_interact", "pools": [
+        pool(who("interacting_entity", json!({"minecraft:flags": {"is_on_fire": true}})),
+            "minecraft:apple"),
+        pool(who("interacting_entity", json!({"minecraft:entity_type": "minecraft:player"})),
+            "minecraft:stick"),
+        pool(who("this", json!({"minecraft:entity_type": "minecraft:player"})), "minecraft:bone"),
+        pool(below("minecraft:stone"), "minecraft:diamond"),
+        pool(below("minecraft:dirt"), "minecraft:coal"),
+    ]});
+    let mut items = game.items().clone();
+    items.set_loot_tables(std::sync::Arc::new(
+        [("minecraft:harvest/sweet_berry_bush".to_owned(), table)]
+            .into_iter()
+            .collect(),
+    ));
+    game.server_items = Some(std::sync::Arc::new(items));
+    let at = [14, 100, 2];
+    let harvest = |game: &mut Game<'_>| {
+        place(game, at, "minecraft:sweet_berry_bush[age=3]");
+        assert!(use_block(game, at, None));
+        let mut dropped: Vec<String> = game
+            .dropped
+            .iter()
+            .map(|d| d.stack.item.to_string())
+            .collect();
+        dropped.sort();
+        dropped
+    };
+    assert_eq!(
+        harvest(&mut game),
+        ["minecraft:diamond", "minecraft:stick"],
+        "the player is the interacting entity and nothing is `this`; the stone below holds"
+    );
+    game.player.as_mut().unwrap().ignite_for_ticks(100).unwrap();
+    assert_eq!(
+        harvest(&mut game),
+        ["minecraft:apple", "minecraft:diamond", "minecraft:stick"],
+        "the burning player matches `is_on_fire`"
+    );
+}

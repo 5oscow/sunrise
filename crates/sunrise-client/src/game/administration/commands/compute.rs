@@ -557,9 +557,9 @@ impl Game<'_> {
                         let this = source
                             .entity
                             .filter(|_| c.without_this.is_none())
-                            .map(|t| self.entity_view_asked(t, cond));
-                        let target = c.target.map(|t| self.entity_view_asked(t, cond));
-                        let interacting = c.interacting.map(|t| self.entity_view_asked(t, cond));
+                            .map(|t| self.entity_view_scored(t, cond));
+                        let target = c.target.map(|t| self.entity_view_scored(t, cond));
+                        let interacting = c.interacting.map(|t| self.entity_view_scored(t, cond));
                         let entities = context_entities(
                             c,
                             this.as_ref(),
@@ -804,6 +804,9 @@ mod tests {
         }
         // `/compute entity`: `target_entity` is the selected entity, and the
         // source (here with no entity) is only `this`.
+        game.set_allow_commands(true);
+        assert!(game.run_command("scoreboard objectives add points dummy"));
+        assert!(game.run_command("scoreboard players set @s points 5"));
         let mut source = game.player_source();
         source.entity = None;
         game.command_source = Some(source);
@@ -835,5 +838,16 @@ mod tests {
             ),
             Ok(0)
         );
+        // `entity_scores` reads the selected holder's live scoreboard value.
+        let scored = |n: i32| {
+            json!({
+                "type": "minecraft:conditional",
+                "condition": {"condition": "minecraft:entity_scores", "entity": "target_entity",
+                    "scores": {"points": n}},
+                "on_true": 1, "on_false": 0
+            })
+        };
+        assert_eq!(game.provider_int(&scored(5), &entity, 0), Ok(1));
+        assert_eq!(game.provider_int(&scored(4), &entity, 0), Ok(0));
     }
 }

@@ -207,13 +207,15 @@ impl Items {
     /// `Block.dropFromBlockInteractLootTable`: the `block_interact` table `id`
     /// for a right click on `state` (its `match_block` conditions see the
     /// state), from the table's random sequence when it has one.
-    /// `interacting` is `INTERACTING_ENTITY`, the player or mob that clicked.
+    /// `interacting` is `INTERACTING_ENTITY`, the player or mob that clicked;
+    /// `location` reads the world around `ORIGIN`, the block's centre.
     pub fn interact_loot(
         &self,
         id: &str,
         registry: &BlockRegistry,
         state: BlockStateId,
         interacting: Option<crate::items::EntityTarget<'_>>,
+        location: Option<&dyn Fn(&Value) -> Option<bool>>,
         random: &mut impl RandomSource,
         sequences: &mut crate::random_sequences::RandomSequences,
         seed: i64,
@@ -231,6 +233,7 @@ impl Items {
                         &block.name,
                         &block.properties,
                         interacting,
+                        location,
                         random,
                     )
                 }
@@ -240,6 +243,7 @@ impl Items {
                     &block.name,
                     &block.properties,
                     interacting,
+                    location,
                     random,
                 ),
             }

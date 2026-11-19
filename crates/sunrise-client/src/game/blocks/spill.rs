@@ -523,11 +523,28 @@ impl GameLevel<'_> {
                 &matcher as &dyn Fn(&serde_json::Value, &sunrise_world::loot::LootEntity) -> bool,
             )
         });
+        // `LocationCheck` reads from ORIGIN, the block's centre: its block position.
+        let (chunks, registry, items) = (&self.world.chunks, self.registry, self.items);
+        let origin = [pos.x, pos.y, pos.z];
+        let location = |condition: &serde_json::Value| {
+            super::commands::terrain_cmds::loot_location_state(
+                condition,
+                origin,
+                |at| {
+                    chunks
+                        .get(&(at[0] >> 4, at[2] >> 4))
+                        .map(|chunk| chunk.block(at[0] & 15, at[1], at[2] & 15))
+                },
+                registry,
+                items,
+            )
+        };
         let drops = self.items.interact_loot(
             table,
             self.registry,
             state,
             interacting,
+            Some(&location),
             &mut self.world.random,
             self.rand_sequences,
             self.seed,

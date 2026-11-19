@@ -505,6 +505,9 @@ fn a_composter_click_supplies_its_interacting_player_and_no_this() {
     };
     let root = std::path::PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap());
     let settings = Settings::default();
+    let mut gui = None;
+    // The loading screen's path: it leaves the process-wide language and UI
+    // metadata alone, and the rest tables load on a worker joined below.
     let mut loaded = load_resources(
         sunrise_assets::resource_source::ResourceRoot::directory(root.clone()),
         Vec::new(),
@@ -512,12 +515,13 @@ fn a_composter_click_supplies_its_interacting_player_and_no_this() {
         &root,
         &settings,
         std::time::Instant::now(),
-        false,
+        true,
         ExecutionRole::IntegratedServer,
         &Progress::new(),
-        &mut |_, _| unreachable!(),
+        &mut |ui, _| gui = Some(ui),
     )
     .unwrap();
+    loaded.rest_loader.take().unwrap().finish().unwrap();
     let provider = |who: &str| {
         serde_json::json!({
             "type": "minecraft:conditional",
@@ -526,13 +530,7 @@ fn a_composter_click_supplies_its_interacting_player_and_no_this() {
             "on_true": 1, "on_false": 0
         })
     };
-    let items = &mut std::sync::Arc::get_mut(&mut loaded.resources)
-        .expect("the resources are unshared before the game borrows them")
-        .rest
-        .get_mut()
-        .expect("the item tables are joined")
-        .items;
-    let items = std::sync::Arc::make_mut(items);
+    let mut items = loaded.resources.rest.get().unwrap().items.as_ref().clone();
     items
         .items
         .get_mut("minecraft:wheat_seeds")
@@ -549,7 +547,7 @@ fn a_composter_click_supplies_its_interacting_player_and_no_this() {
     let mut game = Game::new(
         &loaded.resources,
         loaded.pack,
-        loaded.gui.unwrap(),
+        gui.or(loaded.gui).unwrap(),
         options,
         settings,
         Audio::silent(&sunrise_assets::resource_source::ResourceSource::directory(
@@ -558,6 +556,7 @@ fn a_composter_click_supplies_its_interacting_player_and_no_this() {
         None,
     )
     .unwrap();
+    game.server_items = Some(Arc::new(items));
     game.build_registries();
     for (x, z) in (-1..=1).flat_map(|x| (-1..=1).map(move |z| (x, z))) {
         game.world
