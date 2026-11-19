@@ -132,6 +132,10 @@ struct Readback {
     /// Each buffer's copy, numbered in frame order, so the newest one wins.
     serials: [u64; 2],
     next: u64,
+    /// Each buffer's copy's epoch, and the current one: a copy from an earlier epoch (made
+    /// before fullbright stopped the pack's shader) is dropped, never shown.
+    epochs: [u64; 2],
+    epoch: u64,
 }
 
 impl Readback {
@@ -150,6 +154,8 @@ impl Readback {
             copied: None,
             serials: [0; 2],
             next: 0,
+            epochs: [0; 2],
+            epoch: 0,
         }
     }
 }
@@ -340,6 +346,7 @@ impl CoreLightmap {
         readback.copied = Some(i);
         readback.next += 1;
         readback.serials[i] = readback.next;
+        readback.epochs[i] = readback.epoch;
     }
 
     /// The readback to start once the frame is submitted: mapping the buffer it copied into.
@@ -361,6 +368,14 @@ impl CoreLightmap {
         }))
     }
 
+    /// Copies made so far, mapped or still in flight, are of a texture no longer drawn (fullbright
+    /// took over): they are dropped as they land, and only later copies are read.
+    fn forget_copies(&mut self) {
+        if let Some(readback) = self.readback.as_mut() {
+            readback.epoch += 1;
+        }
+    }
+
     /// The newest texture read back, into `pixels`; whether one was.
     fn collect(&self, pixels: &mut [u8; 16 * 16 * 4]) -> bool {
         let Some(readback) = &self.readback else {
@@ -369,11 +384,13 @@ impl CoreLightmap {
         let mut any = false;
         let mut order = [0, 1];
         order.sort_by_key(|&i| readback.serials[i]);
-        for (buffer, state) in order.map(|i| &readback.buffers[i]) {
+        for i in order {
+            let (buffer, state) = &readback.buffers[i];
             if state.load(Ordering::Acquire) != MAPPED {
                 continue;
             }
-            if let Ok(range) = buffer.slice(..).get_mapped_range() {
+            let current = readback.epochs[i] == readback.epoch;
+            if current && let Ok(range) = buffer.slice(..).get_mapped_range() {
                 for row in 0..16 {
                     let at = row * ROW as usize;
                     pixels[row * 64..][..64].copy_from_slice(&range[at..at + 64]);
@@ -520,6 +537,11 @@ impl super::Renderer {
             // The native pixels go up again when the pack's shader stops drawing.
             self.lightmap_uploaded = false;
             return;
+        }
+        // Fullbright stops a pack's shader: what it copied before must not be read as current
+        // when it draws again.
+        if let Some(core) = self.core_lightmap.as_mut() {
+            core.forget_copies();
         }
         let mut pixels = native_lightmap(&info);
         if self.fullbright {

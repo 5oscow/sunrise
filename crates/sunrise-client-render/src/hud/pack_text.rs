@@ -71,6 +71,44 @@ pub(super) fn load_pair(
     }
 }
 
+/// Why a pack's core shader is refused (`load_pair`), with the file it names.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Refusal {
+    /// A stage or include over the translator's budget for a whole shader
+    /// (`core_shader::MAX_EXPANDED`).
+    OverBudget { path: String },
+    /// A stage or include that isn't UTF-8 text.
+    NotText { path: String },
+    /// A stage or include that couldn't be read otherwise.
+    Unreadable { path: String, error: String },
+    /// A stage the selected packs hid (`root` doesn't have it).
+    StageHidden { path: String },
+    /// An include the selected packs don't have (`ns:path`, as the shader asks for it).
+    IncludeMissing { id: String },
+    /// The translator refused the GLSL.
+    Translation(String),
+    /// The translator panicked on it.
+    Panicked(String),
+}
+
+impl std::fmt::Display for Refusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::OverBudget { path } => write!(
+                f,
+                "{path} is over the {} bytes a shader may have",
+                crate::core_shader::MAX_EXPANDED
+            ),
+            Self::NotText { path } => write!(f, "{path} is not UTF-8 text"),
+            Self::Unreadable { path, error } => write!(f, "{path}: {error}"),
+            Self::StageHidden { path } => write!(f, "{path} is not in the selected packs"),
+            Self::IncludeMissing { id } => write!(f, "{id} is not in the selected packs"),
+            Self::Translation(e) => f.write_str(e),
+            Self::Panicked(e) => write!(f, "the shader translator failed: {e}"),
+        }
+    }
+}
+
 /// [`load_pair`]'s program: none when no pack replaces either stage, else the translation, or
 /// why the shader is refused. A stage the packs don't replace, and every include, is the stack's
 /// (`root`: what the selected packs left of the game's resources), never `defaults` beside it,
@@ -85,15 +123,16 @@ fn translate_pair(
     defines: &[&str],
     glue: &Glue,
     provided: &dyn Fn(&str) -> bool,
-) -> Option<Result<CoreProgram, String>> {
-    let rejected = std::cell::RefCell::new(Vec::new());
+) -> Option<Result<CoreProgram, Refusal>> {
+    // The first file refused while reading, which the shader is refused for.
+    let rejected = std::cell::RefCell::new(None);
     let read = |base: &ResourceSource, path: &str| {
         read_shader_file(base, path).unwrap_or_else(|e| {
-            rejected.borrow_mut().push(e);
+            rejected.borrow_mut().get_or_insert(e);
             None
         })
     };
-    let refused = || Some(Err(rejected.borrow().join("; ")));
+    let refused = || rejected.borrow().clone().map(Err);
     let vertex_path = format!("assets/minecraft/shaders/core/{vertex_name}.vsh");
     let fragment_path = format!("assets/minecraft/shaders/core/{name}.fsh");
     let (vertex, fragment) = (read(root, &vertex_path), read(root, &fragment_path));
@@ -101,56 +140,72 @@ fn translate_pair(
         text.is_some() && read(defaults, path).as_ref() != text.as_ref()
     };
     let replaced = own(&vertex_path, &vertex) || own(&fragment_path, &fragment);
-    if !rejected.borrow().is_empty() {
-        return refused();
+    if let Some(refused) = refused() {
+        return Some(refused);
     }
     if !replaced {
         return None;
     }
     let (Some(vertex), Some(fragment)) = (&vertex, &fragment) else {
-        let missing = if vertex.is_none() {
-            &vertex_path
+        let path = if vertex.is_none() {
+            vertex_path
         } else {
-            &fragment_path
+            fragment_path
         };
-        return Some(Err(format!("{missing}: not in the selected packs")));
+        return Some(Err(Refusal::StageHidden { path }));
     };
+    // The first include the stack doesn't have, which the translator then fails on.
+    let missing = std::cell::RefCell::new(None);
     let include = |id: &str| {
         let (namespace, path) = id.split_once(':')?;
-        read(root, &format!("assets/{namespace}/{path}"))
+        let text = read(root, &format!("assets/{namespace}/{path}"));
+        if text.is_none() {
+            missing.borrow_mut().get_or_insert_with(|| id.to_owned());
+        }
+        text
     };
     let translated = contained(|| {
         crate::core_shader::translate_core_with(vertex, fragment, defines, &include, glue, provided)
     });
-    if !rejected.borrow().is_empty() {
-        return refused();
+    if let Some(refused) = refused() {
+        return Some(refused);
     }
-    Some(translated)
+    Some(translated.map_err(|e| match (e, missing.into_inner()) {
+        (Refusal::Translation(_), Some(id)) => Refusal::IncludeMissing { id },
+        (e, _) => e,
+    }))
 }
 
 /// `translate`'s result, or its panic as a refusal: a pack's GLSL is untrusted, and a fault the
 /// translator or naga meets in it must not end the game.
 fn contained(
     translate: impl FnOnce() -> Result<CoreProgram, String>,
-) -> Result<CoreProgram, String> {
+) -> Result<CoreProgram, Refusal> {
     crate::crash::contain(translate)
-        .unwrap_or_else(|panic| Err(format!("the shader translator failed: {panic}")))
+        .map_err(Refusal::Panicked)
+        .and_then(|translated| translated.map_err(Refusal::Translation))
 }
 
 /// A shader file (a stage or an include) of `base`, read only up to the translator's budget
-/// for a whole shader (`core_shader::MAX_EXPANDED`, 1 MiB): none when `base` hasn't it, an
-/// error naming its path when it is over the budget or isn't text.
-fn read_shader_file(base: &ResourceSource, path: &str) -> Result<Option<String>, String> {
+/// for a whole shader (`core_shader::MAX_EXPANDED`, 1 MiB): none when `base` hasn't it, the
+/// refusal naming its path when it is over the budget or isn't text.
+fn read_shader_file(base: &ResourceSource, path: &str) -> Result<Option<String>, Refusal> {
     if !base.contains(path) {
         return Ok(None);
     }
     let max = crate::core_shader::MAX_EXPANDED as u64;
-    let bytes = base
-        .read_limited(path, max)
-        .map_err(|e| format!("{path}: {e}"))?;
+    let path = path.to_owned();
+    // `read_limited` refuses a resource over `max` as invalid data.
+    let bytes = base.read_limited(&path, max).map_err(|e| match e.kind() {
+        std::io::ErrorKind::InvalidData => Refusal::OverBudget { path: path.clone() },
+        _ => Refusal::Unreadable {
+            path: path.clone(),
+            error: e.to_string(),
+        },
+    })?;
     String::from_utf8(bytes)
         .map(Some)
-        .map_err(|_| format!("{path}: not UTF-8 text"))
+        .map_err(|_| Refusal::NotText { path })
 }
 
 /// The packs' `core/lightmap` with `core/screenquad`, when a pack replaces either stage: the
@@ -491,7 +546,7 @@ mod tests {
     }
 
     /// [`lightmap`]'s translation, with why it is refused.
-    fn lightmap_translation(own: &[(&str, &str)]) -> Option<Result<CoreProgram, String>> {
+    fn lightmap_translation(own: &[(&str, &str)]) -> Option<Result<CoreProgram, Refusal>> {
         let (root, defaults) = lightmap_packs(own);
         translate_pair(
             &root,
@@ -560,16 +615,58 @@ mod tests {
             .expect("the pack replaces a stage")
         };
         assert!(translate(&full).is_ok(), "nothing hidden");
-        let why = translate(&hiding(vsh)).expect_err("the screen quad hidden");
-        assert!(why.starts_with(vsh), "{why}");
-        let why = translate(&hiding(tint)).expect_err("the include hidden");
-        assert!(why.contains("minecraft:shaders/core/tint.glsl"), "{why}");
+        assert_eq!(
+            translate(&hiding(vsh)).expect_err("the screen quad hidden"),
+            Refusal::StageHidden { path: vsh.into() }
+        );
+        assert_eq!(
+            translate(&hiding(tint)).expect_err("the include hidden"),
+            Refusal::IncludeMissing {
+                id: "minecraft:shaders/core/tint.glsl".into()
+            }
+        );
+    }
+
+    /// A stage that isn't UTF-8 text refuses the shader, named.
+    #[test]
+    fn a_stage_that_is_not_text_is_refused_by_its_path() {
+        use sunrise_assets::resource_source::Resource;
+        let fsh = "assets/minecraft/shaders/core/lightmap.fsh";
+        let (full, defaults) = lightmap_packs(&[]);
+        let files = full
+            .list("assets/")
+            .into_iter()
+            .map(|p| {
+                let bytes = if p == fsh {
+                    vec![0xff, 0xfe, 0x00]
+                } else {
+                    full.read(&p).unwrap()
+                };
+                (p, Resource::bytes(bytes))
+            })
+            .collect();
+        let root = ResourceSource::indexed(files);
+        let refused = translate_pair(
+            &root,
+            &defaults,
+            ("screenquad", "lightmap"),
+            &[],
+            &crate::gfx::core_lightmap::GLUE,
+            &|block| block == crate::gfx::core_lightmap::INFO_BLOCK,
+        );
+        assert_eq!(
+            refused.expect("the pack replaces a stage").err(),
+            Some(Refusal::NotText { path: fsh.into() })
+        );
     }
 
     /// A panic in the translator is a refusal, not the game's end.
     #[test]
     fn a_translator_panic_refuses_the_shader() {
-        assert!(contained(|| panic!("a fault in the translator")).is_err());
+        assert!(matches!(
+            contained(|| panic!("a fault in the translator")),
+            Err(Refusal::Panicked(_))
+        ));
     }
 
     /// A quoted import in a pack's `core/lightmap` is read from the shader's own folder,
@@ -586,7 +683,12 @@ mod tests {
         let why = lightmap_translation(&[(fsh, IMPORTING_FSH), (include, TINT_GLSL)])
             .expect("the pack replaces a stage")
             .expect_err("an import only under shaders/include is not beside the shader");
-        assert!(why.contains("minecraft:shaders/core/tint.glsl"), "{why}");
+        assert_eq!(
+            why,
+            Refusal::IncludeMissing {
+                id: "minecraft:shaders/core/tint.glsl".into()
+            }
+        );
     }
 
     /// A shader file is read only up to the translator's 1 MiB budget: an import or a stage
@@ -608,15 +710,21 @@ mod tests {
                 .expect("the pack replaces a stage")
                 .expect_err("refused")
         };
-        let why = refused(&[(fsh, IMPORTING_FSH), (tint, &over)]);
-        assert!(why.starts_with(tint), "{why}");
+        assert_eq!(
+            refused(&[(fsh, IMPORTING_FSH), (tint, &over)]),
+            Refusal::OverBudget { path: tint.into() }
+        );
         // The same file at the budget gets past the read (and the translator then finds the
         // expanded shader too long, a refusal of its own).
-        let why = refused(&[(fsh, IMPORTING_FSH), (tint, &at_budget)]);
-        assert!(!why.contains(tint), "{why}");
+        assert!(matches!(
+            refused(&[(fsh, IMPORTING_FSH), (tint, &at_budget)]),
+            Refusal::Translation(_)
+        ));
         let big_stage = format!("// {}\n{IMPORTING_FSH}", "x".repeat(1 << 20));
-        let why = refused(&[(fsh, &big_stage), (tint, TINT_GLSL)]);
-        assert!(why.starts_with(fsh), "{why}");
+        assert_eq!(
+            refused(&[(fsh, &big_stage), (tint, TINT_GLSL)]),
+            Refusal::OverBudget { path: fsh.into() }
+        );
         assert!(lightmap(&[(fsh, &big_stage), (tint, TINT_GLSL)]).is_none());
     }
 
