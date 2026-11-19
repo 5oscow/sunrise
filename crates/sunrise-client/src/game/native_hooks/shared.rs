@@ -8,6 +8,7 @@ mod level_helpers;
 #[cfg(test)]
 #[path = "shared/particle_count_tests.rs"]
 pub(super) mod particle_count_tests;
+#[cfg(test)]
 use level_helpers::block_entity_for_block;
 #[cfg(test)]
 #[path = "shared/audio_math_tests.rs"]
@@ -84,6 +85,22 @@ enum ScreenDecision {
     Keep,
     /// `ModScreen`: this mod's own screen opens instead.
     ModScreen(&'static str),
+    /// `Vanilla`: this vanilla screen opens instead.
+    Vanilla(ScreenTarget),
+}
+
+/// The title screen a `ScreenOpening::Vanilla` target is (its id), or None
+/// for a world's screen.
+fn title_target_id(target: ScreenTarget) -> Option<&'static str> {
+    match target {
+        ScreenTarget::Title => Some("title"),
+        ScreenTarget::WorldSelect => Some("world_select"),
+        ScreenTarget::WorldCreate => Some("world_create"),
+        ScreenTarget::Multiplayer => Some("multiplayer"),
+        ScreenTarget::AddServer => Some("add_server"),
+        ScreenTarget::DirectConnect => Some("direct_connect"),
+        _ => None,
+    }
 }
 
 pub(super) fn observed_overlay_id(overlays: &[(bool, &'static str)]) -> Option<&'static str> {
@@ -129,6 +146,12 @@ impl Game<'_> {
     /// again, a game with no mod listening to either, and a server's or a guest's `Game`
     /// are a plain assignment.
     pub(super) fn set_screen(&mut self, screen: Screen) {
+        self.set_screen_with(screen, |_| {});
+    }
+    /// `set_screen`, with `before` run once the hooks let the change go ahead and
+    /// before it applies: what a screen's own `onClose` does only when it really
+    /// closes (a container screen's close packet).
+    pub(super) fn set_screen_with(&mut self, screen: Screen, before: impl FnOnce(&mut Self)) {
         if self.screen == screen {
             return;
         }
@@ -146,12 +169,24 @@ impl Game<'_> {
                     screen = Screen::Mod;
                     owner = Some(mod_id);
                 }
+                ScreenDecision::Vanilla(target) => {
+                    before(self);
+                    self.open_screen_target(target);
+                    if self.title.is_some() {
+                        // A title screen: told here, so the frame's observer
+                        // doesn't announce it again.
+                        self.screen_state.observed = self.observed_now();
+                        self.shown_init_post();
+                    }
+                    return;
+                }
                 ScreenDecision::Open => {}
             }
         }
         if self.screen == screen && owner.is_none() {
             return;
         }
+        before(self);
         if self.screen == Screen::Options {
             self.ui.options.discard_draw();
         }
@@ -159,24 +194,34 @@ impl Game<'_> {
     }
     /// Whether a change of screen asks the screen hooks: a mod listens to
     /// `screen_opening` or `screen_closing`, on a client's own `Game` (not a
-    /// server's, not on a guest's behalf). Otherwise it is a plain assignment.
-    fn screen_hooks_heard(&self) -> bool {
+    /// server's, not on a guest's behalf, not the screen a mod's `Vanilla`
+    /// answer opens). Otherwise it is a plain assignment.
+    pub(in crate::game) fn screen_hooks_heard(&self) -> bool {
         (mod_api::__private::listened(mod_api::HookId::ScreenOpening)
             || mod_api::__private::listened(mod_api::HookId::ScreenClosing))
             && self.options.execution_role.is_client()
             && self.lan_acting.is_none()
+            && !self.screen_state.replacing
     }
     /// The hooks' answer to a change from `current` to `new`, for every path
     /// that changes the screen: `screen_change` (Opening, then Closing for
-    /// `current` when `closes`), and a `ModScreen` answer only where a mod's
-    /// screen can open (`mod_screen_blocked`), else the change goes ahead.
+    /// `current` when `closes`), then what `screen_decision` makes of it.
     fn decide_screen(
         &self,
         current: &ScreenView<'_>,
         new: &ScreenView<'_>,
         closes: bool,
     ) -> ScreenDecision {
-        match self.screen_change(current, new, true, closes) {
+        self.screen_decision(self.screen_change(current, new, true, closes))
+    }
+    /// What a mod's `screen_opening` answer does here: a `ModScreen` only
+    /// where a mod's screen can open (`mod_screen_blocked`), a `Vanilla`
+    /// target only where it opens (a title screen while the title shows, a
+    /// world's screen where a mod's could open in a world), else the change
+    /// goes ahead and the refused target is logged. Records whether a mod's
+    /// answer changed what shows (`ScreenState::answered`).
+    fn screen_decision(&self, answer: Option<Answered<ScreenOpening>>) -> ScreenDecision {
+        let decision = match answer {
             Some(Answered {
                 answer: ScreenOpening::Cancel,
                 ..
@@ -186,8 +231,69 @@ impl Game<'_> {
                 mod_id,
                 ..
             }) if !self.mod_screen_blocked() => ScreenDecision::ModScreen(mod_id),
+            Some(Answered {
+                answer: ScreenOpening::Vanilla(target),
+                mod_id,
+                ..
+            }) => {
+                let opens = match title_target_id(target) {
+                    // An overlay over the title would stay in front of it.
+                    Some(_) => self.title.is_some() && !self.screen_over_playing(),
+                    None => self.title.is_none() && !self.mod_screen_blocked(),
+                };
+                if opens {
+                    ScreenDecision::Vanilla(target)
+                } else {
+                    log::warn!(
+                        "Sunrise: mod {mod_id} answered screen_opening with {target:?}, which can't open here; the screen asked for opens"
+                    );
+                    ScreenDecision::Open
+                }
+            }
             _ => ScreenDecision::Open,
+        };
+        self.screen_state
+            .answered
+            .set(!matches!(decision, ScreenDecision::Open));
+        decision
+    }
+    /// Opens vanilla screen `target` as it opens on its own, in place of the
+    /// one asked for (`ScreenOpening::Vanilla`, which `screen_decision` let
+    /// through): the change fires no screen hook again.
+    fn open_screen_target(&mut self, target: ScreenTarget) {
+        self.screen_state.replacing = true;
+        match target {
+            ScreenTarget::Pause => {
+                self.pause_focus = None;
+                self.set_screen(Screen::Paused);
+                self.pause_menu = true;
+            }
+            ScreenTarget::Options => self.open_options(false),
+            ScreenTarget::Inventory => {
+                // A menu the server opened for the screen asked for (a crafting
+                // table) closes: the inventory shows the player's own. With
+                // only the player's own open, there is nothing to close.
+                if self.remote_menu_type().is_some() {
+                    self.close_container();
+                }
+                self.open_player_inventory();
+            }
+            ScreenTarget::Advancements => self.open_advancements(false),
+            ScreenTarget::Stats => self.open_stats(),
+            ScreenTarget::Chat => self.begin_chat_screen("", false),
+            _ => {
+                // A title screen: one of the game's own screens over the title goes.
+                self.set_screen(Screen::Playing);
+                if let (Some(title), Some(id)) = (self.title.as_mut(), title_target_id(target)) {
+                    title.open_by_id(id);
+                }
+                self.build_screen();
+            }
         }
+        // Every target takes the pointer, even one opened in place of a
+        // request that grabbed none (a mod's screen asked for while playing).
+        self.capture(false);
+        self.screen_state.replacing = false;
     }
     /// What `set_screen` does once the hooks have answered: `screen` opens,
     /// and the mod `owner`'s own screen when one answered `ModScreen`.
@@ -244,33 +350,23 @@ impl Game<'_> {
             ),
             None => [0.0; 4],
         };
-        let none = screen == Screen::Playing;
-        ScreenView::from(mod_api::__private::built::ScreenView {
-            id: screen.id(),
-            menu: self.remote_menu_type().filter(|m| !none && !m.is_empty()),
-            title: self
-                .remote
-                .as_ref()
-                .and_then(|r| r.menu_title_snapshot())
-                .filter(|_| !none),
-            rect,
-            slots: if none { 0 } else { self.slot_count() },
-            mouse: self.cursor(),
-            partial_tick: self.clock.fraction() as f32,
-        })
+        let mut view = self.screen_view_at(screen, rect);
+        if screen == Screen::Playing {
+            view.slots = 0;
+        }
+        view
     }
     #[cfg(test)]
     pub(super) fn test_observed_title(&self) -> Option<std::sync::Arc<mod_api::Text>> {
         self.observe_view(self.screen_change_view(self.screen))
             .title
     }
-    /// A mod's own screen cannot open now: over the title screen, a book, a
-    /// sign editor, a dialog or a prompt, with no player or a
+    /// A mod's own screen cannot open now: over a book, a sign editor, a
+    /// dialog or a prompt, with neither the title nor a player, with a
     /// world loading, or on a guest's behalf.
     fn mod_screen_blocked(&self) -> bool {
-        self.title.is_some()
-            || self.lan_acting.is_some()
-            || self.player.is_none()
+        self.lan_acting.is_some()
+            || (self.player.is_none() && self.title.is_none())
             || self.screen_over_playing()
             || self.remote_loading()
     }
@@ -281,7 +377,8 @@ impl Game<'_> {
     /// a screen: `screen_opening` fires first with `id` as the new screen,
     /// then `screen_closing` for an overlay it replaces. A mod's `Cancel`
     /// keeps what is open and `open` never runs; `ModScreen` opens the
-    /// mod's own screen instead, unless one can't open now. Otherwise `open`
+    /// mod's own screen instead, unless one can't open now, and `Vanilla` its
+    /// vanilla screen. Otherwise `open`
     /// sets the overlay and `screen_init_post` follows. Returns whether
     /// `open` ran. With no mod loaded, on a server's `Game` and on a guest's
     /// behalf, `open` just runs.
@@ -315,6 +412,12 @@ impl Game<'_> {
             ScreenDecision::ModScreen(mod_id) => {
                 self.apply_screen(Screen::Mod, Some(mod_id));
                 self.screen_state.observed = self.observed_now();
+                return false;
+            }
+            ScreenDecision::Vanilla(target) => {
+                self.open_screen_target(target);
+                self.screen_state.observed = self.observed_now();
+                self.shown_init_post();
                 return false;
             }
             ScreenDecision::Open => {}
@@ -355,8 +458,8 @@ impl Game<'_> {
     /// `Minecraft.setScreen` opens the title's screens: `screen_opening` fires
     /// from the title screen shown to the new one, then `screen_closing` for
     /// the one it leaves, and the change applies unless a mod answered
-    /// `Cancel`. A mod's own screen can't open over the title, so `ModScreen`
-    /// opens the screen asked for. Then `screen_init_post` follows and the
+    /// `Cancel`; `ModScreen` opens the mod's own screen over the title instead,
+    /// and `Vanilla` another title screen. Then `screen_init_post` follows and the
     /// frame's observer is told, so it does not announce it again. Each call
     /// also sets the title's gate: when no mod listens to the screen hooks
     /// (`screen_hooks_heard`), `set_mode` applies at once. Run after each window
@@ -380,16 +483,29 @@ impl Game<'_> {
             let to = screen_view_with_id(&none, id);
             self.decide_screen(&from, &to, true)
         };
-        if let ScreenDecision::Keep = decision {
-            return;
+        match decision {
+            ScreenDecision::Keep => return,
+            ScreenDecision::ModScreen(mod_id) => self.apply_screen(Screen::Mod, Some(mod_id)),
+            ScreenDecision::Vanilla(target) => self.open_screen_target(target),
+            ScreenDecision::Open => {
+                if let Some(title) = self.title.as_mut() {
+                    title.mode = mode;
+                }
+                self.build_screen();
+            }
         }
-        if let Some(title) = self.title.as_mut() {
-            title.mode = mode;
-        }
-        self.build_screen();
         self.screen_state.observed = self.observed_now();
-        let none = self.screen_change_view(Screen::Playing);
-        self.native_screen_init_post(&screen_view_with_id(&none, id));
+        self.shown_init_post();
+    }
+    /// `screen_init_post` for what shows now, once a change was told to the
+    /// frame's observer: a title screen, a mod's, or the game's own.
+    fn shown_init_post(&self) {
+        let view = self.screen_change_view(self.screen);
+        let id = match &self.title {
+            Some(title) if self.screen == Screen::Playing => title.mode.id(),
+            _ => view.id,
+        };
+        self.native_screen_init_post(&screen_view_with_id(&view, id));
     }
 
     /// Shows `title`, as `Minecraft.setScreen(new TitleScreen())` (or the
@@ -397,8 +513,8 @@ impl Game<'_> {
     /// does at startup and when a world closes. `screen_opening` fires to its
     /// screen, then `screen_closing` for an overlay it replaces, before it
     /// shows; `screen_init_post` follows. With no world open nothing else can
-    /// show, so a mod's `Cancel` or its own screen doesn't keep it shut (a
-    /// mod's screen can't open over the title).
+    /// show, so a mod's `Cancel` doesn't keep it shut; `ModScreen` opens the
+    /// mod's own screen over it, and `Vanilla` another title screen.
     pub(super) fn show_title(&mut self, mut title: sunrise_client::title::Title) {
         title.set_rule_registry(Arc::new(crate::game::api_values::game_rule_registry()));
         self.show_title_with_registry(title);
@@ -420,8 +536,9 @@ impl Game<'_> {
         self.screen_state.observed = self.observed_now();
     }
     /// The hooks of the title appearing (`to` is its screen) or going
-    /// (`None`), from what shows now. What changed before is told first.
-    fn title_change(&mut self, to: Option<&'static str>) {
+    /// (`None`), from what shows now, and a mod's answer. What changed before
+    /// is told first.
+    fn title_change(&mut self, to: Option<&'static str>) -> Option<Answered<ScreenOpening>> {
         let now = self.observed_now();
         self.observe_change(now);
         let none = self.screen_change_view(Screen::Playing);
@@ -443,7 +560,7 @@ impl Game<'_> {
             to.as_ref().unwrap_or(&none),
             true,
             from.is_some(),
-        );
+        )
     }
 
     pub(super) fn observe_screen(&mut self) {
@@ -546,7 +663,7 @@ fn shake_pose(shake: Shake) -> glam::Mat4 {
         * glam::Mat4::from_rotation_y(shake.yaw.to_radians())
 }
 
-/// The mod screen open on this client: the block it is for, the key its
+/// The mod screen open on this client: its menu type and block, the key its
 /// slots are under, the window id of its menu, the menu's data slots as
 /// the server sent them, and what the server sent before the menu opened
 /// (`sunrise:menu_extra`), when it did.
@@ -555,7 +672,10 @@ pub(super) struct OpenNativeScreen {
     slot_moves: SlotMoves,
     key: Pos,
     window: i32,
-    block: String,
+    /// The menu's type, which its screen hooks are keyed by.
+    menu: String,
+    /// The mod block whose menu it is; none for a menu opened without one.
+    block: Option<String>,
     screen: mod_api::Screen,
     data: Vec<i32>,
     extra: Option<sunrise_protocol::menu_extra::Message>,
@@ -1009,10 +1129,19 @@ impl Game<'_> {
     /// container build tells a mod the panel it is about to draw, not the one
     /// the previous frame drew.
     pub(super) fn screen_view_at(&self, screen: Screen, rect: [f32; 4]) -> ScreenView<'_> {
+        // Only the inventory screen shows a server's menu: a menu staged for
+        // a screen a mod replaced is not the pause or chat screen's.
+        let menu_shown = screen == Screen::Inventory;
         ScreenView::from(mod_api::__private::built::ScreenView {
             id: screen.id(),
-            menu: self.remote_menu_type().filter(|m| !m.is_empty()),
-            title: self.remote.as_ref().and_then(|r| r.menu_title_snapshot()),
+            menu: self
+                .remote_menu_type()
+                .filter(|m| menu_shown && !m.is_empty()),
+            title: self
+                .remote
+                .as_ref()
+                .and_then(|r| r.menu_title_snapshot())
+                .filter(|_| menu_shown),
             rect,
             slots: self.slot_count(),
             mouse: self.cursor(),
@@ -1981,19 +2110,21 @@ impl Game<'_> {
         pos: BlockPos,
         state: BlockStateId,
         placed_against: BlockStateId,
-        companion: Option<(BlockPos, BlockStateId)>,
+        extra: impl IntoIterator<Item = (BlockPos, BlockStateId)>,
     ) -> bool {
-        let placement = match companion {
-            None => Placement::Single,
-            Some((at, extra)) => {
-                let (Ok(state), Ok(extra)) = (state.try_into_api(), extra.try_into_api()) else {
-                    return false;
-                };
-                Placement::Multi(Vec::from([
-                    BlockPlacement::new(pos, state),
-                    BlockPlacement::new(at, extra),
-                ]))
-            }
+        let mut extra = extra.into_iter();
+        let placement = if let Some(first) = extra.next() {
+            let Some(writes) = std::iter::once((pos, state))
+                .chain(std::iter::once(first))
+                .chain(extra)
+                .map(|(at, state)| Some(BlockPlacement::new(at, state.try_into_api().ok()?)))
+                .collect()
+            else {
+                return false;
+            };
+            Placement::Multi(writes)
+        } else {
+            Placement::Single
         };
         let mut canceled = false;
         self.native_entity_place(placer, pos, state, placed_against, placement, &mut canceled);
@@ -2005,44 +2136,69 @@ impl Game<'_> {
         &mut self,
         ctx: &PlaceContext,
         by_player: bool,
-    ) -> Option<(PlacementContext, BlockStateId)> {
-        if !mod_api::__private::listened(mod_api::HookId::EntityPlace) {
-            return self
-                .with_level(|b, level, ticks| b.place_block_with_context(level, ticks, ctx));
-        }
-        let (decision, preview) =
-            self.with_level(|b, level, ticks| b.decide_placement(level, ticks, ctx))?;
-        let against_pos = decision.placed_against_pos();
-        let block = |game: &Game<'_>, pos: BlockPos| game.world.block(pos.x, pos.y, pos.z);
-        let against = block(self, against_pos);
-        let target_before = block(self, preview.pos);
-        let companion_before = preview.companion.map(|(pos, _)| (pos, block(self, pos)));
-        let hand = if by_player {
-            self.held().cloned()
-        } else {
-            None
+        stack: &ItemStack,
+    ) -> crate::Result<Option<sunrise_world::level::AppliedPlacement>> {
+        let registry = self.pack.assets.registry;
+        let game_master = ctx.can_use_game_master_blocks;
+        let stack_state =
+            |state| crate::game::block_items::item_block_state(registry, state, stack, game_master);
+        let Some((decision, preview)) =
+            self.with_level(|b, level, ticks| b.decide_placement(level, ticks, ctx, stack_state))
+        else {
+            return Ok(None);
         };
-        let placer = by_player
-            .then(|| self.native_clicker().1.cast_unsigned())
-            .and_then(|entity| self.entity(entity));
-        // The existing block revision and journal epoch cover rule inputs such as
-        // supporting blocks and block-entity shapes without tracing ordinary reads.
-        let level = (self.dim, self.world.revision, self.transactions.writes());
-        if self.placement_canceled(
-            placer,
-            preview.pos,
-            preview.state,
-            against,
-            preview.companion,
-        ) || level != (self.dim, self.world.revision, self.transactions.writes())
-            || block(self, preview.pos) != target_before
-            || block(self, against_pos) != against
-            || companion_before.is_some_and(|(pos, state)| block(self, pos) != state)
-            || (by_player && self.held() != hand.as_ref())
-        {
-            return None;
+        let veto = mod_api::__private::listened(mod_api::HookId::EntityPlace);
+        if veto {
+            let against_pos = decision.placed_against_pos();
+            let block = |game: &Game<'_>, pos: BlockPos| game.world.block(pos.x, pos.y, pos.z);
+            let against = block(self, against_pos);
+            let target_before = block(self, preview.pos);
+            // One proposed state per affected cell. A companion at the pre-clear
+            // position supersedes the intermediate air or water write.
+            let extra = preview.companion.into_iter().chain(
+                preview
+                    .pre_clear
+                    .filter(|(pos, _)| preview.companion.is_none_or(|(at, _)| at != *pos)),
+            );
+            let hand = if by_player {
+                self.held().cloned()
+            } else {
+                None
+            };
+            let placer = by_player
+                .then(|| self.native_clicker().1.cast_unsigned())
+                .and_then(|entity| self.entity(entity));
+            // The block revision and journal epoch cover supporting blocks and
+            // block-entity shapes without tracing ordinary reads.
+            let level = (self.dim, self.world.revision, self.transactions.writes());
+            if self.placement_canceled(placer, preview.pos, preview.state, against, extra)
+                || level != (self.dim, self.world.revision, self.transactions.writes())
+                || block(self, preview.pos) != target_before
+                || block(self, against_pos) != against
+                || (by_player && self.held() != hand.as_ref())
+            {
+                return Ok(None);
+            }
         }
-        self.with_level(|b, level, ticks| b.apply_placement(level, ticks, decision))
+        let Some(placed) = self
+            .with_level(|b, level, ticks| b.apply_placement(level, ticks, decision, stack_state))
+        else {
+            return Ok(None);
+        };
+        if placed.matches_candidate {
+            let pos = placed.context.pos;
+            let target = [pos.x, pos.y, pos.z];
+            self.apply_block_item_data(target, placed.state, stack, game_master);
+            self.with_level(|b, level, ticks| b.placement_set_placed_by(level, ticks, &placed));
+            let placer = by_player.then(|| self.native_acting_player()).flatten();
+            self.set_placed_by(target, placer, Some(stack))?;
+            self.block_item_placed(stack, placer, &placed.context);
+            if by_player {
+                self.trigger_block("minecraft:placed_block", target, stack);
+            }
+        }
+        self.with_level(|b, level, ticks| b.report_placement(level, ticks, &placed));
+        Ok(Some(placed))
     }
     /// `MobEvent::PlaceBlock`: a mob sets `state` at `pos` unless a mod
     /// cancels `entity_place`. Enderman attempts use `enderman_place_block`.
@@ -2227,6 +2383,7 @@ impl Game<'_> {
 
     /// Tells the mods of the chunks that came into this level.
     pub(super) fn native_chunks_loaded(&mut self) {
+        self.fire_pending_block_entity_data_loads();
         let loaded = std::mem::take(&mut self.world.loaded_chunks);
         if self.remote.is_some() {
             return;
@@ -2536,25 +2693,33 @@ impl Game<'_> {
             .no_item_icon
             .as_deref()
     }
-    /// Where the open mod screen of `block` puts container slot `slot` from
-    /// the next frame: the mod's last move, else the screen's declaration;
-    /// None for a hidden slot, another block's screen or none.
-    pub(in crate::game) fn screen_slot(&self, block: &str, slot: usize) -> Option<[f32; 2]> {
-        let s = self.shown_native_screen().filter(|s| s.block == block)?;
+    /// Where the open screen of mod menu type `menu` puts container slot
+    /// `slot` from the next frame: the mod's last move, else the screen's
+    /// declaration; None for a hidden slot, another menu type's screen or none.
+    pub(in crate::game) fn screen_slot(&self, menu: &str, slot: usize) -> Option<[f32; 2]> {
+        let s = self.owned_native_screen(menu)?;
         s.slot_moves.latest(&s.screen.slots, slot)
     }
-    /// Moves container slot `slot` of the open mod screen of `block` to `pos`
+    /// The open screen of menu type `menu`, when the mod calling (if one is)
+    /// owns it: another mod's part on a shared vanilla type moves no slot of it.
+    fn owned_native_screen(&self, menu: &str) -> Option<&OpenNativeScreen> {
+        let s = self.shown_native_screen().filter(|s| s.menu == menu)?;
+        let owner = || mod_api::__private::menu_screen_owner(&s.menu, s.block.as_deref());
+        mod_api::content::crash::current_native_mod()
+            .is_none_or(|calling| owner() == Some(calling))
+            .then_some(s)
+    }
+    /// Moves container slot `slot` of the open screen of menu type `menu` to `pos`
     /// (relative to the screen's origin), or hides it with None, from the
     /// next frame (`SlotMoves::set`).
     pub(in crate::game) fn set_screen_slot(
         &self,
-        block: &str,
+        menu: &str,
         slot: usize,
         pos: Option<[f32; 2]>,
     ) -> Result<(), mod_api::ScreenSlotRefusal> {
         let s = self
-            .shown_native_screen()
-            .filter(|s| s.block == block)
+            .owned_native_screen(menu)
             .ok_or(mod_api::ScreenSlotRefusal::NoScreen)?;
         s.slot_moves.set(&s.screen.slots, slot, pos)
     }
@@ -2644,7 +2809,8 @@ impl Game<'_> {
             let gui_size = [batch.width as i32, batch.height as i32];
             let mut draw = crate::game::host::draw::GameDrawContext::new(self, batch);
             self.native_screen_draw(mod_api::__private::ScreenDrawCall {
-                block: &s.block,
+                menu: &s.menu,
+                block: s.block.as_deref(),
                 pos: s.pos(),
                 data: &s.data,
                 origin: [ox, oy],
@@ -2715,30 +2881,30 @@ impl Game<'_> {
         self.api_menu_button(&context, &mut taken, carried);
         self.put_back_mod_block_entity(pos, taken, &items);
     }
-    /// The cursor from the open mod screen's top left, with its block and
-    /// data, for its press and tooltip hooks.
-    fn native_screen_at(&self) -> Option<(String, Vec<i32>, [f32; 2])> {
-        let s = self.shown_native_screen()?;
-        let r = self.renderer.as_ref()?;
-        let batch = HudBatch::new(
-            [r.config.width, r.config.height],
-            self.settings.gui_scale_inputs(),
-        );
-        let (ox, oy) = self.inventory_origin(&batch);
-        let at = [self.cursor.0 - ox, self.cursor.1 - oy];
-        Some((s.block.clone(), s.data.clone(), at))
-    }
     /// A press on the open mod screen's own button (`native_screen_click`)
     /// goes to the server as a menu button click (true).
     pub(super) fn native_screen_press(&mut self, right: bool) -> bool {
         if self.inventory_target().0.is_some() {
             return false;
         }
-        let Some((block, data, at)) = self.native_screen_at() else {
+        let (Some(screen), Some(r)) = (self.shown_native_screen(), self.renderer.as_ref()) else {
             return false;
         };
+        let batch = HudBatch::new(
+            [r.config.width, r.config.height],
+            self.settings.gui_scale_inputs(),
+        );
+        let (ox, oy) = self.inventory_origin(&batch);
+        let at = [self.cursor.0 - ox, self.cursor.1 - oy];
         let mut button = None;
-        self.native_screen_click(&block, &data, at, right, &mut button);
+        self.native_screen_click(
+            &screen.menu,
+            screen.block.as_deref(),
+            &screen.data,
+            at,
+            right,
+            &mut button,
+        );
         let Some(button) = button else {
             return false;
         };
@@ -2787,7 +2953,8 @@ impl Game<'_> {
             return;
         };
         self.native_screen_tooltip(mod_api::__private::ScreenTooltipCall {
-            block: &screen.block,
+            menu: &screen.menu,
+            block: screen.block.as_deref(),
             data: &screen.data,
             at,
             slot: menu_slot,
@@ -2828,7 +2995,7 @@ impl Game<'_> {
                 .insert(m.id.clone(), sunrise_client::mod_list::ModInfo::of(m, None));
             Installed {
                 id: m.id.clone(),
-                title: [m.name.as_str(), " ", m.version.as_str()].concat(),
+                title: format!("{} {}", m.name, m.version),
                 description: m.description.clone(),
                 problem: None,
                 dev: false,
@@ -3346,131 +3513,163 @@ mod tests {
             ),
         ]);
         mod_platform::__private::install(mods.clone());
-        crate::game::api_values::install_parts(&mods).unwrap();
+        // `be_user` attaches a Part to the type `be_test` declares, which names `be_test`
+        // among its dependencies.
+        let package = |id: &str, depends_on: &[&str]| {
+            PackageInfo::new(
+                id.into(),
+                "1".into(),
+                PackageKind::Code,
+                Side::Both,
+                vec![id.into()],
+                depends_on
+                    .iter()
+                    .map(|owner| {
+                        PackageDependency::new(
+                            (*owner).into(),
+                            "*".into(),
+                            DependencyKind::Required,
+                            DependencyOrder::After,
+                            Side::Both,
+                            None,
+                            None,
+                        )
+                    })
+                    .collect(),
+            )
+        };
         let base = std::path::PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap());
-        let root = super::super::mods::content_root(&base, &Default::default());
-        if invalid {
-            let error = root.unwrap_err().to_string();
-            assert!(error.contains("be_test:shared"), "{error}");
-            assert!(error.contains("be_test:missing"), "{error}");
-            // A refused declaration builds no content root. The roots folder's own `.lock`
-            // is made by every start and never deleted, so it is not a root.
-            let built: Vec<_> = std::fs::read_dir(".sunrise-cache/mod-content")
-                .into_iter()
-                .flatten()
-                .map(|entry| entry.unwrap().file_name())
-                .filter(|name| name != ".lock")
-                .collect();
-            assert!(built.is_empty(), "{built:?}");
-            return;
-        }
-        if let Some(id) = unknown {
-            let error = root.unwrap_err().to_string();
-            assert!(error.contains("be_user"), "{error}");
-            assert!(error.contains("unknown block entity type"), "{error}");
-            assert!(error.contains(id), "{error}");
-            assert!(sunrise_client::block_entity_types::current().is_none());
-            return;
-        }
-        assert_eq!(keys.shared.get(), keys.own.get());
-        with_game_at(root.unwrap().prepared().to_path_buf(), |game| {
-            game.options.dedicated = Some(Vec::new());
-            game.world
-                .chunks
-                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
-            let level = game.level(game.dim.id()).unwrap();
-            let stone = game
-                .pack
-                .assets
-                .registry
-                .default_state("minecraft:stone")
-                .unwrap();
-            for (x, block) in [
-                (1, FIRST),
-                (2, SECOND),
-                (3, EMPTY),
-                (4, PLAIN),
-                (5, "minecraft:chest"),
-            ] {
-                let state = game.pack.assets.registry.default_state(block).unwrap();
-                assert_eq!(
-                    game.level_set_block(level, [x, 63, 0], stone, BlockUpdateFlags::NONE),
-                    Ok(true)
-                );
-                assert_eq!(
-                    game.level_set_block(level, [x, 64, 0], state, BlockUpdateFlags::NONE),
-                    Ok(true)
-                );
-                let pos = (x, 64, 0);
-                if block == PLAIN {
-                    // No declared type claims it, and no mod adds it to `minecraft:banner`'s
-                    // valid blocks, so its template creates no entity (`validateBlockState`).
-                    assert!(game.world.block_entities.get(&pos).is_none());
-                    assert!(game.block_entity(level, [x, 64, 0]).is_none());
-                    continue;
+        mod_platform::__private::with_test_package_inventory(
+            vec![package("be_test", &[]), package("be_user", &["be_test"])],
+            || {
+                crate::game::api_values::install_parts(&mods).unwrap();
+                let root = super::super::mods::content_root(&base, &Default::default());
+                if invalid {
+                    let error = root.unwrap_err().to_string();
+                    assert!(error.contains("be_test:shared"), "{error}");
+                    assert!(error.contains("be_test:missing"), "{error}");
+                    // A refused declaration builds no content root. The roots folder's own `.lock`
+                    // is made by every start and never deleted, so it is not a root.
+                    let built: Vec<_> = std::fs::read_dir(".sunrise-cache/mod-content")
+                        .into_iter()
+                        .flatten()
+                        .map(|entry| entry.unwrap().file_name())
+                        .filter(|name| name != ".lock")
+                        .collect();
+                    assert!(built.is_empty(), "{built:?}");
+                    return;
                 }
-                let handle = game.block_entity(level, [x, 64, 0]).unwrap();
-                if block == "minecraft:chest" {
-                    assert_eq!(handle.kind(game).as_ref(), keys.vanilla.get());
-                    let probe = level.capability(game, &PROBE, [x, 64, 0], None).unwrap();
-                    assert_eq!((probe.value(), probe.owner()), (26, "be_user".into()));
-                    continue;
+                if let Some(id) = unknown {
+                    let error = root.unwrap_err().to_string();
+                    assert!(error.contains("be_user"), "{error}");
+                    assert!(error.contains("unknown block entity type"), "{error}");
+                    assert!(error.contains(id), "{error}");
+                    assert!(sunrise_client::block_entity_types::current().is_none());
+                    return;
                 }
-                let Some(BlockEntity::Mod(entity)) = game.world.block_entities.get(&pos) else {
-                    panic!("declared type did not override its banner template");
-                };
-                if block == EMPTY {
-                    assert_eq!(entity.id(), "be_test:empty");
-                    assert!(entity.nbt.is_empty());
-                    continue;
-                }
-                assert_eq!(entity.id(), "be_test:shared");
-                assert_eq!(entity.nbt.get(&"energy".into()), Some(&Tag::Long(6300)));
-                assert_eq!(handle.kind(game).as_ref(), keys.shared.get());
-                let probe = level.capability(game, &PROBE, [x, 64, 0], None).unwrap();
-                assert_eq!((probe.value(), probe.owner()), (6300, "be_user".into()));
-                game.tick_mod_block_entity(pos);
-                let saved = save::block_entity_encode::encode(
-                    pos,
-                    game.world.block_entities.get(&pos).unwrap(),
-                    block,
-                    &Default::default(),
-                );
-                assert_eq!(saved.get("energy"), Some(&Tag::Long(6301)));
-                let (saved_pos, restored) =
-                    save::decode_block_entity_for_block(&saved, block).unwrap();
-                assert_eq!(saved_pos, pos);
-                assert_eq!(restored.id(), "be_test:shared");
-                assert!(save::decode_block_entity_for_block(&saved, EMPTY).is_none());
-                game.world.block_entities.insert(pos, restored);
-                game.tick_mod_block_entity(pos);
-                let saved = save::block_entity_encode::encode(
-                    pos,
-                    game.world.block_entities.get(&pos).unwrap(),
-                    block,
-                    &Default::default(),
-                );
-                assert_eq!(saved.get("energy"), Some(&Tag::Long(6302)));
-            }
+                assert_eq!(keys.shared.get(), keys.own.get());
+                with_game_at(root.unwrap().prepared().to_path_buf(), |game| {
+                    game.options.dedicated = Some(Vec::new());
+                    game.world
+                        .chunks
+                        .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+                    let level = game.level(game.dim.id()).unwrap();
+                    let stone = game
+                        .pack
+                        .assets
+                        .registry
+                        .default_state("minecraft:stone")
+                        .unwrap();
+                    for (x, block) in [
+                        (1, FIRST),
+                        (2, SECOND),
+                        (3, EMPTY),
+                        (4, PLAIN),
+                        (5, "minecraft:chest"),
+                    ] {
+                        let state = game.pack.assets.registry.default_state(block).unwrap();
+                        assert_eq!(
+                            game.level_set_block(level, [x, 63, 0], stone, BlockUpdateFlags::NONE),
+                            Ok(true)
+                        );
+                        assert_eq!(
+                            game.level_set_block(level, [x, 64, 0], state, BlockUpdateFlags::NONE),
+                            Ok(true)
+                        );
+                        let pos = (x, 64, 0);
+                        if block == PLAIN {
+                            // No declared type claims it, and no mod adds it to `minecraft:banner`'s
+                            // valid blocks, so its template creates no entity (`validateBlockState`).
+                            assert!(game.world.block_entities.get(&pos).is_none());
+                            assert!(game.block_entity(level, [x, 64, 0]).is_none());
+                            continue;
+                        }
+                        let handle = game.block_entity(level, [x, 64, 0]).unwrap();
+                        if block == "minecraft:chest" {
+                            assert_eq!(handle.kind(game).as_ref(), keys.vanilla.get());
+                            let probe = level.capability(game, &PROBE, [x, 64, 0], None).unwrap();
+                            assert_eq!((probe.value(), probe.owner()), (26, "be_user".into()));
+                            continue;
+                        }
+                        let Some(BlockEntity::Mod(entity)) = game.world.block_entities.get(&pos)
+                        else {
+                            panic!("declared type did not override its banner template");
+                        };
+                        if block == EMPTY {
+                            assert_eq!(entity.id(), "be_test:empty");
+                            assert!(entity.nbt.is_empty());
+                            continue;
+                        }
+                        assert_eq!(entity.id(), "be_test:shared");
+                        assert_eq!(entity.nbt.get(&"energy".into()), Some(&Tag::Long(6300)));
+                        assert_eq!(handle.kind(game).as_ref(), keys.shared.get());
+                        let probe = level.capability(game, &PROBE, [x, 64, 0], None).unwrap();
+                        assert_eq!((probe.value(), probe.owner()), (6300, "be_user".into()));
+                        game.tick_mod_block_entity(pos);
+                        let saved = save::block_entity_encode::encode(
+                            pos,
+                            game.world.block_entities.get(&pos).unwrap(),
+                            block,
+                            &Default::default(),
+                        );
+                        assert_eq!(saved.get("energy"), Some(&Tag::Long(6301)));
+                        let (saved_pos, restored) =
+                            save::decode_block_entity_for_block(&saved, block).unwrap();
+                        assert_eq!(saved_pos, pos);
+                        assert_eq!(restored.id(), "be_test:shared");
+                        assert!(save::decode_block_entity_for_block(&saved, EMPTY).is_none());
+                        game.world.block_entities.insert(pos, restored);
+                        game.tick_mod_block_entity(pos);
+                        let saved = save::block_entity_encode::encode(
+                            pos,
+                            game.world.block_entities.get(&pos).unwrap(),
+                            block,
+                            &Default::default(),
+                        );
+                        assert_eq!(saved.get("energy"), Some(&Tag::Long(6302)));
+                    }
 
-            // A level hook's `LevelWriteHost::set_block` fires the same hook in its write.
-            let first = game.pack.assets.registry.default_state(FIRST).unwrap();
-            use crate::game::api_values::TryIntoApi;
-            let written = game.with_level(|_, level, ticks| {
-                LevelWriteHost::set_block(
-                    &mut super::super::mod_api_host::LevelTicks::new(level, ticks),
-                    [5, 64, 0],
-                    first.try_into_api().unwrap(),
-                    BlockUpdateFlags::NONE,
-                )
-            });
-            assert!(written);
-            let Some(BlockEntity::Mod(entity)) = game.world.block_entities.get(&(5, 64, 0)) else {
-                panic!("a level write did not create the declared block entity");
-            };
-            assert_eq!(entity.id(), "be_test:shared");
-            assert_eq!(entity.nbt.get(&"energy".into()), Some(&Tag::Long(6300)));
-        });
+                    // A level hook's `LevelWriteHost::set_block` fires the same hook in its write.
+                    let first = game.pack.assets.registry.default_state(FIRST).unwrap();
+                    use crate::game::api_values::TryIntoApi;
+                    let written = game.with_level(|_, level, ticks| {
+                        LevelWriteHost::set_block(
+                            &mut super::super::mod_api_host::LevelTicks::new(level, ticks),
+                            [5, 64, 0],
+                            first.try_into_api().unwrap(),
+                            BlockUpdateFlags::NONE,
+                        )
+                    });
+                    assert!(written);
+                    let Some(BlockEntity::Mod(entity)) = game.world.block_entities.get(&(5, 64, 0))
+                    else {
+                        panic!("a level write did not create the declared block entity");
+                    };
+                    assert_eq!(entity.id(), "be_test:shared");
+                    assert_eq!(entity.nbt.get(&"energy".into()), Some(&Tag::Long(6300)));
+                });
+            },
+        );
     }
 
     #[test]
@@ -3516,6 +3715,22 @@ mod tests {
             assert_eq!(saved_pos, pos);
             assert_eq!(loaded.id(), "test:machine");
         });
+    }
+
+    #[test]
+    fn observed_overlay_prefers_first_open_screen() {
+        assert_eq!(
+            super::observed_overlay_id(&[(false, "sign"), (false, "book")]),
+            None
+        );
+        assert_eq!(
+            super::observed_overlay_id(&[(false, "sign"), (true, "book")]),
+            Some("book")
+        );
+        assert_eq!(
+            super::observed_overlay_id(&[(true, "sign"), (true, "book")]),
+            Some("sign")
+        );
     }
 
     /// Exercise the gameplay constructor, where name-based entities compete
