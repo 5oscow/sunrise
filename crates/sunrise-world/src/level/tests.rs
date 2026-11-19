@@ -528,7 +528,13 @@ fn block_observation_follows_successful_commits_only() {
         fn game_time(&self) -> i64 {
             self.inner.game_time()
         }
-        fn observe_block_changed(&self, pos: BlockPos, old: BlockStateId, new: BlockStateId) {
+        fn observe_block_changed(
+            &self,
+            pos: BlockPos,
+            old: BlockStateId,
+            new: BlockStateId,
+            _: i32,
+        ) {
             assert_eq!(self.block_state(pos), new);
             self.seen
                 .borrow_mut()
