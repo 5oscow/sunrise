@@ -1630,8 +1630,19 @@ mod tests {
             json!({"sound_event":"minecraft:item.goat_horn.sound.0","use_duration":4.0,"range":128.0,"description":"Base"}),
             "description",
             json!("Lower"),
-            json!("Winner"),
-            Tag::String("Winner".into()),
+            json!({"text":"Winner","bold":null,"italic":true,
+                   "click_event":{"action":"run_command","command":"/help","value":"/ignored"}}),
+            Tag::compound([
+                ("text", Tag::String("Winner".into())),
+                ("italic", Tag::Byte(1)),
+                (
+                    "click_event",
+                    Tag::compound([
+                        ("action", Tag::String("run_command".into())),
+                        ("command", Tag::String("/help".into())),
+                    ]),
+                ),
+            ]),
         );
     }
 
@@ -1847,7 +1858,7 @@ mod tests {
         );
         assert_eq!(entry("packed").1["min_y"], 0);
         assert_eq!(entry("packed").1["height"], 64);
-        assert_eq!(entry("packed").1["ambient_light"], 0.1);
+        assert_eq!(entry("packed").1["ambient_light"], f64::from(0.1_f32));
         assert!(!entry("overworld").2);
     }
 

@@ -80,8 +80,32 @@ fn build_object(
         out.insert("insertion".into(), v.clone());
     }
     if let Some(v) = present(fields, "click_event") {
-        component::parse_click_event(v.as_object()?).ok()??;
-        out.insert("click_event".into(), v.clone());
+        let event = v.as_object()?;
+        use crate::text::ClickEvent;
+        use serde_json::json;
+        let decoded = match component::parse_click_event(event).ok()?? {
+            ClickEvent::OpenUrl(url) => json!({"action":"open_url","url":url}),
+            ClickEvent::ChangePage(page) => json!({"action":"change_page","page":page}),
+            ClickEvent::SuggestCommand(command) => {
+                json!({"action":"suggest_command","command":command})
+            }
+            ClickEvent::RunCommand(command) => json!({"action":"run_command","command":command}),
+            ClickEvent::CopyToClipboard(value) => {
+                json!({"action":"copy_to_clipboard","value":value})
+            }
+            // The decoder already checked these opaque NBT values. Retain the JSON form so
+            // JsonOps booleans do not lose their identity in an NbtOps→JsonOps round trip.
+            ClickEvent::ShowDialog(_) => json!({"action":"show_dialog","dialog":event["dialog"]}),
+            ClickEvent::Custom { id, payload } => {
+                let mut decoded = json!({"action":"custom","id":id});
+                if payload.is_some() {
+                    decoded["payload"] = event["payload"].clone();
+                }
+                decoded
+            }
+            ClickEvent::OpenFile(_) | ClickEvent::Profiler(_) => return None,
+        };
+        out.insert("click_event".into(), decoded);
     }
     if let Some(v) = present(fields, "hover_event") {
         out.insert("hover_event".into(), hover(v.as_object()?, reg, snbt)?);
@@ -226,10 +250,26 @@ fn content(
             }
         }
         "object" => {
-            component::inline_object_fields(fields)?;
-            for key in ["object", "player", "hat", "atlas", "sprite"] {
-                if fields.contains_key(key) {
-                    keep(&mut out, key);
+            present(fields, "object")
+                .map(Value::is_string)
+                .unwrap_or(true)
+                .then_some(())?;
+            use component::InlineObjectFields;
+            match component::inline_object_fields(fields)? {
+                InlineObjectFields::Player { profile, hat } => {
+                    out.insert("object".into(), "player".into());
+                    out.insert("player".into(), profile.clone());
+                    if !hat {
+                        out.insert("hat".into(), Value::Bool(hat));
+                    }
+                }
+                InlineObjectFields::Atlas { atlas, sprite } => {
+                    let id = sunrise_core::identifier::Identifier::parse;
+                    out.insert("object".into(), "atlas".into());
+                    if atlas != "minecraft:blocks" {
+                        out.insert("atlas".into(), id(atlas).ok()?.to_string().into());
+                    }
+                    out.insert("sprite".into(), id(sprite).ok()?.to_string().into());
                 }
             }
             if let Some(fallback) = present(fields, "fallback") {

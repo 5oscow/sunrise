@@ -131,6 +131,42 @@ pub enum IntProvider {
     },
 }
 impl IntProvider {
+    /// Encode the decoded provider using vanilla's integer or dispatched object form.
+    pub(crate) fn to_json(&self) -> serde_json::Value {
+        use serde_json::json;
+        let range = |kind, min, max| json!({"type":kind,"min_inclusive":min,"max_inclusive":max});
+        match self {
+            Self::Constant(value) => json!(value),
+            Self::Weighted(list) => {
+                let distribution: Vec<_> = list
+                    .entries()
+                    .iter()
+                    .map(|(provider, weight)| json!({"data":provider.to_json(),"weight":weight}))
+                    .collect();
+                json!({"type":"minecraft:weighted_list","distribution":distribution})
+            }
+            Self::Uniform { min, max } => range("minecraft:uniform", min, max),
+            Self::BiasedToBottom { min, max } => range("minecraft:biased_to_bottom", min, max),
+            Self::VeryBiasedToBottom { min, max } => {
+                range("minecraft:very_biased_to_bottom", min, max)
+            }
+            Self::Trapezoid { min, max, plateau } => {
+                json!({"type":"minecraft:trapezoid","min":min,"max":max,"plateau":plateau})
+            }
+            Self::Clamped { source, min, max } => json!({
+                "type":"minecraft:clamped","source":source.to_json(),"min_inclusive":min,"max_inclusive":max
+            }),
+            Self::ClampedNormal {
+                mean,
+                deviation,
+                min,
+                max,
+            } => json!({
+                "type":"minecraft:clamped_normal","mean":mean,"deviation":deviation,"min_inclusive":min,"max_inclusive":max
+            }),
+        }
+    }
+
     pub fn from_json(json: &str) -> Result<Self, DecodeError> {
         let raw: Box<RawValue> = serde_json::from_str(json)?;
         Self::decode(&raw, 0, &mut 65536)

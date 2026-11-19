@@ -315,81 +315,66 @@ impl DimensionFacts {
         &VANILLA[0]
     }
 
-    /// Decode the top-level fields of a winning pack definition for registry sync.
-    /// The dimensions API's partial patches still use `patched`. Registry-backed
-    /// sets and attribute payloads stay on their existing binding path.
-    pub fn decode_pack_definition(mut value: Value) -> Result<Value, String> {
-        let fields = value
-            .as_object_mut()
-            .ok_or("expected a dimension type object")?;
-        for name in ["min_y", "height", "logical_height"] {
-            let n = fields
-                .get(name)
-                .and_then(Value::as_i64)
-                .and_then(|n| i32::try_from(n).ok())
-                .ok_or_else(|| format!("{name} must be an integer"))?;
-            fields.insert(name.into(), Value::from(n));
+    /// Decode a synchronized pack definition with the same field codecs as gameplay, then
+    /// encode the decoded values. Registry holder syntax and the other environment attributes
+    /// stay intact for their own readers; in particular this does not bind the infiniburn set.
+    pub fn decode_pack_definition(id: &str, json: &Value) -> Result<Value, String> {
+        use serde_json::json;
+        let facts = Self::decode_patch(Self::base_for_type(id), id, json, true)?;
+        let mut wire = json!({
+            "min_y": facts.height.min_y,
+            "height": facts.height.height,
+            "logical_height": facts.height.logical_height,
+            "has_skylight": facts.height.has_skylight,
+            "has_ceiling": facts.height.has_ceiling,
+            "has_ender_dragon_fight": facts.has_ender_dragon_fight,
+            "coordinate_scale": facts.coordinate_scale,
+            "ambient_light": facts.ambient_light,
+            "monster_spawn_light_level": facts.monster_spawn_light_level.to_json(),
+            "monster_spawn_block_light_limit": facts.monster_spawn_block_light_limit,
+            "infiniburn": json["infiniburn"],
+        });
+        if facts.has_fixed_time {
+            wire["has_fixed_time"] = true.into();
         }
-        for name in ["has_skylight", "has_ceiling", "has_ender_dragon_fight"] {
-            let flag = fields
-                .get(name)
-                .and_then(Value::as_bool)
-                .ok_or_else(|| format!("{name} must be a boolean"))?;
-            fields.insert(name.into(), Value::Bool(flag));
+        if facts.skybox != Skybox::Overworld && !json["skybox"].is_null() {
+            wire["skybox"] = match facts.skybox {
+                Skybox::None => "none",
+                Skybox::Overworld => "overworld",
+                Skybox::End => "end",
+            }
+            .into();
         }
-        for (name, allowed) in [
-            ("has_fixed_time", Value::is_boolean as fn(&Value) -> bool),
-            ("skybox", |v: &Value| {
-                matches!(v.as_str(), Some("none" | "overworld" | "end"))
-            }),
-            ("cardinal_light", |v: &Value| {
-                matches!(v.as_str(), Some("default" | "nether"))
-            }),
-            ("attributes", Value::is_object),
-            ("timelines", |v: &Value| {
-                v.is_string() || v.is_array() || v.is_object()
-            }),
-            ("default_clock", Value::is_string),
-        ] {
-            if let Some(v) = fields.get(name) {
-                if v.is_null() {
-                    fields.remove(name);
-                } else if !allowed(v) {
-                    return Err(format!("invalid {name}"));
+        if facts.cardinal_light == CardinalLight::Nether && !json["cardinal_light"].is_null() {
+            wire["cardinal_light"] = "nether".into();
+        }
+        if let Some(attrs) = json["attributes"].as_object() {
+            let mut attrs = attrs.clone();
+            for (key, rule) in [
+                ("minecraft:gameplay/bed_rule", facts.bed_rule),
+                ("minecraft:gameplay/straw_bed_rule", facts.straw_bed_rule),
+            ] {
+                if attrs.get(key).is_some_and(|value| !value.is_null()) {
+                    let mut value = json!({"can_sleep":rule.can_sleep.name(),"can_set_spawn":rule.can_set_spawn.name()});
+                    if rule.destroy_on_use {
+                        value["destroy_on_use"] = true.into();
+                    }
+                    if rule.destroy_on_leave {
+                        value["destroy_on_leave"] = true.into();
+                    }
+                    attrs.insert(key.into(), value);
                 }
             }
+            if !attrs.is_empty() {
+                wire["attributes"] = attrs.into();
+            }
         }
-        let infiniburn = fields.get("infiniburn").ok_or("infiniburn is required")?;
-        if !(infiniburn.is_string() || infiniburn.is_array() || infiniburn.is_object()) {
-            return Err("infiniburn must be a block holder set".into());
+        for field in ["timelines", "default_clock"] {
+            if !json[field].is_null() {
+                wire[field] = json[field].clone();
+            }
         }
-        let coordinate_scale = fields
-            .get("coordinate_scale")
-            .and_then(Value::as_f64)
-            .filter(|n| Self::valid_coordinate_scale(*n))
-            .ok_or("coordinate_scale must be a number from 1.0E-5 to 3.0E7")?;
-        fields.insert("coordinate_scale".into(), Value::from(coordinate_scale));
-        let ambient_light = fields
-            .get("ambient_light")
-            .and_then(Value::as_f64)
-            .ok_or("ambient_light must be a number")?;
-        fields.insert("ambient_light".into(), Value::from(ambient_light));
-        let block_light = fields
-            .get("monster_spawn_block_light_limit")
-            .and_then(Value::as_i64)
-            .filter(|n| (0..=15).contains(n))
-            .ok_or("monster_spawn_block_light_limit must be an integer in 0..=15")?;
-        fields.insert(
-            "monster_spawn_block_light_limit".into(),
-            Value::from(block_light),
-        );
-        let light = fields
-            .get("monster_spawn_light_level")
-            .ok_or("monster_spawn_light_level is required")?;
-        IntProvider::from_json(&light.to_string())
-            .map_err(|e| format!("monster_spawn_light_level: {e:?}"))?;
-        LevelHeight::of_json(&value).ok_or("invalid level height")?;
-        Ok(value)
+        Ok(wire)
     }
 
     /// Reads a dimension type's JSON; `timeline_tag` expands a timeline tag id to its timelines.
@@ -498,56 +483,94 @@ impl DimensionFacts {
     /// id or a list of ids (any other tag stays `base`'s), and a field the codec refuses is an
     /// error.
     pub fn patched(base: &Self, id: &str, json: &Value) -> Result<Self, String> {
+        Self::decode_patch(base, id, json, false)
+    }
+
+    fn decode_patch(base: &Self, id: &str, json: &Value, complete: bool) -> Result<Self, String> {
         let mut out = base.clone();
         out.id = id.to_owned();
-        out.height = LevelHeight::of_json(json).ok_or("invalid level height")?;
-        let flag = |k: &str| json[k].as_bool();
+        out.height = LevelHeight::decode(json, complete).ok_or("invalid level height")?;
+        let bad = |key| format!("{id} has invalid {key}");
         let attributes = &json["attributes"];
+        if complete && !attributes.is_null() && !attributes.is_object() {
+            return Err(bad("attributes"));
+        }
         let attribute = |k: &str| &attributes[format!("minecraft:gameplay/{k}")];
         let bool_attr = |k: &str| attribute(k).as_bool();
-        if let Some(v) = flag("has_fixed_time") {
-            out.has_fixed_time = v;
-        }
-        if let Some(v) = flag("has_ender_dragon_fight") {
-            out.has_ender_dragon_fight = v;
-        }
-        if let Some(v) = json["coordinate_scale"].as_f64() {
-            if !Self::valid_coordinate_scale(v) {
-                return Err(format!("{id} coordinate_scale is outside 1.0E-5 to 3.0E7"));
+        for (key, field, required) in [
+            ("has_fixed_time", &mut out.has_fixed_time, false),
+            (
+                "has_ender_dragon_fight",
+                &mut out.has_ender_dragon_fight,
+                true,
+            ),
+        ] {
+            match json[key].as_bool() {
+                Some(value) => *field = value,
+                None if complete && (required || !json[key].is_null()) => return Err(bad(key)),
+                None if complete => *field = false,
+                None => {}
             }
-            out.coordinate_scale = v;
         }
-        if let Some(v) = json["infiniburn"].as_str() {
-            out.infiniburn = v.to_owned();
+        match json["coordinate_scale"].as_f64() {
+            Some(v) if Self::valid_coordinate_scale(v) => out.coordinate_scale = v,
+            Some(_) => return Err(format!("{id} coordinate_scale is outside 1.0E-5 to 3.0E7")),
+            None if complete => return Err(bad("coordinate_scale")),
+            None => {}
         }
-        if let Some(v) = json["ambient_light"].as_f64() {
-            out.ambient_light = v as f32;
+        match &json["infiniburn"] {
+            Value::String(v) => out.infiniburn = v.clone(),
+            Value::Array(_) | Value::Object(_) => {}
+            _ if complete => return Err(bad("infiniburn")),
+            _ => {}
         }
-        if !json["monster_spawn_light_level"].is_null() {
+        match json["ambient_light"].as_f64() {
+            Some(v) => out.ambient_light = v as f32,
+            None if complete => return Err(bad("ambient_light")),
+            None => {}
+        }
+        if complete || !json["monster_spawn_light_level"].is_null() {
             out.monster_spawn_light_level =
                 IntProvider::from_json(&json["monster_spawn_light_level"].to_string())
                     .map_err(|e| format!("{id} monster_spawn_light_level: {e:?}"))?;
         }
-        if let Some(v) = json["monster_spawn_block_light_limit"]
+        match json["monster_spawn_block_light_limit"]
             .as_i64()
             .and_then(|n| i32::try_from(n).ok())
         {
-            out.monster_spawn_block_light_limit = v;
+            Some(n) if !complete || (0..=15).contains(&n) => {
+                out.monster_spawn_block_light_limit = n
+            }
+            _ if complete => return Err(bad("monster_spawn_block_light_limit")),
+            _ => {}
         }
-        if let Some(name) = json["skybox"].as_str() {
-            out.skybox = match name {
-                "none" => Skybox::None,
-                "overworld" => Skybox::Overworld,
-                "end" => Skybox::End,
-                other => return Err(format!("unknown skybox {other:?}")),
-            };
+        match &json["skybox"] {
+            Value::String(name) => {
+                out.skybox = match name.as_str() {
+                    "none" => Skybox::None,
+                    "overworld" => Skybox::Overworld,
+                    "end" => Skybox::End,
+                    _ => return Err(format!("unknown skybox {name:?}")),
+                }
+            }
+            Value::Null if complete => out.skybox = Skybox::Overworld,
+            _ if complete => return Err(bad("skybox")),
+            _ => {}
         }
-        if let Some(name) = json["cardinal_light"].as_str() {
-            out.cardinal_light = match name {
-                "default" => CardinalLight::Default,
-                "nether" => CardinalLight::Nether,
-                other => return Err(format!("unknown cardinal light {other:?}")),
-            };
+        match &json["cardinal_light"] {
+            Value::String(name) => {
+                out.cardinal_light = match name.as_str() {
+                    "default" => CardinalLight::Default,
+                    "nether" => CardinalLight::Nether,
+                    _ => return Err(format!("unknown cardinal light {name:?}")),
+                }
+            }
+            Value::Null if complete => out.cardinal_light = CardinalLight::Default,
+            _ if complete => return Err(bad("cardinal_light")),
+            _ => {}
+        }
+        if complete && !(json["default_clock"].is_null() || json["default_clock"].is_string()) {
+            return Err(bad("default_clock"));
         }
         let timelines = match &json["timelines"] {
             Value::String(tag) => match tag.as_str() {
@@ -563,6 +586,8 @@ impl DimensionFacts {
                     .map(str::to_owned)
                     .collect(),
             ),
+            Value::Null | Value::Object(_) => None,
+            _ if complete => return Err(bad("timelines")),
             _ => None,
         };
         if let Some(timelines) = timelines {
@@ -598,7 +623,8 @@ impl DimensionFacts {
             ("straw_bed_rule", &mut out.straw_bed_rule),
         ] {
             if !attribute(key).is_null() {
-                *rule = BedRule::from_json(attribute(key))?;
+                *rule = BedRule::from_json(attribute(key))
+                    .map_err(|error| format!("{key}: {error}"))?;
             }
         }
         Ok(out)

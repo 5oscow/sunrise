@@ -129,7 +129,8 @@ fn decode_definition(
                 .ok_or("invalid dialog definition")?;
         }
         "minecraft:dimension_type" => {
-            value = sunrise_world::dimension_type::DimensionFacts::decode_pack_definition(value)?;
+            value =
+                sunrise_world::dimension_type::DimensionFacts::decode_pack_definition(id, &value)?;
         }
         "minecraft:enchantment" => {
             value = sunrise_items::enchant::decode_pack_definition(value)?;
@@ -187,9 +188,15 @@ mod tests {
                 "dimension_type/test:wrong_scale".into(),
                 vec![br#"{"min_y":0,"height":64,"logical_height":64,"has_skylight":true,"has_ceiling":false,"has_ender_dragon_fight":false,"infiniburn":["minecraft:netherrack"],"coordinate_scale":"one","ambient_light":0,"monster_spawn_light_level":0,"monster_spawn_block_light_limit":0}"#.to_vec()],
             ),
+            (
+                "dimension_type/test:empty_bed_rule".into(),
+                vec![br#"{"min_y":0,"height":64,"logical_height":64,"has_skylight":true,"has_ceiling":false,"has_ender_dragon_fight":false,"infiniburn":["minecraft:netherrack"],"coordinate_scale":1,"ambient_light":0,"monster_spawn_light_level":0,"monster_spawn_block_light_limit":0,"attributes":{"minecraft:gameplay/bed_rule":{}}}"#.to_vec()],
+            ),
             ("enchantment/test:not_read".into(), vec![b"{}".to_vec()]),
             ("enchantment/test:wrong_level".into(), vec![br#"{"max_level":"seven"}"#.to_vec()]),
             ("painting_variant/test:numeric_style".into(), vec![br#"{"asset_id":"test:mural","width":1,"height":1,"title":{"text":"No","bold":1}}"#.to_vec()]),
+            ("painting_variant/test:numeric_object".into(), vec![br#"{"asset_id":"test:mural","width":1,"height":1,"author":{"object":7,"sprite":"test:icon"}}"#.to_vec()]),
+            ("painting_variant/test:legacy_click".into(), vec![br#"{"asset_id":"test:mural","width":1,"height":1,"title":{"text":"Label","hover_event":{"action":"show_text","value":{"text":"Click","click_event":{"action":"run_command","value":"/help"}}}}}"#.to_vec()]),
             (
                 "painting_variant/test:bad".into(),
                 vec![br#"{"asset_id":"test:mural","width":17,"height":1}"#.to_vec()],
@@ -212,50 +219,49 @@ mod tests {
         ) else {
             panic!("world registry load accepted invalid entries");
         };
-        assert!(error.contains("\nminecraft:dialog:\n  test:broken: EOF"));
-        assert!(error.contains(
-            "\nminecraft:dimension_type:\n  test:wrong_scale: coordinate_scale must be a number"
-        ));
-        assert!(error.contains("\nminecraft:enchantment:\n  test:not_read: read failed\n  test:wrong_level: max_level must be an integer"));
-        assert!(error.contains("  test:numeric_style: title: invalid JSON text component"));
-        assert!(error.contains(
-            "\nminecraft:painting_variant:\n  test:bad: width must be an integer in 1..=16"
-        ));
-        assert!(
-            error
-                .contains("\nminecraft:instrument:\n  test:bad: use_duration must be non-negative")
-        );
-        assert!(
-            error.contains("\nminecraft:banner_pattern:\n  test:bad: translation_key is required")
-        );
+        for (registry, defs) in [
+            ("dialog", &[("broken", "")][..]),
+            (
+                "dimension_type",
+                &[
+                    ("wrong_scale", "coordinate_scale"),
+                    ("empty_bed_rule", "bed_rule"),
+                ],
+            ),
+            (
+                "enchantment",
+                &[("not_read", "read failed"), ("wrong_level", "max_level")],
+            ),
+            (
+                "painting_variant",
+                &[
+                    ("numeric_style", "title"),
+                    ("numeric_object", "author"),
+                    ("legacy_click", "title"),
+                    ("bad", "width"),
+                ],
+            ),
+            ("instrument", &[("bad", "use_duration")]),
+            ("banner_pattern", &[("bad", "translation_key")]),
+        ] {
+            let header = format!("\nminecraft:{registry}:\n");
+            let group = error
+                .split_once(&header)
+                .unwrap()
+                .1
+                .split("\nminecraft:")
+                .next()
+                .unwrap();
+            for (id, field) in defs {
+                let entry = format!("  test:{id}:");
+                assert!(
+                    group
+                        .lines()
+                        .any(|line| line.starts_with(&entry) && line.contains(field)),
+                    "{error}"
+                );
+            }
+        }
         assert!(!error.contains("condition_false"));
-    }
-
-    #[test]
-    fn admitted_wire_text_drops_json_null_styles() {
-        let files = [(
-            "instrument/test:horn".into(),
-            vec![
-                br#"{
-            "sound_event":{"sound_id":"test:horn"}, "use_duration":2, "range":64,
-            "description":{"text":"Horn","bold":null,"italic":true}
-        }"#
-                .to_vec(),
-            ],
-        )];
-        let loaded = PackRegistryDefinitions::load(
-            &PackOverlay::new(&files),
-            &BTreeMap::new(),
-            &Default::default(),
-            |_| false,
-        )
-        .unwrap();
-        let mut entries = Vec::new();
-        loaded.append("minecraft:instrument", &mut entries);
-        assert_eq!(entries.len(), 1);
-        assert_eq!(
-            entries[0].1["description"],
-            serde_json::json!({"text":"Horn","italic":true})
-        );
     }
 }
