@@ -48,6 +48,7 @@ SUFFIXES = (".rmeta", ".so", ".dll", ".dll.a", ".dylib")
 IDENTITY = "sunrise-prebuilt.json"
 # The crate the game's library is built from; its build resolves what mods compile against.
 GAME = "sunrise-mod-host"
+OFFICIAL = "sunrise-official"
 LOCK = "Cargo.lock"
 # `git archive` of the whole commit takes seconds on every runner; past this it is stuck, not slow.
 ARCHIVE_SECONDS = 600
@@ -77,7 +78,7 @@ INPUTS = ROOT / "crates/sunrise-mod-package/src/sdk/inputs.json"
 # The crates an API-only mod may name; their closure is the `api` archive.
 API_ROOTS = ("sunrise-mod-api", "sunrise-mod-points")
 # The game libraries outside the API closure, in the runtime archive.
-GAME_LIBRARIES = ("sunrise_mod_host", "sunrise_mod_wasm")
+GAME_LIBRARIES = ("sunrise_mod_host", "sunrise_mod_wasm", "sunrise_official")
 # A crate the wasm runtime depends on normally links into its dylib alone, and a C library inside a Rust dylib is
 # hidden from the other: #1596 put mimalloc there and the game's library, which calls it, no longer linked. These
 # `links` keys carry no library: rayon-core and wasm-bindgen-shared keep one copy, sunrise-mod-vocab hands on a folder.
@@ -268,12 +269,14 @@ def stage(target_dir: Path, stage_tool: Path | None = None, *, sdk_dylibs: bool 
 
 
 def prepare_sdk_manifests(staged: Path) -> None:
-    """Split the API libraries and the wasm runtime out of the prebuilt game: with prefer-dynamic, rustc
-    picks the dylibs rather than folding them into the game."""
+    """Build the host and official layer as dylibs in one Cargo graph, and split out the API and
+    wasm libraries. With prefer-dynamic, the official layer uses the host's engine state."""
     metadata = json.loads(run(["cargo", "metadata", "--format-version", "1"], cwd=staged))
     closure = api_closure(metadata)
     for package in metadata["packages"]:
-        if package["id"] not in closure and package["name"] != "sunrise-mod-wasm":
+        name = package["name"]
+        root_dylib = name in (GAME, OFFICIAL)
+        if not root_dylib and package["id"] not in closure and name != "sunrise-mod-wasm":
             continue
         if not any(target["kind"] == ["lib"] for target in package["targets"]):
             continue
@@ -281,10 +284,11 @@ def prepare_sdk_manifests(staged: Path) -> None:
         if not manifest.is_relative_to(staged):
             continue  # Registry dependencies are owned by Cargo, not rewritten.
         text = manifest.read_text()
+        crate_types = '["dylib"]' if root_dylib else '["rlib", "dylib"]'
         if "[lib]" in text:
-            text = text.replace("[lib]", '[lib]\ncrate-type = ["rlib", "dylib"]', 1)
+            text = text.replace("[lib]", f"[lib]\ncrate-type = {crate_types}", 1)
         else:
-            text += '\n[lib]\ncrate-type = ["rlib", "dylib"]\n'
+            text += f"\n[lib]\ncrate-type = {crate_types}\n"
         manifest.write_text(text)
 
 
@@ -375,6 +379,12 @@ def slices(metadata: dict, copied: dict[str, list[str]], api_route: list[str]) -
     return {"runtime": sorted(set(runtime)), "api": sorted(set(api))}
 
 
+def official_externs(deps: Path) -> list[str]:
+    """Enable the generated entry point's official feature when its layer is in the build."""
+    library = dylib(deps, "sunrise_official")
+    return ["--cfg", 'feature="official"', "--extern", f"sunrise_official={library}"] if library else []
+
+
 def api_route(out: Path, link_args: list[str]) -> list[str]:
     """Build the fixed executable shared by both native routes, once for this SDK."""
     deps = out / "deps"
@@ -386,8 +396,8 @@ def api_route(out: Path, link_args: list[str]) -> list[str]:
     run(["rustc", *common, "--crate-type", "bin", "--crate-name", "sunrise_native_game",
          *(flag for arg in origin + link_args for flag in ("-C", f"link-arg={arg}")),
          *extern_args(deps, "sunrise_client"), *extern_args(deps, "mod_api"), *extern_args(deps, "sunrise_mod_package"),
-         "--extern", f"{GAME_LIBRARIES[0]}={dylib(deps, GAME_LIBRARIES[0])}",
- "-o", str(folder / EXECUTABLE), str(API_MAIN)])
+         *extern_args(deps, "sunrise_mod_host"), *official_externs(deps),
+         "-o", str(folder / EXECUTABLE), str(API_MAIN)])
     built = sorted(path.relative_to(out).as_posix() for path in folder.iterdir())
     if not {path.name for path in folder.iterdir()} <= api_route_files():
         sys.exit(f"the API route's build left {built}, not only {sorted(api_route_files())}")
@@ -528,14 +538,18 @@ def _build_locked(out: Path, server: bool, target_dir: Path) -> None:
     if sys.platform == "darwin":
         rustflags += " -C rpath"
     features = cargo_features(server, sys.platform)
-    # Linux's executable RUNPATH doesn't cover transitive dependencies: the game itself must find
-    # the wasm runtime beside it. macOS's @rpath install names use the executable's rpath.
-    link = ["--", "-C", "link-arg=-Wl,-rpath,$ORIGIN"] if sys.platform == "linux" else []
+    # Linux's executable RUNPATH doesn't cover transitive dependencies, so the dylibs must find
+    # their dependencies beside themselves. macOS's @rpath install names use the executable's rpath.
+    if sys.platform == "linux":
+        rustflags += " -C link-arg=-Wl,-rpath,$ORIGIN"
+    # No official layer in a dedicated server (or a staged source without the package).
+    official = not server and (staged / "crates" / OFFICIAL / "Cargo.toml").is_file()
+    packages = ["-p", GAME, "-p", OFFICIAL] if official else ["-p", GAME]
     # Encoded flags take precedence over RUSTFLAGS in Cargo.
     environment = {key: value for key, value in os.environ.items() if key != "CARGO_ENCODED_RUSTFLAGS"}
     messages = run(
-        ["cargo", "rustc", "--locked", "-p", GAME, "--lib", "--crate-type", "dylib",
-         "--target", host, "--profile", PROFILE, "--message-format", "json-render-diagnostics", *features, *link],
+        ["cargo", "build", "--locked", *packages, "--lib",
+         "--target", host, "--profile", PROFILE, "--message-format", "json-render-diagnostics", *features],
         cwd=staged,
         env={**environment, "SUNRISE_GAME_BUILD_ID": head(), "RUSTFLAGS": rustflags + " -D warnings", "CARGO_TARGET_DIR": str(target_dir)},
     )
@@ -584,6 +598,8 @@ def _build_locked(out: Path, server: bool, target_dir: Path) -> None:
         shutil.copy2(staged / manifest, out / manifest)
     output = Path(game["out_dir"]).parent / "output"
     link_args = executable_link_args(output)
+    if official and dylib(deps, "sunrise_official") is None:
+        sys.exit("prebuilt client is missing the sunrise-official dylib")
     sliced = slices(metadata, copied, api_route(out, link_args))
     files = {str(path.relative_to(out).as_posix()): sha256(path) for path in sorted(out.rglob("*")) if path.is_file()}
     identity = {

@@ -807,8 +807,11 @@ jobs:
           python-version: '3.12'
       # Offline tooling compiles tiny standalone fixtures even when no game Rust changed.
       # Install their tools explicitly rather than making missing compilers turn cases into skips.
+      # Dyna's image has no Cargo, and checks that always run need it (the ignored-test inventory builds
+      # sunrise-game-discovery; a main push's mod-host map reads `cargo metadata`), so it installs there even when
+      # neither is selected, as on a main push whose tree already passed the gate (tools/ci/gate_reuse.py).
       - name: Install Rust tools for isolated tooling fixtures
-        if: needs.changes.outputs.rust_required != 'false' || needs.changes.outputs.tooling_required != 'false'
+        if: needs.changes.outputs.rust_required != 'false' || needs.changes.outputs.tooling_required != 'false' || env.RUNNER_KIND == 'dyna'
         env:
           DYNA: ${{ needs.changes.outputs.self_hosted }}
         run: |
