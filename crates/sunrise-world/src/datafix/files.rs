@@ -1693,25 +1693,26 @@ mod upgrade_tests {
         region.write(pos, &record).unwrap();
         drop(region);
         assert!(dir.join("c.0.0.mcc").is_file());
-        let read = |dir: &Path| {
+        let assert_chunk = |version| {
             let mut region = RegionFile::open(dir.join("r.0.0.mca")).unwrap();
             let chunk = region.read(pos).unwrap().unwrap();
             let tag = chunk.nbt(Limits::saved()).unwrap().tag;
-            let items = match tag.get("Items") {
-                Some(Tag::List(items)) => items.iter().filter(|i| **i == Tag::Byte(1)).count(),
-                _ => 0,
+            assert_eq!(data_version(&tag, -1), version);
+            let Some(Tag::List(items)) = tag.get("Items") else {
+                panic!("the list is gone");
             };
-            (data_version(&tag, -1), items)
+            assert_eq!(items.len(), 1_100_000);
+            assert!(items.iter().all(|item| *item == Tag::Byte(1)));
         };
         // A folder where the staged `.mcc` goes makes the writer fail.
         fs::create_dir_all(dir.join(".datafix/c.0.0.mcc")).unwrap();
         upgrade(&dir, fix_overworld_chunk).unwrap_err();
-        assert_eq!(read(&dir), (4000, 1_100_000));
+        assert_chunk(4000);
 
         fs::remove_dir(dir.join(".datafix/c.0.0.mcc")).unwrap();
         upgrade(&dir, fix_overworld_chunk).unwrap();
         assert!(!dir.join(".datafix").exists());
-        assert_eq!(read(&dir), (CURRENT, 1_100_000));
+        assert_chunk(CURRENT);
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -1734,7 +1735,7 @@ mod upgrade_tests {
             tag: level,
         };
         let raw = nbt::write_named(&root, Limits::saved()).unwrap();
-        assert!((raw.len() as u64) < nbt::NETWORK_NBT_QUOTA);
+        assert!(raw.len() < 2_097_152);
 
         let error = fix_world_files_deferred(&base, &UpgradeProgress::new()).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
