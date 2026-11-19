@@ -1223,3 +1223,7 @@ mod tests {
         assert!(reload_waits(true, true));
     }
 }
+
+#[cfg(test)]
+#[path = "clouds_reload_tests.rs"]
+mod clouds_reload_tests;
