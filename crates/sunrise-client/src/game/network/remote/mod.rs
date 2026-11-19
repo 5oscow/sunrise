@@ -6578,6 +6578,7 @@ impl Game<'_> {
             player.velocity = Vec3::ZERO;
             player.pitch = 0.0;
         } else if walks {
+            let side = game_side!(self);
             let _sections = section_scope.map(|scope| scope.begin(&mut self.native_lifecycle));
             player.client_side = true;
             // LivingEntity.checkAutoSpinAttack: a Riptide spin that touches a
@@ -6591,7 +6592,6 @@ impl Game<'_> {
                         .map(|m| (m.id, m.bounds())),
                 );
             }
-            let side = game_side!(self);
             MotionWorld {
                 side: &side,
                 entities: &entity_collisions,
@@ -6613,9 +6613,9 @@ impl Game<'_> {
             // at 10, the hurt tilt restarted every frame and shook the camera.
             player.health.advance_clock();
             if riding && !dead {
+                let side = game_side!(self);
                 let _sections = section_scope.map(|scope| scope.begin(&mut self.native_lifecycle));
                 player.client_side = true;
-                let side = game_side!(self);
                 let mut passenger = MotionWorld {
                     side: &side,
                     entities: &entity_collisions,

@@ -654,8 +654,8 @@ impl Game<'_> {
         let Some(player) = self.player.as_mut() else {
             return Ok(None);
         };
-        let _sections = section_scope.map(|scope| scope.begin(&mut self.native_lifecycle));
         let side = game_side!(self);
+        let _sections = section_scope.map(|scope| scope.begin(&mut self.native_lifecycle));
         let before = player.position;
         MotionWorld {
             side: &side,
