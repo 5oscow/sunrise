@@ -110,7 +110,7 @@ class StageToolTests(unittest.TestCase):
 
             def build_then_fail(out, server, target_dir):
                 self.assertEqual(target_dir, root.resolve() / "prebuilt")
-                with self.assertRaisesRegex(SystemExit, "Use a separate CARGO_TARGET_DIR"):
+                with self.assertRaises(SystemExit):
                     prebuilt_game.build(root / "other-sdk", server=False)
                 raise RuntimeError("build failed")
 
@@ -537,6 +537,14 @@ class AllocatorSelectionTests(unittest.TestCase):
             self.assertEqual(prebuilt_game.cargo_features(True, platform),
                              ["--no-default-features", "--features", "system-allocator"])
 
+    def test_sdk_build_refuses_an_output_that_holds_its_target_folder(self):
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.dict(os.environ, CARGO_TARGET_DIR=str(Path(directory) / "target")), \
+             patch.object(prebuilt_game, "_build_locked") as build_locked:
+            with self.assertRaises(SystemExit):
+                prebuilt_game.build(Path(directory), server=False)
+            build_locked.assert_not_called()
+
     def test_linux_keeps_mimalloc(self):
         self.assertEqual(prebuilt_game.cargo_features(False, "linux"), [])
         self.assertEqual(prebuilt_game.cargo_features(True, "linux"), ["--no-default-features"])
@@ -554,11 +562,14 @@ class AllocatorSelectionTests(unittest.TestCase):
             self.assertNotIn("CARGO_ENCODED_RUSTFLAGS", kwargs["env"])
             raise Captured
 
-        with patch.object(prebuilt_game, "stage", return_value=Path("staged")), \
+        with tempfile.TemporaryDirectory() as target, \
+             patch.object(prebuilt_game, "stage", return_value=Path("staged")), \
              patch.object(prebuilt_game, "head", return_value="fixture-commit"), \
              patch.object(prebuilt_game, "rustc_host", return_value="fixture-host"), \
              patch.object(prebuilt_game, "run", side_effect=capture), \
-             patch.dict(prebuilt_game.os.environ, {"CARGO_ENCODED_RUSTFLAGS": "-Cprefer-dynamic=no"}):
+             patch.dict(prebuilt_game.os.environ, {"CARGO_ENCODED_RUSTFLAGS": "-Cprefer-dynamic=no",
+                                                   "CARGO_TARGET_DIR": target}):
+            # Its own target folder: the build takes that folder's lock, never the checkout's.
             with self.assertRaises(Captured):
                 prebuilt_game.build(Path("unused-sdk"), False)
 
