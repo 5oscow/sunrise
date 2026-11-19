@@ -322,14 +322,23 @@ fn a_blockless_mod_menu_closes_when_its_part_answers_false() {
                         assert_eq!(answer.asks.load(Ordering::Relaxed), before);
                     }
 
+                    let state_of_guest = |game: &crate::game::Game<'_>| {
+                        game.lan.as_ref().unwrap().hub.guests[0]
+                            .menu
+                            .as_ref()
+                            .unwrap()
+                            .state
+                    };
                     game.lan
                         .as_mut()
                         .unwrap()
                         .hub
                         .guests
                         .update(0, |g| g.game_mode = 3);
+                    let old_state = state_of_guest(game);
                     click(game, window);
                     assert_eq!(window_of_guest(game), Some(window));
+                    assert_eq!(state_of_guest(game), (old_state + 1) & 0x7FFF);
                     assert_eq!(answer.asks.load(Ordering::Relaxed), before);
 
                     game.lan
