@@ -5116,7 +5116,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sunrise-core",
- "sunrise-items",
  "sunrise-mod-api",
  "sunrise-mod-api-gen",
  "sunrise-mod-api-macros",
