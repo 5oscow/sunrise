@@ -296,10 +296,11 @@ impl Game<'_> {
     /// Applies `write` to the attribute `name` of `t` on the record that the
     /// entity's gameplay and its clients' attribute sync read:
     /// - a player's (or a guest's, in its turn) own attribute map;
-    /// - for a mob, `finalize`'s store for the nine attributes its behavior
-    ///   reads there (so it moves and hits by them at once); for its armor and
-    ///   toughness its armor map (`mobs/armor.rs`); for the rest, as for an
-    ///   armor stand, its generic map (`cmds.attributes`), which the sync sends.
+    /// - for a mob, `finalize`'s store for the attributes its behavior reads
+    ///   there (`finalize::Attr`, so it moves, hits and falls by them at once);
+    ///   for its armor and toughness its armor map (`mobs/armor.rs`); for the
+    ///   rest, as for an armor stand, its generic map (`cmds.attributes`),
+    ///   which the sync sends.
     ///
     /// A mob's and a stand's live map (`living_attributes`, which the mod
     /// API's reads and the save use) takes the same write and keeps it
