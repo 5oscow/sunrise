@@ -118,19 +118,29 @@ impl Compression {
                 } else {
                     deflater.zlib(bytes, output);
                 }
-                Ok(output.as_slice().to_vec())
+                let encoded = output.as_slice().to_vec();
+                if output.capacity() > SCRATCH_KEPT {
+                    *output = Vec::new();
+                }
+                Ok(encoded)
             }),
             Self::Lz4 => Ok(encode_lz4(bytes)),
         }
     }
 }
 
+/// The most deflate output capacity a thread keeps between writes.
+const SCRATCH_KEPT: usize = 1 << 20;
+
 thread_local! {
     /// This thread's zlib inflater, reset for each chunk instead of a new
     /// one (and its window) allocated every time.
     static INFLATER: std::cell::RefCell<Option<Decompress>> = const { std::cell::RefCell::new(None) };
     /// This thread's deflate encoder and its output, kept between writes: the
-    /// encoder's 250 KiB of state and the output's capacity are allocated once.
+    /// encoder's 250 KiB of state is allocated once, and the output keeps its
+    /// capacity up to [`SCRATCH_KEPT`]. The encoder reserves room for the
+    /// worst case, which is about the input's size, so a larger write frees it
+    /// after copying its stream out.
     static DEFLATER: std::cell::RefCell<(Deflater, Vec<u8>)> =
         std::cell::RefCell::new((Deflater::new(), Vec::new()));
     /// This thread's LZ4 compressed-block scratch, retained between chunk reads.
