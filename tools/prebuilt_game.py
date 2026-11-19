@@ -23,6 +23,7 @@ The folder holds compiler outputs and game-owned registry patch crates, never va
 
 import argparse
 from concurrent.futures import ProcessPoolExecutor
+import faulthandler
 import hashlib
 import json
 import lzma
@@ -47,6 +48,10 @@ IDENTITY = "sunrise-prebuilt.json"
 # The crate the game's library is built from; its build resolves what mods compile against.
 GAME = "sunrise-mod-host"
 LOCK = "Cargo.lock"
+# `git archive` of the whole commit takes seconds on every runner; past this it is stuck, not slow.
+ARCHIVE_SECONDS = 600
+# While the commit is copied out, every thread's stack is printed this often: a stall there names its line.
+COPY_WATCH_SECONDS = 120
 # Where `smoke` installs the executable it builds, as the launcher does, for `start`: beside OUT, never inside it,
 # since the archive is OUT alone.
 SMOKE = "prebuilt-smoke"
@@ -132,7 +137,9 @@ def fetch_launcher_files(destination: Path, pin: str, fetch=lambda url: urllib.r
 
 def run(command: list[str], **kwargs) -> str:
     print("+", " ".join(command), flush=True)
-    return subprocess.run(command, check=True, text=True, stdout=subprocess.PIPE, **kwargs).stdout
+    # No tool here reads standard input; a child left holding the runner's would wait on it with no output.
+    return subprocess.run(command, check=True, text=True, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                          **kwargs).stdout
 
 
 def sha256(path: Path) -> str:
@@ -162,16 +169,17 @@ def tracked_blobs(root: Path, commit: str, paths: tuple[str, ...] = ()):
     index, whatever line endings the working tree was checked out with (Git for Windows' core.autocrlf) and whatever
     it has that is not committed. Links are left out, as the launcher's download leaves them out."""
     # `git archive` converts line endings as a checkout would (core.autocrlf, core.eol); both are turned off so the
-    # bytes are the commit's on every runner.
-    process = subprocess.Popen(["git", "-c", "core.autocrlf=false", "-c", "core.eol=lf", "archive", "--format=tar",
-                                commit, *(["--", *paths] if paths else [])],
-                               cwd=root, stdout=subprocess.PIPE)
-    with tarfile.open(fileobj=process.stdout, mode="r|") as archive:
-        for member in archive:
-            if member.isfile():
-                yield member.name, archive.extractfile(member).read()
-    if process.wait() != 0:
-        sys.exit(f"git archive {commit} failed in {root}")
+    # bytes are the commit's on every runner. Git writes a file, read once it has exited, with no pipe between the
+    # two processes: Windows SDK legs streaming it through a pipe sat silent here until their timeout. A git that
+    # never ends fails the step with a traceback after ARCHIVE_SECONDS.
+    with tempfile.TemporaryDirectory(prefix="archive-") as folder:
+        tar = Path(folder) / "commit.tar"
+        run(["git", "-c", "core.autocrlf=false", "-c", "core.eol=lf", "archive", "--format=tar", "-o", str(tar),
+             commit, *(["--", *paths] if paths else [])], cwd=root, timeout=ARCHIVE_SECONDS)
+        with tarfile.open(tar, mode="r:") as archive:
+            for member in archive:
+                if member.isfile():
+                    yield member.name, archive.extractfile(member).read()
 
 
 def head() -> str:
@@ -207,6 +215,7 @@ def stage(target_dir: Path, stage_tool: Path | None = None, *, sdk_dylibs: bool 
     """Stage HEAD's tracked bytes, never the working tree's. Run the staging pass (#589) on a fresh copy so
     it can edit the source and emit build data, then sync the result. SDK builds also stage dylib manifests."""
     setup_started = time.monotonic()
+    faulthandler.dump_traceback_later(COPY_WATCH_SECONDS, repeat=True)
     target_dir.mkdir(parents=True, exist_ok=True)
     staged = target_dir / "stage"
     commit = head()
@@ -230,6 +239,7 @@ def stage(target_dir: Path, stage_tool: Path | None = None, *, sdk_dylibs: bool 
             command = [str(stage_tool.resolve())]
             env = None
             label = "Stage binary execution"
+        faulthandler.cancel_dump_traceback_later()
         print(f"stage_phase=copy_setup seconds={time.monotonic() - setup_started:.3f}", flush=True)
         started = time.monotonic()
         print(run(command + arguments, cwd=source, env=env), end="")
