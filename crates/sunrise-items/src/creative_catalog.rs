@@ -91,28 +91,37 @@ pub struct Catalog {
 /// Ordered values from the world's holder provider. Potions are a built-in
 /// registry, enchantments and paintings use holder order, horns use tag order,
 /// and the banner generator only checks whether each named pattern exists.
-#[derive(Default, Deserialize)]
+#[derive(Clone, Default, Deserialize)]
 pub struct Holders {
     pub potions: Vec<String>,
     pub enchantments: Vec<Enchantment>,
     pub paintings: Vec<Painting>,
     pub horns: Vec<String>,
+    /// Text for the creative search projection, from the same provider as `horns`.
+    #[serde(default)]
+    pub instrument_descriptions: HashMap<String, serde_json::Value>,
     pub banner_patterns: HashSet<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct Enchantment {
     pub id: String,
     /// The data codec accepts precisely `1..=255`.
     pub max_level: NonZeroU8,
+    #[serde(default)]
+    pub description: serde_json::Value,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct Painting {
     pub id: String,
     pub width: NonZeroU8,
     pub height: NonZeroU8,
     pub placeable: bool,
+    #[serde(default)]
+    pub title: Option<serde_json::Value>,
+    #[serde(default)]
+    pub author: Option<serde_json::Value>,
 }
 
 /// Independent insertion-ordered sets for a tab's grid and its contribution

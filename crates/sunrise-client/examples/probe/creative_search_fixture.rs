@@ -30,7 +30,6 @@ pub fn main() -> sunrise_client::Result<()> {
         &sunrise_world::loot::PackOverlay::NONE,
         &defaults,
     )?;
-    creative.set_enchantments(items.enchantments.clone());
     let permissions = args.get(5).is_some_and(|a| a == "permissions");
     let vanilla: Value = serde_json::from_slice(&fs::read(args.get(3).ok_or(usage)?)?)?;
     let holders: Holders = serde_json::from_value(vanilla["holders"].clone())?;
@@ -59,7 +58,10 @@ pub fn main() -> sunrise_client::Result<()> {
             })
         })
         .collect();
-    let searches = query_results(&creative, &names, &vanilla["searches"])?;
+    let english = Language::load(&[&source], "en_us");
+    let (searches, _) = lang::scoped(english, || {
+        query_results(&creative, &names, &vanilla["searches"])
+    });
     let french = Language::load(&[&source], "fr_fr");
     let (french_searches, _) = lang::scoped(french, || {
         query_results(&creative, &names, &vanilla["frenchSearches"])
@@ -82,7 +84,7 @@ pub fn main() -> sunrise_client::Result<()> {
         "built_tabs": built_tabs,
         "tabs": tabs,
         "search": search,
-        "searches": searches,
+        "searches": searches?,
         "frenchSearches": french_searches?,
     });
     fs::write(args.get(4).ok_or(usage)?, out.to_string())?;

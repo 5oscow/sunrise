@@ -59,8 +59,9 @@ struct SearchEntry {
     /// The item id's namespace and path, lower-cased.
     namespace: String,
     path: String,
-    /// Tooltip lines, lower-cased; empty when the resources predate them.
+    /// Prepared English tooltip lines, never used on a holder-dependent stack.
     lines: Vec<String>,
+    live_tooltip: bool,
     /// Item tags as (namespace, path), lower-cased.
     tags: Vec<(String, String)>,
 }
@@ -68,7 +69,7 @@ pub struct Creative {
     /// The tabs shown (`CreativeModeTabs.tabs()`), with the stacks the current
     /// permissions put in them.
     pub tabs: Vec<Tab>,
-    pub selected: usize,
+    selected_id: String,
     /// The page of tabs shown.
     pub page: u32,
     /// Scroll position 0..1 (scrollOffs).
@@ -80,8 +81,9 @@ pub struct Creative {
     /// The search tab's stacks, in its display order.
     search_items: Vec<ItemStack>,
     search_index: Vec<SearchEntry>,
-    /// The session's enchantment registry, shared with the hover tooltips.
-    enchantments: Arc<Enchantments>,
+    /// Definitions from the build's holder provider. Their components are
+    /// rendered in the active language when computing the name index.
+    holders: sunrise_items::creative_catalog::Holders,
     catalog: Catalog,
     headers: Vec<Tab>,
     /// Prepared search presentation only, keyed by item and exact components.
@@ -127,12 +129,14 @@ pub fn live_holders(
         NonZeroU8::new(u8::try_from(n).ok()?)
     };
     let entries = |kind: &str| dynamic.registries.get(kind).into_iter().flatten();
+    let text = |data: &Tag, key: &str| data.get(key).map(crate::scoreboard::tag_to_json);
     let enchantments = entries("minecraft:enchantment")
         .filter_map(|(id, data)| {
-            let max_level = size(data.as_ref()?.get("max_level")?)?;
+            let data = data.as_ref()?;
             Some(Enchantment {
                 id: id.clone(),
-                max_level,
+                max_level: size(data.get("max_level")?)?,
+                description: text(data, "description").unwrap_or_default(),
             })
         })
         .collect();
@@ -148,6 +152,8 @@ pub fn live_holders(
                 width: size(data.get("width")?)?,
                 height: size(data.get("height")?)?,
                 placeable: placeable.contains(&(i as i32)),
+                title: text(data, "title"),
+                author: text(data, "author"),
             })
         })
         .collect();
@@ -156,6 +162,9 @@ pub fn live_holders(
         .unwrap_or_default()
         .iter()
         .filter_map(|&id| dynamic.name("minecraft:instrument", id).map(str::to_owned))
+        .collect();
+    let instrument_descriptions = entries("minecraft:instrument")
+        .filter_map(|(id, data)| Some((id.clone(), text(data.as_ref()?, "description")?)))
         .collect();
     let banner_patterns = entries("minecraft:banner_pattern")
         .map(|(id, _)| id.clone())
@@ -168,6 +177,7 @@ pub fn live_holders(
         enchantments,
         paintings,
         horns,
+        instrument_descriptions,
         banner_patterns,
     }
 }
@@ -390,6 +400,7 @@ impl Creative {
                             namespace,
                             path,
                             lines: strings("lines").collect(),
+                            live_tooltip: false,
                             tags: strings("tags").map(|tag| split_id(&tag)).collect(),
                         },
                     );
@@ -417,7 +428,9 @@ impl Creative {
         }
         let mut creative = Self {
             tabs: Vec::new(),
-            selected: 0,
+            selected_id: headers
+                .first()
+                .map_or_else(String::new, |tab| tab.id.clone()),
             page: 0,
             scroll: 0.0,
             scrolling: false,
@@ -430,7 +443,7 @@ impl Creative {
             },
             search_items: Vec::new(),
             search_index: Vec::new(),
-            enchantments: Arc::default(),
+            holders: Default::default(),
             catalog,
             headers,
             metadata,
@@ -509,6 +522,7 @@ impl Creative {
     /// or the client hook's additions over to the next holder provider.
     pub fn reset_contents(&mut self) {
         self.contents = None;
+        self.holders = Default::default();
         self.added.clear();
         self.built = false;
         self.permissions = false;
@@ -533,6 +547,16 @@ impl Creative {
                         ..Default::default()
                     }
                 });
+                entry.live_tooltip = matches!(
+                    stack.item.as_ref(),
+                    "minecraft:enchanted_book"
+                        | "minecraft:painting"
+                        | "minecraft:goat_horn"
+                        | "minecraft:potion"
+                        | "minecraft:splash_potion"
+                        | "minecraft:lingering_potion"
+                        | "minecraft:tipped_arrow"
+                ) || stack.data().is_some_and(|data| data.ominous_banner);
                 if let Some(tags) = &self.item_tags {
                     entry.tags = tags.get(stack.item.as_ref()).cloned().unwrap_or_default();
                 }
@@ -563,7 +587,7 @@ impl Creative {
     pub fn set_pack_modifiers(&mut self, pack: Vec<crate::polytone_creative_tabs::TabModifier>) {
         self.pack = pack;
         self.project();
-        self.selected = self.selected.min(self.tabs.len().saturating_sub(1));
+        self.select_default_if_missing();
     }
     /// A tab after the modifiers aimed at it: its items, icon and name.
     fn apply_pack(&self, tab: &mut Tab) {
@@ -611,7 +635,12 @@ impl Creative {
     /// they are current. The game asks the mods for each tab's stacks
     /// (`BuildCreativeModeTabContentsEvent`) and hands them to `build`.
     pub fn tabs_to_build(&self, permissions: bool, features: &[String]) -> Option<Vec<String>> {
-        if self.built && permissions == self.permissions && features == &*self.features {
+        if self.built
+            && permissions == self.permissions
+            && (features == &*self.features
+                || (features.iter().all(|flag| self.features.contains(flag))
+                    && self.features.iter().all(|flag| features.contains(flag))))
+        {
             return None;
         }
         Some(
@@ -644,10 +673,10 @@ impl Creative {
         added: Vec<(String, Vec<ItemStack>)>,
         names: &Names,
     ) {
-        let selected = self.tab().id.clone();
         let row = self.first_row(names);
         self.permissions = params.operator;
         self.features = Arc::from(params.features);
+        self.holders = params.holders.clone();
         self.built = true;
         self.added = added;
         self.contents = Some(
@@ -655,26 +684,28 @@ impl Creative {
                 .build(params, self.contents.as_deref(), |_, _, _| {}),
         );
         self.project();
-        match self.tabs.iter().position(|t| t.id == selected) {
-            Some(tab) => {
-                self.selected = tab;
-                // ItemPickerMenu.getScrollForRowIndex.
-                let hidden = self.hidden_rows(names);
-                self.scroll = if hidden > 0 {
-                    (row as f32 / hidden as f32).clamp(0.0, 1.0)
-                } else {
-                    0.0
-                };
-            }
-            None => {
-                // CreativeModeTabs.getDefaultTab.
-                let default = self
-                    .tabs
-                    .iter()
-                    .position(|t| t.id == "minecraft:building_blocks");
-                self.select(default.unwrap_or(0));
-            }
+        if !self.select_default_if_missing() {
+            // ItemPickerMenu.getScrollForRowIndex.
+            let hidden = self.hidden_rows(names);
+            self.scroll = if hidden > 0 {
+                (row as f32 / hidden as f32).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
         }
+    }
+
+    fn select_default_if_missing(&mut self) -> bool {
+        if self.tabs.iter().any(|t| t.id == self.selected_id) {
+            return false;
+        }
+        // CreativeModeTabs.getDefaultTab.
+        let default = self
+            .tabs
+            .iter()
+            .position(|t| t.id == "minecraft:building_blocks");
+        self.select(default.unwrap_or(0));
+        true
     }
     /// Where a stack comes in the creative tabs (the search tab lists them
     /// all, in tab order): the same stack's place, else its item's first.
@@ -710,7 +741,14 @@ impl Creative {
                 name: None,
             });
         }
-        &self.tabs[self.selected.min(self.tabs.len() - 1)]
+        &self.tabs[self.selected_index()]
+    }
+    /// The selected tab's position in the current projection, for input and rendering.
+    pub fn selected_index(&self) -> usize {
+        self.tabs
+            .iter()
+            .position(|tab| tab.id == self.selected_id)
+            .unwrap_or(0)
     }
     /// The search tab's index (`CreativeModeTabs.searchTab`), the tab the chat
     /// key opens while another one is shown.
@@ -720,13 +758,14 @@ impl Creative {
     /// selectTab: a different tab empties the search box; the scrollbar goes to the top.
     /// A tab on another page shows that page.
     pub fn select(&mut self, tab: usize) {
-        if tab != self.selected {
+        let Some(t) = self.tabs.get(tab) else {
+            return;
+        };
+        if t.id != self.selected_id {
             self.search.set_value("");
+            self.selected_id.clone_from(&t.id);
         }
-        self.selected = tab;
-        if let Some(t) = self.tabs.get(tab)
-            && !Self::on_every_page(t)
-        {
+        if !Self::on_every_page(t) {
             self.page = t.page;
         }
         self.scroll = 0.0;
@@ -757,7 +796,7 @@ impl Creative {
         let page = page.min(self.pages() - 1);
         let kept = self
             .tabs
-            .get(self.selected)
+            .get(self.selected_index())
             .is_some_and(Self::on_every_page);
         if !kept
             && let Some(first) = self
@@ -772,17 +811,6 @@ impl Creative {
     /// The search tab's stacks.
     pub fn search_items(&self) -> &[ItemStack] {
         &self.search_items
-    }
-    /// Use the active session's registry to resolve enchantments in search tooltips.
-    pub fn set_enchantments(&mut self, enchantments: Arc<Enchantments>) {
-        if !Arc::ptr_eq(&self.enchantments, &enchantments) {
-            self.enchantments = enchantments;
-            *self
-                .lines_cache
-                .get_mut()
-                .unwrap_or_else(|e| e.into_inner()) = None;
-            self.forget_items();
-        }
     }
     /// Opening the screen: vanilla rebuilds CreativeModeInventoryScreen, whose
     /// init() makes a fresh search box and a zeroed scrollbar; only the tab
@@ -804,7 +832,12 @@ impl Creative {
             && names.display_get("itemGroup.search").as_deref() == names.get("itemGroup.search");
         let local = if term.is_empty() || term.starts_with('#') {
             Arc::from([])
-        } else if english && self.search_index.iter().all(|e| !e.lines.is_empty()) {
+        } else if english
+            && self
+                .search_index
+                .iter()
+                .all(|e| !e.live_tooltip && !e.lines.is_empty())
+        {
             // The exported English lines are the whole index.
             Arc::from([])
         } else {
@@ -821,23 +854,110 @@ impl Creative {
         };
         self.search_results_in(term, names, &local, english)
     }
-    /// `SessionSearchTrees.getTooltipLines`: the translated tooltip lines for the name search.
+    /// `SessionSearchTrees.getTooltipLines`: holder-dependent entries use only
+    /// the active definitions and the selected language, never their prepared names.
     fn localized_lines(&self, translate: &dyn Fn(&str) -> Option<String>) -> Arc<[Vec<String>]> {
+        use crate::{item_tooltip, text::Text};
+        use sunrise_core::nbt::Tag;
+        let unenchanted = Enchantments::default();
+        let plain = |component: &Value| crate::scoreboard::comp_text(component).plain();
+        let tr = |key: &str| translate(key).unwrap_or_else(|| key.to_owned());
         self.search_items
             .iter()
-            .map(|s| {
-                crate::item_tooltip::lines(
-                    s,
-                    None,
-                    &crate::item_tooltip::NoAttributeListener,
-                    &self.enchantments,
-                    translate,
-                    // The search cache has no attribute catalog: vanilla's look.
-                    &|_| None,
-                )
-                .iter()
-                .map(|l| java_lower(l))
-                .collect()
+            .map(|stack| {
+                let named = || vec![item_tooltip::name_line(stack, translate)];
+                let display = item_tooltip::tooltip_display(stack);
+                let lines = match stack.item.as_ref() {
+                    "minecraft:enchanted_book" => {
+                        let mut lines = named();
+                        if display.shows("minecraft:stored_enchantments") {
+                            for (id, level) in stack.stored_enchantments() {
+                                let Some(holder) = self
+                                    .holders
+                                    .enchantments
+                                    .iter()
+                                    .find(|holder| holder.id == id.as_ref())
+                                else {
+                                    continue;
+                                };
+                                let mut name = plain(&holder.description);
+                                if *level != 1 || holder.max_level.get() != 1 {
+                                    name.push(' ');
+                                    name.push_str(&tr(&format!("enchantment.level.{level}")));
+                                }
+                                lines.push(name);
+                            }
+                        }
+                        lines
+                    }
+                    "minecraft:goat_horn" => {
+                        let mut lines = named();
+                        if display.shows("minecraft:instrument") {
+                            if let Some(description) = crate::items::inline_instrument(stack)
+                                .and_then(|n| n.get("description"))
+                            {
+                                lines.push(plain(&crate::scoreboard::tag_to_json(description)));
+                            } else if let Some(description) = crate::items::instrument_id(stack)
+                                .and_then(|id| self.holders.instrument_descriptions.get(&id))
+                            {
+                                lines.push(plain(description));
+                            }
+                        }
+                        lines
+                    }
+                    "minecraft:painting" => {
+                        let mut lines = named();
+                        if display.shows("minecraft:painting/variant") {
+                            match stack
+                                .data()
+                                .and_then(|data| data.other("minecraft:painting/variant"))
+                            {
+                                Some(Tag::String(id)) => {
+                                    let id = id.to_string_lossy();
+                                    if let Some(painting) =
+                                        self.holders.paintings.iter().find(|p| p.id == id)
+                                    {
+                                        lines.extend(
+                                            painting
+                                                .title
+                                                .iter()
+                                                .chain(&painting.author)
+                                                .map(plain),
+                                        );
+                                        lines.push(
+                                            crate::text::format_translation(
+                                                &tr("painting.dimensions"),
+                                                &[
+                                                    Text::literal(painting.width.to_string()),
+                                                    Text::literal(painting.height.to_string()),
+                                                ],
+                                            )
+                                            .plain(),
+                                        );
+                                    }
+                                }
+                                None => lines.push(tr("painting.random")),
+                                Some(_) => {}
+                            }
+                        }
+                        lines
+                    }
+                    _ => item_tooltip::lines(
+                        stack,
+                        None,
+                        &item_tooltip::NoAttributeListener,
+                        &unenchanted,
+                        translate,
+                        // The search cache has no attribute catalog: vanilla's look.
+                        &|_| None,
+                    ),
+                };
+                lines
+                    .iter()
+                    .map(|line| java_trim(line))
+                    .filter(|line| !line.is_empty())
+                    .map(java_lower)
+                    .collect()
             })
             .collect()
     }
@@ -869,27 +989,21 @@ impl Creative {
                 })
                 .collect();
         }
-        // FullTextSearchTree: the creative tooltip lines in the selected
-        // language, and the item id after a colon. The export's lines are
-        // English (they come from the vanilla jars), so they stand in only
-        // while the language is English; otherwise every line (name, lore,
-        // effects, ...) is rebuilt through the language, as vanilla's
-        // getTooltipLines does.
+        // FullTextSearchTree: tooltip lines in the selected language, and
+        // the item id after a colon. Only non-holder stacks may use the
+        // prepared English tooltip or the plain item-name fallback.
         let text = java_lower(term);
         all.filter(|&i| {
             let e = &self.search_index[i];
-            let fallback;
-            let lines: &[String] = if e.lines.is_empty() {
-                fallback = [java_lower(&names.item(&self.search_items[i].item))];
-                &fallback
-            } else {
-                &e.lines
-            };
-            let exported = english || e.lines.is_empty();
             let local = local.get(i).map_or(&[][..], Vec::as_slice);
-            let hit = |t: &str| {
-                (exported && any(lines.iter().map(String::as_str), t))
-                    || any(local.iter().map(String::as_str), t)
+            let hit = |term: &str| {
+                if !e.live_tooltip && english && !e.lines.is_empty() {
+                    any(e.lines.iter().map(String::as_str), term)
+                } else if local.is_empty() && !e.live_tooltip {
+                    java_lower(&names.item(&self.search_items[i].item)).contains(term)
+                } else {
+                    any(local.iter().map(String::as_str), term)
+                }
             };
             match text.split_once(':') {
                 None => hit(&text),
@@ -907,7 +1021,7 @@ impl Creative {
         if self.tabs.is_empty() {
             return Arc::from([]);
         }
-        let tab = self.selected.min(self.tabs.len() - 1);
+        let tab = self.selected_index();
         let search = if self.tab().search {
             self.search.value.as_str()
         } else {
@@ -1018,34 +1132,24 @@ impl Creative {
     pub fn scroller_offset(&self) -> f32 {
         ((Self::SCROLL_HEIGHT - 17.0) * self.scroll) as i32 as f32
     }
-    /// The tabs whose `CreativeModeTab.contains(stack)` holds, in
-    /// `CreativeModeTabs.tabs()` order, the search tab left out: the stack is
-    /// among the tab's search-tab items, by item and exact components. The visible display
-    /// also includes any v1/Polytone additions, which have no separate search visibility.
+    /// Visible categories whose canonical search list contains `stack` by item
+    /// and exact components, in registry order. UI-only additions never decide membership.
     pub fn tabs_containing(&self, stack: &ItemStack) -> Vec<usize> {
-        self.tabs
+        let Some(contents) = &self.contents else {
+            return Vec::new();
+        };
+        self.catalog
+            .tabs()
             .iter()
-            .enumerate()
-            .filter_map(|(i, tab)| {
-                if tab.search || tab.hotbar || tab.inventory {
-                    return None;
-                }
-                let contains =
-                    |items: &[ItemStack]| items.iter().any(|shown| same_components(shown, stack));
-                let in_search = self
-                    .contents
-                    .as_ref()
-                    .and_then(|contents| {
-                        let index = self
-                            .catalog
-                            .tabs()
-                            .iter()
-                            .position(|recipe| recipe.id == tab.id)?;
-                        Some(contains(&contents[index].search))
-                    })
-                    .unwrap_or(false);
-                (in_search || contains(&tab.items)).then_some(i)
+            .zip(contents.iter())
+            .filter(|(recipe, _)| recipe.kind == Kind::Category)
+            .filter(|(_, contents)| {
+                contents
+                    .search
+                    .iter()
+                    .any(|shown| same_components(shown, stack))
             })
+            .filter_map(|(recipe, _)| self.tabs.iter().position(|tab| tab.id == recipe.id))
             .collect()
     }
     /// The `#namespace:path` lines `getTooltipFromContainerItem` adds for a
@@ -1347,7 +1451,11 @@ mod tests {
             tab(
                 "minecraft:ingredients",
                 "CATEGORY",
-                vec![search_only(book(1)), row(book(5))]
+                vec![search_only(book(1)), row(book(5)), {
+                    let mut row = row(r#"{id:"minecraft:book",count:1}"#);
+                    row["visibility"] = "PARENT_TAB_ONLY".into();
+                    row
+                }]
             ),
             tab("minecraft:inventory", "INVENTORY", vec![]),
         ]))
@@ -1443,6 +1551,62 @@ mod tests {
     }
 
     #[test]
+    fn search_indexes_the_replaced_enchantment_description_even_at_the_same_level() {
+        use sunrise_core::nbt::Tag;
+        use sunrise_protocol::registry::{Builtin, Dynamic};
+        let raw = serde_json::json!({
+            "schema":4, "item_features":{}, "potion_features":{}, "tabs":[
+                {"id":"minecraft:ingredients", "type":"CATEGORY", "build":[
+                    {"kind":"enchantments","all_levels":false,"visibility":"PARENT_AND_SEARCH_TABS"}
+                ]},
+                {"id":"minecraft:search", "type":"SEARCH", "build":[], "search_metadata":[
+                    {"stack":r#"{components:{"minecraft:stored_enchantments":{"minecraft:sharpness":5}},count:1,id:"minecraft:enchanted_book"}"#, "lines":["Enchanted Book","Sharpness V"]}
+                ]}
+            ]
+        });
+        let mut c = Creative::from_json(&raw).unwrap();
+        let items = crate::items::Items::empty();
+        let names = Names::default();
+        let mut rebuild = |description: &str| {
+            let dynamic = Dynamic {
+                registries: HashMap::from([(
+                    "minecraft:enchantment".into(),
+                    vec![(
+                        "minecraft:sharpness".into(),
+                        Some(Tag::compound([
+                            ("max_level", Tag::Int(5)),
+                            ("description", Tag::String(description.into())),
+                        ])),
+                    )],
+                )]),
+                ..Default::default()
+            };
+            let holders = live_holders(&Builtin::default(), &dynamic);
+            c.reset_contents();
+            c.build(
+                Parameters {
+                    features: &[],
+                    operator: false,
+                    holders: &holders,
+                    items: &items,
+                },
+                Vec::new(),
+                &names,
+            );
+            assert_eq!(
+                c.search_items()[0].stored_enchantments(),
+                [(Arc::from("minecraft:sharpness"), 5)]
+            );
+            (
+                c.search_results("sharpness", &names),
+                c.search_results("honed edge", &names),
+            )
+        };
+        assert_eq!(rebuild("Sharpness"), (vec![0], vec![]));
+        assert_eq!(rebuild("Honed Edge"), (vec![], vec![0]));
+    }
+
+    #[test]
     fn tag_reload_updates_search_without_asking_for_new_tab_contents() {
         let mut c = tooltip_tabs();
         let names = Names::default();
@@ -1486,6 +1650,21 @@ mod tests {
             .collect();
         assert_eq!(ids(books[0]), ["minecraft:ingredients"]);
         assert_eq!(ids(books[1]), ["minecraft:ingredients"]);
+        let ingredients = c
+            .tabs
+            .iter()
+            .find(|tab| tab.id == "minecraft:ingredients")
+            .unwrap();
+        assert!(
+            ingredients
+                .items
+                .iter()
+                .any(|s| s.item.as_ref() == "minecraft:book")
+        );
+        assert!(
+            ids(&stack("book", 1)).is_empty(),
+            "the display-only stack is not a member"
+        );
     }
 
     #[test]
@@ -1685,7 +1864,7 @@ mod tests {
             c.search.set_value("anvil");
             c.scroll = 0.5;
             c.select(selected);
-            assert_eq!(c.selected, selected);
+            assert_eq!(c.selected_index(), selected);
             assert_eq!(c.tab().inventory, inventory);
             assert_eq!(c.tab().search, search);
             assert!(c.search.value.is_empty());
@@ -1735,9 +1914,9 @@ mod tests {
         let count = c.tabs.len();
         let mut pages = Vec::new();
         for step in 1..=count {
-            let tab = (c.selected + 1) % count;
+            let tab = (c.selected_index() + 1) % count;
             c.select(tab);
-            assert_eq!(c.selected, tab, "step {step}");
+            assert_eq!(c.selected_index(), tab, "step {step}");
             assert!(
                 c.on_page(&c.tabs[tab]),
                 "tab {tab} selected on another page"
@@ -1747,9 +1926,9 @@ mod tests {
         // A tab every page shows keeps the page it was reached from; then it wraps.
         assert_eq!(pages, [0, 1, 2, 2, 0]);
         // Backwards off the first tab, across pages, the same way.
-        c.select((c.selected + count - 1) % count);
+        c.select((c.selected_index() + count - 1) % count);
         assert_eq!(c.page, 0);
-        c.select((c.selected + count - 1) % count);
+        c.select((c.selected_index() + count - 1) % count);
         assert_eq!(c.page, 2);
     }
 
@@ -1862,6 +2041,10 @@ mod tests {
         assert!(c.tab().search);
         assert_eq!(c.search.value, "block");
         assert!(c.items(&names).is_empty());
+        c.reset_contents(); // the operator header now precedes Search again
+        assert!(refresh(&mut c, false, &names));
+        assert!(c.tab().search);
+        assert_eq!(c.search.value, "block");
         // The selected operator tab is left empty: the default tab instead.
         refresh(&mut c, true, &names);
         c.select(1);
@@ -1869,6 +2052,34 @@ mod tests {
         refresh(&mut c, false, &names);
         assert_eq!(c.tab().id, "minecraft:building_blocks");
         assert_eq!(c.items(&names)[0].item.as_ref(), "minecraft:stone");
+    }
+
+    #[test]
+    fn reordered_features_keep_the_build() {
+        let mut c = with_operator_tab();
+        c.build(
+            Parameters {
+                operator: false,
+                features: &[
+                    "minecraft:vanilla".into(),
+                    "minecraft:redstone_experiments".into(),
+                ],
+                holders: &Default::default(),
+                items: &crate::items::Items::empty(),
+            },
+            Vec::new(),
+            &Names::default(),
+        );
+        assert!(
+            c.tabs_to_build(
+                false,
+                &[
+                    "minecraft:redstone_experiments".into(),
+                    "minecraft:vanilla".into()
+                ]
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -2134,7 +2345,7 @@ mod tests {
         let names = Names {
             map: HashMap::new(),
         };
-        c.selected = 1;
+        c.select(1);
         // Pressing the track holds the scrollbar without moving it.
         assert!(c.press_scrollbar(180.0, 60.0, &names));
         assert!(c.scrolling);
@@ -2158,7 +2369,7 @@ mod tests {
         // Off the track, or with too few items, it isn't held.
         assert!(!c.press_scrollbar(170.0, 60.0, &names));
         assert!(!c.press_scrollbar(180.0, 130.0, &names));
-        c.selected = 0;
+        c.select(0);
         assert!(c.press_scrollbar(180.0, 60.0, &names));
         assert!(!c.scrolling);
     }
@@ -2203,7 +2414,7 @@ mod tests {
         let names = Names {
             map: HashMap::new(),
         };
-        c.selected = 1;
+        c.select(1);
         let rows = (93usize.div_ceil(9) - 5) as f32;
         c.wheel(-1.0, &names);
         assert!((c.scroll - 1.0 / rows).abs() < 1e-6);

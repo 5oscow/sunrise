@@ -725,6 +725,8 @@ A file only makes new tabs. To put items into a tab the mod doesn't own, such as
 vanilla's `minecraft:ingredients` or another mod's, a native mod listens to the
 client hook `build_creative_mode_tab_contents` (NeoForge's
 `BuildCreativeModeTabContentsEvent`) and pushes its stacks for that `tab`.
+It only appends to category tabs; the screen asks again on a rebuild after the
+world or holder provider, feature flags, client resources, or operator permission changes.
 
 Unknown component types fail content loading unless a code mod registers them.
 Item-id-specific behaviour does not follow a template: a copy of the trident does not throw.

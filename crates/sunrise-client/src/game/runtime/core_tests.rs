@@ -961,7 +961,7 @@ fn selecting_creative_tabs_does_not_drop_the_carried_stack_on_release() {
         let mut clicks = Clicks::default();
         for tab in [1, 1, 0, 1] {
             select_creative_tab(&mut creative, &mut clicks, tab);
-            assert_eq!(creative.selected, tab);
+            assert_eq!(creative.selected_index(), tab);
             assert_eq!(creative.tab().inventory, tab == 1);
             assert_eq!(
                 clicks.release(

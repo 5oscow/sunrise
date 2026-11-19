@@ -1,6 +1,7 @@
 package dev.sunriselab.parity;
 
 import com.google.gson.*;
+import com.mojang.serialization.JsonOps;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
@@ -11,6 +12,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.locale.Language;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.ComponentSerialization;
 import net.minecraft.server.packs.PackLocationInfo;
 import net.minecraft.server.packs.PackType;
 import net.minecraft.server.packs.PathPackResources;
@@ -120,6 +122,7 @@ public final class VanillaCreativeSearchOracle {
     /** Generator inputs in holder and tag order, separate from the expected lists above. */
     private static JsonObject holderFacts(HolderLookup.Provider lookup) {
         var holders = new JsonObject();
+        var ops = lookup.createSerializationContext(JsonOps.INSTANCE);
         var potions = new JsonArray();
         lookup.lookupOrThrow(Registries.POTION).listElements().forEach(h -> potions.add(h.key().identifier().toString()));
         holders.add("potions", potions);
@@ -128,6 +131,7 @@ public final class VanillaCreativeSearchOracle {
             var row = new JsonObject();
             row.addProperty("id", h.key().identifier().toString());
             row.addProperty("max_level", h.value().getMaxLevel());
+            row.add("description", ComponentSerialization.CODEC.encodeStart(ops, h.value().description()).getOrThrow());
             enchantments.add(row);
         });
         holders.add("enchantments", enchantments);
@@ -138,6 +142,8 @@ public final class VanillaCreativeSearchOracle {
             row.addProperty("width", h.value().width());
             row.addProperty("height", h.value().height());
             row.addProperty("placeable", h.is(PaintingVariantTags.PLACEABLE));
+            h.value().title().ifPresent(title -> row.add("title", ComponentSerialization.CODEC.encodeStart(ops, title).getOrThrow()));
+            h.value().author().ifPresent(author -> row.add("author", ComponentSerialization.CODEC.encodeStart(ops, author).getOrThrow()));
             paintings.add(row);
         });
         holders.add("paintings", paintings);
@@ -145,6 +151,10 @@ public final class VanillaCreativeSearchOracle {
         lookup.lookupOrThrow(Registries.INSTRUMENT).get(InstrumentTags.GOAT_HORNS).orElseThrow()
             .forEach(h -> horns.add(h.unwrapKey().orElseThrow().identifier().toString()));
         holders.add("horns", horns);
+        var instruments = new JsonObject();
+        lookup.lookupOrThrow(Registries.INSTRUMENT).listElements().forEach(h -> instruments.add(
+            h.key().identifier().toString(), ComponentSerialization.CODEC.encodeStart(ops, h.value().description()).getOrThrow()));
+        holders.add("instrument_descriptions", instruments);
         var patterns = new JsonArray();
         lookup.lookupOrThrow(Registries.BANNER_PATTERN).listElements().forEach(h -> patterns.add(h.key().identifier().toString()));
         holders.add("banner_patterns", patterns);
