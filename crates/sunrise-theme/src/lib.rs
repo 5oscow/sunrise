@@ -482,13 +482,10 @@ pub const BLOCKS_LIGHT: Blocks = Blocks {
     dark: false,
 };
 
-/// Pixel sizes of the blocky look: outlines, bevels and lips, the cut corner, and the stone tile.
+/// Pixel sizes of the blocky look: outlines, bevels and lips.
 pub const BLOCK_OUTLINE: f32 = 2.;
 pub const BLOCK_BEVEL: f32 = 2.;
 pub const BLOCK_LIP: f32 = 4.;
-/// The stone texture: a 16 by 16 tile, each texel this many logical pixels.
-pub const TILE_TEXELS: usize = 16;
-pub const TILE_TEXEL: f32 = 4.;
 /// The texture's shades: the page colour moved this many levels (of 255) lighter or darker.
 pub const TILE_SHADES: [i16; 5] = [0, 2, -2, 5, -4];
 
