@@ -217,8 +217,8 @@ fn sdk_note_scope_ignores_engine_ids_but_checks_api_ids() {
     let (code, _, err) = run(dir.path(), &notes);
     assert_eq!(code, 1);
     for refused in [
-        ["point.toml", "point:game::old_tick"],
-        ["mixed.toml", "loop:old.tick"],
+        ["point.toml", "point:game::old_tick", "which did not change"],
+        ["mixed.toml", "loop:old.tick", "which did not change"],
     ] {
         assert!(
             err.lines()
@@ -237,7 +237,9 @@ fn sdk_note_scope_ignores_engine_ids_but_checks_api_ids() {
     assert_eq!(code, 1);
     // The engine id in the same note is outside the SDK's scope, so only the API id is refused.
     assert!(
-        err.contains("api-stale.toml") && err.contains("fn:keep"),
+        err.contains("api-stale.toml")
+            && err.contains("fn:keep")
+            && err.contains("which did not change"),
         "{err}"
     );
     assert!(!err.contains("point:game::new_tick"), "{err}");

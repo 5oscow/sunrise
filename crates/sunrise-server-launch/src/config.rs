@@ -1165,9 +1165,51 @@ mod tests {
             fixed.api.address(),
             Ok((std::net::Ipv4Addr::LOCALHOST, 8131).into())
         );
-        assert_eq!(fixed.api.token, "");
         let spaced = "[api]\nbind = \"127.0.0.1:8131\"\ntoken = \"a long random string\"\n";
-        assert!(Config::parse(spaced).is_err());
+        assert!(Config::parse(spaced).unwrap_err().contains("api.token"));
+    }
+
+    #[test]
+    fn a_prune_chunks_section_survives_rendering_and_refuses_what_it_cannot_keep() {
+        let set = Config::parse(
+            "[prune_chunks]\nmode = \"dry-run\"\nmin_inhabited_ticks = 600\nspawn_radius = 16\nring = 2\nkeep_files = [\"claims.json\"]\n",
+        )
+        .unwrap();
+        let prune = &set.prune_chunks;
+        assert_eq!(prune.mode, crate::prune::Mode::DryRun);
+        assert_eq!(
+            (prune.min_inhabited_ticks, prune.spawn_radius, prune.ring),
+            (600, 16, 2)
+        );
+        assert_eq!(prune.keep_files, ["claims.json"]);
+        assert_eq!(Config::parse(&render(&set)).unwrap(), set);
+        for bad in [
+            "ring = 9",
+            "min_inhabited_ticks = -1",
+            "keep_files = [\"../x\"]",
+            "keep_files = [\"/x\"]",
+        ] {
+            let error = Config::parse(&format!("[prune_chunks]\n{bad}\n")).unwrap_err();
+            assert!(error.contains("prune_chunks"), "{bad}: {error}");
+        }
+    }
+
+    #[test]
+    fn a_discord_section_takes_a_discord_webhook_and_known_events_only() {
+        let hook = "webhook = \"https://discord.com/api/webhooks/1/x\"";
+        let set = Config::parse(&format!(
+            "[discord]\n{hook}\nevents = [\"chat\", \"kick\"]\n"
+        ))
+        .unwrap();
+        assert_eq!(set.discord.events, ["chat", "kick"]);
+        let elsewhere = "[discord]\nwebhook = \"https://example.com/api/webhooks/1/x\"\n";
+        assert!(
+            Config::parse(elsewhere)
+                .unwrap_err()
+                .contains("discord.webhook")
+        );
+        let unknown = format!("[discord]\n{hook}\nevents = [\"chat\", \"bogus\"]\n");
+        assert!(Config::parse(&unknown).unwrap_err().contains("bogus"));
     }
 
     #[test]
