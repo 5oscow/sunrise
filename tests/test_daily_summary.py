@@ -628,6 +628,16 @@ class DailySummaryTests(unittest.TestCase):
         self.assertEqual(run(**{compare: ("skipped", [])}),
                          ([f"Daily: {compare} did not complete"], ["green=false", "sdk_green=true"]))
 
+    def test_a_job_skipped_beside_another_leg_jobs_failure_is_still_its_own_issue(self):
+        fixture, stack = "wasm-mods / fixture", "wasm-mods / Guest stack / ubuntu-latest"
+        jobs = [job(fixture, "failure", ["Build tool and shared member"]) if entry["name"] == fixture
+                else job(stack, "skipped") if entry["name"] == stack else entry for entry in GREEN_JOBS]
+        api = Api(jobs)
+        _, out = self.run_summary(api, results=dict(LEGS, **{"wasm-mods": {"result": "failure"}}))
+        self.assertEqual(sorted(body["title"] for _, path, body in api.writes if path == "issues"),
+                         [f"Daily: {stack} did not complete", f"Daily: {fixture} did not complete"])
+        self.assertEqual(out.splitlines(), ["green=false", "sdk_green=true"])
+
     def test_a_shard_killed_for_memory_says_by_what_with_its_memory_time_and_running_tests(self):
         stuck = [f"game::slow::case_{n}" for n in range(7)]
         incomplete = {"shard": "sunrise-world", "reason": "a test process crashed", "ended_by": "signal 9 (SIGKILL)",
