@@ -1,8 +1,8 @@
 //! The `OPTIONS` data fixers of 26.3 (`DataFixTypes.OPTIONS`), applied to the
 //! raw key/value strings of an `options.txt` older than the current version.
 use std::collections::HashMap;
-pub use sunrise_core::text::parse_java_integer as java_parse_int;
 use sunrise_core::java_float_parse::{parse_java_double, parse_java_float};
+pub use sunrise_core::text::parse_java_integer as java_parse_int;
 
 /// A fixer threw an exception; vanilla abandons loading the file.
 #[derive(Debug)]
@@ -125,7 +125,6 @@ const LWJGL3: &[(i32, &str)] = &[
     (21, "key.y"),
     (44, "key.z"),
 ];
-
 
 fn rename(raw: &mut Raw, from: &str, to: &str, fix: impl FnOnce(&str) -> String) {
     if let Some(old) = raw.remove(from) {

@@ -7,8 +7,8 @@ use sunrise_client_core::text::Text;
 pub use sunrise_client_core::registries::{
     CustomCompletionAction, Registries, RegistryIds, modify_custom_completions,
 };
-pub use sunrise_core::{game_mode::GameMode, text::parse_java_integer as java_parse_int};
 use sunrise_core::java_float_parse::{parse_java_double, parse_java_float};
+pub use sunrise_core::{game_mode::GameMode, text::parse_java_integer as java_parse_int};
 
 /// How much of the command line a registered custom argument takes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
