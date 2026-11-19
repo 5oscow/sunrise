@@ -23,7 +23,7 @@ impl Game<'_> {
             .map(|g| g.conn)
             .collect();
         // ServerLevel calls Entity.commonTick even for unloaded spectators,
-        // before ServerPlayer.tick (whose EntityTickEvent.Pre can cancel it).
+        // before the cancellable ServerPlayer.tick.
         for &conn in &conns {
             if self.on_server_trip(conn) {
                 continue;
@@ -136,6 +136,8 @@ impl Game<'_> {
             if let Some(host) = self.lan.as_mut() {
                 host.hub.flush_progress(conn);
             }
+            // ServerLevel.tickPassenger runs rideTick on the level path.
+            self.guest_vehicle_tick(conn);
         }
         self.native_player_tick_post_alone(&round, &mut told);
         self.native_tick_post_batch(round);

@@ -56,7 +56,7 @@ enum Event {
     EntityPre(u32),
     EntityPost(u32),
     Dig(u128, i32),
-    PlayerPre(u128, Option<i32>, Option<i32>),
+    PlayerPre(u128, &'static str, Option<i32>, Option<i32>),
     PlayerPost(u128),
 }
 
@@ -101,6 +101,7 @@ impl mod_api::Hooks for Observe {
         let entity = event.player.entity();
         self.events.lock().unwrap().push(Event::PlayerPre(
             event.player.uuid(),
+            host.dimension(),
             entity.invulnerable_time(host),
             entity.damage_cooldown_time(host),
         ));
@@ -202,11 +203,11 @@ fn player_tick_hooks_observe_advanced_dig_progress_and_skipped_body_still_ticks_
                         EntityPre(23),
                         Dig(124, 0),
                         EntityPost(21),
-                        PlayerPre(123, Some(7), Some(4)),
+                        PlayerPre(123, "minecraft:overworld", Some(7), Some(4)),
                         PlayerPost(123),
-                        PlayerPre(124, Some(7), Some(4)),
+                        PlayerPre(124, "minecraft:the_nether", Some(7), Some(4)),
                         PlayerPost(124),
-                        PlayerPre(126, Some(7), Some(5)),
+                        PlayerPre(126, "minecraft:the_nether", Some(7), Some(5)),
                         PlayerPost(126),
                     ],
                 );
