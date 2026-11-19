@@ -3317,27 +3317,41 @@ impl WorldGenerator {
             .and_then(|data| number(data.get("DataVersion")))
             .and_then(|version| i32::try_from(version).ok())
             .is_some_and(files::requires_file_fixing);
-        let settings = old
-            .then(|| files::current_world_gen_settings(world).ok().flatten())
-            .flatten()
-            .or_else(|| {
-                let mut root = read_dat(&saved_data_path(world, "world_gen_settings"))?;
+        let candidates = [
+            old.then(|| files::current_world_gen_settings(world).ok().flatten())
+                .flatten(),
+            read_dat(&saved_data_path(world, "world_gen_settings")).map(|mut root| {
                 update_saved_data(Ty::SavedWorldGenSettings, &mut root);
-                root.get("data").cloned()
-            })
-            .or_else(|| level_data?.get("WorldGenSettings").cloned());
-        let seed = settings.as_ref().and_then(|s| number(s.get("seed")));
-        let generator = settings
-            .filter(|s| {
-                seed.is_some() && s.get("dimensions").is_some_and(valid_world_gen_dimensions)
-            })
+                root.get("data")
+                    .cloned()
+                    .unwrap_or(Tag::Compound(Default::default()))
+            }),
+            level_data.and_then(|data| data.get("WorldGenSettings").cloned()),
+        ];
+        let usable = |s: &Tag| {
+            number(s.get("seed")).is_some()
+                && s.get("dimensions").is_some_and(valid_world_gen_dimensions)
+        };
+        // Old summaries may still display a seed from level.dat even if its
+        // settings are unusable. A dedicated world only uses a validated generator.
+        let displayed_seed = candidates
+            .iter()
+            .flatten()
+            .find_map(|s| number(s.get("seed")))
+            .unwrap_or(0);
+        let generator = candidates
+            .into_iter()
+            .flatten()
+            .find(usable)
             .map(|data| Self {
                 data,
                 recovered: false,
             });
-        // Old summaries may still display a seed from level.dat even if its
-        // settings are unusable. A dedicated world only uses a validated generator.
-        (generator, seed.unwrap_or(0))
+        let seed = generator
+            .as_ref()
+            .and_then(|g| number(g.data.get("seed")))
+            .unwrap_or(displayed_seed);
+        (generator, seed)
     }
 
     /// Read the prepared settings for a newly created world, which does not
@@ -9635,6 +9649,30 @@ mod tests {
         let read = world_gen_settings(&dir).expect("settings");
         assert!(read.get("dimensions").is_some());
         assert!(!world_gen_unstable(&dir));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    /// Settings that fail validation in the old layout do not hide valid saved data.
+    #[test]
+    fn invalid_projected_settings_fall_through_to_saved_data() {
+        let dir = gen_world("stem-prefix");
+        write_world_gen_settings(&dir, 7, WorldGen::default()).unwrap();
+        write_dat(
+            &dir.join("level.dat"),
+            Tag::compound([(
+                "Data",
+                Tag::compound([
+                    ("DataVersion", Tag::Int(4700)),
+                    ("WorldGenSettings", Tag::compound([("seed", Tag::Long(5))])),
+                ]),
+            )]),
+        )
+        .unwrap();
+        assert!(needs_file_fixes(&dir));
+        assert_eq!(
+            number(world_gen_settings(&dir).unwrap().get("seed")),
+            Some(7)
+        );
         let _ = fs::remove_dir_all(dir);
     }
 

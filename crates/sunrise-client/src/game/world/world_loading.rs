@@ -1408,6 +1408,14 @@ mod tests {
                         .map(|id| id.0)
                 );
 
+                // The spawn search sees the pack's flat layers before the first save.
+                game.level = prepared.level.clone();
+                game.level_shapes = prepared.shapes;
+                assert_eq!(
+                    game.spawn_origin().unwrap(),
+                    ((0, 0), prepared.world.shape.min_y + 3)
+                );
+
                 prepared.level.write_without_player(world).unwrap();
                 assert_eq!(
                     save::world_gen_settings(world).as_ref(),
