@@ -1687,10 +1687,14 @@ impl Game<'_> {
         }
         details.start("minecraft:instrument", lines.len());
         // InstrumentComponent.addToTooltip.
-        if let Some(text) = item_tooltip::instrument_line(stack, &display, |id| {
-            let key = format!("instrument.{}", id.replacen(':', ".", 1));
-            Some(translate(&key).unwrap_or(key))
-        }) {
+        if let Some(text) = item_tooltip::instrument_line(
+            stack,
+            &display,
+            Some(|id: &str| {
+                let key = format!("instrument.{}", id.replacen(':', ".", 1));
+                Some(translate(&key).unwrap_or(key))
+            }),
+        ) {
             push(&mut lines, text, gray);
         }
         details.start("minecraft:map_id", lines.len());

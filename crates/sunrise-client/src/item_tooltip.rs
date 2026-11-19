@@ -524,11 +524,13 @@ pub fn painting_lines<'a>(
 
 /// `InstrumentComponent.addToTooltip`: the instrument's description. A goat
 /// horn without the component has the item's default, the ponder horn.
+/// A caller without an instrument lookup does not include instrument details.
 pub fn instrument_line(
     stack: &ItemStack,
     display: &TooltipDisplay,
-    description: impl FnOnce(&str) -> Option<String>,
+    lookup: Option<impl FnOnce(&str) -> Option<String>>,
 ) -> Option<String> {
+    let lookup = lookup?;
     if !display.shows("minecraft:instrument") {
         return None;
     }
@@ -543,7 +545,7 @@ pub fn instrument_line(
         None if &*stack.item == "minecraft:goat_horn" => "minecraft:ponder_goat_horn".to_owned(),
         None => return None,
     };
-    description(&id)
+    lookup(&id)
 }
 
 /// `TropicalFish.COMMON_VARIANTS`: pattern, base colour and pattern colour of
@@ -1263,15 +1265,17 @@ impl<'a> TooltipHolders<'a> {
         }
     }
 
-    fn instrument_description(self, id: &str) -> Option<String> {
+    fn instrument_lookup(self) -> Option<impl FnOnce(&str) -> Option<String> + 'a> {
         let Self::Live(holders) = self else {
             return None;
         };
-        let id = sunrise_world::datafix::dynamic::namespaced(id);
-        holders
-            .instrument_descriptions
-            .get(&id)
-            .map(|description| crate::scoreboard::comp_text(description).plain())
+        Some(move |id: &str| {
+            let id = sunrise_world::datafix::dynamic::namespaced(id);
+            holders
+                .instrument_descriptions
+                .get(&id)
+                .map(|description| crate::scoreboard::comp_text(description).plain())
+        })
     }
 
     fn painting(self, id: &str) -> Option<PaintingTooltip<'a>> {
@@ -1353,11 +1357,11 @@ pub fn detail_lines(
         .into_iter()
         .map(|text| text.plain()),
     );
-    if creative {
-        lines.extend(instrument_line(stack, &display, |id| {
-            holders.instrument_description(id)
-        }));
-    }
+    lines.extend(instrument_line(
+        stack,
+        &display,
+        holders.instrument_lookup(),
+    ));
     lines.extend(bees_line(stack, &display, translate));
     lines.extend(honey_line(stack, &display, translate));
     let data = stack.data();
