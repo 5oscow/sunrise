@@ -146,10 +146,7 @@ fn actual_owner_replacement_is_stale_and_same_owner_reentry_is_busy() {
                     .crafting
                     .inventory
                     .take();
-                assert!(matches!(
-                    Target::admit(host.game, 12),
-                    Err(Admission::Busy)
-                ));
+                assert!(matches!(Target::admit(host.game, 12), Err(Admission::Busy)));
                 *host
                     .game
                     .lan
