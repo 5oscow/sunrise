@@ -659,6 +659,7 @@ pub(super) fn load_resources_for_mods(
             let ui = load_ui(resolved.source()).map(|ui| offer(ui, &root));
             (ui, core.join())
         });
+        // Core data is provisional: a selected world pack may replace an entry.
         let failure = match (ui, core) {
             (Ok(gui), Ok(Ok(core))) => break (core, gui, resolved, conditions),
             (Err(e), _) if can_rollback => e.to_string(),

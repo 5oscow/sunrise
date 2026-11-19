@@ -6343,7 +6343,8 @@ impl Game<'_> {
         self.end.set_locator(locator);
         self.share_spawn_conditions();
         self.score = Default::default();
-        let stack = self.open_world_datapacks(&level.enabled_features)?;
+        reset_world_progress(&mut self.adv, &mut self.stats);
+        self.open_world_datapacks(&level.enabled_features)?;
         let root = self.options.resources.clone();
         self.damage_tag_generation = self.damage_tag_generation.wrapping_add(1);
         // A code-mod switch can have rebuilt the root since `Game::new`.
@@ -6352,15 +6353,6 @@ impl Game<'_> {
         self.session_lock = Some(session_lock);
         self.resolve_parts()?;
         self.refresh_recipe_property_context();
-        // Keep the no-pack preload; a world's packs replace it atomically.
-        // A later /reload keeps this session's synchronized registries.
-        lan::sync::open_world_sync_data(
-            &self.options.resources,
-            &self.res.core.item_data,
-            &pack_files(&self.world_tables),
-            &self.health_resources.damage,
-        )
-        .map_err(|e| format!("world registries: {e}"))?;
         // Warm this world's pack-aware loot data before gameplay can unpack
         // a container's pending table on its first inventory access.
         self.load_server_loot();
@@ -6376,8 +6368,6 @@ impl Game<'_> {
         self.announce_data_bound(mod_api::TagsUpdateCause::ServerDataLoad { reload: false });
         self.announce_data_maps_updated(mod_api::DataMapsUpdateCause::ServerReload);
         self.sync_recipe_content();
-        reset_world_progress(&mut self.adv, &mut self.stats);
-        self.prefetch_advancement_tree(&stack);
         self.restore_player_state = true;
         self.rand_sequences = rand_sequences;
         // ServerLevel.getWorldBorder: the level in place reads its own saved
