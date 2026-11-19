@@ -1836,6 +1836,7 @@ mod tests {
             id: "ruby".into(),
             version: "1.0".into(),
             side: Side::Both,
+            runtime: None,
         }]);
         server.send(&config_payload(CHANNEL, list.clone())).unwrap();
         let configuration::Serverbound::CustomPayload(echo) = next(&mut server) else {

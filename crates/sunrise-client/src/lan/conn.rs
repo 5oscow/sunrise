@@ -1745,6 +1745,11 @@ fn mod_mismatch(difference: &sunrise_protocol::mod_list::Difference) -> crate::t
                 .append(translated(key, &[Text::literal(names.join("\n"))]));
         }
     }
+    for id in &difference.runtime {
+        text = text
+            .append("\n")
+            .append(translated("sunrise.mods.runtime", &[Text::literal(id)]));
+    }
     for changed in &difference.changed {
         text = text.append("\n").append(translated(
             "sunrise.mods.version",
@@ -2599,6 +2604,7 @@ mod tests {
                 server: "3.0".into(),
                 client: "2.9".into(),
             }],
+            runtime: vec!["baked".into()],
         };
         let reason = crate::lan::data::component_nbt(&mod_mismatch(&difference).component());
         let french = crate::lang::Language::load(&[], "fr_fr");
@@ -2608,6 +2614,7 @@ mod tests {
         assert!(text.contains("extra 2.0"));
         let vanilla = sunrise_protocol::text::plain(&reason, &Default::default());
         assert!(vanilla.starts_with("Your mods don't match"));
+        assert!(vanilla.contains("baked") && vanilla.contains("runtime files"));
         for name in &difference.missing {
             assert!(text.contains(name));
             assert!(vanilla.contains(name));
@@ -2791,6 +2798,7 @@ mod tests {
                     id: "shared_extra".into(),
                     version: "2.0".into(),
                     side: Side::Both,
+                    runtime: None,
                 }]),
             })
             .encode(),
