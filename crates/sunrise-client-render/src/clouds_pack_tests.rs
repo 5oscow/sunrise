@@ -5,13 +5,19 @@
 use super::pack::{faces, faces_key, info};
 use super::*;
 
-/// The input over a `texture`, the camera at block x 0, z -3.96 (cell 0, 0 at time 0) and
+/// The input over a `texture`, the camera at the corner of cell 0, 0 (at time 0) and
 /// `above` the clouds' bottom.
 fn input(texture: &(u32, u32, Vec<bool>), above: f64, range: i32, fast: bool) -> Input<'_> {
     Input {
         texture,
         uv: [0.0; 2],
-        camera: glam::DVec3::new(0.0, CLOUD_HEIGHT + above, -3.96),
+        // Vanilla's height is a float, and it adds 3.9600000381469727 to z: the camera at x 0,
+        // z -3.9600000381469727 sits at the corner of cell 0, 0, `above` the layer's bottom.
+        camera: glam::DVec3::new(
+            0.0,
+            f64::from(CLOUD_HEIGHT as f32) + above,
+            -3.960_000_038_146_972_7,
+        ),
         time: 0,
         partial_tick: 0.0,
         range,
@@ -94,27 +100,78 @@ fn faces_wrap_the_texture_as_vanilla_does() {
     assert_eq!(faces(&input(&texture, -5.0, 3, false)), expected);
 }
 
-/// A tall texture (2 by 4), cells 1, 0 and 0, 1 and 0, 2 filled: cell 1, 0's east neighbour
-/// wraps by the height to column 2, and cell 0, 2's west one to column 3, both past the image.
-/// Vanilla's `getPixel` throws there (the texture never loads); here they count as empty, so
-/// each cell gets that face (1, 0's east face is -1, 0, -123), and nothing reads past the row:
-/// read as the next row's cell, 1, 0's east neighbour would be 0, 1, filled, and take the face
-/// away. Faces from the Python transcription with that one rule.
+/// The textures vanilla 26.3 reads past, as its own load reported them (the bench mod's hook
+/// loading each through `CloudRenderer.prepare`, `.local/clouddump`): a tall texture with a
+/// filled cell in its first column throws `(5, 2) outside of image bounds (4, 6)`, one in its
+/// last column `(4, 4) outside of image bounds (4, 6)`; a tall one with filled cells inside
+/// only, a square one with them at both edges, and a wide one load.
 #[test]
-fn a_tall_textures_neighbours_past_the_image_count_as_empty() {
-    let mut filled = vec![false; 8];
-    filled[1] = true;
-    filled[2] = true;
-    filled[4] = true;
-    let texture = (2, 4, filled);
-    #[rustfmt::skip]
-    let expected = [
-        -1, 0, -128, -1, 0, -123, -1, 0, -112, -1, 0, -111, -1, 0, -110, -1, 0, -109, -1, 0,
-        -108, -1, 0, -107, 0, 0, 64, 0, 0, 66, 0, 0, 80, 0, 0, 81, 0, 0, 82, 0, 0, 83, 0, 0, 84,
-        0, 0, 85, 0, 0, -128, 0, 0, -124, 0, 0, -112, 0, 0, -111, 0, 0, -110, 0, 0, -109, 0, 0,
-        -108, 0, 0, -107, 0, -1, 0, 0, -1, 3, 0, 1, 0,
-    ];
-    assert_eq!(faces(&input(&texture, -5.0, 1, false)), expected);
+fn a_texture_vanilla_reads_past_is_named_by_the_pixel_it_asks_for() {
+    let texture = |w: u32, h: u32, cells: &[[u32; 2]]| {
+        let mut filled = vec![false; (w * h) as usize];
+        for [x, y] in cells {
+            filled[(y * w + x) as usize] = true;
+        }
+        (w, h, filled)
+    };
+    let tall_edge = outside_image(&texture(4, 6, &[[0, 2], [2, 1]]));
+    assert_eq!(
+        tall_edge.map(|p| p.to_string()).as_deref(),
+        Some("(5, 2) outside of image bounds (4, 6)")
+    );
+    let tall_last = outside_image(&texture(4, 6, &[[3, 4]]));
+    assert_eq!(
+        tall_last.map(|p| p.to_string()).as_deref(),
+        Some("(4, 4) outside of image bounds (4, 6)")
+    );
+    for (name, w, h, cells) in JAVA_TEXTURES {
+        assert_eq!(outside_image(&texture(*w, *h, cells)), None, "{name}");
+    }
+}
+
+/// A pack's tall cloud texture vanilla refuses is not used: the game's own clouds are, as when
+/// vanilla's reload fails and drops the packs. One it accepts is the pack's.
+#[test]
+fn a_refused_cloud_texture_leaves_the_games_own() {
+    use crate::resource_source::{Resource, ResourceSource};
+    let png = |w: u32, h: u32, cells: &[[u32; 2]]| {
+        let mut rgba = vec![0u8; (w * h * 4) as usize];
+        for [x, y] in cells {
+            rgba[((y * w + x) * 4 + 3) as usize] = 255;
+        }
+        let mut out = Vec::new();
+        let mut encoder = png::Encoder::new(&mut out, w, h);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder
+            .write_header()
+            .unwrap()
+            .write_image_data(&rgba)
+            .unwrap();
+        out
+    };
+    let source = |bytes: Vec<u8>| {
+        ResourceSource::indexed(
+            [(
+                "assets/minecraft/textures/environment/clouds.png".to_owned(),
+                Resource::bytes(bytes),
+            )]
+            .into_iter()
+            .collect(),
+        )
+    };
+    let game = source(png(2, 2, &[[0, 0]]));
+    let refused = source(png(4, 6, &[[0, 2]]));
+    assert_eq!(
+        load(&refused, &game),
+        (2, 2, vec![true, false, false, false])
+    );
+    let accepted = source(png(4, 6, &[[1, 0]]));
+    let (w, h, filled) = load(&accepted, &game);
+    assert_eq!(
+        (w, h, filled.iter().filter(|f| **f).count(), filled[1]),
+        (4, 6, 1, true)
+    );
 }
 
 /// Faces kept while `faces_key` holds are the ones built afresh: along a path through cells and
@@ -152,4 +209,231 @@ fn the_faces_key_holds_only_while_the_faces_do() {
         kept_frames > 300 && rebuilt > 10,
         "{kept_frames} kept, {rebuilt} rebuilt"
     );
+}
+
+// ---- Java 26.3's own output -----------------------------------------------------------------
+
+/// Cloud textures `CloudRenderer.prepare` loaded in vanilla 26.3 (`name`, width, height, filled
+/// cells; the rest clear).
+const JAVA_TEXTURES: &[(&str, u32, u32, &[[u32; 2]])] = &[
+    (
+        "wide",
+        6,
+        4,
+        &[[1, 0], [2, 0], [5, 1], [0, 2], [3, 3], [4, 3]],
+    ),
+    ("tall_inner", 4, 6, &[[1, 0], [2, 1], [1, 3], [2, 5]]),
+    ("square_edge", 4, 4, &[[0, 1], [3, 2]]),
+];
+
+/// Frames `CloudRenderer.prepare` took in vanilla 26.3: the ARGB colour, fancy, the camera, the
+/// game time and the partial tick, at the overworld's cloud height (192.33) and range.
+const JAVA_FRAMES: &[(u32, bool, i32, [f64; 3], i64, f32)] = &[
+    (0xFFFF_FFFF, true, 1, [37.25, 200.5, -5.5], 12345, 0.37),
+    (0x00FF_0001, false, 1, [-3.75, 194.0, 30.125], 0, 0.0),
+    (0xFE7F_80FF, true, 2, [0.5, 150.25, 0.5], 999_999, 0.99),
+    (0x0180_7F00, true, 1, [11.999, 196.33, 23.5], 400, 0.5),
+];
+
+struct Case {
+    texture: &'static str,
+    frame: usize,
+    /// `CloudInfo`'s 44 bytes as prepare wrote them (none: it built no face and wrote none).
+    info: Option<&'static [u8]>,
+    /// The bytes buildMesh put in the faces buffer.
+    faces: &'static [u8],
+}
+
+/// What a temporary hook in the bench mod read of vanilla 26.3 (`.local/clouddump`): for each
+/// texture and frame, the faces buildMesh encoded into the buffer prepare gave it, and the
+/// CloudInfo bytes prepare wrote with Std140Builder.
+const JAVA: &[Case] = &[
+    Case {
+        texture: "square_edge",
+        frame: 0,
+        info: None,
+        faces: &[],
+    },
+    Case {
+        texture: "square_edge",
+        frame: 1,
+        info: Some(&[
+            0, 0, 128, 63, 0, 0, 0, 0, 129, 128, 128, 59, 0, 0, 0, 0, 0, 0, 4, 193, 128, 194, 213,
+            191, 41, 92, 33, 193, 0, 0, 0, 0, 0, 0, 64, 65, 0, 0, 128, 64, 0, 0, 64, 65,
+        ]),
+        faces: &[0, 0, 32, 0, 255, 224],
+    },
+    Case {
+        texture: "square_edge",
+        frame: 2,
+        info: Some(&[
+            255, 254, 254, 62, 129, 128, 0, 63, 0, 0, 128, 63, 255, 254, 126, 63, 0, 217, 255, 190,
+            236, 81, 40, 66, 82, 184, 142, 192, 0, 0, 0, 0, 0, 0, 64, 65, 0, 0, 128, 64, 0, 0, 64,
+            65,
+        ]),
+        faces: &[
+            0, 0, 64, 0, 0, 66, 0, 0, 80, 0, 0, 81, 0, 0, 82, 0, 0, 83, 0, 0, 84, 0, 0, 85, 255,
+            255, 128, 255, 255, 131, 255, 255, 133, 255, 1, 128, 255, 1, 130, 255, 1, 133, 0, 254,
+            64, 0, 254, 67,
+        ],
+    },
+    Case {
+        texture: "square_edge",
+        frame: 3,
+        info: Some(&[
+            129, 128, 0, 63, 255, 254, 254, 62, 0, 0, 0, 0, 129, 128, 128, 59, 178, 97, 101, 188,
+            248, 255, 127, 192, 164, 112, 93, 192, 0, 0, 0, 0, 0, 0, 64, 65, 0, 0, 128, 64, 0, 0,
+            64, 65,
+        ]),
+        faces: &[
+            0, 0, 129, 0, 0, 128, 0, 0, 132, 0, 0, 144, 0, 0, 145, 0, 0, 146, 0, 0, 147, 0, 0, 148,
+            0, 0, 149,
+        ],
+    },
+    Case {
+        texture: "tall_inner",
+        frame: 0,
+        info: Some(&[
+            0, 0, 128, 63, 0, 0, 128, 63, 0, 0, 128, 63, 0, 0, 128, 63, 20, 199, 57, 193, 80, 184,
+            2, 193, 41, 92, 39, 193, 0, 0, 0, 0, 0, 0, 64, 65, 0, 0, 128, 64, 0, 0, 64, 65,
+        ]),
+        faces: &[
+            0, 0, 65, 0, 0, 66, 0, 0, 80, 0, 0, 81, 0, 0, 82, 0, 0, 83, 0, 0, 84, 0, 0, 85, 0, 0,
+            129, 0, 0, 132, 0, 0, 144, 0, 0, 145, 0, 0, 146, 0, 0, 147, 0, 0, 148, 0, 0, 149, 0,
+            255, 1, 0, 255, 3,
+        ],
+    },
+    Case {
+        texture: "tall_inner",
+        frame: 1,
+        info: Some(&[
+            0, 0, 128, 63, 0, 0, 0, 0, 129, 128, 128, 59, 0, 0, 0, 0, 0, 0, 4, 193, 128, 194, 213,
+            191, 41, 92, 33, 193, 0, 0, 0, 0, 0, 0, 64, 65, 0, 0, 128, 64, 0, 0, 64, 65,
+        ]),
+        faces: &[255, 255, 224],
+    },
+    Case {
+        texture: "tall_inner",
+        frame: 2,
+        info: Some(&[
+            255, 254, 254, 62, 129, 128, 0, 63, 0, 0, 128, 63, 255, 254, 126, 63, 0, 217, 255, 190,
+            236, 81, 40, 66, 82, 184, 142, 192, 0, 0, 0, 0, 0, 0, 64, 65, 0, 0, 128, 64, 0, 0, 64,
+            65,
+        ]),
+        faces: &[
+            0, 0, 128, 0, 0, 132, 0, 0, 144, 0, 0, 145, 0, 0, 146, 0, 0, 147, 0, 0, 148, 0, 0, 149,
+            254, 0, 128, 254, 0, 133, 255, 255, 64, 255, 255, 67, 255, 255, 69, 255, 0, 64, 255, 0,
+            66, 255, 0, 69, 1, 255, 64, 1, 255, 67, 1, 255, 68, 1, 0, 64, 1, 0, 66, 1, 0, 68,
+        ],
+    },
+    Case {
+        texture: "tall_inner",
+        frame: 3,
+        info: Some(&[
+            129, 128, 0, 63, 255, 254, 254, 62, 0, 0, 0, 0, 129, 128, 128, 59, 178, 97, 101, 188,
+            248, 255, 127, 192, 164, 112, 93, 192, 0, 0, 0, 0, 0, 0, 64, 65, 0, 0, 128, 64, 0, 0,
+            64, 65,
+        ]),
+        faces: &[
+            0, 255, 65, 0, 255, 64, 0, 255, 67, 0, 255, 80, 0, 255, 81, 0, 255, 82, 0, 255, 83, 0,
+            255, 84, 0, 255, 85, 255, 0, 193, 255, 0, 192, 255, 0, 194, 255, 0, 197, 255, 0, 208,
+            255, 0, 209, 255, 0, 210, 255, 0, 211, 255, 0, 212, 255, 0, 213,
+        ],
+    },
+    Case {
+        texture: "wide",
+        frame: 0,
+        info: Some(&[
+            0, 0, 128, 63, 0, 0, 128, 63, 0, 0, 128, 63, 0, 0, 128, 63, 17, 199, 57, 193, 80, 184,
+            2, 193, 41, 92, 39, 193, 0, 0, 0, 0, 0, 0, 64, 65, 0, 0, 128, 64, 0, 0, 64, 65,
+        ]),
+        faces: &[
+            0, 0, 1, 0, 0, 16, 0, 0, 17, 0, 0, 18, 0, 0, 19, 0, 0, 20, 0, 0, 21, 0, 0, 129, 0, 0,
+            144, 0, 0, 145, 0, 0, 146, 0, 0, 147, 0, 0, 148, 0, 0, 149, 255, 0, 193, 255, 0, 194,
+            255, 0, 197, 255, 0, 208, 255, 0, 209, 255, 0, 210, 255, 0, 211, 255, 0, 212, 255, 0,
+            213,
+        ],
+    },
+    Case {
+        texture: "wide",
+        frame: 1,
+        info: Some(&[
+            0, 0, 128, 63, 0, 0, 0, 0, 129, 128, 128, 59, 0, 0, 0, 0, 0, 0, 4, 193, 128, 194, 213,
+            191, 41, 92, 33, 193, 0, 0, 0, 0, 0, 0, 64, 65, 0, 0, 128, 64, 0, 0, 64, 65,
+        ]),
+        faces: &[0, 255, 96, 0, 0, 160, 255, 0, 224],
+    },
+    Case {
+        texture: "wide",
+        frame: 2,
+        info: Some(&[
+            255, 254, 254, 62, 129, 128, 0, 63, 0, 0, 128, 63, 255, 254, 126, 63, 0, 217, 255, 190,
+            236, 81, 40, 66, 82, 184, 142, 192, 0, 0, 0, 0, 0, 0, 64, 65, 0, 0, 128, 64, 0, 0, 64,
+            65,
+        ]),
+        faces: &[
+            0, 255, 64, 0, 255, 67, 0, 255, 80, 0, 255, 81, 0, 255, 82, 0, 255, 83, 0, 255, 84, 0,
+            255, 85, 255, 0, 0, 255, 0, 5, 255, 255, 192, 255, 255, 195, 255, 255, 197, 255, 255,
+            208, 255, 255, 209, 255, 255, 210, 255, 255, 211, 255, 255, 212, 255, 255, 213, 0, 0,
+            192, 0, 0, 194, 0, 0, 196, 0, 0, 208, 0, 0, 209, 0, 0, 210, 0, 0, 211, 0, 0, 212, 0, 0,
+            213, 254, 0, 128, 0, 1, 64, 0, 1, 66, 1, 0, 128, 1, 0, 132, 1, 255, 0, 1, 255, 3, 1,
+            255, 4, 1, 1, 0, 1, 1, 2, 1, 1, 4,
+        ],
+    },
+    Case {
+        texture: "wide",
+        frame: 3,
+        info: Some(&[
+            129, 128, 0, 63, 255, 254, 254, 62, 0, 0, 0, 0, 129, 128, 128, 59, 178, 97, 101, 188,
+            248, 255, 127, 192, 164, 112, 93, 192, 0, 0, 0, 0, 0, 0, 64, 65, 0, 0, 128, 64, 0, 0,
+            64, 65,
+        ]),
+        faces: &[
+            255, 0, 1, 255, 0, 0, 255, 0, 5, 0, 255, 1, 0, 255, 0, 0, 255, 3, 0, 1, 1, 0, 1, 0, 0,
+            1, 2, 0, 0, 193, 0, 0, 192, 0, 0, 194, 0, 0, 196, 0, 0, 208, 0, 0, 209, 0, 0, 210, 0,
+            0, 211, 0, 0, 212, 0, 0, 213,
+        ],
+    },
+];
+
+/// The input a frame gives Sunrise: the ARGB colour as `environment` gives it (each channel over
+/// 255).
+fn java_input<'a>(texture: &'a (u32, u32, Vec<bool>), frame: usize) -> Input<'a> {
+    let (argb, fancy, range, camera, time, partial) = JAVA_FRAMES[frame];
+    let channel = |shift: u32| ((argb >> shift) & 0xFF) as f32 / 255.0;
+    Input {
+        texture,
+        uv: [0.0; 2],
+        camera: glam::DVec3::from_array(camera),
+        time,
+        partial_tick: f64::from(partial),
+        range,
+        fast: !fancy,
+        color: [channel(16), channel(8), channel(0), channel(24)],
+    }
+}
+
+/// Sunrise's faces and CloudInfo are vanilla 26.3's, byte for byte, for the same textures and
+/// frames: cloud drift, the camera's cell and place in it, the side of the layer, the colour's
+/// channels at their ends (0, 1, 127, 128, 254, 255), fast and fancy clouds.
+#[test]
+fn faces_and_cloud_info_are_vanillas_byte_for_byte() {
+    for case in JAVA {
+        let (_, w, h, cells) = JAVA_TEXTURES
+            .iter()
+            .find(|(name, ..)| *name == case.texture)
+            .expect("a texture");
+        let mut filled = vec![false; (*w * *h) as usize];
+        for [x, y] in *cells {
+            filled[(y * w + x) as usize] = true;
+        }
+        let texture = (*w, *h, filled);
+        let input = java_input(&texture, case.frame);
+        let what = format!("{} frame {}", case.texture, case.frame);
+        let got: Vec<u8> = faces(&input).iter().map(|&b| b as i8 as u8).collect();
+        assert_eq!(got, case.faces, "{what}: faces");
+        if let Some(java) = case.info {
+            assert_eq!(&info(&input)[..44], java, "{what}: CloudInfo");
+        }
+    }
 }

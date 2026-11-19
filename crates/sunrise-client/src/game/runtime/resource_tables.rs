@@ -313,7 +313,12 @@ impl PackResources {
         let (names, clouds, forcefield, custom_sky, environments, polytone_particles) =
             std::thread::scope(|scope| {
                 let names = named_scope(scope, "pack.names", || Names::load(root.source()));
-                let clouds = named_scope(scope, "pack.clouds", || load_clouds(root.source()));
+                let clouds = named_scope(scope, "pack.clouds", || {
+                    let game = sunrise_assets::resource_source::ResourceSource::directory(
+                        root.prepared().to_path_buf(),
+                    );
+                    sunrise_client::clouds::load(root.source(), &game)
+                });
                 let forcefield =
                     named_scope(scope, "pack.forcefield", || load_forcefield(root.source()));
                 let custom_sky = named_scope(scope, "pack.custom_sky", || {

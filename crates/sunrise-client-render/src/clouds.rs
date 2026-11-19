@@ -179,15 +179,20 @@ impl Input<'_> {
     /// pack's `core/clouds` shader reads).
     fn state(&self, snap: i64) -> (MeshKey, Uniform) {
         let (w, h, _) = self.texture;
-        let offset = drift(self.time, self.partial_tick, *w);
-        let mut x = self.camera.x + offset * 0.030_000_001;
-        let mut z = self.camera.z + 3.96;
+        // CloudRenderer.prepare's float arithmetic: the drift in ticks is a float (the game time's
+        // remainder plus the partial tick), times the float speed, then widened.
+        let offset = (self.time % (i64::from(*w) * 400)) as f32 + self.partial_tick as f32;
+        let mut x = self.camera.x + f64::from(offset * 0.030_000_001_f32);
+        // Vanilla adds 3.96 as a double literal written from the float: 3.9600000381469727.
+        let mut z = self.camera.z + 3.960_000_038_146_972_7;
         let (tw, th) = (f64::from(*w) * 12.0, f64::from(*h) * 12.0);
         x -= (x / tw).floor() * tw;
         z -= (z / th).floor() * th;
         let cell_x = (x / 12.0).floor() as i64 / snap * snap;
         let cell_z = (z / 12.0).floor() as i64 / snap * snap;
-        let bottom = (CLOUD_HEIGHT - self.camera.y) as f32;
+        // `prepare`'s bottomY is a float (the cloud height attribute's), widened to subtract
+        // the camera's double y, then narrowed again.
+        let bottom = (f64::from(CLOUD_HEIGHT as f32) - self.camera.y) as f32;
         // The inward faces of the 3x3 cells around the camera are only seen from inside the
         // layer; outside it they are back-facing, so the mesh need not follow the camera there.
         let inside_layer = bottom <= 0.0 && bottom + 4.0 >= 0.0;
@@ -409,6 +414,93 @@ impl Mesh {
     }
 }
 
+/// The cloud texture's pixel vanilla 26.3's `CloudRenderer.prepare` asks for outside the image
+/// (`NativeImage.getPixel`'s message: `(x, y) outside of image bounds (width, height)`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OutsideImage {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl std::fmt::Display for OutsideImage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self {
+            x,
+            y,
+            width,
+            height,
+        } = self;
+        write!(f, "({x}, {y}) outside of image bounds ({width}, {height})")
+    }
+}
+
+/// Where `CloudRenderer.prepare` would read past a cloud texture: it packs each filled cell's
+/// north, east, south and west neighbours, rows first, and wraps east and west by the texture's
+/// *height*. A texture no wider than tall is read inside; one taller than wide is read outside
+/// for a filled cell in its first column (west) or its last (east), and vanilla's `getPixel`
+/// throws there: the reload fails and every selected pack is dropped. The first such pixel, as
+/// vanilla meets it, or none.
+pub fn outside_image(texture: &(u32, u32, Vec<bool>)) -> Option<OutsideImage> {
+    let (w, h, filled) = texture;
+    let (wi, hi) = (*w as i32, *h as i32);
+    for y in 0..hi {
+        for x in 0..wi {
+            if !filled[(y * wi + x) as usize] {
+                continue;
+            }
+            for nx in [(x + 1).rem_euclid(hi), (x - 1).rem_euclid(hi)] {
+                if nx >= wi {
+                    return Some(OutsideImage {
+                        x: nx,
+                        y,
+                        width: *w,
+                        height: *h,
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+/// The cloud texture (`textures/environment/clouds.png`) as filled cells (alpha 10 or more,
+/// `CloudRenderer.isCellEmpty`), from the selected packs' `root`. One vanilla would read past
+/// ([`outside_image`]) is refused, named, and the game's own (`game`) is used: in vanilla the
+/// reload fails, every selected pack is dropped, and the game's clouds draw.
+pub fn load(
+    root: &crate::resource_source::ResourceSource,
+    game: &crate::resource_source::ResourceSource,
+) -> (u32, u32, Vec<bool>) {
+    const PATH: &str = "assets/minecraft/textures/environment/clouds.png";
+    let decode = |source: &crate::resource_source::ResourceSource| {
+        source
+            .read(PATH)
+            .map_err(Into::into)
+            .and_then(|bytes| crate::hud::decode_bytes(&bytes))
+            .map(|(w, h, px)| {
+                (
+                    w,
+                    h,
+                    px.as_chunks::<4>().0.iter().map(|p| p[3] >= 10).collect(),
+                )
+            })
+            .unwrap_or((1, 1, vec![false]))
+    };
+    let texture = decode(root);
+    match outside_image(&texture) {
+        None => texture,
+        Some(pixel) => {
+            log::warn!(
+                "{PATH} is not used: the clouds would read {pixel}, which vanilla 26.3 refuses \
+                 (dropping the selected packs); the game's own clouds draw"
+            );
+            decode(game)
+        }
+    }
+}
+
 /// What a pack's `core/clouds` shader reads (`CloudRenderer.prepare` and `buildMesh`): the faces
 /// it reads from `CloudFaces` and its `CloudInfo` block.
 pub mod pack {
@@ -462,8 +554,7 @@ pub mod pack {
         let (key, uniform) = input.state(1);
         let (w, h, filled) = input.texture;
         let (w, h) = (*w as i32, *h as i32);
-        // A neighbour outside the image counts as empty (see below).
-        let empty = |x: i32, y: i32| x >= w || !filled[(y * w + x) as usize];
+        let empty = |x: i32, y: i32| !filled[(y * w + x) as usize];
         // RelativeCameraPos: above the layer's top, below its bottom, or inside it.
         let bottom = uniform.offset[1];
         let above = bottom + 4.0 < 0.0;
@@ -488,10 +579,8 @@ pub mod pack {
                 return;
             }
             // The neighbours `CloudRenderer.prepare` packs into a cell, east and west wrapping
-            // by the texture's height as vanilla's do. On a tall texture (taller than wide) that
-            // can name a column past the image for a cell in the first or last column: vanilla's
-            // `NativeImage.getPixel` throws there, so the texture never loads and the reload
-            // fails; here that neighbour counts as empty, and every other cell is vanilla's.
+            // by the texture's height as vanilla's do; a texture where that leaves the image is
+            // refused at load ([`super::outside_image`]).
             let north = empty(ix, (iy - 1).rem_euclid(h));
             let east = empty((ix + 1).rem_euclid(h), iy);
             let south = empty(ix, (iy + 1).rem_euclid(h));
@@ -563,7 +652,10 @@ mod tests {
             assert!(!rebuilt);
             assert_eq!(mesh.vertices.as_ptr(), pointer);
             assert_eq!(bytemuck::cast_slice::<_, u8>(&mesh.vertices), vertices);
-            assert_eq!(uniform.offset[1], (192.33 - input.camera.y) as f32);
+            assert_eq!(
+                uniform.offset[1],
+                (f64::from(192.33f32) - input.camera.y) as f32
+            );
             assert_eq!(
                 uniform.colors[1],
                 [0.8 * 0.7, 0.7 * 0.7, 0.6 * 0.7, 0.5].map(|v| (v * 255.0) as u8 as f32 / 255.0)
@@ -578,7 +670,8 @@ mod tests {
         for (x, y, z, range, fast) in [
             (far_cell, 101.0, 1.0, 2, false),
             (far_cell, 101.0, -5.0, 2, false),
-            (far_cell, 192.33, -5.0, 2, false),
+            // Level with the clouds' bottom, the float height vanilla subtracts from.
+            (far_cell, f64::from(192.33f32), -5.0, 2, false),
             (far_cell, 196.34, -5.0, 2, false),
             (far_cell, 196.34, -5.0, 3, false),
             (far_cell, 196.34, -5.0, 3, true),
