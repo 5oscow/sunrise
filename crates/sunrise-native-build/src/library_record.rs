@@ -22,7 +22,12 @@ pub fn stamp(path: &Path, build: &str, id: &str, version: &str, patch: bool) -> 
         sha256: String::new(),
         kind: if patch { "patch" } else { "mod" }.into(),
         mod_id: id.into(),
-        identity: format!("{build} {id} {version} {}", crate::rust::VERSION),
+        // A mod library also names its panic strategy; the loader refuses `abort` by name.
+        identity: format!(
+            "{build} {id} {version} {}{}",
+            crate::rust::VERSION,
+            if patch { "" } else { " unwind" }
+        ),
     };
     fs::write(
         path.with_extension("identity.json"),
@@ -143,7 +148,7 @@ mod tests {
         assert_eq!(json[2]["kind"], "patch");
         assert_eq!(
             rows[0].identity,
-            format!("build dependency 1 {}", crate::rust::VERSION)
+            format!("build dependency 1 {} unwind", crate::rust::VERSION)
         );
     }
 }
