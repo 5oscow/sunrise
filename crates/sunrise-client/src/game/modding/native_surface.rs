@@ -401,7 +401,7 @@ mod tests {
             false,
             step,
             &game.loop_context,
-            &*game,
+            game,
         ));
         let mut orb = ExperienceOrb::new(9, at, Vec3::new(0.2, 0.0, 0.0), 1);
         orb.on_ground = true;
@@ -415,7 +415,7 @@ mod tests {
             None,
             &game.motion.fluids,
             &game.loop_context,
-            &*game,
+            game,
             &mut |_, _| {},
             &[],
         );
@@ -494,7 +494,7 @@ mod tests {
                         None,
                         &[],
                         &game.loop_context,
-                        &*game,
+                        game,
                     )
                     .unwrap();
                 stand.tick_settle(StandMedium::Air, step);

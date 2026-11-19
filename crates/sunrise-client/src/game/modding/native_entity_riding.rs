@@ -490,16 +490,15 @@ impl Game<'_> {
             return Err(StartRidingRefusal::Canceled);
         }
         self.native_riding_preconditions(rider, vehicle, force, onto_player)?;
-        if previous_vehicle.is_some() {
+        if let Some(previous) = previous_vehicle {
             match rider {
                 Target::Player => self.stop_riding(),
                 Target::Mob(id) => {
-                    if previous_vehicle.is_some_and(|v| {
-                        self.persist.mount_notifications.contains(&(id, v, false))
-                            && self.persist.removals.iter().any(|target| {
-                                matches!(*target, Target::Boat(n) | Target::Cart(n) if n == v)
-                            })
-                    }) {
+                    if self.persist.mount_notifications.contains(&(id, previous, false))
+                        && self.persist.removals.iter().any(|target| {
+                            matches!(*target, Target::Boat(n) | Target::Cart(n) if n == previous)
+                        })
+                    {
                         // This explicit callback mutation completes the in-flight edge,
                         // rather than recursively notifying it a second time.
                         self.dismount_mob_reentrant(id);
@@ -507,7 +506,7 @@ impl Game<'_> {
                         self.dismount_mob(id);
                     }
                 }
-                Target::General(id) => self.dismount_general(id, previous_vehicle.unwrap()),
+                Target::General(id) => self.dismount_general(id, previous),
                 _ => return Err(StartRidingRefusal::UnsupportedRider),
             }
             if self.native_vehicle_id(rider).is_some() {
