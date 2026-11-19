@@ -2,6 +2,26 @@
 //! submitted, keeping offscreen frames at most two ahead of the GPU, and a screenshot's copy.
 
 use super::{Renderer, ScreenshotRequest, copy_frame, submit};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// `Device::poll`, unless the device is lost (`lost`, set by its loss callback). wgpu has no
+/// error result for a poll that finds the device lost (it panics), so that panic is contained;
+/// the callback has set `lost` by then. Any other panic goes on.
+pub(super) fn poll_live(
+    device: &wgpu::Device,
+    lost: &AtomicBool,
+    poll: wgpu::PollType,
+) -> Result<(), String> {
+    const LOST: &str = "the graphics device was lost";
+    if lost.load(Ordering::Relaxed) {
+        return Err(LOST.into());
+    }
+    match crate::crash::contain(|| device.poll(poll)) {
+        Ok(polled) => polled.map(|_| ()).map_err(|e| e.to_string()),
+        Err(_) if lost.load(Ordering::Relaxed) => Err(LOST.into()),
+        Err(message) => panic!("{message}"),
+    }
+}
 
 impl Renderer {
     /// The frame's readbacks to start right after its submission (on the submit thread when
@@ -35,7 +55,8 @@ impl Renderer {
     }
     /// Take in the frame the submit thread submitted: start its readbacks and, offscreen,
     /// keep at most two frames ahead of the GPU, as a frame submitted in place does. Nothing
-    /// more once the device is lost: that submission is often where the loss shows.
+    /// more once the device is lost: that submission is often where the loss shows. The
+    /// readbacks come back through the next frame's poll (`draw_frame`).
     pub(super) fn land_frame(&mut self) {
         let Some(offscreen) = self.deferred.take() else {
             return;
@@ -46,11 +67,6 @@ impl Renderer {
         }
         if let Some(timer) = &mut self.gpu_timer {
             timer.submitted(&self.queue);
-        }
-        if self.poll_live(wgpu::PollType::Poll)
-            && let Some(timer) = &mut self.gpu_timer
-        {
-            timer.collect(&mut self.gpu_times);
         }
         if let Some(Some(timer)) = Self::pass_timer(&mut self.pack_post, &mut self.native) {
             timer.submitted(&self.queue);
@@ -76,23 +92,15 @@ impl Renderer {
     pub(super) fn wait_frames(&mut self) {
         while self.in_flight.len() > 2 {
             let index = self.in_flight.pop_front();
-            self.poll_live(wgpu::PollType::Wait {
-                submission_index: index,
-                timeout: Some(std::time::Duration::from_secs(5)),
-            });
-        }
-    }
-    /// `Device::poll`, unless the device is lost: whether it succeeded. wgpu has no error
-    /// result for a poll that finds the device lost (it panics), so that panic is contained;
-    /// the loss callback has set `device_lost` by then, and the frame is dropped.
-    pub(super) fn poll_live(&self, poll: wgpu::PollType) -> bool {
-        if self.device_lost() {
-            return false;
-        }
-        match crate::crash::contain(|| self.device.poll(poll)) {
-            Ok(polled) => polled.is_ok(),
-            Err(_) if self.device_lost() => false,
-            Err(message) => panic!("{message}"),
+            // A frame that doesn't finish in time, or a lost device, isn't waited for again.
+            let _ = poll_live(
+                &self.device,
+                &self.device_lost,
+                wgpu::PollType::Wait {
+                    submission_index: index,
+                    timeout: Some(std::time::Duration::from_secs(5)),
+                },
+            );
         }
     }
     /// Take a screenshot request: queue the frame's copy, or report why the

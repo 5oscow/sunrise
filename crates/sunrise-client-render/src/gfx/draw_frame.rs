@@ -29,10 +29,20 @@ impl Renderer {
         let mut laps = crate::spans::laps();
         let landing = Instant::now();
         self.land_frame();
-        // The previous frame's submission found the device lost: this frame touches the
-        // device no more and holds no surface texture; `render` leaves recovery to its caller.
+        // The frame's one poll takes in what earlier frames read back (GPU times, GPU
+        // culling's statistics, occlusion results, a shader pack's centre depth); their
+        // collectors don't poll. It, or the previous frame's submission, is often where a
+        // device loss shows: this frame then touches the device no more and holds no surface
+        // texture, and `render` leaves recovery to its caller.
+        let polled =
+            super::in_flight::poll_live(&self.device, &self.device_lost, wgpu::PollType::Poll);
         if self.device_lost() {
             return Err("the graphics device was lost".into());
+        }
+        if polled.is_ok()
+            && let Some(timer) = &mut self.gpu_timer
+        {
+            timer.collect(&mut self.gpu_times);
         }
         // Waiting for the previous frame (offscreen: at most two on the GPU), not work.
         let landed = landing.elapsed();
@@ -458,7 +468,7 @@ impl Renderer {
         let serial = self.frame_serial;
         // GPU frames' statistics come back a frame or a few later (`GpuCulling::collect`).
         if let Some(gpu) = &mut self.gpu_culling
-            && let Some((frame, stats)) = gpu.collect(&self.device)
+            && let Some((frame, stats)) = gpu.collect()
         {
             self.show_stats(frame, stats);
         }
@@ -756,7 +766,7 @@ impl Renderer {
                     && !gpu_frame
                     && visible.len() >= c.min_sections
             })
-            .and_then(|cull| cull.begin(&self.device).then_some(cull));
+            .and_then(|cull| cull.begin().then_some(cull));
         self.phase2_draws.clear();
         self.phase2_pages.clear();
         self.solid_runs.clear();

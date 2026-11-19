@@ -171,11 +171,6 @@ impl Renderer {
         if let Some(timer) = &mut self.gpu_timer {
             timer.submitted(&self.queue);
         }
-        if self.poll_live(wgpu::PollType::Poll)
-            && let Some(timer) = &mut self.gpu_timer
-        {
-            timer.collect(&mut self.gpu_times);
-        }
         if let Some(Some(timer)) = Self::pass_timer(&mut self.pack_post, &mut self.native) {
             timer.submitted(&self.queue);
         }
@@ -186,6 +181,11 @@ impl Renderer {
             && let Some(read) = post.submitted()
         {
             read();
+        }
+        // A loss found since the frame began (by its submission, or another thread's poll):
+        // no screenshot wait and no present on the lost device.
+        if self.device_lost() {
+            return Err("the graphics device was lost".into());
         }
         let failed = checks.and_then(GpuChecks::pop);
         if let Some((request, buffer)) = readback {
@@ -202,6 +202,7 @@ impl Renderer {
                 self.screenshot_halvings = 0;
                 let reader = screenshot_readback::Reader {
                     device: self.device.clone(),
+                    device_lost: self.device_lost.clone(),
                     config: self.config.clone(),
                 };
                 if request.background {

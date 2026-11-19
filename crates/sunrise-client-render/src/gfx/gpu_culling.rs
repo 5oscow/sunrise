@@ -1631,12 +1631,10 @@ impl GpuCulling {
     /// The statistics that came back, their readbacks freed: the newest
     /// frame's, as (frame, [sections drawn, section draws, draw calls]), the
     /// pass's counts added to the CPU's part. Called as a frame starts, so a
-    /// copy no submission took (a frame that failed on the way) is dropped.
-    pub fn collect(&mut self, device: &wgpu::Device) -> Option<(u64, [usize; 3])> {
+    /// copy no submission took (a frame that failed on the way) is dropped. The caller polls
+    /// the device first (the frame's one poll, `Renderer::draw_frame`).
+    pub fn collect(&mut self) -> Option<(u64, [usize; 3])> {
         self.current = None;
-        if device.poll(wgpu::PollType::Poll).is_err() {
-            return None;
-        }
         let mut newest: Option<(u64, [usize; 3])> = None;
         for r in &self.readbacks {
             if r.state.load(Ordering::Acquire) != MAPPED {
@@ -3175,7 +3173,7 @@ mod tests {
             // The reads above waited for the GPU.
             let (kept, drawn) = (kept_sections as usize, draw_count as usize);
             assert_eq!(
-                gpu.collect(device),
+                gpu.collect(),
                 Some((case as u64, [cpu[0] + kept, cpu[1] + drawn, cpu[2]])),
                 "case {case}: statistics"
             );
@@ -3354,14 +3352,14 @@ mod tests {
                 let landed = |gpu: &mut GpuCulling| {
                     queue.landed();
                     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
-                    gpu.collect(device)
+                    gpu.collect()
                 };
                 for f in 1..=3 {
                     assert!(frame(&mut gpu, f), "frame {f}, threaded {threaded}");
                 }
                 assert!(!frame(&mut gpu, 4), "a full ring, threaded {threaded}");
                 assert_eq!(landed(&mut gpu), Some((3, [3 + 5, 10 + 7, 3])));
-                assert_eq!(gpu.collect(device), None);
+                assert_eq!(gpu.collect(), None);
                 assert!(frame(&mut gpu, 5));
                 assert_eq!(landed(&mut gpu), Some((5, [5 + 5, 10 + 7, 3])));
                 // Frame 6's buffer destroyed after its mapping (#6320).
@@ -3370,7 +3368,7 @@ mod tests {
                 queue.landed();
                 device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
                 gpu.readbacks[lost].buffer.destroy();
-                assert_eq!(gpu.collect(device), None);
+                assert_eq!(gpu.collect(), None);
                 for f in 7..=12 {
                     let sent = frame(&mut gpu, f);
                     let back = landed(&mut gpu);
