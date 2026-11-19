@@ -18,7 +18,14 @@ static LOG: Capture = Capture(Mutex::new(Vec::new()));
 
 struct NoHost;
 impl Host for NoHost {}
-mod_api::impl_host_areas!(NoHost);
+mod_api::impl_host_areas!(NoHost, except(tags));
+// The one Host method the probe's mod calls that its phase permits: a Metadata read with a known answer.
+impl mod_api::prelude::TagsHost for NoHost {
+    fn fluid_is_same(&self, fluid: &str, other: &str) -> bool {
+        mod_api::__private::check_access("fluid_is_same", mod_api::__private::LoadAccess::Metadata);
+        fluid == other
+    }
+}
 impl ServerHost for NoHost {}
 mod_api::impl_server_host_areas!(NoHost);
 
@@ -66,7 +73,8 @@ pub fn run(folders: &[&Path]) {
     assert!(
         mod_api::content::crash::details()
             .iter()
-            .any(|(key, value)| *key == "phase probe" && value == "allowed true first true latched true")
+            .any(|(key, value)| *key == "phase probe"
+                && value == "answered true first true latched true")
     );
     let lines = LOG.0.lock().unwrap();
     let named: Vec<_> = lines
