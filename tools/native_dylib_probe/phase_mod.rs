@@ -15,21 +15,24 @@ impl Hooks for Mod {
     ) -> Flow {
         // Undone by the game when this listener is refused.
         event.cancelled = true;
-        // Positive control: the Setup phase permits this metadata call, so it answers before any
-        // refusal and the later refusal of it can only be the latch.
-        let allowed = catch_unwind(AssertUnwindSafe(|| {
+        // Positive control: the Setup phase permits `tags`, so the gate lets it through to the
+        // probe's Host, whose body is `unimplemented!`; the later refusal of the same call can
+        // only be the latch.
+        let refusal = |call: &mut dyn FnMut()| {
+            catch_unwind(AssertUnwindSafe(call))
+                .err()
+                .is_some_and(|payload| payload.is::<mod_api::__private::PhaseRefusal>())
+        };
+        let allowed = !refusal(&mut || {
             host.tags();
-        }))
-        .is_ok();
-        let first = catch_unwind(AssertUnwindSafe(|| {
+        });
+        let first = refusal(&mut || {
             host.entity(1);
-        }))
-        .is_err();
+        });
         // The mod's own catch does not undo the refusal: the permitted call now refuses too.
-        let latched = catch_unwind(AssertUnwindSafe(|| {
+        let latched = refusal(&mut || {
             host.tags();
-        }))
-        .is_err();
+        });
         mod_api::content::crash::set_detail(
             "phase probe",
             format!("allowed {allowed} first {first} latched {latched}"),
