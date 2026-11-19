@@ -6570,7 +6570,7 @@ impl Game<'_> {
             .level
             .respawn_elsewhere
             .as_ref()
-            .map(respawn_anchor::RespawnConfig::from_saved);
+            .and_then(respawn_anchor::RespawnConfig::from_saved);
         self.spawn_origin = None;
         self.spawn_hook_fired = false;
         self.spawn_hook_cancelled = false;
@@ -7881,7 +7881,10 @@ impl Game<'_> {
         level.game_mode = mode;
         level.previous_game_mode = self.previous_mode.map(mod_api::GameMode::id);
         level.spawn = self.spawn.map(|s| [s.x, s.y, s.z]);
-        level.respawn_elsewhere = self.respawn_config.map(|c| c.saved());
+        level.respawn_elsewhere = respawn_anchor::RespawnConfig::kept(
+            level.respawn_elsewhere.take(),
+            self.respawn_config,
+        );
         level.rotation = [self.yaw, self.pitch];
         level.xp_level = self.experience.level;
         level.xp_progress = self.experience.progress;

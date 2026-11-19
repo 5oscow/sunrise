@@ -3581,6 +3581,9 @@ pub struct Level {
     pub world_spawn: Option<[i32; 3]>,
     /// The world spawn's yaw and pitch (`setworldspawn`'s rotation).
     pub world_spawn_angle: [f32; 2],
+    /// The level the world spawn is in (`spawn.dimension`, `RespawnData.dimension`); None for
+    /// the Overworld.
+    pub world_spawn_dimension: Option<String>,
     pub difficulty: String,
     pub hardcore: bool,
     /// `difficulty_settings.locked` (LevelData.isDifficultyLocked).
@@ -3740,6 +3743,8 @@ impl Level {
             _ => 0.0,
         };
         level.world_spawn_angle = [angle("yaw"), angle("pitch")];
+        level.world_spawn_dimension = text(data.get("spawn").and_then(|s| s.get("dimension")))
+            .filter(|d| d != "minecraft:overworld");
         if let Some(d) = data.get("difficulty_settings") {
             level.difficulty = text(d.get("difficulty")).unwrap_or_else(|| "normal".into());
             level.hardcore = n(d.get("hardcore")) != 0;
@@ -4433,7 +4438,14 @@ impl Level {
                 "spawn",
                 Tag::compound([
                     ("pos", Tag::IntArray(spawn.to_vec())),
-                    ("dimension", string("minecraft:overworld")),
+                    (
+                        "dimension",
+                        string(
+                            self.world_spawn_dimension
+                                .as_deref()
+                                .unwrap_or("minecraft:overworld"),
+                        ),
+                    ),
                     ("yaw", Tag::Float(self.world_spawn_angle[0].to_bits())),
                     ("pitch", Tag::Float(self.world_spawn_angle[1].to_bits())),
                 ]),
@@ -8570,6 +8582,8 @@ mod tests {
             dimension: "minecraft:the_nether".into(),
             world_spawn: Some([8, 64, 8]),
             world_spawn_angle: [45.0, -10.0],
+            // The world spawn's level is the world's, not the player's.
+            world_spawn_dimension: Some("minecraft:the_end".into()),
             spawn: Some([20.0, 70.0, 20.0]),
             difficulty_locked: true,
             flying: true,
@@ -8581,6 +8595,13 @@ mod tests {
             .game_rules
             .insert("minecraft:keep_inventory".into(), 1);
         level.write(&dir, &Default::default()).unwrap();
+        let saved = read_dat(&dir.join("level.dat")).unwrap();
+        let spawn = saved.get("Data").and_then(|d| d.get("spawn"));
+        assert_eq!(
+            text(spawn.and_then(|s| s.get("dimension"))).as_deref(),
+            Some("minecraft:the_end"),
+            "level.dat's spawn.dimension"
+        );
         let back = Level::read(&dir).unwrap();
         assert_eq!(back.name, "Test");
         assert_eq!(back.seed, -42);
@@ -8608,6 +8629,10 @@ mod tests {
         assert_eq!(back.dimension, "minecraft:the_nether");
         assert_eq!(back.world_spawn, Some([8, 64, 8]));
         assert_eq!(back.world_spawn_angle, [45.0, -10.0]);
+        assert_eq!(
+            back.world_spawn_dimension.as_deref(),
+            Some("minecraft:the_end")
+        );
         assert_eq!(back.spawn, Some([8.0, 64.0, 8.0]));
         assert_eq!(
             back.respawn_elsewhere,
