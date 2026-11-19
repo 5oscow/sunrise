@@ -152,6 +152,7 @@ pub trait EntityPositionBackendMut {
     /// Turns the entity to `yaw` and `pitch` in degrees (`Entity.setYRot`,
     /// `setXRot`): the pitch wraps and is clamped to -90..90. False for kinds
     /// whose rotation Sunrise does not fully store, or an unavailable player.
+    /// Works for general entities; the new angles are tracked to clients.
     /// Does not teleport or dismount.
     #[access(WorldOnly)]
     fn entity_set_rotation(&mut self, entity: EntityRef, yaw: f32, pitch: f32) -> bool;

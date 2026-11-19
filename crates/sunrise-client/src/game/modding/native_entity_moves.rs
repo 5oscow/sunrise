@@ -202,6 +202,13 @@ impl Game<'_> {
                 });
                 true
             }
+            Target::General(id) => {
+                let Some(row) = self.resident_entities.general.row_mut(id) else {
+                    return false;
+                };
+                row.rotation = [yaw, pitch];
+                true
+            }
             _ => false,
         }
     }

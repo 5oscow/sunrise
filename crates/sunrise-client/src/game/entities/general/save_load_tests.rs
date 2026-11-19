@@ -532,6 +532,29 @@ fn killing_or_removing_a_general_row_keeps_its_passengers_in_the_level() {
     });
 }
 
+#[test]
+#[ignore = "daily"]
+fn a_general_entity_turns_in_place_without_dismounting() {
+    with_types(|game| {
+        let rider = record_tag("mymod:robot", [9, 9, 9, 9], b"", Vec::new());
+        let root = record_tag("mymod:robot", [1, 2, 3, 4], b"", vec![rider]);
+        game.load_listed("mymod:robot", None, None, root).unwrap();
+        let rows = &game.resident_entities.general.rows;
+        let (root, rider) = (
+            game.entity(rows[0].id).unwrap(),
+            game.entity(rows[1].id).unwrap(),
+        );
+        let _world = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+
+        assert!(rider.set_rotation(game, 90.0, 30.0));
+        assert_eq!(rider.rotation(game), Some([90.0, 30.0]));
+        assert_eq!(rider.position(game), Some([0.5, 64.0, 0.5]));
+        assert_eq!(rider.vehicle(game), Some(root));
+        assert!(!rider.set_rotation(game, f32::NAN, 0.0));
+        assert_eq!(rider.rotation(game), Some([90.0, 30.0]));
+    });
+}
+
 /// A tree travels between dimensions with its riders: the source ends with
 /// zero rows and stale ids, the destination holds the same tree — same
 /// UUIDs, same mount links — with fresh join identities, the root placed.
