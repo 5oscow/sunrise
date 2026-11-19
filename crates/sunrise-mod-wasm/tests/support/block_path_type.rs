@@ -30,10 +30,13 @@ impl LevelHost for World {
 impl World {
     pub fn new() -> Self {
         let properties = std::collections::BTreeMap::new();
-        mod_api::__private::resolve_block_keys(["minecraft:stone"], |_| {
-            sunrise_mod_runtime::block_definitions::BlockDefinition::new(&[&properties], 0)
-                .map_err(|error| format!("{error:?}"))
-        })
+        mod_api::__private::resolve_block_keys(
+            ["minecraft:stone", "minecraft:water_cauldron"],
+            |_| {
+                sunrise_mod_runtime::block_definitions::BlockDefinition::new(&[&properties], 0)
+                    .map_err(|error| format!("{error:?}"))
+            },
+        )
         .unwrap();
         let metadata = mod_api::__private::block_definitions().unwrap();
         let key = mod_api::__private::part_tests::block_key("minecraft:stone");
