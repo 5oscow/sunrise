@@ -43,6 +43,7 @@ pub mod tick_phase;
 pub mod ticks;
 pub mod trading;
 pub mod use_animation;
+pub mod uuid;
 pub mod version;
 
 pub use level_key::LevelKey;
