@@ -1,5 +1,4 @@
-use super::*;
-use crate::game::remote::{MovePacket, shape_meets, snap_target, stepped_move};
+use crate::game::remote::{shape_meets, snap_target};
 
 /// The packet riding graph must retain invisible intermediary entities. A custom
 /// sit plugin can use an area-effect cloud, whose server position stops updating

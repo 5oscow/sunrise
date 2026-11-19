@@ -1,6 +1,3 @@
-use super::*;
-use crate::game::remote::hurt_sound_for;
-
 /// The hurt sound of `ClientboundDamageEventPacket` follows its damage
 /// type (`Player.getHurtSound`: the type's effects), with the codec's
 /// `hurt` default for an unknown type (#4149).

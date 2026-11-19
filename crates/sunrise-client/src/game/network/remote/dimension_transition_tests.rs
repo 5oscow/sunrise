@@ -1,5 +1,3 @@
-use super::*;
-
 #[test]
 #[ignore = "daily"]
 fn dimension_transition_screen_is_selected_at_entry_drawn_and_dropped() {
@@ -36,54 +34,67 @@ fn dimension_transition_screen_is_selected_at_entry_drawn_and_dropped() {
             event.draw.fill([0.0, 0.0, 80.0, 10.0], 0xFF102030);
         }
     }
-    mod_platform::testing::with_mods(
-        vec![mod_api::ModEntry::new("transition_test", Box::new(Arrival))].into(),
+    crate::game::in_own_process(
+        "game::remote::tests::dimension_transition_tests::dimension_transition_screen_is_selected_at_entry_drawn_and_dropped",
         || {
-            let mut registrations = Vec::new();
-            super::Game::native_register_dimension_transition_screen(
-                &mod_api::RegistrationContext::new(),
-                &mut registrations,
+            mod_platform::testing::with_mods(
+                vec![mod_api::ModEntry::new("transition_test", Box::new(Arrival))].into(),
+                || {
+                    let mut registrations = Vec::new();
+                    super::Game::native_register_dimension_transition_screen(
+                        &mod_api::RegistrationContext::new(),
+                        &mut registrations,
+                    );
+                    sunrise_client_render::dimension_transition::register(registrations);
+                    with_game(|game| {
+                        game.options.execution_role = ExecutionRole::Client;
+                        let (client, _server) = sunrise_protocol::connection::Pipe::pair();
+                        game.connect_local(client, "TransitionTest").unwrap();
+                        let mut spawn = sunrise_protocol::packets::play::SpawnInfo {
+                            dimension_type: 0,
+                            dimension: "transition_test:a".into(),
+                            seed: 0,
+                            game_type: 0,
+                            previous_game_type: None,
+                            debug: false,
+                            flat: true,
+                            last_death: None,
+                            portal_cooldown: 0,
+                            sea_level: 63,
+                        };
+                        game.enter_remote_dimension(&spawn, false, Reason::Other);
+                        assert_eq!(
+                            game.remote.as_ref().unwrap().level_load.transition_screen(),
+                            None
+                        );
+                        spawn.dimension = "transition_test:b".into();
+                        game.enter_remote_dimension(&spawn, true, Reason::Other);
+                        let tracker = game.remote.as_ref().unwrap().level_load;
+                        assert!(tracker.transition_screen().is_some());
+                        let mut batch = HudBatch::scratch([320, 240]);
+                        assert!(game.draw_dimension_transition_screen(
+                            &mut batch,
+                            &tracker,
+                            Some(0.25)
+                        ));
+                        assert!(!batch.vertices.is_empty());
+                        game.remote.as_mut().unwrap().level_load.finish();
+                        let tracker = game.remote.as_ref().unwrap().level_load;
+                        assert!(!game.draw_dimension_transition_screen(&mut batch, &tracker, None));
+                        spawn.dimension = "transition_test:c".into();
+                        game.enter_remote_dimension(&spawn, true, Reason::Other);
+                        let tracker = game.remote.as_ref().unwrap().level_load;
+                        let mut vanilla = HudBatch::scratch([320, 240]);
+                        assert!(!game.draw_dimension_transition_screen(
+                            &mut vanilla,
+                            &tracker,
+                            None
+                        ));
+                        game.draw_level_loading_background(&mut vanilla, tracker.reason);
+                        assert!(!vanilla.vertices.is_empty());
+                    });
+                },
             );
-            sunrise_client_render::dimension_transition::register(registrations);
-            with_game(|game| {
-                game.options.execution_role = ExecutionRole::Client;
-                let (client, _server) = sunrise_protocol::connection::Pipe::pair();
-                game.connect_local(client, "TransitionTest").unwrap();
-                let mut spawn = sunrise_protocol::packets::play::SpawnInfo {
-                    dimension_type: 0,
-                    dimension: "transition_test:a".into(),
-                    seed: 0,
-                    game_type: 0,
-                    previous_game_type: None,
-                    debug: false,
-                    flat: true,
-                    last_death: None,
-                    portal_cooldown: 0,
-                    sea_level: 63,
-                };
-                game.enter_remote_dimension(&spawn, false, Reason::Other);
-                assert_eq!(
-                    game.remote.as_ref().unwrap().level_load.transition_screen(),
-                    None
-                );
-                spawn.dimension = "transition_test:b".into();
-                game.enter_remote_dimension(&spawn, true, Reason::Other);
-                let tracker = game.remote.as_ref().unwrap().level_load;
-                assert!(tracker.transition_screen().is_some());
-                let mut batch = HudBatch::scratch([320, 240]);
-                assert!(game.draw_dimension_transition_screen(&mut batch, &tracker, Some(0.25)));
-                assert!(!batch.vertices.is_empty());
-                game.remote.as_mut().unwrap().level_load.finish();
-                let tracker = game.remote.as_ref().unwrap().level_load;
-                assert!(!game.draw_dimension_transition_screen(&mut batch, &tracker, None));
-                spawn.dimension = "transition_test:c".into();
-                game.enter_remote_dimension(&spawn, true, Reason::Other);
-                let tracker = game.remote.as_ref().unwrap().level_load;
-                let mut vanilla = HudBatch::scratch([320, 240]);
-                assert!(!game.draw_dimension_transition_screen(&mut vanilla, &tracker, None));
-                game.draw_level_loading_background(&mut vanilla, tracker.reason);
-                assert!(!vanilla.vertices.is_empty());
-            });
         },
     );
 }

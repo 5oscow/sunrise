@@ -1,5 +1,3 @@
-use super::*;
-
 /// Sleeping metadata and the local tick use the loaded bed's shape, not
 /// a red-bed constant. Missing client data must not replace a server pose
 /// or decide to wake the player.

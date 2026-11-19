@@ -1,4 +1,3 @@
-use super::*;
 use crate::game::remote::hold_server_fire;
 
 /// The server's on-fire flag keeps the predicted countdown (which

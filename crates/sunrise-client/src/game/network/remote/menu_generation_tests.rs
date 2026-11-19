@@ -1,6 +1,3 @@
-use super::*;
-use crate::game::remote::ClientMenu;
-
 #[test]
 fn client_menu_generation_changes_on_reused_window_ids() {
     let mut menu = crate::game::remote::ClientMenu::default();

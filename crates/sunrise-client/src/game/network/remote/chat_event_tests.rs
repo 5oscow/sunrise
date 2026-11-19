@@ -43,51 +43,55 @@ impl mod_api::Hooks for Censor {
 #[test]
 #[ignore = "daily"]
 fn mods_replace_and_cancel_received_chat() {
-    mod_platform::__private::install(std::sync::Arc::from([mod_api::ModEntry::new(
-        "test-chat-received",
-        Box::new(Censor),
-    )]));
+    mod_platform::testing::with_mods(
+        vec![mod_api::ModEntry::new(
+            "test-chat-received",
+            Box::new(Censor),
+        )]
+        .into(),
+        || {
+            with_game(|game| {
+                game.options.execution_role = ExecutionRole::Client;
+                let (client, _server) = Pipe::pair();
+                game.connect_local(client, "ChatTest").unwrap();
+                let lines = |game: &crate::game::Game| -> Vec<String> {
+                    let chat = &game.remote.as_ref().unwrap().chat;
+                    chat.iter().map(|(line, _)| line.clone()).collect()
+                };
+                let system = |content: &str| {
+                    C::SystemChat(play::SystemChat {
+                        content: Tag::String(content.into()),
+                        overlay: false,
+                    })
+                };
+                game.handle_packet(system("hello")).unwrap();
+                game.handle_packet(system("drop me")).unwrap();
+                assert_eq!(lines(game), ["[server] hello"]);
 
-    with_game(|game| {
-        game.options.execution_role = ExecutionRole::Client;
-        let (client, _server) = Pipe::pair();
-        game.connect_local(client, "ChatTest").unwrap();
-        let lines = |game: &crate::game::Game| -> Vec<String> {
-            let chat = &game.remote.as_ref().unwrap().chat;
-            chat.iter().map(|(line, _)| line.clone()).collect()
-        };
-        let system = |content: &str| {
-            C::SystemChat(play::SystemChat {
-                content: Tag::String(content.into()),
-                overlay: false,
-            })
-        };
-        game.handle_packet(system("hello")).unwrap();
-        game.handle_packet(system("drop me")).unwrap();
-        assert_eq!(lines(game), ["[server] hello"]);
-
-        game.settings.chat_delay = 1.0;
-        let disguised = |message: &str| {
-            C::DisguisedChat(play::DisguisedChat {
-                message: Tag::String(message.into()),
-                chat_type: play::ChatTypeBound {
-                    chat_type: 0,
-                    name: Tag::String("Steve".into()),
-                    target: None,
-                },
-            })
-        };
-        game.handle_packet(disguised("drop this")).unwrap();
-        game.handle_packet(disguised("hi")).unwrap();
-        assert_eq!(lines(game).len(), 1, "Chat Delay holds both");
-        game.tick_chat_queue();
-        let shown = lines(game);
-        assert_eq!(shown.len(), 2, "{shown:?}");
-        assert!(
-            shown[1].contains("hi") && !shown[1].contains("drop"),
-            "{shown:?}"
-        );
-    });
+                game.settings.chat_delay = 1.0;
+                let disguised = |message: &str| {
+                    C::DisguisedChat(play::DisguisedChat {
+                        message: Tag::String(message.into()),
+                        chat_type: play::ChatTypeBound {
+                            chat_type: 0,
+                            name: Tag::String("Steve".into()),
+                            target: None,
+                        },
+                    })
+                };
+                game.handle_packet(disguised("drop this")).unwrap();
+                game.handle_packet(disguised("hi")).unwrap();
+                assert_eq!(lines(game).len(), 1, "Chat Delay holds both");
+                game.tick_chat_queue();
+                let shown = lines(game);
+                assert_eq!(shown.len(), 2, "{shown:?}");
+                assert!(
+                    shown[1].contains("hi") && !shown[1].contains("drop"),
+                    "{shown:?}"
+                );
+            });
+        },
+    );
 }
 
 #[test]

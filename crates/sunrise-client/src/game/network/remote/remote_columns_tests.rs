@@ -1,4 +1,3 @@
-use super::*;
 use crate::game::native_entity_refs::tests::with_game;
 use sunrise_client::{chunk::Chunk, containers::BlockEntity};
 

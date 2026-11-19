@@ -1,5 +1,4 @@
 use super::*;
-use crate::game::remote::{CREATIVE_SYNCED, creative_sync_slot, creative_sync_stacks, mark_synced};
 
 #[test]
 fn the_creative_sync_covers_inventory_menu_slots_5_to_45_once_each() {

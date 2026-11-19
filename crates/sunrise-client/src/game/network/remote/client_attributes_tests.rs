@@ -1,6 +1,3 @@
-use super::*;
-use crate::game::remote::Tracked;
-
 /// After `ClientboundUpdateAttributes`, the local player's `LivingRef`
 /// reads its attribute value, base, modifiers and attribute list from the
 /// client's own copy of the synced instances. A mob the server tracks

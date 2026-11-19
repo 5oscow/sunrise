@@ -1,6 +1,5 @@
-use super::*;
-
 #[test]
+#[ignore = "daily"]
 fn placement_preview_checks_obstruction_without_changing_the_level() {
     use super::super::DryLevel;
     use sunrise_core::{position::BlockPos, random::LegacyRandom};
@@ -53,13 +52,10 @@ fn placement_preview_checks_obstruction_without_changing_the_level() {
         }
     }
 
-    // As with the LAN tests, prepared game resources are optional locally.
-    let resources = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../.local/sunrise-client")
-        .join(sunrise_core::VANILLA_VERSION);
-    if !resources.join("block-behaviours.json").exists() {
-        return;
-    }
+    let resources = std::path::PathBuf::from(
+        std::env::var_os("SUNRISE_TEST_RESOURCES")
+            .expect("set SUNRISE_TEST_RESOURCES to prepared resources"),
+    );
     let registry = load_registry(&resources).unwrap();
     let behaviours = Behaviours::load(&registry, &resources).unwrap();
     impl super::super::dry_level::PredictionBase for Level {}

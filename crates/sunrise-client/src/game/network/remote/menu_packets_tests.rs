@@ -1,5 +1,3 @@
-use super::*;
-
 #[test]
 #[ignore = "daily"]
 fn rejected_menu_packets_retire_the_previous_client_menu() {

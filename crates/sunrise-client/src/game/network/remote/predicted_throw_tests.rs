@@ -1,10 +1,10 @@
-use super::*;
 use crate::game::remote::predict_clicks;
 
 /// Q over a slot of the inventory on a server (#3357): the predicted THROW
 /// drops the stack, so the player's hand swings, as `LivingEntity.drop`
 /// does for `Prediction.PREDICTED`; a plain pick up drops nothing.
 #[test]
+#[ignore = "daily"]
 fn a_predicted_throw_from_a_slot_swings_the_hand() {
     use sunrise_client::{
         banner::Banners,
@@ -16,12 +16,10 @@ fn a_predicted_throw_from_a_slot_swings_the_hand() {
         menu::{Env, Input, Kind, Menu},
         stations::StationRecipes,
     };
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../.local/sunrise-client")
-        .join(sunrise_core::VANILLA_VERSION);
-    if !root.join("items.json").exists() {
-        return;
-    }
+    let root = std::path::PathBuf::from(
+        std::env::var_os("SUNRISE_TEST_RESOURCES")
+            .expect("set SUNRISE_TEST_RESOURCES to prepared resources"),
+    );
     let none = &sunrise_world::loot::PackOverlay::NONE;
     let defaults = sunrise_world::item_defaults::read(&root).unwrap();
     let items = Items::catalog(&root, none, &defaults).unwrap();

@@ -5,14 +5,12 @@ use crate::game::remote::use_ends_click;
 /// rocket ends the click and the off hand's shield is not raised (#3424).
 /// On foot it passes, so the off hand still gets its turn.
 #[test]
+#[ignore = "daily"]
 fn a_rocket_used_while_gliding_ends_the_click() {
-    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../.local/sunrise-client")
-        .join(sunrise_core::VANILLA_VERSION);
-    if !root.join("items.json").exists() {
-        eprintln!("skipping: no prepared resources in {}", root.display());
-        return;
-    }
+    let root = std::path::PathBuf::from(
+        std::env::var_os("SUNRISE_TEST_RESOURCES")
+            .expect("set SUNRISE_TEST_RESOURCES to prepared resources"),
+    );
     let registry = sunrise_world::level::data::load_registry(&root).unwrap();
     let facts = sunrise_client::blocks::BlockFacts::load(&root, &registry).unwrap();
     let defaults = sunrise_world::item_defaults::read(&root).unwrap();

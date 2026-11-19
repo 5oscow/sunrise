@@ -1,4 +1,3 @@
-use super::*;
 use crate::game::native_entity_refs::tests::with_client_game;
 
 /// A client's painting lives on `Entity.tickCount`, which its renderer reads as the age: it

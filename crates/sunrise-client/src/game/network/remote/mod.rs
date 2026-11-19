@@ -10891,9 +10891,7 @@ pub(crate) mod tests {
     }
 
     use super::{
-        boat_interact_passes, chat_after_event, client_has_level, hold_server_fire,
-        item_frame_interact_passes, keep_client_state, open_hash_order, remote_object_swings,
-        remote_use_swings, shape_meets, snap_target, synced_local_use,
+        boat_interact_passes, chat_after_event, item_frame_interact_passes, remote_object_swings,
     };
 
     #[test]

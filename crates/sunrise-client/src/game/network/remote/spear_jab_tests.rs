@@ -1,4 +1,3 @@
-use super::*;
 use std::sync::Arc;
 use sunrise_client::{chunk::Chunk, items::ItemStack, motion::PlayerMotion};
 use sunrise_core::geometry::Vec3;

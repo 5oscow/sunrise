@@ -1,6 +1,3 @@
-use super::*;
-use crate::game::remote::{Tracked, entity_sound_state};
-
 /// `ClientboundSoundEntityPacket`: the sound is heard where the entity it
 /// names is — the local player included, which is no tracked entity — and
 /// an id this level doesn't have plays nothing at all.

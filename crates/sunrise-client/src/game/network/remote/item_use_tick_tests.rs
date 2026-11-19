@@ -1,4 +1,3 @@
-use super::*;
 use mod_api::{Flow, Hooks, HostSide, LivingEntityUseItemTickEvent, ModEntry, Mods};
 use std::sync::{Arc, Mutex};
 use sunrise_client::items::ItemStack;

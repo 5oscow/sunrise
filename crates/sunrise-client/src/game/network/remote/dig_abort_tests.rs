@@ -1,4 +1,3 @@
-use super::*;
 use crate::game::{Hit, native_entity_refs::tests::with_client_game};
 use mod_api::{ClientHost, ClientMiningPredictEvent, ClientPacketSendEvent, Flow, Hooks, ModEntry};
 use mod_platform::testing::with_mods;

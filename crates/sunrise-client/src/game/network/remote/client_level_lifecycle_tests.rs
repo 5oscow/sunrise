@@ -1,4 +1,3 @@
-use super::*;
 use crate::game::remote::client_has_level;
 
 /// Minecraft.tick: CLIENT_TICK_END only while a level exists. None before

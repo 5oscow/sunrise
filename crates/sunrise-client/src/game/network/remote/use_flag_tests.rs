@@ -1,4 +1,3 @@
-use super::*;
 use crate::game::remote::synced_local_use;
 
 #[test]

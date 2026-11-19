@@ -1,4 +1,3 @@
-use super::*;
 use crate::game::remote::open_hash_order;
 
 /// The vanilla 26.3 client's ServerboundContainerClickPacket for a shift-click from hotbar slot 37

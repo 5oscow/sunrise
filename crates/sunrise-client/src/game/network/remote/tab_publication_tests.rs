@@ -1,4 +1,3 @@
-use super::*;
 use crate::game::remote::{object_skin_changed, skin_entries};
 
 /// An NPC plugin lists the NPC, spawns it, and takes the entry off the list:

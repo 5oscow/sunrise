@@ -1,5 +1,3 @@
-use super::*;
-
 /// A client names the level it shows by the server's key, even where `Dim` has
 /// no name for it.
 #[test]

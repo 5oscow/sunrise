@@ -1,5 +1,3 @@
-use super::*;
-
 /// The remote player animation uses the scoped item answer once per tick.
 #[test]
 #[ignore = "daily"]

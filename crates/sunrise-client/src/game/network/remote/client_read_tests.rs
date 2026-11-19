@@ -1,4 +1,3 @@
-use super::*;
 use crate::game::remote::{look_at_rotation, snapshot_value};
 
 /// An NPC plugin's scale: a base the plugin sets, or a modifier on 1.

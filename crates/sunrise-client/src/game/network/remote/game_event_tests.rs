@@ -1,5 +1,3 @@
-use super::*;
-
 /// `ClientPacketListener.handleGameEvent`: verify that the game event packet
 /// types for arrow hit, pufferfish sting and limited crafting match vanilla.
 #[test]

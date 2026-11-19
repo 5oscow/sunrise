@@ -1,5 +1,3 @@
-use super::*;
-
 /// `ChatType.Bound.decorate` and `decorateNarration`: a private message
 /// shows as "Steve whispers to you: hi" and is narrated "Steve says hi";
 /// a chat type the registry lacks is `minecraft:chat`'s.
