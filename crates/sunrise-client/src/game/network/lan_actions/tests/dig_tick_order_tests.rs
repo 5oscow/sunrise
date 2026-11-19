@@ -58,6 +58,7 @@ enum Event {
     Dig(u128, i32),
     PlayerPre(u128, &'static str, Option<i32>, Option<i32>),
     PlayerPost(u128),
+    Criterion(u128, String),
 }
 
 struct Observe {
@@ -103,6 +104,18 @@ impl mod_api::Hooks for Observe {
             .unwrap()
             .push(Event::Dig(event.player, event.progress));
     }
+    fn player_advancement_progress(
+        &self,
+        _: &mut dyn ServerHost,
+        event: &mut mod_api::PlayerAdvancementProgressEvent<'_>,
+    ) {
+        if matches!(event.advancement, "test:phase" | "test:staged") {
+            self.events
+                .lock()
+                .unwrap()
+                .push(Event::Criterion(event.player, event.criterion.into()));
+        }
+    }
     fn player_tick_pre(&self, host: HostSide<'_>, event: &mut mod_api::PlayerTickPreEvent) {
         let HostSide::Server(host) = host else { return };
         let entity = event.player.entity();
@@ -119,6 +132,114 @@ impl mod_api::Hooks for Observe {
             .unwrap()
             .push(Event::PlayerPost(event.player.uuid()));
     }
+}
+
+#[test]
+#[ignore = "daily"]
+fn advancement_criteria_straddle_the_player_body_even_with_entity_cancel() {
+    use sunrise_client::advancements::Tree;
+    use sunrise_client::effects::EffectInstance;
+    use sunrise_client::lan::{ServerAdvancements, data::SyncData};
+    use sunrise_world::loot::PackOverlay;
+
+    let heard = Arc::default();
+    mod_platform::testing::with_mods(
+        vec![mod_api::ModEntry::new(
+            "observe",
+            Box::new(Observe {
+                events: Arc::clone(&heard),
+                cancel: 23,
+            }),
+        )]
+        .into(),
+        || {
+            with_game(|game| {
+                game.world_root = game.options.game_dir.clone().unwrap();
+                open_to_lan(game);
+                game.build_registries();
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+
+                let pack = tempfile::tempdir().unwrap();
+                let data = pack.path().join("data");
+                let advancements = data.join("test/advancement");
+                std::fs::create_dir_all(&advancements).unwrap();
+                std::fs::write(
+                    advancements.join("phase.json"),
+                    br#"{
+                "criteria": {
+                    "tick": {"trigger": "minecraft:tick"},
+                    "levitation": {"trigger": "minecraft:levitation"},
+                    "location": {"trigger": "minecraft:location"}
+                },
+                "requirements": [["tick"], ["levitation"], ["location"]]
+            }"#,
+                )
+                .unwrap();
+                game.adv.tree = Arc::new(Tree::load(&data));
+                // This unconditional criterion is only in the hub's tree, so it
+                // must go through the staged native first-tick grant path.
+                std::fs::write(
+                    advancements.join("staged.json"),
+                    br#"{
+                "criteria": {"staged": {"trigger": "minecraft:tick"}},
+                "requirements": [["staged"]]
+            }"#,
+                )
+                .unwrap();
+                let mut sync = SyncData::empty();
+                sync.advancements = ServerAdvancements::load(
+                    pack.path(),
+                    &PackOverlay::NONE,
+                    Default::default(),
+                    Default::default(),
+                );
+                game.with_advancement_hub(|hub, owners| {
+                    hub.reload_resources(Arc::new(sync), owners)
+                });
+
+                let levitation = sunrise_client::brewing::effect("levitation").unwrap().id;
+                for (conn, ticks) in [(1, 19), (4, 20)] {
+                    let mut player = guest(conn);
+                    player.dimension = game.dim.id().into();
+                    player.loaded = true;
+                    player.position = [5.5 + f64::from(conn), 64.0, 8.5];
+                    game.lan.as_mut().unwrap().hub.guests.push(player);
+                    game.as_guest(conn, |g| {
+                        g.player.as_mut().unwrap().health.tick_count = ticks;
+                        g.potions
+                            .effects
+                            .add(EffectInstance::new(levitation, 100, 0));
+                    })
+                    .unwrap();
+                }
+                game.tick_server(false).unwrap();
+
+                let host = game.lan.as_ref().unwrap();
+                assert!(host.hub.guest(1).unwrap().advancements_sent);
+                assert!(!host.hub.guest(4).unwrap().advancements_sent);
+                assert!(host.hub.native_advancement_grants.is_empty());
+                use Event::*;
+                let events = heard.lock().unwrap();
+                let position = |event: &Event| events.iter().position(|e| e == event).unwrap();
+                let post_entity = position(&EntityPost(20));
+                for criterion in ["tick", "levitation", "staged"] {
+                    assert!(position(&Criterion(123, criterion.into())) < post_entity);
+                    assert!(!events.contains(&Criterion(126, criterion.into())));
+                }
+                for player in [123, 126] {
+                    let pre = events
+                        .iter()
+                        .position(|e| matches!(e, PlayerPre(uuid, ..) if *uuid == player))
+                        .unwrap();
+                    let post = position(&PlayerPost(player));
+                    assert!(post_entity < pre && pre < post);
+                    assert!(post < position(&Criterion(player, "location".into())));
+                }
+            })
+        },
+    );
 }
 
 #[test]

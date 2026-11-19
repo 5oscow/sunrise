@@ -2380,6 +2380,11 @@ impl Hub {
         // A caller that consumes raw events must resume the inbox before
         // running level/maintenance work. Game uses the split methods.
         if !self.packets_paused() {
+            for i in 0..self.guests.len() {
+                if self.here(&self.guests[i]) {
+                    self.sync_progress(i);
+                }
+            }
             events.extend(self.tick_level(ctx));
             self.finish_tracking_pass();
             self.end_tick();
@@ -3607,47 +3612,6 @@ impl Hub {
                 id: g.entity_id,
                 values: vec![(9, serializer::FLOAT, Value::Float(g.health))],
             }));
-            // ServerPlayer.tick's CriteriaTriggers.TICK, then flushDirty. A
-            // player who has been here has had the tick's criteria already.
-            if !g.advancements_loaded {
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map_or(0, |d| d.as_millis() as i64);
-                let sync = self.sync.clone();
-                self.guests.update(i, |g| {
-                    if self.mods_loaded {
-                        self.native_advancement_grants.push(TickGrants {
-                            conn: g.conn,
-                            player: g.uuid,
-                            entity_id: g.entity_id,
-                            name: g.name.clone(),
-                            now_millis: now,
-                            first_tick: true,
-                            grants: sync.advancements.tick_candidates(&g.advancements),
-                            sync,
-                        });
-                    } else {
-                        let first = sync.advancements.first_tick(
-                            &sync,
-                            now,
-                            &mut g.advancements,
-                            &mut g.recipe_book,
-                        );
-                        if let Some(add) = first.recipe_book_add {
-                            g.send(&raw(ids::RECIPE_BOOK_ADD, add));
-                        }
-                        // The game's own TICK trigger may have awarded these in the guest's
-                        // turn before this first tick: announced here, flush_advancements
-                        // must not send them again (vanilla awards them once).
-                        g.recipes_unlocked.retain(|id| !first.recipes.contains(id));
-                        g.send(&raw(ids::UPDATE_ADVANCEMENTS, first.update_advancements));
-                        g.advancements_visible = sync.advancements.visibility(&g.advancements);
-                        g.advancements_changed.clear();
-                    }
-                });
-            } else {
-                self.flush_advancements(i, true);
-            }
         }
         // ServerEntity.sendDirtyEntityData: the player's changed attribute
         // instances go to the player too (its trackers get them from
@@ -3976,23 +3940,68 @@ impl Hub {
             }
             guest.send(&raw(ids::UPDATE_ADVANCEMENTS, update));
             guest.advancements_visible = visible;
+            guest.advancements_sent = true;
         });
     }
 
-    /// `PlayerAdvancements.flushDirty` and the recipes the player unlocked
-    /// since (`ServerRecipeBook.addRecipes`), once the player's first tick
-    /// has sent their advancements.
+    /// `ServerPlayer.tick`: publish this player's initial or dirty progress,
+    /// separately from the connection's health and experience packets.
     pub fn flush_progress(&mut self, conn: u32) {
-        if let Some(i) = self.guests.iter().position(|g| g.conn == conn)
-            && self.guests[i].sent_health.is_some()
+        if let Some(i) = self.guests.connection_index(conn)
+            && self.here(&self.guests[i])
         {
-            self.flush_advancements(i, true);
-            // ServerPlayer.doTick: sendPostEffects when postEffectsDirty.
-            if self.guests[i].post_effects_dirty {
-                self.send_post_effects(i);
-            }
+            self.sync_progress(i);
         }
     }
+
+    fn sync_progress(&mut self, i: usize) {
+        let g = &self.guests[i];
+        if g.advancements_sent {
+            self.flush_advancements(i, true);
+            return;
+        }
+        if g.advancements_loaded {
+            self.flush_advancements(i, true);
+            self.guests.update(i, |g| g.advancements_sent = true);
+            return;
+        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis() as i64);
+        let sync = self.sync.clone();
+        if self.mods_loaded {
+            self.native_advancement_grants.push(TickGrants {
+                conn: g.conn,
+                player: g.uuid,
+                entity_id: g.entity_id,
+                name: g.name.clone(),
+                now_millis: now,
+                first_tick: true,
+                grants: sync.advancements.tick_candidates(&g.advancements),
+                sync,
+            });
+        } else {
+            self.guests.update(i, |g| {
+                let first = sync.advancements.first_tick(
+                    &sync,
+                    now,
+                    &mut g.advancements,
+                    &mut g.recipe_book,
+                );
+                if let Some(add) = first.recipe_book_add {
+                    g.send(&raw(ids::RECIPE_BOOK_ADD, add));
+                }
+                // The game's TICK trigger may already have awarded these in
+                // this turn. Publish each recipe only once.
+                g.recipes_unlocked.retain(|id| !first.recipes.contains(id));
+                g.send(&raw(ids::UPDATE_ADVANCEMENTS, first.update_advancements));
+                g.advancements_visible = sync.advancements.visibility(&g.advancements);
+                g.advancements_changed.clear();
+                g.advancements_sent = true;
+            });
+        }
+    }
+
     fn flush_advancements(&mut self, i: usize, show: bool) {
         let sync = self.sync.clone();
         self.guests.update(i, |g| {
@@ -5956,6 +5965,8 @@ mod tests {
         let (mut hub, rx) = hub_with_a_guest();
         hub.mods_loaded = true;
         hub.sync_player_state(0);
+        assert!(hub.native_advancement_grants.is_empty());
+        hub.flush_progress(1);
         let task = hub.native_advancement_grants.pop().unwrap();
         assert!(task.grants.is_empty());
         let before: Vec<_> = rx.try_iter().collect();
@@ -5975,6 +5986,11 @@ mod tests {
             _ => false,
         });
         assert!(found, "the first packet resets the client's empty tree");
+        hub.flush_progress(1);
+        assert!(
+            hub.native_advancement_grants.is_empty(),
+            "an empty tree publishes its initial snapshot only once"
+        );
     }
 
     /// `store_mod_commands` keeps a new mod tree without sending it (the

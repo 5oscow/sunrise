@@ -12,9 +12,10 @@ impl Game<'_> {
     fn tick_level_guests_inner(&mut self) {
         // `EntityEvent.Size` for the poses the guests' moves set since the last tick.
         self.native_guest_sizes();
-        let Some(host) = self.lan.as_ref() else {
+        let Some(host) = self.lan.as_mut() else {
             return;
         };
+        Self::sync_hub_mod_flags(&mut host.hub);
         let turns: Vec<_> = host
             .hub
             .guests
@@ -124,11 +125,21 @@ impl Game<'_> {
                 }
                 // ServerPlayer.tick: the TICK and LEVITATION triggers,
                 // player attributes, then PlayerAdvancements.flushDirty.
-                g.tick_advancements();
+                g.tick_level_advancements();
                 g.update_player_attributes();
             });
             if let Some(host) = self.lan.as_mut() {
                 host.hub.flush_progress(conn);
+                if !host.hub.native_advancement_grants.is_empty() {
+                    self.run_native_advancement_grants();
+                }
+            }
+            if let Some(host) = self.lan.as_mut()
+                && let Some(gi) = host.hub.guests.connection_index(conn)
+                && host.hub.here(&host.hub.guests[gi])
+                && host.hub.guests[gi].post_effects_dirty
+            {
+                host.hub.send_post_effects(gi);
             }
         }
         self.native_player_tick_post_alone(&round, &mut told);
@@ -259,7 +270,29 @@ impl Game<'_> {
     fn tick_guest_connection(&mut self, conn: u32) {
         self.tick_guest_connection_body(conn);
         if !self.on_server_trip(conn) {
+            // Like the rest of doTick outside Player.tick, LOCATION also runs
+            // for unloaded spectators and canceled entity ticks.
+            if self
+                .lan
+                .as_ref()
+                .and_then(|host| host.hub.guest(conn).filter(|g| host.hub.here(g)))
+                .is_some_and(|guest| {
+                    guest
+                        .motion
+                        .as_ref()
+                        .is_none_or(|m| m.health.tick_count % 20 == 0)
+                })
+            {
+                let _ = self.as_guest(conn, |game| game.trigger_location_advancement());
+            }
             self.guest_vehicle_movement_baseline(conn);
+        }
+        if self
+            .lan
+            .as_ref()
+            .is_some_and(|host| !host.hub.native_advancement_grants.is_empty())
+        {
+            self.run_native_advancement_grants();
         }
     }
 
