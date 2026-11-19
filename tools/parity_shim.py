@@ -21,16 +21,18 @@ PARITY_JAVA_CACHE=0 disables reuse (tools/parity.py --fresh).
 
 A run's identity includes the JVM option variables (JVM_ENVIRONMENT), which
 change what java does without changing its command line, and the variables the
-oracles read (ORACLE_ENVIRONMENT; tests/test_parity_runner.py checks the list
-against every System.getenv in the oracles): their values, and the files under
-any path a value names as inputs, as for a path in the arguments.
+oracles read (ORACLE_ENVIRONMENT): their values, and the files under any path a
+value names as inputs, as for a path in the arguments.
 
 PARITY_ORACLE_KEEP names a folder that outlives the checkout (the daily's
 per-repository CI keep). There a run is also kept by content: its command,
 the content of the JDK it ran on (toolchain()), and the hash of every file
 under its named paths before it ran, with its stdout, stderr and the content
-of its outputs. A checkout with no record of its own replays a kept run whose
-command, JDK and files match exactly, writing its outputs back. Entries are
+of its outputs. Only a launcher inside a JDK home (its `release` file beside
+bin/) is kept: behind a wrapper or selector the JDK that runs is unknown, so
+such a run always runs. A checkout with no record of its own replays a kept
+run whose command, JDK and files match exactly, writing its outputs back where
+none of them exists yet; an output already in place makes it a miss. Entries are
 written under a temporary name in the keep and moved into place, so a reader
 never sees half of one; a run whose outputs or streams are larger than
 KEPT_FILE or KEPT_RUN is not kept. The keep only ever saves work: an entry that
@@ -225,8 +227,11 @@ def reusable(saved, paths, hashes):
 
 
 def toolchain(program, hashes):
-    """The content of the JDK `program` belongs to: the launcher and JDK_FILES that exist."""
+    """The content of the JDK `program` belongs to: the launcher and JDK_FILES that exist. None when `program` is not
+    a JDK's own launcher (no `release` in its home): a wrapper's or selector's JDK can change behind the same file."""
     home = Path(program).parent.parent
+    if not (home / "release").is_file():
+        return None
     files = [Path(program), *(home / name for name in JDK_FILES)]
     return {str(path): hashes.file(str(path)) for path in files if path.is_file()}
 
@@ -247,13 +252,17 @@ def discard(paths):
 
 
 def restore(entry):
-    """Put a kept run's outputs in place; returns their paths, its stdout and its stderr. None, with no output
-    touched, when the entry is missing or can't be read whole (pruned meanwhile, a damaged keep)."""
+    """Put a kept run's outputs in place; returns their paths, its stdout and its stderr. None, with no existing file
+    touched, when the entry is missing or can't be read whole (pruned meanwhile, a damaged keep), names an unusable
+    path, or any of its outputs already exists."""
     staged = []
     try:
         kept = json.loads((entry / "run.json").read_text())
         if not isinstance(kept["outputs"], list) or not all(isinstance(path, str) and os.path.isabs(path)
-                                                             for path in kept["outputs"]):
+                                                             and "\0" not in path for path in kept["outputs"]):
+            return None
+        # Replay only adds files: one already in place (a stale output, a folder in the way) leaves the oracle to run.
+        if any(os.path.lexists(path) for path in kept["outputs"]):
             return None
         stdout, stderr = (entry / "stdout").read_bytes(), (entry / "stderr").read_bytes()
         for index, path in enumerate(kept["outputs"]):
@@ -267,12 +276,15 @@ def restore(entry):
     published = []
     try:
         for temporary, path in staged:
-            os.replace(temporary, path)
+            # A link never replaces: a file that appeared meanwhile stays, and the replay is a miss.
+            os.link(temporary, path)
             published.append(path)
     except OSError:
-        # Half a replay is worse than none: what it published goes, and the oracle runs and writes every output.
-        discard([temporary for temporary, _ in staged] + published)
+        # Half a replay is worse than none: what it published (only files it created) goes, and the oracle runs.
+        discard(published)
         return None
+    finally:
+        discard(temporary for temporary, _ in staged)
     # Its mtime orders the keep's pruning (tools/parity.py): a replayed run stays. Pruned meanwhile, it was still read.
     try:
         os.utime(entry)
@@ -335,7 +347,8 @@ def main():
         return 0
     before = snapshot(paths)
     inputs = {path: hashes.file(path) for path in files_under(paths)}
-    entry = keep_entry(command, toolchain(command["program"], hashes), inputs) if KEEP else None
+    jdk = toolchain(command["program"], hashes) if KEEP else None
+    entry = keep_entry(command, jdk, inputs) if jdk else None
     kept = restore(entry) if entry else None
     if kept:
         paths_written, stdout, stderr = kept

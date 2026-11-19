@@ -1137,15 +1137,22 @@ def fresh_only(keep):
     return {name: day for name, day in names.items() if isinstance(name, str) and isinstance(day, str) and day >= oldest}
 
 
-def remember_fresh_only(keep, names, results):
+def remember_fresh_only(keep, results):
     """Add the harnesses that failed with oracle reuse on and then passed fresh in this run. A reuse-enabled run that
-    failed may not have replayed anything: the list says what passed only fresh, not that a kept run was wrong."""
+    failed may not have replayed anything: the list says what passed only fresh, not that a kept run was wrong.
+    The daily's shares on one host share the keep: each adds to the list as it is at its finish, under a lock, and a
+    share with nothing to add leaves it alone."""
     today = time.strftime("%Y-%m-%d", time.gmtime())
-    names = dict(names, **{name: today for name, record in results.items()
-                           if record["status"] == "pass" and record.get("retried") == "reused oracle results"})
-    temporary = keep / f".fresh-only.{os.getpid()}.json"
-    temporary.write_text(json.dumps(names, indent=1, sort_keys=True) + "\n", encoding="utf-8")
-    temporary.replace(keep / "fresh-only.json")
+    added = {name: today for name, record in results.items()
+             if record["status"] == "pass" and record.get("retried") == "reused oracle results"}
+    if not added:
+        return
+    with open(keep / "fresh-only.lock", "w") as handle:
+        file_lock.lock(handle)
+        temporary = keep / f".fresh-only.{os.getpid()}.json"
+        temporary.write_text(json.dumps(dict(fresh_only(keep), **added), indent=1, sort_keys=True) + "\n",
+                             encoding="utf-8")
+        temporary.replace(keep / "fresh-only.json")
 
 
 def run(selected, state, hasher, environment_digest, executors, reuse_oracles, rounds=None, known_flaky=None,
@@ -1876,8 +1883,8 @@ def main():
                                rounds, known_flaky(config), set(kept_fresh_only))
         if reuse_oracles and ORACLE_KEEP:
             try:
-                remember_fresh_only(ORACLE_KEEP, kept_fresh_only, results)
-            except OSError as error:
+                remember_fresh_only(ORACLE_KEEP, results)
+            except (OSError, ValueError) as error:
                 print(f"oracle keep {ORACLE_KEEP}: {error}; the harnesses that passed only fresh are not kept",
                       flush=True)
     finally:

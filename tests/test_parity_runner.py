@@ -535,6 +535,8 @@ class OracleReuseTests(unittest.TestCase):
                         "runs.write_text(str(int(runs.read_text() or 0) + 1) if runs.exists() else '1')\n"
                         "pathlib.Path(sys.argv[2]).write_text(pathlib.Path(sys.argv[1]).read_text())\nprint('done')\n")
         fake.chmod(0o755)
+        # bin's parent is the fake launcher's JDK home: its release file makes it a JDK's own launcher.
+        (root / "release").write_text('JAVA_VERSION="25.0.1"\n')
         (self.shim / "java").symlink_to(Path(parity.__file__).with_name("parity_shim.py"))
         self.input, self.output = root / "work" / "in.txt", root / "work" / "out.txt"
         self.input.parent.mkdir()
@@ -643,7 +645,7 @@ class OracleReuseTests(unittest.TestCase):
     def wrapper(self, folder, put_the_shim_back=False):
         """A `java` that runs the first other `java` on PATH, as JDK selectors and build wrappers do. It stops
         itself after a few rounds, so a shim that loops fails this test instead of filling the machine."""
-        folder.mkdir()
+        folder.mkdir(parents=True)
         path = f"os.environ['PATH'] = {str(self.shim)!r} + os.pathsep + os.environ['PATH']\n" if put_the_shim_back else ""
         (folder / "java").write_text(
             f"#!{self.python}\nimport os, sys, shutil\nfrom pathlib import Path\n"
@@ -663,6 +665,21 @@ class OracleReuseTests(unittest.TestCase):
         self.env["PARITY_SHIM_REAL_PATH"] = f"{wrapper}:{self.bin}"
         self.assertEqual(self.oracle(), 1)
         self.assertEqual(self.oracle(), 1)
+
+    def test_a_run_through_a_wrapper_is_never_kept(self):
+        # A JDK selector in front of the JDK: the JDK behind it changes while the wrapper's file stays the same.
+        keep = self.bin.parent / "keep"
+        self.env["PARITY_ORACLE_KEEP"] = str(keep)
+        wrapper = self.bin.parent / "selector" / "bin"
+        self.wrapper(wrapper)
+        self.env["PATH"] = f"{self.shim}:{wrapper}:{self.bin}:{self.bin.parent / 'python'}"
+        self.env["PARITY_SHIM_REAL_PATH"] = f"{wrapper}:{self.bin}"
+        self.assertEqual(self.oracle(), 1)
+        self.new_checkout()
+        (self.bin.parent / "release").write_text('JAVA_VERSION="25.0.2"\n')
+        self.assertEqual(self.oracle(), 2)  # the other JDK ran: nothing of the first one replayed
+        self.assertEqual(self.output.read_text(), "a")
+        self.assertEqual(list(keep.glob("??/*")), [])
 
     def test_a_wrapper_that_puts_the_shim_back_stops_with_a_reason(self):
         wrapper = self.bin.parent / "wrapper"
@@ -710,34 +727,60 @@ class OracleKeepTests(unittest.TestCase):
             keep = Path(tmp)
             long_ago = time.strftime("%Y-%m-%d", time.gmtime(time.time() - 40 * 86400))
             lately = time.strftime("%Y-%m-%d", time.gmtime(time.time() - 5 * 86400))
-            parity.remember_fresh_only(keep, {"expired": long_ago, "inherited": lately}, {
+            (keep / "fresh-only.json").write_text(json.dumps({"expired": long_ago, "inherited": lately}))
+            parity.remember_fresh_only(keep, {
                 "loot": {"status": "pass", "retried": "reused oracle results", "oracle_reuse": False},
                 "inherited": {"status": "pass", "oracle_reuse": False},
                 "failed": {"status": "fail", "retried": "reused oracle results", "oracle_reuse": True},
                 "light": {"status": "pass", "oracle_reuse": True}})
             self.assertEqual(parity.fresh_only(keep), {"loot": time.strftime("%Y-%m-%d", time.gmtime()),
                                                        "inherited": lately})
+            # Two shares of one daily on one host, each adding its own: the second keeps the first's.
+            parity.remember_fresh_only(keep, {"sculk": {"status": "pass", "retried": "reused oracle results"}})
+            self.assertEqual(set(parity.fresh_only(keep)), {"loot", "inherited", "sculk"})
+            # A share with nothing to add doesn't write: a peer's list written meanwhile stays as it is.
+            (keep / "fresh-only.json").write_text(json.dumps({"peer": lately}))
+            parity.remember_fresh_only(keep, {"light": {"status": "pass", "oracle_reuse": True}})
+            self.assertEqual(parity.fresh_only(keep), {"peer": lately})
             (keep / "fresh-only.json").write_text("[1, 2]")
             self.assertEqual(parity.fresh_only(keep), {})
             (keep / "fresh-only.json").write_text(json.dumps({"loot": 3, "light": lately}))
             self.assertEqual(parity.fresh_only(keep), {"light": lately})
 
-    def test_a_replay_that_cannot_publish_every_output_publishes_none(self):
+    def kept_run(self, root, outputs):
         import json
+        entry = root / "keep" / "ab" / "abcd"
+        (entry / "files").mkdir(parents=True)
+        for index in range(len(outputs)):
+            (entry / "files" / str(index)).write_text(f"kept {index}")
+        (entry / "stdout").write_bytes(b"done")
+        (entry / "stderr").write_bytes(b"")
+        (entry / "run.json").write_text(json.dumps({"outputs": [str(path) for path in outputs]}))
+        return entry
+
+    def test_a_replay_that_cannot_publish_every_output_publishes_none(self):
         from tools import parity_shim
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            entry = root / "keep" / "ab" / "abcd"
-            (entry / "files").mkdir(parents=True)
             first, blocked = root / "out" / "a.txt", root / "out" / "b"
-            (entry / "files" / "0").write_text("a")
-            (entry / "files" / "1").write_text("b")
-            (entry / "stdout").write_bytes(b"done")
-            (entry / "stderr").write_bytes(b"")
-            (entry / "run.json").write_text(json.dumps({"outputs": [str(first), str(blocked)]}))
-            (blocked / "in-the-way").mkdir(parents=True)  # a folder where a file must go: its replacement fails
+            entry = self.kept_run(root, [first, blocked])
+            (blocked / "in-the-way").mkdir(parents=True)  # a folder where a file must go
             self.assertIsNone(parity_shim.restore(entry))
             self.assertEqual(sorted(path.name for path in (root / "out").iterdir()), ["b"])
+            # A file already in place is never replaced, even when a later output is the one in the way.
+            first.write_text("the checkout's own")
+            self.assertIsNone(parity_shim.restore(entry))
+            self.assertEqual(first.read_text(), "the checkout's own")
+            self.assertEqual(sorted(path.name for path in (root / "out").iterdir()), ["a.txt", "b"])
+
+    def test_a_kept_run_naming_an_unusable_path_is_a_miss(self):
+        from tools import parity_shim
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            entry = self.kept_run(root, [root / "out" / "a.txt"])
+            (entry / "run.json").write_text('{"outputs": ["' + str(root / "out") + '/b\\u0000c"]}')
+            self.assertIsNone(parity_shim.restore(entry))
+            self.assertFalse((root / "out").exists())
 
     def test_a_run_whose_streams_are_too_large_or_whose_keep_is_unwritable_is_not_kept(self):
         from tools import parity_shim
