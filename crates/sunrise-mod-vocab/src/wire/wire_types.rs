@@ -925,7 +925,9 @@ mod depth_tests {
     }
 }
 
-// The length and repeated key/value pairs use the existing map encoding.
+// Compound is defined in sunrise-core and cannot carry the vocabulary's Wire
+// derive there. Encode the public map (length, then key/value pairs in traversal
+// order), not the private hash table's storage.
 impl Wire for sunrise_core::nbt::Compound {
     layout_via!(std::collections::BTreeMap<sunrise_core::nbt::JavaString, crate::Tag>);
     const MIN: usize = 4;

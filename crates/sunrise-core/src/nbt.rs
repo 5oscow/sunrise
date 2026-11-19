@@ -49,10 +49,11 @@ impl JavaKey for JavaString {
 }
 
 /// `CompoundTag`'s Java HashMap, including collision, resize and tree-bin history.
-/// Equality and hashing ignore iteration order. Rust ownership cloning preserves
-/// this map's history; [`copy_tag`] explicitly performs Java's semantic copy.
+/// Traversal depends on the map's history; equality and hashing do not. Rust
+/// ownership cloning preserves this history; [`copy_tag`] performs Java's deep copy.
 /// The header is allocated only on first insertion, keeping scalar/list Tags compact.
 /// An emptied map retains its header and bucket capacity to preserve its history.
+#[non_exhaustive]
 #[derive(Default)]
 pub struct Compound(Option<Box<JavaHashMap<JavaString, Tag>>>);
 
