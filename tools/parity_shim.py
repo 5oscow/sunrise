@@ -242,9 +242,9 @@ def toolchain(program, hashes):
     return {str(path): hashes.file(str(path)) for path in files if path.is_file()}
 
 
-def keep_entry(command, jdk, inputs):
-    """The keep's folder for this command run by this JDK on exactly these files."""
-    digest = hashlib.sha256(json.dumps({"format": KEEP_FORMAT, "command": command, "jdk": jdk, "inputs": inputs},
+def keep_entry(command, inputs):
+    """The keep's folder for this command (including its JDK) run on exactly these files."""
+    digest = hashlib.sha256(json.dumps({"format": KEEP_FORMAT, "command": command, "inputs": inputs},
                                        sort_keys=True).encode()).hexdigest()
     return KEEP / digest[:2] / digest
 
@@ -362,7 +362,7 @@ def main():
         return 0
     before = snapshot(paths)
     inputs = {path: hashes.file(path) for path in files_under(paths)}
-    entry = keep_entry(command, command["jdk"], inputs) if KEEP else None
+    entry = keep_entry(command, inputs) if KEEP else None
     kept = restore(entry) if entry else None
     if kept:
         paths_written, stdout, stderr = kept

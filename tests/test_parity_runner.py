@@ -531,12 +531,15 @@ class OracleReuseTests(unittest.TestCase):
         root = Path(self.temp.name)
         self.bin, self.shim = root / "bin", root / "shim"
         self.bin.mkdir(); self.shim.mkdir()
-        # A fake oracle: copies its input to its output and counts its runs.
+        # A fake oracle: copies its input (or the JDK release marker) to its output and counts its runs.
         fake = self.bin / "java"
         fake.write_text(f"#!{sys.executable}\nimport sys, pathlib\n"
                         "runs = pathlib.Path(sys.argv[1]).parent / 'runs'\n"
                         "runs.write_text(str(int(runs.read_text() or 0) + 1) if runs.exists() else '1')\n"
-                        "pathlib.Path(sys.argv[2]).write_text(pathlib.Path(sys.argv[1]).read_text())\nprint('done')\n")
+                        "source = pathlib.Path(sys.argv[1])\n"
+                        "if '--emit-release' in sys.argv[3:]:\n"
+                        "    source = pathlib.Path(__file__).resolve().parent.parent / 'release'\n"
+                        "pathlib.Path(sys.argv[2]).write_bytes(source.read_bytes())\nprint('done')\n")
         fake.chmod(0o755)
         # bin's parent is the fake launcher's JDK home (JAVA_HOME below); an update in place changes its release file.
         (root / "release").write_text('JAVA_VERSION="25.0.1"\n')
@@ -557,9 +560,9 @@ class OracleReuseTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def oracle(self):
-        result = self.subprocess.run(["java", str(self.input), str(self.output)], env=self.env, capture_output=True, text=True,
-                                     stdin=self.subprocess.DEVNULL, check=True)
+    def oracle(self, *options):
+        result = self.subprocess.run(["java", str(self.input), str(self.output), *options], env=self.env,
+                                     capture_output=True, text=True, stdin=self.subprocess.DEVNULL, check=True)
         self.assertEqual(result.stdout, "done\n")
         return int((self.input.parent / "runs").read_text())
 
@@ -617,10 +620,13 @@ class OracleReuseTests(unittest.TestCase):
 
     def test_with_a_keep_an_update_of_the_jdk_in_place_replays_nothing_from_the_checkout_either(self):
         self.env["PARITY_ORACLE_KEEP"] = str(self.bin.parent / "keep")
-        self.assertEqual(self.oracle(), 1)
-        self.assertEqual(self.oracle(), 1)
-        (self.bin.parent / "release").write_text('JAVA_VERSION="25.0.2"\n')
-        self.assertEqual(self.oracle(), 2)  # warm: the checkout's own record was of the old JDK
+        self.assertEqual(self.oracle("--emit-release"), 1)
+        self.assertEqual(self.oracle("--emit-release"), 1)
+        self.assertEqual(self.output.read_bytes(), b'JAVA_VERSION="25.0.1"\n')
+        updated = b'JAVA_VERSION="25.0.10"\n'
+        (self.bin.parent / "release").write_bytes(updated)
+        self.assertEqual(self.oracle("--emit-release"), 2)  # warm: the checkout's own record was of the old JDK
+        self.assertEqual(self.output.read_bytes(), updated)
 
     def test_with_a_keep_a_launcher_linked_out_of_the_jdk_is_never_reused(self):
         import os
@@ -690,12 +696,15 @@ class OracleReuseTests(unittest.TestCase):
     def test_with_a_keep_a_run_through_a_wrapper_is_never_reused(self):
         # A JDK selector in front of $JAVA_HOME's JDK: the JDK behind it changes while the wrapper's file stays the same.
         keep = self.bin.parent / "keep"
-        self.env["PARITY_ORACLE_KEEP"] = str(keep)
         wrapper = self.bin.parent / "selector" / "bin"
         self.wrapper(wrapper)
+        (wrapper.parent / "release").write_text('JAVA_VERSION="selector"\n')
         self.env["PATH"] = f"{self.shim}:{wrapper}:{self.bin}:{self.bin.parent / 'python'}"
         self.env["PARITY_SHIM_REAL_PATH"] = f"{wrapper}:{self.bin}"
+        self.env.pop("PARITY_ORACLE_KEEP", None)
         self.assertEqual(self.oracle(), 1)
+        self.assertEqual(self.oracle(), 1)  # the selector populated the checkout's cache without the keep
+        self.env["PARITY_ORACLE_KEEP"] = str(keep)
         (self.bin.parent / "release").write_text('JAVA_VERSION="25.0.2"\n')
         self.assertEqual(self.oracle(), 2)  # warm: the checkout's own record replays nothing either
         self.new_checkout()
