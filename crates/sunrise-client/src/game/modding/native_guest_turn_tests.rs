@@ -485,8 +485,8 @@ fn a_players_move_by_falls_through_a_happy_ghast_that_is_not_held_still() {
     });
 }
 
-/// B's live menu and motion stay available while A acts, but displaced
-/// menus and an outer turn's motion must not use the swapped-out records.
+/// B's live menu and motion stay available while A acts, and A's own menu reads the swapped-in
+/// state, but displaced menus and an outer turn's motion must not use the swapped-out records.
 #[test]
 #[ignore = "daily"]
 fn another_guests_menu_and_push_work_during_a_turn() {
@@ -511,8 +511,8 @@ fn another_guests_menu_and_push_work_during_a_turn() {
             .update_guest(13, |guest| guest.inventory[0] = Some(stone.clone()))
             .unwrap();
         game.as_guest(12, |game| {
-            assert!(game.player_container_menu(a).is_none());
-            assert_eq!(a_menu.slot_count(game), None);
+            assert_eq!(game.player_container_menu(a), Some(a_menu));
+            assert_eq!(a_menu.slot_count(game), Some(46));
             assert_eq!(game.player_container_menu(b), Some(b_menu));
             assert_eq!(b_menu.slot_count(game), Some(46));
             assert_eq!(
@@ -530,8 +530,8 @@ fn another_guests_menu_and_push_work_during_a_turn() {
                     Vec3::new(0.25, 0.5, -0.25)
                 );
                 assert!(game.player_container_menu(a).is_none());
-                assert!(game.player_container_menu(b).is_none());
-                assert_eq!(b_menu.slot_count(game), None);
+                assert_eq!(game.player_container_menu(b), Some(b_menu));
+                assert_eq!(b_menu.slot_count(game), Some(46));
                 assert!(!game.entity_push(a.entity(), [1.0, 0.0, 0.0]));
             })
             .unwrap();
