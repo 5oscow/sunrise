@@ -170,6 +170,70 @@ fn a_player_borrowed_into_another_levels_turn_drops_nothing_there() {
     });
 }
 
+/// `/give` run through the console inside an open transaction, while a Nether guest with a full
+/// inventory is borrowed into an Overworld turn: the command takes the stack in the guest's own
+/// level, so on commit the overflow lies in the Nether at the guest, nothing in the Overworld
+/// and the Overworld is in place again. On abort nothing lies in either level and the
+/// inventory is back.
+#[test]
+#[ignore = "daily"]
+fn a_give_command_in_a_transaction_for_a_borrowed_player_lands_in_their_level() {
+    with_guests(|game| {
+        game.build_registries();
+        in_the_nether(game);
+        let before = dropped(game);
+        for commit in [true, false] {
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .update_guest(13, |g| {
+                    g.inventory
+                        .fill(Some(ItemStack::new("minecraft:stone", 64)))
+                })
+                .unwrap();
+            let case = format!("commit: {commit}");
+            let ran = game
+                .as_guest(13, |game| {
+                    let host: &mut dyn ServerHost = game;
+                    host.transaction(|host, _| {
+                        assert_eq!(host.dimension(), "minecraft:overworld");
+                        let result = host
+                            .commands()
+                            .run_command_with_output("give guest13 minecraft:diamond");
+                        let ok = result.success;
+                        assert!(ok, "{}", result.feedback.join("|"));
+                        assert_eq!(host.dimension(), "minecraft:overworld");
+                        if commit { Ok(ok) } else { Err(ok) }
+                    })
+                })
+                .unwrap();
+            assert!(ran.unwrap_or_else(|ok| ok), "{case}");
+            assert_eq!(game.dim, Dim::Overworld, "{case}");
+            assert_eq!(diamonds(game, 13), 0, "{case}: the inventory is full");
+            if commit {
+                assert_eq!(dropped(game), [before[0], before[1] + 1], "{case}");
+                game.enter_level(Dim::Nether).unwrap();
+                let lying = game.dropped.iter().next().unwrap();
+                assert_eq!(&*lying.stack.item, "minecraft:diamond", "{case}");
+                assert!((lying.position.x - 3.0).abs() < 3.0, "{case}");
+                game.dropped.clear();
+                game.enter_level(Dim::Overworld).unwrap();
+            } else {
+                assert_eq!(dropped(game), before, "{case}");
+                let guest = game.lan.as_ref().unwrap().hub.guest(13).unwrap();
+                assert!(
+                    guest
+                        .inventory
+                        .iter()
+                        .all(|s| s.as_ref().is_some_and(|s| &*s.item == "minecraft:stone")),
+                    "{case}: the inventory is back"
+                );
+            }
+        }
+    });
+}
+
 /// A throw or a break for a player in another level changes nothing: the stack comes back, and
 /// the same coordinates keep their block in both levels.
 #[test]
@@ -293,7 +357,6 @@ fn an_inventory_reward_for_a_player_in_another_level_waits_for_their_own_tick() 
             assert_eq!(diamonds(game, conn), 1, "{case}");
             assert!(!done(game, conn), "{case}: not judged in the hook's level");
             assert_eq!(dropped(game), before, "{case}: nothing dropped yet");
-
             game.enter_level(Dim::Nether).unwrap();
             game.as_guest(conn, |game| game.tick_advancements())
                 .unwrap();

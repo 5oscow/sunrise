@@ -20,15 +20,15 @@ impl Game<'_> {
         if !self.acting_in_level_in_place() {
             return left;
         }
-        // At the player who gets them.
+        // At the player who gets them, in the level in place now: a root commit may replay
+        // this after the command put the caller's level back.
+        let dim = self.dim;
         if let Some(rest) = left {
-            let uuid = self.native_acting_id();
             self.after_commit(crate::game::transactions::After::GiveRest(
-                uuid, rest, owner,
+                uuid, rest, owner, dim,
             ));
         } else {
-            let uuid = self.native_acting_id();
-            self.after_commit(crate::game::transactions::After::GivePickup(uuid));
+            self.after_commit(crate::game::transactions::After::GivePickup(uuid, dim));
         }
         None
     }

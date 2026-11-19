@@ -308,9 +308,12 @@ pub(super) enum After {
     Drop([i32; 3], ItemStack),
     /// `Player.drop(stack, false)` by the player with this UUID: what no longer fits.
     PlayerDrop(u128, ItemStack),
-    GivePickup(u128),
+    /// `/give`'s pickup sound for the player with this UUID, in the level that was in place
+    /// when the stack was accepted (a command run for a borrowed player swaps it in).
+    GivePickup(u128, super::Dim),
     InventoryTrigger(u128),
-    GiveRest(u128, ItemStack, Option<[i32; 4]>),
+    /// What did not fit of a `/give`, thrown in the level that was in place when it was accepted.
+    GiveRest(u128, ItemStack, Option<[i32; 4]>, super::Dim),
     PlayerEquip(u128, String, Option<ItemStack>),
     /// An item split off an item entity, dropped where it is (`Block.popResource`'s delay).
     Spawn([f64; 3], ItemStack),
@@ -1043,8 +1046,14 @@ impl Game<'_> {
             After::Drop(pos, stack) => {
                 self.spawn_item(stack, pos.map(|p| f64::from(p) + 0.5), [0.0; 3], 10);
             }
-            After::GivePickup(uuid) => {
-                self.native_as_player(uuid, |g| g.give_pickup());
+            After::GivePickup(uuid, dim) => {
+                self.native_as_player(uuid, |g| {
+                    let back = g.enter_command_level(dim);
+                    g.give_pickup();
+                    if let Some(back) = back {
+                        g.enter_command_level(back);
+                    }
+                });
             }
             After::InventoryTrigger(uuid) => {
                 // A player in another level has their criteria and rewards judged in their
@@ -1057,8 +1066,14 @@ impl Game<'_> {
                     }
                 });
             }
-            After::GiveRest(uuid, stack, owner) => {
-                self.native_as_player(uuid, |g| g.give_remainder(stack, owner));
+            After::GiveRest(uuid, stack, owner, dim) => {
+                self.native_as_player(uuid, |g| {
+                    let back = g.enter_command_level(dim);
+                    g.give_remainder(stack, owner);
+                    if let Some(back) = back {
+                        g.enter_command_level(back);
+                    }
+                });
             }
             After::PlayerEquip(uuid, slot, stack) => {
                 self.native_as_player(uuid, |g| {
