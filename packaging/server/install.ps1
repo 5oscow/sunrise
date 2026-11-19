@@ -23,14 +23,14 @@ $Repo = "sunrise-org/sunrise"
 # sunrise-verify, the release checker the install pins: its SHA-256 per platform,
 # from release verifier@$VerifierVersion. "unpinned" until the first verifier release exists.
 # >>> verifier pin (tools/ci/pin_verifier.py rewrites this block; do not edit it by hand)
-$VerifierVersion = 'unpinned'
+$VerifierVersion = '1.0.0'
 $VerifierSha256 = @{
-    'linux-x86_64' = 'unpinned'
-    'linux-aarch64' = 'unpinned'
-    'macos-arm64' = 'unpinned'
-    'macos-x64' = 'unpinned'
-    'windows-x64' = 'unpinned'
-    'windows-arm64' = 'unpinned'
+    'linux-x86_64' = '310bba30dd6dba7147d9a14692c4efb5887875c6d6eca953a5e888106f5a7630'
+    'linux-aarch64' = '5e293dbc2552db7a7df79105005425463b7b0eef2d97ff30a8e65d156f0c50b6'
+    'macos-arm64' = '0b934c07fe4003bc25554a95adef2dfc3a3b73e84b9647e100d0a3acd472e11e'
+    'macos-x64' = '912223491295e60f2d338a141b47fe2deab161608b1b8b02134ca7b7bdf0430b'
+    'windows-x64' = 'd26077550c2b8695db181d3f32ba1cb7f2f22cff455f78d6148a298df56f9b79'
+    'windows-arm64' = 'ef5bbdf1440c303c0e8c6056159fc46166727257f1e6a1b98ef63def7932d1d9'
 }
 # <<< verifier pin
 $Fallback = $null

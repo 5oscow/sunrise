@@ -24,13 +24,13 @@ INSECURE=
 # sunrise-verify, the release checker the install pins: its SHA-256 per platform,
 # from release verifier@VERIFIER_VERSION. "unpinned" until the first verifier release exists.
 # >>> verifier pin (tools/ci/pin_verifier.py rewrites this block; do not edit it by hand)
-VERIFIER_VERSION=unpinned
-VERIFIER_SHA256_linux_x86_64=unpinned
-VERIFIER_SHA256_linux_aarch64=unpinned
-VERIFIER_SHA256_macos_arm64=unpinned
-VERIFIER_SHA256_macos_x64=unpinned
-VERIFIER_SHA256_windows_x64=unpinned
-VERIFIER_SHA256_windows_arm64=unpinned
+VERIFIER_VERSION=1.0.0
+VERIFIER_SHA256_linux_x86_64=310bba30dd6dba7147d9a14692c4efb5887875c6d6eca953a5e888106f5a7630
+VERIFIER_SHA256_linux_aarch64=5e293dbc2552db7a7df79105005425463b7b0eef2d97ff30a8e65d156f0c50b6
+VERIFIER_SHA256_macos_arm64=0b934c07fe4003bc25554a95adef2dfc3a3b73e84b9647e100d0a3acd472e11e
+VERIFIER_SHA256_macos_x64=912223491295e60f2d338a141b47fe2deab161608b1b8b02134ca7b7bdf0430b
+VERIFIER_SHA256_windows_x64=d26077550c2b8695db181d3f32ba1cb7f2f22cff455f78d6148a298df56f9b79
+VERIFIER_SHA256_windows_arm64=ef5bbdf1440c303c0e8c6056159fc46166727257f1e6a1b98ef63def7932d1d9
 # <<< verifier pin
 
 die() { echo "sunrise install: $*" >&2; exit 1; }
