@@ -86,6 +86,7 @@ pub trait BlockStatesServerHost {
 // hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 #[sunrise_mod_api_macros::host_area]
+#[table_backend("crate::game::native_block_tables::BlockTables")]
 pub trait BlockStatesBackend {
     /// Side: both. The age read by `BlockStates::weathering_age`.
     #[access(Metadata)]

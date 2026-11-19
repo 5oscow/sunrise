@@ -1,6 +1,6 @@
 # Block-state facts
 
-A `BlockState` is an API-owned value pairing a `BlockKey` with a block-local canonical ordinal, not a numeric engine state ID or a live object. Read facts without a world position on either side through `host.block_states()` (import `HostBlockStates`). The service reads the game's loaded tables. Basic fact queries and matching allocate nothing; `definition` copies the property data for the caller. Property operations on `BlockState` borrow explicit immutable block metadata; `block()` and `ordinal()` need no host:
+A `BlockState` is an API-owned value pairing a `BlockKey` with a block-local canonical ordinal, not a numeric engine state ID or a live object. Read facts without a world position on either side through `host.block_states()` (import `HostBlockStates`). Inside a level callback, which receives a level view and no `Host` (such as `BlockPart::random_tick`), call `level.block_states()` on the view: it is the same service over the same tables. The service reads the game's loaded tables. Basic fact queries and matching allocate nothing; `definition` copies the property data for the caller. Property operations on `BlockState` borrow explicit immutable block metadata; `block()` and `ordinal()` need no host:
 
 | Method | Vanilla |
 |---|---|

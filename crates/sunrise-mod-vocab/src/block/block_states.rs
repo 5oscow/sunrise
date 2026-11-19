@@ -2,8 +2,8 @@
 //! Queries consume owned API block states, never world numeric IDs. Both sides read the
 //! game's published tables; definitions are copied out and property values are borrowed.
 use crate::{
-    Backend, BackendRef, BlockKey, BlockMetadata, BlockSoundType, BlockState, BlockStateError,
-    BlockStateRange, BlockStateRecord, Host,
+    BlockKey, BlockMetadata, BlockSoundType, BlockState, BlockStateError, BlockStateRange,
+    BlockStateRecord, Host, host::block_states::BlockStatesBackend,
 };
 
 /// One property and its legal values in a state definition.
@@ -75,7 +75,7 @@ pub enum StateMatchError {
 /// The block-state facts service: `host.block_states()`.
 // exhaustive: its field is private; only `host.block_states()` builds one
 pub struct BlockStates<'a> {
-    backend: Option<&'a dyn Backend>,
+    backend: Option<&'a dyn BlockStatesBackend>,
 }
 
 /// Reaches [`BlockStates`] from any host.
@@ -87,8 +87,26 @@ pub trait HostBlockStates {
 impl<H: Host + ?Sized> HostBlockStates for H {
     fn block_states(&self) -> BlockStates<'_> {
         BlockStates {
-            backend: self.backend().map(BackendRef::open),
+            backend: self
+                .backend()
+                .map(|backend| backend.open() as &dyn BlockStatesBackend),
         }
+    }
+}
+
+impl<'a> BlockStates<'a> {
+    /// The facts of a game-side table view, as a level view hands them out.
+    // hidden: a game-side constructor, as `BackendRef::of`; mods reach the facts through a host or a level view
+    #[doc(hidden)]
+    pub fn of(backend: &'a dyn BlockStatesBackend) -> Self {
+        Self {
+            backend: Some(backend),
+        }
+    }
+
+    /// The service of a level view with no tables: every fact answers `None` or `Unavailable`.
+    pub(crate) fn unavailable() -> Self {
+        Self { backend: None }
     }
 }
 
