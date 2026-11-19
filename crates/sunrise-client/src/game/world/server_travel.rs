@@ -1113,7 +1113,8 @@ impl Game<'_> {
             conn,
             dim: self.world_spawn_level(),
             at,
-            rotation: None,
+            // Facing the world spawn's angle (respawnData.yaw(), pitch()).
+            rotation: Some(self.level.world_spawn_angle),
             vehicle: None,
         });
         self.run_level_teleports();
