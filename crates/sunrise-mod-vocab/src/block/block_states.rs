@@ -64,6 +64,7 @@ pub enum WeatheringAge {
 /// with [`BlockStates::block_class`]: it is the engine's own classification of the block, not a
 /// tag, so a datapack that edits `minecraft:stairs` does not change it. A mod block declared on
 /// a vanilla behaviour template belongs to that template's classes.
+// exhaustive: the engine matches every class; adding one is a deliberate API change
 #[derive(Clone, Copy, Debug, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
 pub enum BlockClass {
     /// `StairBlock`.
