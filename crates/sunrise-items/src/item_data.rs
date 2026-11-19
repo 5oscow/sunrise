@@ -1505,12 +1505,14 @@ pub fn encode_components(stack: &ItemStack, items: &crate::items::Items) -> Opti
     // Equality belongs to the component codec, not its saved NBT numeric width.
     if let Tag::Compound(entries) = &mut components {
         entries.retain(|id, _| {
+            let key = id.to_string_lossy();
+            // PatchedDataComponentMap: a removal stays in the patch only where
+            // the prototype has the component; elsewhere nothing is removed.
+            if let Some(removed) = key.strip_prefix('!') {
+                return prototype.contains_key(&JavaString::from(removed));
+            }
             !prototype.contains_key(id)
-                || !ingredient_components::component_equal(
-                    &id.to_string_lossy(),
-                    stack,
-                    &info.component_prototype,
-                )
+                || !ingredient_components::component_equal(&key, stack, &info.component_prototype)
         });
         if entries.is_empty() {
             return None;
