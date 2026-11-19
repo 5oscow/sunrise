@@ -157,12 +157,18 @@ window around the expected age.
 
 ## Host calls a load phase refuses
 
-Each Host method says in which load phases it may be called (`#[access(...)]`): outside the running world only
-the settings read, the registry and metadata reads, the client setup reads and the published resource queries are
-open, and a world read or write is open only once the world runs. Two phases open a little more: Config adds
-the mod's own config files, and Setup adds the client setup calls, some of which have
-presentation effects (a sound, a narrator line, a HUD mode) that stand even if the hook is refused afterwards. A native mod that calls one in a phase that does
-not admit it is **refused, not crashed**, as a wasm mod's call is:
+Each Host method says in which load phases it may be called (`#[access(...)]`). A world read or write is open
+only once the world runs. Before it, each phase opens a few classes:
+
+| Phase | Open |
+|---|---|
+| Setup | settings reads; registry and metadata reads; the client setup calls; the published resource queries |
+| Config | settings reads; the mod's own config files |
+| Reloading | settings reads; registry and metadata reads; the published resource queries |
+
+The client setup calls of Setup can have presentation effects (a sound, a narrator line, a HUD mode) that stand
+even if the hook is refused afterwards. A native mod that calls a method in a phase that does not admit it is
+**refused, not crashed**, as a wasm mod's call is:
 
 - The call ends the mod's hook call (it unwinds out of the listener; the game makes no panic report). The game logs
   `native refusal: <mod> hook <hook>: mod API <method> is unavailable during <phase>` once for each mod and method.
