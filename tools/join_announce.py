@@ -60,13 +60,35 @@ def vanilla_client(address, work, log):
     command = vanilla_client.command(args)
     env = vanilla_client.environment()
     env.pop('WAYLAND_DISPLAY', None)
-    xvfb = subprocess.Popen(['Xvfb', ':97', '-screen', '0', '1024x768x24'], stderr=subprocess.DEVNULL)
-    time.sleep(2)
-    env['DISPLAY'] = ':97'
+    # Xvfb picks a free display and writes its number, so two runs never share a screen.
+    read, write = os.pipe()
+    xvfb = subprocess.Popen(['Xvfb', '-displayfd', str(write), '-screen', '0', '1024x768x24'],
+                            stderr=subprocess.DEVNULL, pass_fds=(write,))
+    os.close(write)
+    with os.fdopen(read) as number:
+        display = f':{number.readline().strip()}'
+    env['DISPLAY'] = display
     env['LIBGL_ALWAYS_SOFTWARE'] = '1'
     process = subprocess.Popen(command, cwd=args.game_dir, env=env, stdout=open(log, 'w'),
                                stderr=subprocess.STDOUT)
-    return process, xvfb
+    return process, xvfb, display
+
+
+def output_folder(path, own):
+    """`--out`, emptied of this tool's own files from an earlier run. A folder holding anything
+    else is refused, so a mistyped argument never deletes a checkout or a home folder."""
+    out = Path(path)
+    if out.exists():
+        if not out.is_dir():
+            sys.exit(f'--out {out} is a file')
+        stray = sorted(p.name for p in out.iterdir() if p.name not in own)
+        if stray:
+            sys.exit(f'--out {out} holds files this tool did not write ({", ".join(stray[:5])}); '
+                     'name a new or empty folder')
+        for name in own:
+            (out / name).unlink(missing_ok=True)
+    out.mkdir(parents=True, exist_ok=True)
+    return out
 
 
 def record(args):
@@ -86,9 +108,7 @@ def record(args):
     (directory / 'server.properties').write_text(''.join(f'{k}={v}\n' for k, v in props.items()),
                                                  encoding='iso-8859-1')
     (directory / 'eula.txt').write_text('eula=true\n')
-    out = Path(args.out)
-    shutil.rmtree(out, ignore_errors=True)
-    out.mkdir(parents=True)
+    out = output_folder(args.out, ('capture.jsonl', 'serverbound.json', 'client.log'))
     capture = out / 'capture.jsonl'
     capture.touch()
     server = Server(vanilla, directory, 'server')
@@ -99,7 +119,7 @@ def record(args):
         stop = net_capture.start_background(listen, f'127.0.0.1:{port}', capture, full=True)
         address = f'127.0.0.1:{listen}'
         if args.client == 'vanilla':
-            process, xvfb = vanilla_client(address, work, out / 'client.log')
+            process, xvfb, _ = vanilla_client(address, work, out / 'client.log')
         else:
             game = Headless(Path(args.bin), lab.RESOURCES, work / 'game')
             game('connect', address, PLAYER)

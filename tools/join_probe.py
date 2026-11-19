@@ -38,7 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import lab  # noqa: E402
 import net_capture  # noqa: E402
 import test_rust_parity as base  # noqa: E402
-from join_announce import Headless, vanilla_client, PLAYER  # noqa: E402
+from join_announce import Headless, output_folder, vanilla_client, PLAYER  # noqa: E402
 from test_dedicated_server_parity import Server, free_port  # noqa: E402
 from vanilla_wire_e2e import PROPERTIES  # noqa: E402
 
@@ -271,14 +271,11 @@ def record(args):
     props = dict(PROPERTIES, **{'server-port': str(port), 'server-ip': '127.0.0.1'})
     (directory / 'server.properties').write_text(''.join(f'{k}={v}\n' for k, v in props.items()), encoding='iso-8859-1')
     (directory / 'eula.txt').write_text('eula=true\n')
-    out = Path(args.out)
-    shutil.rmtree(out, ignore_errors=True)
-    out.mkdir(parents=True)
+    out = output_folder(args.out, ('capture.jsonl', 'all.json', 'client.log'))
     capture = out / 'capture.jsonl'
     capture.touch()
     server = Server(vanilla, directory, 'server')
-    game = xvfb = process = None
-    display = ':97'
+    game = xvfb = process = display = None
     try:
         server.wait_for(r'Done \(', timeout=300)
         listen = free_port()
@@ -286,7 +283,7 @@ def record(args):
         stop = net_capture.start_background(listen, f'127.0.0.1:{port}', capture, full=True)
         address = f'127.0.0.1:{listen}'
         if args.client == 'vanilla':
-            process, xvfb = vanilla_client(address, work, out / 'client.log')
+            process, xvfb, display = vanilla_client(address, work, out / 'client.log')
         else:
             game = Headless(Path(args.bin), lab.RESOURCES, work / 'game')
             game('connect', address, PLAYER)
