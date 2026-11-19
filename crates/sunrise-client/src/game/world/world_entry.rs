@@ -678,6 +678,7 @@ impl Game<'_> {
     pub(super) fn load_server_loot(&mut self) {
         if let Some(tables) = &self.world_tables {
             self.server_items = Some(tables.items.clone());
+            self.copy_loot_enchantment_answers(&tables.loot);
             self.server_loot.set(Some(tables.loot.clone()));
             global_loot_modifiers::bind_retained(
                 &self.reload_resources,
@@ -724,6 +725,9 @@ impl Game<'_> {
             let mut items = self.items().clone();
             items.set_loot_tables(loot.tables().clone());
             self.server_items = Some(Arc::new(items));
+        }
+        if let Some(loot) = &loot {
+            self.copy_loot_enchantment_answers(loot);
         }
         self.server_loot.set(loot);
     }
@@ -836,15 +840,28 @@ impl Game<'_> {
     /// that attach parts to a block or item it doesn't have are an error.
     pub(super) fn resolve_parts(&self) -> Result<()> {
         let prepared = self.prepare_parts(self.items())?;
-        self.install_parts(prepared);
+        if self
+            .remote
+            .as_ref()
+            .is_some_and(|r| !r.registries.tags.is_empty())
+        {
+            // During login this binds the local state keys. The effective item snapshot
+            // belongs to install_remote_tags, after it publishes the server's tag view.
+            self.bind_parts(prepared);
+        } else {
+            self.install_parts(prepared);
+        }
         self.resolve_enchant_particles();
         Ok(())
     }
-    /// Ask the parts of each block `isPathfindable` once per state and type, and of each item
-    /// `isPrimaryItemFor` once per enchantment: the answers depend on nothing else, so path
-    /// finding, spawning and enchantment selection read them with no dispatch. A server also
-    /// publishes its parts for its world generation.
+    /// Bind parts, then resolve support and primary item answers against the published tags.
     pub(super) fn install_parts(&self, prepared: PreparedParts) {
+        self.bind_parts(prepared);
+        self.resolve_primary_items();
+    }
+    /// Publish state keys and bind parts before their state-only answers are cached.
+    /// A server also publishes its parts for world generation.
+    pub(super) fn bind_parts(&self, prepared: PreparedParts) {
         cauldron_interactions::install(prepared.cauldrons);
         if self.is_logical_server() {
             native_worldgen_parts::publish(
@@ -859,7 +876,6 @@ impl Game<'_> {
         self.mark_collision_shape_states();
         self.resolve_block_paths();
         self.resolve_piston_reactions();
-        self.resolve_primary_items();
     }
     pub(super) fn resolve_block_paths(&self) {
         use mod_api::{HookId, PathComputationType};
