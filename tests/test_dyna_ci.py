@@ -315,7 +315,9 @@ class DynaRoutingTests(unittest.TestCase):
         self.assertIn("python3 tools/ci/run_test_binaries.py --jobs 3 --time-limits 2,5 --network-guard target/network_guard.so --no-data-skips -- cargo test $JOBS --profile test --workspace --lib --bins --tests", runtime)
         self.assertIn("cargo test $JOBS --no-fail-fast --profile test --workspace --doc", runtime)
         tools = static.split("- name: Install Rust tools for isolated tooling fixtures\n", 1)[1].split("\n      - ", 1)[0]
-        self.assertIn("needs.changes.outputs.rust_required != 'false' || needs.changes.outputs.tooling_required != 'false'", tools)
+        # Dyna's image has no Cargo: a reused main push (nothing selected) still runs the Cargo-using checks there.
+        self.assertIn("if: needs.changes.outputs.rust_required != 'false' || needs.changes.outputs.tooling_required != 'false'"
+                      " || env.RUNNER_KIND == 'dyna'\n", tools)
         self.assertIn("--component rustfmt --component clippy", tools)
         # GITHUB_PATH, not a shell-local export, carries Cargo into later steps.
         self.assertIn('echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"', tools)
