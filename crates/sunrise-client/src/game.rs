@@ -126,6 +126,7 @@ use resource_loader::{
     run_loading, write_report,
 };
 use sunrise_client::random_source;
+use sunrise_client_render::block_entity_reach::Reach;
 // `Action` here is the title screen's buttons (`title::Action`).
 use self::api_values::TryIntoApi;
 pub(crate) use api_values::{block_jump_factor, block_speed_factor, is_ladder};
@@ -5664,19 +5665,9 @@ impl Game<'_> {
             let view = self.view_frustum;
             // Beams and structure outlines reach far outside their block
             // (BlockEntityRenderer.shouldRenderOffScreen): never culled.
-            let off_screen = |state: u32| {
-                let name = &*self.res.facts().get(BlockStateId(state)).name;
-                matches!(
-                    name,
-                    "minecraft:beacon"
-                        | "minecraft:end_gateway"
-                        | "minecraft:structure_block"
-                        | "minecraft:test_instance_block"
-                )
-            };
-            let long_range = |state: u32| {
-                &*self.res.facts().get(BlockStateId(state)).name == "minecraft:end_gateway"
-            };
+            let off_screen = |state: u32| self.block_entity_reach(state).off_screen();
+            // Sections past 64 blocks are kept for the End gateway's 256.
+            let long_range = |state: u32| self.block_entity_reach(state) == Reach::EndGateway;
             let in_view = |p: &[i32; 3]| {
                 view.is_none_or(|v| {
                     let o = (glam::DVec3::new(f64::from(p[0]), f64::from(p[1]), f64::from(p[2]))
@@ -11858,3 +11849,11 @@ mod sign_chain_tests;
 #[cfg(test)]
 #[path = "game/interface/tests/sign_use_tests.rs"]
 mod sign_use_tests;
+
+impl Game<'_> {
+    /// How far the block entity of a block state is drawn: its `BlockEntityRenderer`'s reach, which
+    /// every block entity draw and the frame's block entity selection ask.
+    pub(super) fn block_entity_reach(&self, state: u32) -> Reach {
+        Reach::of(&self.res.facts().get(BlockStateId(state)).name)
+    }
+}

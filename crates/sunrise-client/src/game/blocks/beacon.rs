@@ -17,6 +17,7 @@ use sunrise_client::{
     test_instance_block::Status,
     text::Text,
 };
+use sunrise_client_render::block_entity_reach::Reach;
 use sunrise_core::position::BlockPos;
 use sunrise_protocol::packets::play::{self, Serverbound as S};
 use sunrise_world::registry::BlockStateId;
@@ -692,23 +693,26 @@ impl Game<'_> {
         };
         let time = (self.world.game_time.rem_euclid(40)) as f32 + alpha as f32;
         let scoping = self.scoping();
-        // `BeaconRenderer.shouldRender` culls at the effective render distance.
-        let view = f64::from(self.effective_render_distance() * 16);
+        // `BeaconRenderer.shouldRender` and `TestInstanceRenderer.shouldRender` cull at the
+        // effective render distance.
+        let view = self.effective_render_distance();
         let beams = self.world.block_entities.iter().filter_map(|(k, e)| {
-            let sections = match beam(e) {
-                Some(sections) => std::borrow::Cow::Borrowed(sections),
-                None => std::borrow::Cow::Owned(self.test_instance_beam(e)?),
+            let (reach, sections) = match beam(e) {
+                Some(sections) => (Reach::Beacon, std::borrow::Cow::Borrowed(sections)),
+                None => (
+                    Reach::TestInstance,
+                    std::borrow::Cow::Owned(self.test_instance_beam(e)?),
+                ),
             };
-            Some((k, sections))
+            Some((k, reach, sections))
         });
-        for (k, sections) in beams {
+        for (k, reach, sections) in beams {
             let base = glam::DVec3::new(f64::from(k.0) + 0.5, f64::from(k.1), f64::from(k.2) + 0.5);
-            let offset = base - camera;
-            let horizontal = glam::DVec2::new(offset.x, offset.z).length();
-            if horizontal >= view {
+            if !reach.should_render([k.0, k.1, k.2], camera, view) {
                 continue;
             }
-            let distance = horizontal as f32;
+            let offset = base - camera;
+            let distance = glam::DVec2::new(offset.x, offset.z).length() as f32;
             let scale = if scoping {
                 1.0
             } else {
