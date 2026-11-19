@@ -189,7 +189,9 @@ def rust_includes():
     """(the files this checkout's Rust includes by name, [(source, regex)] for the includes whose path is assembled
     from something other than literals); None if the sources can't be read."""
     scanned = rust_literals()
-    listed = git("grep", "-l", "-z", "-E", r"\b(include(_str|_bytes)?|path)\b", "--", "*.rs")
+    # An attribute's `#[` and `path` can be on different lines: also list a line ending in `#[` or starting `path =`.
+    pattern = r"\binclude(_str|_bytes)?\b|#\[[[:space:]]*path|^[[:space:]]*path[[:space:]]*=|#\[[[:space:]]*$"
+    listed = git("grep", "-l", "-z", "-E", pattern, "--", "*.rs")
     if scanned is None or listed.returncode not in (0, 1):
         return None
     manifests = scanned[0]
