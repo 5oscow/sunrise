@@ -329,8 +329,11 @@ impl Game<'_> {
                 seed,
             ) {
                 draw(BlockItemDraw {
+                    #[cfg(test)]
                     stack,
+                    #[cfg(test)]
                     display: DisplayContext::Ground,
+                    #[cfg(test)]
                     seed: 0,
                     state: &state,
                     pose: copy,

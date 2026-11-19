@@ -386,8 +386,11 @@ impl Game<'_> {
                 key.2 + adjacent[2],
             );
             draw(BlockItemDraw {
+                #[cfg(test)]
                 stack,
+                #[cfg(test)]
                 display: DisplayContext::Fixed,
+                #[cfg(test)]
                 seed: 0,
                 state: &item,
                 pose: pose.to_glam(),

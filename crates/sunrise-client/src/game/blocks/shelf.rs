@@ -290,8 +290,11 @@ impl Game<'_> {
                 pose.scale(0.25, 0.25, 0.25);
                 pose.translate(0.0, offset_y as f32, 0.0);
                 draw(BlockItemDraw {
+                    #[cfg(test)]
                     stack,
+                    #[cfg(test)]
                     display: DisplayContext::OnShelf,
+                    #[cfg(test)]
                     seed,
                     state: &item,
                     pose: pose.to_glam(),

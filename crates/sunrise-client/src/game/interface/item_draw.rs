@@ -374,9 +374,14 @@ impl SpecialHost for Host<'_> {
 /// (`ItemStackRenderState.submit`): the stack it resolved, as
 /// `ItemModelResolver.updateForTopItem` was asked for it, under `pose`
 /// (camera-relative) at `light` (packed lightmap coordinates).
+/// `stack`, `display` and `seed` are what the parity test compares with vanilla's renderers;
+/// drawing reads only the resolved `state`.
 pub(super) struct BlockItemDraw<'a> {
+    #[cfg(test)]
     pub(super) stack: &'a ItemStack,
+    #[cfg(test)]
     pub(super) display: DisplayContext,
+    #[cfg(test)]
     pub(super) seed: i32,
     pub(super) state: &'a ItemRenderState,
     pub(super) pose: glam::Mat4,
