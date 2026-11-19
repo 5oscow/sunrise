@@ -1,7 +1,7 @@
 //! Placement-state reads, placement writes and the `Block.setPlacedBy` step.
-use super::{Game, native_server::PlayerRead};
+use super::{Game, api_values::block_state::block_listens, native_server::PlayerRead};
 use mod_api::{
-    BlockKey, BlockUpdateFlags, LevelReadError, LevelRef, LevelWriteError, PlayerRef,
+    BlockKey, BlockUpdateFlags, HookId, LevelReadError, LevelRef, LevelWriteError, PlayerRef,
     PlayerWorldRefusal as Refusal,
 };
 use sunrise_client::{containers::BlockEntity, items::ItemStack};
@@ -218,15 +218,17 @@ impl Game<'_> {
         self.with_level(|b, level, ticks| {
             b.set_placed_by_state(level, ticks, BlockPos::new(x, y, z), placed);
         });
-        let _ = self.set_placed_by(pos, None, stack);
+        let _ = self.set_placed_by(pos, placed, None, stack);
         let _ = self.process_level_events();
     }
 
     /// The game-level part of `Block.setPlacedBy`, once the state-only part has run.
+    /// `state` is the state the callback began with, before its writes or neighbour updates.
     /// A supplied player is already the acting player. A supplied stack is read only.
     pub(super) fn set_placed_by(
         &mut self,
         pos: [i32; 3],
+        state: BlockStateId,
         placer: Option<PlayerRef>,
         stack: Option<&ItemStack>,
     ) -> crate::Result<()> {
@@ -256,6 +258,13 @@ impl Game<'_> {
                 _ => {}
             }
         }
-        self.check_wither_spawn(pos)
+        self.check_wither_spawn(pos)?;
+        if self.is_logical_server()
+            && block_listens(HookId::SetPlacedBy, state)
+            && let Some(level) = self.level(self.dim.id())
+        {
+            self.native_set_placed_by(level, pos, state, placer.map(PlayerRef::entity), stack);
+        }
+        Ok(())
     }
 }

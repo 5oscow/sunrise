@@ -2182,7 +2182,7 @@ impl Game<'_> {
             self.apply_block_item_data(target, placed.state, stack, game_master);
             self.with_level(|b, level, ticks| b.placement_set_placed_by(level, ticks, &placed));
             let placer = by_player.then(|| self.native_acting_player()).flatten();
-            self.set_placed_by(target, placer, Some(stack))?;
+            self.set_placed_by(target, placed.state, placer, Some(stack))?;
             self.block_item_placed(stack, placer, &placed.context);
             if by_player {
                 self.trigger_block("minecraft:placed_block", target, stack);
