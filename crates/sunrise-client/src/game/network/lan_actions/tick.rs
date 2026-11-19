@@ -15,16 +15,16 @@ impl Game<'_> {
         let Some(host) = self.lan.as_ref() else {
             return;
         };
-        let conns: Vec<u32> = host
+        let turns: Vec<_> = host
             .hub
             .guests
             .iter()
             .filter(|g| host.hub.here(g))
-            .map(|g| g.conn)
+            .map(|g| (g.conn, g.vehicle.is_some()))
             .collect();
-        // ServerLevel calls Entity.commonTick even for unloaded spectators,
-        // before the cancellable ServerPlayer.tick.
-        for &conn in &conns {
+        // A passenger's Entity.commonTick precedes its rideTick and cannot
+        // be canceled by the ride tick's EntityTickEvent.Pre.
+        for &(conn, passenger) in &turns {
             if self.on_server_trip(conn) {
                 continue;
             }
@@ -32,24 +32,18 @@ impl Game<'_> {
                 return;
             };
             host.play.entry(conn).or_default().level_up_sound.tick();
-            let advanced = host.hub.update_guest(conn, |guest| {
-                guest
-                    .motion
-                    .as_mut()
-                    .map(|motion| motion.health.advance_entity_clock())
-            });
-            if advanced == Some(None) {
-                // Joining players have not borrowed their saved body yet.
-                self.as_guest(conn, |game| {
-                    if let Some(player) = game.player.as_mut() {
-                        player.health.advance_entity_clock();
-                    }
-                });
+            if passenger {
+                self.advance_guest_entity_clock(conn);
             }
         }
-        // EntityTickEvent.Pre for each player's `ServerPlayer.tick`, before its
-        // menu updates and each player's game-mode and advancement work.
+        // For a root player the common tick is part of the cancellable
+        // round, even for a spectator touching an unloaded chunk.
         let round = self.native_players_tick_pre();
+        for &(conn, passenger) in &turns {
+            if !passenger && !self.player_tick_canceled(conn) && !self.on_server_trip(conn) {
+                self.advance_guest_entity_clock(conn);
+            }
+        }
         self.tick_guest_cameras();
         self.lan_merchant_tick();
         self.lan_stations_tick();
@@ -61,7 +55,7 @@ impl Game<'_> {
         self.native_players_equipment();
         self.announce_guest_advancements();
         let mut told = None;
-        for conn in conns {
+        for (conn, _) in turns {
             self.native_player_tick_post_alone(&round, &mut told);
             let canceled = self.player_tick_canceled(conn);
             let Some(host) = self.lan.as_mut() else {
@@ -141,6 +135,26 @@ impl Game<'_> {
         }
         self.native_player_tick_post_alone(&round, &mut told);
         self.native_tick_post_batch(round);
+    }
+
+    fn advance_guest_entity_clock(&mut self, conn: u32) {
+        let Some(host) = self.lan.as_mut() else {
+            return;
+        };
+        let advanced = host.hub.update_guest(conn, |guest| {
+            guest
+                .motion
+                .as_mut()
+                .map(|motion| motion.health.advance_entity_clock())
+        });
+        if advanced == Some(None) {
+            // Joining players have not borrowed their saved body yet.
+            self.as_guest(conn, |game| {
+                if let Some(player) = game.player.as_mut() {
+                    player.health.advance_entity_clock();
+                }
+            });
+        }
     }
 
     /// Tick each connection once, in hub order. Resolve its level at dispatch

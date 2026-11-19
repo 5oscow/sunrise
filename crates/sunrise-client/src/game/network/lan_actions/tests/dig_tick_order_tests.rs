@@ -53,7 +53,7 @@ fn every_level_ticks_before_the_connection_phase() {
 
 #[derive(Debug, PartialEq, Eq)]
 enum Event {
-    EntityPre(u32),
+    EntityPre(u32, Option<i32>),
     EntityPost(u32),
     Dig(u128, i32),
     PlayerPre(u128, &'static str, Option<i32>, Option<i32>),
@@ -73,9 +73,16 @@ impl mod_api::Hooks for Observe {
     fn entity_tick_listened(&self, _: HostSide<'_>, event: &mut mod_api::EntityTickListenedEvent) {
         event.listened = true;
     }
-    fn entity_tick_pre(&self, _: HostSide<'_>, event: &mut mod_api::EntityTickPreEvent<'_>) {
+    fn entity_tick_pre(&self, host: HostSide<'_>, event: &mut mod_api::EntityTickPreEvent<'_>) {
+        let HostSide::Server(host) = host else { return };
         for &id in event.entities {
-            self.events.lock().unwrap().push(Event::EntityPre(id));
+            let immunity = host
+                .entity(id)
+                .and_then(|entity| entity.invulnerable_time(host));
+            self.events
+                .lock()
+                .unwrap()
+                .push(Event::EntityPre(id, immunity));
             if id == self.cancel {
                 event.canceled.push(id);
             }
@@ -174,6 +181,7 @@ fn player_tick_hooks_observe_advanced_dig_progress_and_skipped_body_still_ticks_
                         }
                         game.as_guest(conn, |game| {
                             let health = &mut game.player.as_mut().unwrap().health;
+                            health.tick_count = 10;
                             health.invulnerable_time = 8;
                             health.hurt.cooldown = 5;
                         })
@@ -184,6 +192,19 @@ fn player_tick_hooks_observe_advanced_dig_progress_and_skipped_body_still_ticks_
                 game.tick_server(false).unwrap();
 
                 let host = game.lan.as_ref().unwrap();
+                for (conn, count) in [(1, 11), (2, 11), (3, 11), (4, 10)] {
+                    assert_eq!(
+                        host.hub
+                            .guest(conn)
+                            .unwrap()
+                            .motion
+                            .as_ref()
+                            .unwrap()
+                            .health
+                            .tick_count,
+                        count
+                    );
+                }
                 for conn in [1, 2] {
                     let mining = host.play[&conn].mining.as_ref().unwrap();
                     assert_eq!(mining.ticks, 2);
@@ -195,20 +216,20 @@ fn player_tick_hooks_observe_advanced_dig_progress_and_skipped_body_still_ticks_
                 assert_eq!(
                     *heard.lock().unwrap(),
                     [
-                        EntityPre(20),
-                        EntityPre(22),
+                        EntityPre(20, Some(8)),
+                        EntityPre(22, Some(8)),
                         Dig(123, 0),
                         EntityPost(20),
                         EntityPost(22),
-                        EntityPre(21),
-                        EntityPre(23),
+                        EntityPre(21, Some(8)),
+                        EntityPre(23, Some(8)),
                         Dig(124, 0),
                         EntityPost(21),
                         PlayerPre(123, "minecraft:overworld", Some(7), Some(4)),
                         PlayerPost(123),
                         PlayerPre(124, "minecraft:the_nether", Some(7), Some(4)),
                         PlayerPost(124),
-                        PlayerPre(126, "minecraft:the_nether", Some(7), Some(5)),
+                        PlayerPre(126, "minecraft:the_nether", Some(8), Some(5)),
                         PlayerPost(126),
                     ],
                 );
