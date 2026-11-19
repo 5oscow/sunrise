@@ -1287,7 +1287,7 @@ impl Game<'_> {
                 .is_some_and(|v| v.trim().eq_ignore_ascii_case("true")),
             older_clients_play: false,
             lod_distance: sunrise_client::lod_net::distance_property(
-                props.raw.get(sunrise_client::lod_net::PROPERTY),
+                props.raw.get(sunrise_client::lod_net::PROPERTY).as_deref(),
             ),
             server_links: if props.bug_report_link.is_empty() {
                 Vec::new()
@@ -1439,7 +1439,7 @@ impl Game<'_> {
                     0
                 },
                 sunrise_client::lod_net::distance_property(
-                    props.raw.get(sunrise_client::lod_net::PROPERTY),
+                    props.raw.get(sunrise_client::lod_net::PROPERTY).as_deref(),
                 ),
                 anticheat_on,
             ),
