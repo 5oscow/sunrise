@@ -16,7 +16,6 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        non_exhaustive = true,
         event_per_listener = true,
         scope = "block_entity",
         key = "id",
