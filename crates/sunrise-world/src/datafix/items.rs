@@ -5,7 +5,10 @@ use super::dynamic::{
     int_list, is_empty_map, namespaced, remove, rename, set, stream, string,
 };
 use super::json;
-use sunrise_core::nbt::{JavaString, Tag};
+use sunrise_core::{
+    java_hash_map::{JavaHashMap, JavaKey},
+    nbt::{JavaString, Tag},
+};
 
 /// `V704.ITEM_TO_BLOCKENTITY`.
 const ITEM_TO_BLOCK_ENTITY: &[(&str, &str)] = &[
@@ -1105,27 +1108,22 @@ fn fix_profile_properties(v: Option<&Tag>) -> Option<Tag> {
     let Some(Tag::Compound(map)) = v else {
         return None;
     };
-    // asMap collects into a HashMap: the property names in Java hash order.
-    let mut entries: Vec<(String, Vec<(String, Option<String>)>)> = map
-        .iter()
-        .map(|(k, list)| {
-            let props = stream(Some(list))
-                .iter()
-                .map(|p| (as_string(p.get("Value"), ""), as_str(p.get("Signature"))))
-                .collect();
-            (k.to_string_lossy(), props)
-        })
-        .collect();
-    if entries.is_empty() {
+    if map.is_empty() {
         return None;
     }
-    entries = java_hash_order(entries, |(k, _)| k.clone());
+    // asMap collects into a HashMap: keep the original UTF-16 property names
+    // for both Java key identity and the resulting profile's property list.
+    let entries = java_hash_order(map.iter().collect(), |(name, _)| (*name).clone());
     let out = entries
         .into_iter()
-        .flat_map(|(name, props)| {
-            props.into_iter().map(move |(value, signature)| {
-                let mut p = Tag::compound([("name", string(&name)), ("value", string(&value))]);
-                if let Some(sig) = signature {
+        .flat_map(|(name, list)| {
+            stream(Some(list)).into_iter().map(move |prop| {
+                let value = as_string(prop.get("Value"), "");
+                let mut p = Tag::compound([
+                    ("name", Tag::String(name.clone())),
+                    ("value", string(&value)),
+                ]);
+                if let Some(sig) = as_str(prop.get("Signature")) {
                     set(&mut p, "signature", string(&sig));
                 }
                 p
@@ -1137,8 +1135,8 @@ fn fix_profile_properties(v: Option<&Tag>) -> Option<Tag> {
 
 /// Iteration order of a `java.util.HashMap`/`HashSet` built by inserting the
 /// items in order with the default capacity. Later values replace earlier ones.
-pub(super) fn java_hash_order<T>(items: Vec<T>, key: impl Fn(&T) -> String) -> Vec<T> {
-    let mut map = sunrise_core::java_hash_map::JavaHashMap::default();
+pub(super) fn java_hash_order<T, K: JavaKey>(items: Vec<T>, key: impl Fn(&T) -> K) -> Vec<T> {
+    let mut map = JavaHashMap::default();
     let mut items: Vec<_> = items.into_iter().map(Some).collect();
     for (i, item) in items.iter().enumerate() {
         map.put(key(item.as_ref().expect("not moved yet")), i);
@@ -1164,6 +1162,29 @@ fn datafix_names_follow_java_hashmap_tree_order() {
         ordered,
         [1, 0, 2, 3, 13, 4, 12, 5, 6, 14, 7, 15, 11, 8, 9, 10]
     );
+}
+
+#[cfg(test)]
+#[test]
+fn profile_keeps_distinct_unpaired_surrogate_property_names() {
+    let names = [JavaString(vec![0xd800]), JavaString(vec![0xd801])];
+    let input = Tag::compound([(
+        "Properties",
+        Tag::compound(names.iter().cloned().zip(
+            ["A", "B"].map(|value| Tag::List(vec![Tag::compound([("Value", string(value))])])),
+        )),
+    )]);
+    let expected = Tag::List(
+        names
+            .into_iter()
+            .zip(["A", "B"])
+            .map(|(name, value)| {
+                Tag::compound([("name", Tag::String(name)), ("value", string(value))])
+            })
+            .collect(),
+    );
+    // Java hashes these one-unit strings to adjacent buckets, in this order.
+    assert_eq!(fix_profile(&input).get("properties"), Some(&expected));
 }
 
 // ------------------------------------------------------------------ particles
