@@ -129,8 +129,7 @@ def include_arguments(text):
 def resolve_include(source, crate, argument):
     """("exact", paths) for an include whose argument is a literal, or a concat! of literals after an optional
     env!("CARGO_MANIFEST_DIR") (env!("OUT_DIR") names a file the build makes: no repository path); else
-    ("pattern", regex) over the paths it could name: its literal pieces in order, the first resolved from where the
-    include resolves when the argument starts with it."""
+    ("pattern", regex) matching any possible name based on the literal suffix."""
     folder = posixpath.dirname(source)
     if len(argument) == 1 and argument[0][0] == "str":
         literal = argument[0][1]
@@ -171,21 +170,17 @@ def resolve_include(source, crate, argument):
         if literal.startswith("/") and base == folder:
             return "exact", set()
         return "exact", {posixpath.normpath(posixpath.join(base, under(literal)))}
-    fragments = []
-    for part in parts:
-        if part is not None and fragments and fragments[-1] is not None:
-            fragments[-1] += part
-        else:
-            fragments.append(part)
-    if not fragments or fragments[0] is None:
-        pattern = ""
-    else:
-        first = fragments.pop(0)
-        resolved = posixpath.normpath(posixpath.join(base, under(first)))
-        pattern = "^" + re.escape(resolved + ("/" if first.endswith("/") else ""))
-    for fragment in fragments:
-        pattern += ".*" if fragment is None else ".*" + re.escape(fragment)
-    return "pattern", re.compile(pattern)
+    # A dynamic piece can contain `../` and escape the apparent prefix. Only a literal suffix
+    # within the final path component can rule out a changed filename. Otherwise match any path.
+    tail = []
+    for part in reversed(parts):
+        if part is None:
+            break
+        tail.append(part)
+    suffix = "".join(reversed(tail))
+    if not suffix or suffix.endswith(("/", "/.", "/..")) or suffix in {".", ".."}:
+        return "pattern", re.compile("")
+    return "pattern", re.compile(re.escape(suffix.rsplit("/", 1)[-1]) + r"\Z")
 
 
 @functools.lru_cache(maxsize=None)
@@ -193,7 +188,7 @@ def rust_includes():
     """(the files this checkout's Rust includes by name, [(source, regex)] for the includes whose path is assembled
     from something other than literals); None if the sources can't be read."""
     scanned = rust_literals()
-    listed = git("grep", "-l", "-z", "-E", r"include(_str|_bytes)?!|#\[path", "--", "*.rs")
+    listed = git("grep", "-l", "-z", "-E", r"\binclude(_str|_bytes)?\b|#\[[[:space:]]*path", "--", "*.rs")
     if scanned is None or listed.returncode not in (0, 1):
         return None
     manifests = scanned[0]

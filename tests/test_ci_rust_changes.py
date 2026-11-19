@@ -251,6 +251,18 @@ class RustChangesTests(unittest.TestCase):
             source = Path(rust_changes.ROOT, "crates/demo/src/lib.rs").read_text()
             self.assertEqual(len(list(rust_changes.include_arguments(source))), 3)
 
+    def test_dynamic_include_can_escape_its_prefix(self):
+        with fixture_repository({
+            "crates/demo/Cargo.toml": '[package]\nname = "demo"\n',
+            "crates/demo/src/lib.rs": (
+                'macro_rules! doc { ($name:literal) => { include_str ! (concat!("../notes/", $name, ".md")) }; }\n'
+                'const TEXT: &str = doc!("../outside");\n'
+            ),
+            "crates/demo/notes/keep.txt": "x\n",
+            "crates/demo/outside.md": "x\n",
+        }):
+            self.assertTrue(needs_rust(["crates/demo/outside.md"]))
+
     def test_helpers_of_gated_steps_count_as_their_inputs(self):
         workflow = (
             "on: pull_request\njobs:\n"
