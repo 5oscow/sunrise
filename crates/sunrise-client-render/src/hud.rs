@@ -638,8 +638,8 @@ fn atlas_sprites(root: &ResourceSource, packed: &[PackedImage]) -> (Vec<PackedIm
             order += 1;
         }
     }
-    let load = |texture: &str, directory: &str| {
-        decode_resource(root, &atlas_sources::texture_resource(texture, directory)).ok()
+    let load = |texture: &str| {
+        decode_resource(root, &atlas_sources::texture_resource(texture, "textures")).ok()
     };
     let first = |(name, origins): &(String, Vec<(usize, SpriteOrigin)>)| {
         origins.iter().find_map(|(order, origin)| {

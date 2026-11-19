@@ -448,10 +448,7 @@ fn argb(rgba: &[u8]) -> Vec<u32> {
 }
 /// The pixels of a generated sprite (`Region`, `Paletted` or a mod's `Pixels`);
 /// `None` for a plain file, which loads as itself.
-pub fn generate(
-    origin: &SpriteOrigin,
-    load: &dyn Fn(&str, &str) -> Option<Image>,
-) -> Option<Image> {
+pub fn generate(origin: &SpriteOrigin, load: &dyn Fn(&str) -> Option<Image>) -> Option<Image> {
     match origin {
         SpriteOrigin::File(_) => None,
         SpriteOrigin::Pixels(image) => Some(image.clone()),
@@ -461,7 +458,7 @@ pub fn generate(
             divisor_x,
             divisor_y,
         } => {
-            let (w, h, pixels) = load(texture, "textures")?;
+            let (w, h, pixels) = load(texture)?;
             let x_scale = f64::from(w) / divisor_x;
             let y_scale = f64::from(h) / divisor_y;
             // A float-to-integer cast saturates (NaN is 0), so every value here is in range.
@@ -507,9 +504,9 @@ pub fn generate(
             palette_key,
             palette,
         } => {
-            let (w, h, pixels) = load(texture, "textures")?;
-            let (_, _, key) = load(palette_key, "textures/palettes")?;
-            let (_, _, target) = load(palette, "textures/palettes")?;
+            let (w, h, pixels) = load(texture)?;
+            let (_, _, key) = load(palette_key)?;
+            let (_, _, target) = load(palette)?;
             let mut mapped = argb(&pixels);
             let key = argb(&key);
             let target = argb(&target);
@@ -656,7 +653,7 @@ mod tests {
     #[test]
     fn unstitch_cuts_by_divisor() {
         let pixels: Vec<u8> = (0..16u8).flat_map(|i| [i, i, i, 255]).collect();
-        let load = |_: &str, _: &str| Some((4u32, 4u32, pixels.clone()));
+        let load = |_: &str| Some((4u32, 4u32, pixels.clone()));
         let origin = SpriteOrigin::Region {
             texture: "t".into(),
             region: Region {
@@ -679,7 +676,7 @@ mod tests {
     /// An unstitch region over a 4x4 texture with divisors 1: the region's numbers are pixels.
     fn region_of(x: f64, y: f64, width: f64, height: f64) -> Option<Image> {
         let pixels: Vec<u8> = (0..16u8).flat_map(|i| [i, i, i, 255]).collect();
-        let load = |_: &str, _: &str| Some((4u32, 4u32, pixels.clone()));
+        let load = |_: &str| Some((4u32, 4u32, pixels.clone()));
         let origin = SpriteOrigin::Region {
             texture: "t".into(),
             region: Region {

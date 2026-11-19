@@ -662,8 +662,8 @@ impl Sprites {
         if let Some(origin) = self.listing().get(name)
             && !matches!(origin, crate::atlas_sources::SpriteOrigin::File(_))
         {
-            let image = crate::atlas_sources::generate(origin, &|texture, directory| {
-                let file = crate::atlas_sources::texture_resource(texture, directory);
+            let image = crate::atlas_sources::generate(origin, &|texture| {
+                let file = crate::atlas_sources::texture_resource(texture, "textures");
                 read_rgba(&self.source, &file).ok()
             })
             .ok_or_else(|| format!("sprite {name} could not be generated"))?;
@@ -1888,6 +1888,45 @@ mod tests {
         // The missing texture: 16 x 16, black in its top left quarter.
         assert_eq!(sprites.native[layer as usize].0, SPRITE_SIZE);
         assert_eq!(sprites.native[layer as usize].1[0][..4], [0, 0, 0, 255]);
+        fs::remove_dir_all(&root).unwrap();
+    }
+    #[test]
+    fn a_paletted_sprite_reads_palettes_directly_below_textures() {
+        let root = std::env::temp_dir().join(format!("sunrise-palette-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let write = |path: &str, width: u32, height: u32, pixels: &[u8]| {
+            let file = root.join("assets/demo/textures").join(path);
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            let mut encoder = png::Encoder::new(File::create(file).unwrap(), width, height);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder
+                .write_header()
+                .unwrap()
+                .write_image_data(pixels)
+                .unwrap();
+        };
+        // Two columns of key colours, recoloured to the target palette's two colours.
+        write("block/base.png", 2, 1, &[10, 20, 30, 255, 40, 50, 60, 255]);
+        write("trim/key.png", 2, 1, &[10, 20, 30, 255, 40, 50, 60, 255]);
+        write("trim/red.png", 2, 1, &[200, 0, 0, 255, 0, 200, 0, 255]);
+        let atlases = root.join("assets/minecraft/atlases");
+        fs::create_dir_all(&atlases).unwrap();
+        fs::write(
+            atlases.join("blocks.json"),
+            r#"{"sources":[{"type":"minecraft:paletted_permutations","textures":["demo:block/base"],
+                "palette_key":"demo:trim/key","permutations":{"red":"demo:trim/red"}}]}"#,
+        )
+        .unwrap();
+        let mut sprites = Sprites::new(ResourceSource::directory(root.clone()));
+        let layer = sprites.insert("demo:block/base_red").unwrap();
+        assert_eq!(sprites.native[layer as usize].0, 2);
+        assert_eq!(
+            sprites.native[layer as usize].1[0],
+            [
+                200, 0, 0, 255, 0, 200, 0, 255, 200, 0, 0, 255, 0, 200, 0, 255
+            ]
+        );
         fs::remove_dir_all(&root).unwrap();
     }
 }
