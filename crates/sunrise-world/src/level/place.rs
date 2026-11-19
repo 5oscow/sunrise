@@ -3,7 +3,7 @@
 //! overriding class.
 use super::{
     Behaviours, LevelAccess, LevelEvent, Sim, Ticks,
-    classes::Class,
+    classes::{Class, Interface},
     data::ItemKind,
     query::{axis_of, clockwise, counter_clockwise, is_horizontal},
     states::BlockId,
@@ -1714,18 +1714,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             }
             _ => self.state_for_placement(binding.block, &ctx),
         }?;
-        let class = b.data(primary);
-        if !input.can_use_game_master_blocks
-            && [
-                Class::Command,
-                Class::Structure,
-                Class::Jigsaw,
-                Class::TestBlock,
-                Class::TestInstanceBlock,
-            ]
-            .into_iter()
-            .any(|kind| class.is(kind))
-        {
+        if !input.can_use_game_master_blocks && b.data(primary).implements(Interface::GameMaster) {
             return None;
         }
         let must_survive = standing_and_wall
