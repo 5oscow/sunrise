@@ -56,13 +56,15 @@ impl Game<'_> {
     /// `IShearable.onSheared` on mob `index`'s entity part `part` (as [`Self::part_shearable`]
     /// named it), then `spawnShearedDrop` for each drop it returns: one block above where the mob
     /// stands afterwards, nudged by the mob's own random as `Sheep.shear` nudges its wool.
+    /// A call the load phase refuses (reported) is no shearing: it comes back as the refusal, not
+    /// as a shearing that dropped nothing.
     pub(super) fn part_shear(
         &mut self,
         index: usize,
         part: usize,
         player: Option<PlayerRef>,
         shears: &ItemStack,
-    ) {
+    ) -> Result<(), mod_api::__private::PhaseRefusal> {
         let (id, at) = (self.mobs[index].id, self.mobs[index].position);
         let parts = mod_api::__private::entity_parts();
         let (Some(attached), Some(entity), Ok(shears)) = (
@@ -70,7 +72,7 @@ impl Game<'_> {
             self.entity(id),
             shears.try_into_api(),
         ) else {
-            return;
+            return Ok(());
         };
         let drops = {
             let _guard = enter_native_mod(ModCall {
@@ -78,15 +80,10 @@ impl Game<'_> {
                 hook: "on_sheared",
                 part: Some(attached.type_name()),
             });
-            match mod_api::__private::contain_outside_world(|| {
+            mod_api::__private::contain_outside_world(|| {
                 attached.part().on_sheared(self, entity, player, &shears)
-            }) {
-                Ok(drops) => drops,
-                Err(refusal) => {
-                    refusal.report();
-                    Vec::new()
-                }
-            }
+            })
+            .inspect_err(|refusal| refusal.report())?
         };
         // The part may have moved or removed the mob: its drops fall where it is now.
         let index = self.mobs.iter().position(|m| m.id == id && !m.removed);
@@ -108,6 +105,7 @@ impl Game<'_> {
                 item.velocity = Vec3::new(v.x + push[0], v.y + push[1], v.z + push[2]);
             }
         }
+        Ok(())
     }
 
     /// Shears in the acting player's hand on mob `index` (`ShearsItem.interactLivingEntity`):
@@ -155,7 +153,9 @@ impl Game<'_> {
             }
         }
         let (part, _) = part?;
-        self.part_shear(index, part, player, &shears);
+        if self.part_shear(index, part, player, &shears).is_err() {
+            return Some(false);
+        }
         let ctx = self.who_context(Some(Who::Player), None);
         self.post_game_event("minecraft:shear", [at.x, at.y, at.z], ctx);
         self.damage_held_tool();
@@ -333,7 +333,7 @@ mod tests {
                 let setup = PhaseOwner::scope(ModPhase::Setup);
                 let _reload = reloading.then(|| setup.reloading().unwrap());
                 assert_eq!(game.part_shearable(0, None, &shears), None);
-                game.part_shear(0, 0, None, &shears);
+                assert!(game.part_shear(0, 0, None, &shears).is_err());
                 assert!(game.dropped.is_empty(), "a refused part drops nothing");
             }
             assert_eq!(game.part_shearable(0, None, &shears), Some((0, true)));
