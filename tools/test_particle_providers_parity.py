@@ -129,10 +129,12 @@ def decode(token):
     return token
 
 
-# Particles whose tick calls Math.pow. On x86-64 HotSpot's intrinsic (Intel's
-# libm) rounds a fraction of a percent of arguments a unit apart from the
-# platform libm sunrise_core::jmath::pow uses, so their motion is compared to
-# 1e-12 relative error; everything else about them, and every other type, exactly.
+# Particles whose tick calls Math.pow: cherry leaves' flow, which still calls the
+# platform powf. On x86-64 HotSpot's intrinsic (Intel's libm) rounds a fraction of a
+# percent of arguments a unit apart from it, so in these cases each differing 16-hex
+# double token may differ by up to 1e-12 * max(1, |expected|) (`close`); every other
+# token of these cases, and every other type, compares exactly. The allowance goes
+# once the flow calls an exact pow.
 LIBM = {'cherry_leaves'}
 
 
