@@ -104,15 +104,7 @@ impl Renderer {
                 &self.animations,
             );
         }
-        self.update_lightmap(
-            &mut encoder,
-            &frame.sky,
-            frame.darkness.1,
-            (self.gamma - frame.darkness.0).max(0.0),
-            frame.night_vision,
-            frame.block_flicker,
-            frame.boss_darken,
-        );
+        self.update_lightmap(&mut encoder, frame);
         let views = self.views(frame);
         let pose = frame.bob * frame.spin;
         let view_proj = views.primary().view_proj(pose);
@@ -1304,6 +1296,13 @@ impl Renderer {
             });
             core.prepare(&mut self.uploads, &mut encoder, &sky, stars.as_deref());
         }
+        // Polytone GPU particles with their own shader: the vanilla blocks as the block outline's
+        // (a particle's ModelViewMat is the camera's rotation, its positions camera relative).
+        self.core_particles
+            .prepare_frame(&self.device, &self.queue, frame.title, || {
+                let view = views.primary();
+                core_lines::uniforms(pack.globals, view, pose, jitter, 1.0, fog_color, pack.fog)
+            });
         let skin = frame.skin.filter(|skin| match &mut self.entity_skin {
             Some(skinner) => skinner.register(&self.device, &mut self.uploads, &mut encoder, skin),
             None => false,
@@ -3325,6 +3324,15 @@ impl Renderer {
                     ((world_quads + additive_quads + hand_quads) * 4) as i32,
                     0..1,
                 );
+            }
+            // Polytone GPU particles with their own shader (wiki "GPU Particles"): after the
+            // world, the clouds and the weather, which would otherwise cover the ones that write
+            // no depth.
+            if self.core_particles_drawing() {
+                pass.stage(self.own_timing.as_mut(), "polytone particles");
+                self.draw_core_particles(&mut pass);
+                pass.set_bind_group(0, &self.group, &[]);
+                pack_frame(&mut pass);
             }
             // Native mods' primitives: after the entities and the rest of the world, into its
             // targets (its resolution, reversed depth and TAA), before the hand

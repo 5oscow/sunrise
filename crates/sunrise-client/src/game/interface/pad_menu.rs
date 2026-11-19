@@ -491,7 +491,7 @@ impl Game<'_> {
                     let (x, y) = Creative::tab_position(t);
                     targets.push(Target {
                         rect: [ox + x, oy + y, 26.0, 32.0],
-                        kind: Kind::Tab(i == self.creative_screen.selected),
+                        kind: Kind::Tab(i == self.creative_screen.selected_index()),
                     });
                 }
             }
@@ -1430,7 +1430,7 @@ impl Game<'_> {
         if count == 0 {
             return;
         }
-        let selected = self.creative_screen.selected;
+        let selected = self.creative_screen.selected_index();
         let tab = if next {
             (selected + 1) % count
         } else {
