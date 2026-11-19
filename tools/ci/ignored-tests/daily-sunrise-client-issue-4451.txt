@@ -2307,7 +2307,8 @@ sunrise-client game::remote::tests::dimension_transition_screen_is_selected_at_e
 sunrise-client game::remote::tests::every_free_route_returns_the_columns_it_freed_once lib daily resources
 sunrise-client game::remote::tests::flint_and_steel_use_on_ends_the_click lib daily resources
 sunrise-client game::remote::tests::forgetting_and_closing_remote_columns_clear_their_data lib daily resources
-sunrise-client game::remote::tests::joining_a_server_empties_the_off_hand_too lib daily resources
+sunrise-client game::remote::tests::hand_swap_tests::joining_a_server_empties_the_off_hand_too lib daily resources
+sunrise-client game::remote::tests::hand_swap_tests::the_hand_swap_event_keeps_whole_stacks lib daily resources
 sunrise-client game::remote::tests::menu_title_tests::menu_title_snapshot_follows_packet_and_close_paths lib daily resources
 sunrise-client game::remote::tests::menu_title_tests::menu_title_snapshot_tracks_open_replacement_and_close lib daily resources
 sunrise-client game::remote::tests::mod_open_chat_fills_the_box_only_over_the_world lib daily resources
@@ -2317,7 +2318,6 @@ sunrise-client game::remote::tests::rejected_menu_packets_retire_the_previous_cl
 sunrise-client game::remote::tests::remote_player_use_animation_dispatches_once lib daily resources
 sunrise-client game::remote::tests::spear_jab_tests::a_spear_jab_sends_only_its_stab lib daily resources
 sunrise-client game::remote::tests::streaming_adoption_and_resend_stay_resident_until_the_forget lib daily resources
-sunrise-client game::remote::tests::the_hand_swap_event_keeps_whole_stacks lib daily resources
 sunrise-client game::remote::tests::tracking_emitters_follow_the_packet_target lib daily resources
 sunrise-client game::remote::tests::transactional_bucket_hands_reach_the_owning_client lib daily resources
 sunrise-client game::remote::tests::update_attributes_answers_the_local_players_living_reads lib daily resources
