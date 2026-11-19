@@ -108,6 +108,9 @@ pub const CORE_PACK: (&str, &str, &str) = ("minecraft", "core", sunrise_protocol
 /// Enchantments are among them: the items' enchantment catalog reads a
 /// world's pack definitions too, so their ids must reach clients.
 const PACK_REGISTRIES: &[&str] = &[
+    "minecraft:banner_pattern",
+    "minecraft:instrument",
+    "minecraft:painting_variant",
     "minecraft:dialog",
     "minecraft:dimension_type",
     "minecraft:enchantment",
@@ -423,13 +426,6 @@ impl SyncData {
         sources: &crate::crafting::ResolvedSources,
     ) -> Result<Self, String> {
         use crate::spans::startup;
-        let loaded;
-        let packed = if kept.is_none() && packed.is_none() {
-            loaded = PackRegistryDefinitions::load(overlay, &BTreeMap::new())?;
-            Some(&loaded)
-        } else {
-            packed
-        };
         // The recipe book, the recipe sync and the advancements read the
         // recipe folder: held here, they share one read of it.
         let _recipe_files = startup::time("sync.recipe_folder", || {
@@ -441,6 +437,25 @@ impl SyncData {
                 .and_then(|p| Builtin::load(&p).ok())
                 .ok_or("registries.json not found next to the resources")?,
         );
+        let loaded;
+        let packed = if kept.is_none() && packed.is_none() {
+            let text_registries = crate::command::Registries {
+                entity_types: builtin
+                    .get("minecraft:entity_type")
+                    .map_or_else(Vec::new, |ids| ids.names.clone()),
+                ..Default::default()
+            };
+            loaded =
+                PackRegistryDefinitions::load(overlay, &BTreeMap::new(), &text_registries, |id| {
+                    builtin
+                        .get("minecraft:sound_event")
+                        .and_then(|sounds| sounds.id(id))
+                        .is_some()
+                })?;
+            Some(&loaded)
+        } else {
+            packed
+        };
         let root: PathBuf = resources.join("data/minecraft");
         let mut registries = Vec::new();
         let mut dynamic = Dynamic {
@@ -1135,7 +1150,9 @@ mod tests {
         overlay: &sunrise_world::loot::PackOverlay,
         entries: &mut Vec<((String, String), Value, bool)>,
     ) {
-        let registries = PackRegistryDefinitions::load(overlay, &BTreeMap::new()).unwrap();
+        let registries =
+            PackRegistryDefinitions::load(overlay, &BTreeMap::new(), &Default::default(), |_| true)
+                .unwrap();
         let key = format!("minecraft:{key}");
         registries.discard_replaced(&key, entries);
         registries.append(&key, entries);
@@ -1495,6 +1512,140 @@ mod tests {
             quick.ids,
             [0, 2],
             "the pack's dialog, then the nested tag's"
+        );
+    }
+
+    fn assert_pack_holder_sync(
+        kind: &str,
+        tag: &str,
+        base: Value,
+        field: &str,
+        lower: Value,
+        higher: Value,
+        expected: Tag,
+    ) {
+        use crate::datapack::{DataPack, DataStore};
+        use sunrise_assets::resource_source::{Resource, ResourceSource};
+        use sunrise_world::{item_defaults, loot::PackOverlay};
+
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("items.json"), "{}").unwrap();
+        std::fs::write(root.path().join("registries.json"), r#"{"minecraft:sound_event":{"entries":{"minecraft:item.goat_horn.sound.0":{"protocol_id":0}}}}"#).unwrap();
+        let definitions = root.path().join("data/minecraft").join(kind);
+        std::fs::create_dir_all(&definitions).unwrap();
+        for file in ["x.json", "z.json"] {
+            std::fs::write(definitions.join(file), base.to_string()).unwrap();
+        }
+        let mut low = base.clone();
+        low[field] = lower;
+        let mut high = base.clone();
+        high[field] = higher;
+        let bytes = |value: &Value| Resource::bytes(value.to_string().into_bytes());
+        let packs = [
+            DataPack::from_source(
+                "file/low".into(),
+                ResourceSource::indexed(BTreeMap::from([(
+                    format!("data/minecraft/{kind}/x.json"),
+                    bytes(&low),
+                )])),
+            ),
+            DataPack::from_source(
+                "file/high".into(),
+                ResourceSource::indexed(BTreeMap::from([
+                    (format!("data/minecraft/{kind}/x.json"), bytes(&high)),
+                    (format!("data/demo/{kind}/x-y.json"), bytes(&base)),
+                    (format!("data/demo/{kind}/x.json"), bytes(&base)),
+                    (
+                        format!("data/minecraft/tags/{kind}/{tag}.json"),
+                        Resource::bytes(
+                            br#"{"values":["minecraft:x","demo:x-y","demo:x"]}"#.to_vec(),
+                        ),
+                    ),
+                ])),
+            ),
+        ];
+        let files: Vec<_> = DataStore::load(&packs.iter().collect::<Vec<_>>())
+            .files
+            .into_iter()
+            .collect();
+        let sync = SyncData::load(
+            root.path(),
+            &PackOverlay::new(&files),
+            &item_defaults::read(root.path()).unwrap(),
+            &crate::crafting::ResolvedSources::default(),
+        )
+        .unwrap();
+        let registry = format!("minecraft:{kind}");
+        let packet = sync
+            .registry_packets(true, &LevelShapes::VANILLA)
+            .into_iter()
+            .find(|packet| packet.registry == registry)
+            .unwrap();
+        let ids: Vec<_> = packet
+            .entries
+            .iter()
+            .map(|entry| entry.id.as_str())
+            .collect();
+        assert_eq!(ids, ["demo:x-y", "demo:x", "minecraft:x", "minecraft:z"]);
+        assert!(packet.entries[0].data.is_some());
+        assert_eq!(
+            packet.entries[2].data.as_ref().unwrap().get(field),
+            Some(&expected)
+        );
+        assert!(packet.entries[3].data.is_none());
+        let tags = sync
+            .tags
+            .registries
+            .iter()
+            .find(|row| row.registry == registry)
+            .unwrap();
+        let tag = tags
+            .tags
+            .iter()
+            .find(|row| row.name == format!("minecraft:{tag}"))
+            .unwrap();
+        assert_eq!(tag.ids, [2, 0, 1]);
+    }
+
+    #[test]
+    fn world_pack_paintings_reach_clients() {
+        use serde_json::json;
+        assert_pack_holder_sync(
+            "painting_variant",
+            "placeable",
+            json!({"asset_id":"demo:mural","width":1,"height":2}),
+            "width",
+            json!(2),
+            json!(4),
+            Tag::Int(4),
+        );
+    }
+
+    #[test]
+    fn world_pack_instruments_reach_clients() {
+        use serde_json::json;
+        assert_pack_holder_sync(
+            "instrument",
+            "goat_horns",
+            json!({"sound_event":"minecraft:item.goat_horn.sound.0","use_duration":4.0,"range":128.0,"description":"Base"}),
+            "description",
+            json!("Lower"),
+            json!("Winner"),
+            Tag::String("Winner".into()),
+        );
+    }
+
+    #[test]
+    fn world_pack_banner_patterns_reach_clients() {
+        use serde_json::json;
+        assert_pack_holder_sync(
+            "banner_pattern",
+            "no_item_required",
+            json!({"asset_id":"demo:mural","translation_key":"test.banner.base"}),
+            "translation_key",
+            json!("test.banner.lower"),
+            json!("test.banner.winner"),
+            Tag::String("test.banner.winner".into()),
         );
     }
 

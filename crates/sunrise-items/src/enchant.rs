@@ -272,10 +272,84 @@ pub fn level_name(level: u32) -> String {
         .map_or_else(|| level.to_string(), |s| (*s).to_owned())
 }
 
-/// Run the existing definition decoder before binding holder sets. Binding
-/// and effect resolution still belong to the world enchantment loader.
-pub fn decode_definition(id: &str, value: &Value) -> crate::Result<()> {
-    decode_entry(id, value, &HashMap::new(), &HashMap::new()).map(|_| ())
+/// Decode a winning pack definition's top-level fields for registry sync.
+/// Holder sets and effect payloads are bound after the registry phase.
+pub fn decode_pack_definition(mut value: Value) -> Result<Value, String> {
+    let fields = value
+        .as_object_mut()
+        .ok_or("expected an enchantment object")?;
+    for (name, range) in [
+        ("max_level", 1..=255),
+        ("weight", 1..=1024),
+        ("anvil_cost", 0..=i64::from(i32::MAX)),
+    ] {
+        let n = fields
+            .get(name)
+            .and_then(Value::as_i64)
+            .filter(|n| range.contains(n))
+            .ok_or_else(|| format!("{name} must be an integer in {range:?}"))?;
+        fields.insert(name.into(), Value::from(n));
+    }
+    for name in ["min_cost", "max_cost"] {
+        let cost = fields
+            .get(name)
+            .ok_or_else(|| format!("{name} is required"))?;
+        let int = |field: &str| {
+            cost[field]
+                .as_i64()
+                .and_then(|n| i32::try_from(n).ok())
+                .ok_or_else(|| format!("{name}.{field} must be an integer"))
+        };
+        let cost = Cost {
+            base: int("base")?,
+            per_level: int("per_level_above_first")?,
+        };
+        fields.insert(
+            name.into(),
+            serde_json::json!({"base": cost.base,"per_level_above_first": cost.per_level}),
+        );
+    }
+    for name in ["supported_items", "primary_items", "exclusive_set"] {
+        match fields.get(name) {
+            Some(Value::String(_) | Value::Array(_) | Value::Object(_)) => {}
+            None | Some(Value::Null) if name != "supported_items" => {
+                fields.remove(name);
+            }
+            _ => return Err(format!("{name} must be a holder set")),
+        }
+    }
+    let slots = fields
+        .get("slots")
+        .and_then(Value::as_array)
+        .ok_or("slots must be a list of equipment slot groups")?;
+    for slot in slots {
+        if !matches!(
+            slot.as_str(),
+            Some(
+                "any"
+                    | "mainhand"
+                    | "offhand"
+                    | "hand"
+                    | "feet"
+                    | "legs"
+                    | "chest"
+                    | "head"
+                    | "armor"
+                    | "body"
+                    | "saddle"
+            )
+        ) {
+            return Err("slots must contain equipment slot groups".into());
+        }
+    }
+    match fields.get("effects") {
+        Some(Value::Null) => {
+            fields.remove("effects");
+        }
+        Some(Value::Object(_)) | None => {}
+        _ => return Err("effects must be a component map".into()),
+    }
+    Ok(value)
 }
 
 /// One registry entry from its definition (`Enchantment.DIRECT_CODEC`).
@@ -294,15 +368,6 @@ fn parse_entry(
         )
         .into());
     }
-    decode_entry(id, v, tags, lang)
-}
-
-fn decode_entry(
-    id: &str,
-    v: &Value,
-    tags: &HashMap<String, Vec<Arc<str>>>,
-    lang: &HashMap<String, String>,
-) -> crate::Result<Enchantment> {
     let native_post_attack = v["effects"]["minecraft:post_attack"]
         .as_array()
         .into_iter()

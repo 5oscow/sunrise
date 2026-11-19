@@ -315,6 +315,83 @@ impl DimensionFacts {
         &VANILLA[0]
     }
 
+    /// Decode the top-level fields of a winning pack definition for registry sync.
+    /// The dimensions API's partial patches still use `patched`. Registry-backed
+    /// sets and attribute payloads stay on their existing binding path.
+    pub fn decode_pack_definition(mut value: Value) -> Result<Value, String> {
+        let fields = value
+            .as_object_mut()
+            .ok_or("expected a dimension type object")?;
+        for name in ["min_y", "height", "logical_height"] {
+            let n = fields
+                .get(name)
+                .and_then(Value::as_i64)
+                .and_then(|n| i32::try_from(n).ok())
+                .ok_or_else(|| format!("{name} must be an integer"))?;
+            fields.insert(name.into(), Value::from(n));
+        }
+        for name in ["has_skylight", "has_ceiling", "has_ender_dragon_fight"] {
+            let flag = fields
+                .get(name)
+                .and_then(Value::as_bool)
+                .ok_or_else(|| format!("{name} must be a boolean"))?;
+            fields.insert(name.into(), Value::Bool(flag));
+        }
+        for (name, allowed) in [
+            ("has_fixed_time", Value::is_boolean as fn(&Value) -> bool),
+            ("skybox", |v: &Value| {
+                matches!(v.as_str(), Some("none" | "overworld" | "end"))
+            }),
+            ("cardinal_light", |v: &Value| {
+                matches!(v.as_str(), Some("default" | "nether"))
+            }),
+            ("attributes", Value::is_object),
+            ("timelines", |v: &Value| {
+                v.is_string() || v.is_array() || v.is_object()
+            }),
+            ("default_clock", Value::is_string),
+        ] {
+            if let Some(v) = fields.get(name) {
+                if v.is_null() {
+                    fields.remove(name);
+                } else if !allowed(v) {
+                    return Err(format!("invalid {name}"));
+                }
+            }
+        }
+        let infiniburn = fields.get("infiniburn").ok_or("infiniburn is required")?;
+        if !(infiniburn.is_string() || infiniburn.is_array() || infiniburn.is_object()) {
+            return Err("infiniburn must be a block holder set".into());
+        }
+        let coordinate_scale = fields
+            .get("coordinate_scale")
+            .and_then(Value::as_f64)
+            .filter(|n| Self::valid_coordinate_scale(*n))
+            .ok_or("coordinate_scale must be a number from 1.0E-5 to 3.0E7")?;
+        fields.insert("coordinate_scale".into(), Value::from(coordinate_scale));
+        let ambient_light = fields
+            .get("ambient_light")
+            .and_then(Value::as_f64)
+            .ok_or("ambient_light must be a number")?;
+        fields.insert("ambient_light".into(), Value::from(ambient_light));
+        let block_light = fields
+            .get("monster_spawn_block_light_limit")
+            .and_then(Value::as_i64)
+            .filter(|n| (0..=15).contains(n))
+            .ok_or("monster_spawn_block_light_limit must be an integer in 0..=15")?;
+        fields.insert(
+            "monster_spawn_block_light_limit".into(),
+            Value::from(block_light),
+        );
+        let light = fields
+            .get("monster_spawn_light_level")
+            .ok_or("monster_spawn_light_level is required")?;
+        IntProvider::from_json(&light.to_string())
+            .map_err(|e| format!("monster_spawn_light_level: {e:?}"))?;
+        LevelHeight::of_json(&value).ok_or("invalid level height")?;
+        Ok(value)
+    }
+
     /// Reads a dimension type's JSON; `timeline_tag` expands a timeline tag id to its timelines.
     pub fn from_json(
         id: &str,

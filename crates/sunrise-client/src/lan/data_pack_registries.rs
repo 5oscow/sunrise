@@ -18,6 +18,8 @@ impl PackRegistryDefinitions {
     pub fn load(
         overlay: &PackOverlay<'_>,
         read_errors: &BTreeMap<String, String>,
+        text_registries: &crate::command::Registries,
+        sound_exists: impl Fn(&str) -> bool,
     ) -> Result<Self, String> {
         let mut definitions = Self::default();
         let mut errors = BTreeMap::<_, BTreeMap<_, _>>::new();
@@ -47,7 +49,13 @@ impl PackRegistryDefinitions {
                     if !overlay.conditions.allows_file_isolated(&value, &file)? {
                         return Ok((key, None));
                     }
-                    decode_definition(registry, &id.to_string(), &value)?;
+                    let value = decode_definition(
+                        registry,
+                        &id.to_string(),
+                        value,
+                        text_registries,
+                        &sound_exists,
+                    )?;
                     Ok((key, Some(value)))
                 };
                 match decode() {
@@ -104,26 +112,57 @@ impl PackRegistryDefinitions {
     }
 }
 
-fn decode_definition(registry: &str, id: &str, value: &Value) -> Result<(), String> {
-    if !value.is_object() {
-        return Err("expected a registry definition object".into());
-    }
+fn decode_definition(
+    registry: &str,
+    id: &str,
+    mut value: Value,
+    text_registries: &crate::command::Registries,
+    sound_exists: &dyn Fn(&str) -> bool,
+) -> Result<Value, String> {
+    let decode_text = |field: &str, value: &Value| {
+        crate::text_grammar::build(value, text_registries, false)
+            .ok_or_else(|| format!("{field}: invalid JSON text component"))
+    };
     match registry {
         "minecraft:dialog" => {
-            crate::dialog::Dialog::parse(&json_to_nbt(value)).ok_or("invalid dialog definition")?;
+            crate::dialog::Dialog::parse(&json_to_nbt(&value))
+                .ok_or("invalid dialog definition")?;
         }
         "minecraft:dimension_type" => {
-            use sunrise_world::dimension_type::DimensionFacts;
-            let base = DimensionFacts::vanilla(id).unwrap_or_else(DimensionFacts::overworld);
-            DimensionFacts::patched(base, id, value)?;
+            value = sunrise_world::dimension_type::DimensionFacts::decode_pack_definition(value)?;
         }
         "minecraft:enchantment" => {
-            sunrise_items::enchant::decode_definition(id, value)
-                .map_err(|error| error.to_string())?;
+            value = sunrise_items::enchant::decode_pack_definition(value)?;
+            value["description"] = decode_text("description", &value["description"])?;
+        }
+        "minecraft:painting_variant" => {
+            let painting = crate::entities::PaintingVariant::decode(id, &value)?;
+            for (field, text) in [("title", painting.title), ("author", painting.author)] {
+                if let Some(text) = text {
+                    if text.is_null() {
+                        value
+                            .as_object_mut()
+                            .expect("decoded painting object")
+                            .remove(field);
+                    } else {
+                        value[field] = decode_text(field, &text)?;
+                    }
+                }
+            }
+        }
+        "minecraft:instrument" => {
+            let instrument = sunrise_items::items::Instrument::decode(&value)?;
+            if value["sound_event"].is_string() && !sound_exists(&instrument.sound) {
+                return Err(format!("sound_event: unknown holder {}", instrument.sound));
+            }
+            value["description"] = decode_text("description", &value["description"])?;
+        }
+        "minecraft:banner_pattern" => {
+            crate::banner::Pattern::decode(id, &value)?;
         }
         _ => unreachable!("only selected registry families are decoded"),
     }
-    Ok(())
+    Ok(value)
 }
 
 #[cfg(test)]
@@ -145,22 +184,78 @@ mod tests {
                 vec![br#"{"neoforge:conditions":[{"type":"neoforge:never"}]}"#.to_vec()],
             ),
             (
-                "dimension_type/test:missing_fields".into(),
-                vec![b"{}".to_vec()],
+                "dimension_type/test:wrong_scale".into(),
+                vec![br#"{"min_y":0,"height":64,"logical_height":64,"has_skylight":true,"has_ceiling":false,"has_ender_dragon_fight":false,"infiniburn":["minecraft:netherrack"],"coordinate_scale":"one","ambient_light":0,"monster_spawn_light_level":0,"monster_spawn_block_light_limit":0}"#.to_vec()],
             ),
             ("enchantment/test:not_read".into(), vec![b"{}".to_vec()]),
+            ("enchantment/test:wrong_level".into(), vec![br#"{"max_level":"seven"}"#.to_vec()]),
+            ("painting_variant/test:numeric_style".into(), vec![br#"{"asset_id":"test:mural","width":1,"height":1,"title":{"text":"No","bold":1}}"#.to_vec()]),
+            (
+                "painting_variant/test:bad".into(),
+                vec![br#"{"asset_id":"test:mural","width":17,"height":1}"#.to_vec()],
+            ),
+            (
+                "instrument/test:bad".into(),
+                vec![br#"{"sound_event":"minecraft:item.goat_horn.sound.0","use_duration":-1,"range":128,"description":"Broken"}"#.to_vec()],
+            ),
+            (
+                "banner_pattern/test:bad".into(),
+                vec![br#"{"asset_id":"test:banner","translation_key":7}"#.to_vec()],
+            ),
         ];
         let io = BTreeMap::from([("enchantment/test:not_read".into(), "read failed".into())]);
-        let Err(error) = PackRegistryDefinitions::load(&PackOverlay::new(&files), &io) else {
+        let Err(error) = PackRegistryDefinitions::load(
+            &PackOverlay::new(&files),
+            &io,
+            &Default::default(),
+            |_| true,
+        ) else {
             panic!("world registry load accepted invalid entries");
         };
         assert!(error.contains("\nminecraft:dialog:\n  test:broken: EOF"));
+        assert!(error.contains(
+            "\nminecraft:dimension_type:\n  test:wrong_scale: coordinate_scale must be a number"
+        ));
+        assert!(error.contains("\nminecraft:enchantment:\n  test:not_read: read failed\n  test:wrong_level: max_level must be an integer"));
+        assert!(error.contains("  test:numeric_style: title: invalid JSON text component"));
+        assert!(error.contains(
+            "\nminecraft:painting_variant:\n  test:bad: width must be an integer in 1..=16"
+        ));
         assert!(
-            error.contains(
-                "\nminecraft:dimension_type:\n  test:missing_fields: invalid level height"
-            )
+            error
+                .contains("\nminecraft:instrument:\n  test:bad: use_duration must be non-negative")
         );
-        assert!(error.contains("\nminecraft:enchantment:\n  test:not_read: read failed"));
+        assert!(
+            error.contains("\nminecraft:banner_pattern:\n  test:bad: translation_key is required")
+        );
         assert!(!error.contains("condition_false"));
+    }
+
+    #[test]
+    fn admitted_wire_text_drops_json_null_styles() {
+        let files = [(
+            "instrument/test:horn".into(),
+            vec![
+                br#"{
+            "sound_event":{"sound_id":"test:horn"}, "use_duration":2, "range":64,
+            "description":{"text":"Horn","bold":null,"italic":true}
+        }"#
+                .to_vec(),
+            ],
+        )];
+        let loaded = PackRegistryDefinitions::load(
+            &PackOverlay::new(&files),
+            &BTreeMap::new(),
+            &Default::default(),
+            |_| false,
+        )
+        .unwrap();
+        let mut entries = Vec::new();
+        loaded.append("minecraft:instrument", &mut entries);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0].1["description"],
+            serde_json::json!({"text":"Horn","italic":true})
+        );
     }
 }

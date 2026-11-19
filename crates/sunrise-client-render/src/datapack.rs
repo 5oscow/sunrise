@@ -730,8 +730,8 @@ pub struct DataStore {
 /// `<kind-dir>/<ns>:<path>` for a pack file the content tables read:
 /// `recipe/`, `recipe_filter/`, `loot_table/`, `advancement/`, `trade_set/`,
 /// `villager_trade/`, `dialog/`, `damage_type/`, `dimension_type/`, `data_maps/`, enchantments, songs,
-/// instruments, predicates, item modifiers or `tags/<sub>/`, where the id keeps the sub
-/// path so a nested tag kind stays addressable.
+/// instruments, painting variants, banner patterns, predicates, item modifiers or `tags/<sub>/`.
+/// The tag id keeps the subpath so a nested tag kind stays addressable.
 fn content_id(file: &str) -> Option<String> {
     let rest = file.strip_prefix("data/")?;
     let (ns, rest) = rest.split_once('/')?;
@@ -739,7 +739,8 @@ fn content_id(file: &str) -> Option<String> {
     let kind = match kind {
         "recipe" | "recipe_filter" | "loot_table" | "advancement" | "trade_set"
         | "villager_trade" | "dialog" | "damage_type" | "dimension_type" | "data_maps"
-        | "enchantment" | "jukebox_song" | "instrument" | "predicate" | "item_modifier" => kind,
+        | "enchantment" | "jukebox_song" | "instrument" | "painting_variant" | "banner_pattern"
+        | "predicate" | "item_modifier" => kind,
         // A tag id is `{ns}:{path-under-tags}` (`tags/worldgen/biome/
         // test:sub/mytag`), the whole path after the namespace, so nested
         // registries keep their directory (`TagLoader`'s id shape).
@@ -868,6 +869,7 @@ impl DataStore {
             let builtin = pack.id == "vanilla";
             for f in pack.list_kinds(&[
                 "advancement",
+                "banner_pattern",
                 "damage_type",
                 "data_maps",
                 "dialog",
@@ -878,6 +880,7 @@ impl DataStore {
                 "item_modifier",
                 "jukebox_song",
                 "loot_table",
+                "painting_variant",
                 "predicate",
                 "recipe",
                 "recipe_filter",

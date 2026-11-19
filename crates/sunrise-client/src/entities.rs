@@ -1537,6 +1537,40 @@ mod level_up_sound {
     }
 }
 
+/// The `PaintingVariant.DIRECT_CODEC` definition used by the registry and renderer.
+#[derive(Clone, Debug)]
+pub struct PaintingVariant {
+    pub id: std::sync::Arc<str>,
+    pub asset: String,
+    pub width: i32,
+    pub height: i32,
+    pub title: Option<serde_json::Value>,
+    pub author: Option<serde_json::Value>,
+}
+
+impl PaintingVariant {
+    pub fn decode(id: &str, value: &serde_json::Value) -> Result<Self, String> {
+        let axis = |field: &str| {
+            value[field]
+                .as_i64()
+                .filter(|n| (1..=16).contains(n))
+                .map(|n| n as i32)
+                .ok_or_else(|| format!("{field} must be an integer in 1..=16"))
+        };
+        let asset = value["asset_id"].as_str().ok_or("asset_id is required")?;
+        sunrise_core::identifier::Identifier::parse(asset)
+            .map_err(|error| format!("asset_id: {error}"))?;
+        Ok(Self {
+            id: id.into(),
+            asset: asset.trim_start_matches("minecraft:").to_owned(),
+            width: axis("width")?,
+            height: axis("height")?,
+            title: value.get("title").cloned(),
+            author: value.get("author").cloned(),
+        })
+    }
+}
+
 /// A painting (`Painting`, a `HangingEntity`): the block it hangs in, the
 /// 2D data value of the direction it faces, and its variant.
 #[derive(Clone, Debug)]

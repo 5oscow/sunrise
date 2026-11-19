@@ -255,11 +255,22 @@ impl Game<'_> {
         };
         let packed_registry_definitions = if !reload && self.is_logical_server() {
             Some(Arc::new(
-                sunrise_client::lan::data::PackRegistryDefinitions::load(&overlay, &read_errors)
-                    .map_err(|error| {
-                        log::error!("{error}");
-                        std::io::Error::other(error)
-                    })?,
+                sunrise_client::lan::data::PackRegistryDefinitions::load(
+                    &overlay,
+                    &read_errors,
+                    &self.ui.registries,
+                    |id| {
+                        self.ui
+                            .registries
+                            .ids("minecraft:sound_event")
+                            .binary_search_by(|sound| sound.as_str().cmp(id))
+                            .is_ok()
+                    },
+                )
+                .map_err(|error| {
+                    log::error!("{error}");
+                    std::io::Error::other(error)
+                })?,
             ))
         } else {
             None

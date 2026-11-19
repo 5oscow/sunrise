@@ -724,17 +724,38 @@ pub fn inline_instrument(stack: &ItemStack) -> Option<&sunrise_core::nbt::Tag> {
         _ => None,
     }
 }
-/// `Instrument.DIRECT_CODEC`: a `sound_event` that is an id or `{sound_id}`,
-/// `use_duration` and `range`.
-fn parse_instrument(v: &Value) -> Instrument {
-    let sound = match &v["sound_event"] {
-        Value::String(s) => s.clone(),
-        other => other["sound_id"].as_str().unwrap_or("").to_owned(),
-    };
-    Instrument {
-        sound,
-        use_duration: v["use_duration"].as_f64().unwrap_or(0.0) as f32,
-        range: v["range"].as_f64().unwrap_or(0.0) as f32,
+impl Instrument {
+    /// `Instrument.DIRECT_CODEC`: a sound holder or inline sound, duration,
+    /// audible range, and optional durability cost used by instrument gameplay.
+    pub fn decode(v: &Value) -> std::result::Result<Self, String> {
+        let sound = &v["sound_event"];
+        let sound = sound
+            .as_str()
+            .or_else(|| sound["sound_id"].as_str())
+            .ok_or("sound_event must be a sound id or definition")?;
+        let sound = sunrise_core::identifier::Identifier::parse(sound)
+            .map_err(|error| format!("sound_event: {error}"))?
+            .to_string();
+        let use_duration = v["use_duration"]
+            .as_f64()
+            .map(|n| n as f32)
+            .filter(|n| *n >= 0.0)
+            .ok_or("use_duration must be non-negative")?;
+        let range = v["range"]
+            .as_f64()
+            .map(|n| n as f32)
+            .filter(|n| *n > 0.0)
+            .ok_or("range must be positive")?;
+        if v.get("durability_damage")
+            .is_some_and(|n| !n.as_u64().is_some_and(|n| i32::try_from(n).is_ok()))
+        {
+            return Err("durability_damage must be a non-negative integer".into());
+        }
+        Ok(Self {
+            sound,
+            use_duration,
+            range,
+        })
     }
 }
 #[path = "condition_files.rs"]
@@ -743,7 +764,11 @@ pub(crate) use condition_files::data_files;
 fn load_instruments(root: &Path, overlay: &PackOverlay) -> HashMap<String, Instrument> {
     data_files(root, "instrument", overlay)
         .into_iter()
-        .map(|(id, v)| (id, parse_instrument(&v)))
+        .filter_map(|(id, v)| {
+            Instrument::decode(&v)
+                .ok()
+                .map(|definition| (id, definition))
+        })
         .collect()
 }
 fn load_songs(root: &Path, overlay: &PackOverlay) -> HashMap<String, Song> {
@@ -1334,9 +1359,7 @@ impl Items {
     /// registry entry or inline instrument.
     pub fn instrument(&self, stack: &ItemStack) -> Option<Instrument> {
         if let Some(tag) = inline_instrument(stack) {
-            return Some(parse_instrument(
-                &sunrise_client_core::scoreboard::tag_to_json(tag),
-            ));
+            return Instrument::decode(&sunrise_client_core::scoreboard::tag_to_json(tag)).ok();
         }
         self.instruments.get(&instrument_id(stack)?).cloned()
     }
@@ -3636,7 +3659,7 @@ mod tests {
             fs::write(dir.join("entry.json"), "{}").unwrap();
             files.push((format!("{kind}/demo:entry"), vec![
                 b"{}".to_vec(),
-                json!({"neoforge:conditions":[{"type":"neoforge:mod_loaded","modid":"provider"}],"description":"winning","max_level":7}).to_string().into_bytes(),
+                json!({"neoforge:conditions":[{"type":"neoforge:mod_loaded","modid":"provider"}],"description":"winning","max_level":7,"sound_event":"demo:note","use_duration":4.0,"range":16.0}).to_string().into_bytes(),
             ]));
             files.push((
                 format!("{kind}/demo:unknown"),

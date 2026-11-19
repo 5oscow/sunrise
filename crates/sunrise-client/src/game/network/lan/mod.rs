@@ -4038,7 +4038,7 @@ mod tests {
         let damage = Catalog::load(&root, &PackOverlay::NONE).unwrap();
         let initial = vec![(
             "dialog/demo:before".into(),
-            vec![br#"{"type":"minecraft:notice"}"#.to_vec()],
+            vec![br#"{"type":"minecraft:notice","title":"Before"}"#.to_vec()],
         )];
         let mut cache = SyncCache::default();
         initialize_world_sync_data(
@@ -4064,7 +4064,7 @@ mod tests {
             ),
             (
                 "dialog/demo:after".into(),
-                vec![br#"{"type":"minecraft:notice"}"#.to_vec()],
+                vec![br#"{"type":"minecraft:notice","title":"After"}"#.to_vec()],
             ),
             (
                 "tags/demo:damage_type/reloaded".into(),
