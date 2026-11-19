@@ -8,7 +8,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 struct Gain(AtomicU32);
 
 impl Gain {
-    const FULL: Self = Self(AtomicU32::new(0x3f80_0000));
+    const fn full() -> Self {
+        Self(AtomicU32::new(0x3f80_0000))
+    }
 
     fn set(&self, gain: f32) {
         let gain = if gain.is_nan() {
@@ -25,7 +27,7 @@ impl Gain {
 }
 
 /// The gain on mod audio: 1.0 until a crate sets it.
-static MOD_STREAM_GAIN: Gain = Gain::FULL;
+static MOD_STREAM_GAIN: Gain = Gain::full();
 
 /// Sets the gain on every mod audio stream, from 0 to 1 (anything else is clamped, NaN is 0). At 0
 /// the engine mixes none of it: the streams stay open and their audio is still taken in at its own
@@ -48,7 +50,7 @@ mod tests {
 
     #[test]
     fn a_gain_is_one_until_set_and_stays_within_zero_and_one() {
-        let gain = Gain::FULL;
+        let gain = Gain::full();
         assert_eq!(gain.get(), 1.0);
         gain.set(0.25);
         assert_eq!(gain.get(), 0.25);
