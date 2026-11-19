@@ -540,7 +540,7 @@ pub struct PlayerMotion {
     /// it travels on the server: `isLocalInstanceAuthoritative` is false, so
     /// its moves check no fall damage.
     pub server_copy: bool,
-    /// A speculative anticheat replay, whose native callbacks must not escape.
+    /// A tick played again (`replayed_tick`), whose native callbacks must not escape.
     pub(crate) replaying: bool,
     /// The span of `events` a wall hit on the server's copy pushed (sound and
     /// damage): `server_travel` keeps them while it drops the simulated moves.
@@ -1274,9 +1274,8 @@ impl MotionWorld<'_, '_, '_> {
             player.sprint_input_tick_with_window(keys, sprint_window)
         })
     }
-    /// A client's tick played again by the server's movement prediction: the
-    /// client's own keys, and the sprinting it said it had (its
-    /// ServerboundPlayerCommandPacket comes before the tick's move).
+    /// A client's tick played again: the client's own keys, and the sprinting it said it had
+    /// (its ServerboundPlayerCommandPacket comes before the tick's move). Mods' callbacks don't fire.
     pub fn replayed_tick(&mut self, keys: crate::sprint::Keys, sprinting: bool) -> Result<()> {
         self.player.replaying = true;
         let result = self.local_tick(keys, |player, _| {

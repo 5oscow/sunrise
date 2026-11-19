@@ -29,7 +29,6 @@ pub mod copper_golem;
 pub mod creaking;
 pub mod creaking_heart;
 pub mod cube;
-pub mod dab;
 pub mod data;
 pub mod dolphin;
 pub mod doors;
@@ -1551,8 +1550,6 @@ pub struct Mob {
     /// `Entity.needsSync`: knocked back, pushed or jumped since its server
     /// last sent it, so the next update goes out at once.
     pub needs_sync: bool,
-    /// The mobs it pushed this turn, kept while the collision cap is on (`push::Cap`).
-    pub pushed: Vec<u32>,
     /// `Entity.syncPosition`: it bounced this tick (`restituteMovementAfterCollisions`),
     /// so its tracker keeps this position as a step of the next move it sends.
     pub sync_position: bool,
@@ -1691,9 +1688,6 @@ pub struct Mob {
     /// `PlayerSkin.cape`: a player's cape texture, once every download of
     /// its skin is ready.
     pub cape: Option<String>,
-    /// A pose laid over this player's body after the vanilla animation (`anim::setup`), timed on
-    /// `age`, given by a hook (`sunrise_hooks::players::BodyPose`). Visual only.
-    pub emote: Option<Arc<dyn anim::BodyPose>>,
     /// A mannequin's `DATA_PROFILE` (ResolvableProfile): the profile's
     /// `textures` property resolves to `skin` like a player's.
     pub profile: Option<sunrise_protocol::entity_data::Profile>,
@@ -2888,7 +2882,6 @@ impl Mob {
             is_vehicle: equine::is_vehicle(m),
             still: m.species() == Species::HappyGhast && happy_ghast::on_still_timeout(m),
             carrying: m.rider.is_some() || m.extra.rider.is_some(),
-            collisions: 0,
             knockback_resistance: m.attrs.knockback_resistance,
             effects: m
                 .extra
@@ -3655,7 +3648,6 @@ impl Mob {
         random: LegacyRandom,
     ) -> Self {
         let mut mob = Self {
-            emote: None,
             attachment_lifetime: Default::default(),
             join: Default::default(),
             id,
@@ -3675,7 +3667,6 @@ impl Mob {
             horizontal_collision: false,
             vertical_collision_below: false,
             needs_sync: false,
-            pushed: Vec::new(),
             sync_position: false,
             movement_emission: None,
             gear_knockback_resistance: None,

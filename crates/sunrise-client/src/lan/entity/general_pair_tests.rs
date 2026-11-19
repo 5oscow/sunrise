@@ -179,7 +179,6 @@ fn pass(level: &mut Entities, clients: &mut [Client], at: &[[f64; 3]], states: &
             sources: c.sources.as_deref(),
             tracker: &mut c.tracker,
             out,
-            gone: None,
         })
         .collect();
     let refs: Vec<&EntityState> = states.iter().collect();

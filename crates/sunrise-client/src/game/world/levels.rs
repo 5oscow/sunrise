@@ -975,7 +975,7 @@ impl Game<'_> {
             p.world.watched = std::mem::take(&mut self.world.watched);
             self.swap_level(&mut p);
             // The tracked entities go with their level: a level's moves, read before its tick
-            // describes its entities again, would otherwise meet the last level's (the anticheat
+            // describes its entities again, would otherwise meet the last level's (a move
             // missed the boat under a player while anyone was in another dimension).
             let states = self.lan.as_mut().map(|h| &mut h.states);
             if let Some(states) = states {

@@ -1691,9 +1691,7 @@ struct Game<'a> {
     /// `render-capture DIR`: replied once the renderer wrote the scene.
     pending_render_capture: Option<std::sync::mpsc::Sender<String>>,
     pending_bench: Option<(Instant, std::sync::mpsc::Sender<String>, bool)>,
-    /// Recent frame times for the performance overlay.
-    frame_graph: sunrise_client::perf_overlay::FrameGraph,
-    /// Sunrise's extras (auto-reconnect; mods' counters): `game/interface/extras.rs`.
+    /// Settings and HUD state: `game/interface/extras.rs`.
     extras: extras::ExtrasState,
     /// The PvP & HUD options' state (`game/entities/pvp.rs`).
     pvp: pvp::PvpState,
@@ -1780,6 +1778,16 @@ struct Game<'a> {
     remote: Option<remote::Remote>,
     /// The current connection came from Realms (retained for reconnect).
     realm_session: bool,
+    /// The server this window connected to last over the network: kept while something may
+    /// connect there again (game/network/remote/connection.rs).
+    last_connection: Option<sunrise_hooks::connection::Server>,
+    /// A connection over the network is open: started, not yet closed (one `Hooks::left` or
+    /// `Hooks::ended` each).
+    connection_open: bool,
+    /// The crates' answer to the last connection's end, until the Disconnected screen shows it.
+    pending_retry: Option<sunrise_hooks::connection::Retry>,
+    /// A connection the Disconnected screen makes on its next frame, as that answer asked.
+    retry_due: Option<sunrise_hooks::connection::Server>,
     /// Replay playback (game/replay.rs), and Sunrise Studio's editor on it (game/studio.rs).
     pub(super) replay: replay::Replay,
     pub(super) studio: studio::Studio,
@@ -4771,8 +4779,12 @@ impl Game<'_> {
         // Gui.extractRenderState: the debug overlay comes after the screen
         // and the toasts, so it is over everything, menus included.
         self.draw_debug_overlay(&mut batch, size);
-        self.frame_graph
-            .draw(self.settings.sunrise.overlay, &mut batch, &self.gui.atlas);
+        // The layers crates registered to draw over everything (`sunrise_hooks::hud`).
+        sunrise_client::extras_hud::draw_top_layers(
+            sunrise_hooks::hud::engine::all(),
+            &mut batch,
+            &self.gui.atlas,
+        );
         self.draw_pad_over_hud(&mut batch);
         if let Some(pointer) = pointer {
             debug_assert_eq!(
@@ -5520,8 +5532,6 @@ impl Game<'_> {
                 .extend(out.drain(player_start..));
         }
         self.mark_motion(out.len(), 0);
-        // What crates draw around players: first person, see-through (game/player_hooks.rs).
-        self.players_after_geometry(camera, alpha, &mut out);
         self.mark_entity(out.len(), "minecraft:evoker_fangs");
         self.fangs_geometry(camera, alpha, &mut out);
         self.block_item_display_geometry(camera, alpha, &mut out);
@@ -10314,7 +10324,7 @@ impl Game<'_> {
                     }
                     self.client_tick_steps(steps, Some(event_loop))?;
                     self.extras_frame(elapsed);
-                    self.extras_retry()?;
+                    self.follow_retry()?;
                     self.apply_mouse_look();
                     self.input_look(elapsed.as_secs_f32());
                     self.advance_flight();
@@ -10336,11 +10346,18 @@ impl Game<'_> {
                         if rendered {
                             let ms = |d: Duration| d.as_secs_f32() * 1000.0;
                             perf_times = Some((ms(cpu), r.gpu_times.last().copied()));
-                            self.frame_graph.record(
+                            let g = &self.settings.sunrise;
+                            // The scale while Dynamic Resolution moves it on its own.
+                            let dynamic_scale = g
+                                .dynamic_resolution
+                                .then(|| self.dynamic_resolution.scale(g.resolution_scale));
+                            let times = sunrise_hooks::perf::FrameTimes::new(
                                 ms(elapsed),
                                 ms(cpu),
                                 r.gpu_times.last().copied(),
+                                dynamic_scale,
                             );
+                            sunrise_hooks::engine::frame_timed(&times);
                             if let Some(&gpu) = r.gpu_times.last() {
                                 self.gpu_utilization =
                                     f64::from(gpu) * 100.0 / f64::from(ms(cpu).max(0.001));
@@ -10351,7 +10368,6 @@ impl Game<'_> {
                                 &self.settings.sunrise,
                                 settled,
                                 (&mut self.gpu_culling_auto, &mut self.dynamic_resolution),
-                                &mut self.frame_graph,
                                 r,
                                 (ms(cpu), ms(elapsed)),
                             );
@@ -11052,7 +11068,6 @@ impl<'a> Game<'a> {
             pack_shadow_casters: (false, false),
             pending_uploads: Vec::new(),
             upload_pace: Default::default(),
-            frame_graph: Default::default(),
             extras: Default::default(),
             pvp: Default::default(),
             mods: mod_sources,
@@ -11083,6 +11098,10 @@ impl<'a> Game<'a> {
             attachment_indexes: Default::default(),
             remote: None,
             realm_session: false,
+            last_connection: None,
+            connection_open: false,
+            pending_retry: None,
+            retry_due: None,
             replay: Default::default(),
             studio: Default::default(),
             lan: None,

@@ -693,13 +693,7 @@ impl Game<'_> {
             .and_then(|host| host.menus.get(&conn))
             .and_then(|p| p.station.as_ref())
             .is_some_and(|s| s.kind == StationKind::Anvil);
-        if anvil
-            && self.chat_filter_text(
-                conn,
-                &[name],
-                sunrise_client::lan::hub::chat_filter::Place::Anvil,
-            )
-        {
+        if anvil {
             self.lan_station_op(conn, None, |menu, env| {
                 menu.rename(env, name);
             });
@@ -1098,6 +1092,7 @@ impl Game<'_> {
                 .guests
                 .iter()
                 .find(|g| g.conn == conn && host.hub.here(g))
+                .filter(|_| !self.player_tick_canceled(conn))
             else {
                 continue;
             };
@@ -1179,7 +1174,7 @@ impl Game<'_> {
             let Some(g) = host.hub.guests.iter().find(|g| g.conn == conn) else {
                 continue;
             };
-            if !host.hub.here(g) {
+            if !host.hub.here(g) || self.player_tick_canceled(conn) {
                 continue;
             }
             if self.lan_lectern_valid(g, key) {

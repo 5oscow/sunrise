@@ -922,6 +922,14 @@ fn borrowed_prepared(
             let _ = send;
             continue;
         }
+        // A slice of borrowed strings borrows a local list of them, read as owned strings.
+        if let Ty::List(item, List::Slice) = &f.ty
+            && matches!(**item, Ty::Str(Str::Borrowed))
+        {
+            write!(read, "let {local}_held: Vec<String> = input.take()?; let {local}: Vec<&str> = {local}_held.iter().map(String::as_str).collect();").unwrap();
+            build.push(format!("{}: &{local}", f.rust));
+            continue;
+        }
         // Optional references to borrowed records need a local record before borrowing it.
         if let Ty::Option(t) = &f.ty
             && let Ty::Ref(inner, false) = &**t

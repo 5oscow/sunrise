@@ -1298,8 +1298,7 @@ impl Game<'_> {
         Identifier::parse(level.dimension_id()).ok()
     }
 
-    /// The IP address the player connects from, without the port (behind a
-    /// Velocity proxy, the address the proxy forwards). Displaced connected
+    /// The IP address the player connects from, without the port. Displaced connected
     /// players keep their address; an acting player with no known connection
     /// has an empty address. None for a stale or unavailable player.
     pub(super) fn player_address(&self, player: PlayerRef) -> Option<String> {
@@ -1638,8 +1637,7 @@ impl Game<'_> {
     /// again. Hovering the shown name gives the real one, which stays in the
     /// log, commands, selectors and the server's events. Kept until a mod
     /// sets it again or the server stops (also if they leave and come back).
-    /// Plain text: the mod checks it (`Messages::text_allowed`, its length,
-    /// other players' names). False when the server list is unavailable,
+    /// Plain text: the mod checks it (its length, other players' names). False when the server list is unavailable,
     /// the handle is stale or the player isn't online.
     pub(super) fn player_set_nickname(
         &mut self,
@@ -1657,18 +1655,6 @@ impl Game<'_> {
         }
         host.hub.set_nickname(uuid, nickname.map(str::to_owned));
         true
-    }
-    /// Whether the server's chat filter (`server.toml` `[chat_filter]`)
-    /// lets `text` through: true without a filter, None inside a player's
-    /// hook (where the server is out of reach).
-    pub(super) fn native_text_allowed(&self, text: &str) -> Option<bool> {
-        let host = self.lan.as_ref()?;
-        Some(
-            host.hub
-                .chat_filter
-                .as_ref()
-                .is_none_or(|g| !g.matches(text)),
-        )
     }
     /// A system line in every player's chat and the server's log.
     pub(super) fn native_broadcast(&self, mut line: Text) {
@@ -6120,7 +6106,7 @@ mod player_rule_tests {
     }
 }
 
-// Dedicated network settings stay engine-private; never expose the forwarding secret.
+// Dedicated network settings stay engine-private.
 #[allow(dead_code)]
 impl Game<'_> {
     /// Whether the dedicated server runs in online mode (`online-mode` of server.properties):
@@ -6135,13 +6121,6 @@ impl Game<'_> {
     pub(super) fn native_server_port(&self) -> Option<u16> {
         Some(self.dedicated_lan()?.port)
     }
-    /// How the dedicated server takes its players from a proxy: `"velocity"` when it signs the
-    /// forwarded player information with `forwarding.secret` (offline mode behind Velocity),
-    /// `"none"` when it doesn't; None off a dedicated server and before it listens. The secret
-    /// itself is never returned. API @API:server_settings@.
-    pub(super) fn native_proxy_forwarding(&self) -> Option<&'static str> {
-        Some(proxy_forwarding_of(&self.dedicated_lan()?.shared.config))
-    }
     /// The listening socket of a dedicated server; None on any other side and before it listens.
     fn dedicated_lan(&self) -> Option<&sunrise_client::lan::Lan> {
         self.options.dedicated.as_ref()?;
@@ -6155,16 +6134,6 @@ fn online_mode_of(config: &sunrise_client::lan::NetConfig) -> bool {
     config.online.is_some()
 }
 
-/// The proxy forwarding a dedicated server's network config carries: the secret
-/// is set only offline behind a proxy (game/dedicated.rs `forwarding_secret`).
-fn proxy_forwarding_of(config: &sunrise_client::lan::NetConfig) -> &'static str {
-    if config.forwarding_secret.is_some() {
-        "velocity"
-    } else {
-        "none"
-    }
-}
-
 #[cfg(test)]
 mod network_settings_tests {
     use super::*;
@@ -6173,17 +6142,10 @@ mod network_settings_tests {
     fn server_settings_follow_the_network_config() {
         use sunrise_client::lan::{NetConfig, OnlineMode};
         let mut config = NetConfig::loopback(25565, String::new(), 20);
-        // online-mode=false, no proxy: no key, no forwarding secret.
+        // online-mode=false: no key.
         assert!(!online_mode_of(&config));
-        assert_eq!(proxy_forwarding_of(&config), "none");
-        // online-mode=false behind Velocity: the secret is set.
-        config.forwarding_secret = Some(b"secret".to_vec());
-        assert!(!online_mode_of(&config));
-        assert_eq!(proxy_forwarding_of(&config), "velocity");
-        // online-mode=true: the server's key, and forwarding stays off.
-        config.forwarding_secret = None;
+        // online-mode=true: the server's key.
         config.online = Some(std::sync::Arc::new(OnlineMode::generate(false).unwrap()));
         assert!(online_mode_of(&config));
-        assert_eq!(proxy_forwarding_of(&config), "none");
     }
 }

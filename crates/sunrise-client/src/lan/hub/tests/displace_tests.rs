@@ -227,7 +227,6 @@ fn an_unconfirmed_displacement_is_resent_absolute_with_no_velocity() {
     assert_eq!(packet.relatives, 0, "no relative flag");
     assert_eq!(packet.position, target, "the awaited position, absolute");
     assert_eq!(packet.delta, [0.0; 3]);
-    assert!(!side.guest().awaiting_keeps_motion);
     // The old id is stale now.
     side.tick(&rig, vec![accept(old, target, 0.0)]);
     assert_eq!(

@@ -58,7 +58,7 @@ class GateTests(unittest.TestCase):
         self.assertEqual(ours, {"heavy": "true", "pr_sha": SHA, "trusted": "true"})
 
     def test_a_dispatch_on_our_rollup_or_sync_is_refused_since_its_pushes_run_the_gate(self):
-        for ref, labels in (("sunrise-review-rollup-43", []), ("sync-upstream-7", []), ("integration", ["rollup"])):
+        for ref, labels in (("sunrise-review-rollup-43", []), ("sync-upstream-7", []), ("sync/upstream-acbd", []), ("integration", ["rollup"])):
             head = {"sha": SHA, "ref": ref, "labels": labels, "same_repository": True}
             with self.subTest(ref=ref, labels=labels), self.assertRaisesRegex(SystemExit, "rollup or sync"):
                 pr_gate.outputs("workflow_dispatch", True, "2833", lambda n, head=head: head)
@@ -86,7 +86,7 @@ class WorkflowTests(unittest.TestCase):
     def test_cheap_jobs_run_without_the_heavy_gate(self):
         # verify-static runs outside the gate too: only where it runs depends on the gate.
         self.assertNotIn("outputs.heavy", self.job("verify-static").split("\n", 2)[1])
-        self.assertIn("needs.changes.outputs.heavy != 'true'", self.job("format"))
+        self.assertIn("needs.changes.outputs.heavy == 'false'", self.job("format"))
         self.assertNotRegex(self.job("format"), r"cargo (clippy|build|test|check)")
 
     def test_a_dispatched_head_is_checked_out_with_a_read_only_token_and_reported_apart(self):
@@ -163,8 +163,8 @@ class WorkflowTests(unittest.TestCase):
         # Outside the gate, the first term decides (Actions' || and && short-circuit): no switch, paid pool or boat
         # label reached through the later terms can move verify-static, and boat's watcher never starts.
         static = self.job("verify-static")
-        self.assertIn("runs-on: ${{ needs.changes.outputs.heavy != 'true' && 'ubuntu-latest' || ", static)
-        self.assertIn("RUNNER_KIND: ${{ needs.changes.outputs.heavy != 'true' && 'github' || ", static)
+        self.assertIn("runs-on: ${{ needs.changes.outputs.heavy == 'false' && 'ubuntu-latest' || ", static)
+        self.assertIn("RUNNER_KIND: ${{ needs.changes.outputs.heavy == 'false' && 'github' || ", static)
         self.assertIn("if: needs.changes.outputs.heavy == 'true' && ", self.job("boat-watch"))
         # A contributor's dispatched pull request is heavy but untrusted: GitHub's runner too.
         self.assertIn("needs.changes.outputs.trusted != 'true' && 'ubuntu-latest' ||", static)

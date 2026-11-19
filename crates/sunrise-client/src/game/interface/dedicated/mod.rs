@@ -187,130 +187,17 @@ pub(super) fn cached_user_by_id(id: u128) -> Option<NameAndId> {
     USER_CACHE.lock().unwrap().as_mut()?.get_by_id(id)
 }
 
-/// `server.toml`'s `[anticheat]`, beside server.properties when sunrise-server runs the game; the
-/// default (on) without the file or the section, off (with an error logged) when the section is wrong.
-fn load_anticheat() -> sunrise_anticheat::Config {
-    let Ok(text) = std::fs::read_to_string("server.toml") else {
-        return Default::default();
-    };
-    match sunrise_anticheat::Config::from_server_toml(&text) {
-        Ok(config) => {
-            if config.enabled {
-                log(
-                    "INFO",
-                    "Anticheat on (server.toml [anticheat]; enabled = false turns it off)",
-                );
-            }
-            config
-        }
-        Err(e) => {
-            log(
-                "ERROR",
-                &format!("server.toml: {e}; the anticheat stays off"),
-            );
-            sunrise_anticheat::Config {
-                enabled: false,
-                ..Default::default()
-            }
-        }
-    }
-}
+/// What the start answers when the server folder still has a `forwarding.secret`.
+const FORWARDING_REMOVED: &str = "Velocity forwarding was removed from Sunrise; delete forwarding.secret from the \
+     server folder (with online-mode=false, anyone who can reach the port then joins under any name)";
 
-/// `server.toml`'s `[chat_filter]` (docs/chat-filter.md), through the filter the executable installed
-/// (`sunrise_server_files::chat_guard`): none without one.
-fn load_chat_filter() -> Option<Box<dyn sunrise_server_files::chat_guard::ChatGuard>> {
-    let text = std::fs::read_to_string("server.toml").unwrap_or_default();
-    let loaded = sunrise_server_files::chat_guard::load(&text, std::path::Path::new("."));
-    for (level, line) in &loaded.log {
-        log(level, line);
+/// A `forwarding.secret` in `dir` stops the start: Velocity forwarding is gone, and an owner who relied on it
+/// to keep an offline server closed must not find it silently open.
+fn refuse_forwarding_secret(dir: &std::path::Path) -> std::result::Result<(), String> {
+    if dir.join("forwarding.secret").exists() {
+        return Err(FORWARDING_REMOVED.to_owned());
     }
-    loaded.guard
-}
-
-/// `server.toml`'s `[entities]` (docs/server.md): `villager_lobotomize` and its check interval. Off without
-/// the file or the section, and (with an error logged) when the section is wrong.
-fn load_entities() {
-    let text = std::fs::read_to_string("server.toml").unwrap_or_default();
-    match parse_entities(&text) {
-        Ok((on, interval)) => {
-            if on {
-                log(
-                    "INFO",
-                    &format!(
-                        "villagers that cannot move skip their brain, rechecked every {interval} ticks (server.toml [entities])"
-                    ),
-                );
-            }
-            sunrise_client::mobs::villager::lobotomy::configure(on, interval);
-        }
-        Err(e) => log(
-            "ERROR",
-            &format!("server.toml: {e}; villagers keep their brains"),
-        ),
-    }
-}
-
-/// The `[entities]` section of a `server.toml`: (`villager_lobotomize`, its check interval in ticks). The
-/// section's other keys (`dab`...) belong to other settings, so they are skipped here; `sunrise-server` refuses
-/// typos when it reads the file.
-fn parse_entities(text: &str) -> std::result::Result<(bool, u32), String> {
-    #[derive(serde::Deserialize)]
-    #[serde(default)]
-    struct Entities {
-        villager_lobotomize: bool,
-        villager_lobotomize_check_interval: u32,
-    }
-    impl Default for Entities {
-        fn default() -> Self {
-            Self {
-                villager_lobotomize: false,
-                villager_lobotomize_check_interval:
-                    sunrise_client::mobs::villager::lobotomy::DEFAULT_INTERVAL,
-            }
-        }
-    }
-    let mut table = toml::from_str::<toml::Table>(text).map_err(|e| e.to_string())?;
-    let Some(section) = table.remove("entities") else {
-        return Ok((
-            false,
-            Entities::default().villager_lobotomize_check_interval,
-        ));
-    };
-    let e: Entities = section.try_into().map_err(|e| format!("[entities]: {e}"))?;
-    if e.villager_lobotomize_check_interval == 0 {
-        return Err("[entities]: villager_lobotomize_check_interval must be at least 1".into());
-    }
-    Ok((e.villager_lobotomize, e.villager_lobotomize_check_interval))
-}
-
-/// The secret for Velocity's player information forwarding, from `forwarding.secret` beside server.properties.
-/// No file means no forwarding. A file that is empty or can't be read stops the start, because an empty secret
-/// would let anyone sign a login, and a typo must not leave a server open that was meant to be behind a proxy.
-fn forwarding_secret(online: bool) -> Result<Option<Vec<u8>>> {
-    const FILE: &str = "forwarding.secret";
-    if !std::path::Path::new(FILE).exists() {
-        return Ok(None);
-    }
-    if online {
-        log(
-            "WARN",
-            "forwarding.secret is ignored: the proxy authenticates the players, so set \"online-mode\" to \"false\".",
-        );
-        return Ok(None);
-    }
-    let text = std::fs::read(FILE).map_err(|e| format!("{FILE}: {e}"))?;
-    let secret = text.trim_ascii().to_vec();
-    if secret.is_empty() {
-        return Err(format!(
-            "{FILE} is empty: put the proxy's forwarding secret in it, or remove the file"
-        )
-        .into());
-    }
-    log(
-        "INFO",
-        "Velocity player information forwarding is on (forwarding.secret)",
-    );
-    Ok(Some(secret))
+    Ok(())
 }
 
 /// `DedicatedServer.initServer`: elapsed level-load nanoseconds as ROOT `%.3f` seconds.
@@ -533,38 +420,8 @@ pub(super) struct Lists {
     pub stop: bool,
     /// `MinecraftServer.isAutoSave`: all of Sunrise's server levels share this save flag.
     pub autosave: bool,
-    /// UUID prefixes (lower case, with dashes) that pass the whitelist: `whitelist-bypass.txt`.
-    pub whitelist_bypass: Vec<String>,
 }
 
-/// The lines of `whitelist-bypass.txt`: one UUID prefix each, e.g. `00000000-0000-0000-0009-` for Floodgate's
-/// Bedrock players. `#` starts a comment. A prefix has to be a dashed UUID start of at least 8 characters, so
-/// a typo can't open the whitelist to everybody.
-fn parse_whitelist_bypass(text: &str) -> std::result::Result<Vec<String>, String> {
-    let mut out = Vec::new();
-    for (n, line) in text.lines().enumerate() {
-        let line = line
-            .split('#')
-            .next()
-            .unwrap_or("")
-            .trim()
-            .to_ascii_lowercase();
-        if line.is_empty() {
-            continue;
-        }
-        if line.len() < 8
-            || line.len() > 36
-            || !line.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
-        {
-            return Err(format!(
-                "whitelist-bypass.txt line {}: {line:?} is not a UUID prefix",
-                n + 1
-            ));
-        }
-        out.push(line);
-    }
-    Ok(out)
-}
 impl Lists {
     /// The console's `/ban` of one player (`BanPlayerCommands.banPlayers`): whether they are banned now.
     /// One banned already (`isBanned`) is left as they are, their first reason kept.
@@ -600,24 +457,7 @@ impl Lists {
             player_idle_timeout: 0,
             stop: false,
             autosave: true,
-            whitelist_bypass: Vec::new(),
         };
-        // Sunrise only: players from a proxy's Bedrock bridge (Floodgate) are never on whitelist.json.
-        if let Ok(text) = std::fs::read_to_string("whitelist-bypass.txt") {
-            match parse_whitelist_bypass(&text) {
-                Ok(prefixes) => {
-                    log(
-                        "INFO",
-                        &format!(
-                            "whitelist-bypass.txt: {} UUID prefix(es) skip the whitelist",
-                            prefixes.len()
-                        ),
-                    );
-                    l.whitelist_bypass = prefixes;
-                }
-                Err(e) => log("ERROR", &format!("{e}; the file is ignored")),
-            }
-        }
         // Each list tells the event stream what changes in it, as vanilla's tell their `NotificationService`.
         l.ops.watch(|change| {
             let (kind, e) = listed("operators", change);
@@ -663,16 +503,7 @@ impl Lists {
     }
     /// PlayerList.isWhiteListed.
     fn whitelisted(&self, user: &NameAndId) -> bool {
-        !self.use_whitelist
-            || self.ops.contains(user)
-            || self.white.contains(user)
-            || self.bypasses_whitelist(user.id)
-    }
-    fn bypasses_whitelist(&self, id: u128) -> bool {
-        let id = sunrise_protocol::crypto::uuid_string(id);
-        self.whitelist_bypass
-            .iter()
-            .any(|p| id.starts_with(p.as_str()))
+        !self.use_whitelist || self.ops.contains(user) || self.white.contains(user)
     }
     /// PlayerList.canPlayerLogin before the player count.
     fn can_login(&mut self, address: std::net::SocketAddr, user: &NameAndId) -> Option<Tag> {
@@ -1227,18 +1058,19 @@ impl Game<'_> {
         let favicon = std::fs::read("server-icon.png")
             .ok()
             .filter(|b| png_size(b) == Some((64, 64)));
-        // Behind a Velocity proxy: `forwarding.secret` in the server folder, like the proxy's own file.
-        let forwarding_secret = forwarding_secret(online.is_some())?;
+        // Sunrise only: a leftover `forwarding.secret` says that Velocity forwarding is gone.
+        refuse_forwarding_secret(std::path::Path::new("."))?;
         // `[transfer]` on: a player's only way in must be the proxy, or one who joins this server
         // directly finds the older copy of itself that a hand-over left here, and items double.
+        // Velocity forwarding made it so; without it nothing does.
         let transfers = self
             .options
             .transfers
             .clone()
             .map(sunrise_client::lan::arrivals::Transfers::new);
-        if transfers.is_some() && forwarding_secret.is_none() {
-            return Err("server.toml's [transfer] is on, but players can join this server without the proxy: \
-                 turn on Velocity forwarding (forwarding.secret, docs/velocity-forwarding.md) or turn [transfer] off"
+        if transfers.is_some() {
+            return Err("server.toml's [transfer] is on, but players can join this server without the proxy \
+                 (Sunrise has no Velocity forwarding any more): turn [transfer] off"
                 .into());
         }
         self.start_loaded_dedicated_world(&opened_packs);
@@ -1269,7 +1101,6 @@ impl Game<'_> {
             })),
             gate: Some(gate),
             online,
-            forwarding_secret,
             arrivals: transfers.as_ref().map(|t| t.expected.clone()),
             log: Some(NetLog {
                 write: Arc::new(log_from),
@@ -1285,11 +1116,6 @@ impl Game<'_> {
                 .raw
                 .get(sunrise_client::lan::SUNRISE_CLIENTS_ONLY)
                 .is_some_and(|v| v.trim().eq_ignore_ascii_case("true")),
-            accept_older_clients: props
-                .raw
-                .get(sunrise_client::lan::ACCEPT_OLDER_CLIENTS)
-                .is_some_and(|v| v.trim().eq_ignore_ascii_case("true")),
-            older_clients_play: false,
             lod_distance: sunrise_client::lod_net::distance_property(
                 props.raw.get(sunrise_client::lod_net::PROPERTY).as_deref(),
             ),
@@ -1357,11 +1183,7 @@ impl Game<'_> {
             host.hub.transfers = Some(transfers);
         }
         self.sync_ops(&lists);
-        let anticheat = load_anticheat();
-        let anticheat_on = anticheat.enabled;
-        let chat_filter = load_chat_filter();
         self.read_runtime_level_cap(|key| props.raw.get(key));
-        load_entities();
         // Sunrise's far ring (docs/hosting.md): server.toml's `max_view_distance`.
         let far = props
             .raw
@@ -1378,8 +1200,6 @@ impl Game<'_> {
                     &format!("Sending saved chunks up to {far} chunks away (max_view_distance)"),
                 );
             }
-            host.hub.set_anticheat(anticheat);
-            host.hub.set_chat_filter(chat_filter);
             // The viewed areas' chunk caps (#3716): server.toml's `max_viewed_*` settings.
             let (caps, clamped) = viewed::ViewedCaps::from_properties(|key| props.raw.get(key));
             if let Some(asked) = clamped {
@@ -1439,7 +1259,6 @@ impl Game<'_> {
                 sunrise_client::lod_net::distance_property(
                     props.raw.get(sunrise_client::lod_net::PROPERTY).as_deref(),
                 ),
-                anticheat_on,
             ),
             compression: props.network_compression_threshold,
             view: (
@@ -2078,20 +1897,6 @@ impl Game<'_> {
                 }
             }
             "whitelist" => self.console_whitelist(state, &rest),
-            // The chat filter's (game/interface/chat_filter.rs), on servers that filter.
-            command
-                if super::chat_filter::MUTE_COMMANDS.contains(&command)
-                    && self.lan.as_ref().is_some_and(|h| h.hub.chat_filter_on()) =>
-            {
-                if let Some(mut host) = self.lan.take() {
-                    let words: Vec<&str> = [command].into_iter().chain(rest).collect();
-                    let replies = self.mute_command(&mut host, &words, "Server");
-                    self.lan = Some(host);
-                    for reply in replies {
-                        self.console_reply(reply.text());
-                    }
-                }
-            }
             "ban" if !rest.is_empty() => {
                 let Some(user) = self.resolve(rest[0]) else {
                     return;
@@ -2468,53 +2273,6 @@ impl Game<'_> {
         }
     }
 
-    /// The anticheat bans a player (`HostEvent::Ban`): `banned-players.json` gets it as `/ban` adds it,
-    /// with the anticheat as its source, and the player is sent away with the ban's message.
-    pub(super) fn anticheat_ban(&mut self, uuid: u128, name: &str, reason: &str) {
-        let Some(host) = self.lan.as_mut() else {
-            return;
-        };
-        let hub = &mut host.hub;
-        let Some(lists) = &self.server_lists else {
-            // No ban list to add to: the anticheat's kick, so a flagged cheater still doesn't stay.
-            log(
-                "WARN",
-                &format!("Can't ban {name} ({reason}): no ban list; kicked"),
-            );
-            let conns: Vec<u32> = hub
-                .guests
-                .iter()
-                .filter(|g| g.uuid == uuid)
-                .map(|g| g.conn)
-                .collect();
-            for conn in conns {
-                hub.anticheat_kick(conn);
-            }
-            return;
-        };
-        let user = NameAndId {
-            id: uuid,
-            name: name.to_owned(),
-        };
-        lists.lock().unwrap().bans.add(BanEntry::new(
-            user,
-            Some("Sunrise anticheat".into()),
-            None,
-            Some(reason.to_owned()),
-        ));
-        log("INFO", &format!("Banned {name}: {reason}"));
-        let conns: Vec<u32> = hub
-            .guests
-            .iter()
-            .filter(|g| g.uuid == uuid)
-            .map(|g| g.conn)
-            .collect();
-        for conn in conns {
-            hub.kick(conn, translatable("multiplayer.disconnect.banned", &[]));
-        }
-        events::record("ban", name, uuid, serde_json::json!({ "reason": reason }));
-    }
-
     pub(super) fn kick_uuid(&mut self, uuid: u128, reason: Tag) {
         let conns: Vec<u32> = self.lan.as_ref().map_or_else(Vec::new, |h| {
             h.hub
@@ -2700,7 +2458,8 @@ mod tests {
     }
 
     use super::{
-        capture_log, log, log_from, overload_warning, panic_message, parse_whitelist_bypass,
+        FORWARDING_REMOVED, capture_log, log, log_from, overload_warning, panic_message,
+        refuse_forwarding_secret,
     };
     use std::{
         fs,
@@ -2781,35 +2540,19 @@ mod tests {
             assert_eq!(game.ip_ban_players("127.0.0.1"), [13]);
         });
     }
-    #[test]
-    fn entities_section_is_off_by_default_and_keeps_the_other_settings_keys() {
-        use super::parse_entities;
-        assert_eq!(parse_entities(""), Ok((false, 100)));
-        assert_eq!(
-            parse_entities(
-                "[entities]\nvillager_lobotomize = true\nvillager_lobotomize_check_interval = 40\n"
-            ),
-            Ok((true, 40))
-        );
-        assert_eq!(
-            parse_entities(
-                "[entities]\ndab = true\nmax_collisions = 8\nvillager_lobotomize = true\n"
-            ),
-            Ok((true, 100))
-        );
-        assert!(parse_entities("[entities]\nvillager_lobotomize_check_interval = 0\n").is_err());
-    }
 
+    /// A server folder that still has the forwarding secret is told what to do.
     #[test]
-    fn whitelist_bypass_file_takes_uuid_prefixes_and_refuses_junk() {
-        let ok =
-            parse_whitelist_bypass("# Bedrock\n00000000-0000-0000-0009-  # floodgate\n\n").unwrap();
-        assert_eq!(ok, vec!["00000000-0000-0000-0009-".to_owned()]);
-        assert!(
-            parse_whitelist_bypass("0-").is_err(),
-            "a short prefix would match nearly everyone"
+    fn a_leftover_forwarding_secret_says_what_to_do() {
+        let dir = std::env::temp_dir().join(format!("sunrise-forwarding-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        assert_eq!(refuse_forwarding_secret(&dir), Ok(()));
+        fs::write(dir.join("forwarding.secret"), "secret\n").unwrap();
+        assert_eq!(
+            refuse_forwarding_secret(&dir),
+            Err(FORWARDING_REMOVED.to_owned())
         );
-        assert!(parse_whitelist_bypass("not-a-uuid-at-all").is_err());
+        let _ = fs::remove_dir_all(&dir);
     }
 
     /// ServerGamePacketListenerImpl.tick: a player idle past `player-idle-timeout` minutes is kicked,
@@ -3036,7 +2779,6 @@ mod tests {
             player_idle_timeout: 0,
             stop: false,
             autosave: true,
-            whitelist_bypass: Vec::new(),
         };
         let alpha = NameAndId {
             id: 0x5ca1ab1e,
@@ -3057,7 +2799,7 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// A temporary ban (the chat filter's) keeps the player out and says when it ends;
+    /// A temporary ban keeps the player out and says when it ends;
     /// once it has ended, or after `/pardon`, they come in.
     #[test]
     fn a_temporarily_banned_player_is_refused_with_the_end_until_it_has_passed() {
@@ -3076,7 +2818,6 @@ mod tests {
             player_idle_timeout: 0,
             stop: false,
             autosave: true,
-            whitelist_bypass: Vec::new(),
         };
         // Every translation key and string in a message, in the order they come.
         fn words(tag: &super::Tag, out: &mut Vec<String>) {
