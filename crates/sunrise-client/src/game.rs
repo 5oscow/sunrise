@@ -8055,6 +8055,9 @@ impl Game<'_> {
                 && let Some(renderer) = &mut self.renderer
             {
                 renderer.wait_submissions();
+                if renderer.device_lost() {
+                    return Ok(false);
+                }
             }
             self.native_flip_frame();
         }
