@@ -12,7 +12,7 @@ pub mod wire;
 pub mod world;
 pub use backend::{
     ActionOutcome, ActionRefused, BackendMutRef, BackendRef, ClientBackendMutRef, NoBackend,
-    backend_mut_of, backend_of, client_backend_mut_of,
+    AccessRefusal, backend_mut_of, backend_of, client_backend_mut_of,
 };
 pub use block::types::*;
 pub use client::types::*;

@@ -411,6 +411,7 @@ pub(super) fn game_forwarders(root: &Path) -> Result<String, String> {
     // The gated methods with no refusal-shaped `Result`: a refused call unwinds out of them
     // (#3123).
     let mut unwinding = std::collections::BTreeSet::new();
+    let refusals = refusal_errors(root)?;
     let mut code = String::from(
         "use crate::game::Game;\nuse crate::game::api_values::{call_stack_write, call_state_write, call_write, TryIntoApi, TryIntoEngine};\nuse mod_api::*;\n",
     );
@@ -502,12 +503,15 @@ pub(super) fn game_forwarders(root: &Path) -> Result<String, String> {
                     }
                 } else if crosses_output {
                     match result_error(&entry.sig.output) {
-                        Some(error) if outer_type(error, "LevelReadError") => format!(
-                            "{call}.try_into_api().unwrap_or(Err(mod_api::LevelReadError::Unavailable))"
-                        ),
-                        Some(error) if outer_type(error, "AudioRefusal") => format!(
-                            "{call}.try_into_api().unwrap_or(Err(mod_api::AudioRefusal::Unavailable))"
-                        ),
+                        Some(error)
+                            if refusal_shaped(&entry.sig.output, &refusals).is_some()
+                                && !outer_type(error, "LevelWriteError") =>
+                        {
+                            let error = error.to_token_stream();
+                            format!(
+                                "{call}.try_into_api().unwrap_or(Err(<{error} as mod_api::AccessRefusal>::unavailable()))"
+                            )
+                        }
                         Some(error) if outer_type(error, "GameRuleReadError") => format!(
                             "{call}.try_into_api().expect(\"game rule values convert infallibly\")"
                         ),
@@ -519,18 +523,14 @@ pub(super) fn game_forwarders(root: &Path) -> Result<String, String> {
                 } else {
                     call
                 };
-                let typed_access_error = result_error(&entry.sig.output).filter(|error| {
-                    outer_type(error, "LevelReadError")
-                        || outer_type(error, "LevelWriteError")
-                        || outer_type(error, "AudioRefusal")
-                });
+                let typed_access_error = refusal_shaped(&entry.sig.output, &refusals);
                 if typed_access_error.is_none() {
                     unwinding.insert(format!("{}::{name}", area.stem));
                 }
                 let access = if let Some(error) = typed_access_error {
                     let error = error.to_token_stream();
                     format!(
-                        "if !mod_api::__private::access_allowed({name:?}, mod_api::__private::LoadAccess::{level}) {{ return Err({error}::Unavailable); }}"
+                        "if !mod_api::__private::access_allowed({name:?}, mod_api::__private::LoadAccess::{level}) {{ return Err(<{error} as mod_api::AccessRefusal>::unavailable()); }}"
                     )
                 } else {
                     format!(
@@ -605,12 +605,66 @@ pub(super) fn game_forwarders(root: &Path) -> Result<String, String> {
     Ok(prettyplease::unparse(&parsed))
 }
 
+/// The error types a gated method may refuse with: those the mod vocabulary crate implements
+/// `AccessRefusal` for. The `impl` is the marker, so a new refusal-shaped error is one `impl` and
+/// no entry in a list here.
+fn refusal_errors(root: &Path) -> Result<std::collections::BTreeSet<String>, String> {
+    // Every file of the crate's source folder: its module tree is generated, so it is not walked
+    // from `lib.rs`.
+    let mut errors = std::collections::BTreeSet::new();
+    let mut folders = vec![root.join("crates/sunrise-mod-vocab/src")];
+    while let Some(folder) = folders.pop() {
+        crate::rerun_if_changed(&folder.display().to_string());
+        for entry in fs::read_dir(&folder).map_err(|e| format!("{}: {e}", folder.display()))? {
+            let path = entry.map_err(|e| e.to_string())?.path();
+            if path.is_dir() {
+                folders.push(path);
+            } else if path.extension().is_some_and(|extension| extension == "rs") {
+                crate::rerun_if_changed(&path.display().to_string());
+                let source =
+                    fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+                errors.extend(access_refusal_impls(&source)?);
+            }
+        }
+    }
+    Ok(errors)
+}
+
+/// The types `source` implements `AccessRefusal` for.
+fn access_refusal_impls(source: &str) -> Result<Vec<String>, String> {
+    let file = syn::parse_file(source).map_err(|e| e.to_string())?;
+    Ok(file
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Impl(item) => {
+                let (_, path, _) = item.trait_.as_ref()?;
+                (path.segments.last()?.ident == "AccessRefusal").then_some(())?;
+                let Type::Path(ty) = &*item.self_ty else {
+                    return None;
+                };
+                Some(ty.path.segments.last()?.ident.to_string())
+            }
+            _ => None,
+        })
+        .collect())
+}
+
+/// The error of a `Result` return when it is one of the `refusals`: what lets a wrong-phase call
+/// refuse instead of unwinding.
+fn refusal_shaped<'a>(
+    output: &'a syn::ReturnType,
+    refusals: &std::collections::BTreeSet<String>,
+) -> Option<&'a Type> {
+    result_error(output).filter(|error| refusals.iter().any(|name| outer_type(error, name)))
+}
+
 /// Where the gated methods that may unwind are listed, one `area::method` per line. The list
 /// only shrinks: `tools/ci/check_unwinding_methods.py` refuses a line added since the base.
 const UNWINDING_METHODS: &str = "crates/sunrise-mod-api-gen/unwinding-methods.txt";
 
-/// A gated method that returns no `Result` with a refusal error (`LevelReadError`,
-/// `LevelWriteError` or `AudioRefusal`, whose `Unavailable` the forwarder returns) can only refuse a wrong-phase
+/// A gated method that returns no `Result` with a refusal error (a type with a `AccessRefusal`
+/// impl, whose `unavailable()` the forwarder returns) can only refuse a wrong-phase
 /// call by unwinding. A new one is refused unless it is listed; a listed one that has gained a
 /// refusal, or is gone, must leave the list.
 fn check_unwinding(
@@ -628,7 +682,7 @@ fn check_unwinding(
     let added: Vec<_> = unwinding.difference(&listed).cloned().collect();
     if !added.is_empty() {
         return Err(format!(
-            "gated methods without a refusal-shaped Result: return `Result<_, LevelReadError>` or `Result<_, LevelWriteError>` so a wrong-phase call refuses instead of unwinding; the list in {UNWINDING_METHODS} only shrinks:\n{}",
+            "gated methods without a refusal-shaped Result: return `Result<_, E>` with an error `E` that implements `AccessRefusal` (`LevelReadError`, `LevelWriteError`...) so a wrong-phase call refuses instead of unwinding; the list in {UNWINDING_METHODS} only shrinks:\n{}",
             added.join("\n")
         ));
     }
@@ -1233,6 +1287,46 @@ mod state_write_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A marked error is refusal-shaped as a `Result`'s error and an unmarked one is not; the
+    /// marker is the `AccessRefusal` impl.
+    #[test]
+    fn a_result_is_refusal_shaped_by_its_errors_access_refusal_impl() {
+        let source = "impl crate::AccessRefusal for Marked { fn unavailable() -> Self { Self } }\n\
+                      impl mod_api::AccessRefusal for other::Path { fn unavailable() -> Self { Self } }\n\
+                      impl NoBackend for Unmarked { fn no_backend() -> Self { Self } }";
+        let marked: std::collections::BTreeSet<_> =
+            access_refusal_impls(source).unwrap().into_iter().collect();
+        assert_eq!(marked, ["Marked".to_owned(), "Path".to_owned()].into());
+        let output = |ty: &str| syn::parse_str::<syn::ReturnType>(&format!("-> {ty}")).unwrap();
+        assert!(refusal_shaped(&output("Result<u32, Marked>"), &marked).is_some());
+        assert!(refusal_shaped(&output("Result<u32, Unmarked>"), &marked).is_none());
+        assert!(refusal_shaped(&output("u32"), &marked).is_none());
+    }
+
+    /// The vocabulary's own refusal errors are found from their impls.
+    #[test]
+    fn the_vocabulary_marks_its_refusal_errors() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let found = refusal_errors(&root).unwrap();
+        for name in ["LevelReadError", "LevelWriteError", "AudioRefusal"] {
+            assert!(found.contains(name), "{name} in {found:?}");
+        }
+    }
+
+    /// A gated method outside the list that has no refusal-shaped `Result` is refused, and one
+    /// inside it passes.
+    #[test]
+    fn an_unmarked_gated_method_must_be_listed_to_pass() {
+        let root = std::env::temp_dir().join(format!("sunrise-unwinding-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("crates/sunrise-mod-api-gen")).unwrap();
+        std::fs::write(root.join(UNWINDING_METHODS), "# listed\narea::listed\n").unwrap();
+        let methods = |names: &[&str]| names.iter().map(|n| n.to_string()).collect();
+        assert!(check_unwinding(&root, &methods(&["area::listed"])).is_ok());
+        let refused = check_unwinding(&root, &methods(&["area::listed", "area::new"]));
+        assert!(refused.unwrap_err().contains("area::new"));
+        std::fs::remove_dir_all(&root).unwrap();
+    }
 
     fn entry(source: &str) -> Entry {
         let method: syn::TraitItemFn = syn::parse_str(source).unwrap();

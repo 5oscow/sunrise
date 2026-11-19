@@ -177,6 +177,11 @@ impl std::fmt::Display for AudioRefusal {
     }
 }
 impl std::error::Error for AudioRefusal {}
+impl crate::AccessRefusal for AudioRefusal {
+    fn unavailable() -> Self {
+        Self::Unavailable
+    }
+}
 impl std::fmt::Display for SpecFault {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
@@ -197,8 +202,9 @@ impl std::fmt::Display for SpecFault {
 pub trait AudioStreamSource: Send + Sync + 'static {
     /// Queues interleaved `samples`: whole frames only (a trailing odd sample of a stereo stream
     /// is not taken). Returns the frames accepted, which falls short of the frames offered when
-    /// the ring is full, or when another thread is pushing to the same stream at that moment:
-    /// the rest is refused, never delayed. NaN-free by construction: `i16` has none.
+    /// the ring is full, or when another thread is pushing to the same stream at that moment
+    /// (the ring has one producer: that push returns 0 and drops nothing already queued): the
+    /// rest is refused, never delayed.
     fn push(&self, samples: &[i16]) -> u32;
     /// Moves the stream; false, changing nothing, for a stereo stream and a placement other than
     /// `Flat`, for a position that is not finite or lies past 30 million blocks, and once the
@@ -242,7 +248,10 @@ impl AudioStreamRef {
     /// Queues interleaved 16-bit samples (`channels` per frame) behind what is waiting and
     /// returns the frames accepted. The ring has a fixed size: what does not fit is refused,
     /// never delayed, so a stalled sender cannot build up latency, and the caller drops it or
-    /// pushes it again later. It never blocks, allocates or waits for a tick.
+    /// pushes it again later. It never blocks, allocates or waits for a tick. The ring has one
+    /// producer: if a second thread pushes to the same stream at the same moment, that push
+    /// accepts nothing and returns 0. A native mod that shares the handle across threads
+    /// pushes from one thread at a time (a lock of its own, or one pushing thread).
     pub fn push(&self, samples: &[i16]) -> u32 {
         self.source.push(samples)
     }
