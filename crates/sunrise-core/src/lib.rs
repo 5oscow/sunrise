@@ -2,7 +2,8 @@
 //!
 //! This is not a playable game. Differential checks cover only the operations
 //! listed in docs/rust-parity.md; the rest of vanilla remains unimplemented.
-#![forbid(unsafe_code)]
+// Only the runtime-gated CRC32 SIMD module opts out.
+#![deny(unsafe_code)]
 
 pub mod arm_pose;
 pub mod biome;
