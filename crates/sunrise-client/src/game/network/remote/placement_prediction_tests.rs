@@ -744,3 +744,149 @@ fn a_prediction_asks_the_live_level_over_its_writes() {
     guess.asks_mods = false;
     assert_eq!(ask(&guess), None);
 }
+
+#[test]
+#[ignore = "daily"]
+fn an_active_vault_ends_a_held_item_s_click_on_the_client() {
+    crate::game::native_entity_refs::tests::with_client_game(|game| {
+        let (mut peer, _writer) = super::tests::connect_menu_test(game);
+        peer.set_read_timeout(Some(std::time::Duration::from_millis(50)))
+            .unwrap();
+        game.set_mode_id(0);
+        game.player = Some(PlayerMotion::new(game.motion, Vec3::new(0.5, 64.0, 3.5)).unwrap());
+        game.world
+            .chunks
+            .insert((0, 0), Arc::new(sunrise_client::chunk::Chunk::empty(0, 0)));
+        game.sync_tick_chunks();
+        let hit = top_of(0, 0);
+        game.forced_hit = Some(hit);
+        let registry = game.pack.assets.registry;
+        let vault = |state: &str| {
+            registry
+                .resolve(&sunrise_world::chunk::BlockState {
+                    name: "minecraft:vault".into(),
+                    properties: [
+                        ("facing", "north"),
+                        ("ominous", "false"),
+                        ("vault_state", state),
+                    ]
+                    .into_iter()
+                    .map(|(key, value)| (key.into(), value.into()))
+                    .collect(),
+                })
+                .unwrap()
+        };
+        // VaultBlock.useItemOn: SUCCESS_SERVER for any held item on an ACTIVE vault, so the
+        // click ends with UseItemOn and the hand swings only when the server says so.
+        game.world.set(0, 64, 0, vault("active")).unwrap();
+        for (hand, expected) in [
+            (Hand::Main, &[(0, 1)][..]),
+            (Hand::Off, &[(0, 1), (1, 2)][..]),
+        ] {
+            for item in ["minecraft:trial_key", "minecraft:stick"] {
+                game.inventory[game.selected] =
+                    (hand == Hand::Main).then(|| ItemStack::new(item, 1));
+                game.offhand = (hand == Hand::Off).then(|| ItemStack::new(item, 1));
+                let sequence = game.remote.as_ref().unwrap().sequence;
+                let swings = game.swings_started;
+                game.remote_use(mod_api::InteractionAttempt::Press);
+                let mut uses = Vec::new();
+                while let Ok((id, body)) = peer.recv() {
+                    match S::decode(id, &body).unwrap() {
+                        S::UseItemOn(packet) => {
+                            assert_eq!(packet.pos, hit.pos);
+                            uses.push((packet.hand, packet.sequence - sequence));
+                        }
+                        S::UseItem(_) => panic!("unexpected UseItem for {hand:?} {item}"),
+                        _ => {}
+                    }
+                }
+                assert_eq!(uses.as_slice(), expected, "{hand:?} {item}");
+                assert_eq!(
+                    game.remote.as_ref().unwrap().sequence - sequence,
+                    expected.len() as i32
+                );
+                assert_eq!(game.swings_started, swings, "{hand:?} {item}");
+            }
+        }
+        // TRY_WITH_EMPTY_HAND otherwise: the vault has no useWithoutItem, so the click goes on.
+        let (empty, _) = game.remote_block_reacts(&hit, None, true);
+        assert!(!empty.consumes_action());
+        game.world.set(0, 64, 0, vault("unlocking")).unwrap();
+        let key = ItemStack::new("minecraft:trial_key", 1);
+        let (unlocking, _) = game.remote_block_reacts(&hit, Some(&key), true);
+        assert!(!unlocking.consumes_action());
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn blocks_answer_a_held_item_s_click_on_the_client_as_vanilla() {
+    on_a_client(Vec::new().into(), |game| {
+        let registry = game.pack.assets.registry;
+        let state = |name: &str, properties: &[(&str, &str)]| {
+            registry
+                .resolve(&sunrise_world::chunk::BlockState {
+                    name: name.into(),
+                    properties: properties
+                        .iter()
+                        .map(|(key, value)| ((*key).into(), (*value).into()))
+                        .collect(),
+                })
+                .unwrap()
+        };
+        let click = |game: &mut Game<'_>, item: &str| {
+            let held = ItemStack::new(item, 1);
+            game.remote_block_reacts(&top_of(0, 0), Some(&held), true).0
+        };
+        // RedStoneOreBlock.useItemOn: SUCCESS, unless a block item would go on top (PASS).
+        game.world
+            .set(
+                0,
+                64,
+                0,
+                state("minecraft:redstone_ore", &[("lit", "false")]),
+            )
+            .unwrap();
+        assert!(click(game, "minecraft:stick").should_swing());
+        assert!(!click(game, "minecraft:cobblestone").consumes_action());
+        // PumpkinBlock.useItemOn: shears are SUCCESS; anything else goes on.
+        game.world
+            .set(0, 64, 0, state("minecraft:pumpkin", &[]))
+            .unwrap();
+        assert!(click(game, "minecraft:shears").should_swing());
+        assert!(!click(game, "minecraft:stick").consumes_action());
+        // WeatheringCopperGolemStatueBlock.useItemOn: an axe on an unaffected statue is SUCCESS.
+        game.world
+            .set(
+                0,
+                64,
+                0,
+                state(
+                    "minecraft:copper_golem_statue",
+                    &[
+                        ("copper_golem_pose", "standing"),
+                        ("facing", "north"),
+                        ("waterlogged", "false"),
+                    ],
+                ),
+            )
+            .unwrap();
+        assert!(click(game, "minecraft:iron_axe").should_swing());
+        // BeehiveBlock.useItemOn on a client level: a full hive takes a glass bottle; its
+        // shears are the server's, so they go on.
+        game.world
+            .set(
+                0,
+                64,
+                0,
+                state(
+                    "minecraft:beehive",
+                    &[("facing", "north"), ("honey_level", "5")],
+                ),
+            )
+            .unwrap();
+        assert!(click(game, "minecraft:glass_bottle").consumes_action());
+        assert!(!click(game, "minecraft:shears").consumes_action());
+    });
+}

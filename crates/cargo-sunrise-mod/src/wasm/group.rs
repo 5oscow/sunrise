@@ -569,7 +569,8 @@ pub(super) fn build(
     }
     for member in &members {
         // A group member packs no uses table yet, so it counts as made for its build only.
-        crate::pack_into(&member.root, &target, None, api, None)?;
+        let package = sunrise_mod_package::Package::read(&member.root)?;
+        crate::pack_into(&member.root, &target, &package.manifest, None, api, None)?;
     }
     Ok(())
 }

@@ -4996,6 +4996,7 @@ version = "0.1.0"
 dependencies = [
  "libloading",
  "log",
+ "object 0.39.1",
  "serde",
  "serde_json",
  "sha2",
