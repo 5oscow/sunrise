@@ -1248,10 +1248,10 @@ impl Item {
             _ => return None,
         })
     }
-    pub fn slider(self, s: &Settings) -> Option<f32> {
+    pub fn slider(self, s: &Settings) -> Option<f64> {
         match self {
             Item::Vanilla(o) => o.slider_position(s),
-            Item::Sunrise(h) => h.slider(s),
+            Item::Sunrise(h) => h.slider(s).map(f64::from),
             Item::Extra(_) => None,
         }
     }
@@ -1272,14 +1272,14 @@ impl Item {
             ),
         }
     }
-    pub fn set_slider(self, s: &mut Settings, v: f32, out: &EffectiveOutput) {
+    pub fn set_slider(self, s: &mut Settings, v: f64, out: &EffectiveOutput) {
         if !self.available() || self.blocked(s, out).is_some() {
             return;
         }
         match self {
             // Options.applyGraphicsPreset, as Video Settings' slider does it.
             Item::Vanilla(o) => crate::options_ui::set_slider(o, s, v),
-            Item::Sunrise(h) => h.set_slider(s, v),
+            Item::Sunrise(h) => h.set_slider(s, v as f32),
             Item::Extra(_) => {}
         }
         self.touched(s);
@@ -1521,7 +1521,7 @@ impl Screen for GraphicsScreen {
             }
         }
     }
-    fn slide(&mut self, s: &mut Settings, item: Item, position: f32) {
+    fn slide(&mut self, s: &mut Settings, item: Item, position: f64) {
         item.set_slider(s, position, &self.output);
     }
     /// With the "Scroll wheel changes settings" extra, the wheel steps a value between `<` `>`
@@ -2159,9 +2159,9 @@ mod tests {
         // Every stop is reachable and reads back as the same position.
         for (i, &distance) in LOD_STEPS.iter().enumerate() {
             let at = i as f32 / (LOD_STEPS.len() - 1) as f32;
-            item.set_slider(&mut s, at, &NONE);
+            item.set_slider(&mut s, f64::from(at), &NONE);
             assert_eq!(s.sunrise.lod_distance, distance);
-            assert_eq!(item.slider(&s), Some(at));
+            assert_eq!(item.slider(&s), Some(f64::from(at)));
             assert_eq!(s.render_distance, near);
         }
         // The ends are off and the whole world, which the far terrain plans.

@@ -42,10 +42,10 @@ pub(crate) fn chat_delay_label(s: &Settings) -> Text {
 /// `IntRange(0, 60).toSliderValue` on the stored seconds (`xmap(v / 10.0)`):
 /// the tenth-of-a-second step over the slider's 60.
 pub(crate) fn kind(value: f64) -> Kind {
-    Kind::Slider(((value * 10.0).floor() / 60.0).clamp(0.0, 1.0) as f32)
+    Kind::Slider(((value * 10.0).floor() / 60.0).clamp(0.0, 1.0))
 }
 /// `IntRange(0, 60).fromSliderValue` then `xmap`'s `/ 10.0`:
 /// floor(map(v, 0, 1, 0, 61)), the last step capped at 60, in tenths.
-pub(crate) fn from_slider(v: f32) -> f64 {
-    f64::from((v.clamp(0.0, 1.0) * 61.0).floor().min(60.0)) / 10.0
+pub(crate) fn from_slider(v: f64) -> f64 {
+    (v.clamp(0.0, 1.0) * 61.0).floor().min(60.0) / 10.0
 }
