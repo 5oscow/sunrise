@@ -268,15 +268,15 @@ impl Game<'_> {
             } else {
                 // useItemOn runs for the off hand too (useWithoutItem doesn't):
                 // RespawnAnchorBlock.useItemOn charges an anchor with its
-                // glowstone, SUCCESS; an active vault takes the click.
+                // glowstone, SUCCESS; the blocks of `client_block_answer` answer too.
                 let charges = vanilla_block && self.anchor_takes(hit.pos, held.as_ref());
                 let result = if charges {
                     InteractionResult::Success
-                } else if vanilla_block
-                    && !spectator
-                    && self.vault_takes_click(hit.pos, held.as_ref())
+                } else if let Some(answer) = (vanilla_block && !spectator)
+                    .then(|| self.client_block_answer(&hit, held.as_ref()))
+                    .flatten()
                 {
-                    InteractionResult::Consume
+                    answer
                 } else {
                     InteractionResult::Pass
                 };
