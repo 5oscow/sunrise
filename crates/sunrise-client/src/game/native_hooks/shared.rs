@@ -36,19 +36,11 @@ mod runtime_environment_tests;
 #[path = "shared/screen_position_tests.rs"]
 mod screen_position_tests;
 #[cfg(test)]
-#[path = "shared/screen_slot_tests.rs"]
-mod screen_slot_tests;
-#[cfg(test)]
 #[path = "shared/slot_icon_tests.rs"]
 mod slot_icon_tests;
 #[cfg(test)]
 #[path = "shared/slot_tooltip_tests.rs"]
 mod slot_tooltip_tests;
-#[path = "shared/sound_and_shader_helpers.rs"]
-mod sound_and_shader_helpers;
-pub(super) use sound_and_shader_helpers::{
-    finite, finite_params, level_sound_playable, local_sound_ok, mod_sound_ok, sound_id,
-};
 #[path = "shared/system_helpers.rs"]
 mod system_helpers;
 #[path = "shared/world_helpers.rs"]
