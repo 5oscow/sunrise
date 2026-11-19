@@ -66,7 +66,10 @@ Unsure? Add `needs-proof`: it costs a few hours, a broken release costs more.
 
 The [daily run](#daily-run) is the only CI entry point for vanilla parity. It calls `.github/workflows/parity.yml`
 on every real (writing) run, which takes only commits of main, so no run can move `daily-green` or start the
-Nightly without it. Dry runs, rollups and pull requests do not run parity. The Dyna runners use their prepared vanilla data and run all automatic harnesses from scratch, as several shares of one planned selection (`tools/ci/parity_shards.py`, `tools/parity.py --harness-file`), and the daily summary reads the one verdict the shares merge into.
+Nightly without it. Dry runs, rollups and pull requests do not run parity. The Dyna runners use their prepared
+vanilla data and run all automatic harnesses in shares of one plan (`tools/ci/parity_shards.py`,
+`tools/parity.py --harness-file`). They replay an earlier vanilla oracle run from the CI host's keep only when its
+command, JDK and inputs match ([parity workflow](parity-workflow.md)); the daily summary reads the shares' merged verdict.
 `named_only` in `tools/parity_hosts.json` lists the exceptions, such as `frame_identity`, each with its reason; run them
 locally by name. Proofs that need arguments (a saved capture to replay) declare `PARITY_MANUAL` in their script instead,
 which no automatic run selects.
