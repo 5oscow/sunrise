@@ -180,6 +180,11 @@ def avatar_cases(rng):
 def boat_cases(rng):
     """AbstractBoat.clampRotation: a rider's yaw against the boat's, near the 105-degree limit, around the wrap
     at 180, at large turns and at float steps where adding and subtracting round differently."""
+    # The float immediately below +180 wraps to the opposite sign if 180 is added first.
+    # The second angle is in range but changes when vanilla adds the target before subtracting the delta.
+    yield dict(t='boat', views=[[lab.fbits(rider), lab.fbits(boat)]
+                                for rider, boat in [(179.99998, 0.0), (-179.99998, -75.12346)]])
+
     def angle():
         r = rng.random()
         if r < 0.3:
