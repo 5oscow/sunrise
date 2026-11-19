@@ -31,30 +31,27 @@ impl Game<'_> {
         }
     }
 
+    /// Whether the local player can move itself rather than being held in place.
+    pub(in crate::game) fn can_move_local_player(&self) -> bool {
+        self.riding.is_none() && self.sleeping.is_none() && self.screen != super::Screen::Dead
+    }
+
     pub(super) fn move_local_player_by(
         &mut self,
         delta: [f64; 3],
     ) -> Result<Option<[f64; 3]>, LevelWriteError> {
-        if !sunrise_client::move_gate::valid_mod_move_delta(delta) {
-            return Ok(None);
-        }
-        let Some(before) = self.player.as_ref().map(|p| p.position) else {
-            return Ok(None);
-        };
-        let [x, y, z] = delta;
-        let moved = self.in_this_levels_colliders(|game| {
-            game.move_local_player(MoverType::SelfMovement, Vec3::new(x, y, z))
-        });
-        // File the actual write, even if a later step of movement returned an error.
-        if let Some(after) = self.player.as_ref().map(|p| p.position)
-            && before != after
-            && let Ok(id) = u32::try_from(self.own_entity_id())
+        if self.player.is_none()
+            || !self.can_move_local_player()
+            || !sunrise_client::move_gate::valid_mod_move_delta(delta)
         {
-            self.entity_section_step(id, before.components(), after.components());
+            return Ok(None);
         }
-        moved
-            .map(|moved| moved.map(Vec3::components))
-            .map_err(|_| LevelWriteError::Unavailable)
+        let [x, y, z] = delta;
+        self.in_this_levels_colliders(|game| {
+            game.move_local_player(MoverType::SelfMovement, Vec3::new(x, y, z))
+        })
+        .map(|moved| moved.map(Vec3::components))
+        .map_err(|_| LevelWriteError::Unavailable)
     }
 }
 
@@ -245,7 +242,7 @@ mod tests {
     #[test]
     #[ignore = "daily"]
     fn local_displacements_out_and_back_notify_both_section_crossings() {
-        type Crossing = ([i32; 3], [i32; 3], [f64; 3]);
+        type Crossing = ([i32; 3], [i32; 3], [f64; 3], Option<bool>);
         #[derive(Default)]
         struct Walk(Arc<Mutex<Vec<Crossing>>>);
         #[mod_api::__subscriptions]
@@ -254,11 +251,13 @@ mod tests {
                 if let HostSide::Client(host) = host
                     && host.local_player() == Some(event.player)
                 {
+                    assert!(host.set_local_player_on_ground(true));
                     assert_eq!(
                         host.move_local_player_by([16.0, 0.0, 0.0]),
                         Ok(Some([16.0, 0.0, 0.0]))
                     );
                     assert_eq!(self.0.lock().unwrap().len(), 1);
+                    assert_eq!(event.player.entity().on_ground(host), Some(false));
                     assert_eq!(
                         host.move_local_player_by([-16.0, 0.0, 0.0]),
                         Ok(Some([-16.0, 0.0, 0.0]))
@@ -281,6 +280,7 @@ mod tests {
                         event.old_section,
                         event.new_section,
                         event.entity.position(host).unwrap(),
+                        event.entity.on_ground(host),
                     ));
                 }
             }
@@ -300,8 +300,8 @@ mod tests {
                 assert_eq!(
                     *crossings.lock().unwrap(),
                     [
-                        ([0, 4, 0], [1, 4, 0], [16.5, 64.5, 0.5]),
-                        ([1, 4, 0], [0, 4, 0], [0.5, 64.5, 0.5])
+                        ([0, 4, 0], [1, 4, 0], [16.5, 64.5, 0.5], Some(true)),
+                        ([1, 4, 0], [0, 4, 0], [0.5, 64.5, 0.5], Some(false))
                     ],
                 );
             });
@@ -315,6 +315,28 @@ mod tests {
             game.player = None;
             assert!(!game.set_local_player_velocity([0.0; 3]));
             assert!(!game.set_local_player_on_ground(true));
+            assert_eq!(game.move_local_player_by([1.0, 0.0, 0.0]), Ok(None));
+        });
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn local_displacements_refuse_bad_deltas_and_players_held_in_place() {
+        crate::game::native_entity_refs::tests::with_client_game(|game| {
+            loaded_client(game);
+            let before = game.player.as_ref().unwrap().position;
+            for x in [f64::NAN, f64::INFINITY, -f64::INFINITY, 64.5, -64.5] {
+                assert_eq!(game.move_local_player_by([x, 0.0, 0.0]), Ok(None));
+            }
+            game.riding = Some(43);
+            assert_eq!(game.move_local_player_by([1.0, 0.0, 0.0]), Ok(None));
+            game.riding = None;
+            game.sleeping = Some([0, 64, 0]);
+            assert_eq!(game.move_local_player_by([1.0, 0.0, 0.0]), Ok(None));
+            game.sleeping = None;
+            game.screen = crate::game::Screen::Dead;
+            assert_eq!(game.move_local_player_by([1.0, 0.0, 0.0]), Ok(None));
+            assert_eq!(game.player.as_ref().unwrap().position, before);
         });
     }
 }

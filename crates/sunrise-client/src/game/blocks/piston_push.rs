@@ -650,9 +650,11 @@ impl Game<'_> {
         movement: Vec3,
     ) -> sunrise_client::Result<Option<Vec3>> {
         let entities = self.entity_collisions(Mover::Player);
+        let section_scope = self.player_section_scope();
         let Some(player) = self.player.as_mut() else {
             return Ok(None);
         };
+        let _sections = section_scope.map(|scope| scope.begin(&mut self.native_lifecycle));
         let before = player.position;
         MotionWorld {
             entities: &entities,
@@ -1002,12 +1004,6 @@ impl Game<'_> {
                 let _ = self.move_local_player(cause, movement);
             });
             let after = self.player.as_ref().map_or(before, |p| p.bounds());
-            if after != before
-                && let Ok(id) = u32::try_from(self.own_entity_id())
-            {
-                self.entity_section_moved_id(id);
-                self.tell_entity_sections();
-            }
             self.piston_block_triggers(before, after);
             self.piston_cactus_contact(target, before, after, pricked);
             return;

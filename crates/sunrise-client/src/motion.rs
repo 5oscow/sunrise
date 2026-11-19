@@ -51,6 +51,7 @@ use sunrise_world::{
 };
 mod exclusions;
 mod restitution;
+pub mod section_writes;
 
 /// A living entity jumped (`LivingEvent.LivingJumpEvent`); `velocity` is its motion right after
 /// the jump.
@@ -2223,7 +2224,11 @@ impl EntityMoveWorld for MotionWorld<'_, '_, '_> {
         self.player.position
     }
     fn set_position(&mut self, p: Vec3) -> Result<()> {
+        let from = self.player.position;
         self.player.position = p;
+        if from != p {
+            section_writes::position_written(self.player, from);
+        }
         Ok(())
     }
     fn record_movement(&mut self, mover: MoverType, movement: Vec3) -> Result<()> {

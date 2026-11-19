@@ -96,11 +96,13 @@ pub trait PlayersClientHost {
     /// Available to client hooks with world access. For per-tick movement call from the local
     /// player's client-side `player_tick_pre`, before its own movement. This sends no packet
     /// and fires no `entity_move` hook (that hook is server-only). A section change is
-    /// reported through `entity_entering_section` at the displacement, not at tick end.
+    /// reported through `entity_entering_section` at the position write, before the move
+    /// updates collision flags, ground, fall distance and velocity.
     /// The normal position report carries the result and the server checks it as usual.
-    /// Returns the displacement actually made, or `Ok(None)` for no local player, a
-    /// non-finite component or one outside ±64 blocks. `Err(LevelWriteError::Unavailable)`
-    /// means the call is outside a world phase or the engine couldn't finish the move.
+    /// Returns the displacement actually made, or `Ok(None)` without moving if there is no
+    /// local player, the player is dead, sleeping or riding, or a component is non-finite or
+    /// outside ±64 blocks. `Err(LevelWriteError::Unavailable)` means the call is outside a
+    /// world phase or the engine couldn't finish the move.
     #[access(WorldOnly)]
     fn move_local_player_by(
         &mut self,

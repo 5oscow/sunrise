@@ -6403,11 +6403,8 @@ impl Game<'_> {
         if let Some(player) = player {
             self.native_player_tick_pre(mod_api::__private::PlayerTickPreCall { player });
         }
-        // A displacement from Pre has already filed its own crossing.
-        let player_from = entity_section_steps::player_before(self);
         self.native_local_player_fit_sizes();
         let result = self.tick_local_player(entity_collisions, sprint_window);
-        entity_section_steps::player_after(self, player_from);
         // `EntityEvent.Size` for the pose the tick set.
         self.native_local_player_size();
         if let Some(player) = player {
@@ -6540,7 +6537,18 @@ impl Game<'_> {
             self.ui.death_time = self.ui.death_time.saturating_add(1);
         }
         let sleeping = self.sleeping;
-        let sleep_position = sleeping.and_then(|head| self.sleeping_position(head));
+        if let Some(at) = sleeping.and_then(|head| self.sleeping_position(head))
+            && let Some(player) = self.player.as_mut()
+        {
+            let from = std::mem::replace(&mut player.position, at);
+            if from != at
+                && let Ok(id) = u32::try_from(self.own_entity_id())
+            {
+                self.remote_entity_section_step(id, from, at);
+            }
+        }
+        let walks = self.can_move_local_player();
+        let section_scope = self.player_section_scope();
         let Some(player) = self.player.as_mut() else {
             return Ok(None);
         };
@@ -6549,12 +6557,10 @@ impl Game<'_> {
         // LivingEntity.isImmobile: a sleeper lies still, even if its bed's
         // shape is unavailable here; only the server decides when to wake.
         if sleeping.is_some() {
-            if let Some(at) = sleep_position {
-                player.position = at;
-            }
             player.velocity = Vec3::ZERO;
             player.pitch = 0.0;
-        } else if !dead && !riding {
+        } else if walks {
+            let _sections = section_scope.map(|scope| scope.begin(&mut self.native_lifecycle));
             player.client_side = true;
             // LivingEntity.checkAutoSpinAttack: a Riptide spin that touches a
             // mob ends and bounces back; the server deals the hit.
@@ -6587,6 +6593,7 @@ impl Game<'_> {
             // at 10, the hurt tilt restarted every frame and shook the camera.
             player.health.advance_clock();
             if riding && !dead {
+                let _sections = section_scope.map(|scope| scope.begin(&mut self.native_lifecycle));
                 player.client_side = true;
                 let mut passenger = MotionWorld {
                     entities: &entity_collisions,
@@ -6607,7 +6614,7 @@ impl Game<'_> {
                     passenger.player.position = from;
                 }
                 passenger.rider_tick(keys.direction())?;
-                passenger.player.position = seat;
+                sunrise_world::entity_move::EntityMoveWorld::set_position(&mut passenger, seat)?;
                 // LivingEntity.aiStep: a passenger freezes in powder snow too, and the
                 // frostbite overlay shows it (#8156).
                 passenger.passenger_block_effects_tick()?;
