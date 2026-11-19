@@ -5,6 +5,7 @@ cargo-sunrise-mod bounded_catalog_commands test:bounded_reads daily slow
 cargo-sunrise-mod bounded_manifest_commands test:bounded_reads daily child-process
 cargo-sunrise-mod bounded_special_manifests test:bounded_reads daily child-process
 cargo-sunrise-mod compiler_wrapper_preserves_diagnostics_exit_code_and_signal test:wasm_rustc_status daily child-process
+cargo-sunrise-mod content_run_keeps_the_previous_package_on_jar_refusal_and_starts_with_the_staged_home test:run daily child-process
 cargo-sunrise-mod every_import_of_a_built_greeter_is_an_export_of_the_std_member test:wasm_std_symbols daily child-process
 cargo-sunrise-mod git_project_build_checks_only_the_files_it_packages test:content_project daily child-process
 cargo-sunrise-mod help_lists_the_everyday_commands_and_each_command_says_its_usage test:help daily child-process

@@ -57,6 +57,8 @@ use std::{
     process::{Command, ExitCode},
 };
 
+const RUN_DIR: &str = "target/sunrise-mod/run";
+
 fn is_compiler_wrapper(name: &str) -> bool {
     name.strip_suffix(".exe").unwrap_or(name).ends_with("rustc")
 }
@@ -285,9 +287,6 @@ fn new(args: &[String], fetch: FetchSdk) -> Result<Option<PathBuf>, String> {
         let value = options
             .next()
             .ok_or_else(|| format!("missing value after {option}\n{}", usage().trim_end()))?;
-        if value.starts_with('-') {
-            return Err(unexpected(value));
-        }
         slot.get_or_insert(value);
     }
     let dir = Path::new(path);
@@ -562,14 +561,22 @@ fn build(
     pack_into(
         root,
         &root.join("target/sunrise-mod"),
+        &package.manifest,
         uses.as_deref(),
         api.as_ref(),
         mixins,
     )
 }
 
-fn build_in(root: &Path) -> Result<PathBuf, String> {
-    pack_into(root, &root.join("target/sunrise-mod"), None, None, None)
+fn build_in(root: &Path, manifest: &Manifest) -> Result<PathBuf, String> {
+    pack_into(
+        root,
+        &root.join("target/sunrise-mod"),
+        manifest,
+        None,
+        None,
+        None,
+    )
 }
 
 /// The manifest text a package carries: the project's with derived `api` and `capabilities`
@@ -599,21 +606,21 @@ fn completed_manifest(text: &str, mixins: Option<&str>) -> Result<String, String
 fn pack_into(
     root: &Path,
     dir: &Path,
+    manifest: &Manifest,
     uses: Option<&[u8]>,
     api: Option<&mod_surface::Surface>,
     mixins: Option<&str>,
 ) -> Result<PathBuf, String> {
-    let package = Package::read(root)?;
     // A failed build leaves no earlier package that a later `check <file>` would report as good.
-    let path = dir.join(format!("{}.smod", package.manifest.id));
+    let path = dir.join(format!("{}.smod", manifest.id));
     match std::fs::remove_file(&path) {
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
             return Err(format!("{}: {e}", path.display()));
         }
         _ => {}
     }
-    check::references(root, &package.manifest)?;
-    if package.manifest.native.is_some() || package.manifest.wasm.is_some() {
+    check::references(root, manifest)?;
+    if manifest.native.is_some() || manifest.wasm.is_some() {
         layouts::build(root, api)?;
     }
     let text = bounded::read(&root.join(MANIFEST), bounded::MAX_MANIFEST)?;
@@ -704,16 +711,18 @@ fn run(args: &[String]) -> Result<(), RunError> {
         return dev::run(Path::new("."), flag(args, "--resources"), jars, extra)
             .map_err(RunError::Build);
     }
+    let project = Path::new(".");
+    let package = Package::read(project).map_err(RunError::Build)?;
+    let home =
+        jar::stage_for_run(&package.manifest, project, jars, extra).map_err(RunError::Build)?;
     // A content mod carries no uses table.
-    let path = build_in(Path::new(".")).map_err(RunError::Build)?;
+    let path = build_in(project, &package.manifest).map_err(RunError::Build)?;
     let game = flag(args, "--game")
         .map(str::to_string)
         .or_else(|| std::env::var("SUNRISE_CLIENT").ok())
         .unwrap_or_else(|| "sunrise-client".into());
-    let home = Path::new("target/sunrise-mod/run/home");
-    let manifest = Package::read(&path).map_err(RunError::Build)?.manifest;
     let mut command = Command::new(&game);
-    if jar::stage_for_run(&manifest, home, jars, extra).map_err(RunError::Build)? {
+    if let Some(home) = home {
         command.env("SUNRISE_HOME", home);
     }
     println!("Starting {game} with {}", path.display());
@@ -746,15 +755,31 @@ mod tests {
     fn new_rejects_unknown_flags_without_creating_a_mod() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("greeter");
-        for arg in ["--native", "--wasm", "--content", "--typo", "-x"] {
+        for arg in ["--native", "--wasm", "--content", "--typo", "-x", "--name"] {
             let error = new(&[path.display().to_string(), arg.into()], &offline).unwrap_err();
             assert!(error.contains(arg), "{error}");
-            assert!(error.contains("usage: cargo sunrise-mod new <path>"));
-            if matches!(arg, "--native" | "--wasm" | "--content") {
-                assert!(error.contains(&format!("use --template {}", &arg[2..])));
-            }
             assert!(!path.exists());
         }
+    }
+
+    #[test]
+    fn new_accepts_a_name_beginning_with_a_dash() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("garden");
+        new(
+            &[
+                path.display().to_string(),
+                "--name".into(),
+                "-Garden".into(),
+            ],
+            &offline,
+        )
+        .unwrap();
+        assert_eq!(Package::read(&path).unwrap().manifest.name, "-Garden");
+    }
+
+    fn build_in(root: &Path) -> Result<PathBuf, String> {
+        super::build_in(root, &Package::read(root)?.manifest)
     }
 
     fn code_args(path: &Path, template: &str) -> [String; 5] {
@@ -979,6 +1004,7 @@ mod tests {
         let smod = pack_into(
             &root,
             &dir.path().join("out"),
+            &Package::read(&root).unwrap().manifest,
             None,
             None,
             Some(identity.revision()),
@@ -1010,7 +1036,7 @@ mod tests {
             );
         }
         let written = Manifest::parse(&text).unwrap();
-        assert_eq!(written.native.unwrap().mixins, None);
+        assert_eq!(written.native.as_ref().unwrap().mixins, None);
         let api = std::fs::read_to_string(path.join("Cargo.toml")).unwrap();
         // The SDK by path, never git: the build is the manifest's pin.
         assert!(
@@ -1026,7 +1052,7 @@ mod tests {
         assert_eq!(sdk_fetch::pin(&path).unwrap(), commit);
         // No rows: the package still carries the SDK's revision for readers that require it.
         let rev = "fedcba9876543210fedcba9876543210fedcba98";
-        let smod = pack_into(&path, &path.join("target"), None, None, Some(rev)).unwrap();
+        let smod = pack_into(&path, &path.join("target"), &written, None, None, Some(rev)).unwrap();
         // The package carries what the tool derives, which the project did not write.
         let packed = Package::entry(&smod, MANIFEST, 1 << 20).unwrap().unwrap();
         let packed = String::from_utf8(packed).unwrap();

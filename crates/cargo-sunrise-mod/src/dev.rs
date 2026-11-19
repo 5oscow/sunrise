@@ -12,8 +12,6 @@ use sunrise_native_build::{contract, library_record::Library, prebuilt::Route, r
 
 /// Names the cache's folder instead of the platform's.
 const CACHE_ENV: &str = "SUNRISE_MOD_CACHE";
-/// What `run` stages, in the project's `target/sunrise-mod/`.
-const RUN: &str = "run";
 
 /// Whether `dir`'s package is a native mod.
 pub(crate) fn is_native(dir: &Path) -> Result<bool, String> {
@@ -389,10 +387,10 @@ pub(crate) fn run(
             resources.display()
         ));
     }
-    let stage = project.join("target/sunrise-mod").join(RUN);
-    let home = stage.join("home");
+    let stage = project.join(crate::RUN_DIR);
     let mod_package = sunrise_mod_package::Package::read(project)?;
-    crate::jar::stage_for_run(&mod_package.manifest, &home, jars, args)?;
+    let home = crate::jar::stage_for_run(&mod_package.manifest, project, jars, args)?
+        .unwrap_or_else(|| stage.join("home"));
     let built = build(project, false)?;
     let app = stage.join("app");
     match std::fs::remove_dir_all(&app) {
