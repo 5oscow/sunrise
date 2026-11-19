@@ -3,7 +3,7 @@
 Every mod starts with `cargo sunrise-mod`, the tool that makes a project, fetches the mod SDK, checks the mod, builds
 it and packs it. Each SDK release ships the tool for three computers, built from that release's own source. Take the
 one from the release the Nightly names, so the tool, the SDK your mod builds against and the game players run are the
-same build. A fix to the tool that has merged since is in the [newest tool from main](#newest-tool-from-main).
+same build. A fix to the tool that has been published since is in the [newest tool from main](#newest-tool-from-main).
 
 You also need Rust 1.95 or newer (`cargo`, from [rustup.rs](https://rustup.rs)). The tool runs `cargo` itself.
 
@@ -164,7 +164,7 @@ To move to a newer tool later, run the same block again.
 
 ## Newest tool from main
 
-The release `mod-tool` always holds the newest tool built from the repository's main branch, for the same three
+The release `mod-tool` holds the newest tool published from the repository's main branch, for the same three
 computers and signed with the same key: `tool-x86_64-unknown-linux-gnu.tar.xz`, `tool-aarch64-apple-darwin.tar.xz`,
 `tool-x86_64-pc-windows-gnu.tar.xz`, `tool.json` (the commit it is built from), `SHA256SUMS` and `SHA256SUMS.sig`.
 To install it, run your computer's block above with its `RELEASE` line changed to `RELEASE=mod-tool` (in PowerShell,
@@ -174,7 +174,10 @@ Which to take:
 
 - **The Nightly's tool**, by default. It is built from the same source as the SDK your mod pins and the game players
   run.
-- **The newest tool from main**, when you need a fix to the tool that merged after the Nightly. It builds against a
+- **The newest tool from main**, when you need a fix to the tool that merged after the Nightly and is in that
+  release, or when the Nightly's tool is older than this book: if `cargo sunrise-mod --version` answers with the
+  usage instead of a commit, that tool cannot yet `build` or `run` a native mod on its own, so take `mod-tool` for
+  [Your first native mod](first-mod.md). The project still pins the Nightly's SDK either way. It builds against a
   pinned SDK as long as that SDK has what the tool needs; when it does not, `build` stops and names both ways out:
   `cargo sunrise-mod update --sunrise nightly`, or the tool in that SDK's own release.
 

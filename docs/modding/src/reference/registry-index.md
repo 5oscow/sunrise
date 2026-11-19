@@ -21,7 +21,7 @@ entry leaves out.
   "generated": "2026-10-24T18:00:00Z",
   "projects": [{
     "id": "coords_hud", "kind": "mod", "name": "Coordinates HUD", "summary": "One line.",
-    "description": "Markdown.", "authors": ["Sunrise"], "owners": ["ludovic111"],
+    "description": "Markdown.", "authors": ["Sunrise"], "owners": ["octocat"],
     "license": "MIT", "source": "https://github.com/...", "icon": "https://...png", "key": "RWT...", "downloads": 1234, "stars": 56, "updated": "2026-10-24",
     "categories": ["utility"], "tags": ["hud"], "screenshots": ["https://...png"],
     "versions": [{
