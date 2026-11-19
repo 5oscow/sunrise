@@ -88,7 +88,17 @@ console.log(JSON.stringify(eval(expression)));
                     with self.subTest(entry=row["name"]):
                         self.assertEqual(evaluate(expressions[1], row, trusted), expected)
         self.assertEqual({row["name"] for row in rows if row.get("blacksmith")},
-                         {"linux", "linux-musl", "windows", "macos", "macos-x64"})
+                         {"linux", "linux-musl", "windows", "windows-arm64", "macos", "macos-x64"})
+        # A leg built for another CPU is started there, by a job that downloads its untested archive.
+        for row in rows:
+            if row.get("started_elsewhere"):
+                with self.subTest(started_elsewhere=row["name"]):
+                    job, native = next((name, block) for name, block in workflow_jobs.items()
+                                       if name != "build" and f"name: untested-{row['asset']}" in block)
+                    self.assertIn(f"name: {row['asset']}", native)
+                    self.assertIn(f"leg-{row['name']}", native)
+                    self.assertIn(job, re.search(r"^    needs: \[(.*)\]", workflow_jobs["legs"], re.M).group(1))
+        self.assertEqual({row["name"] for row in rows if row.get("started_elsewhere")}, {"macos-x64", "windows-arm64"})
 
         timeout = re.search(r"^\s*timeout-minutes:\s*\$\{\{(.*?)\}\}", workflow_jobs["build"], re.M).group(1)
         for repository, trusted, row in itertools.product(["sunrise-org/sunrise", "horizon-rust/horizon"], [False, True], rows):

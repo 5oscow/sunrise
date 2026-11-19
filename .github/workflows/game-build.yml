@@ -156,14 +156,17 @@ jobs:
             pe_arch: x64
             # The C runtime linked in, so the game runs without the Visual C++ redistributable.
             rustflags: -C target-feature=+crt-static
+          # Windows ARM64: cross-built on Blacksmith's x64 machine (its image has MSVC's ARM64 tools); its programs are
+          # started on real ARM64 hardware by windows-arm64-native below. Keep the C runtime in the archive.
           - name: windows-arm64
             os: windows-11-vs2026-arm
+            blacksmith: blacksmith-16vcpu-windows-2025
             target: aarch64-pc-windows-msvc
             dir: sunrise-windows-arm64
             asset: sunrise-windows-arm64.zip
             exe: .exe
             pe_arch: arm64
-            # The ARM64 runner builds and runs native ARM64 executables; keep the C runtime in the archive.
+            started_elsewhere: true
             rustflags: -C target-feature=+crt-static
           - name: macos
             mac: true
@@ -182,10 +185,10 @@ jobs:
             target: x86_64-apple-darwin
             dir: sunrise-macos-x64
             asset: sunrise-macos-x64.zip
-            started_on_intel: true
+            started_elsewhere: true
     # Blacksmith's machines (owner, 2026-11-18), the same images as GitHub's with the Rust cache beside them: 16 vCPUs
-    # for Linux and Windows x64, the 12-vCPU M4 for both Macs. Windows ARM64 has no Blacksmith machine. The repository
-    # variable BLACKSMITH=off puts every leg back on GitHub's `os`. Every leg is a fresh machine: nothing of a pull
+    # for Linux and Windows (ARM64 cross-built there), the 12-vCPU M4 for both Macs. The repository variable
+    # BLACKSMITH=off puts every leg back on GitHub's `os`. Every leg is a fresh machine: nothing of a pull
     # request's earlier jobs is on it.
     runs-on: ${{ vars.BLACKSMITH != 'off' && matrix.blacksmith || matrix.os }}
     # The fork's cold client + headless builds need both feature variants; keep upstream's limits unchanged.
@@ -345,7 +348,7 @@ jobs:
           echo "Runner arch:"
           arch || true
       - name: Every program starts
-        if: ${{ !matrix.musl && !matrix.started_on_intel }}
+        if: ${{ !matrix.musl && !matrix.started_elsewhere }}
         run: |
           set -euo pipefail
           bin=$BIN
@@ -360,7 +363,7 @@ jobs:
             [[ "$out" == "$binary $SUNRISE_VERSION" ]] || { echo "::error::expected $binary $SUNRISE_VERSION"; exit 1; }
           done
       # The game's run of a new world (smoke-test.json) is linux-smoke's, on Dyna's runner with the prepared files;
-      # Intel macOS has startup checks only, in macos-x64-intel.
+      # the legs built for another CPU (started_elsewhere) are started by macos-x64-intel and windows-arm64-native.
       - uses: actions/download-artifact@v8
         with:
           name: original-exporters
@@ -410,15 +413,16 @@ jobs:
             codesign --verify --strict "dist/${{ matrix.dir }}/$binary"
           done
           packaging/macos/notarize.sh "dist/${{ matrix.asset }}"
-      # A file named like the Intel macOS asset comes only from macos-x64-intel: the publish job downloads every
-      # artifact into one folder, so the untested archive carries its own file name too.
-      - name: The Intel macOS archive, named untested until it starts on Intel
-        if: matrix.started_on_intel
+      # A file named like the Intel macOS or Windows ARM64 asset comes only from the job that started its programs on
+      # that CPU: the publish job downloads every artifact into one folder, so the untested archive carries its own
+      # file name too.
+      - name: The archive, named untested until its programs start on their CPU
+        if: matrix.started_elsewhere
         run: mv "dist/${{ matrix.asset }}" "dist/untested-${{ matrix.asset }}"
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.started_on_intel && 'untested-' || '' }}${{ matrix.asset }}
-          path: dist/${{ matrix.started_on_intel && 'untested-' || '' }}${{ matrix.asset }}
+          name: ${{ matrix.started_elsewhere && 'untested-' || '' }}${{ matrix.asset }}
+          path: dist/${{ matrix.started_elsewhere && 'untested-' || '' }}${{ matrix.asset }}
           if-no-files-found: error
           retention-days: 3
       - name: The server build (the game without sound or controllers, as sunrise-engine)
@@ -445,13 +449,13 @@ jobs:
           path: dist/${{ matrix.server_asset }}
           if-no-files-found: error
           retention-days: 3
-      # The leg's last step: legs below counts a leg as built only once this marker exists. The Intel macOS
-      # leg's marker is macos-x64-intel's, once its programs started.
+      # The leg's last step: legs below counts a leg as built only once this marker exists. A leg built for another
+      # CPU gets its marker from the job that started its programs there.
       - name: This leg built
-        if: ${{ !matrix.started_on_intel }}
+        if: ${{ !matrix.started_elsewhere }}
         run: echo built > "$RUNNER_TEMP/leg-${{ matrix.name }}"
       - uses: actions/upload-artifact@v7
-        if: ${{ !matrix.started_on_intel }}
+        if: ${{ !matrix.started_elsewhere }}
         with:
           name: leg-${{ matrix.name }}
           path: ${{ runner.temp }}/leg-${{ matrix.name }}
@@ -524,8 +528,68 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
+  windows-arm64-native:
+    name: start the Windows ARM64 archive on ARM64
+    needs: build
+    if: ${{ !cancelled() }}
+    # Optional as the leg is (build's continue-on-error): a failure here drops ARM64 without turning the run red.
+    continue-on-error: true
+    runs-on: windows-11-vs2026-arm
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      SUNRISE_VERSION: ${{ inputs.version }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: untested-sunrise-windows-arm64.zip
+          path: ${{ runner.temp }}/arm64
+      - name: Unpack the archive, unchanged
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/arm64"
+          7z x untested-sunrise-windows-arm64.zip > /dev/null
+          echo "BIN=$RUNNER_TEMP/arm64/sunrise-windows-arm64" >> "$GITHUB_ENV"
+      - name: Every program starts, on ARM64
+        run: |
+          set -euo pipefail
+          [[ "$PROCESSOR_ARCHITECTURE" == ARM64 ]] || { echo "::error::not a native ARM64 runner"; exit 1; }
+          "$BIN/sunrise-client.exe" --help | grep -q -- '--resources'
+          "$BIN/sunrise-ctl.exe" --help > /dev/null
+          "$BIN/sunrise-perf.exe" --help | grep -q -- 'sunrise-perf summary'
+          "$BIN/sunrise-prepare.exe" --help | grep -q -- '--minecraft-dir'
+          # The version is the release's.
+          for binary in sunrise-prepare sunrise-server sunrise-port-pack; do
+            out=$("$BIN/$binary.exe" --version | tr -d '\r')
+            echo "$out"
+            [[ "$out" == "$binary $SUNRISE_VERSION" ]] || { echo "::error::expected $binary $SUNRISE_VERSION"; exit 1; }
+          done
+      # The same bytes the build leg packed, under the asset's own name.
+      - name: The archive, named as it ships
+        run: |
+          mkdir -p "$RUNNER_TEMP/ship"
+          cp "$RUNNER_TEMP/arm64/untested-sunrise-windows-arm64.zip" "$RUNNER_TEMP/ship/sunrise-windows-arm64.zip"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sunrise-windows-arm64.zip
+          path: ${{ runner.temp }}/ship/sunrise-windows-arm64.zip
+          if-no-files-found: error
+          retention-days: 3
+      - name: This leg built
+        run: echo built > "$RUNNER_TEMP/leg-windows-arm64"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: leg-windows-arm64
+          path: ${{ runner.temp }}/leg-windows-arm64
+          if-no-files-found: error
+          retention-days: 3
+
   legs:
-    needs: [build, macos-x64-intel]
+    needs: [build, macos-x64-intel, windows-arm64-native]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
