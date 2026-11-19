@@ -129,12 +129,11 @@ def decode(token):
     return token
 
 
-# Particles whose tick calls Math.cos/sin/pow. On x86-64 HotSpot's intrinsics
-# (Intel's libm) round a fraction of a percent of arguments a unit apart from
-# the platform libm sunrise_core::jmath uses, so their motion is compared to
+# Particles whose tick calls Math.pow. On x86-64 HotSpot's intrinsic (Intel's
+# libm) rounds a fraction of a percent of arguments a unit apart from the
+# platform libm sunrise_core::jmath::pow uses, so their motion is compared to
 # 1e-12 relative error; everything else about them, and every other type, exactly.
-LIBM = {'cherry_leaves', 'pale_oak_leaves', 'tinted_leaves', 'red_poplar_leaves', 'orange_poplar_leaves',
-        'yellow_poplar_leaves'}
+LIBM = {'cherry_leaves'}
 
 
 def sections(path):
