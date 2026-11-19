@@ -388,7 +388,13 @@ impl Game<'_> {
                 .then(|| g.add_stack_to_inventory(rest))
                 .flatten()
             {
-                g.drop_after_commit(player, rest);
+                // What is left drops at the player, unless they are in another level than
+                // this one: then it stays the caller's.
+                if g.acting_in_level_in_place() {
+                    g.drop_after_commit(player, rest);
+                } else {
+                    went -= rest.count;
+                }
             }
         });
         went

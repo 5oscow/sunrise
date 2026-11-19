@@ -523,7 +523,10 @@ impl ItemPlace {
     /// block entity's, an entity's or an item's slot's into that container's other slots
     /// (`forHandlerIndex`, refused instead around [`Strict`](Self::Strict)); a mod's place's
     /// where its [`PlaceProvider`] puts it; a [`Scratch`](Self::Scratch) stack's nowhere; a
-    /// [`ScratchSlots`](Self::ScratchSlots) stack's into its second slot.
+    /// [`ScratchSlots`](Self::ScratchSlots) stack's into its second slot. A player-backed place whose
+    /// player is in another level than the hook's (not a creative one) takes only what fits their
+    /// inventory, and nothing is dropped: the rest stays the caller's, and [`exchange`](Self::exchange)
+    /// rolls back when it cannot insert the whole replacement.
     pub fn insert(
         &self,
         host: &mut dyn ServerHost,
