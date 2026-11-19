@@ -92,11 +92,11 @@ def report(tool: str, base: Path, head: Path, work: Path, gate_on: bool, *,
     """Exports both trees at once, diffs them; (exit code, report text)."""
     # The base's records may predate the call names: its export names none (`--without-calls`),
     # which no comparison reads.
-    audit_flags = ["--with-internals"] if with_internals else []
+    catalogs = "--with-internals" if with_internals else "--with-points-and-loops"
     with ThreadPoolExecutor(max_workers=2) as pool:
         # Drain both subprocesses' diagnostics while they run so a full pipe cannot stall an export.
         exports = {name: pool.submit(subprocess.run,
-                                    [tool, "surface", str(tree), str(work / f"{name}.json"), *flags, *audit_flags],
+                                    [tool, "surface", str(tree), str(work / f"{name}.json"), *flags, catalogs],
                                     capture_output=True, text=True)
                    for name, tree, flags in (("base", base, ["--without-calls"]), ("head", head, []))}
     # This tree failing is a broken generator, which no other step would catch; the base failing

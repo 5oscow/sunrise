@@ -2,9 +2,10 @@
 //! source copy, then write the build data (`points.json`, `internals.json`, `loops.json`) with the
 //! header naming COMMIT, the source's full commit sha (#589). Never run on a working tree.
 //!
-//! `sunrise-stage surface ROOT OUT [--without-calls] [--with-internals]`: write the surface export
-//! (`surface.json`) of the source tree at ROOT to OUT, and nothing else. It only reads the tree, so a
-//! working tree is fine. Use `--with-internals` on both exports to audit listed internals.
+//! `sunrise-stage surface ROOT OUT [--without-calls] [--with-points-and-loops] [--with-internals]`:
+//! write the SDK surface (`surface.json`) of the source tree at ROOT to OUT, and nothing else. It
+//! only reads the tree, so a working tree is fine. The engine options are for comparisons: choose
+//! the same options for both exports. `--with-internals` also includes points and loops.
 //!
 //! `sunrise-stage uses SURFACE MOD_DIR [--json OUT --made-for BUILD]`: list
 //! what the mod in MOD_DIR uses of SURFACE, each item with the place that brought it in, then
@@ -29,12 +30,15 @@ use sunrise_mod_api_gen::surface::{ExportOptions, export_with};
 
 fn surface(args: &[PathBuf]) {
     let [root, out, flags @ ..] = args else {
-        fail("usage: sunrise-stage surface ROOT OUT [--without-calls] [--with-internals]")
+        fail(
+            "usage: sunrise-stage surface ROOT OUT [--without-calls] [--with-points-and-loops] [--with-internals]",
+        )
     };
     let mut options = ExportOptions::default();
     for flag in flags {
         match flag.to_str() {
             Some("--without-calls") => options.without_calls = true,
+            Some("--with-points-and-loops") => options.with_points_and_loops = true,
             Some("--with-internals") => options.with_internals = true,
             _ => fail(format!("unknown option {}", flag.display())),
         }
@@ -252,7 +256,7 @@ fn main() {
     }
     let usage = || {
         eprintln!(
-            "usage: sunrise-stage ROOT POINTS_JSON INTERNALS_JSON COMMIT [--sync-internals]\n       sunrise-stage surface ROOT OUT [--without-calls] [--with-internals]\n       sunrise-stage surface-diff OLD NEW [--notes DIR] [--base-notes DIR] [--json OUT] [--gate]\n       sunrise-stage uses SURFACE MOD_DIR [--json OUT --made-for BUILD]\n       sunrise-stage fits USES_JSON TARGET_SURFACE"
+            "usage: sunrise-stage ROOT POINTS_JSON INTERNALS_JSON COMMIT [--sync-internals]\n       sunrise-stage surface ROOT OUT [--without-calls] [--with-points-and-loops] [--with-internals]\n       sunrise-stage surface-diff OLD NEW [--notes DIR] [--base-notes DIR] [--json OUT] [--gate]\n       sunrise-stage uses SURFACE MOD_DIR [--json OUT --made-for BUILD]\n       sunrise-stage fits USES_JSON TARGET_SURFACE"
         );
         std::process::exit(2)
     };

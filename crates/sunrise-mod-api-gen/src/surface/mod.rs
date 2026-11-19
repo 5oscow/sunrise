@@ -1,8 +1,8 @@
 //! The surface export: `surface.json` ([`mod_surface::Surface`]) from what the build parses. Hooks
 //! come from the catalog, with their arguments from the generated event types; trait roles,
 //! sides and "Not on wasm" from the wire index; everything else from a walk of the public items
-//! of `sunrise-mod-api` and the vocabulary it re-exports. The engine records use the same
-//! point, loop and internal collectors as SDK source staging.
+//! of `sunrise-mod-api` and the vocabulary it re-exports. The optional engine audit uses the
+//! same point, loop and internal collectors as SDK source staging.
 pub mod behaviours;
 pub(crate) mod calls;
 mod engine;
@@ -220,11 +220,13 @@ impl Export {
 pub struct ExportOptions {
     /// Omit `call` names on the old side of a comparison, which may predate their declarations.
     pub without_calls: bool,
-    /// Collect listed internals in addition to the API, injection points and published loops.
+    /// Collect injection points and published loops in addition to the stable API.
+    pub with_points_and_loops: bool,
+    /// Audit the full engine catalogs, including listed internals.
     pub with_internals: bool,
 }
 
-/// Exports the API, injection points and published loops of the source tree at `root`.
+/// Exports the stable mod API of the source tree at `root`, as shipped by the SDK.
 pub fn export(root: &Path) -> Result<Export, String> {
     export_with(root, ExportOptions::default())
 }
@@ -256,11 +258,15 @@ fn export_here(root: &Path, options: ExportOptions) -> Result<Export, String> {
     // A listed boundary trait an older tree lacks is noted by `Roles::resolve`, not refused.
     let mut wire = crate::wire::surface_reading(root, &with_providers, Some(&mut Vec::new()))?;
     let boundary = Boundary::from_wire(&wire);
-    // Resolve the point types before the call export changes the index, just as staging does.
-    let point_types = crate::wire::point_types(&mut wire)?;
-    let engine = crate::source::with_walk_cache(|| {
-        engine::collect(root, &point_types, options.with_internals)
-    })?;
+    let engine = if options.with_points_and_loops || options.with_internals {
+        // Resolve the point types before the call export changes the index, as staging does.
+        let point_types = crate::wire::point_types(&mut wire)?;
+        Some(crate::source::with_walk_cache(|| {
+            engine::collect(root, &point_types, options.with_internals)
+        })?)
+    } else {
+        None
+    };
     let calls = if options.without_calls {
         None
     } else {
@@ -268,7 +274,9 @@ fn export_here(root: &Path, options: ExportOptions) -> Result<Export, String> {
     };
     let mut index = wire.types.index;
     let mut export = build(root, &mut index, &catalog.hooks, &boundary)?;
-    export.surface = export.surface.with_engine_items(engine);
+    if let Some(engine) = engine {
+        export.surface = export.surface.with_engine_items(engine);
+    }
     if let Some(calls) = &calls {
         name_calls(&mut export.surface, calls);
     }

@@ -1,8 +1,8 @@
 # `surface.json`
 
-`surface.json` describes the stable mod API, injection points and published loops of one build. It is generated from
-source (`sunrise-stage surface ROOT OUT`), never kept by hand or committed, and is byte-identical for one commit
-with the same options: sorted, with no machine paths or timestamps.
+The SDK's `surface.json` describes the stable mod API of one build. It is generated from source
+(`sunrise-stage surface ROOT OUT`), never kept by hand or committed, and is byte-identical for one commit:
+sorted, with no machine paths or timestamps.
 
 ## Records
 
@@ -16,17 +16,7 @@ public, so a re-export added later never changes its id; otherwise its shortest 
 lists every public path a mod can name it by. Types inside signatures are normalised Rust, with paths relative to
 `mod_api` and lifetimes kept.
 
-`cargo sunrise-mod hooks <text>` searches the API records offline ([Commands](05-commands.md)). The engine records
-come from the same collectors as `points.json`, `loops.json` and, when requested, `internals.json`; they do not make
-the native route stable across builds:
-
-- A point's id is `point:<target>`, using the function path as listed in `points.json`. Functions that refuse all API
-  listeners are not injection points. Its contract includes the published place name and signature hash.
-- A loop's id is `loop:<name>`, using its `[[native.loop]]` name. The report compares its entry path, generic method,
-  slot trait and side.
-- An internal's id is `internal:<kind>:<path>` as listed in `internals.json`, with ` [<cfg>]` appended for a guarded
-  alternative. The report compares its signature and hash, and whether the row is a type shape rather than an exposed
-  internal.
+`cargo sunrise-mod hooks <text>` searches the API records offline ([Commands](05-commands.md)).
 
 ## What a hash covers
 
@@ -73,10 +63,23 @@ Each change says what changed in words a mod author can act on, for example
 ``argument `player`: `PlayerRef` → `ServerPlayerRef` ``. `cargo sunrise-mod sdk diff <build> <build>` prints the
 same report for two published builds.
 
-When the `verify` check runs on a pull request that changes Rust, its summary compares the merge base with the head.
-It covers injection points and published loops, not listed internals. The engine catalogs have counts for additions,
-removals and changes, and names of removed or changed items, subject to the summary's length cap. The report fails
-the check only when:
+## CI and local audits
+
+CI exports the stable API plus injection points and published loops using `--with-points-and-loops`, then compares
+its merge base with its head. The extra records are for comparison, never shipped in the SDK's `surface.json`;
+`points.json`, `loops.json` and `internals.json` remain separate build data. The audit reads the same declarations:
+
+- A point's id is `point:<target>`, using the function path as listed in `points.json`. Functions that refuse all API
+  listeners are not injection points. Its contract includes the published place name and signature hash.
+- A loop's id is `loop:<name>`, using its `[[native.loop]]` name. The report compares its entry path, generic method,
+  slot trait and side.
+- In a local audit that includes listed internals, an internal's id is `internal:<kind>:<path>` as listed in
+  `internals.json`, with ` [<cfg>]` appended for a guarded alternative. The report compares its signature and hash,
+  and whether the row is a type shape rather than an exposed internal.
+
+When the `verify` check runs on a pull request that changes Rust, the engine-catalog summary counts additions,
+removals and changes, and names removed or changed items, subject to its length cap. The report fails the check
+only when:
 
 - the head's tree cannot be exported;
 - a change note cannot be read, or names an item that did not change;

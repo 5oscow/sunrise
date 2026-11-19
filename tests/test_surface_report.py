@@ -115,7 +115,11 @@ exit {diff_exit}
         self.assertIn("Surface: report\n", text)
         self.assertNotIn("--gate", calls)
         self.assertNotIn("--with-internals", calls)
-        self.assertIn(f"--notes ", calls)
+        exports = [call.split() for call in calls.splitlines() if call.startswith("surface ")]
+        self.assertEqual(len(exports), 2)
+        for call in exports:
+            self.assertIn("--with-points-and-loops", call)
+        self.assertIn("--notes ", calls)
         code, text, calls = self.run_report(diff_exit=1, gate_on=True)
         self.assertEqual(code, 1)
         self.assertIn("fn:a", text)

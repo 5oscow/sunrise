@@ -24,7 +24,7 @@ INPUTS = ROOT / "crates/sunrise-mod-package/src/sdk/inputs.json"
 
 # What each asset kind holds (`sunrise_mod_package::sdk::Kind`), and the files beside them.
 KINDS = {
-    "surface": "The mod API and published engine catalogs, each item with its fingerprint "
+    "surface": "The stable surface: everything an API-only mod can name, each item with its fingerprint "
                "([`surface.json`](02-surface.md)).",
     "build-data": "`points.json`, `internals.json`, `loops.json` and `functions.json`: data pinned to this build, "
                   "with no compatibility promise.",
@@ -74,9 +74,6 @@ RECORDS = {
     "capability": "Capability",
     "behaviour": "Behaviour: a promise that is no type or signature",
     "extension_tag": "Tag extension point (registry/id in `extension_tags`)",
-    "point": "Injection point with an API listener place",
-    "loop": "Published native loop",
-    "internal": "Listed engine signature or type shape",
 }
 ID_FORMS = {
     "hook": "hook:<name>",
@@ -93,9 +90,6 @@ ID_FORMS = {
     "capability": "capability:<key>",
     "behaviour": "behaviour:<name>",
     "extension_tag": "extension_tag:<registry>/<namespace>:<path>",
-    "point": "point:<target>",
-    "loop": "loop:<name>",
-    "internal": "internal:<kind>:<path>",
 }
 
 
@@ -180,7 +174,7 @@ def ids(value):
 
 
 def surface(document):
-    counts = {"extension_tag": len(document.get("extension_tags", [])), "point": 0, "loop": 0, "internal": 0}
+    counts = {"extension_tag": len(document.get("extension_tags", []))}
     for record in ids(document):
         prefix, _, rest = record.partition(":")
         key = f"{prefix} member" if prefix in ("hook", "type") and "." in rest else prefix

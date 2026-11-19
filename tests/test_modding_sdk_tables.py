@@ -42,8 +42,6 @@ class SdkTablesTests(unittest.TestCase):
                     "types": [{"id": "type:world::Pos", "fields": [{"id": "type:world::Pos.x"},
                                                                    {"id": "type:world::Pos.y"}]}],
                     "others": others,
-                    "engine_items": [{"id": "point:game::tick"}, {"id": "loop:entities.tick"},
-                                     {"id": "internal:fn:game::tick"}],
                     "extension_tags": [{"registry": "block", "id": "sunrise:villager_secondary_poi/farmer", "doc": "Extra work blocks."}]}
         text = tables.surface(document)
         self.assertIn("| Public field or variant of a type | `type:<path>.<field or variant>` | 2 |", text)
@@ -51,8 +49,6 @@ class SdkTablesTests(unittest.TestCase):
         self.assertIn("| Tag extension point (registry/id in `extension_tags`) | `extension_tag:<registry>/<namespace>:<path>` | 1 |", text)
         # A surface from before the additive collection is still readable.
         self.assertIn("| `extension_tag:<registry>/<namespace>:<path>` | 0 |", tables.surface({key: value for key, value in document.items() if key != "extension_tags"}))
-        self.assertIn("| `loop:<name>` | 1 |", text)
-        self.assertIn("| `loop:<name>` | 0 |", tables.surface({key: value for key, value in document.items() if key != "engine_items"}))
         with self.assertRaises(ValueError):
             tables.surface({**document, "hooks": [{"id": "event:tick"}]})
 

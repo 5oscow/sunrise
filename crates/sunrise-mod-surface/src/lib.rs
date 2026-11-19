@@ -1,4 +1,4 @@
-//! `surface.json`: the mod API and the published source catalogs of one game build.
+//! `surface.json`: the stable mod API of one game build, with optional engine records for CI and audits.
 //!
 //! The generator (`sunrise-stage surface`) writes it from the declarations the build parses;
 //! nothing in it is kept by hand. This crate holds its record types, their contract hashes, the
@@ -125,8 +125,8 @@ pub struct Surface {
     /// Older readers ignore this additive collection without a schema change.
     #[serde(default)]
     pub extension_tags: Vec<ExtensionTag>,
-    /// The SDK's injection points, native loops and listed internals. These are compared by
-    /// the diff, not inferred by the API source-use scanner.
+    /// Injection points, native loops and listed internals for CI and local audits. Omitted
+    /// from SDK exports and not inferred by the API source-use scanner.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub engine_items: Vec<EngineItem>,
 }
