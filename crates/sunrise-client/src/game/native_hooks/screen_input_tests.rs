@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 /// The characters a `ScreenEvent.CharacterTyped.Pre` sees are the
 /// printable ones of a text: a cancelled one leaves that text and a
 /// control character (a key, not text) is never offered a hook.

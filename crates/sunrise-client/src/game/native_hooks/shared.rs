@@ -42,9 +42,6 @@ mod packet_tests;
 #[path = "shared/runtime_environment_tests.rs"]
 mod runtime_environment_tests;
 #[cfg(test)]
-#[path = "shared/screen_input_tests.rs"]
-mod screen_input_tests;
-#[cfg(test)]
 #[path = "shared/screen_position_tests.rs"]
 mod screen_position_tests;
 #[cfg(test)]
