@@ -413,7 +413,11 @@ impl Game<'_> {
         }
     }
     pub(super) fn save_advancements(&self) {
-        if !self.adv.loaded || self.remote.is_some() || self.no_player_here() {
+        if !self.adv.loaded
+            || self.remote.is_some()
+            || self.no_player_here()
+            || self.crash_save.holds_interrupted(self.lan_acting)
+        {
             return;
         }
         let Some(path) = self.adv_path() else {
@@ -423,11 +427,8 @@ impl Game<'_> {
             .adv
             .progress
             .to_json(&self.adv.tree, sunrise_world::DATA_VERSION);
-        if let Some(dir) = path.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
         if let Ok(text) = serde_json::to_string_pretty(&json) {
-            let _ = std::fs::write(path, text);
+            let _ = sunrise_client::save::write_durable(&path, text.as_bytes());
         }
     }
     /// The player as predicates see it.
