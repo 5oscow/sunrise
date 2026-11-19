@@ -978,6 +978,10 @@ impl Diff {
         text.push_str("\nEngine catalogs (point and loop removals and changes are breaking)\n");
         for (prefix, title) in ENGINE_KINDS {
             let records = || self.changes.iter().filter(|c| record_kind(&c.id) == prefix);
+            // An ordinary export has no internal rows. Only show their section when they change.
+            if prefix == "internal" && records().next().is_none() {
+                continue;
+            }
             let count = |kind| records().filter(|c| c.kind == kind).count();
             text.push_str(&format!(
                 "{title}: {} added, {} removed, {} changed\n",

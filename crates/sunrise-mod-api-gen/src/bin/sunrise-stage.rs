@@ -2,8 +2,9 @@
 //! source copy, then write the build data (`points.json`, `internals.json`, `loops.json`) with the
 //! header naming COMMIT, the source's full commit sha (#589). Never run on a working tree.
 //!
-//! `sunrise-stage surface ROOT OUT`: write the surface export (`surface.json`) of the source tree
-//! at ROOT to OUT, and nothing else. It only reads the tree, so a working tree is fine.
+//! `sunrise-stage surface ROOT OUT [--without-calls] [--with-internals]`: write the surface export
+//! (`surface.json`) of the source tree at ROOT to OUT, and nothing else. It only reads the tree, so a
+//! working tree is fine. Use `--with-internals` on both exports to audit listed internals.
 //!
 //! `sunrise-stage uses SURFACE MOD_DIR [--json OUT --made-for BUILD]`: list
 //! what the mod in MOD_DIR uses of SURFACE, each item with the place that brought it in, then
@@ -24,8 +25,20 @@ use mod_surface::Surface;
 use mod_surface::uses::{Fit, ManifestFacts, Origin, UsesTable, fits, uses_contained};
 use std::path::PathBuf;
 use sunrise_mod_api_gen::staging::{self, Mode};
+use sunrise_mod_api_gen::surface::{ExportOptions, export_with};
 
-fn surface(root: &std::path::Path, out: &std::path::Path, named: bool) {
+fn surface(args: &[PathBuf]) {
+    let [root, out, flags @ ..] = args else {
+        fail("usage: sunrise-stage surface ROOT OUT [--without-calls] [--with-internals]")
+    };
+    let mut options = ExportOptions::default();
+    for flag in flags {
+        match flag.to_str() {
+            Some("--without-calls") => options.without_calls = true,
+            Some("--with-internals") => options.with_internals = true,
+            _ => fail(format!("unknown option {}", flag.display())),
+        }
+    }
     let started = std::time::Instant::now();
     // The generator writes source paths into `#[path]`s it then reads: they must be absolute.
     let root = match std::fs::canonicalize(root) {
@@ -35,11 +48,7 @@ fn surface(root: &std::path::Path, out: &std::path::Path, named: bool) {
             std::process::exit(1);
         }
     };
-    let export = match if named {
-        sunrise_mod_api_gen::surface::export(&root)
-    } else {
-        sunrise_mod_api_gen::surface::export_without_calls(&root)
-    } {
+    let export = match export_with(&root, options) {
         Ok(export) => export,
         Err(error) => {
             eprintln!("sunrise-stage surface: {error}");
@@ -235,24 +244,15 @@ fn main() {
     let entry = mod_surface::child::child_entry();
     let args: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
     match args.first().and_then(|c| c.to_str()) {
+        Some("surface") => return surface(&args[1..]),
         Some("uses") => return uses_command(entry, &args[1..]),
         Some("fits") => fits_command(&args[1..]),
         Some("surface-diff") => surface_diff(&args[1..]),
         _ => {}
     }
-    if let [command, root, out, rest @ ..] = &args[..]
-        && command == "surface"
-        && matches!(rest, [] | [_])
-    {
-        // `--without-calls`: a tree from before the call names, the old side of a comparison.
-        let without = rest.first().is_some_and(|flag| flag == "--without-calls");
-        if rest.is_empty() || without {
-            return surface(root, out, !without);
-        }
-    }
     let usage = || {
         eprintln!(
-            "usage: sunrise-stage ROOT POINTS_JSON INTERNALS_JSON COMMIT [--sync-internals]\n       sunrise-stage surface ROOT OUT [--without-calls]\n       sunrise-stage surface-diff OLD NEW [--notes DIR] [--base-notes DIR] [--json OUT] [--gate]\n       sunrise-stage uses SURFACE MOD_DIR [--json OUT --made-for BUILD]\n       sunrise-stage fits USES_JSON TARGET_SURFACE"
+            "usage: sunrise-stage ROOT POINTS_JSON INTERNALS_JSON COMMIT [--sync-internals]\n       sunrise-stage surface ROOT OUT [--without-calls] [--with-internals]\n       sunrise-stage surface-diff OLD NEW [--notes DIR] [--base-notes DIR] [--json OUT] [--gate]\n       sunrise-stage uses SURFACE MOD_DIR [--json OUT --made-for BUILD]\n       sunrise-stage fits USES_JSON TARGET_SURFACE"
         );
         std::process::exit(2)
     };

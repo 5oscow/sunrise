@@ -862,7 +862,6 @@ fn breaking_changes_come_first_and_notes_declare_them() {
          Engine catalogs (point and loop removals and changes are breaking)\n\
          Injection points: 0 added, 0 removed, 0 changed\n\
          Published loops: 0 added, 0 removed, 0 changed\n\
-         Listed internals (advisory): 0 added, 0 removed, 0 changed\n\
          \n\
          Breaking (1)\n\
          - fn:a (removed)\n    why (rename.toml): Shorter name.\n    migrate: Call `b`.\n\

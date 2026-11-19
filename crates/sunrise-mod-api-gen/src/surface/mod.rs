@@ -215,31 +215,34 @@ impl Export {
     }
 }
 
-/// Exports the surface of the source tree at `root`, with each record's `call` name.
+/// Optional work for the source-tree export.
+#[derive(Default)]
+pub struct ExportOptions {
+    /// Omit `call` names on the old side of a comparison, which may predate their declarations.
+    pub without_calls: bool,
+    /// Collect listed internals in addition to the API, injection points and published loops.
+    pub with_internals: bool,
+}
+
+/// Exports the API, injection points and published loops of the source tree at `root`.
 pub fn export(root: &Path) -> Result<Export, String> {
-    export_with(root, true)
+    export_with(root, ExportOptions::default())
 }
 
-/// Exports the surface of a tree that predates the call names, so records carry none: the old
-/// side of a comparison across the change that introduced them. A tree this reads that does
-/// declare how every type crosses is exported by [`export`].
-pub fn export_without_calls(root: &Path) -> Result<Export, String> {
-    export_with(root, false)
-}
-
-fn export_with(root: &Path, calls: bool) -> Result<Export, String> {
+/// Exports the source tree at `root` with the requested options.
+pub fn export_with(root: &Path, options: ExportOptions) -> Result<Export, String> {
     // The wire index's resolver recurses through the API's types: give it a deep stack.
     std::thread::scope(|scope| {
         std::thread::Builder::new()
             .stack_size(64 << 20)
-            .spawn_scoped(scope, || export_here(root, calls))
+            .spawn_scoped(scope, || export_here(root, options))
             .map_err(|e| e.to_string())?
             .join()
             .map_err(|_| "the surface export panicked".to_string())?
     })
 }
 
-fn export_here(root: &Path, named: bool) -> Result<Export, String> {
+fn export_here(root: &Path, options: ExportOptions) -> Result<Export, String> {
     let catalog = Catalog::load(root).map_err(|e| e.to_string())?;
     let generated = crate::sources(root, crate::FillMode::Require)?;
     let included = [
@@ -255,11 +258,13 @@ fn export_here(root: &Path, named: bool) -> Result<Export, String> {
     let boundary = Boundary::from_wire(&wire);
     // Resolve the point types before the call export changes the index, just as staging does.
     let point_types = crate::wire::point_types(&mut wire)?;
-    let engine = crate::source::with_walk_cache(|| engine::collect(root, &point_types))?;
-    let calls = if named {
-        Some(crate::wire::exported_calls(&mut wire, &catalog.hooks)?)
-    } else {
+    let engine = crate::source::with_walk_cache(|| {
+        engine::collect(root, &point_types, options.with_internals)
+    })?;
+    let calls = if options.without_calls {
         None
+    } else {
+        Some(crate::wire::exported_calls(&mut wire, &catalog.hooks)?)
     };
     let mut index = wire.types.index;
     let mut export = build(root, &mut index, &catalog.hooks, &boundary)?;

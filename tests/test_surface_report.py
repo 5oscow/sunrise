@@ -65,7 +65,8 @@ class GateTests(unittest.TestCase):
 class ReportTests(unittest.TestCase):
     """report() against a stub sunrise-stage whose behaviour each test sets."""
 
-    def run_report(self, base_export=0, diff_exit=0, gate_on=False, head_export=0, diff_err=""):
+    def run_report(self, base_export=0, diff_exit=0, gate_on=False, head_export=0, diff_err="",
+                   with_internals=False):
         with tempfile.TemporaryDirectory() as directory:
             work = Path(directory)
             tool = work / "sunrise-stage"
@@ -82,7 +83,8 @@ exit {diff_exit}
 """)
             tool.chmod(0o755)
             (work / "base").mkdir()
-            code, text = surface_report.report(str(tool), work / "base", work / "head", work, gate_on)
+            code, text = surface_report.report(str(tool), work / "base", work / "head", work, gate_on,
+                                               with_internals=with_internals)
             return code, text, (work / "calls").read_text()
 
     def test_a_base_the_head_tool_cannot_read_passes_with_one_line(self):
@@ -107,8 +109,12 @@ exit {diff_exit}
 
     def test_the_diff_decides_and_the_gate_is_passed_on(self):
         code, text, calls = self.run_report()
-        self.assertEqual((code, text), (0, "Surface: report\n"))
+        self.assertEqual(code, 0)
+        self.assertIn("CI does not compare listed internals", text)
+        self.assertIn("--with-internals", text)
+        self.assertIn("Surface: report\n", text)
         self.assertNotIn("--gate", calls)
+        self.assertNotIn("--with-internals", calls)
         self.assertIn(f"--notes ", calls)
         code, text, calls = self.run_report(diff_exit=1, gate_on=True)
         self.assertEqual(code, 1)
@@ -117,6 +123,14 @@ exit {diff_exit}
         # An unreadable note (exit 2) fails too.
         code, _, _ = self.run_report(diff_exit=2)
         self.assertEqual(code, 1)
+
+    def test_the_audit_exports_internals_on_both_sides(self):
+        code, text, calls = self.run_report(with_internals=True)
+        self.assertEqual((code, text), (0, "Surface: report\n"))
+        exports = [call for call in calls.splitlines() if call.startswith("surface ")]
+        self.assertEqual(len(exports), 2)
+        for call in exports:
+            self.assertIn("--with-internals", call.split())
 
 
 @unittest.skipUnless(os.environ.get("SUNRISE_STAGE_TOOL"), "set SUNRISE_STAGE_TOOL to test the real gate")
@@ -140,7 +154,8 @@ class EngineCatalogGateTests(unittest.TestCase):
                 changes = work / "head" / surface_report.NOTES
                 changes.mkdir(parents=True)
                 (changes / "engine-change.toml").write_text(f'ids = {json.dumps(notes)}\nwhy = "Use the new sites."\n')
-            return surface_report.compare(os.environ["SUNRISE_STAGE_TOOL"], work / "base", work / "head", work, True)
+            return surface_report.compare(os.environ["SUNRISE_STAGE_TOOL"], work / "base", work / "head", work, True,
+                                          with_internals=True)
 
     def test_undeclared_point_and_loop_removals_fail_and_declared_removals_pass(self):
         code, text = self.compare(self.ITEMS, [])
@@ -216,7 +231,7 @@ class SummaryTests(unittest.TestCase):
 class MainTests(unittest.TestCase):
     """main(): the base it fetches, what it prints, what it writes to the job summary."""
 
-    def run_main(self, event="pull_request", pr="", **patches):
+    def run_main(self, event="pull_request", pr="", argv=(), **patches):
         with tempfile.TemporaryDirectory() as directory:
             summary_file = Path(directory) / "summary.md"
             env = {"SUNRISE_STAGE_TOOL": "/no/tool", "EVENT": event, "PR": pr,
@@ -225,7 +240,7 @@ class MainTests(unittest.TestCase):
                     contextlib.ExitStack() as stack:
                 for name, value in patches.items():
                     stack.enter_context(mock.patch.object(surface_report, name, value))
-                code = surface_report.main()
+                code = surface_report.main(argv)
             return code, out.getvalue(), summary_file.read_text()
 
     def test_an_unfetchable_base_reports_and_passes(self):
@@ -250,10 +265,19 @@ class MainTests(unittest.TestCase):
         code, out, summary = self.run_main(
             base_commit=lambda *a: ("abcd", ""),
             unpack=lambda sha, into: fetched.append(sha),
-            report=lambda *a: (1, "Surface: breaking\n"))
+            report=lambda *a, **kw: (1, "Surface: breaking\n"))
         self.assertEqual((code, fetched), (1, ["abcd"]))
         self.assertRegex(out, r"^Surface: breaking\nBase abcd; fetch \d+\.\ds, total \d+\.\ds\n$")
         self.assertTrue(summary.startswith("### Mod API surface\n\n```text\nSurface: breaking\nBase abcd"))
+
+    def test_local_audit_uses_the_supplied_trees_without_fetching(self):
+        with mock.patch.object(surface_report, "report", return_value=(0, "Surface: advisory\n")) as report, \
+             mock.patch.object(surface_report, "base_commit") as find_base:
+            code, out, _ = self.run_main(argv=["--with-internals", "--trees", "before", "after"])
+        self.assertEqual((code, out), (0, "Surface: advisory\n"))
+        self.assertEqual(report.call_args.args[1:3], (Path("before"), Path("after")))
+        self.assertTrue(report.call_args.kwargs["with_internals"])
+        find_base.assert_not_called()
 
 
 if __name__ == "__main__":

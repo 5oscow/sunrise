@@ -1,8 +1,8 @@
 # `surface.json`
 
-`surface.json` describes what a mod can name in one build: the stable mod API and the build's published engine
-catalogs. It is generated from the declarations the build parses (`sunrise-stage surface ROOT OUT`), never kept by
-hand or committed, and is byte-identical for one commit: sorted, with no machine paths or timestamps.
+`surface.json` describes the stable mod API, injection points and published loops of one build. It is generated from
+source (`sunrise-stage surface ROOT OUT`), never kept by hand or committed, and is byte-identical for one commit
+with the same options: sorted, with no machine paths or timestamps.
 
 ## Records
 
@@ -17,8 +17,8 @@ lists every public path a mod can name it by. Types inside signatures are normal
 `mod_api` and lifetimes kept.
 
 `cargo sunrise-mod hooks <text>` searches the API records offline ([Commands](05-commands.md)). The engine records
-come from the same collectors as `points.json`, `loops.json` and `internals.json`; they do not make the native route
-stable across builds:
+come from the same collectors as `points.json`, `loops.json` and, when requested, `internals.json`; they do not make
+the native route stable across builds:
 
 - A point's id is `point:<target>`, using the function path as listed in `points.json`. Functions that refuse all API
   listeners are not injection points. Its contract includes the published place name and signature hash.
@@ -73,15 +73,27 @@ Each change says what changed in words a mod author can act on, for example
 ``argument `player`: `PlayerRef` → `ServerPlayerRef` ``. `cargo sunrise-mod sdk diff <build> <build>` prints the
 same report for two published builds.
 
-When the `verify` check runs on a pull request that changes Rust, its summary carries this report, comparing the
-merge base with the head. The engine catalogs have a section of their own, with counts for additions, removals and
-changes and names removed or changed items, subject to the summary's length cap. It fails the check only when:
+When the `verify` check runs on a pull request that changes Rust, its summary compares the merge base with the head.
+It covers injection points and published loops, not listed internals. The engine catalogs have counts for additions,
+removals and changes, and names of removed or changed items, subject to the summary's length cap. The report fails
+the check only when:
 
 - the head's tree cannot be exported;
 - a change note cannot be read, or names an item that did not change;
 - a breaking change has no change note: every breaking record the report lists, members included (a removed field is
   its own line), must be named by a note the pull request adds. Conditional, additive and advisory changes need none.
   The gate is `gate = true` in `tools/ci/surface.toml`.
+
+For a local audit, export **both** trees with `sunrise-stage surface ROOT OUT --with-internals`, then pass the two
+exports to `sunrise-stage surface-diff`. Or run the CI report locally using the `sunrise-stage` binary:
+
+```sh
+SUNRISE_STAGE_TOOL=target/debug/sunrise-stage \
+  python3 tools/ci/surface_report.py --with-internals --trees BASE HEAD
+```
+
+`BASE` and `HEAD` are source directories, such as two Git worktrees. The option adds advisory internal changes to
+the report without changing the gate.
 
 ## Command completion layouts
 
