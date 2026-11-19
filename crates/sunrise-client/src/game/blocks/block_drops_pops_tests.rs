@@ -6,12 +6,15 @@
 //! `SweetBerryBushBlock.java:122`) all pop through it, so they drop nothing with
 //! the rule off and their usual item with it on.
 use super::*;
-use crate::game::game_tests::tests::server_game;
+use crate::game::game_tests::tests::{isolated_server_game, server_game};
 use sunrise_client::items::ItemStack;
 use sunrise_core::position::ChunkPos;
 
 fn game(resources: &mut Option<std::sync::Arc<crate::game::Resources>>) -> Game<'_> {
-    let mut game = server_game(resources);
+    set_up(server_game(resources))
+}
+
+fn set_up(mut game: Game<'_>) -> Game<'_> {
     game.build_registries();
     game.set_allow_commands(true);
     game.block_ticks
@@ -174,12 +177,30 @@ fn block_drops_on_keeps_the_pop() {
 fn a_harvest_rolls_with_its_interacting_player_and_block_origin() {
     use serde_json::json;
     let mut resources = None;
-    let mut game = game(&mut resources);
+    let (_published, game) = isolated_server_game(&mut resources);
+    let mut game = set_up(game);
+    // The clicking player, standing beside the bush, and the loot data the
+    // entity matcher reads (`server_loot`).
+    game.player = Some(
+        sunrise_client::motion::PlayerMotion::new(
+            game.motion,
+            sunrise_core::geometry::Vec3::new(12.5, 100.0, 2.5),
+        )
+        .unwrap(),
+    );
+    game.server_loot.set(Some(std::sync::Arc::new(
+        sunrise_world::loot::LootData::load(
+            &game.options.resources,
+            &Default::default(),
+            game.res.item_defaults(),
+        )
+        .unwrap(),
+    )));
     let item = |name: &str| json!({"type": "minecraft:item", "name": name});
     let pool = |condition: serde_json::Value, name: &str| json!({"rolls": 1, "condition": condition, "entries": [item(name)]});
-    let who = |who: &str, predicate: serde_json::Value| json!({"condition": "minecraft:entity_properties", "entity": who, "predicate": predicate});
+    let who = |who: &str, predicate: serde_json::Value| json!({"type": "minecraft:entity_properties", "entity": who, "predicate": predicate});
     let below = |block: &str| {
-        json!({"condition": "minecraft:location_check", "offsetY": -1,
+        json!({"type": "minecraft:location_check", "offsetY": -1,
             "predicate": {"block": {"blocks": block}}})
     };
     let table = json!({"type": "minecraft:block_interact", "pools": [

@@ -500,28 +500,9 @@ fn a_client_copy_never_answers_composter_items() {
 #[test]
 #[ignore = "daily"]
 fn a_composter_click_supplies_its_interacting_player_and_no_this() {
-    use crate::game::{
-        Audio, Options, Progress, Settings, execution_role::ExecutionRole, load_resources,
-    };
-    let root = std::path::PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap());
-    let settings = Settings::default();
-    let mut gui = None;
-    // The loading screen's path: it leaves the process-wide language and UI
-    // metadata alone, and the rest tables load on a worker joined below.
-    let mut loaded = load_resources(
-        sunrise_assets::resource_source::ResourceRoot::directory(root.clone()),
-        Vec::new(),
-        None,
-        &root,
-        &settings,
-        std::time::Instant::now(),
-        true,
-        ExecutionRole::IntegratedServer,
-        &Progress::new(),
-        &mut |ui, _| gui = Some(ui),
-    )
-    .unwrap();
-    loaded.rest_loader.take().unwrap().finish().unwrap();
+    let mut resources = None;
+    let (_published, mut game) =
+        crate::game::game_tests::tests::isolated_server_game(&mut resources);
     let provider = |who: &str| {
         serde_json::json!({
             "type": "minecraft:conditional",
@@ -530,7 +511,7 @@ fn a_composter_click_supplies_its_interacting_player_and_no_this() {
             "on_true": 1, "on_false": 0
         })
     };
-    let mut items = loaded.resources.rest.get().unwrap().items.as_ref().clone();
+    let mut items = game.items().clone();
     items
         .items
         .get_mut("minecraft:wheat_seeds")
@@ -541,23 +522,16 @@ fn a_composter_click_supplies_its_interacting_player_and_no_this() {
         .get_mut("minecraft:beetroot_seeds")
         .unwrap()
         .compostable = Some(provider("this"));
-    let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
-    options.resources = root.clone();
-    options.execution_role = ExecutionRole::IntegratedServer;
-    let mut game = Game::new(
-        &loaded.resources,
-        loaded.pack,
-        gui.or(loaded.gui).unwrap(),
-        options,
-        settings,
-        Audio::silent(&sunrise_assets::resource_source::ResourceSource::directory(
-            root,
-        )),
-        None,
-    )
-    .unwrap();
     game.server_items = Some(Arc::new(items));
     game.build_registries();
+    // The clicking player, beside the composter.
+    game.player = Some(
+        sunrise_client::motion::PlayerMotion::new(
+            game.motion,
+            sunrise_core::geometry::Vec3::new(4.5, 64.0, 2.5),
+        )
+        .unwrap(),
+    );
     for (x, z) in (-1..=1).flat_map(|x| (-1..=1).map(move |z| (x, z))) {
         game.world
             .chunks
