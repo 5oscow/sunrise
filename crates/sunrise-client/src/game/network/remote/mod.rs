@@ -7860,6 +7860,22 @@ impl Game<'_> {
             }));
         }
     }
+    /// `MultiPlayerGameMode.handleCreativeModeItemAdd` for inventory slot `i` (0 to 35): the
+    /// stack goes out now and counts as synced. Nothing without a server.
+    pub(in crate::game) fn remote_creative_slot_add(&mut self, i: usize) {
+        let stack = self.inventory.get(i).cloned().flatten();
+        let Some(r) = self.remote.as_mut() else {
+            return;
+        };
+        if let Some(synced) = r.synced.get_mut(i) {
+            *synced = stack.clone();
+        }
+        let item = self.to_network(&stack);
+        self.send(S::SetCreativeModeSlot(play::SetCreativeModeSlot {
+            slot: creative_sync_slot(i),
+            item,
+        }));
+    }
     /// Inventory as the server last described it.
     fn remote_synced(&mut self) {
         let stacks = self.creative_stacks();
@@ -9229,8 +9245,12 @@ impl Game<'_> {
     pub(super) fn remote_drop(&mut self, all: bool) {
         // ensureHasSentCarriedItem: the server drops from the slot just chosen.
         self.remote_send_carried();
+        // MultiPlayerGameMode.dropItem predicts the removal and sends only the drop: the
+        // server's stack agrees, so no creative slot edit follows at the end of the tick.
+        let before = self.creative_stacks();
         let dropped =
             sunrise_client::items::take_held_drop(&mut self.inventory[self.selected], all, false);
+        self.remote_synced_since(&before);
         self.send_action(if all { 4 } else { 5 });
         if dropped.is_some() {
             self.swing_hand(Hand::Main, SwingAnimation::DEFAULT);
