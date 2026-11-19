@@ -993,7 +993,7 @@ fn borrowed_prepared(
 
 /// The export a mod answers with the hooks it listens to: they cross as names, which stay
 /// the same across builds, and the game maps them to its own ids.
-fn is_subscription(m: &Method) -> bool {
+pub(super) fn is_subscription(m: &Method) -> bool {
     super::SUBSCRIBED
         .iter()
         .any(|(owner, name)| *owner == m.owner && *name == m.name)
@@ -1042,20 +1042,42 @@ pub(crate) fn mark_block(root: &str, name: &str) -> String {
 }
 
 /// The `__sunrise_mark!` macro: one arm per export a mod can implement, each a no-op import
-/// named like the export, so a mod's import section lists exactly the hooks, Part methods and
-/// handler methods it writes; `#[sunrise_mod]` and `#[sunrise_part]` call it for each method an
-/// impl overrides. The protocol module holds the three imports every guest links.
+/// named like the export, so a mod's import section lists exactly the hooks and Part methods it
+/// writes; `#[sunrise_mod]` and `#[sunrise_part]` call it for each method an impl overrides. A
+/// plain impl of any other handler trait calls it for nothing, so it carries no marks. The protocol module holds the three imports every guest links.
 pub(super) fn mark_macro(names: &super::Names) -> String {
     let mut out = String::from(
         "/// Marks that the mod implements one export: an import of the game's table, called for nothing.\n#[doc(hidden)]\n#[cfg(not(test))]\n#[macro_export]\nmacro_rules! __sunrise_mark {\n",
     );
+    // A prepared hook is one Part method with three more entries of their own wire shapes
+    // (prepare, ask, release): its arm marks all of them, since a Part that implements the
+    // method links them all.
+    let entries = |hook: &str| {
+        let mut entries: Vec<_> = names
+            .prepared
+            .iter()
+            .filter(|((owner, _), _)| owner == hook)
+            .map(|((_, entry), name)| (entry.as_str(), name))
+            .collect();
+        entries.sort_by_key(|(entry, _)| *entry);
+        entries
+    };
     for (owner, method, name) in names.marked() {
-        writeln!(
-            out,
-            "(\"{owner}\" {method}) => {{ {} }};",
-            mark_block("::mod_api", &name.text())
-        )
-        .unwrap();
+        let is_entry = names
+            .prepared
+            .keys()
+            .any(|(_, entry)| owner == "ItemPart" && entry == method);
+        if is_entry {
+            continue;
+        }
+        let mut marks = mark_block("::mod_api", &name.text());
+        if owner == "ItemPart" {
+            for (_, entry) in entries(method) {
+                marks.push(' ');
+                marks.push_str(&mark_block("::mod_api", &entry.text()));
+            }
+        }
+        writeln!(out, "(\"{owner}\" {method}) => {{ {marks} }};").unwrap();
     }
     // A method the API keeps off wasm crosses nowhere and has no name.
     out.push_str("($owner:literal $method:ident) => {};\n}\n");
@@ -1302,18 +1324,33 @@ fn every_mark_declares_its_import_in_its_own_function() {
     for name in names {
         let block: syn::Block = syn::parse_str(&format!("{{ {} }}", mark_block("::mod_api", name)))
             .expect("a mark is a statement");
-        let text = quote::ToTokens::to_token_stream(&block).to_string();
-        let function = text
-            .split("__sunrise_import ! (")
-            .nth(1)
-            .and_then(|rest| rest.split(',').next())
-            .expect("a mark calls __sunrise_import! with its function")
-            .trim()
-            .to_owned();
-        assert!(function.starts_with("__sunrise_mark_"), "{text}");
+        let syn::Stmt::Expr(syn::Expr::Block(cfg), _) = &block.stmts[0] else {
+            panic!("a mark is a cfg-gated block: {name}");
+        };
+        let syn::Stmt::Macro(call) = &cfg.block.stmts[0] else {
+            panic!("a mark is a macro call: {name}");
+        };
         assert!(
-            functions.insert(function),
-            "two marks share a function: {text}"
+            call.mac
+                .path
+                .segments
+                .last()
+                .is_some_and(|s| s.ident == "__sunrise_import")
+        );
+        let (function, literal) = call
+            .mac
+            .parse_body_with(|input: syn::parse::ParseStream| {
+                let function: syn::Ident = input.parse()?;
+                input.parse::<syn::Token![,]>()?;
+                let literal: syn::LitStr = input.parse()?;
+                Ok((function, literal))
+            })
+            .expect("a mark calls __sunrise_import! with its function and its name");
+        assert_eq!(literal.value(), name);
+        assert!(function.to_string().starts_with("__sunrise_mark_"));
+        assert!(
+            functions.insert(function.to_string()),
+            "two marks share a function: {name}"
         );
     }
 }

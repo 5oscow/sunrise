@@ -452,7 +452,7 @@ impl Drop for Reply {
 }
 
 /// Marks one export as used: a call, on wasm, of a no-op import named `$name`. The module's
-/// import section then lists the hook, Part method or handler method; the link keeps the
+/// import section then lists the export it names; the link keeps the
 /// import exactly while the code that calls this is linked.
 ///
 /// `$id` names the function that holds the import. The generator gives every mark its own, because
