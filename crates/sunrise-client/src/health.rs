@@ -1967,6 +1967,7 @@ impl HurtWorld for Environment<'_> {
         else {
             if reached {
                 self.blocking_item_used = true;
+                self.shield_damage = shield_damage;
             }
             return Ok(0.0);
         };
