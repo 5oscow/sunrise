@@ -1684,13 +1684,13 @@ impl Game<'_> {
         let pos: [i32; 3] =
             std::array::from_fn(|i| op["poi"][i].as_i64().unwrap_or(i64::MIN) as i32);
         let loaded = self.world.loaded(pos[0], pos[2]);
-        let live_poi = loaded.then(|| {
+        let live_poi = if loaded {
             let w = self.mob_world_base(&[]);
-            format!(
-                "{:?}",
-                sunrise_client::mobs::villager_brain::poi_at(&w, pos[0], pos[1], pos[2])
-            )
-        });
+            sunrise_client::mobs::villager_brain::poi_at(&w, pos[0], pos[1], pos[2])
+                .and_then(|poi| w.professions.pois.name(poi))
+        } else {
+            None
+        };
         eprintln!(
             "raid input raw: {}",
             json!({"label":op["label"],"id":id,"loaded":loaded,
