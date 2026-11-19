@@ -35,6 +35,7 @@ impl Fixture {
             ("crates/sunrise-client/src/entry.rs", ""),
             ("crates/sunrise-client/src/game.rs", ""),
             ("crates/sunrise-mod-api-gen/internals.txt", ""),
+            ("crates/sunrise-mod-api-gen/crossing-foreign.json", "[]"),
             (
                 "crates/sunrise-engine-slots/Cargo.toml",
                 "[package]\nname='sunrise-engine-slots'\n",
