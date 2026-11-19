@@ -4969,7 +4969,6 @@ dependencies = [
  "sunrise-client",
  "sunrise-mod-api",
  "sunrise-mod-host",
- "sunrise-mod-package",
  "sunrise-mod-wasm",
  "tempfile",
  "wat",
