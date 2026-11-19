@@ -649,7 +649,7 @@ class ParityWorkflowTests(unittest.TestCase):
         ci = self.root / "tools/ci"
         ci.mkdir(parents=True)
         shutil.copy(ROOT / "tools/ci/parity_verdict.py", ci)
-        self.slot = self.root / "parity-keep/77-2"
+        self.slot = self.root / "parity-keep/77-2-bucket-0"
 
     def step(self, name):
         return subprocess.run(["bash", "-e", "-c", self.steps[name]["run"]], cwd=self.root, env=self.env,
@@ -663,24 +663,25 @@ class ParityWorkflowTests(unittest.TestCase):
 
     def test_an_early_failure_cannot_report_a_previous_slots_result(self):
         # Both an older attempt and stale state in the current directory survive until the first workflow step.
-        for path in (self.slot.with_name("77-1"), self.slot):
+        for path in (self.slot.with_name("77-1-bucket-0"), self.slot):
             path.mkdir(parents=True)
             (path / "parity.log").write_text("FAIL loot_old 3s\n0 passed, 1 failed in 1.0 min.\n")
             (path / "selection.json").write_text('["loot_old"]')
             (path / "exit").write_text("1\n")
         self.initialise()
         self.assertFalse((self.slot / "parity.log").exists())
-        self.assertTrue((self.slot.with_name("77-1") / "parity.log").exists())
+        self.assertTrue((self.slot.with_name("77-1-bucket-0") / "parity.log").exists())
         # A setup step failed before any harness could run. The always() reporter still runs.
         self.assertEqual(self.steps["Write the harnesses' verdict"]["if"], "always()")
         result = self.step("Write the harnesses' verdict")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "")
         report = json.loads((self.root / "parity.json").read_text())
-        self.assertEqual(report, {"passed": [], "failed": [], "complete": False,
+        self.assertEqual(report, {"passed": [], "failed": [], "complete": False, "selected": [],
+                                  "bucket": None, "of": 1,
                                   "scope": {"run_id": "77", "run_attempt": "2", "commit": "current"}})
         self.assertEqual(self.steps["Upload the harnesses' verdict"]["with"]["name"],
-                         "daily-report-parity-${{ github.run_attempt }}")
+                         "daily-report-parity-${{ github.run_attempt }}-${{ matrix.bucket }}")
 
     def test_parity_public_output_is_names_and_results_only(self):
         self.initialise()
@@ -709,6 +710,30 @@ class ParityWorkflowTests(unittest.TestCase):
         self.assertEqual((self.slot / "loot_b.log").read_text(), "private mismatch")
         self.assertEqual((self.slot / "loot_a.first-run.log").read_text(), "private retry reason")
         self.assertEqual((self.root / "parity-private-summary").read_text(), "private retry reason")
+
+    def test_merging_verdicts_keeps_current_failures_beside_bad_evidence(self):
+        from test_ci_concurrency import expression_value, yaml
+        verdict = yaml.load(PARITY.read_text(), Loader=yaml.BaseLoader)["jobs"]["verdict"]
+        step = next(step for step in verdict["steps"] if step.get("name") == "Merge the shares' verdicts")
+        scope = {"run_id": "77", "run_attempt": "2", "commit": "selected-main-commit"}
+        expected_commit = expression_value(step["env"]["COMMIT"].strip("${} "), {}, inputs={"commit": scope["commit"]})
+        env = dict(self.env, SHARDED="true", BUCKETS="3", COMMIT=expected_commit, GITHUB_SHA="workflow-source")
+        plan = self.root / "plan/selection.json"
+        plan.parent.mkdir()
+        plan.write_text('["loot_a", "loot_b", "loot_c"]')
+        for bucket, name in enumerate(("loot_a", "loot_b", "loot_c")):
+            report = self.root / f"shares/artifact-{bucket}/parity.json"
+            report.parent.mkdir(parents=True)
+            run = scope | {"run_attempt": "1"} if bucket == 1 else scope
+            report.write_text(json.dumps({"bucket": bucket, "of": 3, "selected": [name], "passed": [],
+                                          "failed": [name], "complete": True, "scope": run}) if bucket != 2 else "{")
+        result = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=self.root, env=env,
+                                capture_output=True, text=True, check=True)
+        self.assertEqual(result.stdout.splitlines(), ["FAIL loot_a"])
+        merged = json.loads((self.root / "parity.json").read_text())
+        self.assertEqual((merged["passed"], merged["failed"], merged["complete"], merged["scope"]),
+                         ([], ["loot_a"], False, scope))
+        self.assertEqual(merged["shares"], {"reported": 1, "expected": 3})
 
     def test_vanilla_derived_scratch_is_deleted_when_the_job_ends(self):
         self.initialise()

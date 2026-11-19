@@ -85,10 +85,9 @@ impl Game<'_> {
             let cushion_passes = is_cushion
                 && (sneaking
                     || self.riding.is_some_and(|r| r as i32 == hit.id)
-                    || self
-                        .mobs
-                        .iter()
-                        .any(|m| m.extra.mount.is_some_and(|r| r as i32 == hit.id)));
+                    || self.remote.as_ref().is_some_and(|r| {
+                        r.passenger_vehicles.values().any(|&v| v as i32 == hit.id)
+                    }));
             // EndCrystal and EnderDragonPart keep Entity.interact's PASS.
             let crystal_passes = self.crystals.iter().any(|c| c.id as i32 == hit.id)
                 || self.level_dragon_part(hit.id as u32).is_some();

@@ -903,6 +903,12 @@ jobs:
         id: test_reruns_select_ignored_tests_too
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: python3 tools/ci/reexec_include_ignored.py --check
+      # The nested workspaces (telemetry server, registry, wasm fixtures, probes) take game crates by path: a crate that
+      # gains a dependency must refresh their own Cargo.lock too, or their --locked builds refuse after merge.
+      - name: Nested workspaces' lockfiles are current
+        id: nested_workspaces_lockfiles_are_current
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' && (needs.changes.outputs.rust_required != 'false') }}
+        run: python3 tools/ci/check_nested_locks.py
       # docs/layers.md: a crate depends only on its own layer or a lower one; today's exceptions only shrink.
       - name: Crates follow the layers
         id: crates_follow_the_layers

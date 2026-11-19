@@ -1,4 +1,5 @@
 from pathlib import Path
+import argparse
 import json
 import os
 import subprocess
@@ -10,6 +11,7 @@ import unittest
 from unittest import mock
 
 from tools import parity, parity_shard
+from tools.ci import parity_shards
 
 
 class ParityRunnerTests(unittest.TestCase):
@@ -238,6 +240,73 @@ class ParityRunnerTests(unittest.TestCase):
                         sys, "argv", ["parity.py", *args, "--list", "--selection-file", str(manifest)]):
                     self.assertEqual(parity.main(), 0)
                     self.assertEqual(set(json.loads(manifest.read_text())), selected)
+
+    def test_the_planner_splits_sorted_labels_round_robin(self):
+        with tempfile.TemporaryDirectory() as temp:
+            selection = Path(temp, "input.json")
+            selection.write_text(json.dumps(["wolf", "chest#2", "boat", "chest#1", "zombie"]))
+            out = Path(temp, "plan")
+            self.assertEqual(parity_shards.write_selection(selection, out, count=2), 2)
+            self.assertEqual(json.loads((out / "selection.json").read_text()),
+                             ["boat", "chest#1", "chest#2", "wolf", "zombie"])
+            self.assertEqual(json.loads((out / "bucket-0.json").read_text()), ["boat", "chest#2", "zombie"])
+            self.assertEqual(json.loads((out / "bucket-1.json").read_text()), ["chest#1", "wolf"])
+
+    def test_a_planned_share_runs_exactly_the_harnesses_it_names(self):
+        planned = ["boat", "chest#2", "wolf"]
+        found = dict.fromkeys([*planned, "chest#1", "zombie"])
+        with tempfile.TemporaryDirectory() as temp, \
+                mock.patch.object(parity, "harnesses", return_value=found), \
+                mock.patch.object(parity, "load_state", return_value={"hashes": {}, "harnesses": {}}), \
+                mock.patch.object(parity, "save_state"), mock.patch.object(parity, "exit_on_termination"), \
+                mock.patch.object(parity, "environment_key", return_value="test"), \
+                mock.patch.object(parity, "platform_skips", return_value={"chest": "worker exclusion"}), \
+                mock.patch.object(parity, "named_only", return_value={"wolf": "worker named-only"}), \
+                mock.patch.object(parity, "changed_harnesses", return_value={"zombie"}), mock.patch("builtins.print"):
+            manifest = Path(temp, "selection.json")
+            share = Path(temp, "bucket-0.json")
+            share.write_text(json.dumps(planned))
+            with mock.patch.object(sys, "argv", [
+                    "parity.py", "--all", "--skip-named-only", "--exclude", "boat", "--flake-check", "main",
+                    "--harness-file", str(share), "--list", "--selection-file", str(manifest)]):
+                self.assertEqual(parity.main(), 0)
+            self.assertEqual(json.loads(manifest.read_text()), planned)
+
+    def test_a_share_naming_a_harness_this_tree_lacks_is_refused(self):
+        with tempfile.TemporaryDirectory() as temp, \
+                mock.patch.object(parity, "load_state", return_value={"hashes": {}, "harnesses": {}}), \
+                mock.patch.object(parity, "save_state"), mock.patch.object(parity, "exit_on_termination"), \
+                mock.patch.object(parity, "environment_key", return_value="test"), \
+                mock.patch.object(parity, "platform_skips", return_value={}), mock.patch("builtins.print"):
+            share = Path(temp, "bucket-0.json")
+            share.write_text(json.dumps(["food", "no_such_harness_in_this_tree"]))
+            with mock.patch.object(sys, "argv", ["parity.py", "--all", "--harness-file", str(share), "--list"]), \
+                    mock.patch("sys.stderr"):
+                with self.assertRaises(SystemExit):
+                    parity.main()
+
+    def test_only_a_whole_run_marks_the_run_finished(self):
+        with tempfile.TemporaryDirectory() as temp, \
+                mock.patch.object(parity, "load_state", return_value={"hashes": {}, "harnesses": {}}), \
+                mock.patch.object(parity, "save_state"), mock.patch.object(parity, "exit_on_termination"), \
+                mock.patch.object(parity, "environment_key", return_value="test"), \
+                mock.patch.object(parity, "stale", return_value=False), \
+                mock.patch.object(parity, "platform_skips", return_value={}), mock.patch("builtins.print"):
+            marker = Path(temp, "last-run.json")
+            empty = Path(temp, "bucket-0.json")
+            empty.write_text("[]")
+            # Nothing to do: a whole run still records one for tools/gate.py.
+            with mock.patch.object(parity, "STATE_DIR", Path(temp)):
+                with mock.patch.dict(os.environ, PARITY_RUN_ID="whole"), \
+                        mock.patch.object(sys, "argv", ["parity.py"]):
+                    self.assertEqual(parity.main(), 0)
+                previous = marker.read_bytes()
+                self.assertEqual(json.loads(previous), {"run": "whole", "failed": []})
+                # A share must not overwrite the marker with its own run ID.
+                with mock.patch.dict(os.environ, PARITY_RUN_ID="share"), \
+                        mock.patch.object(sys, "argv", ["parity.py", "--harness-file", str(empty)]):
+                    self.assertEqual(parity.main(), 0)
+                self.assertEqual(marker.read_bytes(), previous)
 
     def test_a_pass_from_another_worktree_counts_only_for_the_same_content(self):
         with tempfile.TemporaryDirectory() as temp:
