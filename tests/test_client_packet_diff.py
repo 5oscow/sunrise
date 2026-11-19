@@ -1,21 +1,9 @@
 """tools/client_packet_diff.py keeps only the differences every run reproduces, whatever tick real-time input
 landed on; tools/input_recording.py cuts a recording at its markers."""
-from pathlib import Path
-import importlib.util
 import unittest
 
-TOOLS = Path(__file__).resolve().parents[1] / 'tools'
-
-
-def load(name):
-    spec = importlib.util.spec_from_file_location(name, TOOLS / f'{name}.py')
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-diff = load('client_packet_diff')
-recording = load('input_recording')
+from tools import client_packet_diff as diff
+from tools import input_recording as recording
 
 
 def tick(*packets):

@@ -12,11 +12,12 @@ one count turns the view 0.15 degrees (MouseHandler.turnPlayer).
 """
 import argparse
 import re
-import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import input_recording  # noqa: E402
+try:
+    from . import input_recording
+except ImportError:
+    import input_recording
 
 PLAYER = "Steve"
 # The opponent of the PvP routes: tools/client_packet_parity.py joins it as sunrise-bots --behaviour stand.

@@ -23,11 +23,12 @@ import difflib
 import json
 import math
 from pathlib import Path
-import sys
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import input_recording  # noqa: E402
-import wire_stream  # noqa: E402
+try:
+    from . import input_recording, wire_stream
+except ImportError:
+    import input_recording
+    import wire_stream
 
 MOVES = wire_stream.MOVES
 # Packets the server's timing decides, or that only the network thread sends: never per tick.
