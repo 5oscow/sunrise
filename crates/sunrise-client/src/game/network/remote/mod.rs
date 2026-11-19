@@ -1797,6 +1797,11 @@ impl Game<'_> {
             .as_ref()
             .is_some_and(|r| r.last_input & SHIFT_INPUT != 0)
     }
+    /// Whether secondary use skips a block's default interaction on this client.
+    pub(super) fn remote_secondary_use_skips_block(&self) -> bool {
+        self.remote_shift_down()
+            && (self.stack_in(self.selected).is_some() || self.offhand.is_some())
+    }
     fn next_sequence(&mut self) -> i32 {
         let r = self.remote.as_mut().expect("remote");
         r.sequence += 1;

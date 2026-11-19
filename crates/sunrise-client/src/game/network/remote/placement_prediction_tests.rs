@@ -748,7 +748,18 @@ fn a_prediction_asks_the_live_level_over_its_writes() {
 #[test]
 #[ignore = "daily"]
 fn an_active_vault_ends_a_held_item_s_click_on_the_client() {
-    on_a_client(Vec::new().into(), |game| {
+    crate::game::native_entity_refs::tests::with_client_game(|game| {
+        let (mut peer, _writer) = super::tests::connect_menu_test(game);
+        peer.set_read_timeout(Some(std::time::Duration::from_millis(50)))
+            .unwrap();
+        game.set_mode_id(0);
+        game.player = Some(PlayerMotion::new(game.motion, Vec3::new(0.5, 64.0, 3.5)).unwrap());
+        game.world
+            .chunks
+            .insert((0, 0), Arc::new(sunrise_client::chunk::Chunk::empty(0, 0)));
+        game.sync_tick_chunks();
+        let hit = top_of(0, 0);
+        game.forced_hit = Some(hit);
         let registry = game.pack.assets.registry;
         let vault = |state: &str| {
             registry
@@ -765,21 +776,45 @@ fn an_active_vault_ends_a_held_item_s_click_on_the_client() {
                 })
                 .unwrap()
         };
-        let key = ItemStack::new("minecraft:trial_key", 1);
-        let stick = ItemStack::new("minecraft:stick", 1);
         // VaultBlock.useItemOn: SUCCESS_SERVER for any held item on an ACTIVE vault, so the
         // click ends with UseItemOn and the hand swings only when the server says so.
         game.world.set(0, 64, 0, vault("active")).unwrap();
-        for held in [&key, &stick] {
-            let (result, _) = game.remote_block_reacts(&top_of(0, 0), Some(held), true);
-            assert!(result.consumes_action(), "{}", held.item);
-            assert!(!result.should_swing(), "{}", held.item);
+        for (hand, expected) in [
+            (Hand::Main, &[(0, 1)][..]),
+            (Hand::Off, &[(0, 1), (1, 2)][..]),
+        ] {
+            for item in ["minecraft:trial_key", "minecraft:stick"] {
+                game.inventory[game.selected] =
+                    (hand == Hand::Main).then(|| ItemStack::new(item, 1));
+                game.offhand = (hand == Hand::Off).then(|| ItemStack::new(item, 1));
+                let sequence = game.remote.as_ref().unwrap().sequence;
+                let swings = game.swings_started;
+                game.remote_use(mod_api::InteractionAttempt::Press);
+                let mut uses = Vec::new();
+                while let Ok((id, body)) = peer.recv() {
+                    match S::decode(id, &body).unwrap() {
+                        S::UseItemOn(packet) => {
+                            assert_eq!(packet.pos, hit.pos);
+                            uses.push((packet.hand, packet.sequence - sequence));
+                        }
+                        S::UseItem(_) => panic!("unexpected UseItem for {hand:?} {item}"),
+                        _ => {}
+                    }
+                }
+                assert_eq!(uses.as_slice(), expected, "{hand:?} {item}");
+                assert_eq!(
+                    game.remote.as_ref().unwrap().sequence - sequence,
+                    expected.len() as i32
+                );
+                assert_eq!(game.swings_started, swings, "{hand:?} {item}");
+            }
         }
         // TRY_WITH_EMPTY_HAND otherwise: the vault has no useWithoutItem, so the click goes on.
-        let (empty, _) = game.remote_block_reacts(&top_of(0, 0), None, true);
+        let (empty, _) = game.remote_block_reacts(&hit, None, true);
         assert!(!empty.consumes_action());
         game.world.set(0, 64, 0, vault("unlocking")).unwrap();
-        let (unlocking, _) = game.remote_block_reacts(&top_of(0, 0), Some(&key), true);
+        let key = ItemStack::new("minecraft:trial_key", 1);
+        let (unlocking, _) = game.remote_block_reacts(&hit, Some(&key), true);
         assert!(!unlocking.consumes_action());
     });
 }

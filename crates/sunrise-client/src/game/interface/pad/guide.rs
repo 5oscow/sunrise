@@ -305,11 +305,13 @@ impl Game<'_> {
         let latching = self.settings.controller.toggle_sneak || self.settings.toggle_crouch;
         let main_hand_item = self.stack_in(self.selected).is_some();
         let off_hand_item = self.offhand.is_some();
-        let (target, block, can_pick) = self.pad_guide_target(spectator);
+        let skip_block_use = self.remote_secondary_use_skips_block();
+        let (target, block, can_pick) = self.pad_guide_target(spectator, skip_block_use);
         let held = self.held().cloned();
-        let swallowed = block
-            .as_ref()
-            .is_some_and(|hit| self.pad_guide_click_swallowed(hit, held.as_ref()));
+        let swallowed = !skip_block_use
+            && block
+                .as_ref()
+                .is_some_and(|hit| self.pad_guide_click_swallowed(hit, held.as_ref()));
         let mut item_use = None;
         if !spectator && !swallowed {
             for hand in Hand::BOTH {
@@ -367,7 +369,11 @@ impl Game<'_> {
 
     /// `Minecraft.hitResult` with what the buttons do to it, the block hit the held items may act
     /// on, and whether Pick Block would do anything.
-    fn pad_guide_target(&mut self, spectator: bool) -> (Target, Option<super::super::Hit>, bool) {
+    fn pad_guide_target(
+        &mut self,
+        spectator: bool,
+        skip_block_use: bool,
+    ) -> (Target, Option<super::super::Hit>, bool) {
         let attack = self.pick_entity_hit();
         let object = self
             .remote_object_hit(false)
@@ -400,21 +406,21 @@ impl Game<'_> {
         let opens = self.block_opens_menu(&hit);
         let takes = if spectator {
             opens.then_some(Verb::Open)
+        } else if skip_block_use {
+            None
         } else {
             let held = self.held().cloned();
-            let hands_full = self.stack_in(self.selected).is_some() || self.offhand.is_some();
-            let secondary = self.keys.held(Action::Sneak) && hands_full;
             let ender_chest = &*self
                 .res
                 .facts()
                 .get(self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]))
                 .name
                 == "minecraft:ender_chest";
-            if !secondary && opens {
+            if opens {
                 Some(Verb::Open)
             } else if self.pad_guide_click_swallowed(&hit, held.as_ref()) {
                 None
-            } else if !secondary && ender_chest && !self.pad_guide_block_covered(&hit) {
+            } else if ender_chest && !self.pad_guide_block_covered(&hit) {
                 // EnderChestBlock has no menu provider but opens one: nothing solid on top.
                 Some(Verb::Open)
             } else if self.block_takes_click(&hit, held.as_ref()) {
@@ -450,10 +456,6 @@ impl Game<'_> {
         hit: &super::super::Hit,
         held: Option<&ItemStack>,
     ) -> bool {
-        let hands_full = self.stack_in(self.selected).is_some() || self.offhand.is_some();
-        if self.keys.held(Action::Sneak) && hands_full {
-            return false;
-        }
         let book = held.is_some_and(|s| {
             matches!(
                 &*s.item,

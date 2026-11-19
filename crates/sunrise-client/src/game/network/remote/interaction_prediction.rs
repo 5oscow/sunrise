@@ -221,9 +221,8 @@ impl Game<'_> {
             // Player.isSecondaryUseActive with something in either hand
             // keeps the block from reacting by default; an explicit block
             // allow overrides that skip, and False always skips the block.
-            let sneaking = self.remote_shift_down();
-            let hands_full = self.stack_in(self.selected).is_some() || self.offhand.is_some();
-            let block_used = canceled.is_none() && use_block.or(!(sneaking && hands_full));
+            let block_used =
+                canceled.is_none() && use_block.or(!self.remote_secondary_use_skips_block());
             let item_forced = use_item == TriState::True;
             let item_used = canceled.is_none()
                 && use_item.or(true)
