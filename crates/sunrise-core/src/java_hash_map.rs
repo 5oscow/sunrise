@@ -2,13 +2,14 @@
 // orders a real JVM produces; the red-black tree is the textbook one (CLRS, chapter 13).
 //! Java HashMap traversal for non-null keys with pure hash/equality/order
 //! operations. Tree bins preserve native linked iteration order.
-//! Shared storage for simulation callback lifecycles and NBT compounds.
+//! This is the storage/iterator subset needed by simulation callback lifecycles.
 //!
 //! Layout: entries live in a slab of nodes addressed by `u32` index. A bucket holds the first
 //! node of its bin's list (nodes chain through `next`, in iteration order) and, for a tree bin,
 //! the root of a red-black tree over the same nodes. Tree links live in a side table that the
 //! map only allocates with its first tree bin.
 use std::{
+    borrow::Borrow,
     cmp::Ordering,
     mem,
     sync::atomic::{self, AtomicU64},
@@ -24,6 +25,30 @@ pub trait JavaKey: Eq {
     /// Native class-name ordering, then identity-hash ordering. Equal identity
     /// hashes break to Less, even for two different objects. Never return Equal.
     fn tie_break(&self, other: &Self) -> Ordering;
+}
+
+impl JavaKey for str {
+    fn java_hash(&self) -> i32 {
+        crate::random::java_string_hash(self.encode_utf16())
+    }
+    fn comparable_compare(&self, other: &Self) -> Option<Ordering> {
+        Some(self.encode_utf16().cmp(other.encode_utf16()))
+    }
+    fn tie_break(&self, _other: &Self) -> Ordering {
+        unreachable!("unequal strings are Comparable")
+    }
+}
+
+impl JavaKey for String {
+    fn java_hash(&self) -> i32 {
+        self.as_str().java_hash()
+    }
+    fn comparable_compare(&self, other: &Self) -> Option<Ordering> {
+        self.as_str().comparable_compare(other.as_str())
+    }
+    fn tie_break(&self, other: &Self) -> Ordering {
+        self.as_str().tie_break(other.as_str())
+    }
 }
 
 /// No node: the end of a list, an absent child or parent, an empty bucket.
@@ -100,7 +125,6 @@ pub struct JavaHashMap<K, V> {
     mod_count: u64,
 }
 
-/// Borrowed Java bucket/list traversal, without a cursor or allocation.
 pub struct Iter<'a, K, V> {
     map: &'a JavaHashMap<K, V>,
     next: u32,
@@ -227,6 +251,13 @@ impl<K: JavaKey, V> Default for JavaHashMap<K, V> {
     }
 }
 
+impl<K: JavaKey + Clone, V: Clone> Clone for JavaHashMap<K, V> {
+    /// A Rust clone preserves the Java table state, unlike [`Self::copied`].
+    fn clone(&self) -> Self {
+        self.clone_with(Clone::clone)
+    }
+}
+
 /// `h ^ (h >>> 16)`: the hash the map places a key by.
 fn spread(hash: i32) -> i32 {
     hash ^ ((hash as u32) >> 16) as i32
@@ -242,8 +273,16 @@ fn threshold_for(capacity: usize) -> usize {
 }
 
 impl<K: JavaKey, V> JavaHashMap<K, V> {
-    /// Preserve map state while cloning values in slab order. Only structural
-    /// ownership cloning uses this order; observable traversal uses `entries`.
+    /// `HashMap.newHashMap(expected)`: pre-size the table for this many entries,
+    /// without allocating it until the first put.
+    pub fn with_expected_entries(expected: usize) -> Self {
+        let wanted = expected.saturating_mul(4).div_ceil(3);
+        Self {
+            initial_capacity: wanted.min(MAX_CAPACITY).next_power_of_two(),
+            ..Self::default()
+        }
+    }
+    /// Preserve the table history while copying values in slab order.
     pub(crate) fn clone_with(&self, mut clone_value: impl FnMut(&V) -> V) -> Self
     where
         K: Clone,
@@ -299,19 +338,30 @@ impl<K: JavaKey, V> JavaHashMap<K, V> {
         Self::from_copy_entries(self.len, self)
     }
     fn from_copy_entries(size: usize, entries: impl IntoIterator<Item = (K, V)>) -> Self {
-        let mut copy = Self::default();
-        if size > 0 {
-            // The smallest power of two at least size / 0.75.
-            let wanted = size.saturating_mul(4).div_ceil(3);
-            copy.initial_capacity = wanted.min(MAX_CAPACITY).next_power_of_two();
-            copy.nodes.reserve(size);
-            for (key, value) in entries {
-                copy.put(key, value);
-            }
+        if size == 0 {
+            return Self::default();
+        }
+        let mut copy = Self::with_expected_entries(size);
+        copy.nodes.reserve(size);
+        for (key, value) in entries {
+            copy.put(key, value);
         }
         copy
     }
-    pub fn get(&self, key: &K) -> Option<&V> {
+    pub(crate) fn cleared(&self) -> Self {
+        Self {
+            initial_capacity: if self.buckets.is_empty() {
+                self.initial_capacity
+            } else {
+                self.buckets.len()
+            },
+            ..Self::default()
+        }
+    }
+    pub fn get<Q: JavaKey + ?Sized>(&self, key: &Q) -> Option<&V>
+    where
+        K: Borrow<Q>,
+    {
         let (_, i) = self.find(key)?;
         Some(&self.node(i).value)
     }
@@ -322,7 +372,10 @@ impl<K: JavaKey, V> JavaHashMap<K, V> {
             remaining: self.len,
         }
     }
-    pub fn get_mut(&mut self, key: &K) -> Option<&mut V> {
+    pub fn get_mut<Q: JavaKey + ?Sized>(&mut self, key: &Q) -> Option<&mut V>
+    where
+        K: Borrow<Q>,
+    {
         let (_, index) = self.find(key)?;
         Some(&mut self.node_mut(index).value)
     }
@@ -420,7 +473,10 @@ impl<K: JavaKey, V> JavaHashMap<K, V> {
         }
         None
     }
-    pub fn remove(&mut self, key: &K) -> Option<V> {
+    pub fn remove<Q: JavaKey + ?Sized>(&mut self, key: &Q) -> Option<V>
+    where
+        K: Borrow<Q>,
+    {
         let (b, i) = self.find(key)?;
         Some(self.remove_node(b, i, true))
     }
@@ -503,18 +559,27 @@ impl<K: JavaKey, V> JavaHashMap<K, V> {
     fn bucket_index(&self, hash: i32) -> usize {
         hash as u32 as usize & (self.buckets.len() - 1)
     }
-    fn is_key(&self, i: u32, hash: i32, key: &K) -> bool {
+    fn is_key<Q: JavaKey + ?Sized>(&self, i: u32, hash: i32, key: &Q) -> bool
+    where
+        K: Borrow<Q>,
+    {
         let node = self.node(i);
-        node.hash == hash && node.key == *key
+        node.hash == hash && node.key.borrow() == key
     }
     /// The bucket and node holding the key equal to `key`.
-    fn find(&self, key: &K) -> Option<(usize, u32)> {
+    fn find<Q: JavaKey + ?Sized>(&self, key: &Q) -> Option<(usize, u32)>
+    where
+        K: Borrow<Q>,
+    {
         if self.buckets.is_empty() {
             return None;
         }
         self.find_hashed(key, spread(key.java_hash()))
     }
-    fn find_hashed(&self, key: &K, hash: i32) -> Option<(usize, u32)> {
+    fn find_hashed<Q: JavaKey + ?Sized>(&self, key: &Q, hash: i32) -> Option<(usize, u32)>
+    where
+        K: Borrow<Q>,
+    {
         let b = self.bucket_index(hash);
         let Bucket { head, root } = self.buckets[b];
         let found = if root != NIL {
@@ -530,25 +595,24 @@ impl<K: JavaKey, V> JavaHashMap<K, V> {
     }
     /// The node of the key equal to `key` in the subtree at `p`. Trees are ordered by hash
     /// first, so a different hash rules out one side; nodes with the same hash can be on both.
-    fn tree_find(&self, mut p: u32, hash: i32, key: &K) -> u32 {
+    fn tree_find<Q: JavaKey + ?Sized>(&self, mut p: u32, hash: i32, key: &Q) -> u32
+    where
+        K: Borrow<Q>,
+    {
         while p != NIL {
             let node = self.node(p);
             let links = self.links[p as usize];
             p = match node.hash.cmp(&hash) {
                 Ordering::Greater => links.left,
                 Ordering::Less => links.right,
-                Ordering::Equal if node.key == *key => return p,
-                Ordering::Equal => match key.comparable_compare(&node.key) {
-                    Some(Ordering::Less) => links.left,
-                    Some(Ordering::Greater) => links.right,
-                    _ => {
-                        let found = self.tree_find(links.right, hash, key);
-                        if found != NIL {
-                            return found;
-                        }
-                        links.left
+                Ordering::Equal if node.key.borrow() == key => return p,
+                Ordering::Equal => {
+                    let found = self.tree_find(links.right, hash, key);
+                    if found != NIL {
+                        return found;
                     }
-                },
+                    links.left
+                }
             };
         }
         NIL
@@ -694,6 +758,9 @@ impl<K: JavaKey, V> JavaHashMap<K, V> {
     }
     /// The first node of the first non-empty bucket from `b` on.
     fn first_node_from(&self, b: usize) -> u32 {
+        if self.len == 0 {
+            return NIL;
+        }
         self.buckets[b..]
             .iter()
             .find(|bucket| bucket.head != NIL)
