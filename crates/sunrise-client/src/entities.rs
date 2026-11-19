@@ -1256,6 +1256,7 @@ impl ExperienceOrb {
         }
         // ExperienceOrb.tick applies block effects after moving, before drag.
         let discarded = server
+            && !burnt_out
             && self.apply_lava_contact_damage_inner(
                 world,
                 fluids,
@@ -1327,9 +1328,6 @@ impl ExperienceOrb {
         on_sound: &mut dyn FnMut([f64; 3], f32),
         invulnerable: &mut dyn FnMut(&mut W) -> bool,
     ) -> bool {
-        if self.health <= 0 {
-            return true;
-        }
         let contacts = orb_lava_contacts(self.previous, self.position, wanted, |p| {
             let fluid = fluids.fluid(world.block(p.x, p.y, p.z));
             if !fluid
@@ -5230,24 +5228,46 @@ mod orb_lava_tests {
                 "client orb in lava must not play burn sound"
             );
             assert_eq!(client_orb.health, 5);
+        });
+    }
 
-            // Dead orb (health <= 0) takes no contact damage and emits no sound
-            let mut dead_orb = sample_orb(Vec3::new(20.5, 4.1, 20.5), 0);
-            sounds.clear();
-            let mut dead_draws = 0;
-            let discarded = dead_orb.apply_lava_contact_damage(
-                world,
-                fluids,
-                Vec3::ZERO,
-                &mut || {
-                    dead_draws += 1;
-                    0.5
-                },
-                &mut |pos, pitch| sounds.push((pos, pitch)),
-            );
-            assert!(discarded, "dead orb remains discarded");
-            assert!(sounds.is_empty(), "dead orb must not play burn sound");
-            assert_eq!(dead_draws, 0, "dead orb must not consume random float");
+    #[test]
+    #[ignore = "daily"]
+    fn nonpositive_health_orbs_age_in_air_and_take_damage_in_lava() {
+        with_fixture(|world, facts, collision, fluids, assets| {
+            let lava = assets.registry.default_state("minecraft:lava").unwrap();
+            world.set(20, 4, 20, lava).unwrap();
+            for health in [0, -3] {
+                for (y, fire_ticks, ticks, damage, burn_sounds) in
+                    [(6.0, 0, 20, 0, 0), (4.1, 0, 1, 4, 1), (4.1, 20, 1, 1, 0)]
+                {
+                    let mut orb = sample_orb(Vec3::new(20.5, y, 20.5), health);
+                    orb.no_gravity = true;
+                    orb.fire_ticks = fire_ticks;
+                    let mut sounds = 0;
+                    for _ in 0..ticks {
+                        assert_eq!(
+                            orb.tick(
+                                world,
+                                facts,
+                                collision,
+                                None,
+                                true,
+                                &mut || 0.5,
+                                None,
+                                fluids,
+                                crate::test_resources::server_loop_context(),
+                                &mut |_, _| sounds += 1,
+                            ),
+                            damage == 0,
+                            "Health {health}, Y {y}, Fire {fire_ticks}"
+                        );
+                    }
+                    assert_eq!(orb.age, ticks);
+                    assert_eq!(orb.health, health - damage);
+                    assert_eq!(sounds, burn_sounds);
+                }
+            }
         });
     }
 
