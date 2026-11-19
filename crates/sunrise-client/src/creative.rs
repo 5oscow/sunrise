@@ -1002,9 +1002,13 @@ impl Creative {
     }
     /// `CreativeModeInventoryScreen.checkTabHovering`: the tab whose icon
     /// rectangle, 3 pixels in from its 26x32 slot (`isHovering(x + 3, y + 3,
-    /// 21, 27)`), holds the cursor. The screen draws its display name.
-    pub fn hovered_tab(tabs: &[Tab], origin: (f32, f32), cursor: (f32, f32)) -> Option<usize> {
-        tabs.iter().position(|tab| {
+    /// 21, 27)`), holds the cursor, among the tabs of the page shown. The
+    /// screen draws its display name.
+    pub fn hovered_tab(&self, origin: (f32, f32), cursor: (f32, f32)) -> Option<usize> {
+        self.tabs.iter().position(|tab| {
+            if !self.on_page(tab) {
+                return false;
+            }
             let (x, y) = Self::tab_position(tab);
             let (x, y) = (origin.0 + x + 3.0, origin.1 + y + 3.0);
             cursor.0 >= x && cursor.0 < x + 21.0 && cursor.1 >= y && cursor.1 < y + 27.0
@@ -2059,14 +2063,37 @@ mod tests {
         let screen = tooltip_tabs();
         let tab = &screen.tabs[0];
         let (x, y) = Creative::tab_position(tab);
-        let at =
-            |dx: f32, dy: f32| Creative::hovered_tab(&screen.tabs, (0.0, 0.0), (x + dx, y + dy));
+        let at = |dx: f32, dy: f32| screen.hovered_tab((0.0, 0.0), (x + dx, y + dy));
         assert_eq!(at(4.0, 4.0), Some(0));
         assert_eq!(at(23.5, 4.0), Some(0));
         assert_eq!(at(2.0, 4.0), None);
         assert_eq!(at(24.0, 4.0), None);
         assert_eq!(at(4.0, 2.0), None);
         assert_eq!(at(4.0, 30.0), None);
+    }
+
+    /// NeoForge's pages: a tab on another page is not hovered, even where it
+    /// shares a slot with one on the page shown (#2646).
+    #[test]
+    fn only_the_shown_pages_tabs_are_hovered() {
+        let stack = |id: &str| format!("{{count:1,id:\"minecraft:{id}\"}}");
+        let tab = |id: &str, column: u32, page: u32| {
+            serde_json::json!({"id": format!("minecraft:{id}"), "type": "CATEGORY", "row": "TOP",
+                "column": column, "page": page, "title": id, "icon": stack("stone"),
+                "visible": true, "items": [stack("stone")]})
+        };
+        let raw = serde_json::json!({"schema": 3, "tabs": [
+            tab("first", 0, 0), tab("second", 1, 0), tab("modded", 0, 1), tab("everywhere", 6, 0)
+        ]});
+        let mut c = Creative::from_json(&raw).unwrap();
+        c.set_page(1);
+        let at = |c: &Creative, i: usize| {
+            let (x, y) = Creative::tab_position(&c.tabs[i]);
+            c.hovered_tab((0.0, 0.0), (x + 4.0, y + 4.0))
+        };
+        assert_eq!(at(&c, 0), Some(2));
+        assert_eq!(at(&c, 1), None);
+        assert_eq!(at(&c, 3), Some(3));
     }
 }
 
