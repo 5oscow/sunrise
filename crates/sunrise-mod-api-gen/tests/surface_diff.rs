@@ -79,7 +79,7 @@ fn without_the_gate_a_break_reports_and_passes() {
     let (code, out, _) = run(dir.path(), &["--notes", "changes", "--base-notes", "base"]);
     assert_eq!(code, 0);
     assert!(out.starts_with(
-        "Surface: breaking (1 breaking, 0 conditional, 1 additive; 1 breaking without a note)"
+        "Surface: breaking (1 breaking, 0 conditional, 1 additive, 0 advisory; 1 breaking without a note)"
     ));
     assert!(out.find("- fn:spawn (removed)") < out.find("- fn:summon (added)"));
 }

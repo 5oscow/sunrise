@@ -48,7 +48,7 @@ fn engine_catalogs_share_the_diff_and_note_gate() {
         [
             ("loop:entities.tick", ChangeKind::Removed, Class::Breaking),
             ("point:game::tick", ChangeKind::Changed, Class::Breaking),
-            ("internal:fn:game::step", ChangeKind::Added, Class::Additive),
+            ("internal:fn:game::step", ChangeKind::Added, Class::Advisory),
         ]
     );
     assert_eq!(report.changes[1].what, ["signature hash: `old` → `new`"]);
@@ -66,6 +66,13 @@ fn engine_catalogs_share_the_diff_and_note_gate() {
             .is_empty()
     );
     assert_eq!(report.undeclared().count(), 0);
+
+    let only_internal = functions(vec![]).with_engine_items(vec![new.engine_items[0].clone()]);
+    let report = diff(&only_internal, &functions(vec![]));
+    assert_eq!(report.verdict, Verdict::Advisory);
+    assert_eq!(report.undeclared().count(), 0);
+    assert_eq!(report.changes[0].kind, ChangeKind::Removed);
+    assert_eq!(report.changes[0].class, Class::Advisory);
 }
 
 fn hook(name: &str, side: Side, arguments: &[(&str, &str)]) -> Hook {
@@ -849,13 +856,13 @@ fn breaking_changes_come_first_and_notes_declare_them() {
     assert_eq!(d.undeclared().count(), 0);
     assert_eq!(
         d.to_text(),
-        "Surface: breaking (1 breaking, 0 conditional, 1 additive; 0 breaking without a note)\n\
+        "Surface: breaking (1 breaking, 0 conditional, 1 additive, 0 advisory; 0 breaking without a note)\n\
          Old OLD, new NEW\n\
          \n\
-         Engine catalogs (removals and changes are breaking)\n\
+         Engine catalogs (point and loop removals and changes are breaking)\n\
          Injection points: 0 added, 0 removed, 0 changed\n\
          Published loops: 0 added, 0 removed, 0 changed\n\
-         Listed internals: 0 added, 0 removed, 0 changed\n\
+         Listed internals (advisory): 0 added, 0 removed, 0 changed\n\
          \n\
          Breaking (1)\n\
          - fn:a (removed)\n    why (rename.toml): Shorter name.\n    migrate: Call `b`.\n\

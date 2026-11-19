@@ -29,6 +29,8 @@
 //!   a marker or object-safe API supertrait gained by a trait mods only call (`Send`, `Sync`,
 //!   `'static`, `Debug`, `Any`), an item no longer required, an enum no longer
 //!   `#[non_exhaustive]`.
+//! - **Advisory**: a listed internal added, removed or changed. Native internals are pinned to
+//!   an exact build and are not covered by the change-note gate.
 //!
 //! A container's members are reported with it once: when a type, trait or hook is added or
 //! removed, or its hashed member set (`members`, `required`, whether a hook has an output)
@@ -47,6 +49,8 @@ use std::collections::{BTreeMap, BTreeSet};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Class {
+    /// A listed internal's change, visible in the report without a change-note requirement.
+    Advisory,
     Additive,
     /// Breaks only a mod that builds the value with a full literal, names a hook version, or
     /// is a wasm mod; the fit test judges each mod.
@@ -59,6 +63,7 @@ pub enum Class {
 #[serde(rename_all = "snake_case")]
 pub enum Verdict {
     Identical,
+    Advisory,
     Additive,
     Conditional,
     Breaking,
@@ -97,8 +102,7 @@ pub struct Change {
     pub notes: Vec<Note>,
 }
 
-/// The comparison of two surfaces: breaking changes first, then conditional, then additive,
-/// each by id.
+/// The comparison of two surfaces, from breaking changes down to advisory ones, each by id within its class.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Diff {
     /// The old document's hash.
@@ -397,11 +401,15 @@ pub fn diff(old: &Surface, new: &Surface) -> Diff {
             }
             (None, None) => continue,
         };
-        let class = lines
-            .iter()
-            .map(|(_, c)| *c)
-            .max()
-            .expect("one line at least");
+        let class = if record_kind(id) == "internal" {
+            Class::Advisory
+        } else {
+            lines
+                .iter()
+                .map(|(_, c)| *c)
+                .max()
+                .expect("one line at least")
+        };
         changes.insert(
             id.clone(),
             Change {
@@ -486,6 +494,7 @@ pub fn diff(old: &Surface, new: &Surface) -> Diff {
     changes.sort_by(|a, b| b.class.cmp(&a.class).then_with(|| a.id.cmp(&b.id)));
     let verdict = match changes.iter().map(|c| c.class).max() {
         None => Verdict::Identical,
+        Some(Class::Advisory) => Verdict::Advisory,
         Some(Class::Additive) => Verdict::Additive,
         Some(Class::Conditional) => Verdict::Conditional,
         Some(Class::Breaking) => Verdict::Breaking,
@@ -889,7 +898,7 @@ fn pair<T>(
 const ENGINE_KINDS: [(&str, &str); 3] = [
     ("point", "Injection points"),
     ("loop", "Published loops"),
-    ("internal", "Listed internals"),
+    ("internal", "Listed internals (advisory)"),
 ];
 
 fn record_kind(id: &str) -> &str {
@@ -947,24 +956,26 @@ impl Diff {
     /// The verdict and counts, engine catalog changes, then API changes by class.
     pub fn to_text(&self) -> String {
         let count = |class| self.changes.iter().filter(|c| c.class == class).count();
-        let (breaking, conditional, additive) = (
+        let (breaking, conditional, additive, advisory) = (
             count(Class::Breaking),
             count(Class::Conditional),
             count(Class::Additive),
+            count(Class::Advisory),
         );
         let verdict = match self.verdict {
             Verdict::Identical => "identical",
+            Verdict::Advisory => "advisory",
             Verdict::Additive => "additive",
             Verdict::Conditional => "conditional",
             Verdict::Breaking => "breaking",
         };
         let mut text = format!(
-            "Surface: {verdict} ({breaking} breaking, {conditional} conditional, {additive} additive; {} breaking without a note)\nOld {}, new {}\n",
+            "Surface: {verdict} ({breaking} breaking, {conditional} conditional, {additive} additive, {advisory} advisory; {} breaking without a note)\nOld {}, new {}\n",
             self.undeclared().count(),
             self.old,
             self.new
         );
-        text.push_str("\nEngine catalogs (removals and changes are breaking)\n");
+        text.push_str("\nEngine catalogs (point and loop removals and changes are breaking)\n");
         for (prefix, title) in ENGINE_KINDS {
             let records = || self.changes.iter().filter(|c| record_kind(&c.id) == prefix);
             let count = |kind| records().filter(|c| c.kind == kind).count();

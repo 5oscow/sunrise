@@ -142,21 +142,31 @@ class EngineCatalogGateTests(unittest.TestCase):
                 (changes / "engine-change.toml").write_text(f'ids = {json.dumps(notes)}\nwhy = "Use the new sites."\n')
             return surface_report.compare(os.environ["SUNRISE_STAGE_TOOL"], work / "base", work / "head", work, True)
 
-    def test_undeclared_removals_fail_and_declared_removals_pass(self):
+    def test_undeclared_point_and_loop_removals_fail_and_declared_removals_pass(self):
         code, text = self.compare(self.ITEMS, [])
         self.assertEqual(code, 1, text)
-        ids = [item["id"] for item in self.ITEMS]
-        for id in ids:
-            self.assertIn(f"- {id} (removed)", text)
-            self.assertIn(f"breaking change without a change note: {id}", text)
+        ids = [item["id"] for item in self.ITEMS[:2]]
+        for record in ids:
+            self.assertIn(f"- {record} (removed)", text)
+            self.assertIn(f"breaking change without a change note: {record}", text)
         code, text = self.compare(self.ITEMS, [], notes=ids)
         self.assertEqual(code, 0, text)
+        self.assertNotIn("breaking change without a change note:", text)
+
+    def test_undeclared_internal_removal_is_advisory_and_listed(self):
+        internal = self.ITEMS[2]
+        code, text = self.compare([internal], [])
+        self.assertEqual(code, 0, text)
+        self.assertIn("Surface: advisory (0 breaking, 0 conditional, 0 additive, 1 advisory;", text)
+        self.assertIn("Listed internals (advisory): 0 added, 1 removed, 0 changed", text)
+        self.assertIn(f"- {internal['id']} (removed)", text)
         self.assertNotIn("breaking change without a change note:", text)
 
     def test_additions_pass_and_each_kind_has_a_count(self):
         code, text = self.compare([], self.ITEMS)
         self.assertEqual(code, 0, text)
-        for kind in ("Injection points", "Published loops", "Listed internals"):
+        self.assertIn("0 breaking, 0 conditional, 2 additive, 1 advisory", text)
+        for kind in ("Injection points", "Published loops", "Listed internals (advisory)"):
             self.assertIn(f"{kind}: 1 added, 0 removed, 0 changed", text)
 
     def test_changed_contracts_keep_their_ids(self):
@@ -167,6 +177,7 @@ class EngineCatalogGateTests(unittest.TestCase):
             dict(internal, hash="internal-2", signature="fn tick(&mut self)", signature_hash="new-internal"),
         ])
         self.assertEqual(code, 1, text)
+        self.assertIn("2 breaking, 0 conditional, 0 additive, 1 advisory", text)
         for item, detail in zip(self.ITEMS, ("`old-point` → `new-point`", "`TickSlot` → `NewTickSlot`",
                                             "`fn tick(&self)` → `fn tick(&mut self)`")):
             self.assertIn(f"- {item['id']} (changed)", text)

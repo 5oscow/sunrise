@@ -51,21 +51,23 @@ changes nothing, one lost is named by the fit test. The document's own `hash` is
 ## What a change is
 
 `sunrise-stage surface-diff OLD NEW` compares two documents by id. A record only in the new one is added, only in the
-old one removed; in both with another hash, changed. A rename shows as a removal and an addition. Each change is in
-one of three classes:
+old one removed; in both with another hash, changed. A rename or a move to a different point path shows as a removal
+and an addition, even within the same crate. Each change is in one of four classes:
 
 - **Breaking**: it can stop any mod that uses the item from compiling or meaning the same. A record removed; a
   contract changed (a hook's side or kind, a retyped field or argument, a signature, a method no longer on wasm); a
   variant added to an exhaustive enum; a required item added to a trait mods implement; an impl a type no longer
-  has; a behaviour removed. An injection point, published loop or listed internal removed or changed is breaking.
+  has; a behaviour removed. An injection point or published loop removed or changed is breaking.
 - **Conditional**: it breaks only some mods, which the [fit test](04-fit.md) finds from each mod's source (except a
   behaviour's `version`, which no fit report shows: a mod relies on a behaviour without naming it). A field
   added to a struct mods can build, or an argument added to a hook (only a mod that writes it out in full); a struct
   no longer constructible; a public path that goes (only a mod that writes that path); a hook's `version` (only a mod
   whose manifest names it) or a behaviour's `version` (only a mod that relies on it); a type's wire form or layout
   (wasm mods only).
-- **Additive**: a new record, including an engine catalog item or behaviour, and changes that only widen an item: now on wasm, an impl gained, a new public path, an
-  item no longer required, an enum no longer `#[non_exhaustive]`.
+- **Additive**: a new API record, behaviour, injection point or published loop, or a change that only widens an item:
+  now on wasm, an impl gained, a new public path, an item no longer required, an enum no longer `#[non_exhaustive]`.
+- **Advisory**: all listed internal changes are reported, not gated, because native internals are pinned to an exact
+  build and the [fit test](04-fit.md) tells each mod whether it still fits.
 
 Each change says what changed in words a mod author can act on, for example
 ``argument `player`: `PlayerRef` → `ServerPlayerRef` ``. `cargo sunrise-mod sdk diff <build> <build>` prints the
@@ -73,13 +75,13 @@ same report for two published builds.
 
 When the `verify` check runs on a pull request that changes Rust, its summary carries this report, comparing the
 merge base with the head. The engine catalogs have a section of their own, with counts for additions, removals and
-changes and details for every removal or change. It reports, and fails the check only when:
+changes and names removed or changed items, subject to the summary's length cap. It fails the check only when:
 
 - the head's tree cannot be exported;
 - a change note cannot be read, or names an item that did not change;
 - a breaking change has no change note: every breaking record the report lists, members included (a removed field is
-  its own line), is named by a note the pull request adds. Conditional and additive changes need none. The gate is
-  `gate = true` in `tools/ci/surface.toml`.
+  its own line), must be named by a note the pull request adds. Conditional, additive and advisory changes need none.
+  The gate is `gate = true` in `tools/ci/surface.toml`.
 
 ## Command completion layouts
 
@@ -103,8 +105,22 @@ why = "The hook now fires on the server only."
 migrate = "Take `ServerPlayerRef` instead of `PlayerRef`."   # optional
 ```
 
-Use the exact id printed by `surface-diff`, including `point:`, `loop:` or `internal:` for an engine catalog item.
-A note with an unknown key, a missing `ids` or `why`, an empty `ids`, or an id that did not change is refused. The SDK's `sdk.json`
+Use the exact id printed by `surface-diff`, including `point:` or `loop:` for a breaking engine catalog item. For a
+move, give the removed ids in `ids` and the replacement paths in `migrate`. For example, this is the note for the tick
+methods' move within the game crate:
+
+```toml
+ids = [
+    "point:sunrise_client::game::Game<'_>::tick_world",
+    "point:sunrise_client::game::Game<'_>::tick_mobs",
+]
+why = "Commit e0e8269d76a moved the world and mob tick methods into game::level_tick."
+migrate = "Replacement ids: point:sunrise_client::game::level_tick::Game<'_>::tick_world and point:sunrise_client::game::level_tick::Game<'_>::tick_mobs. In [[inject]], set at to the corresponding path without point: and update hash if pinned."
+```
+
+The reader checks new top-level notes; a note with an unknown key, a missing `ids` or `why`, an empty `ids`, or an id
+that did not change is refused. `changes/history/` holds backfilled notes in the same format. The reader does not
+scan that directory, so they neither waive the gate nor appear in the SDK diff. For active notes, the SDK's `sdk.json`
 carries the notes of the changes since the SDK before it (`surface.notes`), and `cargo sunrise-mod update` prints a
 changed item's `migrate` line beside it.
 
