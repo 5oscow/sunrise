@@ -1115,6 +1115,11 @@ fn path_clear(m: &Mob, w: &MobWorld, to: Vec3) -> bool {
     }
     true
 }
+/// `FoxPounceGoal.tick`'s pitch: `signum(-y) * Math.acos(horizontal / len)` times
+/// `Mth.RAD_TO_DEG` in one multiply.
+fn pounce_pitch(horizontal: f64, y: f64, len: f64) -> f64 {
+    signum(-y) * jmath::acos(horizontal / len) * f64::from(sunrise_core::geometry::trig::RAD_TO_DEG)
+}
 fn signum(x: f64) -> f64 {
     if x > 0.0 {
         1.0
@@ -1278,8 +1283,7 @@ impl Goal for Pounce {
                 let y = v.y * bias;
                 let len = (horizontal * horizontal + y * y).sqrt();
                 if len > f64::from(1.0e-5f32) {
-                    let pitch = signum(-y) * jmath::acos(horizontal / len) * 180.0
-                        / f64::from(std::f32::consts::PI);
+                    let pitch = pounce_pitch(horizontal, y, len);
                     m.head_pitch = (pitch as f32 % 360.0).clamp(-90.0, 90.0);
                 }
             }
@@ -2429,5 +2433,16 @@ mod defend_tests {
             },
         );
         assert!(ran, "vanilla data is missing");
+    }
+}
+
+#[cfg(test)]
+mod pounce_pitch_tests {
+    /// `FoxPounceGoal.tick` multiplies by `Mth.RAD_TO_DEG` once, then narrows to a float.
+    #[test]
+    fn the_pounce_pitch_uses_vanillas_degree_factor() {
+        let (horizontal, y) = (0.3f64, 0.5f64);
+        let len = (horizontal * horizontal + y * y).sqrt();
+        assert_eq!(super::pounce_pitch(horizontal, y, len) as f32, -59.03624);
     }
 }

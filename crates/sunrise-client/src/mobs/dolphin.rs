@@ -264,11 +264,16 @@ impl Goal for Jump {
             // Mth.rotLerp(0.2, xRot, 0).
             m.head_pitch += 0.2 * super::living::wrap(0.0 - m.head_pitch);
         } else if v.length() > f64::from(1.0e-5f32) {
-            let horizontal = sunrise_core::geometry::length(v.x, v.z);
-            m.head_pitch = ((-v.y).atan2(horizontal) * f64::from(180.0f32)
-                / f64::from(std::f32::consts::PI)) as f32;
+            m.head_pitch = breach_pitch(v);
         }
     }
+}
+
+/// `DolphinJumpGoal.tick`'s pitch: `Math.atan2(-y, horizontalDistance)` times `Mth.RAD_TO_DEG`.
+fn breach_pitch(v: sunrise_core::geometry::Vec3) -> f32 {
+    let horizontal = sunrise_core::geometry::length(v.x, v.z);
+    (sunrise_core::jmath::atan2(-v.y, horizontal)
+        * f64::from(sunrise_core::geometry::trig::RAD_TO_DEG)) as f32
 }
 
 /// `FollowPlayerRiddenEntityGoal(mob, AbstractBoat / AbstractNautilus)`: a
@@ -691,5 +696,17 @@ mod treasure_play_tests {
             }
         });
         assert!(ran, "vanilla data is missing");
+    }
+}
+
+#[cfg(test)]
+mod breach_pitch_tests {
+    /// `DolphinJumpGoal.tick`: `Math.atan2` times `Mth.RAD_TO_DEG` in one multiply.
+    #[test]
+    fn the_breach_pitch_uses_vanillas_degree_factor() {
+        let v = sunrise_core::geometry::Vec3::new(0.3, 0.5, 0.0);
+        assert_eq!(super::breach_pitch(v), -59.03624);
+        let v = sunrise_core::geometry::Vec3::new(0.5, 1.0, 0.0);
+        assert_eq!(super::breach_pitch(v), -63.434944);
     }
 }

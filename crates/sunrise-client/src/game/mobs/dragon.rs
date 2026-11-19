@@ -2494,19 +2494,14 @@ impl Game<'_> {
                             f64::from(-trig::cos(r)),
                         ));
                         let dot = dir.dot(aim) as f32;
-                        let angle = (f64::from(dot).acos() * 180.0
-                            / f64::from(std::f32::consts::PI))
+                        let angle = (sunrise_core::jmath::acos(f64::from(dot))
+                            * f64::from(trig::RAD_TO_DEG))
                             as f32
                             + 0.5;
                         if angle < 0.0 || angle > 10.0 {
                             let head = d.parts[0].0;
                             let (xd, zd) = (pp.x - head.x, pp.z - head.z);
-                            let delta = wrap64(
-                                180.0
-                                    - trig::atan2(xd, zd) * 180.0 / f64::from(std::f32::consts::PI)
-                                    - f64::from(d.yaw),
-                            )
-                            .clamp(-100.0, 100.0);
+                            let delta = scanning_turn(xd, zd, d.yaw);
                             d.yaw_accel *= 0.8;
                             let dist = ((xd * xd + zd * zd).sqrt() as f32 + 1.0).min(40.0);
                             d.yaw_accel += delta as f32 * (0.7 / dist / dist);
@@ -5101,8 +5096,22 @@ mod crystal;
 mod death_render;
 use death_render::{dissolve_color, dissolve_mask};
 
+/// `DragonSittingScanningPhase.doServerTick`'s turn towards the player: `180 - Mth.atan2(xd, zd)`
+/// in degrees (one multiply by `Mth.RAD_TO_DEG`) less the yaw, wrapped and held within 100.
+fn scanning_turn(xd: f64, zd: f64, yaw: f32) -> f64 {
+    wrap64(180.0 - trig::atan2(xd, zd) * f64::from(trig::RAD_TO_DEG) - f64::from(yaw))
+        .clamp(-100.0, 100.0)
+}
+
 #[cfg(test)]
 mod tests {
+    /// `DragonSittingScanningPhase.doServerTick` multiplies by `Mth.RAD_TO_DEG` once; a multiply
+    /// then a divide by the float pi landed three float ulps off here.
+    #[test]
+    fn the_scanning_turn_uses_vanillas_degree_factor() {
+        assert_eq!(super::scanning_turn(4.0, -3.0, 45.0) as f32, 8.130369);
+    }
+
     use super::*;
 
     #[test]

@@ -40,6 +40,16 @@ fn look_at_turns_towards_the_target() {
     close(look_at_rotation(at, off([0.0, -4.0, 4.0])), (0.0, 45.0));
 }
 
+/// `Entity.lookAt` multiplies by `Mth.RAD_TO_DEG` once: a multiply then a divide by the float pi
+/// landed this pitch one float ulp off.
+#[test]
+fn look_at_uses_vanillas_degree_factor() {
+    assert_eq!(
+        look_at_rotation([0.0, 0.0, 0.0], [1.0, 0.5, 2.0]),
+        (-26.565033, -12.604396)
+    );
+}
+
 /// `handleMovePlayer` moves the player's pitch and the model's old pitch
 /// (`xRotO`) alike: a relative change keeps the ease a tick began, each
 /// end clamped on its own, and an absolute one snaps both (#3844).
