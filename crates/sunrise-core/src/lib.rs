@@ -11,6 +11,7 @@ pub mod carving;
 pub mod character_names;
 pub mod color;
 pub mod connection_kind;
+pub mod crc32;
 pub mod density;
 pub mod dimension;
 pub mod equipment_slot;

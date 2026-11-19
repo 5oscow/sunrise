@@ -967,6 +967,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6f34b169b8cbbaed2b4995205f1d02d7eac4b2771df5479255fe5483e1334a39"
 
 [[package]]
+name = "crc-fast"
+version = "1.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e75b2483e97a5a7da73ac68a05b629f9c53cff58d8ed1c77866079e18b00dba5"
+dependencies = [
+ "digest",
+ "spin",
+]
+
+[[package]]
 name = "crc32fast"
 version = "1.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4366,6 +4376,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "spin"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "023a211cb3138dbc438680b32560ad89f699977624c9f8dbb95a47d5b4c07dd3"
+
+[[package]]
 name = "spirv"
 version = "0.4.0+sdk-1.4.341.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4453,7 +4469,6 @@ dependencies = [
  "cap-std",
  "chrono",
  "cipher",
- "crc32fast",
  "crypto-common",
  "digest",
  "flate2",
@@ -4563,7 +4578,6 @@ dependencies = [
  "ab_glyph",
  "bytemuck",
  "chrono",
- "crc32fast",
  "dunce",
  "flate2",
  "fs4",
@@ -4703,6 +4717,8 @@ dependencies = [
 name = "sunrise-core"
 version = "0.1.0"
 dependencies = [
+ "crc-fast",
+ "crc32fast",
  "libm",
  "rustc-hash 2.1.3",
  "safe_arch",
@@ -5336,7 +5352,6 @@ dependencies = [
 name = "sunrise-prepare"
 version = "0.1.0"
 dependencies = [
- "crc32fast",
  "libc",
  "regex",
  "sha1",

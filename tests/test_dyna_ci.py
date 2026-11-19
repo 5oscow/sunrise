@@ -734,5 +734,28 @@ class ParityWorkflowTests(unittest.TestCase):
         self.assertTrue((self.slot / "loot_b.log").exists())
 
 
+class ScheduledDynaJobTests(unittest.TestCase):
+    def test_hot_paths_schedule_only_dispatches_and_its_dyna_job_runs_from_the_dispatch(self):
+        # Dyna's runners refuse a scheduled event at "Set up runner" (hot-paths' scheduled runs, 2026-11-16 to 18):
+        # the schedule starts only a GitHub-hosted job that dispatches the workflow on main, and the chain that
+        # reaches the Dyna runner (route, measure, record) runs from that dispatch alone.
+        from test_ci_concurrency import yaml
+        workflow = yaml.load((ROOT / ".github/workflows/hot-paths.yml").read_text(), Loader=yaml.BaseLoader)
+        self.assertEqual(set(workflow["on"]), {"schedule", "workflow_dispatch"})
+        jobs = workflow["jobs"]
+        self.assertEqual(set(jobs), {"schedule-dispatch", "route", "measure", "record"})
+        dispatcher = jobs["schedule-dispatch"]
+        self.assertEqual(dispatcher["if"], "github.repository == 'sunrise-org/sunrise' && github.event_name == 'schedule'")
+        self.assertEqual(dispatcher["runs-on"], "ubuntu-latest")
+        self.assertEqual(dispatcher["permissions"], {"actions": "write"})
+        self.assertEqual([step["run"] for step in dispatcher["steps"]],
+                         ['gh workflow run hot-paths.yml --repo "$GITHUB_REPOSITORY" --ref main'])
+        self.assertEqual(jobs["route"]["if"], "github.event_name == 'workflow_dispatch'")
+        self.assertNotIn("needs", jobs["route"])
+        self.assertEqual(jobs["measure"]["needs"], "route")
+        self.assertEqual(jobs["measure"]["runs-on"], "dyna-medium")
+        self.assertEqual(jobs["record"]["needs"], "measure")
+
+
 if __name__ == "__main__":
     unittest.main()
