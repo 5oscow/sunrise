@@ -60,10 +60,18 @@ class GateTests(unittest.TestCase):
                                       "github.event.pull_request.head.repo.full_name != github.repository"})
 
     def test_a_dispatch_with_pr_runs_that_head_and_keeps_a_fork_off_our_runners(self):
-        fork = pr_gate.outputs("workflow_dispatch", True, "3665", lambda n: {"sha": SHA, "same_repository": False})
+        fork = pr_gate.outputs("workflow_dispatch", True, "3665", lambda n: {
+            "sha": SHA, "ref": "sync-upstream", "labels": ["rollup"], "same_repository": False})
         self.assertEqual(fork, {"heavy": "true", "pr_sha": SHA, "trusted": "false"})
-        ours = pr_gate.outputs("workflow_dispatch", True, "3672", lambda n: {"sha": SHA, "same_repository": True})
+        ours = pr_gate.outputs("workflow_dispatch", True, "3672", lambda n: {
+            "sha": SHA, "ref": "split/c3-bridge-docs", "labels": [], "same_repository": True})
         self.assertEqual(ours, {"heavy": "true", "pr_sha": SHA, "trusted": "true"})
+
+    def test_a_dispatch_on_our_rollup_or_sync_is_refused_since_its_pushes_run_the_gate(self):
+        for ref, labels in (("sunrise-review-rollup-43", []), ("sync-upstream-7", []), ("integration", ["rollup"])):
+            head = {"sha": SHA, "ref": ref, "labels": labels, "same_repository": True}
+            with self.subTest(ref=ref, labels=labels), self.assertRaisesRegex(SystemExit, "rollup or sync"):
+                pr_gate.outputs("workflow_dispatch", True, "2833", lambda n, head=head: head)
 
     def test_pr_must_be_a_number(self):
         for bad in ("0", "12a", "1;id", "refs/pull/1/head", "-1"):
