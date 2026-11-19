@@ -268,6 +268,7 @@ fn tell_live(sections: &std::cell::RefCell<EntitySections>, writer: SectionWrite
     }
     sections.borrow_mut().end_telling(batch);
 }
+
 /// Delivers a mob's captured teleport at the write boundary.  The observer
 /// owns only the section table, so it can run while the mob's borrowed world
 /// view is still live.
