@@ -295,3 +295,25 @@ fn opening_a_screen_releases_mod_holds() {
         ));
     });
 }
+
+/// `MultiPlayerGameMode.tick` comes first in `Minecraft.tick`, before the GUI ticks its
+/// screens: a slot chosen since the last tick goes out ahead of what a screen sends as it
+/// closes in that tick (a sign editor whose sign is gone, `AbstractSignEditScreen.removed`).
+#[test]
+#[ignore = "daily"]
+fn the_held_slot_goes_out_before_a_closing_screens_packet() {
+    with_pressing_game(|game, packets, _| {
+        game.open_sign_editor((0, 64, 40), true);
+        sent(packets);
+        game.selected = (game.selected + 1) % 9;
+        game.tick_remote_level().unwrap();
+        let sent = sent(packets);
+        let at = |id: &str| sent.iter().position(|p| p == id);
+        assert!(at("minecraft:sign_update").is_some(), "{sent:?}");
+        assert!(at("minecraft:set_carried_item").is_some(), "{sent:?}");
+        assert!(
+            at("minecraft:set_carried_item") < at("minecraft:sign_update"),
+            "{sent:?}"
+        );
+    });
+}

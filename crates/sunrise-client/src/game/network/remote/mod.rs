@@ -8711,13 +8711,6 @@ impl Game<'_> {
             && self.screen == Screen::Playing
             && self.sleeping.is_none()
             && !self.screen_over_playing();
-        // MultiPlayerGameMode.tick, first in Minecraft.tick, screen or not: the slot
-        // chosen since the last tick (the wheel, the last tick's number keys, the
-        // server's SetHeldSlot) goes out before anything else of this tick.
-        self.remote_send_carried();
-        // Then its Connection.tick: ClientPacketListener.tick's key refresh and setKeyPair, so a
-        // new chat session goes out before this tick's actions and move.
-        self.tick_chat_session();
         self.refresh_client_pick(1.0);
         if stop || !ready {
             self.stop_remote_mining();
