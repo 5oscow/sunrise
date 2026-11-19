@@ -6,6 +6,30 @@ through `RenderAssets::model` after resources are published. World render hooks 
 copies in a group. GUI scenes, mobs and kept/spinning renderers use their
 CPU routes; groups are a world-drawing facility, not another renderer.
 
+## Local player skins
+
+Implement `Hooks::resolve_player_skin` to change the local player's appearance
+without changing their profile. Upload the skin with
+[`create_dynamic_texture`](dynamic-textures.md) as a 64×64 RGBA image once per
+skin file. Normalize legacy 64×32 skins before uploading. Keep the texture id
+and its model width, then select them in the hook:
+
+```rust,ignore
+fn resolve_player_skin(&self, _: &dyn ClientHost, event: &mut ResolvePlayerSkinEvent<'_>) {
+    if let Some(skin) = self.selected_skin() {
+        *event.selection = Some(PlayerSkinOverride::new(skin.texture.clone(), skin.model));
+    }
+}
+```
+
+Use `PlayerModel::Wide` for four-pixel arms and `PlayerModel::Slim` for
+three-pixel arms. The selection starts at `None` each frame; listeners can leave
+an earlier answer alone or clear it with `*event.selection = None`. A missing,
+freed or wrongly sized texture keeps the original texture **and** model.
+The selection affects the third-person avatar and its skin layers, first-person
+arms, and inventory and creative previews. It does not change the cape, tab
+list, or anyone else's view. Native and wasm mods use the same hook.
+
 ## Worn humanoid equipment
 
 An item attaches one `ClientItemExtensions` Part in

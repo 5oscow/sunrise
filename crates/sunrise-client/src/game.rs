@@ -8599,6 +8599,7 @@ impl Game<'_> {
         });
         let _projection_frame = (!title).then(|| self.activate_projection_frame());
         pr.lap("pr_projection");
+        let vanilla_skin = self.apply_player_skin_override(title);
         // GUI hooks project against this frame's camera, including its bob/spin and FOV.
         let mut hud = sunrise_client::spans::time("hud", || self.hud(size));
         self.flush_ime(&mut hud);
@@ -8796,6 +8797,11 @@ impl Game<'_> {
             &mut world_geometry,
             &mut entities,
         );
+        if let Some((skin, slim)) = vanilla_skin
+            && let Some(avatar) = self.player_model.as_mut()
+        {
+            (avatar.skin, avatar.slim) = (skin, slim);
+        }
         // After the mods' world geometry, whose labels add see-through copies.
         let see_through = std::mem::take(&mut self.see_through_vertices);
         let colored_lights = if self.title.is_none() {
