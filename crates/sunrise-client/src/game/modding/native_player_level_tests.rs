@@ -174,15 +174,18 @@ fn a_player_borrowed_into_another_levels_turn_drops_nothing_there() {
 /// inventory is borrowed into an Overworld turn: the command takes the stack in the guest's own
 /// level, so on commit the overflow lies in the Nether at the guest, nothing in the Overworld
 /// and the Overworld is in place again. On abort nothing lies in either level and the
-/// inventory is back.
+/// inventory is back. A guest at zero health by the commit still has the accepted overflow
+/// lie in the Nether where they were.
 #[test]
 #[ignore = "daily"]
 fn a_give_command_in_a_transaction_for_a_borrowed_player_lands_in_their_level() {
     with_guests(|game| {
         game.build_registries();
         in_the_nether(game);
+        let player = game.player(13).unwrap();
         let before = dropped(game);
-        for commit in [true, false] {
+        // The zero-health case last: the guest stays dead.
+        for (commit, dies) in [(true, false), (false, false), (true, true)] {
             game.lan
                 .as_mut()
                 .unwrap()
@@ -192,7 +195,7 @@ fn a_give_command_in_a_transaction_for_a_borrowed_player_lands_in_their_level() 
                         .fill(Some(ItemStack::new("minecraft:stone", 64)))
                 })
                 .unwrap();
-            let case = format!("commit: {commit}");
+            let case = format!("commit: {commit}, dies: {dies}");
             let ran = game
                 .as_guest(13, |game| {
                     let host: &mut dyn ServerHost = game;
@@ -204,6 +207,10 @@ fn a_give_command_in_a_transaction_for_a_borrowed_player_lands_in_their_level() 
                         let ok = result.success;
                         assert!(ok, "{}", result.feedback.join("|"));
                         assert_eq!(host.dimension(), "minecraft:overworld");
+                        if dies {
+                            let living = host.living(player.entity()).unwrap();
+                            assert!(living.set_health(host, 0.0));
+                        }
                         if commit { Ok(ok) } else { Err(ok) }
                     })
                 })
@@ -216,7 +223,7 @@ fn a_give_command_in_a_transaction_for_a_borrowed_player_lands_in_their_level() 
                 game.enter_level(Dim::Nether).unwrap();
                 let lying = game.dropped.iter().next().unwrap();
                 assert_eq!(&*lying.stack.item, "minecraft:diamond", "{case}");
-                assert!((lying.position.x - 3.0).abs() < 3.0, "{case}");
+                assert_eq!([lying.position.x, lying.position.z], [3.0, 5.0], "{case}");
                 game.dropped.clear();
                 game.enter_level(Dim::Overworld).unwrap();
             } else {

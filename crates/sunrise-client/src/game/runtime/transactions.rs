@@ -312,8 +312,16 @@ pub(super) enum After {
     /// when the stack was accepted (a command run for a borrowed player swaps it in).
     GivePickup(u128, super::Dim),
     InventoryTrigger(u128),
-    /// What did not fit of a `/give`, thrown in the level that was in place when it was accepted.
-    GiveRest(u128, ItemStack, Option<[i32; 4]>, super::Dim),
+    /// What did not fit of a `/give` to the player `uuid`, thrown in the level `dim` that was in
+    /// place when it was accepted; at `eye`, the player's eyes then, if they are dead or gone
+    /// by the commit.
+    GiveRest {
+        uuid: u128,
+        rest: ItemStack,
+        owner: Option<[i32; 4]>,
+        dim: super::Dim,
+        eye: [f64; 3],
+    },
     PlayerEquip(u128, String, Option<ItemStack>),
     /// An item split off an item entity, dropped where it is (`Block.popResource`'s delay).
     Spawn([f64; 3], ItemStack),
@@ -1058,14 +1066,33 @@ impl Game<'_> {
             After::InventoryTrigger(uuid) => {
                 self.native_as_player(uuid, |g| g.check_inventory_trigger());
             }
-            After::GiveRest(uuid, stack, owner, dim) => {
+            After::GiveRest {
+                uuid,
+                rest,
+                owner,
+                dim,
+                eye,
+            } => {
+                let mut rest = Some(rest);
                 self.native_as_player(uuid, |g| {
                     let back = g.enter_command_level(dim);
-                    g.give_remainder(stack, owner);
+                    if let Some(rest) = rest.take() {
+                        g.give_remainder(rest, owner);
+                    }
                     if let Some(back) = back {
                         g.enter_command_level(back);
                     }
                 });
+                // The stack was accepted (the command succeeded, `give_stack` returned no
+                // rest): a player who died or left since, so it was not thrown, still has it
+                // land where they were.
+                if let Some(rest) = rest {
+                    let back = self.enter_command_level(dim);
+                    self.give_remainder_unheld(rest, owner, eye);
+                    if let Some(back) = back {
+                        self.enter_command_level(back);
+                    }
+                }
             }
             After::PlayerEquip(uuid, slot, stack) => {
                 self.native_as_player(uuid, |g| {
