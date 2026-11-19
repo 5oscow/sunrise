@@ -123,10 +123,12 @@ fn rains_at(world: &World, biomes: &Biomes, x: i32, y: i32, z: i32) -> bool {
 }
 
 impl Game<'_> {
-    /// Polytone GPU particles, before the frame's quads are built: the renderer's verdict on
-    /// each shader, then the heightmap for the readers that draw (a custom shader's `Sampler1`,
+    /// Polytone GPU particles, before the frame's quads are built: any pending clear, the
+    /// renderer's verdict on each shader and on the quads drawn here, then the heightmap for the readers that draw (a custom shader's `Sampler1`,
     /// and the surface rain drawn as quads dies under), every half second.
     pub(super) fn polytone_gpu_decide(&mut self, camera: glam::DVec3) {
+        // A mod's clear asked since the last frame goes first: cleared records read nothing.
+        self.apply_mod_particle_clear();
         let (world, properties) = (&self.world, &self.pack.assets.properties);
         let top = |x, z| motion_blocking_height(world, properties, x, z);
         let source = sunrise_client::particles::polytone_gpu::HeightmapSource {

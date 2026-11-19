@@ -5,7 +5,7 @@
 //! on the CPU with the engine's particles (`particles::polytone_gpu`).
 
 use crate::particles::polytone_gpu::{
-    GpuParticleRenderer, GpuShader, ShaderBatch, ShaderRequest, ShaderVertex,
+    FALLBACK_QUADS, GpuParticleRenderer, GpuShader, ShaderBatch, ShaderRequest, ShaderVertex,
 };
 use std::sync::Arc;
 use sunrise_polytone::gpu_particle::{GPU_BLOCK, GPU_BLOCK_SIZE, Surface};
@@ -27,6 +27,15 @@ pub const HEIGHTMAP_SIZE: u32 = 128;
 const MAX_QUADS: usize = 1 << 20;
 /// A quad's bytes in the record buffer: the record on its four corners.
 const QUAD_BYTES: u64 = std::mem::size_of::<ShaderVertex>() as u64 * 4;
+
+/// The quads the types drawn on the CPU may add to a frame on a device whose buffers hold
+/// `max_buffer_size` bytes: [`FALLBACK_QUADS`], or a quarter of the entity vertex buffer the
+/// device allows, leaving the rest to the frame's other quads and the buffer's growth to a
+/// power of two (`gfx::entity_buffer_vertices`).
+pub(super) fn fallback_quads(max_buffer_size: u64) -> usize {
+    let quad = std::mem::size_of::<crate::mesher::Vertex>() as u64 * 4;
+    FALLBACK_QUADS.min((max_buffer_size / quad / 4) as usize)
+}
 
 /// The record as vertex attributes 0 to 5 (`polytone_gpu::GLUE`).
 const ATTRIBUTES: [wgpu::VertexAttribute; 6] = wgpu::vertex_attr_array![
@@ -550,6 +559,10 @@ impl CoreParticles {
 /// The game's side: the verdict it asks for before building the frame's quads, the heightmap
 /// and batches it hands over.
 impl GpuParticleRenderer for super::Renderer {
+    fn polytone_fallback_quads(&self) -> usize {
+        fallback_quads(self.device.limits().max_buffer_size)
+    }
+
     fn decide_polytone_shaders(&mut self, requests: &[ShaderRequest]) {
         let frame = &self.output.frame;
         self.core_particles.decide(

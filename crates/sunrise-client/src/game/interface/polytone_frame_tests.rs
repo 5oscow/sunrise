@@ -97,3 +97,23 @@ fn rain_under_the_surface_is_hidden_from_its_first_frame() {
         assert_eq!(out.len(), 4, "the drop above the surface only");
     });
 }
+
+/// A mod's clear asked before the frame is applied before the heightmap's readers are counted,
+/// in the same call: the cleared rain is gone when they are.
+#[test]
+#[ignore = "daily"]
+fn a_pending_clear_goes_before_the_heightmap_is_read() {
+    with_game(|game| {
+        let bottom = f64::from(game.world.bottom_y());
+        let camera = [0.5, bottom + 4.0, 0.5];
+        rain_particles(game, &rain_pack(true), camera);
+        game.particles.add(
+            &ParticleOptions::named("test:rain"),
+            [0.5, bottom + 2.0, 0.5],
+            [0.0; 3],
+        );
+        game.mod_clear_particles.set(true);
+        game.polytone_gpu_decide(glam::DVec3::from_array(camera));
+        assert_eq!(game.particles.polytone_gpu_records(), 0, "cleared first");
+    });
+}

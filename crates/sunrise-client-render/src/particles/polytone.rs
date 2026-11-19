@@ -2547,6 +2547,13 @@ mod tests {
         // No engine particle: a record each; the rain drawn as its area's three quads.
         assert!(engine.pending.is_empty());
         assert_eq!(engine.polytone_gpu_records(), 2);
+        // The frame's verdict on its quads, as the game asks it before building them.
+        let source = super::super::polytone_gpu::HeightmapSource {
+            size: 4,
+            min_y: 0,
+            top: &|_, _| 0,
+        };
+        engine.polytone_gpu_decide(None, DVec3::new(1.0, 70.0, 1.0), &source);
         let mut out = Vec::new();
         engine.render(
             DVec3::new(1.0, 70.0, 1.0),

@@ -127,22 +127,25 @@ pub struct Surface {
     heights: std::sync::Arc<[u16]>,
 }
 
-/// Heights that don't fill their area: `size` × `size` were wanted.
+/// Why heights can't make a [`Surface`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SurfaceSizeError {
-    pub size: u32,
-    pub heights: usize,
+pub enum SurfaceSizeError {
+    /// An area of no columns (`size` 0): nothing for a column to read.
+    NoColumns,
+    /// `heights` heights for an area of `size` × `size` columns.
+    WrongCount { size: u32, heights: usize },
 }
 
 impl std::fmt::Display for SurfaceSizeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "a heightmap of {0} by {0} columns needs {1} heights, not {2}",
-            self.size,
-            u64::from(self.size).pow(2),
-            self.heights
-        )
+        match *self {
+            Self::NoColumns => write!(f, "a heightmap area needs at least one column a side"),
+            Self::WrongCount { size, heights } => write!(
+                f,
+                "a heightmap of {size} by {size} columns needs {} heights, not {heights}",
+                u64::from(size).pow(2)
+            ),
+        }
     }
 }
 
@@ -154,9 +157,11 @@ impl Surface {
         area: HeightmapArea,
         heights: std::sync::Arc<[u16]>,
     ) -> Result<Self, SurfaceSizeError> {
-        let wanted = (area.size as usize).checked_pow(2);
-        if area.size == 0 || wanted != Some(heights.len()) {
-            return Err(SurfaceSizeError {
+        if area.size == 0 {
+            return Err(SurfaceSizeError::NoColumns);
+        }
+        if (area.size as usize).checked_pow(2) != Some(heights.len()) {
+            return Err(SurfaceSizeError::WrongCount {
                 size: area.size,
                 heights: heights.len(),
             });
@@ -283,9 +288,9 @@ mod tests {
         }
     }
 
-    /// Heights that don't fill their area are refused when the surface is made, naming the
-    /// count wanted, so its quads never check their lengths: an empty area, too few heights and
-    /// too many.
+    /// Heights that don't fill their area are refused when the surface is made, with the
+    /// reason as a value, so its quads never check their lengths: an empty area, too few
+    /// heights and too many.
     #[test]
     fn a_surface_is_refused_unless_its_heights_fill_its_area() {
         let area = |size| HeightmapArea {
@@ -296,19 +301,11 @@ mod tests {
         let surface = |size, n: usize| Surface::new(area(size), vec![0u16; n].into());
         assert_eq!(surface(4, 16).unwrap().heights().len(), 16);
         assert_eq!(surface(4, 16).unwrap().area(), area(4));
-        assert_eq!(
-            surface(0, 0).unwrap_err(),
-            SurfaceSizeError {
-                size: 0,
-                heights: 0
-            }
-        );
-        let short = surface(4, 15).unwrap_err();
-        assert_eq!(
-            short.to_string(),
-            "a heightmap of 4 by 4 columns needs 16 heights, not 15"
-        );
-        assert_eq!(surface(4, 17).unwrap_err().heights, 17);
+        assert_eq!(surface(0, 0).unwrap_err(), SurfaceSizeError::NoColumns);
+        assert_eq!(surface(0, 1).unwrap_err(), SurfaceSizeError::NoColumns);
+        let wrong = |heights| SurfaceSizeError::WrongCount { size: 4, heights };
+        assert_eq!(surface(4, 15).unwrap_err(), wrong(15));
+        assert_eq!(surface(4, 17).unwrap_err(), wrong(17));
     }
 
     /// Rain dies at the surface of its own column (wiki "GPU Particles": the motion-blocking

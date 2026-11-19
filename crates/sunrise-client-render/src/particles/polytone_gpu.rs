@@ -108,8 +108,16 @@ struct Record {
     custom: f32,
 }
 
+/// The most records a type keeps, whatever its `limit`: the ring is the pack's to size.
+const MAX_RECORDS: usize = 1 << 18;
+/// The most quads the types drawn on the CPU add to a frame without a renderer to ask
+/// ([`GpuParticleRenderer::polytone_fallback_quads`]).
+pub const FALLBACK_QUADS: usize = 1 << 18;
+
 /// A GPU particle type's records: a ring of `limit` slots, the oldest overwritten.
 pub(super) struct Store {
+    /// The type's id (`ns:name`), for the log.
+    id: String,
     def: Arc<CustomParticle>,
     gpu: Gpu,
     orientation: Orientation,
@@ -120,6 +128,11 @@ pub(super) struct Store {
     limit: usize,
     /// The type's own shader, when it has one that translated.
     shader: Option<Arc<GpuShader>>,
+    /// This frame's verdict for its quads: they fit what the frame has left for the quads of
+    /// the types drawn on the CPU (`ParticleEngine::polytone_gpu_decide`).
+    fallback: bool,
+    /// Whether the log has said the type fits neither path, until it fits again.
+    unfit_logged: bool,
 }
 
 /// The atlas name of a full texture path: `ns:textures/particle/a/b.png` is `ns:particle/a/b`
@@ -178,6 +191,7 @@ impl Store {
     pub(super) fn new(def: &Arc<CustomParticle>, shader: Option<Arc<GpuShader>>) -> Option<Self> {
         let gpu = def.gpu.clone()?;
         Some(Self {
+            id: String::new(),
             def: def.clone(),
             orientation: Orientation::parse(&def.rotation_mode),
             sprite: sprite_name(&gpu.texture),
@@ -185,8 +199,12 @@ impl Store {
             records: Vec::new(),
             next: 0,
             // The wiki's default ring capacity.
-            limit: def.limit.map_or(16_384, |l| l.max(1) as usize),
+            limit: def
+                .limit
+                .map_or(16_384, |l| (l.max(1) as usize).min(MAX_RECORDS)),
             shader,
+            fallback: false,
+            unfit_logged: false,
         })
     }
 
@@ -232,8 +250,9 @@ impl Store {
         self.records.len()
     }
 
-    /// The quads of every live record at `now + frame.partial` ticks; none while the renderer
-    /// draws the type with its own shader.
+    /// The quads of every live record at `now + frame.partial` ticks; none unless this frame
+    /// draws the type here (`fallback`): not while the renderer draws it with its own shader,
+    /// nor when its quads don't fit.
     pub(super) fn render(
         &self,
         frame: &QuadFrame,
@@ -250,7 +269,7 @@ impl Store {
             light_at,
             surface,
         } = *frame;
-        if self.def.render_type == RenderType::Invisible || self.drawn() {
+        if !self.fallback {
             return;
         }
         let Some(&(rect, _)) = atlas.get(&self.sprite) else {
@@ -529,8 +548,8 @@ impl Store {
         self.shader.as_ref().is_some_and(|s| s.drawn())
     }
 
-    /// The most quads the type hands its shader this frame: each live record times its
-    /// `area`'s copies (some may expire before the batch, none are added).
+    /// The most quads the type draws this frame, with its shader or here: each live record
+    /// times its `area`'s copies (some may expire or die under the heightmap, none are added).
     fn quads(&self) -> usize {
         let copies = self.gpu.area.map_or(1, |(_, n)| n as usize);
         self.records.len().saturating_mul(copies)
@@ -631,6 +650,9 @@ pub trait GpuParticleRenderer {
     /// draws a type with its shader only when the shader builds there and it has room for all
     /// of the type's quads. The others' types draw their quads.
     fn decide_polytone_shaders(&mut self, requests: &[ShaderRequest]);
+    /// The most quads the types drawn on the CPU may add to this frame, all together: what its
+    /// entity vertex buffer can take beside the frame's other quads.
+    fn polytone_fallback_quads(&self) -> usize;
     /// The heights the drawn shaders sample (`Sampler1`) this frame, the area their blocks
     /// advertise; the same snapshot as the last one is uploaded once.
     fn set_polytone_heightmap(&mut self, surface: &Surface);
@@ -647,9 +669,11 @@ pub struct HeightmapSource<'a> {
 }
 
 impl GpuParticles {
-    /// Records a spawn of type `def` (its shader `shader`, when it has one that translated).
+    /// Records a spawn of type `id`, `def` (its shader `shader`, when it has one that
+    /// translated).
     pub(super) fn spawn(
         &mut self,
+        id: &str,
         def: &Arc<CustomParticle>,
         shader: impl FnOnce() -> Option<Arc<GpuShader>>,
         particle: &super::Particle,
@@ -660,9 +684,10 @@ impl GpuParticles {
         let store = match self.stores.iter().position(|s| s.is(def)) {
             Some(i) => &mut self.stores[i],
             None => {
-                let Some(store) = Store::new(def, shader()) else {
+                let Some(mut store) = Store::new(def, shader()) else {
                     return;
                 };
+                id.clone_into(&mut store.id);
                 self.stores.push(store);
                 let last = self.stores.len() - 1;
                 &mut self.stores[last]
@@ -723,12 +748,15 @@ impl GpuParticles {
             }
         }
         let size = source.size as i32;
-        let half = size / 2;
+        // The area's corner, its far side kept inside the block coordinates however far the
+        // camera is (a float saturates, NaN is 0).
+        let span = i64::from(source.size);
+        let corner = |v: f64| {
+            let far = i64::from(i32::MAX) - (span - 1).max(0);
+            ((v.floor() as i64).saturating_sub(span / 2)).clamp(i64::from(i32::MIN), far) as i32
+        };
         let area = HeightmapArea {
-            origin: [
-                camera.x.floor() as i32 - half,
-                camera.z.floor() as i32 - half,
-            ],
+            origin: [corner(camera.x), corner(camera.z)],
             size: source.size,
             min_y: source.min_y,
         };
@@ -773,14 +801,41 @@ impl super::ParticleEngine {
             })
             .collect();
         let mut renderer = renderer;
-        match renderer.as_deref_mut() {
-            Some(renderer) => renderer.decide_polytone_shaders(&requests),
-            None => requests.iter().for_each(|r| r.shader.set_drawn(false)),
+        let mut room = match renderer.as_deref_mut() {
+            Some(renderer) => {
+                renderer.decide_polytone_shaders(&requests);
+                renderer.polytone_fallback_quads()
+            }
+            None => {
+                requests.iter().for_each(|r| r.shader.set_drawn(false));
+                FALLBACK_QUADS
+            }
+        };
+        // The others draw here, in the stores' order, while their quads fit what is left; a
+        // type with no sprite in the atlas draws nothing.
+        for store in &mut gpu.stores {
+            store.fallback = false;
+            if !store.visible() || store.drawn() || !self.atlas.contains_key(&store.sprite) {
+                continue;
+            }
+            let quads = store.quads();
+            if quads <= room {
+                room -= quads;
+                store.fallback = true;
+                store.unfit_logged = false;
+            } else if !store.unfit_logged {
+                store.unfit_logged = true;
+                log::warn!(
+                    "custom particle {}: not drawn while its {quads} quads fit neither its \
+                     shader nor the {room} the frame has left for particle quads",
+                    store.id
+                );
+            }
         }
         let live = || gpu.stores.iter().filter(|s| s.visible());
         let for_shaders =
             live().any(|s| s.drawn() && s.shader.as_ref().is_some_and(|sh| sh.samples_heightmap));
-        let for_quads = live().any(|s| s.gpu.kill_below_heightmap && !s.drawn());
+        let for_quads = live().any(|s| s.gpu.kill_below_heightmap && s.fallback);
         if !for_shaders && !for_quads {
             return;
         }
@@ -989,11 +1044,11 @@ mod tests {
         assert_eq!(batch(&single, camera, 12, 0.0).unwrap().vertices.len(), 4);
     }
 
-    /// A type with its own shader draws its quads and hands over no batch until the renderer
-    /// says it draws the shader in this frame, and again once it says it can't (the shader
-    /// doesn't build, or the frame holds linear light).
+    /// A type with its own shader hands over no batch until the renderer says it draws the
+    /// shader in this frame, and again once it says it can't (the shader doesn't build, or the
+    /// frame holds linear light); it builds quads only on the frame's verdict for them.
     #[test]
-    fn a_type_keeps_its_quads_unless_the_renderer_draws_its_shader() {
+    fn a_type_hands_over_its_batch_only_while_the_renderer_draws_its_shader() {
         let json = serde_json::json!({
             "type": "gpu", "texture": "test:textures/particle/rain.png", "render_type": "opaque"
         });
@@ -1032,14 +1087,17 @@ mod tests {
             out.len() / 4
         };
         let shader = store.shader.clone().unwrap();
-        assert_eq!(quads(&store), 1, "no renderer decided: its quads");
-        assert!(batch(&store, DVec3::ZERO, 12, 0.0).is_none());
+        assert!(
+            batch(&store, DVec3::ZERO, 12, 0.0).is_none(),
+            "no renderer decided"
+        );
         shader.set_drawn(true);
-        assert_eq!(quads(&store), 0, "drawn with its shader: no quads");
         assert!(batch(&store, DVec3::ZERO, 12, 0.0).is_some());
         shader.set_drawn(false);
-        assert_eq!(quads(&store), 1, "refused: its quads again");
-        assert!(batch(&store, DVec3::ZERO, 12, 0.0).is_none());
+        assert!(batch(&store, DVec3::ZERO, 12, 0.0).is_none(), "refused");
+        assert_eq!(quads(&store), 0, "no verdict for its quads");
+        store.fallback = true;
+        assert_eq!(quads(&store), 1, "its quads fit");
     }
 
     /// Wiki "GPU Particles": a `kill_below_heightmap` type drawn as quads hides the ones under
@@ -1053,6 +1111,7 @@ mod tests {
         });
         let def = Arc::new(CustomParticle::parse(&json).unwrap());
         let mut store = Store::new(&def, None).unwrap();
+        store.fallback = true;
         let rect = Rect {
             u0: 0.0,
             v0: 0.0,
@@ -1093,6 +1152,24 @@ mod tests {
         assert_eq!(quads(&store, 8), 1, "above the ground in a hill's shade");
         store.records[0] = still(63.5);
         assert_eq!(quads(&store, 15), 0, "under the ground");
+    }
+
+    /// A pack's `limit` sizes the ring up to [`MAX_RECORDS`]; the wiki's default is 16384.
+    #[test]
+    fn the_ring_of_records_is_bounded() {
+        let ring = |limit: Option<u32>| {
+            let mut json = serde_json::json!({
+                "type": "gpu", "texture": "test:textures/particle/rain.png"
+            });
+            if let Some(limit) = limit {
+                json["limit"] = serde_json::json!(limit);
+            }
+            let def = Arc::new(CustomParticle::parse(&json).unwrap());
+            Store::new(&def, None).unwrap().limit
+        };
+        assert_eq!(ring(None), 16_384);
+        assert_eq!(ring(Some(100)), 100);
+        assert_eq!(ring(Some(u32::MAX)), 1 << 18);
     }
 
     #[test]

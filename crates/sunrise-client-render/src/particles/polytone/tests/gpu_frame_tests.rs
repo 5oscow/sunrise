@@ -3,7 +3,7 @@
 //! before the heightmap is read, only the readers that draw in the frame read it, and a shader
 //! that samples it gets the heights its block advertises before its first frame.
 use super::super::super::polytone_gpu::{
-    GpuParticleRenderer, HeightmapSource, ShaderBatch, ShaderRequest,
+    FALLBACK_QUADS, GpuParticleRenderer, HeightmapSource, ShaderBatch, ShaderRequest,
 };
 use super::*;
 use std::cell::Cell;
@@ -19,6 +19,8 @@ pub(super) struct Fake {
     /// Every heightmap handed over, in order.
     pub(super) uploads: Vec<Surface>,
     pub(super) batches: Vec<ShaderBatch>,
+    /// The quads it has room for from the types drawn on the CPU (`FALLBACK_QUADS` if none).
+    pub(super) room: Option<usize>,
 }
 
 impl GpuParticleRenderer for Fake {
@@ -30,6 +32,10 @@ impl GpuParticleRenderer for Fake {
         for request in requests {
             request.shader.set_drawn(!self.refuses);
         }
+    }
+
+    fn polytone_fallback_quads(&self) -> usize {
+        self.room.unwrap_or(FALLBACK_QUADS)
     }
 
     fn set_polytone_heightmap(&mut self, surface: &Surface) {
@@ -426,4 +432,156 @@ fn clearing_forgets_the_gpu_records_and_the_heightmap() {
         &ground(&top, &reads),
     );
     assert_eq!(reads.get(), 32, "read again at once for the new level");
+}
+
+/// A pack whose players emit each of `types` (name, texture, `area` copies): GPU types with no
+/// shader of their own that die under the heightmap, living 40 ticks.
+fn cpu_types_pack(types: &[(&str, &str, u32)]) -> sunrise_assets::resource_source::ResourceSource {
+    use sunrise_assets::resource_source::{Resource, ResourceSource};
+    let mut files: Vec<(String, serde_json::Value)> = types
+        .iter()
+        .map(|(name, texture, count)| {
+            let json = serde_json::json!({
+                "type": "gpu", "texture": format!("test:textures/particle/{texture}.png"),
+                "render_type": "translucent", "kill_below_heightmap": true,
+                "area": {"size": [8, 8, 8], "count": count},
+                "initializer": {"lifetime": "40", "size": "0.5"}
+            });
+            (
+                format!("assets/test/polytone/custom_particles/{name}.json"),
+                json,
+            )
+        })
+        .collect();
+    let emitters: Vec<serde_json::Value> = types
+        .iter()
+        .map(|(name, _, _)| serde_json::json!({"particle": format!("test:{name}")}))
+        .collect();
+    files.push((
+        "assets/minecraft/polytone/entity_modifiers/player.json".to_owned(),
+        serde_json::json!({ "emitters": emitters }),
+    ));
+    ResourceSource::indexed(
+        files
+            .into_iter()
+            .map(|(path, json)| (path, Resource::bytes(json.to_string().into_bytes())))
+            .collect(),
+    )
+}
+
+/// The quads drawn on the CPU have a room of their own, shared in the types' order: a type
+/// whose quads (each record times its copies) don't fit what the types before it left draws
+/// none and reads no heightmap, and the next frame with room draws it again.
+#[test]
+fn the_quads_drawn_on_the_cpu_fit_the_room_the_renderer_has() {
+    let scene = scene(blocks());
+    let pack = cpu_types_pack(&[("rain", "rain", 2), ("snow", "rain", 2)]);
+    let mut engine = rain_engine(&pack, blocks());
+    engine.polytone_entity(&level(&scene), "minecraft:player", [1.0, 64.0, 1.0]);
+    assert_eq!(engine.polytone_gpu_records(), 2);
+    let mut renderer = Fake {
+        room: Some(3),
+        ..Fake::default()
+    };
+    assert_eq!(
+        frame(&mut engine, Some(&mut renderer), CAMERA, &|_, _| 0),
+        2,
+        "the first type"
+    );
+    renderer.room = Some(4);
+    assert_eq!(
+        frame(&mut engine, Some(&mut renderer), CAMERA, &|_, _| 0),
+        4,
+        "both"
+    );
+    let (top, reads) = (Cell::new(0), Cell::new(0));
+    renderer.room = Some(1);
+    assert_eq!(
+        frame(
+            &mut engine,
+            Some(&mut renderer),
+            CAMERA,
+            &ground(&top, &reads)
+        ),
+        0
+    );
+    assert_eq!(reads.get(), 0, "no quads drawn: no heights read for them");
+}
+
+/// Without a renderer the quads drawn on the CPU are still bounded: a type over
+/// `FALLBACK_QUADS` (257 records of 1024 copies) draws none.
+#[test]
+fn without_a_renderer_the_quads_are_bounded_too() {
+    let scene = scene(blocks());
+    let pack = cpu_types_pack(&[("rain", "rain", 1024)]);
+    let mut engine = rain_engine(&pack, blocks());
+    for _ in 0..257 {
+        engine.polytone_entity(&level(&scene), "minecraft:player", [1.0, 64.0, 1.0]);
+    }
+    assert_eq!(engine.polytone_gpu_records(), 257);
+    const { assert!(257 * 1024 > FALLBACK_QUADS) };
+    assert_eq!(frame(&mut engine, None, CAMERA, &|_, _| 0), 0);
+}
+
+/// A type drawn on the CPU whose sprite isn't in the atlas draws nothing: it reads no heightmap
+/// and takes no room.
+#[test]
+fn a_type_without_its_sprite_reads_no_heightmap() {
+    let scene = scene(blocks());
+    let pack = cpu_types_pack(&[("ghost", "missing", 1), ("rain", "rain", 1)]);
+    let mut engine = rain_engine(&pack, blocks());
+    engine.polytone_entity(&level(&scene), "minecraft:player", [1.0, 64.0, 1.0]);
+    let (top, reads) = (Cell::new(0), Cell::new(0));
+    let mut renderer = Fake {
+        room: Some(1),
+        ..Fake::default()
+    };
+    assert_eq!(
+        frame(
+            &mut engine,
+            Some(&mut renderer),
+            CAMERA,
+            &ground(&top, &reads)
+        ),
+        1
+    );
+    assert_eq!(reads.get(), 16, "for the rain");
+    let ghosts = cpu_types_pack(&[("ghost", "missing", 1)]);
+    let mut engine = rain_engine(&ghosts, blocks());
+    engine.polytone_entity(&level(&scene), "minecraft:player", [1.0, 64.0, 1.0]);
+    frame(
+        &mut engine,
+        Some(&mut renderer),
+        CAMERA,
+        &ground(&top, &reads),
+    );
+    assert_eq!(reads.get(), 16, "none for the ghost");
+}
+
+/// A camera at the far end of the floats reads a heightmap whose every column is a block
+/// coordinate: the area's far side stops at the largest one, its near side at the smallest.
+#[test]
+fn the_heightmap_stays_in_block_coordinates_at_any_camera() {
+    let scene = scene(blocks());
+    let mut engine = raining(&cpu_rain_pack("translucent"), &scene);
+    let columns = std::cell::RefCell::new(Vec::new());
+    let top = |x: i32, z: i32| {
+        columns.borrow_mut().push((x, z));
+        0
+    };
+    let source = HeightmapSource {
+        size: 4,
+        min_y: 0,
+        top: &top,
+    };
+    frame_of(
+        &mut engine,
+        None,
+        DVec3::new(f64::MAX, 70.0, -1.0e300),
+        &source,
+    );
+    let columns = columns.borrow();
+    assert_eq!(columns.len(), 16);
+    assert_eq!(columns[0], (i32::MAX - 3, i32::MIN));
+    assert_eq!(columns[15], (i32::MAX, i32::MIN + 3));
 }
