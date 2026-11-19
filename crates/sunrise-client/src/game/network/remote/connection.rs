@@ -22,7 +22,6 @@ impl Game<'_> {
         sunrise_hooks::engine::connecting(&server);
         self.last_connection = Some(server);
         self.connection_open = true;
-        self.extras_connecting(address, name, lan);
     }
     /// The server this window connected to last over the network: while connected, and after a
     /// lost connection while the Disconnected screen may connect there again.
@@ -43,7 +42,6 @@ impl Game<'_> {
             return;
         }
         sunrise_hooks::engine::joined();
-        self.extras_joined();
     }
     /// The open network connection closes without being lost (`Hooks::left`). Nothing when
     /// none is open: it closed already, or the window plays its own world.
@@ -53,7 +51,6 @@ impl Game<'_> {
         }
         self.last_connection = None;
         sunrise_hooks::engine::left(how);
-        self.extras_left();
     }
     /// The open network connection ended without the player leaving (`Hooks::ended`), before
     /// the Disconnected screen shows; nothing when none is open. The crates are asked once
@@ -63,9 +60,8 @@ impl Game<'_> {
         if !std::mem::take(&mut self.connection_open) {
             return;
         }
-        self.extras_ended(reason, key, by);
         sunrise_hooks::engine::ended(&Ended::new(reason, key, by));
-        self.pending_retry = self.retry_answer();
+        self.pending_retry = sunrise_hooks::engine::retry();
         if self.pending_retry.is_none() {
             self.last_connection = None;
         }
@@ -109,7 +105,7 @@ impl Game<'_> {
         }
         let answer = match self.retry_due.take() {
             Some(server) => Some(Retry::Now(server)),
-            None => self.retry_answer(),
+            None => sunrise_hooks::engine::retry(),
         };
         let Some(slot) = retry_slot(&mut self.title) else {
             return Ok(());
@@ -129,10 +125,6 @@ impl Game<'_> {
         *slot = None;
         let realm = self.realm_session;
         self.connect_server_with_options(&server.address, &server.name, None, server.lan, realm)
-    }
-    /// Whether to connect again: the auto-reconnect extra's answer, else a crate's.
-    fn retry_answer(&self) -> Option<Retry> {
-        self.extras_retry().or_else(sunrise_hooks::engine::retry)
     }
 }
 

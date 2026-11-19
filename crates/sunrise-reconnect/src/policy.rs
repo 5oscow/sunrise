@@ -1,7 +1,6 @@
-//! The auto-reconnect extra (`docs/extras.md`): whether a lost multiplayer
-//! connection may be retried, and when. Only lost connections and the
-//! server's own shutdown or restart are retried, never kicks, bans or
-//! refusals; attempts back off and stop after a few.
+//! Whether a lost multiplayer connection may be retried, and when. Only lost
+//! connections and the server's own shutdown or restart are retried, never
+//! kicks, bans or refusals; attempts back off and stop after a few.
 use std::time::{Duration, Instant};
 
 /// Seconds before each attempt; there are no more after the last.
@@ -140,14 +139,6 @@ impl Retry {
     }
 }
 impl Tracker {
-    /// The server connected to last.
-    pub fn address(&self) -> Option<&str> {
-        self.address.as_deref()
-    }
-    /// That server was found on the local network.
-    pub fn lan(&self) -> bool {
-        self.lan
-    }
     /// A connection to `address` as `name` starts: a new address starts
     /// counting anew.
     pub fn connecting(&mut self, address: &str, name: &str, lan: bool) {
@@ -273,7 +264,7 @@ mod tests {
             false
         ));
         assert!(!allowed(
-            crate::net::NOT_SIGNED_IN,
+            "This server is in online mode. Sign in with your Microsoft account in the Sunrise launcher to join it.",
             Some("sunrise.multiplayer.not_signed_in"),
             false
         ));
@@ -298,76 +289,61 @@ mod tests {
     fn keys_decide_whatever_language_resolved_the_text() {
         // A zh_cn client resolves the server's and the session service's
         // texts: the keyword scan of the text would see none of the
-        // English words, the keys do. A tiny fake language file stands in
-        // for vanilla's; Sunrise's bundled strings come with the map.
-        use std::collections::HashMap;
-        use sunrise_client_core::lang::{Language, ResourceSource};
-        struct Mem(HashMap<String, Vec<u8>>);
-        impl ResourceSource for Mem {
-            fn read(&self, path: &str) -> Option<Vec<u8>> {
-                self.0.get(path).cloned()
+        // English words, the keys do. The texts are zh_cn's.
+        fn zh(key: &str) -> &str {
+            match key {
+                "multiplayer.disconnect.server_shutdown" => "服务器已关闭",
+                "multiplayer.disconnect.server_full" => "服务器已满！",
+                "multiplayer.disconnect.slow_login" => "登录超时",
+                "multiplayer.disconnect.kicked" => "被管理员踢出游戏",
+                "multiplayer.disconnect.banned" => "你已被此服务器封禁",
+                "multiplayer.disconnect.not_whitelisted" => "你不在此服务器的白名单中！",
+                "disconnect.loginFailedInfo.invalidSession" => "无效会话（请尝试重启游戏及启动器）",
+                "sunrise.multiplayer.not_signed_in" => {
+                    "该服务器为在线模式服务器。请先在 Sunrise 启动器中登录 Microsoft 账户再加入。"
+                }
+                _ => key,
             }
         }
-        let mem = Mem(HashMap::from([(
-            "assets/minecraft/lang/zh_cn.json".into(),
-            r#"{
-                "multiplayer.disconnect.server_shutdown": "服务器已关闭",
-                "multiplayer.disconnect.server_full": "服务器已满！",
-                "multiplayer.disconnect.slow_login": "登录超时",
-                "multiplayer.disconnect.kicked": "被管理员踢出游戏",
-                "multiplayer.disconnect.banned": "你已被此服务器封禁",
-                "multiplayer.disconnect.not_whitelisted": "你不在此服务器的白名单中！",
-                "disconnect.loginFailedInfo.invalidSession": "无效会话（请尝试重启游戏及启动器）"
-            }"#
-            .as_bytes()
-            .to_vec(),
-        )]));
-        let lang = Language::load(&[&mem], "zh_cn");
-        let zh = |key: &str| lang.get(key).unwrap_or(key).to_owned();
-        assert_eq!(zh("multiplayer.disconnect.server_shutdown"), "服务器已关闭");
-        assert_eq!(
-            zh("sunrise.multiplayer.not_signed_in"),
-            "该服务器为在线模式服务器。请先在 Sunrise 启动器中登录 Microsoft 账户再加入。"
-        );
         // Shutdowns, a full server and a slow login are retried, kicks and
         // bans are not — whatever the resolved text says.
         assert!(allowed(
-            &zh("multiplayer.disconnect.server_shutdown"),
+            zh("multiplayer.disconnect.server_shutdown"),
             Some("multiplayer.disconnect.server_shutdown"),
             true
         ));
         assert!(allowed(
-            &zh("multiplayer.disconnect.server_full"),
+            zh("multiplayer.disconnect.server_full"),
             Some("multiplayer.disconnect.server_full"),
             true
         ));
         assert!(allowed(
-            &zh("multiplayer.disconnect.slow_login"),
+            zh("multiplayer.disconnect.slow_login"),
             Some("multiplayer.disconnect.slow_login"),
             true
         ));
         assert!(!allowed(
-            &zh("multiplayer.disconnect.kicked"),
+            zh("multiplayer.disconnect.kicked"),
             Some("multiplayer.disconnect.kicked"),
             true
         ));
         assert!(!allowed(
-            &zh("multiplayer.disconnect.banned"),
+            zh("multiplayer.disconnect.banned"),
             Some("multiplayer.disconnect.banned"),
             true
         ));
         assert!(!allowed(
-            &zh("multiplayer.disconnect.not_whitelisted"),
+            zh("multiplayer.disconnect.not_whitelisted"),
             Some("multiplayer.disconnect.not_whitelisted"),
             true
         ));
         assert!(!allowed(
-            &zh("disconnect.loginFailedInfo.invalidSession"),
+            zh("disconnect.loginFailedInfo.invalidSession"),
             Some("disconnect.loginFailedInfo.invalidSession"),
             false
         ));
         assert!(!allowed(
-            &zh("sunrise.multiplayer.not_signed_in"),
+            zh("sunrise.multiplayer.not_signed_in"),
             Some("sunrise.multiplayer.not_signed_in"),
             true
         ));
