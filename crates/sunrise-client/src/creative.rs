@@ -1595,6 +1595,7 @@ mod tests {
                 ("attribute.modifier.plus.0".into(), "+%s %s".into()),
                 ("painting.dimensions".into(), "%s by %s".into()),
             ]),
+            ..Default::default()
         };
         let local = creative.localized_lines(&|key| names.get(key).map(str::to_owned));
         let search = |term| creative.search_results_in(term, &names, &local, false);
@@ -1920,7 +1921,8 @@ mod tests {
         c.select(2);
         assert!(c.tab().inventory);
         assert!(!c.can_scroll(&Names {
-            map: HashMap::new()
+            map: HashMap::new(),
+            ..Default::default()
         }));
     }
 
@@ -2229,6 +2231,7 @@ mod tests {
         c.set_saved_hotbars(vec![stack("diamond_sword", 1), stack("air", 0), hint]);
         let names = Names {
             map: HashMap::new(),
+            ..Default::default()
         };
         assert_eq!(c.shown(&names, 0), Some(stack("diamond_sword", 1)));
         assert_eq!(c.shown(&names, 1), None);
@@ -2277,6 +2280,7 @@ mod tests {
         let c = creative(0);
         let names = Names {
             map: HashMap::new(),
+            ..Default::default()
         };
         let q = |s: &str| c.search_results(s, &names);
         assert_eq!(q(""), [0, 1, 2]);
@@ -2307,6 +2311,7 @@ mod tests {
                 ("item.minecraft.anvil".to_owned(), "铁砧".to_owned()),
                 ("item.minecraft.wooden_hoe".to_owned(), "木锄".to_owned()),
             ]),
+            ..Default::default()
         };
         let tr = |k: &str| names.get(k).map(str::to_owned);
         let local = c.localized_lines(&tr);
@@ -2340,6 +2345,7 @@ mod tests {
         let mut c = creative(90);
         let names = Names {
             map: HashMap::new(),
+            ..Default::default()
         };
         c.select(1);
         // Pressing the track holds the scrollbar without moving it.
@@ -2409,6 +2415,7 @@ mod tests {
         let mut c = creative(90);
         let names = Names {
             map: HashMap::new(),
+            ..Default::default()
         };
         c.select(1);
         let rows = (93usize.div_ceil(9) - 5) as f32;
@@ -2492,6 +2499,7 @@ mod tests {
         assert!(!c.tab().search);
         let names = Names {
             map: HashMap::new(),
+            ..Default::default()
         };
         assert!(c.items(&names).is_empty());
         assert!(c.tab_headers().is_empty());
