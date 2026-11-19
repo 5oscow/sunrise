@@ -493,12 +493,7 @@ impl Game<'_> {
         }
         self.draw_screen_phase(batch, sunrise_client::screen_draw::RenderPhase::Background);
         if open.show_saddle && open.saddle.is_none() {
-            batch.sprite(
-                atlas,
-                "container/slot/saddle",
-                ox + 8.0,
-                oy + 18.0,
-            );
+            batch.sprite(atlas, "container/slot/saddle", ox + 8.0, oy + 18.0);
         }
         if open.show_armor && open.armor.is_none() {
             let sprite = if llama::is_llama(open.species) {

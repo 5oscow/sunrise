@@ -41,14 +41,13 @@ pub fn item_slot(slot: u32) -> bool {
 /// The first op of `draws` [`paint_checked`] cannot draw, with its index. It reads the buffer
 /// and allocates only a sprite's name, once.
 pub fn undrawable(atlas: &HudAtlas, draws: &[GuiDraw]) -> Option<(usize, Undrawable)> {
-    let mut name = String::new();
     draws
         .iter()
         .enumerate()
-        .find_map(|(i, d)| refusal(atlas, d, &mut name).map(|why| (i, why)))
+        .find_map(|(i, d)| refusal(atlas, d).map(|why| (i, why)))
 }
 
-fn refusal(atlas: &HudAtlas, draw: &GuiDraw, name: &mut String) -> Option<Undrawable> {
+fn refusal(atlas: &HudAtlas, draw: &GuiDraw) -> Option<Undrawable> {
     match draw {
         GuiDraw::Item {
             slot, scale, pivot, ..
@@ -84,23 +83,13 @@ fn refusal(atlas: &HudAtlas, draw: &GuiDraw, name: &mut String) -> Option<Undraw
             if region.is_some_and(|[sw, sh, ..]| sw <= 0 || sh <= 0) {
                 return Some(Undrawable::SpriteRegion);
             }
-            // As `paint` looks it up: a mob effect sprite (namespaced or not) by its own name,
-            // the others under `gui/sprites/`. A mod's missing effect sprite is refused, not
-            // drawn as the missing texture.
-            let effect = sprite.starts_with("mob_effect/")
-                || sprite
-                    .split_once(':')
-                    .is_some_and(|(_, path)| path.starts_with("mob_effect/"));
-            name.clear();
-            if !effect {
-                name.push_str("");
-            }
-            name.push_str(sprite);
-            let known = atlas.sprites.contains_key(name.as_str());
+            // As `paint` looks it up, by GUI id. A mod's missing sprite is refused, not drawn as
+            // the missing texture.
+            let known = atlas.gui_rect(sprite).is_some();
             (!known).then(|| Undrawable::Sprite(sprite.to_string()))
         }
         GuiDraw::AtlasSprite { sprite, .. } => {
-            let known = atlas.sprites.contains_key(sprite.as_ref());
+            let known = atlas.gui_rect(sprite.as_ref()).is_some();
             (!known).then(|| Undrawable::Sprite(sprite.to_string()))
         }
         GuiDraw::Fill { .. }

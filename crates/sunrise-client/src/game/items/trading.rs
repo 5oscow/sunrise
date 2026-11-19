@@ -825,12 +825,7 @@ impl Game<'_> {
         }
         // Scroller (`extractScroller`): its thumb, or the disabled sprite.
         if let Some([x, y, w, h]) = scroller_rect(offers.len(), scroll) {
-            batch.sprite(
-                atlas,
-                "container/villager/scroller",
-                ox + x,
-                oy + y,
-            );
+            batch.sprite(atlas, "container/villager/scroller", ox + x, oy + y);
             if let Some(cursor) = scroller_cursor(local, [x, y, w, h], dragging) {
                 request_cursor(cursor);
             }

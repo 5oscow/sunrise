@@ -7083,9 +7083,7 @@ mod tests {
             h: 20,
         };
         for name in ["button", "button_disabled", "button_highlighted"] {
-            atlas
-                .sprites
-                .insert(format!("widget/{name}"), button);
+            atlas.sprites.insert(format!("widget/{name}"), button);
         }
         for above in [true, false] {
             let mut s = Settings::default();

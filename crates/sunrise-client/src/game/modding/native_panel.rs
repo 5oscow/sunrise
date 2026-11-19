@@ -620,12 +620,7 @@ impl Game<'_> {
             } else if on {
                 let name = ["page_backward", "page_forward"][i];
                 let suffix = if hovered { "_highlighted" } else { "" };
-                batch.sprite(
-                    atlas,
-                    &format!("recipe_book/{name}{suffix}"),
-                    x,
-                    y,
-                );
+                batch.sprite(atlas, &format!("recipe_book/{name}{suffix}"), x, y);
             } else {
                 continue;
             }

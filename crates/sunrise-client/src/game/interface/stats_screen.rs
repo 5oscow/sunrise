@@ -651,12 +651,7 @@ impl Game<'_> {
                         .child_of(list_key, i + 1)
                         .without_tooltip()
                     });
-                    batch.sprite(
-                        &self.gui.atlas,
-                        "container/slot",
-                        left + 1.0,
-                        y + 1.0,
-                    );
+                    batch.sprite(&self.gui.atlas, "container/slot", left + 1.0, y + 1.0);
                     self.draw_item(batch, &stack, left + 2.0, y + 2.0);
                     // `ItemRowWidget.extractTooltip`: the item's tooltip at the slot's corner.
                     if ui::hovered(self.cursor, left + 1.0, y + 1.0, 18.0, 18.0) {

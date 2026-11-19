@@ -680,8 +680,8 @@ pub fn registered(
 const ASKED_ATLASES: [&str; 3] = ["minecraft:blocks", "minecraft:items", "minecraft:gui"];
 
 /// Every atlas definition of a resource tree with the sprites its merged definition lists, from one
-/// listing of the textures. The registered types of mods are asked for the game's blocks and
-/// items atlases (`SpriteSource.run` runs a source of any registered type in any atlas), each
+/// listing of the textures. The registered types of mods are asked for the game's blocks, items and
+/// GUI atlases (`SpriteSource.run` runs a source of any registered type in any atlas), each
 /// entry once; every other definition lists its built-in sources. One load has one listing
 /// ([`shared`]), which the block sprites, the item masks, the HUD atlas and the glint atlas all
 /// read. The atlases a mod registers are asked by [`registered`].

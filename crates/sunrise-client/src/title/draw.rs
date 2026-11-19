@@ -792,7 +792,7 @@ impl Title {
                 "widget/button"
             };
             // Nine-slice approximation: left and right halves of the 200-wide sprite.
-            if let Some(r) = atlas.sprites.get(sprite).copied() {
+            if let Some(r) = atlas.gui_rect(sprite).copied() {
                 let half = b.w / 2.0;
                 let mut left = r;
                 left.u1 = r.u0 + (r.u1 - r.u0) * (half / r.w as f32);
@@ -811,7 +811,7 @@ impl Title {
                 // a 15px icon in a 20px button starts at 10 - 7 = 3, not 2.
                 batch.sprite_scaled(
                     atlas,
-                    &format!("{icon}"),
+                    icon,
                     b.x + (b.w / 2.0).floor() - (size / 2.0).floor(),
                     b.y + 10.0 - (size / 2.0).floor(),
                     size,
@@ -825,7 +825,7 @@ impl Title {
                 // TextAndIcon: `x + width - spriteWidth - 2`, centred in the height.
                 batch.sprite_scaled(
                     atlas,
-                    &format!("{icon}"),
+                    icon,
                     b.x + b.w - size - 2.0,
                     b.y + 10.0 - (size / 2.0).floor(),
                     size,

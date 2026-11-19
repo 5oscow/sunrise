@@ -145,12 +145,8 @@ fn scaling(sprite: &str, r: &Rect) -> NineSlice {
             "sunrise/jei/recipe_preview_background_v2" => [16; 4],
             "sunrise/jei/scrollbar_background_v2" => [6; 4],
             "sunrise/jei/scrollbar_marker_v2" => [2, 2, 2, 1],
-            "widget/button"
-            | "widget/button_highlighted"
-            | "widget/button_disabled" => [3; 4],
-            "widget/slider_handle" | "widget/slider_handle_highlighted" => {
-                [2, 2, 2, 3]
-            }
+            "widget/button" | "widget/button_highlighted" | "widget/button_disabled" => [3; 4],
+            "widget/slider_handle" | "widget/slider_handle_highlighted" => [2, 2, 2, 3],
             _ => [1; 4],
         },
         stretch_inner: false,
@@ -360,7 +356,7 @@ pub fn tiled_sized(
     size: [f32; 2],
     color: u32,
 ) {
-    let Some(r) = atlas.sprites.get(sprite).copied() else {
+    let Some(r) = atlas.gui_rect(sprite).copied() else {
         return;
     };
     tile(
@@ -862,7 +858,7 @@ pub fn menu_background(
     } else {
         "gui/menu_background"
     };
-    if atlas.sprites.contains_key(sprite) {
+    if atlas.gui_rect(sprite).is_some() {
         tiled(batch, atlas, sprite, x, y, w, h, 32.0, u32::MAX);
     } else {
         batch.fill(atlas, x, y, w, h, rgba(0, 0, 0, 160));
@@ -1057,16 +1053,7 @@ pub fn scrollbar_sprites(
         height,
         u32::MAX,
     );
-    nine_slice(
-        batch,
-        atlas,
-        "widget/scroller",
-        x,
-        y,
-        6.0,
-        bar,
-        u32::MAX,
-    );
+    nine_slice(batch, atlas, "widget/scroller", x, y, 6.0, bar, u32::MAX);
 }
 
 /// Screen tooltip (DefaultTooltipPositioner + TooltipRenderUtil): the
@@ -1214,13 +1201,13 @@ fn tooltip_size(atlas: &HudAtlas, lines: &[Text]) -> (f32, f32) {
 }
 /// `TooltipRenderUtil.getBackgroundSprite` and `getFrameSprite` of a tooltip style
 /// (`<namespace>:<path>`): `tooltip/<path>_background` and `tooltip/<path>_frame` in the style's
-/// namespace, named as the GUI atlas packs them.
+/// namespace, named by GUI id.
 pub fn tooltip_style_sprites(namespace: &str, path: &str) -> [String; 2] {
     let prefix = match namespace {
         "minecraft" => String::new(),
         namespace => format!("{namespace}:"),
     };
-    ["background", "frame"].map(|part| format!("{prefix}gui/sprites/tooltip/{path}_{part}"))
+    ["background", "frame"].map(|part| format!("{prefix}tooltip/{path}_{part}"))
 }
 /// `TooltipRenderUtil.renderTooltipBackground`: the background sprite, then the frame sprite,
 /// each drawn by `blitSprite` (nine-sliced as its `gui.scaling` says, stretched without it)
@@ -1234,7 +1221,7 @@ pub fn tooltip_sprites(
 ) -> bool {
     if ![background, frame]
         .iter()
-        .all(|sprite| atlas.sprites.contains_key(*sprite))
+        .all(|sprite| atlas.gui_rect(sprite).is_some())
     {
         return false;
     }
@@ -1265,10 +1252,7 @@ fn tooltip_box(
     tooltip_sprites(
         batch,
         atlas,
-        [
-            "tooltip/background",
-            "tooltip/frame",
-        ],
+        ["tooltip/background", "tooltip/frame"],
         [x, y, w, h],
     );
     let mut ly = y;
@@ -2725,13 +2709,10 @@ mod tests {
             (20, 12, [3; 4])
         );
         // Another namespace's sprite is named with it, as the GUI atlas packs it.
-        let frame = metadata
-            .0
-            .get("lobby:tooltip/gold_frame")
-            .unwrap();
+        let frame = metadata.0.get("lobby:tooltip/gold_frame").unwrap();
         assert_eq!((frame.width, frame.border), (40, [6; 4]));
     }
-    /// A tooltip style names its sprites as `TooltipRenderUtil` does, in the GUI atlas's names;
+    /// A tooltip style names its sprites as `TooltipRenderUtil` does, by GUI id;
     /// the box draws the background, then the frame, 12 pixels out from the contents, each
     /// stretched when it has no `gui.scaling` (`GuiMetadataSection.DEFAULT`), and nothing
     /// without either sprite.
@@ -2739,18 +2720,12 @@ mod tests {
     fn a_tooltip_style_draws_its_own_background_and_frame() {
         assert_eq!(
             tooltip_style_sprites("minecraft", "fancy"),
-            [
-                "tooltip/fancy_background",
-                "tooltip/fancy_frame"
-            ]
+            ["tooltip/fancy_background", "tooltip/fancy_frame"]
         );
         let [background, frame] = tooltip_style_sprites("lobby", "gold");
         assert_eq!(
             [background.as_str(), frame.as_str()],
-            [
-                "lobby:tooltip/gold_background",
-                "lobby:tooltip/gold_frame"
-            ]
+            ["lobby:tooltip/gold_background", "lobby:tooltip/gold_frame"]
         );
         let mut atlas = atlas();
         let mut batch = HudBatch::scratch([640, 480]);

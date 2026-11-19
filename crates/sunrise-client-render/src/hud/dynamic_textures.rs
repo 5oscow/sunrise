@@ -407,6 +407,85 @@ mod tests {
         assert_eq!(sized([1025, 1025], 0), Err(TooLarge));
     }
 
+    /// A GUI atlas list that lists then removes an id leaves it to a live texture made there, which
+    /// then resolves as itself and not as the missing sprite; an id the list has a sprite for is
+    /// the list's (the game refuses a live texture there), and a model's sprite of a removed id
+    /// is not what the removed GUI id resolves to.
+    #[test]
+    fn a_live_texture_and_the_gui_list_never_mask_each_other() {
+        use crate::hud::{GuiSprite, HudAtlas};
+        let root = std::env::temp_dir().join(format!("sunrise-live-gui-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let atlases = root.join("assets/minecraft/atlases");
+        let sheet = root.join("assets/demo/textures/item");
+        std::fs::create_dir_all(&atlases).unwrap();
+        std::fs::create_dir_all(&sheet).unwrap();
+        let mut encoder = png::Encoder::new(
+            std::fs::File::create(sheet.join("sheet.png")).unwrap(),
+            1,
+            1,
+        );
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder
+            .write_header()
+            .unwrap()
+            .write_image_data(&[1, 2, 3, 255])
+            .unwrap();
+        std::fs::write(atlases.join("blocks.json"), r#"{"sources":[]}"#).unwrap();
+        std::fs::write(
+            atlases.join("items.json"),
+            r#"{"sources":[{"type":"minecraft:single","resource":"demo:item/sheet","sprite":"demo:item/modeled"}]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            atlases.join("gui.json"),
+            r#"{"sources":[
+                {"type":"minecraft:single","resource":"demo:item/sheet","sprite":"demo:kept"},
+                {"type":"minecraft:single","resource":"demo:item/sheet","sprite":"demo:gone"},
+                {"type":"minecraft:single","resource":"demo:item/sheet","sprite":"demo:item/modeled"},
+                {"type":"minecraft:filter","pattern":{"namespace":"demo","path":"gone"}},
+                {"type":"minecraft:filter","pattern":{"namespace":"demo","path":"item/modeled"}}]}"#,
+        )
+        .unwrap();
+        let mut atlas = HudAtlas::build(&crate::resource_source::ResourceSource::directory(
+            root.clone(),
+        ))
+        .unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+        let size = |atlas: &HudAtlas, id: &str| atlas.gui_rect(id).map(|rect| (rect.w, rect.h));
+        let missing = size(&atlas, crate::hud::MISSING_SPRITE);
+        // The list has a sprite at `demo:kept`: the list's, so a live texture is refused there.
+        assert!(atlas.gui_owns("demo:kept"));
+        assert!(!atlas.gui_owns("demo:gone"));
+        // Removed ids: the missing sprite, and not the model's sprite for `demo:item/modeled`.
+        assert!(matches!(
+            atlas.gui_lookup("demo:gone"),
+            Some(GuiSprite::Missing { model: false })
+        ));
+        assert_eq!(size(&atlas, "demo:item/modeled"), missing);
+        assert_eq!(
+            atlas.sprites.get("demo:item/modeled").map(|r| (r.w, r.h)),
+            Some((1, 1)),
+            "the model's own sprite is untouched"
+        );
+        // A live texture made at the removed id is what the id then resolves to.
+        let (mut textures, pool) = (textures(), pool());
+        assert_eq!(
+            textures.create(
+                Some(&pool),
+                &mut atlas.sprites,
+                Some("demo"),
+                &id("demo:gone"),
+                [3, 2],
+                &[7; 24],
+            ),
+            Ok(())
+        );
+        assert_eq!(size(&atlas, "demo:gone"), Some((3, 2)));
+        assert_ne!(size(&atlas, "demo:gone"), missing);
+    }
+
     /// The slot and budget decisions, with no GPU: a full class has no slot for any mod, a freed
     /// slot and budget come back, the budget counts images and the kept pixels, and an update
     /// writes into the slot the image holds.

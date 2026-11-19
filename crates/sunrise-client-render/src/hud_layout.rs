@@ -802,7 +802,6 @@ fn paint_with(
 ) {
     let mut stack = vec![IDENTITY];
     // One buffer for the sprite keys, instead of a string per drawn sprite.
-    let mut name = String::new();
     for d in draws {
         let start = batch.vertices.len();
         let pose = *stack.last().unwrap_or(&IDENTITY);
@@ -817,21 +816,15 @@ fn paint_with(
                 color,
                 blend,
             } => {
-                // Effect sprites belong to the mob_effect atlas directory (a
-                // content mod's under its namespace); the other blitSprite
-                // ids refer to GUI sprites.
-                name.clear();
+                // An effect sprite (a content mod's under its namespace) draws as the missing
+                // sprite where the atlas lacks it; any other GUI sprite is then not drawn.
                 let effect = sprite.starts_with("mob_effect/")
                     || sprite
                         .split_once(':')
                         .is_some_and(|(_, path)| path.starts_with("mob_effect/"));
-                if !effect {
-                    name.push_str("");
-                }
-                name.push_str(sprite);
                 let found = match effect {
-                    true => atlas.sprite_or_missing(&name),
-                    false => atlas.sprites.get(name.as_str()).copied(),
+                    true => atlas.gui_sprite_or_missing(sprite),
+                    false => atlas.gui_rect(sprite).copied(),
                 };
                 let Some(mut r) = found else {
                     continue;
@@ -846,7 +839,7 @@ fn paint_with(
                     r.v0 = v0;
                 }
                 let at = [*x as f32, *y as f32, *w as f32, *h as f32];
-                match crate::hud::sprite_modifiers::draws(atlas, &name, r, at, abgr(*color)) {
+                match crate::hud::sprite_modifiers::draws(atlas, sprite, r, at, abgr(*color)) {
                     // A Polytone screen sprite modifier: the sprite changed, then its overlays.
                     Some(draws) => {
                         for d in draws {

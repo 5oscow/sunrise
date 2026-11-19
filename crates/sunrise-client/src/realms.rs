@@ -1328,7 +1328,7 @@ impl Screen {
         };
         if self.news_unread
             && let Some(sprite) = badge(u32::MAX)
-            && atlas.sprites.contains_key(sprite)
+            && atlas.gui_rect(sprite).is_some()
         {
             crate::ui::blit_sprite(
                 batch,
@@ -1343,7 +1343,7 @@ impl Screen {
         }
         if self.pending_invites > 0
             && let Some(sprite) = badge(self.pending_invites)
-            && atlas.sprites.contains_key(sprite)
+            && atlas.gui_rect(sprite).is_some()
         {
             crate::ui::blit_sprite(
                 batch,
@@ -7922,10 +7922,7 @@ impl Screen {
                                 );
                                 // `RealmsWorldSlotButton.extractContents`: the hardcore
                                 // heart 9x8 at x + 3, y + 4.
-                                if hardcore
-                                    && atlas
-                                        .sprites
-                                        .contains_key("hud/heart/hardcore_full")
+                                if hardcore && atlas.sprites.contains_key("hud/heart/hardcore_full")
                                 {
                                     crate::ui::blit_sprite(
                                         batch,
@@ -9056,7 +9053,7 @@ impl Screen {
                 }
                 let top = ((h - height) / 2.0).floor();
                 let left = ((w - 214.0) / 2.0).floor();
-                if atlas.sprites.contains_key("popup/background") {
+                if atlas.gui_rect("popup/background").is_some() {
                     crate::ui::blit_sprite(
                         batch,
                         atlas,
@@ -9304,7 +9301,7 @@ impl Screen {
                 let height = 9.0 + 12.0 + lines.len() as f32 * 9.0 + 12.0 + 20.0;
                 let top = ((h - height) / 2.0).floor();
                 let left = ((w - 214.0) / 2.0).floor();
-                if atlas.sprites.contains_key("popup/background") {
+                if atlas.gui_rect("popup/background").is_some() {
                     crate::ui::blit_sprite(
                         batch,
                         atlas,
@@ -10090,9 +10087,7 @@ impl Screen {
                         }
                         if server.is_hardcore
                             && let Some(mode_x) = mode_x
-                            && atlas
-                                .sprites
-                                .contains_key("hud/heart/hardcore_full")
+                            && atlas.sprites.contains_key("hud/heart/hardcore_full")
                         {
                             crate::ui::blit_sprite(
                                 batch,

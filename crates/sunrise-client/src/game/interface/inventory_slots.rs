@@ -419,12 +419,7 @@ impl Game<'_> {
         for i in self.slots() {
             let (sx, sy) = self.slot_position(i);
             if i == 504 && self.offhand.is_none() {
-                batch.sprite(
-                    &self.gui.atlas,
-                    "container/slot/shield",
-                    ox + sx,
-                    oy + sy,
-                );
+                batch.sprite(&self.gui.atlas, "container/slot/shield", ox + sx, oy + sy);
             }
             if (500..504).contains(&i) && self.armor[i - 500].is_none() {
                 let icon = ["helmet", "chestplate", "leggings", "boots"][i - 500];
@@ -456,7 +451,7 @@ impl Game<'_> {
                         h: f32,
                         dx: f32,
                         dy: f32| {
-                if let Some(mut r) = atlas.sprites.get(name).copied() {
+                if let Some(mut r) = atlas.gui_rect(name).copied() {
                     let (du, dv) = ((r.u1 - r.u0) / r.w as f32, (r.v1 - r.v0) / r.h as f32);
                     r.u0 += sx * du;
                     r.v0 += sy * dv;

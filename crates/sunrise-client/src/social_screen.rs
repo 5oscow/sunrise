@@ -304,15 +304,7 @@ pub fn draw_background(batch: &mut HudBatch, atlas: &HudAtlas, in_world: bool) {
         window_height(h) + 16.0,
         WHITE,
     );
-    batch.sprite_scaled(
-        atlas,
-        "icon/search",
-        mx + 10.0,
-        76.0,
-        12.0,
-        12.0,
-        WHITE,
-    );
+    batch.sprite_scaled(atlas, "icon/search", mx + 10.0, 76.0, 12.0, 12.0, WHITE);
 }
 
 /// Draw the widgets and return the delayed tooltip for the screen's overlay pass.

@@ -2188,18 +2188,17 @@ impl Game<'_> {
                     }
                 }
                 Call::Sprite { id, x, y, w, h } => {
-                    let name = sunrise_client::hud::atlas_key_of_gui_sprite(id);
+                    let name = id.as_str();
                     let native = atlas
-                        .sprites
-                        .get(&name)
+                        .gui_rect(name)
                         .is_some_and(|r| r.w as i32 == *w && r.h as i32 == *h);
                     if native {
-                        batch.sprite(atlas, &name, *x as f32, *y as f32);
+                        batch.sprite(atlas, name, *x as f32, *y as f32);
                     } else {
                         sunrise_client::ui::nine_slice(
                             batch,
                             atlas,
-                            &name,
+                            name,
                             *x as f32,
                             *y as f32,
                             *w as f32,

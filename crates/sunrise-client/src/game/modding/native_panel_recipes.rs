@@ -524,12 +524,7 @@ impl Game<'_> {
                 } else {
                     ""
                 };
-                batch.sprite(
-                    atlas,
-                    &format!("recipe_book/{name}{suffix}"),
-                    x,
-                    y,
-                );
+                batch.sprite(atlas, &format!("recipe_book/{name}{suffix}"), x, y);
                 sunrise_client::widgets::record(label, [x, y, 12.0, 17.0], true);
             }
             let text = format!("{}/{pages_n}", page + 1);

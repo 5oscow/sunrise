@@ -209,16 +209,7 @@ impl Game<'_> {
 
         let (title, tx, ty) = &layout.title;
         batch.text_styled(atlas, title, *tx, *ty, u32::MAX, true);
-        ui::nine_slice(
-            batch,
-            atlas,
-            "widget/text_field",
-            ax,
-            ay,
-            aw,
-            ah,
-            u32::MAX,
-        );
+        ui::nine_slice(batch, atlas, "widget/text_field", ax, ay, aw, ah, u32::MAX);
         let start = batch.vertices.len();
         for (i, line) in layout.lines.iter().enumerate() {
             let y = ay + PAD + i as f32 * LINE - offset;

@@ -1031,6 +1031,13 @@ impl HudAtlas {
             GuiSprite::Missing { .. } => self.sprites.get(MISSING_SPRITE),
         }
     }
+    /// [`HudAtlas::gui_rect`], or the missing sprite where the atlas has no such GUI sprite (an
+    /// effect without its icon).
+    pub fn gui_sprite_or_missing(&self, id: &str) -> Option<Rect> {
+        self.gui_rect(id)
+            .or_else(|| self.sprites.get(MISSING_SPRITE))
+            .copied()
+    }
     /// A sprite, or the missing one when the atlas has no such sprite (an
     /// effect without its icon), as a stitched atlas answers.
     pub fn sprite_or_missing(&self, name: &str) -> Option<Rect> {
@@ -1101,7 +1108,7 @@ impl HudAtlas {
         pack_text::load_shaders(&mut atlas, root, game);
         atlas.sprite_modifiers = std::sync::Arc::new(sprite_modifiers::SpriteModifiers::read(
             root,
-            atlas.sprites.keys(),
+            atlas.gui.keys(),
         ));
         Ok(atlas)
     }
@@ -2180,13 +2187,13 @@ impl HudBatch {
         h: f32,
         color: u32,
     ) {
-        if let Some(r) = atlas.sprites.get(name).copied() {
+        if let Some(r) = atlas.gui_rect(name).copied() {
             self.rect_uv(x, y, w, h, r, color);
         }
     }
     /// Draw part of a sprite, `fraction` of its width from the left.
     pub fn sprite_part(&mut self, atlas: &HudAtlas, name: &str, x: f32, y: f32, fraction: f32) {
-        if let Some(mut r) = atlas.sprites.get(name).copied() {
+        if let Some(mut r) = atlas.gui_rect(name).copied() {
             let w = r.w as f32 * fraction;
             r.u1 = r.u0 + (r.u1 - r.u0) * fraction;
             self.rect_uv(x, y, w, r.h as f32, r, u32::MAX);
@@ -3547,6 +3554,18 @@ mod tests {
         }
     }
 
+    /// `assets/minecraft/atlases/gui.json` as the game's resources have it.
+    fn write_vanilla_gui_definition(root: &std::path::Path) {
+        let atlases = root.join("assets/minecraft/atlases");
+        fs::create_dir_all(&atlases).unwrap();
+        fs::write(
+            atlases.join("gui.json"),
+            r#"{"sources":[
+                {"type":"minecraft:directory","prefix":"","source":"gui/sprites"},
+                {"type":"minecraft:directory","prefix":"mob_effect/","source":"mob_effect"}]}"#,
+        )
+        .unwrap();
+    }
     fn write_pixel(path: &std::path::Path, rgba: [u8; 4]) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         let mut encoder = png::Encoder::new(std::fs::File::create(path).unwrap(), 1, 1);
@@ -3776,6 +3795,90 @@ mod tests {
         };
         assert_eq!(size("demo:alias"), Some((2, 1)));
         assert_eq!(size("demo:cut"), Some((1, 1)));
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+    /// A GUI override of a walked vanilla sprite is what each kind of GUI consumer gets by the
+    /// sprite's id: a built-in draw, an inline atlas glyph, a size measurement and a mod's map
+    /// decoration sprite (all the one lookup), and the walked file's packed name is gone.
+    #[test]
+    fn a_gui_override_reaches_every_kind_of_consumer() {
+        let root = model_atlas_root("gui-consumers", r#"{"sources":[]}"#, r#"{"sources":[]}"#);
+        write_vanilla_gui_definition(&root);
+        // The walked sprite: 1 x 1. The override: the 2 x 1 sheet, under the same id.
+        write_pixel(
+            &root.join("assets/minecraft/textures/gui/sprites/container/slot.png"),
+            [9, 9, 9, 255],
+        );
+        std::fs::write(
+            root.join("assets/minecraft/atlases/gui.json"),
+            r#"{"sources":[
+                {"type":"minecraft:directory","prefix":"","source":"gui/sprites"},
+                {"type":"minecraft:single","resource":"demo:item/sheet","sprite":"minecraft:container/slot"},
+                {"type":"minecraft:single","resource":"demo:item/sheet","sprite":"demo:marker"}]}"#,
+        )
+        .unwrap();
+        let atlas = HudAtlas::build(&ResourceSource::directory(root.clone())).unwrap();
+        let (w, h) = (atlas.width, atlas.height);
+        let own = *atlas.gui_rect("container/slot").unwrap();
+        assert_eq!(own.texels((w, h)), (2, 1), "the override's pixels");
+        assert!(
+            !atlas.sprites.contains_key("gui/sprites/container/slot"),
+            "the walked file it replaced is no sprite"
+        );
+        // A built-in draw by id.
+        let mut batch = HudBatch::scratch([320, 240]);
+        batch.sprite(&atlas, "container/slot", 10.0, 20.0);
+        assert_eq!(batch.vertices[1].pos, [12.0, 20.0], "drawn 2 wide");
+        assert_eq!(batch.vertices[2].pos, [12.0, 21.0], "and 1 high");
+        assert_eq!(batch.vertices[0].uv, [own.u0, own.v0]);
+        // An inline atlas glyph of the GUI atlas, by the qualified id.
+        let glyph = atlas
+            .inline_sprite("minecraft:gui", "minecraft:container/slot")
+            .unwrap();
+        assert_eq!((glyph.u0, glyph.v0), (own.u0, own.v0));
+        // A size measurement and a mod's decoration sprite: the same lookup, by id.
+        let measured = atlas.gui_rect("minecraft:container/slot").unwrap();
+        assert_eq!((measured.w, measured.h), (2, 1));
+        assert_eq!(
+            atlas.gui_rect("demo:marker").unwrap().texels((w, h)),
+            (2, 1)
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+    /// A GUI alias of an animated strip shows the strip's first frame in the atlas and animates
+    /// through the strip's later ones, under its own id, with the pixels of each.
+    #[test]
+    fn a_gui_alias_animates_through_its_sources_frames() {
+        let root = model_atlas_root("gui-alias-frames", r#"{"sources":[]}"#, r#"{"sources":[]}"#);
+        write_vanilla_gui_definition(&root);
+        std::fs::write(
+            root.join("assets/demo/textures/item/sheet.png.mcmeta"),
+            r#"{"animation":{"width":1,"frametime":1}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("assets/minecraft/atlases/gui.json"),
+            r#"{"sources":[{"type":"minecraft:single","resource":"demo:item/sheet","sprite":"demo:alias"}]}"#,
+        )
+        .unwrap();
+        let atlas = HudAtlas::build(&ResourceSource::directory(root.clone())).unwrap();
+        let rect = *atlas.gui_rect("demo:alias").unwrap();
+        assert_eq!(
+            texel_at(&atlas, rect, 0, 0),
+            [255, 0, 0, 255],
+            "the first frame"
+        );
+        let (_, animation) = atlas
+            .sprite_animations
+            .iter()
+            .find(|(r, _)| r.u0 == rect.u0 && r.v0 == rect.v0)
+            .expect("the alias animates");
+        assert_eq!(animation.resized_pixels(0, 1, 1), [255, 0, 0, 255]);
+        assert_eq!(
+            animation.resized_pixels(1, 1, 1),
+            [0, 255, 0, 0],
+            "the strip's second frame"
+        );
         std::fs::remove_dir_all(&root).unwrap();
     }
     #[test]
@@ -4649,6 +4752,7 @@ mod tests {
             std::env::temp_dir().join(format!("sunrise-atlas-inline-{}", std::process::id()));
         let gui = root.join("assets/minecraft/textures/gui/sprites/boss_bar");
         fs::create_dir_all(&gui).unwrap();
+        write_vanilla_gui_definition(&root);
         write_strip(
             &gui.join("pink_background.png"),
             16,
@@ -5628,6 +5732,7 @@ texture=wide",
         // No Minecraft installation or GPU is needed for this regression test.
         let root =
             std::env::temp_dir().join(format!("sunrise-effect-icons-{}", std::process::id()));
+        write_vanilla_gui_definition(&root);
         for (name, size) in [
             ("mob_effect/levitation", 18),
             ("gui/sprites/hud/effect_background", 24),

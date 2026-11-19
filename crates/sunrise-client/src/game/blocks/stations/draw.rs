@@ -182,12 +182,7 @@ impl Game<'_> {
                         flip,
                     );
                     if s.inputs[1].is_none() {
-                        batch.sprite(
-                            atlas,
-                            "container/slot/lapis_lazuli",
-                            ox + 35.0,
-                            oy + 47.0,
-                        );
+                        batch.sprite(atlas, "container/slot/lapis_lazuli", ox + 35.0, oy + 47.0);
                     }
                     let mut names = LegacyRandom::new(i64::from(self.level.xp_seed));
                     let gold = s.inputs[1].as_ref().map_or(0, |l| l.count as i32);
@@ -231,10 +226,7 @@ impl Game<'_> {
                             );
                             batch.sprite(
                                 atlas,
-                                &format!(
-                                    "container/enchanting_table/level_{}_disabled",
-                                    i + 1
-                                ),
+                                &format!("container/enchanting_table/level_{}_disabled", i + 1),
                                 ox + bx + 1.0,
                                 oy + by + 1.0,
                             );
@@ -376,12 +368,7 @@ impl Game<'_> {
                         u32::MAX,
                     );
                     if has_input && s.result.is_none() {
-                        batch.sprite(
-                            atlas,
-                            "container/anvil/error",
-                            ox + 99.0,
-                            oy + 45.0,
-                        );
+                        batch.sprite(atlas, "container/anvil/error", ox + 99.0, oy + 45.0);
                     }
                     if s.inputs[0].is_some() {
                         // Drawn once this borrow of the station ends.
@@ -428,12 +415,7 @@ impl Game<'_> {
                 }
                 Kind::Grindstone => {
                     if has_input && s.result.is_none() {
-                        batch.sprite(
-                            atlas,
-                            "container/grindstone/error",
-                            ox + 92.0,
-                            oy + 31.0,
-                        );
+                        batch.sprite(atlas, "container/grindstone/error", ox + 92.0, oy + 31.0);
                     }
                 }
                 Kind::Smithing => {
@@ -464,12 +446,7 @@ impl Game<'_> {
                         }
                     }
                     if s.inputs.iter().all(Option::is_some) && s.result.is_none() {
-                        batch.sprite(
-                            atlas,
-                            "container/smithing/error",
-                            ox + 65.0,
-                            oy + 46.0,
-                        );
+                        batch.sprite(atlas, "container/smithing/error", ox + 65.0, oy + 46.0);
                         if inside(local, 65.0, 46.0, 28.0, 21.0) {
                             onboarding = Some(self.translate_with_fallback(
                                 "container.upgrade.error_tooltip",

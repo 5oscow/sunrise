@@ -832,16 +832,7 @@ impl Game<'_> {
         );
         let p = Popup::lock_question(&atlas.font, o.difficulty, (w, h));
         let (fx, fy, fw, fh) = p.frame;
-        ui::nine_slice(
-            batch,
-            atlas,
-            "popup/background",
-            fx,
-            fy,
-            fw,
-            fh,
-            u32::MAX,
-        );
+        ui::nine_slice(batch, atlas, "popup/background", fx, fy, fw, fh, u32::MAX);
         self.draw_screen_phase(batch, sunrise_client::screen_draw::RenderPhase::Background);
         for (line, x, y) in &p.lines {
             batch.text_styled(atlas, line, *x, *y, u32::MAX, true);

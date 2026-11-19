@@ -129,7 +129,7 @@ fn background(batch: &mut HudBatch, atlas: &HudAtlas, panel: &EffectPanel) {
     } else {
         "container/inventory/effect_background"
     };
-    let Some(rect) = atlas.sprites.get(name).copied() else {
+    let Some(rect) = atlas.gui_rect(name).copied() else {
         return;
     };
     let mut strip = |dx: i32, sx: i32, width: i32| {

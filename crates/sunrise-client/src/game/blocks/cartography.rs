@@ -164,7 +164,7 @@ impl Game<'_> {
             return;
         };
         for d in map.decorations.iter().filter(|d| shown_on_frame(d.sprite)) {
-            let Some(s) = self.gui.atlas.sprites.get(d.sprite).copied() else {
+            let Some(s) = self.gui.atlas.gui_rect(d.sprite).copied() else {
                 continue;
             };
             batch.quad(
@@ -198,7 +198,7 @@ impl Game<'_> {
         }
         // A native mod's own icons (`native_map_decorations`).
         for d in self.mod_map_decorations(id, true) {
-            let Some(s) = self.gui.atlas.sprites.get(d.sprite.as_str()).copied() else {
+            let Some(s) = self.gui.atlas.gui_rect(d.sprite.as_str()).copied() else {
                 continue;
             };
             batch.quad(

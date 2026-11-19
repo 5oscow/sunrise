@@ -1428,7 +1428,7 @@ impl Game<'_> {
         size: (f32, f32),
         dst: (f32, f32),
     ) {
-        if let Some(mut r) = atlas.sprites.get(name).copied() {
+        if let Some(mut r) = atlas.gui_rect(name).copied() {
             let (du, dv) = ((r.u1 - r.u0) / r.w as f32, (r.v1 - r.v0) / r.h as f32);
             r.u0 += src.0 * du;
             r.v0 += src.1 * dv;
