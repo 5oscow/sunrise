@@ -370,9 +370,6 @@ impl<'g, V: Value> State<'g, V> {
             self.errors.push((sugg, reason));
         }
     }
-    pub fn store_at_mark(&mut self, reason: Reason) {
-        self.store(self.cursor, Sugg::Empty, reason);
-    }
     fn parse_top(&mut self) -> Option<V> {
         let r = self.parse(self.grammar.top);
         if r.is_some() {
