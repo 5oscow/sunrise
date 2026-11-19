@@ -1086,7 +1086,7 @@ pub fn takedown_notes(base: &[Entry], previous: &[Revoked], head: &Index) -> Vec
                     .as_ref()
                     .is_none_or(|h| h.eq_ignore_ascii_case(hash))
             })
-            .filter_map(|(v, _)| crate::dependencies::parse_version(v).ok())
+            .filter_map(|(v, _)| crate::manifest::parse_version(v).ok())
             .collect();
         for p in &head.projects {
             for v in &p.versions {

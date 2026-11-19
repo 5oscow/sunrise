@@ -1,6 +1,6 @@
 //! The registry's install and removal rules. Planning does not download or write any files.
 use super::{Dependency, Index, Kind, Project, Version, dependencies::required_cycle};
-use crate::dependencies::parse_version;
+use crate::manifest::parse_version;
 use mod_vocab::Side;
 use semver::{Comparator, Op, VersionReq};
 use serde::{Deserialize, Serialize};
