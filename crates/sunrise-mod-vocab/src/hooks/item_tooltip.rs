@@ -10,7 +10,8 @@ pub trait Hooks {
     /// `advanced` (F3+H) and `creative` (a creative tab's own slot) its
     /// `TooltipFlag`. Asked when item tooltip lines are built, for the game's display
     /// or `ItemResource::tooltip`. Never asked for a hidden tooltip, a crossbow's loaded
-    /// projectile or a reentrant tooltip query from a tooltip callback. Client-side.
+    /// projectile or a query made during item tooltip line construction. Queries outside
+    /// line construction can dispatch this event, but never gather images or draw. Client-side.
     /// This global event is distinct from [`ItemPart::tooltip`], which runs at
     /// the earlier `Item.appendHoverText` position, before component lines.
     /// Parts' lines therefore come first; this event sees the finished list

@@ -19,8 +19,10 @@ Pass their text to `DrawContext::gui_tooltip` at your GUI cursor position. If a 
 has a separate RGBA colour, use its RGB channels as the fallback text style colour;
 `u32::MAX` means keep the text's own style.
 
-Inside a tooltip callback, the same request returns base lines without running any
-of the tooltip callbacks again.
+During item tooltip line construction, the request returns base lines without
+running line callbacks again. Outside line construction, including in gather or
+pre-render callbacks, the request runs line callbacks. It never gathers images or
+draws a tooltip.
 
 ## Adding tooltip lines
 

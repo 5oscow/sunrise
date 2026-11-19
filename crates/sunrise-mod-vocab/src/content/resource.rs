@@ -300,8 +300,9 @@ impl ItemResource {
     }
     /// `ItemStack.getTooltipLines` with the client's current viewer context and explicit
     /// advanced and creative flags. Includes item parts, component appenders and edits from
-    /// `item_tooltip`, just as inventory tooltips do. A request from inside a tooltip callback
-    /// returns base lines without calling any mods again. Does not gather images or draw.
+    /// `item_tooltip`, just as inventory tooltips do. A request during item tooltip line
+    /// construction returns base lines without dispatching line callbacks again. No request
+    /// gathers images or draws.
     /// Returns None without a client backend, when the item is unknown, or when its lines
     /// cannot be represented.
     pub fn tooltip(
