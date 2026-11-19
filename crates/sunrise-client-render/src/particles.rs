@@ -4788,6 +4788,40 @@ mod tests {
         });
     }
 
+    /// An entity effect takes its colour and alpha from the option, and its spell behaviour
+    /// restores that alpha; a trail lasts the ticks the option gives, `-1` included.
+    #[test]
+    fn entity_effect_and_trail_particles_read_their_options() {
+        let mut engine = ParticleEngine::new(
+            &ResourceSource::indexed(Default::default()),
+            &HashMap::new(),
+            &HashSet::new(),
+        );
+        let effect = engine
+            .make(
+                &ParticleOptions::colored(ParticleType::EntityEffect, [0.25, 0.5, 0.75, 0.4]),
+                [0.0; 3],
+                [0.0; 3],
+                1,
+            )
+            .expect("an entity effect is made");
+        assert_eq!(effect.rgba, [0.25, 0.5, 0.75, 0.4]);
+        assert!(matches!(
+            effect.behaviour,
+            Behaviour::Spell { original_alpha } if original_alpha == 0.4
+        ));
+        for duration in [30, -1] {
+            let options = ParticleOptions {
+                trail: Some(([1.0, 2.0, 3.0], duration)),
+                ..ParticleOptions::simple(ParticleType::Trail)
+            };
+            let trail = engine
+                .make(&options, [0.0; 3], [0.0; 3], 1)
+                .expect("a trail is made");
+            assert_eq!(trail.lifetime, duration);
+        }
+    }
+
     #[test]
     fn special_particles_wait_for_admission_without_ticking_or_counting() {
         with_empty_particle_level(|level| {
