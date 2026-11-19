@@ -1836,10 +1836,10 @@ mod tests {
         };
         assert_eq!(load(&root), [255, 0, 0, 255]);
         assert_eq!(load(&root), [255, 0, 0, 255]);
-        std::thread::sleep(std::time::Duration::from_millis(30));
+        // A longer definition, so the change shows in the file's size whatever the clock.
         fs::write(
             root.join("assets/minecraft/atlases/blocks.json"),
-            quadrant("demo:block/cut", 1, 1),
+            format!("{} ", quadrant("demo:block/cut", 1, 1)),
         )
         .unwrap();
         assert_eq!(load(&root), [255; 4]);
