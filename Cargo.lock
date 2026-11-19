@@ -5532,6 +5532,7 @@ dependencies = [
  "sha2",
  "sunrise-assets",
  "sunrise-core",
+ "sunrise-deflate",
  "sunrise-threads",
  "xxhash-rust",
 ]

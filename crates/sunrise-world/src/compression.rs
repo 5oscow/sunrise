@@ -1,9 +1,10 @@
 //! Region codecs, including lz4-java's block framing (not the LZ4 frame format).
-use flate2::{Compression as Level, Decompress, FlushDecompress, Status};
+use flate2::{Decompress, FlushDecompress, Status};
 use std::{
-    io::{self, Read, Write},
+    io::{self, Read},
     sync::atomic::{AtomicU8, Ordering},
 };
+use sunrise_deflate::Deflater;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
@@ -104,19 +105,21 @@ impl Compression {
         }
     }
 
+    /// Gzip and zlib write the bytes `GZIPOutputStream` and
+    /// `DeflaterOutputStream` write at their defaults: zlib 1.3.2's, as the
+    /// JDK bundles it.
     pub fn encode(self, bytes: &[u8]) -> io::Result<Vec<u8>> {
         match self {
             Self::None => Ok(bytes.to_vec()),
-            Self::Gzip => {
-                let mut encoder = flate2::write::GzEncoder::new(Vec::new(), Level::default());
-                encoder.write_all(bytes)?;
-                encoder.finish()
-            }
-            Self::Zlib => {
-                let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), Level::default());
-                encoder.write_all(bytes)?;
-                encoder.finish()
-            }
+            Self::Gzip | Self::Zlib => DEFLATER.with_borrow_mut(|(deflater, output)| {
+                output.clear();
+                if self == Self::Gzip {
+                    deflater.gzip(bytes, output);
+                } else {
+                    deflater.zlib(bytes, output);
+                }
+                Ok(output.as_slice().to_vec())
+            }),
             Self::Lz4 => Ok(encode_lz4(bytes)),
         }
     }
@@ -126,6 +129,10 @@ thread_local! {
     /// This thread's zlib inflater, reset for each chunk instead of a new
     /// one (and its window) allocated every time.
     static INFLATER: std::cell::RefCell<Option<Decompress>> = const { std::cell::RefCell::new(None) };
+    /// This thread's deflate encoder and its output, kept between writes: the
+    /// encoder's 250 KiB of state and the output's capacity are allocated once.
+    static DEFLATER: std::cell::RefCell<(Deflater, Vec<u8>)> =
+        std::cell::RefCell::new((Deflater::new(), Vec::new()));
     /// This thread's LZ4 compressed-block scratch, retained between chunk reads.
     static LZ4_BUFFER: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
 }
@@ -388,12 +395,6 @@ mod tests {
     /// lz4-java 1.10.1's.
     #[test]
     fn lz4_blocks_are_read_as_lz4_java_reads_them() {
-        let hex = |s: &str| -> Vec<u8> {
-            (0..s.len())
-                .step_by(2)
-                .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-                .collect()
-        };
         let lz4 = |s: &str| Compression::Lz4.decode(&hex(s), usize::MAX);
         const END: &str = "4c5a34426c6f636b16000000000000000000000000";
         // The issue's stream: its last match ends 2 bytes before the output's end.
@@ -449,6 +450,13 @@ mod tests {
     /// each stream, and 8 KiB blocks copied out.
     fn blockwise(bytes: &[u8], max_output: usize, output: &mut Vec<u8>) -> io::Result<()> {
         zlib_blocks(&mut Decompress::new(true), bytes, max_output, output)
+    }
+
+    fn hex(s: &str) -> Vec<u8> {
+        (0..s.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+            .collect()
     }
 
     /// Inflating in place keeps what the block decoder kept and fails as it
@@ -561,6 +569,23 @@ mod tests {
         assert_eq!(Compression::selected(), Compression::Lz4);
         assert!(Compression::configure("deflate"));
         assert_eq!(Compression::selected(), Compression::Zlib);
+    }
+    /// Bytes Temurin 25.0.5 wrote for 8193 zero bytes through
+    /// `DeflaterOutputStream` and `GZIPOutputStream`; zlib-rs, the encoder
+    /// before, wrote a different distance code.
+    #[test]
+    fn deflate_writes_the_jdks_bytes() {
+        let zeros = [0; 8193];
+        assert_eq!(
+            Compression::Zlib.encode(&zeros).unwrap(),
+            hex("789cedc1010d000000c2a0f74f6d0e37a000000000000000807b0320010001")
+        );
+        assert_eq!(
+            Compression::Gzip.encode(&zeros).unwrap(),
+            hex(
+                "1f8b08000000000000ffedc1010d000000c2a0f74f6d0e37a000000000000000807b03494cb82501200000"
+            )
+        );
     }
     #[test]
     fn checksums_reject_corruption() {
