@@ -5547,6 +5547,8 @@ dependencies = [
  "sunrise-assets",
  "sunrise-core",
  "sunrise-deflate",
+ "sunrise-engine-slots",
+ "sunrise-mod-api-macros",
  "sunrise-threads",
  "xxhash-rust",
 ]
