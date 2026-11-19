@@ -206,12 +206,6 @@ pub fn ch<V>(c: char) -> Term<V> {
         accept: None,
     }
 }
-pub fn chs<V>(a: char, b: char) -> Term<V> {
-    Term::Chars {
-        values: vec![a, b],
-        accept: None,
-    }
-}
 pub fn look<V>(t: Term<V>) -> Term<V> {
     Term::Look(Box::new(t), true)
 }
