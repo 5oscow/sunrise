@@ -45,14 +45,8 @@ impl Memo {
         parallel: bool,
     ) -> std::result::Result<Arc<Tables>, String> {
         let mut hash = Sha256::new();
-        // The manifest identifies preparation; facts defines the usual registry.
-        // The projection loader reads gameplay facts and the caller supplies behaviours.
-        for name in [
-            "sunrise-resources.json",
-            "facts.json",
-            "gameplay-facts.json",
-            "block-behaviours.json",
-        ] {
+        // The files the projection loader reads; the registry and behaviours document are hashed below.
+        for name in ["gameplay-facts.json", "block-behaviours.json"] {
             let bytes = sunrise_world::json_file::read_bytes(&root.join(name))
                 .map_err(|e| e.to_string())?;
             hash.update((bytes.len() as u64).to_le_bytes());
@@ -116,8 +110,6 @@ fn identical_inputs_hit_but_changed_behaviours_and_registries_reload() {
     let root = tempfile::tempdir().unwrap();
     let root = root.path();
     let registry_json = br#"{"states":[["minecraft:air",true,false,"","minecraft:air"],["minecraft:stone",true,false,"","minecraft:stone"]],"defaults":{"minecraft:air":0,"minecraft:stone":1}}"#;
-    std::fs::write(root.join("sunrise-resources.json"), b"{}").unwrap();
-    std::fs::write(root.join("facts.json"), registry_json).unwrap();
     std::fs::write(
         root.join("gameplay-facts.json"),
         br#"{"states":[{"id":0},{"id":1,"hardness":2}]}"#,
@@ -152,4 +144,21 @@ fn identical_inputs_hit_but_changed_behaviours_and_registries_reload() {
     let other = memo.load(root, &other_registry, &behaviours, true).unwrap();
     assert!(!Arc::ptr_eq(&changed, &other));
     assert_eq!(&*other.0.states[1].name, "minecraft:dirt");
+    // Registries that differ only in a state property (the same names) are different keys.
+    let property = |value: &str| {
+        BlockRegistry::from_facts_json(
+            format!(
+                r#"{{"states":[["minecraft:air",true,false,"","minecraft:air"],["minecraft:stone",true,false,"",{{"id":"minecraft:stone","properties":{{"waterlogged":"{value}"}}}}]],"defaults":{{"minecraft:air":0,"minecraft:stone":1}}}}"#
+            )
+            .as_bytes(),
+        )
+        .unwrap()
+    };
+    let dry = memo
+        .load(root, &property("false"), &behaviours, true)
+        .unwrap();
+    let wet = memo
+        .load(root, &property("true"), &behaviours, true)
+        .unwrap();
+    assert!(!Arc::ptr_eq(&dry, &wet));
 }
