@@ -589,12 +589,12 @@ impl Materials {
     pub fn resolve<T>(
         &self,
         id: &str,
-        mut finish: impl FnMut(&SpriteOrigin) -> Option<T>,
+        finish: impl FnMut(&SpriteOrigin) -> Option<T>,
     ) -> Option<T> {
         self.atlases
             .iter()
             .filter_map(|atlas| atlas.get(id))
-            .find_map(|origin| finish(origin))
+            .find_map(finish)
     }
 }
 
