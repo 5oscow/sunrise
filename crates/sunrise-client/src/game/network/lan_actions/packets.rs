@@ -6,6 +6,11 @@ fn creative_count_bound(item_max_stack: u32) -> u32 {
     item_max_stack.max(99)
 }
 
+/// Whether a creative stack's count is past the bound its item's own max stack gives it.
+fn creative_count_exceeds(count: u32, own_max: u32) -> bool {
+    count > creative_count_bound(own_max)
+}
+
 impl Game<'_> {
     /// DedicatedServer.isUnderSpawnProtection: no operators, an operator or a
     /// radius of 0 or less is never under it; else a block within the radius
@@ -1247,7 +1252,7 @@ impl Game<'_> {
         let Some(host) = self.lan.as_mut() else {
             return false;
         };
-        if s.count > max {
+        if creative_count_exceeds(s.count, size) {
             let g = &host.hub.guests[gi];
             let conn = g.conn;
             let reason = format!("Invalid packet: count {} is not in 1..={max}", s.count);
@@ -1319,7 +1324,7 @@ impl Game<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::creative_count_bound;
+    use super::{creative_count_bound, creative_count_exceeds};
 
     #[test]
     fn creative_count_bound_kicks_vanilla_100_but_not_modded_own_size() {
@@ -1335,5 +1340,14 @@ mod tests {
         assert_eq!(bound, 500);
         assert!(500 <= bound, "500 must not kick a modded item");
         assert!(501 > bound, "501 must kick a modded item");
+    }
+
+    #[test]
+    fn creative_count_exceeds_the_bound_of_the_items_own_max() {
+        assert!(creative_count_exceeds(100, 64));
+        assert!(creative_count_exceeds(100, 1));
+        assert!(!creative_count_exceeds(99, 64));
+        assert!(!creative_count_exceeds(500, 500));
+        assert!(creative_count_exceeds(501, 500));
     }
 }
