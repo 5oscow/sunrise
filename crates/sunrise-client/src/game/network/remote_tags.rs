@@ -59,7 +59,9 @@ impl Game<'_> {
         super::class_tags::install(&mut items, self.res.facts());
         // Rebuild scoped parts against the received tags before refreshing state-only facts.
         let mut part_items = self.items().clone();
+        let names = items.block_state_names();
         part_items.block_tags = items.block_tags.clone();
+        part_items.rebuild_block_tag_flags(names);
         part_items.item_tags = items.item_tags.clone();
         let parts = match self.prepare_parts(&part_items) {
             Ok(parts) => parts,
@@ -68,15 +70,16 @@ impl Game<'_> {
                 return;
             }
         };
-        self.install_parts(parts);
         if let Some(r) = self.remote.as_mut() {
             r.tags = Some(items);
             r.has_item_tags = has_item_tags;
         }
+        self.bind_parts(parts);
         self.refresh_recipe_property_context();
         self.announce_data_bound(mod_api::TagsUpdateCause::ClientPacketReceived {
             integrated_server: self.integrated.is_some(),
         });
+        self.resolve_primary_items();
         self.resolve_enchant_particles();
     }
 }

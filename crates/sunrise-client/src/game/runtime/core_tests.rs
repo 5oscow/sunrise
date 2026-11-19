@@ -195,7 +195,7 @@ fn client_modifier_snapshot_tracks_focus_loss() {
         assert!(snapshot.alt());
         assert!(!snapshot.control());
         assert!(!snapshot.super_key());
-        game.handle_window_event_inner(&TestLoop, WindowEvent::Focused(false));
+        game.handle_window_event_inner(&TestLoop, WindowEvent::Focused(false), None);
         assert_eq!((game as &dyn ClientHost).modifiers().bits, 0);
         assert_eq!(snapshot.bits, 5);
     });
@@ -1127,6 +1127,7 @@ fn integrated_server_save_persists_owner_player_data() {
         &dir,
         execution_role::ExecutionRole::IntegratedServer,
         &Default::default(),
+        false,
     )
     .unwrap();
 
@@ -1148,6 +1149,7 @@ fn integrated_server_save_persists_owner_player_data() {
         &dir,
         execution_role::ExecutionRole::DedicatedServer,
         &Default::default(),
+        false,
     )
     .unwrap();
 

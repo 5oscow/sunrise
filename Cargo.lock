@@ -4075,6 +4075,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
+name = "safe_arch"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42c6efa15875e6ecb39ca61fb0b0c1a40b84fac5a5ffe71eef7d1000c8eb3f5f"
+
+[[package]]
 name = "salsa20"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4407,14 +4413,6 @@ name = "sunrise-addresses"
 version = "0.1.0"
 
 [[package]]
-name = "sunrise-anticheat"
-version = "0.1.0"
-dependencies = [
- "serde",
- "toml",
-]
-
-[[package]]
 name = "sunrise-assets"
 version = "0.1.0"
 dependencies = [
@@ -4443,16 +4441,6 @@ version = "0.1.0"
 dependencies = [
  "serde_json",
  "sunrise-protocol",
-]
-
-[[package]]
-name = "sunrise-chat-filter"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "sunrise-server-files",
- "toml",
 ]
 
 [[package]]
@@ -4485,10 +4473,8 @@ dependencies = [
  "sha1",
  "sha2",
  "socket2 0.6.5",
- "sunrise-anticheat",
  "sunrise-assets",
  "sunrise-bench",
- "sunrise-chat-filter",
  "sunrise-client-core",
  "sunrise-client-gameplay",
  "sunrise-client-input",
@@ -4541,6 +4527,7 @@ dependencies = [
 name = "sunrise-client-core"
 version = "0.1.0"
 dependencies = [
+ "log",
  "serde_json",
  "sunrise-assets",
  "sunrise-core",
@@ -4562,6 +4549,7 @@ dependencies = [
  "log",
  "png",
  "sunrise-client-core",
+ "sunrise-core",
  "sunrise-engine-slots",
  "sunrise-mod-api-macros",
  "sunrise-theme",
@@ -4595,7 +4583,6 @@ dependencies = [
  "serde_json",
  "sha1",
  "sha2",
- "sunrise-anticheat",
  "sunrise-assets",
  "sunrise-bench",
  "sunrise-client-core",
@@ -4718,9 +4705,18 @@ version = "0.1.0"
 dependencies = [
  "libm",
  "rustc-hash 2.1.3",
+ "safe_arch",
  "serde",
  "serde_json",
  "unicode_names2",
+]
+
+[[package]]
+name = "sunrise-deflate"
+version = "0.1.0"
+dependencies = [
+ "crc32fast",
+ "simd-adler32",
 ]
 
 [[package]]
@@ -4772,8 +4768,8 @@ version = "0.1.0"
 dependencies = [
  "serde_json",
  "sunrise-client",
+ "sunrise-client-lib",
  "sunrise-core",
- "sunrise-guest-stack",
  "sunrise-mod-host",
  "sunrise-mod-package",
  "sunrise-protocol",
@@ -5005,6 +5001,7 @@ dependencies = [
  "sha2",
  "socket2 0.6.5",
  "subtle",
+ "sunrise-assets",
  "sunrise-core",
  "sunrise-mod-api",
  "sunrise-mod-api-macros",
@@ -5223,8 +5220,10 @@ dependencies = [
  "sunrise-friends",
  "sunrise-game",
  "sunrise-heartbeat",
+ "sunrise-perf-overlay",
  "sunrise-perf-share",
  "sunrise-platform",
+ "sunrise-reconnect",
  "winresource",
 ]
 
@@ -5266,6 +5265,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "sunrise-perf-overlay"
+version = "0.1.0"
+dependencies = [
+ "sunrise-platform",
+]
+
+[[package]]
 name = "sunrise-perf-share"
 version = "0.1.0"
 dependencies = [
@@ -5274,6 +5280,7 @@ dependencies = [
  "open",
  "serde",
  "serde_json",
+ "subtle",
  "sunrise-addresses",
  "sunrise-platform",
  "ureq",
@@ -5358,6 +5365,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "sunrise-reconnect"
+version = "0.1.0"
+dependencies = [
+ "sunrise-platform",
+]
+
+[[package]]
 name = "sunrise-relay"
 version = "0.1.0"
 dependencies = [
@@ -5392,8 +5406,6 @@ dependencies = [
  "serde_json",
  "sha1",
  "sha2",
- "sunrise-anticheat",
- "sunrise-chat-filter",
  "sunrise-mcp",
  "sunrise-platform",
  "sunrise-release-sign",
@@ -5426,8 +5438,6 @@ version = "0.1.0"
 dependencies = [
  "dunce",
  "serde",
- "sunrise-anticheat",
- "sunrise-chat-filter",
  "sunrise-core",
  "sunrise-platform",
  "sunrise-server-files",
@@ -5511,6 +5521,7 @@ version = "0.1.0"
 dependencies = [
  "cap-fs-ext",
  "cap-std",
+ "crc32fast",
  "flate2",
  "libm",
  "log",
@@ -5522,6 +5533,7 @@ dependencies = [
  "sha2",
  "sunrise-assets",
  "sunrise-core",
+ "sunrise-deflate",
  "sunrise-threads",
  "xxhash-rust",
 ]

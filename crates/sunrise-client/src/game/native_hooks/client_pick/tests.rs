@@ -638,3 +638,218 @@ fn paused_ticks_pick_and_the_frame_can_overwrite_the_tick_target() {
         })
     });
 }
+
+struct OverwriteOrigin;
+#[mod_api::__subscriptions]
+impl Hooks for OverwriteOrigin {
+    fn client_pick(&self, _: &mut dyn ClientHost, event: &mut ClientPickEvent<'_>) {
+        event.origin = [0.0; 3];
+    }
+}
+
+struct RecordOrigins(Arc<Mutex<Vec<[f64; 3]>>>);
+#[mod_api::__subscriptions]
+impl Hooks for RecordOrigins {
+    fn client_pick(&self, _: &mut dyn ClientHost, event: &mut ClientPickEvent<'_>) {
+        self.0.lock().unwrap().push(event.origin);
+    }
+}
+
+#[test]
+#[ignore = "daily"]
+fn pick_origin_is_the_eye_used_for_each_pick_and_isolated_per_listener() {
+    use sunrise_core::geometry::Vec3;
+    let origins = Arc::new(Mutex::new(Vec::new()));
+    let mods = vec![
+        mod_api::ModEntry::new("a_overwrite", Box::new(OverwriteOrigin)),
+        mod_api::ModEntry::new("b_record", Box::new(RecordOrigins(origins.clone()))),
+    ]
+    .into();
+    mod_platform::testing::with_mods(mods, || {
+        with_pick_game("minecraft:pig", 10.0, |game, _| {
+            let player_eye = f64::from(game.player.as_ref().unwrap().dimensions.eye_height);
+            game.previous_position = Vec3::new(4.5, 5.0, 8.5);
+            game.refresh_client_pick(1.0);
+            game.refresh_client_pick(0.25);
+
+            let mob = game.mobs.iter_mut().find(|mob| mob.id == 31).unwrap();
+            mob.previous = Vec3::new(6.0, 4.0, -1.5);
+            let mob_eye = f64::from(mob.eye_height() as f32);
+            game.remote_set_camera(31);
+            assert_eq!(game.remote_camera_id(), Some(31));
+            game.refresh_client_pick(0.25);
+
+            assert_eq!(
+                *origins.lock().unwrap(),
+                [
+                    [0.5, 1.0 + player_eye, 0.5],
+                    [3.5, 4.0 + player_eye, 6.5],
+                    [7.0, 3.5 + mob_eye, -1.0],
+                ],
+                "a listener receives the sampled camera eye, not a prior listener's edit"
+            );
+        });
+    });
+}
+
+struct RiderPart(Arc<Mutex<usize>>, bool);
+#[mod_api::sunrise_part]
+impl mod_api::EntityPart for RiderPart {
+    fn can_rider_interact(
+        &self,
+        host: &mut dyn ClientHost,
+        event: &mut mod_api::CanRiderInteractEvent,
+    ) {
+        assert_eq!(event.entity.id(), 31);
+        *self.0.lock().unwrap() += 1;
+        event.allowed = true;
+        if self.1 {
+            assert!(host.set_camera_entity(event.entity));
+        }
+    }
+}
+struct RegisterRiderPart(Arc<Mutex<usize>>, bool);
+#[mod_api::__subscriptions]
+impl Hooks for RegisterRiderPart {
+    fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+        r.entity_part("minecraft:pig", RiderPart(self.0.clone(), self.1));
+    }
+}
+
+#[test]
+#[ignore = "daily"]
+fn rider_pick_rejects_shared_passengers_unless_their_part_allows_them() {
+    use sunrise_protocol::packets::play::{self, Clientbound as C};
+    for subscribed in [false, true] {
+        let calls = Arc::new(Mutex::new(0));
+        let mods = if subscribed {
+            vec![mod_api::ModEntry::new(
+                "rider",
+                Box::new(RegisterRiderPart(calls.clone(), false)),
+            )]
+        } else {
+            Vec::new()
+        };
+        mod_platform::testing::with_mods(mods.into(), || {
+            with_pick_game("minecraft:pig", 1.5, |game, _| {
+                let kind = game
+                    .remote
+                    .as_ref()
+                    .unwrap()
+                    .builtin
+                    .get("minecraft:entity_type")
+                    .unwrap()
+                    .id("minecraft:oak_boat")
+                    .unwrap();
+                game.handle_packet(C::AddEntity(play::AddEntity {
+                    id: 32,
+                    uuid: 32,
+                    kind,
+                    position: [0.5, 1.0, 0.5],
+                    velocity: [0.0; 3],
+                    pitch: 0,
+                    yaw: 0,
+                    head_yaw: 0,
+                    data: 0,
+                }))
+                .unwrap();
+                game.remote_set_passengers(32, &[7, 31]);
+                game.refresh_client_pick(1.0);
+                assert_eq!(
+                    matches!(game.crosshair_target(),
+                    Some(CrosshairTarget::Entity { entity, .. }) if entity.id() == 31),
+                    subscribed
+                );
+                assert_eq!(*calls.lock().unwrap(), usize::from(subscribed));
+                // The brush uses the margin-overload ray, not the mounted
+                // crosshair's root-vehicle exclusion or rider part.
+                let (mob, _, _) = game.mob_hit_within(game.block_reach).unwrap();
+                assert_eq!(game.mobs[mob].id, 31);
+                assert_eq!(*calls.lock().unwrap(), usize::from(subscribed));
+                if !subscribed {
+                    assert_eq!(game.client_pick.rider_candidates.capacity(), 0);
+                }
+                let capacity = game.client_pick.rider_candidates.capacity();
+                game.refresh_client_pick(1.0);
+                assert_eq!(game.client_pick.rider_candidates.capacity(), capacity);
+
+                game.remote_set_passengers(32, &[]);
+                game.refresh_client_pick(1.0);
+                assert!(matches!(game.crosshair_target(),
+                    Some(CrosshairTarget::Entity { entity, .. }) if entity.id() == 31));
+                assert_eq!(*calls.lock().unwrap(), 2 * usize::from(subscribed));
+                game.remote_set_passengers(32, &[7, 31]);
+
+                // AttackRange uses its own geometry, with no root-vehicle filter.
+                game.inventory[game.selected] = Some(ranged_stack());
+                game.refresh_client_pick(1.0);
+                assert!(matches!(game.crosshair_target(),
+                    Some(CrosshairTarget::Entity { entity, .. }) if entity.id() == 31));
+                assert_eq!(*calls.lock().unwrap(), 2 * usize::from(subscribed));
+                game.inventory[game.selected] = None;
+
+                // Put the root vehicle's box around the camera. Inside hits are
+                // pickable without asking any part; remove the later passenger.
+                game.mobs.update(0, |mob| mob.removed = true);
+                game.boats.update(0, |boat| {
+                    boat.position = sunrise_core::geometry::Vec3::new(0.5, 2.5, 0.5);
+                });
+                game.refresh_client_pick(1.0);
+                assert!(matches!(game.crosshair_target(),
+                    Some(CrosshairTarget::Entity { entity, .. }) if entity.id() == 32));
+                assert_eq!(*calls.lock().unwrap(), 2 * usize::from(subscribed));
+            });
+        });
+    }
+}
+
+#[test]
+#[ignore = "daily"]
+fn rider_pick_refuses_a_camera_changed_by_its_listener() {
+    use sunrise_protocol::packets::play::{self, Clientbound as C};
+    let calls = Arc::new(Mutex::new(0));
+    let mods = vec![mod_api::ModEntry::new(
+        "rider_camera",
+        Box::new(RegisterRiderPart(calls.clone(), true)),
+    )];
+    mod_platform::testing::with_mods(mods.into(), || {
+        with_pick_game("minecraft:pig", 1.5, |game, _| {
+            let kind = game
+                .remote
+                .as_ref()
+                .unwrap()
+                .builtin
+                .get("minecraft:entity_type")
+                .unwrap()
+                .id("minecraft:oak_boat")
+                .unwrap();
+            game.handle_packet(C::AddEntity(play::AddEntity {
+                id: 32,
+                uuid: 32,
+                kind,
+                position: [0.5, 1.0, 0.5],
+                velocity: [0.0; 3],
+                pitch: 0,
+                yaw: 0,
+                head_yaw: 0,
+                data: 0,
+            }))
+            .unwrap();
+            game.remote_set_passengers(32, &[7, 31]);
+            assert_eq!(game.pick_camera_id(), Some(7));
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            game.world.set(3, 2, 0, stone).unwrap();
+            game.refresh_client_pick(1.0);
+            assert_eq!(*calls.lock().unwrap(), 1);
+            assert_eq!(game.pick_camera_id(), Some(31));
+            assert!(game.crosshair_target().is_none());
+            assert!(game.mob_hit().is_none());
+            assert!(!game.entity_targeted());
+        });
+    });
+}

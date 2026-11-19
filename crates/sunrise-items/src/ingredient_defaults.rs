@@ -21,6 +21,7 @@ impl Items {
             order: Vec::new(),
             registry_order: Vec::new(),
             block_tags: load_tags(root, "block", overlay)?,
+            block_tag_flags: Default::default(),
             item_tags: load_tags(root, "item", overlay)?,
             fluid_tags: load_tags(root, "fluid", overlay)?,
             item_tag_order: load_tag_lists(root, "item", overlay)?,
