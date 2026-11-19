@@ -7,10 +7,8 @@ use sunrise_client_core::text::Text;
 pub use sunrise_client_core::registries::{
     CustomCompletionAction, Registries, RegistryIds, modify_custom_completions,
 };
-use sunrise_core::java_float_parse::parse_java_float;
-pub use sunrise_core::{
-    game_mode::GameMode, java_float_parse::parse_java_double as java_parse_double,
-};
+pub use sunrise_core::game_mode::GameMode;
+use sunrise_core::java_float_parse::{parse_java_double, parse_java_float};
 
 /// How much of the command line a registered custom argument takes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -808,7 +806,7 @@ pub fn read_int_bounds(reader: &mut Reader) -> CmdResult<IntRange> {
 /// MinMaxBounds.Doubles.fromReader.
 pub fn read_double_bounds(reader: &mut Reader) -> CmdResult<DoubleRange> {
     let start = reader.cursor;
-    let b = read_bounds(reader, java_parse_double, "parsing.double.invalid")?;
+    let b = read_bounds(reader, parse_java_double, "parsing.double.invalid")?;
     if let (Some(l), Some(h)) = b
         && l > h
     {

@@ -1,9 +1,7 @@
 //! The `OPTIONS` data fixers of 26.3 (`DataFixTypes.OPTIONS`), applied to the
 //! raw key/value strings of an `options.txt` older than the current version.
 use std::collections::HashMap;
-pub use sunrise_core::java_float_parse::{
-    parse_java_double as java_parse_double, parse_java_float as java_parse_float,
-};
+use sunrise_core::java_float_parse::{parse_java_double, parse_java_float};
 
 /// A fixer threw an exception; vanilla abandons loading the file.
 #[derive(Debug)]
@@ -196,7 +194,7 @@ pub fn update(raw: &mut Raw, version: i32) -> Result<(), FixFailed> {
     if version < 1936
         && let Some(opacity) = raw.get("chatOpacity")
     {
-        let background = java_parse_double(opacity).map_or(0.5, |v| (0.9 * v + 0.1) / 2.0);
+        let background = parse_java_double(opacity).map_or(0.5, |v| (0.9 * v + 0.1) / 2.0);
         raw.insert(
             "textBackgroundOpacity".into(),
             sunrise_core::java_number::double_to_string(background),
@@ -234,7 +232,7 @@ pub fn update(raw: &mut Raw, version: i32) -> Result<(), FixFailed> {
     if version < 3943
         && let Some(v) = raw.get_mut("menuBackgroundBlurriness")
     {
-        let value = java_parse_float(v).map_or(5, |d| ((d * 10.0) + 0.5).floor() as i32);
+        let value = parse_java_float(v).map_or(5, |d| ((d * 10.0) + 0.5).floor() as i32);
         *v = value.to_string();
     }
     if version < 4651 {
