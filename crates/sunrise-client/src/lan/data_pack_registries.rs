@@ -676,11 +676,13 @@ mod tests {
     #[test]
     fn every_bad_winning_definition_is_reported_in_one_error() {
         let mut oversized = enchantment("Oversized");
-        // Each string fits modified UTF-8, but together they exceed the 2 MiB quota.
-        oversized["description"] = json!(vec!["x".repeat(64_000); 33]);
-        assert!(
-            sunrise_core::nbt::write_network(&json_to_nbt(&oversized), Default::default()).is_ok()
-        );
+        // Fits the wire byte limit, but the receiver charges two bytes per decoded ASCII unit.
+        oversized["description"] = json!(vec!["x".repeat(64_000); 17]);
+        let wire_limits = sunrise_core::nbt::Limits {
+            max_bytes: sunrise_protocol::buf::NBT_QUOTA,
+            ..Default::default()
+        };
+        assert!(sunrise_core::nbt::write_network(&json_to_nbt(&oversized), wire_limits).is_ok());
         let files = [
             (
                 "dialog/test:broken".into(),
@@ -807,7 +809,7 @@ mod tests {
                 "enchantment",
                 &[
                     ("not_read", "read failed"),
-                    ("oversized", "byte limit exceeded"),
+                    ("oversized", "heap quota exceeded"),
                     ("wrong_level", "max_level"),
                     ("unencodable", "modified UTF-8"),
                 ],
