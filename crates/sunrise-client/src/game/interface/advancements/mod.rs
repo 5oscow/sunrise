@@ -1339,8 +1339,18 @@ impl Game<'_> {
                 )
         });
     }
-    /// `PlayerTrigger.LOCATION` every second, and the other per-tick checks.
+    /// Per-tick checks for the player already in place, without a guest connection turn.
     pub(super) fn tick_advancements(&mut self) {
+        self.tick_level_advancements();
+        if let Some(player) = &self.player
+            && player.health.tick_count % 20 == 0
+        {
+            self.trigger_location_advancement();
+        }
+    }
+
+    /// Criteria on the level path (`ServerPlayer.tick`).
+    pub(super) fn tick_level_advancements(&mut self) {
         if self.player.is_none() || self.remote.is_some() {
             return;
         }
@@ -1379,18 +1389,20 @@ impl Game<'_> {
             self.trigger_levitation(start, (self.ticks - since) as i64);
         }
         self.tick_marks();
-        if self.ticks.is_multiple_of(20) {
-            let me = self.player_entity_for("minecraft:location");
-            self.trigger("minecraft:location", |c, w| {
-                let ctx = adv::Entities {
-                    this: Some(&me),
-                    origin: me.position,
-                    tool: None,
-                    block_pos: None,
-                };
-                adv::conditions(&c["player"], &ctx, w)
-            });
-        }
+    }
+
+    /// `ServerPlayer.doTick` fires LOCATION after the player body, every 20 entity ticks.
+    pub(super) fn trigger_location_advancement(&mut self) {
+        let me = self.player_entity_for("minecraft:location");
+        self.trigger("minecraft:location", |c, w| {
+            let ctx = adv::Entities {
+                this: Some(&me),
+                origin: me.position,
+                tool: None,
+                block_pos: None,
+            };
+            adv::conditions(&c["player"], &ctx, w)
+        });
     }
     /// A player condition plus one entity (`player`, `entity` keys).
     pub(super) fn trigger_entity(&mut self, name: &str, key: &str, target: &EntityView) {
