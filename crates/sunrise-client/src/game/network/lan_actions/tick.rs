@@ -272,18 +272,29 @@ impl Game<'_> {
         if !self.on_server_trip(conn) {
             // Like the rest of doTick outside Player.tick, LOCATION also runs
             // for unloaded spectators and canceled entity ticks.
-            if self
+            let tick_count = self
                 .lan
                 .as_ref()
                 .and_then(|host| host.hub.guest(conn).filter(|g| host.hub.here(g)))
-                .is_some_and(|guest| {
-                    guest
-                        .motion
-                        .as_ref()
-                        .is_none_or(|m| m.health.tick_count % 20 == 0)
-                })
-            {
-                let _ = self.as_guest(conn, |game| game.trigger_location_advancement());
+                .map(|guest| guest.motion.as_ref().map(|m| m.health.tick_count));
+            match tick_count {
+                Some(Some(tick_count)) if tick_count % 20 == 0 => {
+                    let _ = self.as_guest(conn, |game| game.trigger_location_advancement());
+                }
+                // Joining players have not borrowed their saved body yet: read
+                // its clock through the swap, as `advance_guest_entity_clock` does.
+                Some(None) => {
+                    let _ = self.as_guest(conn, |game| {
+                        if game
+                            .player
+                            .as_ref()
+                            .is_some_and(|player| player.health.tick_count % 20 == 0)
+                        {
+                            game.trigger_location_advancement();
+                        }
+                    });
+                }
+                _ => {}
             }
             self.guest_vehicle_movement_baseline(conn);
         }
