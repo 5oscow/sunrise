@@ -58,16 +58,6 @@ fn full_record_overflow_discards_edits_without_losing_current_chunk_data() {
         block_entity_save_edits: Some(Arc::new([(pos, edited)].into())),
         ..Default::default()
     }));
-    let mut long_name_chunk = chunk.clone();
-    Arc::make_mut(
-        Arc::make_mut(long_name_chunk.saved.as_mut().unwrap())
-            .block_entity_save_edits
-            .as_mut()
-            .unwrap(),
-    )
-    .get_mut(&pos)
-    .unwrap()
-    .insert("\0".repeat(32_768).as_str().into(), Tag::Int(-1));
     let encoding = Arc::new(Encoding {
         registry: Box::leak(Box::new(registry)),
         biomes: Arc::new(biomes),
@@ -75,16 +65,14 @@ fn full_record_overflow_discards_edits_without_losing_current_chunk_data() {
         tables: None,
         shape: LevelShape::OVERWORLD,
     });
-    let record = Record::Chunk(Arc::new(chunk), encoding.clone(), None);
-    let long_name_record = Record::Chunk(Arc::new(long_name_chunk), encoding, None);
+    let record = Record::Chunk(Arc::new(chunk), encoding, None);
     let dir = tempfile::tempdir().unwrap();
     let mut region = RegionFile::open_writable(dir.path().join("r.0.0.mca"), true).unwrap();
     let pos = ChunkPos::new(0, 0);
-    for (record, limits, compressed_overflow, admitted) in [
-        (&record, Limits::saved(), false, true),
-        (&record, limits, false, false),
-        (&record, Limits::saved(), true, false),
-        (&long_name_record, Limits::saved(), false, false),
+    for (limits, compressed_overflow, admitted) in [
+        (Limits::saved(), false, true),
+        (limits, false, false),
+        (Limits::saved(), true, false),
     ] {
         let job = QueuedWrite::new((0, 0), record.clone(), 0);
         let pending = job.record.clone();

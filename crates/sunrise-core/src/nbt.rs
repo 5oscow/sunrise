@@ -30,6 +30,17 @@ impl JavaString {
     pub fn to_string_lossy(&self) -> String {
         String::from_utf16_lossy(&self.0)
     }
+    /// Encoded byte length for Java's `DataOutput.writeUTF`, including each surrogate separately.
+    pub fn modified_utf8_len(&self) -> usize {
+        self.0
+            .iter()
+            .map(|&unit| match unit {
+                1..=127 => 1,
+                0..=2047 => 2,
+                _ => 3,
+            })
+            .sum()
+    }
 }
 
 pub type Compound = BTreeMap<JavaString, Tag>;
@@ -890,16 +901,7 @@ impl Writer {
         self.put(&len.to_be_bytes())
     }
     fn string(&mut self, string: &JavaString) -> Result<(), Error> {
-        let len: usize = string
-            .0
-            .iter()
-            .map(|&c| match c {
-                1..=127 => 1,
-                0..=2047 => 2,
-                _ => 3,
-            })
-            .sum();
-        let Ok(len) = u16::try_from(len) else {
+        let Ok(len) = u16::try_from(string.modified_utf8_len()) else {
             if self.empty_long_strings {
                 return self.put(&0u16.to_be_bytes());
             }
@@ -1024,30 +1026,15 @@ impl Writer {
 /// `NbtIo.write`: a file root. A string too long for modified UTF-8 is
 /// written empty, as vanilla's disk writer does; [`write_network`] refuses it.
 pub fn write_named(root: &NamedTag, limits: Limits) -> Result<Vec<u8>, Error> {
-    write_named_with_string_fallback(root, limits, true)
+    write_named_parts(&root.name, &root.tag, limits)
 }
 
-/// Write disk NBT, allowing vanilla's empty-string fallback only when requested.
-/// Refusing overlong names avoids collisions with legitimate empty keys.
-pub fn write_named_with_string_fallback(
-    root: &NamedTag,
-    limits: Limits,
-    empty_long_strings: bool,
-) -> Result<Vec<u8>, Error> {
-    write_named_parts(&root.name, &root.tag, limits, empty_long_strings)
-}
-
-fn write_named_parts(
-    name: &JavaString,
-    tag: &Tag,
-    limits: Limits,
-    empty_long_strings: bool,
-) -> Result<Vec<u8>, Error> {
+fn write_named_parts(name: &JavaString, tag: &Tag, limits: Limits) -> Result<Vec<u8>, Error> {
     let mut writer = Writer {
         bytes: Vec::new(),
         limits,
         nodes: 0,
-        empty_long_strings,
+        empty_long_strings: true,
         canonical_nan: true,
     };
     writer.put(&[tag.id()])?;
@@ -1091,7 +1078,7 @@ pub fn validate_component_value(value: &Tag) -> Result<(), String> {
         ..Limits::default()
     };
     // Disk NBT canonicalizes NaNs and normalizes negative zero when read.
-    let saved = write_named_parts(&JavaString::default(), value, limits, true)
+    let saved = write_named_parts(&JavaString::default(), value, limits)
         .map_err(|error| error.to_string())?;
     let (loaded, _) = read_named(&saved, limits).map_err(|error| error.to_string())?;
     if loaded.tag != *value {

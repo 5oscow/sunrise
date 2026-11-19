@@ -190,13 +190,7 @@ pub(super) fn compress_record(
     let Some(tag) = super::chunk_disk::encode_record(record)? else {
         return Ok(None);
     };
-    let error = match ChunkRecord::from_nbt_with_string_fallback(
-        &tag,
-        compression,
-        timestamp,
-        limits,
-        !record.has_block_entity_edits(),
-    ) {
+    let error = match ChunkRecord::from_nbt(&tag, compression, timestamp, limits) {
         Ok(record) => {
             return Ok(Some(CompressedWrite {
                 record,

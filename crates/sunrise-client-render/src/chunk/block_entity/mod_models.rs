@@ -1,8 +1,12 @@
 //! Engine-owned mod block entity storage and revision tracking.
 use super::published_shapes::{PublishedShapes, SHAPES_KEY};
-use std::{collections::BTreeSet, sync::Arc};
-use sunrise_core::nbt::{Compound, Tag};
+use std::sync::{Arc, LazyLock};
+use sunrise_client_core::block_entity_nbt::saved_item_slot;
+use sunrise_core::nbt::{Compound, JavaString, Tag};
 use sunrise_items::items::ItemStack;
+
+static ITEMS: LazyLock<JavaString> = LazyLock::new(|| "Items".into());
+
 /// A mod's block entity, read and changed through its fields
 /// (`ModBlockEntityFields`) as a struct's: `entity.nbt`. Each change goes
 /// through `DerefMut` and gives it a new `revision`, so a client tells
@@ -19,8 +23,6 @@ pub struct ModBlockEntity {
     pub(crate) numeric_id: Option<u32>,
     pub(crate) fields: ModBlockEntityFields,
     pub(crate) revision: ModRevision,
-    /// Indexed `Items` rows that could not be modeled. Claiming a slot never claims its neighbors.
-    opaque_item_slots: BTreeSet<usize>,
     /// What its block's collision and outline are while it holds some
     /// (`BlockEntityRef::set_shapes`). Saved and sent with it, outside its `nbt`.
     pub(crate) shapes: Option<Arc<PublishedShapes>>,
@@ -30,8 +32,8 @@ pub struct ModBlockEntity {
     pub(crate) shapes_cleared: bool,
 }
 /// What a `ModBlockEntity` can change: its saved compound without `id`,
-/// `x`, `y`, `z` and `Items`, its item slots
-/// (`Items`) when its block has a container (`ModContainer`), and the data
+/// `x`, `y`, `z` or modeled `Items` rows, its item slots
+/// when its block has a container (`ModContainer`), and the data
 /// slots its menu shows (`ContainerData`: a furnace menu's flame and arrow),
 /// which the mod sets and nothing saves.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -40,6 +42,19 @@ pub struct ModBlockEntityFields {
     pub nbt: Compound,
     pub items: Vec<Option<ItemStack>>,
     pub data: Vec<i32>,
+}
+
+impl ModBlockEntityFields {
+    /// The retained `Items` rows are their own ownership record. A modeled
+    /// stack taking a slot drops its pending saved row from the same snapshot.
+    fn claim_modeled_item_rows(&mut self) {
+        if let Some(Tag::List(rows)) = self.nbt.get_mut(&*ITEMS) {
+            rows.retain(|row| {
+                saved_item_slot(row)
+                    .is_none_or(|slot| self.items.get(slot).is_none_or(Option::is_none))
+            });
+        }
+    }
 }
 /// Which contents a `ModBlockEntity` has had: one per entity made (a clone
 /// is another), counted on by each change. Equal revisions, equal contents.
@@ -64,42 +79,30 @@ impl ModRevision {
 impl ModBlockEntity {
     /// Apply a validated callback snapshot in place, keeping this entity's identity.
     /// The game passes the snapshot's original write count, including no-op writes.
-    pub fn apply_snapshot(&mut self, fields: ModBlockEntityFields, changes: u64) {
-        self.opaque_item_slots
-            .retain(|&slot| !fields.items.get(slot).is_some_and(Option::is_some));
+    pub fn apply_snapshot(&mut self, mut fields: ModBlockEntityFields, changes: u64) {
+        fields.claim_modeled_item_rows();
         self.fields = fields;
         self.revision.changes = changes;
     }
 
-    /// Install the opaque indices identified by the saved-data decoder.
-    pub fn with_opaque_item_slots(mut self, slots: BTreeSet<usize>) -> Self {
-        self.opaque_item_slots = slots;
-        self
-    }
-
     pub fn has_opaque_item_slot(&self, slot: usize) -> bool {
-        self.opaque_item_slots.contains(&slot)
+        matches!(self.nbt.get(&*ITEMS), Some(Tag::List(rows)) if
+            rows.iter().any(|row| saved_item_slot(row) == Some(slot)))
     }
 
-    /// Restore the saved-data ownership bit from a single-slot transaction journal.
-    pub fn restore_opaque_item_slot(&mut self, slot: usize, opaque: bool) {
-        if opaque {
-            self.opaque_item_slots.insert(slot);
-        } else {
-            self.opaque_item_slots.remove(&slot);
-        }
-    }
-
-    /// A write (including an explicit clear) supersedes the raw row for this index.
+    /// A write (including an explicit clear) supersedes raw rows for this index.
     pub fn item_slot_mut(&mut self, slot: usize) -> Option<&mut Option<ItemStack>> {
         if slot >= self.items.len() {
             return None;
         }
-        self.opaque_item_slots.remove(&slot);
+        if let Some(Tag::List(rows)) = self.fields.nbt.get_mut(&*ITEMS) {
+            rows.retain(|row| saved_item_slot(row) != Some(slot));
+        }
         self.items.get_mut(slot)
     }
 
-    pub fn new(id: String, fields: ModBlockEntityFields) -> Self {
+    pub fn new(id: String, mut fields: ModBlockEntityFields) -> Self {
+        fields.claim_modeled_item_rows();
         let numeric_id = sunrise_client_core::block_entity_types::numeric_id(&id);
         Self::with_numeric_id(id, numeric_id, fields)
     }
@@ -112,7 +115,6 @@ impl ModBlockEntity {
                 born: sunrise_mod_runtime::block_entities::new_identity(),
                 changes: 0,
             },
-            opaque_item_slots: BTreeSet::new(),
             shapes: None,
             shapes_cleared: false,
         }
@@ -229,7 +231,6 @@ impl Default for ModBlockEntity {
 impl Clone for ModBlockEntity {
     fn clone(&self) -> Self {
         let mut copy = Self::with_numeric_id(self.id.clone(), self.numeric_id, self.fields.clone());
-        copy.opaque_item_slots.clone_from(&self.opaque_item_slots);
         copy.shapes.clone_from(&self.shapes);
         copy.shapes_cleared = self.shapes_cleared;
         copy
@@ -237,10 +238,7 @@ impl Clone for ModBlockEntity {
 }
 impl PartialEq for ModBlockEntity {
     fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
-            && self.fields == other.fields
-            && self.opaque_item_slots == other.opaque_item_slots
-            && self.shapes == other.shapes
+        self.id == other.id && self.fields == other.fields && self.shapes == other.shapes
     }
 }
 impl std::fmt::Debug for ModBlockEntity {
@@ -248,7 +246,6 @@ impl std::fmt::Debug for ModBlockEntity {
         f.debug_struct("ModBlockEntity")
             .field("id", &self.id)
             .field("fields", &self.fields)
-            .field("opaque_item_slots", &self.opaque_item_slots)
             .field("shapes", &self.shapes)
             .finish()
     }

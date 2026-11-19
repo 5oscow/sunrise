@@ -3,7 +3,7 @@ use super::{BlockEntity, Game, GameLevel, Pos};
 use crate::game::native_level_signals::ReadLevel;
 use mod_api::{BlockEntityRef, BlockEntityTypeKey, HookId, LevelRef};
 use sunrise_client::save::block_entity_encode;
-use sunrise_core::nbt::{Compound, Limits, Tag};
+use sunrise_core::nbt::{Compound, JavaString, Limits, Tag};
 use sunrise_mod_runtime::attachments::ATTACHMENTS_KEY;
 
 fn save_additional(
@@ -32,27 +32,30 @@ fn save_additional(
         .map(|(name, value)| (name.clone(), value.clone()))
         .collect();
     fire(id, entity, &mut output);
-    // Admit the listener's structure once. Disk encoding owns the byte budget
-    // of the complete chunk, not the individual payload's standalone size.
+    // Admit the listener's output once, before any consumer sees it. Disk
+    // encoding still owns the size limit for its complete record.
     let max_depth = Limits::saved().max_depth;
-    let mut pending: Vec<_> = output.values().map(|tag| (tag, 1)).collect();
-    while let Some((tag, depth)) = pending.pop() {
-        match tag {
-            Tag::List(items) if depth < max_depth => {
-                pending.extend(items.iter().map(|v| (v, depth + 1)))
+    let fits = |s: &JavaString| u16::try_from(s.modified_utf8_len()).is_ok();
+    let mut pending: Vec<_> = output.iter().map(|(k, v)| (Some(k), v, 1)).collect();
+    while let Some((name, tag, depth)) = pending.pop() {
+        if name.is_none_or(fits) {
+            match tag {
+                Tag::List(items) if depth < max_depth => {
+                    pending.extend(items.iter().map(|v| (None, v, depth + 1)));
+                    continue;
+                }
+                Tag::Compound(items) if depth < max_depth => {
+                    pending.extend(items.iter().map(|(k, v)| (Some(k), v, depth + 1)));
+                    continue;
+                }
+                Tag::End | Tag::List(_) | Tag::Compound(_) => {}
+                Tag::String(value) if !fits(value) => {}
+                _ => continue,
             }
-            Tag::Compound(items) if depth < max_depth => {
-                pending.extend(items.values().map(|v| (v, depth + 1)))
-            }
-            Tag::End | Tag::List(_) | Tag::Compound(_) => {
-                log::warn!(
-                    "block_entity_save_additional: refused malformed payload for {kind} at {pos:?}"
-                );
-                sunrise_core::nbt::discard_tag(Tag::Compound(output));
-                return None;
-            }
-            _ => {}
         }
+        log::warn!("block_entity_save_additional: refused malformed payload for {kind} at {pos:?}");
+        sunrise_core::nbt::discard_tag(Tag::Compound(output));
+        return None;
     }
     output.remove(&key);
     let mut output = crate::game::native_block_entity_refs::mod_payload(output);

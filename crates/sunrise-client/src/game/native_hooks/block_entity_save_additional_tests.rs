@@ -10,7 +10,7 @@ mod tests {
         save::SaveDir,
     };
     use sunrise_core::{
-        nbt::{Compound, Limits, Tag},
+        nbt::{Compound, JavaString, Limits, Tag, read_named},
         position::ChunkPos,
     };
     use sunrise_mod_runtime::attachments::ATTACHMENTS_KEY;
@@ -28,6 +28,15 @@ mod tests {
         ) {
             let serial = self.0.fetch_add(1, Ordering::Relaxed);
             match event.tag.get(&"count".into()) {
+                Some(Tag::Int(-3)) => {
+                    event.tag.insert(
+                        "values".into(),
+                        Tag::List(vec![Tag::String(JavaString(vec![0; 32_768]))]),
+                    );
+                }
+                Some(Tag::Int(-2)) => {
+                    event.tag.insert(JavaString(vec![0; 32_768]), Tag::Int(-99));
+                }
                 Some(Tag::Int(-1)) => {
                     event.tag.insert("invalid".into(), Tag::End);
                 }
@@ -61,6 +70,80 @@ mod tests {
                 .unwrap();
             registrar.block_entity_type("silent").build();
         }
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn structure_capture_refuses_lossy_listener_keys_and_strings() {
+        let calls = Arc::new(AtomicI32::new(0));
+        let mods = vec![ModEntry::new("test", Box::new(Mod(calls.clone())))].into();
+        mod_platform::testing::with_mods(mods, || {
+            with_game(|game| {
+                mod_api::__private::resolve_block_entity_types(
+                    ["test:counter", "test:silent"],
+                    |_| Some(()),
+                )
+                .unwrap();
+                let scratch = tempfile::tempdir().unwrap();
+                game.world_root = scratch.path().to_path_buf();
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+                let dirt = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:dirt")
+                    .unwrap();
+                for (x, selector) in [(5, -2), (6, -3)] {
+                    game.world.set(x, 64, 1, dirt).unwrap();
+                    game.world.block_entities.insert(
+                        (x, 64, 1),
+                        BlockEntity::Mod(Box::new(ModBlockEntity::new(
+                            "test:counter".into(),
+                            ModBlockEntityFields {
+                                nbt: Compound::from([
+                                    ("".into(), Tag::Int(123)),
+                                    ("count".into(), Tag::Int(selector)),
+                                    ("values".into(), Tag::List(vec![Tag::String("keep".into())])),
+                                ]),
+                                ..Default::default()
+                            },
+                        ))),
+                    );
+                }
+                assert!(game.save_structure_area(
+                    "test:payload",
+                    [5, 64, 1],
+                    [2, 1, 1],
+                    true,
+                    "",
+                    true,
+                    false
+                ));
+                let bytes =
+                    std::fs::read(scratch.path().join("generated/test/structures/payload.nbt"))
+                        .unwrap();
+                let limits = Limits::templates();
+                let raw = sunrise_world::compression::Compression::Gzip
+                    .decode(&bytes, limits.max_bytes)
+                    .unwrap();
+                let (saved, _) = read_named(&raw, limits).unwrap();
+                let Some(Tag::List(blocks)) = saved.tag.get("blocks") else {
+                    panic!("structure blocks missing")
+                };
+                assert_eq!(blocks.len(), 2);
+                for block in blocks {
+                    let nbt = block.get("nbt").unwrap();
+                    assert_eq!(nbt.get(""), Some(&Tag::Int(123)));
+                    assert_eq!(
+                        nbt.get("values"),
+                        Some(&Tag::List(vec![Tag::String("keep".into())]))
+                    );
+                }
+                assert_eq!(calls.load(Ordering::Relaxed), 2);
+            });
+        });
     }
 
     #[test]

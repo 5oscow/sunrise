@@ -34,7 +34,7 @@ use crate::{
     streaming::ChunkGenerator,
 };
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     sync::{
@@ -722,16 +722,11 @@ pub fn decode_end_gateway(tag: &Tag) -> crate::containers::EndGateway {
         exact_teleport: crate::entity_nbt::flag(tag, "ExactTeleport"),
     }
 }
-fn saved_item_slot(entry: &Tag) -> Option<usize> {
-    number(entry.get("Slot"))
-        .filter(|slot| (-128..=255).contains(slot))
-        .map(|slot| usize::from(slot as u8))
-}
-
 /// A mod's block entity: its compound without `id` and the position, and
 /// the `Items` rows that can be represented losslessly as modeled slots.
 /// The game sizes the modeled vector to its container when it uses it.
 fn decode_mod_block_entity(id: String, tag: &Tag) -> Option<crate::containers::ModBlockEntity> {
+    use crate::block_entity_nbt::saved_item_slot;
     let Tag::Compound(map) = tag else {
         return None;
     };
@@ -744,7 +739,6 @@ fn decode_mod_block_entity(id: String, tag: &Tag) -> Option<crate::containers::M
         .remove(&crate::containers::SHAPES_KEY.into())
         .and_then(|tag| crate::containers::PublishedShapes::from_tag(&tag));
     let mut items = Vec::new();
-    let mut opaque_slots = BTreeSet::new();
     let key = "Items".into();
     if let Some(Tag::List(entries)) = nbt.get_mut(&key) {
         let mut occurrences = [0u8; 256];
@@ -768,7 +762,6 @@ fn decode_mod_block_entity(id: String, tag: &Tag) -> Option<crate::containers::M
                     return false;
                 }
             }
-            opaque_slots.insert(slot);
             true
         });
         if entries.is_empty() && !items.is_empty() {
@@ -782,8 +775,7 @@ fn decode_mod_block_entity(id: String, tag: &Tag) -> Option<crate::containers::M
             items,
             data: Vec::new(),
         },
-    )
-    .with_opaque_item_slots(opaque_slots);
+    );
     entity.set_shapes(shapes.map(std::sync::Arc::new));
     Some(entity)
 }
@@ -7632,10 +7624,17 @@ mod tests {
         assert_eq!(reloaded.items[0], data.items[0]);
         assert_eq!(encode(&reloaded), encoded);
         *data.item_slot_mut(0).unwrap() = None;
+        // A tick reply replacing the mutable fields, including shrinking the
+        // modeled vector to zero, cannot restore the old saved row for slot 0.
+        let mut snapshot = (**data).clone();
+        snapshot.items.clear();
+        let revision = data.revision().changes() + 1;
+        data.apply_snapshot(snapshot, revision);
         assert_eq!(
             encode(&data).get("Items"),
             Some(&parse(r#"[{Slot:1b,raw:"retained"},{raw:"no slot"}]"#))
         );
+        data.items.resize(2, None);
         *data.item_slot_mut(1).unwrap() = None;
         assert_eq!(
             encode(&data).get("Items"),

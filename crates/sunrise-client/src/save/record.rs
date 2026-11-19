@@ -47,7 +47,7 @@ impl Record {
         }
     }
 
-    pub(super) fn has_block_entity_edits(&self) -> bool {
+    fn has_block_entity_edits(&self) -> bool {
         match self {
             Self::Chunk(chunk, ..) => chunk
                 .saved

@@ -1,4 +1,4 @@
-use super::{block_entity_id, saved_item_slot, string, uuid_tag};
+use super::{block_entity_id, string, uuid_tag};
 use crate::{
     beehive::BeehiveExt,
     mobs::{spawner::SpawnerExt, trial_spawner::TrialSpawnerExt},
@@ -25,13 +25,7 @@ pub fn mod_items(
     });
     match m.nbt.get(&"Items".into()) {
         Some(Tag::List(raw)) => {
-            entries.extend(
-                raw.iter()
-                    .filter(|entry| {
-                        saved_item_slot(entry).is_none_or(|slot| m.has_opaque_item_slot(slot))
-                    })
-                    .cloned(),
-            );
+            entries.extend(raw.iter().cloned());
             Some(Tag::List(entries))
         }
         // A non-list is opaque; unoccupied modeled slots introduce no field.

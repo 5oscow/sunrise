@@ -5,7 +5,9 @@ pub trait Hooks {
     /// (`BlockEntity.saveAdditional`). Edits affect only the output; the entity,
     /// its inventory, identity, position, and engine-managed attachments and
     /// shapes are not changed. Parts of the entity's type run in dispatch order.
-    /// Malformed payloads are refused. If the region writer cannot encode or
+    /// Malformed payloads, including overlong modified-UTF-8 names and
+    /// strings, fall back to the stored payload before any output is used.
+    /// If the region writer cannot encode or
     /// admit the complete chunk record, it retries that snapshot with stored
     /// block-entity payloads instead of listener edits.
     ///
