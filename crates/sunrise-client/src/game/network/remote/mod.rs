@@ -36,7 +36,6 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use sunrise_client::actions::Action;
 use sunrise_client::first_person::{Hand, SwingAnimation};
 use sunrise_client::input_queue::InputQueue;
 use sunrise_client::{
@@ -6352,7 +6351,6 @@ impl Game<'_> {
         self.cooldowns.tick();
         // Player.tick's sleep counter (the darkening and the wake-up fade).
         self.sleep_timer = super::tick_sleep_timer(self.sleep_timer, self.sleeping.is_some());
-        let stick = self.pad_move();
         if self.player.is_none() {
             return Ok(None);
         }
@@ -6362,19 +6360,12 @@ impl Game<'_> {
             .as_ref()
             .is_some_and(|r| r.level_load.is_active());
         let playing = self.screen == Screen::Playing && !loading && !self.dialog_open();
-        let held = |action| playing && self.keys.held(action);
-        let mut keys = Keys {
-            forward: held(Action::Forward),
-            backward: held(Action::Back),
-            left: held(Action::Left),
-            right: held(Action::Right),
-            jump: held(Action::Jump),
-            shift: held(Action::Sneak),
-            sprint: held(Action::Sprint),
-            sprint_suppressed: false,
-            analog: None,
-        }
-        .with_stick(stick.filter(|_| playing));
+        let stick = self.pad_move();
+        let mut keys = if playing {
+            self.sample_movement_keys(stick)
+        } else {
+            Keys::default()
+        };
         // On a server (not this game's own server thread), the stick moves as the keys it sets do
         // (`KeyboardInput.tick`: 8 directions, full speed). The server only hears those keys
         // (`ServerboundPlayerInputPacket`), and an anticheat that predicts from them pulls back
