@@ -849,7 +849,9 @@ pub struct ExperienceOrb {
     /// `ExperienceOrb.DATA_VALUE`: an int that a save or command can leave at
     /// 0 or below, which a pickup turns into no experience.
     pub value: i32,
-    pub age: u32,
+    /// `ExperienceOrb.age`: ticks lived, signed (a save can start it below 0);
+    /// the orb is discarded at 6000.
+    pub age: i32,
     pub on_ground: bool,
     /// `ExperienceOrb.count`: orbs merged into this one; each pickup gives
     /// `value` once and takes one off.
@@ -1287,7 +1289,8 @@ impl ExperienceOrb {
         if self.on_ground && wanted.y < -0.03 {
             self.velocity.y = -wanted.y * 0.4;
         }
-        self.age += 1;
+        // `++age` on a Java int.
+        self.age = self.age.wrapping_add(1);
         let step = OrbMove {
             from,
             moved,
