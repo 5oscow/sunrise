@@ -543,7 +543,7 @@ impl Game<'_> {
     /// The download notifiers' toasts, each in a free 32-pixel slot of the
     /// `ToastManager` (`hidden`, F1, keeps them timing out undrawn).
     pub(super) fn draw_pack_toasts(&mut self, batch: &mut HudBatch, hidden: bool) {
-        let multiplier = f64::from(self.settings.notification_display_time);
+        let multiplier = self.settings.notification_display_time;
         self.add_chunk_io_toasts();
         let mut used = self.toast_slots_used();
         let packs = &mut self.server_packs;

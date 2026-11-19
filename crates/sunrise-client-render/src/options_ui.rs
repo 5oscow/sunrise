@@ -373,7 +373,7 @@ impl Opt {
             Opt::ModSetting(i, j) => {
                 Kind::Slider(mod_setting(s, i, j).map_or(0.0, |m| m.value.fraction()))
             }
-            Opt::ChatDelay => values::kind(s.file.double("chatDelay")),
+            Opt::ChatDelay => values::kind(s.chat_delay),
             Opt::FovEffects | Opt::DarknessPulsing => {
                 Kind::Slider(s.file.double(self.file_key().unwrap()).sqrt() as f32)
             }
@@ -389,17 +389,17 @@ impl Opt {
                 crate::options_file::MAX_RENDER_DISTANCE as f32,
             ),
             Opt::SimulationDistance => unit(s.simulation_distance as f32, 5.0, 32.0),
-            Opt::Sensitivity => Kind::Slider(s.sensitivity),
+            Opt::Sensitivity => Kind::Slider(s.sensitivity as f32),
             Opt::WheelSensitivity => wheel::kind(s.mouse_wheel_sensitivity),
             Opt::Volume(i) => Kind::Slider(if i == 0 {
-                s.master_volume
+                s.master_volume as f32
             } else {
-                s.volumes[i]
+                s.volumes[i] as f32
             }),
-            Opt::Gamma => Kind::Slider(s.gamma),
+            Opt::Gamma => Kind::Slider(s.gamma as f32),
             Opt::MaxFps => unit(s.max_fps as f32, 10.0, 260.0),
             Opt::CloudRange => unit(s.cloud_range as f32, 2.0, 128.0),
-            Opt::EntityDistance => unit(s.entity_distance, 0.5, 5.0),
+            Opt::EntityDistance => unit(s.entity_distance as f32, 0.5, 5.0),
             Opt::BiomeBlend => unit(s.biome_blend as f32, 0.0, 7.0),
             Opt::Preset => unit(preset_index(&s.graphics_preset) as f32, 0.0, 3.0),
             Opt::Mipmaps => unit(s.mipmap_levels as f32, 0.0, 4.0),
@@ -413,16 +413,16 @@ impl Opt {
                 }
             }
             Opt::WeatherRadius => unit(s.weather_radius as f32, 3.0, 10.0),
-            Opt::ChunkFade => unit(s.chunk_fade, 0.0, 2.0),
+            Opt::ChunkFade => unit(s.chunk_fade as f32, 0.0, 2.0),
             Opt::MenuBlur => unit(s.menu_blur as f32, 0.0, 10.0),
-            Opt::NotificationDisplayTime => unit(s.notification_display_time, 0.5, 10.0),
-            Opt::ChatOpacity => Kind::Slider(s.chat_opacity),
-            Opt::TextBackgroundOpacity => Kind::Slider(s.text_background_opacity),
-            Opt::ChatScale => Kind::Slider(s.chat_scale),
-            Opt::ChatWidth => Kind::Slider(s.chat_width),
-            Opt::ChatHeightFocused => Kind::Slider(s.chat_height_focused),
-            Opt::ChatHeightUnfocused => Kind::Slider(s.chat_height_unfocused),
-            Opt::ChatLineSpacing => Kind::Slider(s.chat_line_spacing),
+            Opt::NotificationDisplayTime => unit(s.notification_display_time as f32, 0.5, 10.0),
+            Opt::ChatOpacity => Kind::Slider(s.chat_opacity as f32),
+            Opt::TextBackgroundOpacity => Kind::Slider(s.text_background_opacity as f32),
+            Opt::ChatScale => Kind::Slider(s.chat_scale as f32),
+            Opt::ChatWidth => Kind::Slider(s.chat_width as f32),
+            Opt::ChatHeightFocused => Kind::Slider(s.chat_height_focused as f32),
+            Opt::ChatHeightUnfocused => Kind::Slider(s.chat_height_unfocused as f32),
+            Opt::ChatLineSpacing => Kind::Slider(s.chat_line_spacing as f32),
             Opt::PadLookSensitivity => Kind::Slider(s.controller.look_sensitivity),
             Opt::PadPointerSpeed => unit(s.controller.pointer_speed, 0.25, 3.0),
             Opt::PadScrollSpeed => unit(s.controller.scroll_speed, 1.0, 36.0),
@@ -558,14 +558,14 @@ impl Opt {
             | Opt::DamageTilt
             | Opt::GlintSpeed
             | Opt::GlintStrength => {
-                let value = s.file.double(self.file_key().unwrap()) as f32;
+                let value = s.file.double(self.file_key().unwrap());
                 if value == 0.0 {
                     generic(c, tr("options.off"))
                 } else {
                     percent(c, value)
                 }
             }
-            Opt::PanoramaSpeed => percent(c, s.file.double("panoramaScrollSpeed") as f32),
+            Opt::PanoramaSpeed => percent(c, s.file.double("panoramaScrollSpeed")),
             Opt::SprintWindow => {
                 let value = if s.sprint_window == 0 {
                     tr("options.off")
@@ -594,7 +594,9 @@ impl Opt {
             }
             Opt::WheelSensitivity => generic(
                 c,
-                Text::literal(format!("{:.2}", s.mouse_wheel_sensitivity)),
+                Text::literal(sunrise_core::java_number::format_fixed2(
+                    s.mouse_wheel_sensitivity,
+                )),
             ),
             Opt::Volume(i) => {
                 let v = if i == 0 {
@@ -617,7 +619,7 @@ impl Opt {
                 };
                 generic(c, value)
             }
-            Opt::Gamma => match (f64::from(s.gamma) * 100.0) as i32 {
+            Opt::Gamma => match (s.gamma * 100.0) as i32 {
                 0 => generic(c, tr("options.gamma.min")),
                 50 => generic(c, tr("options.gamma.default")),
                 100 => generic(c, tr("options.gamma.max")),
@@ -674,7 +676,7 @@ impl Opt {
                 } else {
                     Text::tr(
                         "options.chunkFade.seconds",
-                        &[&format!("{:.2}", s.chunk_fade)],
+                        &[&sunrise_core::java_number::format_fixed2(s.chunk_fade)],
                     )
                 }
             }
@@ -694,22 +696,22 @@ impl Opt {
                     percent(c, s.chat_scale)
                 }
             }
-            Opt::ChatWidth => chat_px(c, (s.chat_width * 280.0 + 40.0).floor()),
-            Opt::ChatHeightFocused => chat_px(c, (s.chat_height_focused * 160.0 + 20.0).floor()),
-            Opt::ChatHeightUnfocused => {
-                chat_px(c, (s.chat_height_unfocused * 160.0 + 20.0).floor())
-            }
+            Opt::ChatWidth => chat_px(c, s.chat_options().width_px()),
+            Opt::ChatHeightFocused => chat_px(c, s.chat_options().height_px(true)),
+            Opt::ChatHeightUnfocused => chat_px(c, s.chat_options().height_px(false)),
             Opt::ChatLineSpacing => percent(c, s.chat_line_spacing),
             Opt::NotificationDisplayTime => generic(
                 c,
                 Text::tr(
                     "options.multiplier",
-                    &[&format!("{:.1}", s.notification_display_time)],
+                    &[&sunrise_core::java_number::double_to_string(
+                        s.notification_display_time,
+                    )],
                 ),
             ),
-            Opt::PadLookSensitivity => percent(c, 2.0 * s.controller.look_sensitivity),
-            Opt::PadPointerSpeed => percent(c, s.controller.pointer_speed),
-            Opt::PadScrollSpeed => percent(c, s.controller.scroll_speed / 12.0),
+            Opt::PadLookSensitivity => percent(c, f64::from(2.0 * s.controller.look_sensitivity)),
+            Opt::PadPointerSpeed => percent(c, f64::from(s.controller.pointer_speed)),
+            Opt::PadScrollSpeed => percent(c, f64::from(s.controller.scroll_speed / 12.0)),
             Opt::PadRepeatDelay | Opt::PadRepeatInterval => generic(
                 c,
                 Text::tr(
@@ -948,7 +950,7 @@ impl Opt {
         let v = v.clamp(0.0, 1.0);
         let step = |lo: f32, hi: f32| (lo + v * (hi - lo)).round();
         match self {
-            Opt::ChatDelay => values::set(s, v),
+            Opt::ChatDelay => s.chat_delay = values::from_slider(v),
             Opt::FovEffects | Opt::DarknessPulsing => s.file.set(
                 self.file_key().unwrap(),
                 crate::options_file::V::Double(f64::from(v).powi(2)),
@@ -967,14 +969,14 @@ impl Opt {
                     step(2.0, crate::options_file::MAX_RENDER_DISTANCE as f32) as i32
             }
             Opt::SimulationDistance => s.simulation_distance = step(5.0, 32.0) as i32,
-            Opt::Sensitivity => s.sensitivity = v,
+            Opt::Sensitivity => s.sensitivity = f64::from(v),
             Opt::WheelSensitivity => s.mouse_wheel_sensitivity = wheel::from_slider(v),
-            Opt::Volume(0) => s.master_volume = v,
-            Opt::Volume(i) => s.volumes[i] = v,
-            Opt::Gamma => s.gamma = v,
+            Opt::Volume(0) => s.master_volume = f64::from(v),
+            Opt::Volume(i) => s.volumes[i] = f64::from(v),
+            Opt::Gamma => s.gamma = f64::from(v),
             Opt::MaxFps => s.max_fps = (step(1.0, 26.0) as u32) * 10,
             Opt::CloudRange => s.cloud_range = step(2.0, 128.0) as i32,
-            Opt::EntityDistance => s.entity_distance = step(2.0, 20.0) / 4.0,
+            Opt::EntityDistance => s.entity_distance = f64::from(step(2.0, 20.0)) / 4.0,
             Opt::BiomeBlend => s.biome_blend = step(0.0, 7.0) as i32,
             Opt::Preset => s.graphics_preset = PRESETS[preset_from_slider(v)].into(),
             Opt::Mipmaps => s.mipmap_levels = step(0.0, 4.0) as i32,
@@ -993,16 +995,18 @@ impl Opt {
                     .map(|i| s.video_modes[i].write());
             }
             Opt::WeatherRadius => s.weather_radius = step(3.0, 10.0) as i32,
-            Opt::ChunkFade => s.chunk_fade = step(0.0, 40.0) / 20.0,
+            Opt::ChunkFade => s.chunk_fade = f64::from(step(0.0, 40.0)) / 20.0,
             Opt::MenuBlur => s.menu_blur = step(0.0, 10.0) as i32,
-            Opt::NotificationDisplayTime => s.notification_display_time = step(5.0, 100.0) / 10.0,
-            Opt::ChatOpacity => s.chat_opacity = v,
-            Opt::TextBackgroundOpacity => s.text_background_opacity = v,
-            Opt::ChatScale => s.chat_scale = v,
-            Opt::ChatWidth => s.chat_width = v,
-            Opt::ChatHeightFocused => s.chat_height_focused = v,
-            Opt::ChatHeightUnfocused => s.chat_height_unfocused = v,
-            Opt::ChatLineSpacing => s.chat_line_spacing = v,
+            Opt::NotificationDisplayTime => {
+                s.notification_display_time = f64::from(step(5.0, 100.0)) / 10.0
+            }
+            Opt::ChatOpacity => s.chat_opacity = f64::from(v),
+            Opt::TextBackgroundOpacity => s.text_background_opacity = f64::from(v),
+            Opt::ChatScale => s.chat_scale = f64::from(v),
+            Opt::ChatWidth => s.chat_width = f64::from(v),
+            Opt::ChatHeightFocused => s.chat_height_focused = f64::from(v),
+            Opt::ChatHeightUnfocused => s.chat_height_unfocused = f64::from(v),
+            Opt::ChatLineSpacing => s.chat_line_spacing = f64::from(v),
             Opt::PadLookSensitivity => s.controller.look_sensitivity = v,
             Opt::PadPointerSpeed => s.controller.pointer_speed = step(25.0, 300.0) / 100.0,
             Opt::PadScrollSpeed => s.controller.scroll_speed = step(1.0, 36.0),
@@ -1296,7 +1300,7 @@ fn drag_slider(opt: Opt, s: &mut Settings, v: f32, events: &mut Vec<Event>) {
     if let (Opt::Volume(source), Some(after)) = (opt, volume(s))
         && before != Some(after)
     {
-        events.push(Event::Volume(source, after));
+        events.push(Event::Volume(source, after as f32));
     }
 }
 /// GraphicsPreset.apply: the options Fast, Fancy and Fabulous set.
@@ -2368,7 +2372,7 @@ impl OptionsUi {
         if let (Opt::Volume(source), Some(after)) = (opt, volume(s))
             && before_vol != Some(after)
         {
-            events.push(Event::Volume(source, after));
+            events.push(Event::Volume(source, after as f32));
         }
         events
     }
@@ -6262,6 +6266,42 @@ mod tests {
     }
 
     #[test]
+    fn numeric_captions_use_vanilla_double_text_and_truncation() {
+        let s = Settings {
+            mouse_wheel_sensitivity: 1.125,
+            chunk_fade: 0.125,
+            notification_display_time: 1.1,
+            chat_delay: 1.25,
+            ..Settings::parse("gamma:0.7\n")
+        };
+        let language = lang::Language::of(
+            "en_us",
+            [
+                ("options.generic_value", "%s: %s"),
+                ("options.mouseWheelSensitivity", "Wheel"),
+                ("options.notifications.display_time", "Notification"),
+                ("options.multiplier", "%sx"),
+                ("options.chunkFade.seconds", "%s s"),
+                ("options.chat.delay", "%s s"),
+                ("options.gamma", "Brightness"),
+            ]
+            .map(|(k, v)| (k.into(), v.into())),
+        );
+        lang::scoped(language, || {
+            // Temurin 25: %.2f(1.125), %.2f(0.125), Double.toString(1.1),
+            // %.1f(1.25), and the Java int cast of 0.7 * 100.0.
+            assert_eq!(Opt::WheelSensitivity.label(&s).plain(), "Wheel: 1.13");
+            assert_eq!(Opt::ChunkFade.label(&s).plain(), "0.13 s");
+            assert_eq!(
+                Opt::NotificationDisplayTime.label(&s).plain(),
+                "Notification: 1.1x"
+            );
+            assert_eq!(Opt::ChatDelay.label(&s).plain(), "1.3 s");
+            assert_eq!(Opt::Gamma.label(&s).plain(), "Brightness: 70");
+        });
+    }
+
+    #[test]
     fn option_tooltip_keys_follow_value_dependent_descriptions() {
         let mut s = Settings::default();
         assert_eq!(
@@ -6774,7 +6814,7 @@ mod tests {
         for cx in [-100.0, 250.0, 1000.0] {
             assert_eq!(
                 ui.click(&mut s, &atlas, cx, -100.0, size, [854, 480], true, false),
-                vec![Event::SliderDrag, Event::Volume(0, s.master_volume)]
+                vec![Event::SliderDrag, Event::Volume(0, s.master_volume as f32)]
             );
         }
         assert_eq!(ui.release(), vec![Event::ButtonClick, Event::Changed]);
@@ -6804,7 +6844,7 @@ mod tests {
         assert!((volume - 0.5).abs() < 1e-3, "{volume}");
         assert_eq!(
             events,
-            vec![Event::SliderDrag, Event::Volume(hostile, volume)]
+            vec![Event::SliderDrag, Event::Volume(hostile, volume as f32)]
         );
         // OptionInstance.set: an unchanged value runs no callback.
         assert_eq!(

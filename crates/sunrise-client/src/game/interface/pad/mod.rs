@@ -793,8 +793,7 @@ impl Game<'_> {
 
     /// Connection notices sit below the boss bars and last as long as a toast.
     pub(super) fn draw_controller_notice(&mut self, batch: &mut HudBatch) {
-        let shown_for =
-            Duration::from_secs_f64(5.0 * f64::from(self.settings.notification_display_time));
+        let shown_for = Duration::from_secs_f64(5.0 * self.settings.notification_display_time);
         self.controller_notice.draw(
             batch,
             &self.gui.atlas,

@@ -1038,10 +1038,7 @@ impl Game<'_> {
             online_mode,
             gui_ticks: self.visual_ticks() as i64,
             // Sunrise has no "chat background only" option: vanilla's default (on).
-            background: tab_list::row_background(
-                true,
-                f64::from(self.settings.text_background_opacity),
-            ),
+            background: tab_list::row_background(true, self.settings.text_background_opacity),
             upside_down: &up,
             mark: &marked,
         };

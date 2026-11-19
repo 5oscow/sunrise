@@ -4783,7 +4783,8 @@ impl Game<'_> {
                 );
                 self.settings.save(&Self::options_path());
             }
-            if let Some(sound) = title.update_toast(self.settings.notification_display_time) {
+            if let Some(sound) = title.update_toast(self.settings.notification_display_time as f32)
+            {
                 self.audio.play(sound, None, 1.0, 1.0);
             }
         }
@@ -5591,7 +5592,7 @@ impl Game<'_> {
             // so nothing warms it.
             let warm_cache = self.pack_ids.is_none();
             for entity in
-                r.block_entities_in_range(self.settings.chunk_fade, camera, view, long_range)
+                r.block_entities_in_range(self.settings.chunk_fade as f32, camera, view, long_range)
             {
                 let (pos, state) = *entity.block;
                 if !self.live_block_entity_render(pos, state) {
@@ -5739,7 +5740,7 @@ impl Game<'_> {
                 .block_entities
                 .has_mods()
                 .then(|| {
-                    r.visible_block_entities(self.settings.chunk_fade)
+                    r.visible_block_entities(self.settings.chunk_fade as f32)
                         .filter(|(_, state)| !self.res.block_entity_render().renders(*state))
                 })
                 .into_iter()
@@ -8783,7 +8784,7 @@ impl Game<'_> {
                     ..Default::default()
                 },
             },
-            chunk_fade: self.settings.chunk_fade,
+            chunk_fade: self.settings.chunk_fade as f32,
         };
         pr.lap("pr_frame");
         // Renderer encoding and GPU waiting belong to render, not prepare.
@@ -9463,7 +9464,7 @@ impl Game<'_> {
                     };
                     // MouseHandler.onScroll: discrete scrolling and the wheel sensitivity.
                     let discrete = self.settings.discrete_scroll;
-                    let wheel_sensitivity = f64::from(self.settings.mouse_wheel_sensitivity);
+                    let wheel_sensitivity = self.settings.mouse_wheel_sensitivity;
                     let scaled = |v: f64| {
                         (if discrete {
                             sunrise_client::mouse::java_signum(v)
