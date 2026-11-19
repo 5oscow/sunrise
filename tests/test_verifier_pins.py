@@ -53,8 +53,8 @@ class VerifierPins(unittest.TestCase):
         rows = "".join(f"{hashlib.sha256(data).hexdigest()}  {name}\n" for name, data in binaries.items())
         (self.release / "SHA256SUMS").write_text(rows + extra)
 
-    def pin(self, attest=attested, tag="verifier@2.3.4", commit=COMMIT):
-        pin_verifier.pin(tag, pin_verifier.REPOSITORY, self.release, commit, self.scripts, attest)
+    def pin(self, attest=attested, tag="verifier@2.3.4", commit=COMMIT, repository=pin_verifier.REPOSITORY):
+        pin_verifier.pin(tag, repository, self.release, commit, self.scripts, attest)
 
     def assert_scripts_unchanged(self, before):
         self.assertEqual(before, [script.read_bytes() for script in self.scripts])
@@ -104,10 +104,10 @@ class VerifierPins(unittest.TestCase):
     def test_files_that_match_their_own_sums_but_have_no_attestation_pin_nothing(self):
         self.refused(attest=not_attested)
 
-    def test_a_release_attested_for_another_commit_is_asked_about_the_callers_commit(self):
+    def test_download_repository_does_not_change_the_signer_or_callers_commit(self):
         seen = []
-        self.pin(attest=lambda path, repository, commit: seen.append((path.name, repository, commit)))
-        self.assertEqual({commit for _, _, commit in seen}, {COMMIT})
+        self.pin(repository="mirror/verifier", attest=lambda path, repo, commit: seen.append((path.name, repo, commit)))
+        self.assertEqual({(repo, commit) for _, repo, commit in seen}, {("sunrise-org/sunrise", COMMIT)})
         self.assertEqual(sorted(name for name, _, _ in seen), sorted(["SHA256SUMS", *ASSETS]))
         self.refused(commit="main")
         self.refused(commit=COMMIT.upper())
@@ -141,10 +141,11 @@ class VerifierPins(unittest.TestCase):
             (self.release / "SHA256SUMS").write_text(bad)
             self.refused()
 
-    def test_a_tag_must_be_ascii_digits(self):
-        self.refused(tag="verifier@1.0.\u0661")
-        self.refused(tag="verifier@1.0")
-        self.refused(tag="launcher@1.0.0")
+    def test_a_tag_must_match_the_publishing_version_grammar(self):
+        for tag in ["verifier@1.0.\u0661", "verifier@1.0", "launcher@1.0.0",
+                    "verifier@1.00.0", "verifier@1.0.1234567890"]:
+            with self.subTest(tag=tag):
+                self.refused(tag=tag)
 
     def test_a_script_with_two_pin_blocks_is_refused_and_nothing_is_written(self):
         text = self.scripts[1].read_bytes().decode()

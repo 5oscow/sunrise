@@ -10,8 +10,8 @@ that pin, so the pin on main is the trust anchor, and SHA256SUMS sits in the sam
 anything is written, `gh attestation verify` must accept SHA256SUMS and every binary as built by verifier.yml of
 REPOSITORY on refs/heads/main at COMMIT, the commit the caller names (the one the release was dispatched from), never
 one read from the release. The change goes in an ordinary pull request.
-`--from-dir` reads the files from a folder instead of the release (a release downloaded by hand); they are
-attested all the same.
+`--repository` changes only where the files are downloaded from. `--from-dir` reads the files from a folder
+instead of the release. Both still require the official Sunrise verifier workflow's attestation.
 """
 import argparse
 import hashlib
@@ -26,7 +26,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = (ROOT / "packaging/server/install.sh", ROOT / "packaging/server/install.ps1")
 REPOSITORY = "sunrise-org/sunrise"
-TAG = re.compile(r"verifier@([0-9]+\.[0-9]+\.[0-9]+)")
+VERSION_COMPONENT = r"(?:0|[1-9][0-9]{0,8})"
+TAG = re.compile(rf"verifier@({VERSION_COMPONENT}(?:\.{VERSION_COMPONENT}){{2}})")
 SUMS_ROW = re.compile(r"([0-9a-f]{64}) [ *]([^\s/\\]+)")
 COMMIT = re.compile(r"[0-9a-f]{40}")
 WORKFLOW = ".github/workflows/verifier.yml"
@@ -130,7 +131,7 @@ def pin(tag: str, repository: str, folder: Path | None, commit: str, scripts: tu
             files[name].write_bytes(fetch(repository, tag, name, folder))
         # Provenance first: nothing below trusts a digest from files nobody has authenticated.
         for path in files.values():
-            attest(path, repository, commit)
+            attest(path, REPOSITORY, commit)
         sums = parse_sums(files["SHA256SUMS"].read_bytes().decode("utf-8"))
         if sorted(sums) != sorted(PLATFORMS.values()):
             sys.exit(f"{tag}'s SHA256SUMS lists {sorted(sums)}, expected exactly {sorted(PLATFORMS.values())}")
@@ -159,7 +160,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("tag")
     parser.add_argument("--commit", required=True, help="the full commit the release was dispatched from")
-    parser.add_argument("--repository", default=REPOSITORY)
+    parser.add_argument("--repository", default=REPOSITORY,
+                        help="download from this repository; the signer is always the official Sunrise verifier workflow")
     parser.add_argument("--from-dir", type=Path)
     args = parser.parse_args()
     pin(args.tag, args.repository, args.from_dir, args.commit)

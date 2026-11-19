@@ -108,7 +108,7 @@ jobs:
       - name: The pinned Rust
         id: rust
         run: echo "version=$(cat tools/ci/rust-version)" >> "$GITHUB_OUTPUT"
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
         with:
           toolchain: ${{ steps.rust.outputs.version }}
           targets: ${{ matrix.target }}
