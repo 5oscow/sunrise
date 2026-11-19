@@ -1430,7 +1430,7 @@ impl Game<'_> {
         // Entity.isInvulnerableTo: the flag, then EnchantmentHelper.isImmuneToDamage.
         let a = &self.armor_stands[i];
         if (invulnerable && !creative)
-            || (a.mod_fire_immune && tagged("minecraft:is_fire"))
+            || (a.mod_fire_immune && tagged(self, "minecraft:is_fire"))
             || a.invisible
             || a.marker
             || self.stand_immune_to_damage(i, damage_type, causing)
