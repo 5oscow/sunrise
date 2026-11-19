@@ -10,9 +10,10 @@ pub trait Hooks {
     /// This is a read-only query on the entity's saved data and current slots, with no Host.
     /// Hoppers, droppers, default `ITEMS` and `STORAGE` inserts, and nonempty `/loot insert`
     /// and `/loot replace block` offers ask it. Inserts query with the remaining offer
-    /// before clamping to room. Default `STORAGE.space_for` checks a single-item offer and
-    /// reports room in slots that admit it. Menus use `menu_slot_rules` instead
-    /// (`Slot.mayPlace`). A subscribed wasm part costs one Wire call per queried slot.
+    /// before clamping to room. Default `STORAGE.space_for` does not ask this hook: for a
+    /// subscribed slot it bounds insertion by physical room after face and input checks.
+    /// Menus use `menu_slot_rules` instead (`Slot.mayPlace`). A subscribed wasm part costs
+    /// one Wire call per queried slot.
     ///
     /// Seed a filter from an accepted write, not this query. Default capability writes to
     /// mod-owned storage do not emit `contents_changed`; use an explicit `set_changed`

@@ -139,9 +139,9 @@ pub trait ItemStorage {
         host: &mut dyn ServerHost,
         resource: &ItemResource,
     ) -> Result<u64, StorageError>;
-    /// How much room there is for `resource`: what a router plans by, not a promise.
-    /// For game-held slots this checks a single-item offer; an insert checks the actual
-    /// offer and may take less.
+    /// A planning bound for `resource`, not an admission decision. The game's default
+    /// handler does not ask `BlockEntityPart::can_place_item` here; an insert checks the
+    /// actual offer and may take less.
     fn space_for(
         &self,
         host: &mut dyn ServerHost,

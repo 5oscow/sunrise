@@ -25,6 +25,7 @@ impl BlockEntityPart for Filter {
             Some(1) => return Some(false),
             Some(2) => return None,
             Some(3) => return Some(event.slot == 2 && event.stack.count() == 1),
+            Some(4) => return Some(event.slot == 1 && event.stack.count() == 2),
             _ => {}
         }
         match event.slot {
@@ -230,12 +231,14 @@ fn refusing_a_capability_insert_does_not_journal_the_slot() {
     });
 }
 
-fn prepare_single_item_admission(game: &mut Game<'_>) -> ItemResource {
+fn prepare_counted_admission(game: &mut Game<'_>, mode: i32, counts: [u32; 3]) -> ItemResource {
     let Some(BlockEntity::Mod(entity)) = game.world.block_entities.get_mut(&TARGET) else {
         unreachable!();
     };
-    entity.data = vec![3];
-    entity.items[2] = Some(ItemStack::new("minecraft:stone", 63));
+    entity.data = vec![mode];
+    entity.items = counts
+        .map(|count| Some(ItemStack::new("minecraft:stone", count)))
+        .into();
     use super::super::api_values::TryIntoApi;
     ItemResource::of(&ItemStack::new("minecraft:stone", 1).try_into_api().unwrap())
 }
@@ -244,7 +247,7 @@ fn prepare_single_item_admission(game: &mut Game<'_>) -> ItemResource {
 #[ignore = "daily"]
 fn admission_checks_the_offer_before_clamping_to_room() {
     fixture(|game| {
-        let resource = prepare_single_item_admission(game);
+        let resource = prepare_counted_admission(game, 3, [64, 64, 63]);
         let level = game.level("minecraft:overworld").unwrap();
         let at = [TARGET.0, TARGET.1, TARGET.2];
         let items = level
@@ -268,36 +271,50 @@ fn admission_checks_the_offer_before_clamping_to_room() {
     });
 }
 
+fn transfer_to_filtered_container(game: &mut Game<'_>, resource: &ItemResource, amount: u64) {
+    source(game, "minecraft:hopper", HOPPER_SLOTS);
+    let level = game.level("minecraft:overworld").unwrap();
+    let from = level
+        .capability(game, &STORAGE, [ABOVE.0, ABOVE.1, ABOVE.2], None)
+        .unwrap();
+    let to = level
+        .capability(
+            game,
+            &STORAGE,
+            [TARGET.0, TARGET.1, TARGET.2],
+            Some(Direction::Up),
+        )
+        .unwrap();
+    assert_eq!(to.space_for(game, resource), Ok(amount));
+    assert_eq!(
+        mod_api::run_transaction(game, |game, tx| {
+            mod_api::transfer(game, &from, &to, resource, amount, tx)
+        }),
+        Ok(amount)
+    );
+    assert_eq!(from.amount(game, resource), Ok(2 - amount));
+    assert_eq!(
+        target(game).items,
+        vec![Some(ItemStack::new("minecraft:stone", 64)); 3]
+    );
+}
+
 #[test]
 #[ignore = "daily"]
-fn storage_transfer_plans_with_one_item_and_checks_the_real_write() {
+fn storage_transfer_can_insert_into_a_slot_that_only_admits_one() {
     fixture(|game| {
-        source(game, "minecraft:hopper", HOPPER_SLOTS);
-        let resource = prepare_single_item_admission(game);
-        let level = game.level("minecraft:overworld").unwrap();
-        let from = level
-            .capability(game, &STORAGE, [ABOVE.0, ABOVE.1, ABOVE.2], None)
-            .unwrap();
-        let to = level
-            .capability(
-                game,
-                &STORAGE,
-                [TARGET.0, TARGET.1, TARGET.2],
-                Some(Direction::Up),
-            )
-            .unwrap();
-        assert_eq!(to.space_for(game, &resource), Ok(1));
-        assert_eq!(
-            mod_api::run_transaction(game, |game, tx| {
-                mod_api::transfer(game, &from, &to, &resource, 1, tx)
-            }),
-            Ok(1)
-        );
-        assert_eq!(
-            target(game).items[2],
-            Some(ItemStack::new("minecraft:stone", 64))
-        );
-        assert_eq!(from.amount(game, &resource), Ok(1));
+        let resource = prepare_counted_admission(game, 3, [64, 64, 63]);
+        transfer_to_filtered_container(game, &resource, 1);
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn storage_transfer_can_insert_two_despite_a_declared_rule_the_part_replaces() {
+    fixture(|game| {
+        // The only slot with room declares OnlyWhenEmpty, but the part admits exactly two.
+        let resource = prepare_counted_admission(game, 4, [64, 62, 64]);
+        transfer_to_filtered_container(game, &resource, 2);
     });
 }
 
@@ -379,13 +396,19 @@ fn no_answer_falls_back_to_the_declared_insert_rule() {
         let c = game.containers();
         let view = c.view(TARGET, false).unwrap();
         let offered = ItemStack::new("minecraft:stone", 1);
-        assert!(c.can_place(&view, 1, &offered, &mut PlacementAttempt::default()));
+        assert!(c.can_place(
+            &view,
+            1,
+            &offered,
+            PlacementQuery::Offer(&mut PlacementAttempt::default())
+        ));
         *game.slot_mut_at(&view, 1).unwrap() = Some(offered.clone());
-        assert!(
-            !game
-                .containers()
-                .can_place(&view, 1, &offered, &mut PlacementAttempt::default())
-        );
+        assert!(!game.containers().can_place(
+            &view,
+            1,
+            &offered,
+            PlacementQuery::Offer(&mut PlacementAttempt::default()),
+        ));
     });
 }
 

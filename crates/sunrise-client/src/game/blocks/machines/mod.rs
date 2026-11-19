@@ -277,6 +277,11 @@ struct PlacementAttempt {
     entity: Option<PlacementEntity>,
 }
 
+enum PlacementQuery<'a> {
+    Offer(&'a mut PlacementAttempt),
+    Planning,
+}
+
 struct PlacementEntity {
     pos: Pos,
     revision: sunrise_client::chunk::block_entity::ModRevision,
@@ -634,13 +639,14 @@ impl Containers<'_> {
     /// `Container.canPlaceItem` (+ `canPlaceItemThroughFace` for furnaces): `accepts`, and what
     /// the slot holds now. The slots of one item (a jukebox's, a chiseled bookshelf's, a brewing
     /// stand's bottles) take one only when empty, a furnace's fuel slot no bucket onto a
-    /// bucket, and a crafter fills its smallest stack first.
+    /// bucket, and a crafter fills its smallest stack first. Planning has no offered amount,
+    /// so it must not veto a slot that a subscribed part could admit.
     fn can_place(
         &self,
         view: &View,
         slot: usize,
         stack: &ItemStack,
-        attempt: &mut PlacementAttempt,
+        query: PlacementQuery<'_>,
     ) -> bool {
         if !self.accepts(view, slot, stack) {
             return false;
@@ -652,7 +658,15 @@ impl Containers<'_> {
             let Some(BlockEntity::Mod(entity)) = self.world.block_entities.get(&pos) else {
                 return false;
             };
-            return attempt.ask(pos, entity, index, stack).unwrap_or_else(|| {
+            let answer = match query {
+                PlacementQuery::Offer(attempt) => attempt.ask(pos, entity, index, stack),
+                PlacementQuery::Planning => mod_api::__private::block_entity_type_listens(
+                    mod_api::HookId::CanPlaceItem,
+                    entity.id(),
+                )
+                .then_some(true),
+            };
+            return answer.unwrap_or_else(|| {
                 sunrise_client::containers::mod_container_insert_allowed(
                     container
                         .insert_rules
@@ -696,15 +710,9 @@ impl Containers<'_> {
             .and_then(|(pos, _)| self.world.container_stack_limit(pos))
             .map_or(capacity, |limit| capacity.min(limit))
     }
-    /// Physical room in a slot that admits `stack`, zero if admission refuses the offer.
-    fn admitted_room(
-        &self,
-        view: &View,
-        slot: usize,
-        stack: &ItemStack,
-        attempt: &mut PlacementAttempt,
-    ) -> u32 {
-        if !self.can_place(view, slot, stack, attempt) {
+    /// For planning, physical room subject to rules a part cannot override.
+    fn planning_room(&self, view: &View, slot: usize, stack: &ItemStack) -> u32 {
+        if !self.can_place(view, slot, stack, PlacementQuery::Planning) {
             return 0;
         }
         self.insertion_room(view, slot, stack)
@@ -1003,7 +1011,12 @@ impl Game<'_> {
             return false;
         };
         view.kind == Kind::Shulker
-            || containers.can_place(&view, slot, stack, &mut PlacementAttempt::default())
+            || containers.can_place(
+                &view,
+                slot,
+                stack,
+                PlacementQuery::Offer(&mut PlacementAttempt::default()),
+            )
     }
     fn slot_mut_at(&mut self, view: &View, slot: usize) -> Option<&mut Option<ItemStack>> {
         let (pos, i) = view.locate(slot)?;
@@ -1101,7 +1114,7 @@ impl Game<'_> {
         attempt: &mut PlacementAttempt,
     ) -> (Option<ItemStack>, MoveIn) {
         let c = self.containers();
-        if !c.can_place(view, slot, &stack, attempt) {
+        if !c.can_place(view, slot, &stack, PlacementQuery::Offer(attempt)) {
             return (Some(stack), MoveIn::Skipped);
         }
         let (from_hopper, count) = match insertion {
@@ -2526,7 +2539,12 @@ mod brewing_fuel_transfer_tests {
                 let stand = containers.view(stand_pos, false).unwrap();
                 let fuel = containers.get(&hopper, 0).unwrap();
                 assert_eq!(
-                    containers.can_place(&stand, 4, fuel, &mut super::PlacementAttempt::default()),
+                    containers.can_place(
+                        &stand,
+                        4,
+                        fuel,
+                        super::PlacementQuery::Offer(&mut super::PlacementAttempt::default()),
+                    ),
                     accepted
                 );
                 assert_eq!(
@@ -2868,11 +2886,7 @@ mod capacity_tests {
             };
             let offered = ItemStack::new(offered, 1);
             assert_eq!(c.capacity(&view, 0, &offered), 1, "{block}");
-            assert_eq!(
-                c.admitted_room(&view, 0, &offered, &mut super::PlacementAttempt::default()),
-                0,
-                "{block}"
-            );
+            assert_eq!(c.planning_room(&view, 0, &offered), 0, "{block}");
             assert_eq!(
                 c.capacity(&view, 0, &ItemStack::new("minecraft:stick", 1)),
                 0,

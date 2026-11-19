@@ -265,13 +265,9 @@ impl Game<'_> {
         let Some(slot) = view.capability_slots(at.side).nth(slot) else {
             return Some(stack);
         };
-        let mut attempt = PlacementAttempt::default();
         if matches!(view.kind, Kind::Composter(_)) {
             if amount == 0
-                || self
-                    .containers()
-                    .admitted_room(&view, slot, &stack, &mut attempt)
-                    == 0
+                || self.containers().planning_room(&view, slot, &stack) == 0
                 || !self.composter_capability_insert(at.pos, &stack)
             {
                 return Some(stack);
@@ -281,8 +277,13 @@ impl Game<'_> {
                 ..stack
             });
         }
-        let (rest, result) =
-            self.move_in_item(Insertion::Capability, &view, stack, slot, &mut attempt);
+        let (rest, result) = self.move_in_item(
+            Insertion::Capability,
+            &view,
+            stack,
+            slot,
+            &mut PlacementAttempt::default(),
+        );
         // A jukebox's disc starts at the root commit (`JukeboxBlockEntity.setTheItem`).
         if result == MoveIn::Moved {
             self.view_told(&view);
@@ -306,8 +307,8 @@ impl Game<'_> {
             .filter(|held| held.same_item_same_components(resource))
             .try_fold(0u64, |total, held| total.checked_add(u64::from(held.count)))
     }
-    /// Physical room through `at`'s side in slots that admit one item of this resource,
-    /// summed in one pass. The insert asks again with its actual offered count.
+    /// Physical room through `at`'s side, subject to rules a part cannot override.
+    /// This is a bound for planning, not an admission decision on an offered count.
     /// None where the total does not fit in 64 bits.
     pub(in crate::game) fn container_kind_space(
         &self,
@@ -317,17 +318,10 @@ impl Game<'_> {
         let Some(view) = self.capability_view(at) else {
             return Some(0);
         };
-        // The engine conversion of ItemResource always gives its single-item stack.
         let c = self.containers();
-        let mut attempt = PlacementAttempt::default();
         view.capability_slots(at.side)
             .try_fold(0u64, |total, slot| {
-                total.checked_add(u64::from(c.admitted_room(
-                    &view,
-                    slot,
-                    resource,
-                    &mut attempt,
-                )))
+                total.checked_add(u64::from(c.planning_room(&view, slot, resource)))
             })
     }
     /// What the slots `at`'s side reaches hold, from its `from`th to before its

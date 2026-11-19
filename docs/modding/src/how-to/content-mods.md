@@ -980,8 +980,9 @@ entity's saved data and current slots, the queried slot index and the offered st
 and input-slot rules and stack limits still apply. Hoppers and hopper minecarts, droppers,
 default `ITEMS` and `STORAGE` insertion, and nonempty offers from `/loot insert` and
 `/loot replace block` use this query. `/item replace block` keeps its direct slot-write behavior.
-The default `STORAGE.space_for` asks with one item and reports the room in slots that admit it.
-An actual insert asks with its remaining offer before applying the stack limit.
+The default `STORAGE.space_for` does not ask the part: for subscribed slots it counts
+physical room after face and input checks. An actual insert asks with its remaining offer
+before applying the stack limit.
 
 The query has no Host and may run for a slot that is never written. Seed a filter from the
 accepted write, not from the query. Default capability writes to mod-owned storage are
