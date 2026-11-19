@@ -2172,7 +2172,10 @@ mod tests {
             if server_brand == b"\xff" {
                 // A registered brand uses its own string codec: malformed
                 // bytes fail the session rather than continuing negotiation.
-                assert!(server.recv().unwrap_err().is_end_of_stream());
+                let error = server
+                    .recv()
+                    .expect_err("malformed brand must end the session");
+                assert!(error.is_end_of_stream());
                 drop(server);
                 drop(session);
                 continue;
