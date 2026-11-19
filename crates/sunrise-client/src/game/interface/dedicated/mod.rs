@@ -162,7 +162,6 @@ struct Setup {
     universe: PathBuf,
     level_name: String,
     port: Option<u16>,
-    started: Instant,
     /// `--allowMissingMods`: open a world whose saved mods are missing (`missing_mods`).
     allow_missing_mods: bool,
 }
@@ -311,6 +310,12 @@ fn forwarding_secret(online: bool) -> Result<Option<Vec<u8>>> {
     Ok(Some(secret))
 }
 
+/// `DedicatedServer.initServer`: elapsed level-load nanoseconds as ROOT `%.3f` seconds.
+fn startup_done(elapsed: Duration) -> String {
+    let seconds = sunrise_core::java_number::format_fixed(elapsed.as_nanos() as f64 / 1e9, 3);
+    format!("Done ({seconds}s)! For help, type \"help\"")
+}
+
 /// `MinecraftServer.runServer`'s overload warning for a server `behind` its
 /// schedule, in milliseconds and in ticks of `tick`.
 fn overload_warning(behind: Duration, tick: Duration) -> String {
@@ -420,7 +425,6 @@ pub(super) fn preflight(options: &mut Options) -> Result<bool> {
             _ => return Err(format!("{name} is not a recognized option").into()),
         }
     }
-    let started = Instant::now();
     let settings = PathBuf::from("server.properties");
     let props = ServerProperties::from_file(&settings, &mut SystemEntropy::default())?;
     for w in &props.warnings {
@@ -488,7 +492,6 @@ pub(super) fn preflight(options: &mut Options) -> Result<bool> {
             universe,
             level_name,
             port,
-            started,
             allow_missing_mods,
         });
     Ok(true)
@@ -986,7 +989,6 @@ impl Game<'_> {
             universe,
             level_name,
             port,
-            started,
             allow_missing_mods,
         } = SETUP
             .get()
@@ -1099,6 +1101,7 @@ impl Game<'_> {
         let lists = Arc::new(Mutex::new(lists));
         self.server_lists = Some(lists.clone());
         log("INFO", &format!("Preparing level \"{level_name}\""));
+        let level_load_started = Instant::now();
         let folder = world_dir.to_string_lossy().into_owned();
         // The mods' common and server configs, read before the server starts.
         self.native_configs_server_start(&world_dir, true);
@@ -1177,6 +1180,7 @@ impl Game<'_> {
         self.streaming.radius = -1;
         self.settle_spawn()?;
         self.prepare_levels()?;
+        let level_load_time = level_load_started.elapsed();
         let gate_lists = lists.clone();
         let gate: LoginGate = Arc::new(move |address, uuid, name| {
             // `ServerActivityMonitor.reportLoginActivity`: a login attempt, however it ends. The management
@@ -1373,13 +1377,7 @@ impl Game<'_> {
                 .get(ADMIN_FEEDBACK_PROPERTY)
                 .is_none_or(|v| v.trim() != "false");
         }
-        log(
-            "INFO",
-            &format!(
-                "Done ({:.3}s)! For help, type \"help\"",
-                started.elapsed().as_secs_f64()
-            ),
-        );
+        log("INFO", &startup_done(level_load_time));
         // DedicatedServer.initServer ends with saveEverything(false, true, true).
         self.save_game()?;
         self.log_saved_levels();
@@ -2822,6 +2820,14 @@ mod tests {
     }
 
     /// Vanilla's words, with how far behind the server is in milliseconds and in whole ticks.
+    #[test]
+    fn done_uses_java_half_up_world_load_seconds() {
+        assert_eq!(
+            super::startup_done(std::time::Duration::from_nanos(2_345_500_000)),
+            "Done (2.346s)! For help, type \"help\""
+        );
+    }
+
     #[test]
     fn the_overload_warning_reads_as_vanilla_s() {
         let tick = std::time::Duration::from_millis(50);
