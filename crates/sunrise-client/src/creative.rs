@@ -805,6 +805,7 @@ impl Creative {
                     None,
                     &item_tooltip::NoAttributeListener,
                     item_tooltip::TooltipHolders::Live(&self.holders),
+                    true,
                     translate,
                     // The search cache has no attribute catalog.
                     &|_| None,

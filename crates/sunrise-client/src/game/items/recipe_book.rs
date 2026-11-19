@@ -689,6 +689,7 @@ impl Game<'_> {
                         sunrise_client::item_tooltip::TooltipHolders::Definitions(
                             self.item_enchantments(),
                         ),
+                        false,
                         &|k| self.pack.names.display_get(k),
                         &|attribute| self.attribute_style(attribute, false),
                     )

@@ -1687,7 +1687,7 @@ impl Game<'_> {
         }
         details.start("minecraft:instrument", lines.len());
         // InstrumentComponent.addToTooltip.
-        if let Some(text) = item_tooltip::instrument_line(stack, &display, None, &translate) {
+        if let Some(text) = item_tooltip::instrument_line(stack, &display, holders, &translate) {
             push(&mut lines, text, gray);
         }
         details.start("minecraft:map_id", lines.len());

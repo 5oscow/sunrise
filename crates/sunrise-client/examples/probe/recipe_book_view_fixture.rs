@@ -43,6 +43,7 @@ pub fn main() -> sunrise_client::Result<()> {
             items.get(&s.item),
             &sunrise_client::item_tooltip::NoAttributeListener,
             sunrise_client::item_tooltip::TooltipHolders::Definitions(&items.enchantments),
+            false,
             &translate,
             &|_| None,
         )
