@@ -254,15 +254,23 @@ Before a block's placement state is selected, `ItemPart::placement_context` repl
 `BlockItem.updatePlacementContext` rewrite: `Some(Some(context))` rewrites the target and click,
 `Some(None)` refuses, and `None` runs vanilla (including scaffolding's column walk). The placing
 item cannot change, click and view values must be finite, and the target must be within bounds.
-Replaceability is checked before the rewrite, not again on its answer. At the final `BlockItem.canPlace`
+Replaceability is checked before the rewrite, not again on its answer. `BlockPart::state_for_placement`
+then selects the candidate, which may be a registered state of another block. The game uses that
+candidate for survival, obstruction, and the written-block check that gates item data and placed-by
+callbacks. The held item does not change, and its double-height pre-clear still runs if applicable.
+Selecting a different block does not run that block's `getStateForPlacement`. If that block places a
+companion, the mod must check its footprint: `setPlacedBy` can overwrite the companion cell without
+rechecking it, and failing to write the companion does not refund the item. Sunrise additionally
+requires creative-operator permission when a mod selects a game-master block. At the final `BlockItem.canPlace`
 check, `ItemPart::must_survive` decides whether placement must pass `can_survive`: `Some(false)`
 skips it, `Some(true)` requires it, and `None` keeps vanilla (scaffolding false, other block items
 true). Standing/wall items retain their own unconditional candidate-survival checks. Entity
 obstruction is still checked. Both hooks run on both sides with
 a read-only `LevelSide`, dispatched by item id. These events have no stack yet: they decide from
 the item and level, not held components. Player and dispenser placement offer the resolved decision
-once to `entity_place`; if a listener changes its inputs, the placement is refused rather than
-retargeted. The veto's placement neighbour and the post-placement notice use the resolved face,
+once to `entity_place`; a veto stops all writes, including a double-height item's pre-clear, and
+keeps the stack. If a listener changes the placement inputs, it is refused rather than retargeted.
+The veto's placement neighbour and the post-placement notice use the resolved face,
 and the notice uses the resolved click location. Neither changes the sides of the block placement or
 survival hooks.
 

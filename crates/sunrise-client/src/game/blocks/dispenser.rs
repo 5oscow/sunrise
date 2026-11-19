@@ -1840,23 +1840,10 @@ impl Game<'_> {
         if !self.with_level(|b, level, ticks| b.directional_can_place(level, ticks, &ctx)) {
             return Ok((Some(stack), FAIL));
         }
-        let Some((resolved, state)) = self.place_item_block(&ctx, false) else {
+        if self.place_item_block(&ctx, false, &stack)?.is_none() {
             self.process_level_events()?;
             return Ok((Some(stack), FAIL));
-        };
-        let placed = resolved.pos;
-        let target = (placed.x, placed.y, placed.z);
-        let state = self.apply_item_block_state([target.0, target.1, target.2], state, &stack)?;
-        if !self.world.block_entities.stateful_entity(state.0)
-            && let Some(entity) = self.new_block_entity_for_state(state)
-        {
-            self.world.block_entities.insert(target, entity);
         }
-        if self.world.block_entities.get(&target).is_some() {
-            self.apply_placed_item([target.0, target.1, target.2], &stack, false);
-        }
-        self.set_placed_by([target.0, target.1, target.2], None, Some(&stack))?;
-        self.block_item_placed(&stack, None, &resolved);
         self.process_level_events()?;
         Ok((shrink(stack), CLICK))
     }

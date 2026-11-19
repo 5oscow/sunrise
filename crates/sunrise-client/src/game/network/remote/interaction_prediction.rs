@@ -524,19 +524,9 @@ impl Game<'_> {
                 {
                     self.with_hand(hand, |g| g.start_eating(info));
                 }
-                if let Some(placed) = &placed {
-                    self.predict_place(placed, seq);
-                    if let Some(stack) = &held {
-                        let pos = placed.0;
-                        self.apply_predicted_item([pos.x, pos.y, pos.z], stack);
-                        self.with_hand(hand, |g| g.consume_placed(stack));
-                    }
-                } else if let Some(r) = self.remote.as_mut() {
-                    // BlockItem.place plays its sound only once the block is set: the
-                    // server's resend of the target it refused is no placement.
-                    r.placing = None;
-                }
-                if placed.is_some() {
+                if let Some((placed, stack)) = placed.as_ref().zip(held.as_ref()) {
+                    self.predict_place(placed, stack, seq);
+                    self.with_hand(hand, |g| g.consume_placed(stack));
                     self.with_hand(hand, Game::swing_arm);
                 }
                 // BlockItem.place returns FAIL when placement is rejected:

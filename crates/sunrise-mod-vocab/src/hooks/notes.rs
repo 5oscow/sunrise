@@ -1769,18 +1769,6 @@ still go on each event or registrar.
 
 - [loot table hooks](#loot-tables), for changing loot a mod didn't make. `loot_table_load(context, id, table)`, in `sunrise-world`'s `loot.rs`, gets each loot table's JSON as it loads, after the data packs' (NeoForge's `LootTableLoadEvent`, Fabric's `LootTableEvents.MODIFY`): add pools or entries, change or replace it, and chests, block and mob drops, fishing and the rest then roll the changed table. It runs on the server for each data load and reload, not client preloads. `loot_drops(context, drops)` gets the items a broken block or a dead mob is about to drop, to add, change or take out (global loot modifiers, `MODIFY_DROPS`), with `LootDrops`: the table rolled, the dimension, the origin, the block or the mob, the player who broke or killed it, the tool and an explosion's radius. It hears blocks a player, an explosion or a mob breaks, not other breaks such as leaves decaying.
 
-- `state_for_placement(state, context, fluid, answer)`: the state a block is about to be placed in
-  (`Block.getStateForPlacement(BlockPlaceContext)`), `state` the block's own default state. Answer only for your own
-  blocks: `answer` set to `Some(Some(state))` places that state (a state of that block, as vanilla sets properties on its own
-  `defaultBlockState`; another block's is ignored), `Some(None)` refuses the placement (vanilla's `null`:
-  the block goes nowhere and the stack is kept), and left empty the block's own placement runs. `context` is vanilla's
-  `BlockPlaceContext`: the clicked face, the placer's rotation, the clicked position, whether the clicked block is
-  being replaced and the item in hand. `fluid` is the fluid in the position the block would go in, which a
-  waterlogged block reads. It is asked for every placer that goes through vanilla's placement (a player's
-  `BlockItem.place`, a dispenser's `DirectionalPlaceContext`), and the answer still takes its survival and entity
-  obstruction checks. `native_state_with_property(state, key, value)` builds the state from `state` and one of its
-  properties, its own declared ones included. Asked on both sides (see above): a client refusal keeps its stack unspent.
-
 - A `minecraft:post_attack` enchantment effect of a mod's own kind, on a mob a player's weapon hit: `enchant_effect` (see
   [A mod's own enchantment effect kinds](../how-to/items/enchantment-effect-kinds.md)).
 

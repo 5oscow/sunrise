@@ -269,6 +269,9 @@ impl sunrise_world::level::LevelAccess for DryLevel<'_> {
     fn is_unobstructed(&self, pos: sunrise_core::position::BlockPos, state: BlockStateId) -> bool {
         self.base.is_unobstructed(pos, state)
     }
+    fn within_world_border(&self, pos: BlockPos) -> bool {
+        self.base.within_world_border(pos)
+    }
     fn random(&mut self) -> &mut sunrise_core::random::LegacyRandom {
         &mut self.random
     }

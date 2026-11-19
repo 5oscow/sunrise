@@ -219,8 +219,8 @@ use {
         fluid::FluidState,
         level::{
             Behaviours, BucketContent, EntityQuery, Landing, LevelAccess, LevelEvent, PlaceContext,
-            PlaceOutcome, PlacementContext, PlayerContext, PlayerEffect, RandomTickMaskUpdate,
-            Ticks, flags as level_flags,
+            PlacementContext, PlayerContext, PlayerEffect, RandomTickMaskUpdate, Ticks,
+            flags as level_flags,
         },
         registry::BlockStateId,
     },
