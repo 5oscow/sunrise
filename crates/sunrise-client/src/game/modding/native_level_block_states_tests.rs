@@ -24,8 +24,8 @@ impl BlockPart for Reader {
         let facts = level.block_states();
         self.0.lock().unwrap().push((
             (
-                facts.weathering_age(neighbour.clone()),
-                facts.next_weathering_stage(neighbour.clone()),
+                facts.weathering_age(neighbour),
+                facts.next_weathering_stage(neighbour),
                 facts.requires_correct_tool(neighbour),
             ),
             level.block_state_id("minecraft:weathered_copper"),
@@ -88,8 +88,8 @@ fn a_random_tick_part_reads_a_neighbours_weathering_facts_through_the_level() {
             };
             let host = game.block_states();
             let host_facts = (
-                host.weathering_age(exposed_api.clone()),
-                host.next_weathering_stage(exposed_api.clone()),
+                host.weathering_age(exposed_api),
+                host.next_weathering_stage(exposed_api),
                 host.requires_correct_tool(exposed_api),
             );
             let seen = reader.0.lock().unwrap();
