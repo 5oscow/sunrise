@@ -6172,7 +6172,7 @@ impl Game<'_> {
             player.position.z.floor() as i32,
         ];
         // `Util.toMillis(chunkSectionFadeInTime)`.
-        let fade_ms = sunrise_client::gfx::fade_millis(self.settings.chunk_fade);
+        let fade_ms = sunrise_client::gfx::fade_millis(self.settings.chunk_fade as f32);
         // `LevelRenderer`'s playerCompiledSectionCallback, run once
         // `isSectionCompiledAndVisible(camera)`: the renderer's own mesh and fade
         // for the camera's section. Without a renderer, the section counts as
