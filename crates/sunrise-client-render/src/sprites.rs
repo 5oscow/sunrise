@@ -395,10 +395,14 @@ impl Sprites {
             }
         }
     }
+    /// The layer already loaded for a model material, rather than the explicit blocks atlas's.
+    pub(crate) fn model_layer(&self, name: &str) -> Option<u32> {
+        self.layer_of(self.slot_of(Lookup::Model, name), name)
+    }
     /// [`Sprites::insert`] without the missing-texture fallback: a file that doesn't load is an
     /// error, and nothing is added.
     pub fn try_insert(&mut self, name: &str) -> Result<u32> {
-        match self.layer_of(self.slot_of(Lookup::Model, name), name) {
+        match self.model_layer(name) {
             Some(layer) => Ok(layer),
             None => self.load(name, Lookup::Model),
         }
@@ -700,7 +704,7 @@ impl Sprites {
             .collect::<Result<Vec<_>>>()?;
         // Where Fusion doesn't draw the sheet (items, other models), the lone tile rather than
         // the whole sheet squeezed square, whose size would set every layer's.
-        if let (Some(&own), Some(&first)) = (self.layers.get(name), tiles.iter().flatten().next()) {
+        if let (Some(own), Some(&first)) = (self.model_layer(name), tiles.iter().flatten().next()) {
             self.show_as(own, first);
         }
         Ok(tiles)

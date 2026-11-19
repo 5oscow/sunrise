@@ -684,7 +684,7 @@ fn atlas_sprites(
                     // files, under any folder: vanilla animates every sprite of these atlases
                     // (a server pack's `wynn/...` as well as `item/...`).
                     let mcmeta = root.read_to_string(&format!("{file}.mcmeta")).ok();
-                    let animation = animation_of(mcmeta.as_deref());
+                    let animation = material.animation.as_ref();
                     if animation.is_some() {
                         animated.push(name.clone());
                     }
@@ -698,7 +698,7 @@ fn atlas_sprites(
                         || path.starts_with("block/")
                         || path.starts_with("item/")
                     {
-                        first_frame(material.image, animation.as_ref())
+                        first_frame(material.image, animation)
                     } else {
                         material.image
                     }
@@ -3202,35 +3202,23 @@ mod tests {
     /// the pack takes the blocks atlas's sprite of the id instead.
     #[test]
     fn a_walked_file_with_unfitting_frames_gives_way_to_the_blocks_cut() {
-        let items = r#"{"sources":[{"type":"minecraft:single","resource":"demo:item/target"}]}"#;
-        let root = model_atlas_root("unfitting", items, &cut("demo:item/target", 1));
-        let textures = root.join("assets/demo/textures/item");
-        // A 1 x 1 file declaring frames 2 wide.
-        let mut encoder = png::Encoder::new(
-            std::fs::File::create(textures.join("target.png")).unwrap(),
+        let items =
+            r#"{"sources":[{"type":"minecraft:single","resource":"minecraft:item/target"}]}"#;
+        let root = model_atlas_root("unfitting", items, &cut("minecraft:item/target", 1));
+        let textures = root.join("assets/minecraft/textures/item");
+        std::fs::create_dir_all(&textures).unwrap();
+        // A file the HUD walk really packs: 1 x 1, declaring frames 2 wide.
+        write_strip(
+            &textures.join("target.png"),
             1,
             1,
+            &[[9, 9, 9, 9]],
+            Some(r#"{"animation":{"width":2}}"#),
         );
-        encoder.set_color(png::ColorType::Rgba);
-        encoder.set_depth(png::BitDepth::Eight);
-        encoder
-            .write_header()
-            .unwrap()
-            .write_image_data(&[9, 9, 9, 9])
-            .unwrap();
-        std::fs::write(
-            textures.join("target.png.mcmeta"),
-            r#"{"animation":{"width":2}}"#,
-        )
-        .unwrap();
-        let packed = vec![("demo:item/target".to_owned(), 1, 1, vec![9, 9, 9, 9])];
-        let (images, _, dropped, _) =
-            atlas_sprites(&ResourceSource::directory(root.clone()), &packed);
-        assert_eq!(
-            images,
-            [("demo:item/target".to_owned(), 1, 1, vec![0, 255, 0, 0])]
-        );
-        assert_eq!(dropped, HashSet::from(["demo:item/target".to_owned()]));
+        let atlas = HudAtlas::build(&ResourceSource::directory(root.clone())).unwrap();
+        let rect = atlas.sprites["item/target"];
+        assert_eq!(rect.texels((atlas.width, atlas.height)), (1, 1));
+        assert_eq!(texel_at(&atlas, rect, 0, 0), [0, 255, 0, 0]);
         std::fs::remove_dir_all(&root).unwrap();
     }
     /// The winning renamed file's own render flags come with its pixels, and another atlas's
@@ -3242,7 +3230,8 @@ mod tests {
         let root = model_atlas_root("flags", items, &cut("demo:item/cut", 0));
         std::fs::write(
             root.join("assets/demo/textures/item/sheet.png.mcmeta"),
-            r#"{"texture":{"blur":true}}"#,
+            r#"{"texture":{"blur":true,"clamp":true},"animation":{"width":1,"height":1}}
+// High Contrast pack signature"#,
         )
         .unwrap();
         // The GUI atlas cuts the other quadrant under the id the blocks atlas cuts.
@@ -3251,20 +3240,28 @@ mod tests {
             cut("demo:item/cut", 1),
         )
         .unwrap();
-        let (images, _, _, flags) = atlas_sprites(&ResourceSource::directory(root.clone()), &[]);
-        let names: Vec<&str> = images.iter().map(|image| image.0.as_str()).collect();
-        assert_eq!(names, ["demo:item/blurred", "demo:item/cut"]);
-        let cut = images
-            .iter()
-            .find(|image| image.0 == "demo:item/cut")
-            .unwrap();
+        let atlas = HudAtlas::build(&ResourceSource::directory(root.clone())).unwrap();
         assert_eq!(
-            cut.3,
+            texel_at(&atlas, atlas.sprites["demo:item/cut"], 0, 0),
             [255, 0, 0, 255],
             "the blocks atlas's quadrant, not the GUI atlas's"
         );
-        assert_eq!(flags.len(), 1);
-        assert!(flags["demo:item/blurred"].blur);
+        let rect = atlas.sprites["demo:item/blurred"];
+        assert_eq!(rect.texels((atlas.width, atlas.height)), (1, 1));
+        assert_eq!(texel_at(&atlas, rect, 0, 0), [255, 0, 0, 255]);
+        assert_eq!(
+            atlas.flags["demo:item/blurred"],
+            TextureFlags {
+                blur: true,
+                clamp: true,
+            }
+        );
+        let (_, animation) = atlas
+            .sprite_animations
+            .iter()
+            .find(|(r, _)| r.u0 == rect.u0 && r.v0 == rect.v0)
+            .expect("the renamed sprite animates");
+        assert_eq!(animation.frame_count(), 2);
         std::fs::remove_dir_all(&root).unwrap();
     }
     /// The items atlas keeps the walked file of its name; the blocks atlas's lower cut of that

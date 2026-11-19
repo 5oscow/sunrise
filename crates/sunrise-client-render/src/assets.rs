@@ -81,6 +81,7 @@ pub struct RenderAssets {
     /// The block sprites' RGBA, layer by layer: as built until a renderer has
     /// them, then kept compressed ([`SpritePixels`]).
     pub pixels: SpritePixels,
+    /// How many array layers the block sprites take, whatever maps name them.
     pub texture_layers: u32,
     pub model_catalog: crate::models::StateModels,
     /// Shared parsed resources; item-only validation errors surface at item preparation.
@@ -89,8 +90,6 @@ pub struct RenderAssets {
     pub model_gallery: Vec<Value>,
     pub animations: Vec<crate::sprites::SpriteAnimation>,
     pub sprite_layers: std::collections::BTreeMap<String, u32>,
-    /// How many array layers the block sprites take, whatever maps name them.
-    pub sprite_count: u32,
     /// The layers of the texture files read on their own (emissive overlays), by raw name.
     pub file_layers: std::collections::BTreeMap<String, u32>,
     /// OptiFine's emissive block overlays: base sprite and overlay sprite names.
@@ -485,7 +484,6 @@ impl RenderAssets {
         // `finish` grows the buffer by doubling: keep only the bytes in use.
         sprites.pixels.shrink_to_fit();
         let generation = GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-        let sprite_count = sprites.count() as u32;
         Ok(Self {
             sprite_size: sprites.size,
             sprite_minimum_size: sprites.minimum_size,
@@ -498,7 +496,6 @@ impl RenderAssets {
             animations: sprites.animations,
             sprite_layers: sprites.layers,
             file_layers: sprites.files,
-            sprite_count,
             emissive,
             translucent_layers: sprites.translucent,
             sprite_mips: sprites.mips,

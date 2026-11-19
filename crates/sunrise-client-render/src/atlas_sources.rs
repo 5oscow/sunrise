@@ -11,7 +11,7 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use sunrise_assets::palette::apply_palette;
+use sunrise_assets::{animation::AnimationMetadata, palette::apply_palette};
 use sunrise_client_core::pattern::Pattern;
 use sunrise_core::nbt::Tag;
 
@@ -571,19 +571,17 @@ pub struct Materials {
     defined: bool,
 }
 
-/// A finished sprite: its pixels, and the texture file whose `.mcmeta` describes them (a cut or
-/// a palette has none).
+/// A finished sprite: its pixels, its source texture file and animation metadata whose frame
+/// size fits the image. Generated sprites have neither a texture file nor animation metadata.
 pub struct Material {
     pub image: Image,
     pub resource: Option<String>,
+    pub animation: Option<AnimationMetadata>,
 }
 
 /// Whether a texture of `size` tiles into the frames its animation declares (the whole image
 /// when it has none): or the sprite is no sprite.
-pub fn frames_fit(
-    (width, height): (u32, u32),
-    animation: Option<&sunrise_assets::animation::AnimationMetadata>,
-) -> bool {
+pub fn frames_fit((width, height): (u32, u32), animation: Option<&AnimationMetadata>) -> bool {
     let [frame_width, frame_height] = animation
         .map_or([width as i32, height as i32], |animation| {
             animation.frame_size(width as i32, height as i32)
@@ -612,11 +610,13 @@ pub fn finish_origin(
             frames_fit((image.0, image.1), animation.as_ref()).then_some(Material {
                 image,
                 resource: Some(resource),
+                animation,
             })
         }
         generated => Some(Material {
             image: generate(generated, &decode)?,
             resource: None,
+            animation: None,
         }),
     }
 }

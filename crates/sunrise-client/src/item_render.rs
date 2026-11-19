@@ -32,7 +32,6 @@ use std::{
     sync::{Arc, Mutex},
 };
 use sunrise_assets::{
-    animation::AnimationMetadata,
     item_bake::{BakedItemModel, SpriteLookup, SpriteMask, bake_item_model, bake_sprite_layer},
     item_model::{
         ClientItem, Context, DisplayContext, FoilType, ItemEnv, ItemModels, LayerContent,
@@ -595,11 +594,11 @@ impl FileSprites {
         })
     }
     fn load(&self, sprite: &str) -> Option<SpriteMask> {
-        // The finished model material: the pixels and the resource whose `.mcmeta` describes
-        // them, a candidate whose frames don't fit already left to the next atlas.
+        // A candidate whose frames don't fit already gave way to the next atlas.
         let crate::atlas_sources::Material {
             image: (iw, ih, rgba),
-            resource: png,
+            animation,
+            ..
         } = self.materials.finish(&self.root, sprite)?;
         let (iw, ih, argb) = (iw as usize, ih as usize, argb_pixels(&rgba));
         let translucent = argb.iter().any(|p| matches!(p >> 24, 1..=254));
@@ -607,11 +606,6 @@ impl FileSprites {
             cache.insert(sprite.to_owned(), translucent);
         }
         let alpha: Vec<u8> = argb.iter().map(|p| (p >> 24) as u8).collect();
-        let animation = png
-            .and_then(|png| self.root.read_to_string(&format!("{png}.mcmeta")).ok())
-            .and_then(|m| serde_json::from_str::<Value>(&m).ok())
-            .and_then(|m| m.get("animation").map(Value::to_string))
-            .and_then(|a| AnimationMetadata::from_json(&a).ok());
         let (w, h) = match &animation {
             Some(a) => {
                 let [w, h] = a.frame_size(iw as i32, ih as i32);
@@ -1823,7 +1817,9 @@ mod tests {
             ("assets/example/textures/item/mask.png", png.as_slice()),
             (
                 "assets/example/textures/item/mask.png.mcmeta",
-                br#"{"animation":{"width":1,"height":1,"frames":[0,1]}}"#.as_slice(),
+                br#"{"animation":{"width":1,"height":1,"frames":[0,1]}}
+// High Contrast pack signature"#
+                    .as_slice(),
             ),
             (
                 "assets/example/items/nested/mask.json",
