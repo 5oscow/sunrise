@@ -4065,6 +4065,7 @@ mod tests {
         let initial = PackOverlay::new(&initial);
         let packed = sunrise_client::lan::data::SyncData::stage_registry_definitions(
             &root,
+            item_data.defaults(),
             &initial,
             &Default::default(),
             &Default::default(),

@@ -247,7 +247,7 @@ pub(super) fn cached_sync_data(
             root: root.to_owned(),
             with_packs: packs,
             generation,
-            result: load(sync.packed_registries.as_deref(), advancements),
+            result: load(sync.packed_registries.as_ref(), advancements),
         })
         .result
         .clone()

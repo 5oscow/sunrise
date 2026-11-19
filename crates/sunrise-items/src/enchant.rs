@@ -472,6 +472,33 @@ impl Enchantments {
         overlay: &sunrise_world::loot::PackOverlay,
         defaults: &sunrise_world::item_defaults::ItemDefaults,
     ) -> crate::Result<Self> {
+        // The registry lists entries sorted by id, like the data-pack loader.
+        let mut files: BTreeMap<String, Value> =
+            crate::items::data_files(root, "enchantment", overlay)
+                .into_iter()
+                .collect();
+        if files.values().any(HolderSetBinding::needed) {
+            let binding =
+                HolderSetBinding::load(root, overlay, defaults, files.keys().cloned().collect())?;
+            for (id, value) in &mut files {
+                binding.bind(id, value)?;
+            }
+        }
+        Self::load_selected(
+            root,
+            overlay,
+            defaults,
+            files.iter().map(|(id, value)| (id.as_str(), value)),
+        )
+    }
+
+    /// Assemble gameplay behavior from the selected, holder-bound definitions in id order.
+    pub fn load_selected<'a>(
+        root: &Path,
+        overlay: &sunrise_world::loot::PackOverlay,
+        defaults: &sunrise_world::item_defaults::ItemDefaults,
+        files: impl IntoIterator<Item = (&'a str, &'a Value)>,
+    ) -> crate::Result<Self> {
         let data = root.join("data/minecraft");
         let mut raw_tags = read_tag_dir(&data.join("tags/enchantment"));
         let namespaces = other_namespaces(root);
@@ -525,18 +552,6 @@ impl Enchantments {
             // Small tools/fixtures may not carry the prepared catalog.
             Err(_) => unordered(read_tag_dir(&data.join("tags/damage_type"))),
         };
-        // The registry lists entries sorted by id, like the data-pack loader.
-        let mut files: BTreeMap<String, Value> =
-            crate::items::data_files(root, "enchantment", overlay)
-                .into_iter()
-                .collect();
-        if files.values().any(HolderSetBinding::needed) {
-            let binding =
-                HolderSetBinding::load(root, overlay, defaults, files.keys().cloned().collect())?;
-            for (id, value) in &mut files {
-                binding.bind(id, value)?;
-            }
-        }
         let lang: HashMap<String, String> =
             sunrise_core::prepared_files::read(&root.join("assets/minecraft/lang/en_us.json"))
                 .ok()
@@ -584,14 +599,14 @@ impl Enchantments {
         }
         let mut custom_damage = HashMap::new();
         let list = files
-            .iter()
+            .into_iter()
             .filter_map(|(id, v)| {
                 match resolve_damage_effects(
                     &v["effects"],
                     DAMAGE_EFFECT_IDS.get().map_or(&[], Vec::as_slice),
                 ) {
                     Ok(Some(nodes)) => {
-                        custom_damage.insert(Arc::from(id.as_str()), nodes);
+                        custom_damage.insert(Arc::from(id), nodes);
                     }
                     Ok(None) => {}
                     Err(error) => {
