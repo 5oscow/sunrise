@@ -254,6 +254,20 @@ impl Game<'_> {
                 riders.entry(v).or_default().push(j);
             }
         }
+        // The general vehicles mobs ride, for the general tick that follows: from this pass's own
+        // map, so a level with no general rows pays nothing.
+        let mut general_vehicles =
+            std::mem::take(&mut self.resident_entities.general.riders.mob_vehicles);
+        general_vehicles.clear();
+        if !self.resident_entities.general.rows.is_empty() {
+            general_vehicles.extend(
+                riders
+                    .keys()
+                    .copied()
+                    .filter(|&vehicle| self.general_object(vehicle).is_some()),
+            );
+        }
+        self.resident_entities.general.riders.mob_vehicles = general_vehicles;
         self.seat_boat_mobs(&riders);
         self.seat_cart_mobs(&riders);
         self.seat_tnt_mobs(&riders);

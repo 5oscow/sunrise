@@ -634,11 +634,6 @@ impl Game<'_> {
         if current.is_some() {
             return Err(R::Cycle);
         }
-        if let (Target::General(rider), Target::General(vehicle)) = (rider, vehicle)
-            && !self.general_boarding_depth_fits(rider, vehicle)
-        {
-            return Err(R::Full);
-        }
         if !force {
             match rider {
                 Target::Player if self.keys.held(sunrise_client::actions::Action::Sneak) => {

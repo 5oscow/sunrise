@@ -15,8 +15,6 @@ pub mod limits {
     /// payload decode checks it; the record tree itself has the stricter
     /// passenger-depth bound.
     pub const MAX_NESTING: u32 = 32;
-    /// The deepest chain of passengers a general entity tree may carry.
-    pub const MAX_PASSENGER_DEPTH: u32 = 16;
     /// The largest record a missing mod's quarantined general entity may
     /// occupy, as its encoded NBT size. A larger record is skipped with a
     /// warning rather than preserved. There is no vanilla analogue:

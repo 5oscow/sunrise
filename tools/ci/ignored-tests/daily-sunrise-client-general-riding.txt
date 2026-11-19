@@ -1,2 +1,1 @@
-sunrise-client game::general::save_load_tests::a_forced_mount_cannot_make_a_general_tree_too_deep_to_reload lib daily resources
 sunrise-client game::general::save_load_tests::mixed_passengers_sit_and_unload_with_their_actual_root lib daily resources

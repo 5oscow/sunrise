@@ -236,31 +236,6 @@ fn mixed_passengers_sit_and_unload_with_their_actual_root() {
     });
 }
 
-#[test]
-#[ignore = "daily"]
-fn a_forced_mount_cannot_make_a_general_tree_too_deep_to_reload() {
-    with_types(|game| {
-        let mut handles = Vec::new();
-        for word in 1..=limits::MAX_PASSENGER_DEPTH as i32 + 2 {
-            let tag = record_tag("mymod:robot", [word, 0, 3, 5], b"", Vec::new());
-            game.load_listed("mymod:robot", None, None, tag).unwrap();
-            handles.push(
-                game.entity(game.resident_entities.general.rows.last().unwrap().id)
-                    .unwrap(),
-            );
-        }
-        let extra_vehicle = handles.pop().unwrap();
-        for pair in handles.windows(2) {
-            assert_eq!(game.entity_start_riding(pair[1], pair[0], true), Ok(()));
-        }
-        assert_eq!(
-            game.entity_start_riding(handles[0], extra_vehicle, true),
-            Err(mod_api::StartRidingRefusal::Full)
-        );
-        assert_eq!(handles.last().unwrap().root_vehicle(game), Some(handles[0]));
-    });
-}
-
 /// `noSave`: instances load and live like any other, but produce zero
 /// persisted records.
 #[test]

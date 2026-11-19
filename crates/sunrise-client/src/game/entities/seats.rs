@@ -249,6 +249,30 @@ mod tests {
         assert!((stand.dismount().y - 65.975).abs() < 1e-9);
     }
 
+    /// `Entity.positionRider`: the vehicle's position plus its passenger attachment, less the
+    /// rider's own vehicle attachment, with the attachment turned by the vehicle's yaw. Expected
+    /// values are written out by hand, not derived from the code.
+    #[test]
+    fn a_rider_sits_on_the_passenger_attachment_less_its_own() {
+        let seat = Seat {
+            position: Vec3::new(10.0, 64.0, -3.0),
+            height: 2.0,
+            width: 0.5,
+            attachment: [1.0, 2.0, 0.5],
+            yaw: 0.0,
+        };
+        // Facing yaw 0 the attachment is not turned: x 10 + 1, y 64 + 2 - 0.5, z -3 + 0.5.
+        assert_eq!(seat.passenger_position(0.5), Vec3::new(11.0, 65.5, -2.5));
+        // A rider with no vehicle attachment of its own sits on the point itself.
+        assert_eq!(seat.passenger_position(0.0), Vec3::new(11.0, 66.0, -2.5));
+        // The default attachment is the top centre of the box, whatever the position.
+        let top = Seat {
+            attachment: [0.0, 2.0, 0.0],
+            ..seat
+        };
+        assert_eq!(top.passenger_position(0.0), Vec3::new(10.0, 66.0, -3.0));
+    }
+
     #[test]
     fn kept_entities_are_as_tall_as_their_type() {
         assert_eq!(other_height("minecraft:item_display", None), (0.0, 0.0));

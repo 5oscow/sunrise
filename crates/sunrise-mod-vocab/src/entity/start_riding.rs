@@ -36,8 +36,8 @@ pub enum StartRidingRefusal {
     /// `force` mounts it anyway.
     CannotRide,
     /// The vehicle has no room (`Entity.canAddPassenger`): a mob at its
-    /// species' count, a seat already taken, or a vehicle or general record
-    /// tree at its storage limit, which even `force` keeps.
+    /// species' count, a seat already taken, or a boat or minecart at its
+    /// storage limit, which even `force` keeps.
     Full,
     /// A mod's `entity_mount` hook canceled the mount, or the dismount from
     /// the rider's old vehicle, or changed the rider so that it no longer

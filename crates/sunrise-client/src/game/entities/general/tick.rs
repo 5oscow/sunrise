@@ -81,13 +81,6 @@ impl Game<'_> {
         let index = &mut self.resident_entities.general.riders;
         index.ticked.clear();
         index.ticked.resize(total, false);
-        index.mob_vehicles.clear();
-        index
-            .mob_vehicles
-            .extend(self.mobs.iter().filter_map(|mob| {
-                let mount = mob.extra.mount?;
-                (!mob.removed && index.places.contains_key(&mount)).then_some(mount)
-            }));
 
         // Walk wholly general branches from the roots first. If a branch
         // crosses a vanilla vehicle, its general riders follow after that

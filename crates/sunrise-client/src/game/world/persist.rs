@@ -1248,18 +1248,48 @@ impl Game<'_> {
         self.put_passengers_for(tag, id, false);
     }
 
+    /// The passengers of `id` under `tag`'s `Passengers`, whole subtrees of either family. Tags are
+    /// built top-down and attached bottom-up, so no chain of passengers recurses (vanilla bounds a
+    /// saved tree only by the NBT nesting limit, which the region writer applies).
     pub(super) fn put_passengers_for(&mut self, tag: &mut Tag, id: u32, transferring: bool) {
-        let riders = self
+        const ROOT: usize = usize::MAX;
+        let mut nodes: Vec<(usize, Tag)> = Vec::new();
+        let mut pending: Vec<(usize, u32)> = self
             .vehicle_passenger_ids(id)
             .into_iter()
-            .filter_map(|rider| {
-                if let Some(object) = self.mob_object_slot(rider) {
-                    Some(self.mob_object_tree_nbt(object, transferring))
-                } else {
-                    self.general_tree_nbt(rider, transferring)
-                }
-            })
+            .rev()
+            .map(|rider| (ROOT, rider))
             .collect();
+        while let Some((parent, rider)) = pending.pop() {
+            let own = if let Some(object) = self.mob_object_slot(rider) {
+                Some(self.mob_object_nbt(object))
+            } else {
+                self.general_own_nbt(rider, transferring)
+            };
+            let Some(own) = own else { continue };
+            let node = nodes.len();
+            nodes.push((parent, own));
+            pending.extend(
+                self.vehicle_passenger_ids(rider)
+                    .into_iter()
+                    .rev()
+                    .map(|child| (node, child)),
+            );
+        }
+        let mut attached: Vec<Vec<Tag>> = (0..=nodes.len()).map(|_| Vec::new()).collect();
+        for (node, (parent, mut own)) in nodes.into_iter().enumerate().rev() {
+            let mut children = std::mem::take(&mut attached[node]);
+            children.reverse();
+            add_passengers(&mut own, children);
+            let slot = if parent == ROOT {
+                attached.len() - 1
+            } else {
+                parent
+            };
+            attached[slot].push(own);
+        }
+        let mut riders = attached.pop().unwrap_or_default();
+        riders.reverse();
         add_passengers(tag, riders);
     }
 
