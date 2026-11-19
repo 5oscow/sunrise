@@ -49,7 +49,7 @@ pub struct Sky {
     pub star_brightness: f32,
     pub sunrise_color: [f32; 4],
     pub cloud_color: [f32; 4],
-    /// `gameplay/sky_light_level` (0 to 15), the server-side sky darkening.
+    /// Raw `gameplay/sky_light_level` (0 to 15), before conversion to sky darkening.
     pub sky_light_level: f32,
     /// Environmental fog (`visual/fog_start_distance` / `fog_end_distance`).
     pub fog_start: f32,
@@ -1201,6 +1201,10 @@ mod tests {
                 ),
             )]));
             let environment = Environment::load(&source).unwrap();
+            assert_eq!(
+                environment.sample(&Sample::default()).sky_light_level,
+                level
+            );
             assert_eq!(sky_darken(&environment, 0, 0.0, 0.0), expected);
             assert!(Environment::load_dimension(&source, "missing").is_err());
         }
