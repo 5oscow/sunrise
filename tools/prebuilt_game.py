@@ -276,8 +276,9 @@ def prepare_sdk_manifests(staged: Path) -> None:
     metadata = json.loads(run(["cargo", "metadata", "--format-version", "1", "--filter-platform", rustc_host()],
                               cwd=staged))
     split = sdk_dylibs(metadata)
+    # A warning, not a refusal: this reads declared dependencies of every feature, and rustc links fewer.
     if clash := shared_twice(metadata, split | {GAME, OFFICIAL}):
-        sys.exit(clash)
+        print(f"warning: {clash}", file=sys.stderr, flush=True)
     for package in metadata["packages"]:
         name = package["name"]
         root_dylib = name in (GAME, OFFICIAL)
@@ -298,14 +299,14 @@ def prepare_sdk_manifests(staged: Path) -> None:
 
 
 def normal_dependencies(metadata: dict) -> dict[str, list[str]]:
-    """Each package's normal dependencies, by package ID. A proc macro has none here: its own are inside its
-    library."""
+    """Each package's normal dependencies that link into it, by package ID: never a proc macro, which runs in the
+    compiler and keeps its own dependencies inside its library."""
     macros = {package["id"] for package in metadata["packages"]
               if any("proc-macro" in target["kind"] for target in package["targets"])}
     return {package["id"]: [] for package in metadata["packages"]} | {
-        node["id"]: [dependency["pkg"] for dependency in node["deps"]
-                     if any(kind["kind"] is None for kind in dependency["dep_kinds"])]
-        for node in metadata["resolve"]["nodes"] if node["id"] not in macros}
+        node["id"]: [dependency["pkg"] for dependency in node["deps"] if dependency["pkg"] not in macros
+                     and any(kind["kind"] is None for kind in dependency["dep_kinds"])]
+        for node in metadata["resolve"]["nodes"]}
 
 
 def sdk_dylibs(metadata: dict) -> set[str]:
@@ -359,9 +360,10 @@ def shared_twice(metadata: dict, libraries: set[str]) -> str | None:
     for first in ids:
         for second in ids:
             if first < second and (both := holds[first] & holds[second]):
-                return (f"{names[first]} and {names[second]} are separate libraries of the prebuilt game and would "
+                return (f"{names[first]} and {names[second]} are separate libraries of the prebuilt game and may "
                         f"each hold a copy of {', '.join(sorted(names[crate] for crate in both))}: rustc refuses to "
-                        "link the two into one program. One must depend on the other, or stay out of `sdk_dylibs`.")
+                        "link two copies into one program. If the build fails on these crates, one library must "
+                        "depend on the other, or stay out of `sdk_dylibs`.")
     return None
 
 
