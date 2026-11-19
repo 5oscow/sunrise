@@ -219,12 +219,19 @@ shell's packages on NixOS.",
     .to_string()
 }
 
-/// Whether `text` (a build's output) is a linker not finding udev or ALSA.
+/// Whether `text` (a line of a build's output) is a linker not finding udev or ALSA: rust-lld's
+/// `unable to find library -ludev`, or GNU ld's `cannot find -ludev: No such file or directory`.
 pub fn missing_system_libraries(text: &str) -> bool {
-    ["-ludev", "-lasound"].iter().any(|flag| {
-        text.contains(&format!("unable to find library {flag}"))
-            || text.contains(&format!("cannot find {flag}"))
-    })
+    ["unable to find library ", "cannot find "]
+        .iter()
+        .any(|said| {
+            text.match_indices(said).any(|(at, _)| {
+                let flag = text[at + said.len()..]
+                    .split(|c: char| c.is_whitespace() || c == ':')
+                    .next();
+                matches!(flag, Some("-ludev" | "-lasound"))
+            })
+        })
 }
 
 /// Whether `text` (a build's output, or the error starting one of its programs) is Windows
@@ -281,6 +288,26 @@ pub(crate) mod tests {
             .find(|(name, _)| *name == "NIX_ENFORCE_PURITY")
             .and_then(|(_, value)| value);
         assert_eq!(purity, Some(std::ffi::OsStr::new("0")));
+    }
+
+    #[test]
+    fn only_a_linker_missing_exactly_udev_or_alsa_is_recognised() {
+        for line in [
+            "  = note: rust-lld: error: unable to find library -ludev",
+            "          rust-lld: error: unable to find library -lasound",
+            "/usr/bin/ld: cannot find -ludev: No such file or directory",
+            "/usr/bin/ld: cannot find -lasound: No such file or directory",
+        ] {
+            assert!(missing_system_libraries(line), "{line}");
+        }
+        for line in [
+            "rust-lld: error: unable to find library -lasound_extra",
+            "/usr/bin/ld: cannot find -ludev2: No such file or directory",
+            "rust-lld: error: unable to find library -lz",
+            "error: linking with `cc` failed: exit status: 1",
+        ] {
+            assert!(!missing_system_libraries(line), "{line}");
+        }
     }
 
     #[cfg(target_os = "linux")]

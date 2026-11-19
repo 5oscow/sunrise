@@ -375,6 +375,8 @@ fn run_checked(
         let mut tail = std::collections::VecDeque::new();
         let mut errors = Vec::new();
         let mut blocked = false;
+        // Noted as the output arrives: later lines can push the linker's note out of `tail`.
+        let mut libraries = false;
         for text in BufReader::new(child.stderr.take().expect("piped"))
             .lines()
             .map_while(Result::ok)
@@ -384,6 +386,7 @@ fn run_checked(
             }
             line(&text);
             blocked |= rust::blocked_by_app_control(&text);
+            libraries |= rust::missing_system_libraries(&text);
             if text.starts_with("error") && errors.len() < 4 {
                 errors.push(text.clone());
             }
@@ -424,12 +427,12 @@ fn run_checked(
             return Ok(());
         }
         let tail: Vec<String> = tail.into();
-        let error = system_libraries(diagnostics::with_internals_hint(failure(
-            what,
-            &status.to_string(),
-            &errors,
-            &tail,
-        )));
+        let error =
+            diagnostics::with_internals_hint(failure(what, &status.to_string(), &errors, &tail));
+        let error = match libraries {
+            true => with_system_libraries(error),
+            false => error,
+        };
         Err(Ran {
             error: match blocked {
                 true => with_app_control(error),
@@ -489,12 +492,9 @@ fn with_app_control(error: String) -> String {
     format!("{}\n\n{error}", rust::smart_app_control())
 }
 
-/// `error` led by what to install when its link could not find udev or ALSA.
-fn system_libraries(error: String) -> String {
-    match rust::missing_system_libraries(&error) {
-        true => format!("{}\n\n{error}", rust::system_libraries()),
-        false => error,
-    }
+/// `error` led by what to install when the build's link could not find udev or ALSA.
+fn with_system_libraries(error: String) -> String {
+    format!("{}\n\n{error}", rust::system_libraries())
 }
 
 /// [`run`]'s error: the `errors` lines not already among the last ones (`tail`), then those.
@@ -1055,28 +1055,33 @@ mod tests {
         assert!(e.contains("The end of its output") && e.matches("alsa-sys").count() == 1);
     }
 
+    /// The linker's note comes before more output than the error keeps, so the hint is decided
+    /// as the output arrives.
+    #[cfg(unix)]
     #[test]
+    #[ignore = "daily"]
     fn a_link_missing_udev_or_alsa_leads_with_what_to_install() {
+        let _guard = log_lock();
+        clear_log().unwrap();
         // rustc's output linking a native mod's patch library in a shell without either library
-        // (Rust 1.99.1 with rust-lld, 2026-11-19).
-        let errors = ["error: linking with `cc` failed: exit status: 1".to_owned()];
-        let tail: Vec<String> = [
-            "  = note: rust-lld: error: unable to find library -ludev",
-            "          rust-lld: error: unable to find library -lasound",
-            "          collect2: error: ld returned 1 exit status",
-            "error: could not compile `sunrise_patch` (lib) due to 1 previous error",
-        ]
-        .map(str::to_owned)
-        .into();
-        let plain = failure("Compiling the mod", "exit status: 101", &errors, &tail);
-        let e = system_libraries(plain.clone());
-        assert_eq!(e, format!("{}\n\n{plain}", rust::system_libraries()));
-        // GNU ld's wording, and a failure that names neither library.
-        assert!(rust::missing_system_libraries(
-            "/usr/bin/ld: cannot find -lasound: No such file or directory"
-        ));
-        let other = failure("Compiling the mod", "exit status: 101", &errors, &errors);
-        assert_eq!(system_libraries(other.clone()), other);
+        // (Rust 1.99.1 with rust-lld, 2026-11-19), then more lines than the error's end keeps.
+        let script = |library: &str| {
+            let mut cmd = Command::new("sh");
+            cmd.args(["-c", &format!(
+                "echo 'error: linking with `cc` failed: exit status: 1' >&2
+                 echo '  = note: rust-lld: error: unable to find library {library}' >&2
+                 for i in 1 2 3 4 5 6 7 8 9 10 11 12 13; do echo \"warning: build failed, waiting ($i)\" >&2; done
+                 exit 101"
+            )]);
+            run(cmd, "Compiling the mod", |_| {}).unwrap_err()
+        };
+        for library in ["-ludev", "-lasound"] {
+            let e = script(library);
+            assert!(e.starts_with(&rust::system_libraries()), "{e}");
+            assert!(!e.contains("unable to find library"), "{e}");
+        }
+        let e = script("-lasound_extra");
+        assert!(e.starts_with("Compiling the mod failed"), "{e}");
     }
 
     /// Smart App Control refusing a build script (#5911): cargo names the crate, Windows' reason
