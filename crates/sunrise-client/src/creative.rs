@@ -229,6 +229,9 @@ struct Shown {
 #[derive(Default)]
 pub struct Names {
     map: HashMap<String, String>,
+    item_names: HashMap<String, serde_json::Value>,
+    /// The block registry, which says whether an item is a block's (`Item.Properties.useBlockDescriptionPrefix`).
+    blocks: Option<&'static sunrise_world::registry::BlockRegistry>,
 }
 impl Names {
     pub fn load(root: &sunrise_assets::resource_source::ResourceSource) -> Self {
@@ -247,7 +250,41 @@ impl Names {
         {
             map.extend(read(&namespace));
         }
-        Self { map }
+        Self {
+            map,
+            item_names: HashMap::new(),
+            blocks: None,
+        }
+    }
+    /// Keep each item's default `minecraft:item_name` component from the items' prototypes:
+    /// `Item.getDescriptionId` is its translation key, so the key is the item's own, never
+    /// guessed from the language.
+    pub fn with_item_names(
+        mut self,
+        prototypes: &std::collections::BTreeMap<
+            String,
+            std::collections::BTreeMap<String, serde_json::Value>,
+        >,
+        blocks: &'static sunrise_world::registry::BlockRegistry,
+    ) -> Self {
+        self.blocks = Some(blocks);
+        self.item_names = prototypes
+            .iter()
+            .filter_map(|(id, components)| {
+                Some((id.clone(), components.get("minecraft:item_name")?.clone()))
+            })
+            .collect();
+        self
+    }
+    /// Whether `id` is the item of a block of the same id, which takes its block's `block.*`
+    /// description id (a mod block item, whose prototype carries no `item_name`).
+    pub fn is_block_item(&self, id: &str) -> bool {
+        self.blocks
+            .is_some_and(|blocks| blocks.default_state(id).is_some())
+    }
+    /// An item's default `minecraft:item_name` component, as its prototype has it.
+    pub fn item_name(&self, id: &str) -> Option<&serde_json::Value> {
+        self.item_names.get(id)
     }
     pub fn item(&self, id: &str) -> String {
         let (namespace, path) = id.split_once(':').unwrap_or(("minecraft", id));

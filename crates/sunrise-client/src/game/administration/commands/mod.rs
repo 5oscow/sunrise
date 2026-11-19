@@ -1170,47 +1170,7 @@ impl Game<'_> {
         let item = &*s.item;
         let empty = item == "minecraft:air" || s.count == 0;
         let custom = s.data().and_then(|data| data.custom_name.as_ref());
-        let hover = if let Some(c) = custom {
-            sunrise_client::component::name_text(c)
-        } else if let Some(key) = sunrise_client::brewing::contents_name_key(s) {
-            // A potion's or tipped arrow's own name, over its `item_name`.
-            Text::translate(&key, &[])
-        } else if item == "minecraft:compass"
-            && s.data()
-                .is_some_and(|d| d.other("minecraft:lodestone_tracker").is_some())
-        {
-            // `CompassItem.getName`: a lodestone tracker names it, over `item_name`.
-            Text::translate("item.minecraft.lodestone_compass", &[])
-        } else if let Some(name) = s.data().and_then(|d| d.other("minecraft:item_name")) {
-            // `ItemStack.getItemName`: the `item_name` component wins over the
-            // item's own name (`Item.getName`), so a datapack's or a server's
-            // renaming shows here as it does on the tooltip's first line.
-            sunrise_client::component::name_text(name)
-        } else if let Some(title) = s
-            .data()
-            .and_then(|d| d.written.as_ref())
-            .map(|w| w.title.clone())
-            .filter(|t| !t.trim().is_empty())
-        {
-            Text::literal(title)
-        } else if item == "minecraft:shield"
-            && let Some(color) = s.data().and_then(|d| d.base_color.as_deref())
-        {
-            // `ShieldItem.getName`: the banner's base colour names the shield.
-            Text::translate(&format!("item.minecraft.shield.{color}"), &[])
-        } else if let Some(head) = sunrise_client::item_tooltip::player_head_name(s) {
-            head.text()
-        } else {
-            // Item.getDescriptionId: a block item's is the block's.
-            let (namespace, path) = item.split_once(':').unwrap_or(("minecraft", item));
-            let key = format!("item.{namespace}.{path}");
-            let key = if self.pack.names.get(&key).is_some() {
-                key
-            } else {
-                format!("block.{namespace}.{path}")
-            };
-            Text::translate(&key, &[])
-        };
+        let hover = sunrise_client::stations::hover_name_text(&self.pack.names, s);
         // Component.empty().append(getHoverName()), italic for a custom name.
         let mut name = Text::empty().append(hover);
         if custom.is_some() {
