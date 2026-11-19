@@ -1398,4 +1398,80 @@ mod tests {
             "assets/minecraft/optifine/ctm/glass/0.png"
         );
     }
+    #[test]
+    fn a_fixed_tile_naming_an_unstitched_sprite_gets_its_pixels() {
+        // A 32 x 16 sheet, red then green, and a blocks atlas cutting the right half out as
+        // `demo:block/panel_0`, which a CTM rule names as its tile.
+        let root =
+            std::env::temp_dir().join(format!("sunrise-ctm-unstitch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let textures = root.join("assets/demo/textures/block");
+        let atlases = root.join("assets/minecraft/atlases");
+        std::fs::create_dir_all(&textures).unwrap();
+        std::fs::create_dir_all(&atlases).unwrap();
+        let pixels: Vec<u8> = (0..32 * 16)
+            .flat_map(|i| {
+                if i % 32 < 16 {
+                    [255, 0, 0, 255]
+                } else {
+                    [0, 255, 0, 255]
+                }
+            })
+            .collect();
+        let mut encoder = png::Encoder::new(
+            std::fs::File::create(textures.join("sheet.png")).unwrap(),
+            32,
+            16,
+        );
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder
+            .write_header()
+            .unwrap()
+            .write_image_data(&pixels)
+            .unwrap();
+        std::fs::write(
+            atlases.join("blocks.json"),
+            r#"{"sources":[{"type":"minecraft:unstitch","resource":"demo:block/sheet","divisor_x":2,
+                "regions":[{"sprite":"demo:block/panel_0","x":1,"y":0,"width":1,"height":1}]}]}"#,
+        )
+        .unwrap();
+        let rule = Rule::parse(
+            "assets/minecraft/optifine/ctm/panel.properties",
+            &Properties::parse("method=fixed\ntiles=demo:block/panel_0"),
+        )
+        .unwrap()
+        .unwrap();
+        let registry = BlockRegistry::from_nbt(&sunrise_core::nbt::Tag::compound([
+            (
+                "DataVersion",
+                sunrise_core::nbt::Tag::Int(sunrise_world::DATA_VERSION),
+            ),
+            (
+                "states",
+                sunrise_core::nbt::Tag::List(vec![sunrise_core::nbt::Tag::String(
+                    "minecraft:air".into(),
+                )]),
+            ),
+            (
+                "defaults",
+                sunrise_core::nbt::Tag::compound([(
+                    "minecraft:air",
+                    sunrise_core::nbt::Tag::Int(0),
+                )]),
+            ),
+        ]))
+        .unwrap();
+        let source = ResourceSource::directory(root.clone());
+        let mut sprites = Sprites::new(source.clone());
+        let ctm =
+            ConnectedTextures::load(&source, vec![rule], &registry, &mut sprites, |_, _| None);
+        let [TileLayer::Layer { layer, .. }] = ctm.rules[0].tiles[..] else {
+            panic!("the rule keeps its tile");
+        };
+        sprites.finish();
+        let at = layer as usize * (sprites.size * sprites.size * 4) as usize;
+        assert_eq!(sprites.pixels[at..at + 4], [0, 255, 0, 255]);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
 }
