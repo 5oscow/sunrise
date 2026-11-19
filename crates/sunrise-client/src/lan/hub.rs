@@ -388,6 +388,13 @@ pub struct Hub {
     /// The `player_movement_check` and `elytra_movement_check` game rules,
     /// set by the game before each tick.
     pub movement_checks: (bool, bool),
+    /// The level's entities that can be solid to a player (boats, shulkers, happy ghasts), set by
+    /// the game once before each tick's packets: the moved-wrongly check resolves a report
+    /// against those meeting the move's swept box (`Entity.collide`'s entity collisions).
+    pub move_solids: Vec<crate::entity_solids::Candidate>,
+    /// The boxes of those meeting the move being checked: kept so a reported move allocates
+    /// nothing once it has grown.
+    pub(super) move_boxes: Mutex<Vec<sunrise_core::geometry::Aabb>>,
     /// The far ring, when `server.toml`'s `max_view_distance` turns it on (dedicated servers).
     pub far: Option<super::far::Far>,
     /// The `immediate_respawn` game rule, as the players were last told.
@@ -804,6 +811,8 @@ impl Hub {
             reduced_debug_info: false,
             limited_crafting: false,
             movement_checks: (true, true),
+            move_solids: Vec::new(),
+            move_boxes: Mutex::default(),
             far: None,
             singleplayer_owner: None,
             flat_world: false,
@@ -5295,6 +5304,7 @@ mod tests {
     mod collision_part_tests;
     mod displace_tests;
     mod effect_meta_tests;
+    mod entity_move_check_tests;
     #[path = "../far_tests.rs"]
     mod far_tests;
     mod first_tick_recipe_tests;
