@@ -84,6 +84,9 @@ version row to the entry from the checkout, leaving all existing fields and rows
 reads only the new file, so you do not need to download the old files or copy over the icon and screenshots.
 Repeat steps 2 to 4.
 
+`--registry <checkout>` also checks a first listing's id against the checkout's collection ids; without it, the
+registry's CI checks the id when the pull request opens.
+
 Published versions never change and are never removed: a version already in the entry is refused by name, and a file
 that must go is taken down by the registry's maintainers in `revoked.toml`.
 

@@ -134,7 +134,9 @@ fn bad_version_or_checkout_leaves_destination_and_outside_files_unchanged() {
          owners = ['ada']\nicon = 'icons/coords_hud.png'\nmembers = [{ id = 'other_mod' }]\n",
     )
     .unwrap();
-    attempt(Some("collection"));
+    // The checkout itself loads: the refusal below is the id collision, not a broken collection file.
+    index::registry::load(&checkout).unwrap();
+    attempt(None);
 }
 
 #[test]

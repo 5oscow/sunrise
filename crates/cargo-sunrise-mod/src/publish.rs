@@ -364,8 +364,7 @@ pub fn run(entry_point: mod_surface::child::ChildEntry, args: &[String]) -> Resu
         .flatten()
         .chain(built.into_iter().flatten()),
     ) {
-        check_output_dir(dir)
-            .map_err(|e| format!("{e}; choose a writable --out folder without symlinks"))?;
+        check_output_dir(dir)?;
     }
     if let Some(checkout) = &o.registry
         && let Ok(out_path) = dunce::canonicalize(&out)
