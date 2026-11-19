@@ -1677,6 +1677,8 @@ impl Game<'_> {
         self.native_net.holds.borrow_mut().clear();
         if let Some(mut r) = self.remote.take() {
             r.session.disconnect();
+            self.creative_screen.reset_contents();
+            self.refresh_creative_search_tags();
         }
         super::lan::sync::forget_sync_data();
         self.gui.atlas.clear_object_skins();
@@ -2408,6 +2410,8 @@ impl Game<'_> {
                 Arc::new(ChunkFormat::new(&r.dimension, biomes, bits).in_column(column));
             r.registries = registries;
             r.resolve_clocks();
+            self.creative_screen.reset_contents();
+            self.refresh_creative_search_tags();
         }
     }
 

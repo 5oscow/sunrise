@@ -156,7 +156,9 @@ pub trait ItemsClientHost {
     /// which join when the tabs are built (the first time the creative inventory opens). The
     /// operator items tab's only with the last build's `hasPermissions`. A stack's place here
     /// is its creative order, the order inventory sorters rank by (an item not listed, by its
-    /// first stack). Empty before the game's resources load.
+    /// first stack). Before the first screen build, or after a holder reset until the screen builds
+    /// again, this reads a listener-free Normal preview without filling the screen cache. Empty
+    /// before the game's resources load.
     #[access(ClientSetup)]
     fn creative_search_items(&self) -> Vec<ItemStack>;
     /// Side: client.
@@ -167,9 +169,10 @@ pub trait ItemsClientHost {
     /// when `has_permissions`), and include what mods add in `build_creative_mode_tab_contents`
     /// once the tabs are built (the first time the creative inventory opens). Not the search,
     /// saved toolbars or survival inventory tabs; [`creative_search_items`](Self::creative_search_items)
-    /// is the search tab's. The contents come from the game's prepared tab export, which is built
-    /// with vanilla's default feature flags: the build's feature set is not a world's. No tabs
-    /// before the game's resources load.
+    /// is the search tab's. The builder uses the current world's holders and enabled feature flags.
+    /// Before the first screen build, or after a holder reset until the screen builds again,
+    /// this reads a listener-free Normal preview without filling the screen cache. No tabs before
+    /// the game's resources load.
     #[access(ClientSetup)]
     fn creative_tabs(&self) -> CreativeModeTabs;
     /// Side: client.

@@ -205,15 +205,18 @@ These read the local player as the client sees it. They take no mod-controlled n
 - `ClientHost::creative_search_items()` is the creative search tab's stacks, in the order the screen
   lists them, once per item and components. Mod additions from `build_creative_mode_tab_contents`
   join when the tabs are built, and the operator tab's items only with the last build's permissions.
-  It is empty before resources load. It reads the same on native and wasm.
+  Before the first screen build (and after a holder reset until the next build), it reads a Normal
+  preview without calling the hook or filling the screen cache. Empty before resources load; the
+  same on native and wasm.
 - `ClientHost::creative_tabs()` is the creative inventory's item tabs in `CreativeModeTabs.tabs()` order
   (not the search, saved toolbars or survival inventory tabs), each a `CreativeModeTabInfo` with its
   registry id and `display_items` (`CreativeModeTab.getDisplayItems`, components kept), and the build's
   `has_permissions`. Mod stacks from `build_creative_mode_tab_contents` follow a tab's own, so this is
   the read for "which tab shows this stack": `tabs_showing(&stack)` matches by item and components. The
-  operator tab is listed only when the last build had permissions. The contents come from the game's
-  tab export, built with vanilla's default feature flags: a world's feature set does not change them,
-  so there is no feature field. Empty before resources load; the same on native and wasm.
+  operator tab is listed only when the last build had permissions. The builder uses the world's
+  registry holders and enabled feature flags. Before the first screen build (and after a holder
+  reset until the next build), it reads a Normal preview without calling the hook or filling the
+  screen cache. Empty before resources load; the same on native and wasm.
 - `ClientHost::item_uses_block_light(&stack, context)` is `ItemStackRenderState.usesBlockLight` of the
   stack's model resolved for an `ItemDisplayContext` (no owner or level): true for a model lit like a
   block from the side (`gui_light: side`), false for a flat item lit from the front. It is what

@@ -12,7 +12,8 @@ pub trait Hooks {
     /// option is on). Asked for every item tab, the operator items tab and the mods' tabs among
     /// them, not for the search, saved toolbars or survival inventory tabs. Asked when the tabs
     /// are built: the first time the creative inventory opens after the game's resources load,
-    /// and again whenever `has_permissions` changes. Client-side.
+    /// and again on a rebuild after the world/holder provider, feature flags, client resources,
+    /// or `has_permissions` change. This client-side hook only appends to category tabs.
     #[hook(
         side = "client",
         contract = "collect",
