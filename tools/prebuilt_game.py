@@ -807,13 +807,15 @@ def runtime_libraries(out: Path) -> list[Path]:
 
 def start(out: Path) -> None:
     """Start two installations of the fixed executable (with smoke's two libraries and without mods),
-    each as a dedicated server with no game data: it loads the game's libraries
-    and sets up the mods' runtime, then stops at the missing prepared files. Fails on a crash, a hang or any other
-    stop, so an archive whose libraries disagree (two allocators, #3877) cannot ship. On Windows it runs without
-    MinGW on PATH, as on a player's computer, so a runtime DLL the launcher would not install fails here (#3521)."""
+    each in dedicated mode with no game data: it loads the game's libraries and sets up the mods' runtime, then
+    stops at the missing prepared files. Only a client SDK registers the launcher download hook. Fails on a crash,
+    a hang or any other stop, so an archive whose libraries disagree (two allocators, #3877) cannot ship. On Windows
+    it runs without MinGW on PATH, as on a player's computer, so a runtime DLL the launcher would not install fails
+    here (#3521)."""
     # Run as a script, so lab sits on the path beside it; tests import this module without running `start`.
     import lab
 
+    client = json.loads((out / IDENTITY).read_text())["side"] == "client"
     for installed in (out.parent / SMOKE, out.parent / SMOKE_API):
         with tempfile.TemporaryDirectory(dir=out.parent) as scratch:
             scratch = Path(scratch)
@@ -869,6 +871,10 @@ def start(out: Path) -> None:
         # The prepared-files check exits with status 1; any other status is a different stop.
         if result.returncode != 1 or NO_RESOURCES not in result.stdout or "panicked" in result.stdout:
             sys.exit(f"start: {installed.name} stopped before the prepared-files check (exit {result.returncode})")
+        shows_launcher = bool(re.search(r"launcher: download it at https?://\S+ \(Download\)", result.stdout))
+        if shows_launcher != client:
+            problem = "client omitted" if client else "server showed"
+            sys.exit(f"start: {installed.name}: {problem} the launcher download URL")
         print(f"start: {installed.name} loaded the game's libraries and the mods' runtime and stopped at: "
               f"{NO_RESOURCES}")
 
