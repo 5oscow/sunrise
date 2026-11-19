@@ -35,6 +35,22 @@ pub trait Hooks {
     /// keeps its stack unspent until the server answers. Answer `None` on a
     /// client where only a server can decide: the template's rule then
     /// predicts, and the server still decides.
+    #[notes = r##"### Choosing a block placement state
+
+`BlockPart::state_for_placement` is vanilla's `Block.getStateForPlacement` for
+player and dispenser placement, including client prediction for a player.
+Answer only for your own blocks: `Some(Some(state))` selects a registered
+candidate, `Some(None)` refuses placement without spending the stack, and
+`None` delegates to the next Part or ordinary placement. Use
+`native_state_with_property(state, key, value)` to set a property, including
+one your block declares.
+
+A candidate can belong to another block. The selected block does not run its
+placement-state method again. It still gets the primary cell's survival and
+obstruction checks as applicable, and a game-master block requires creative
+operator permission. If the selected block spans cells, check its footprint
+before returning it: `setPlacedBy` does not recheck its companion cell.
+"##]
     #[hook(
         side = "both",
         version = 3,
