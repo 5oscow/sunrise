@@ -943,13 +943,11 @@ handle, an entity the client doesn't track and a level it doesn't show:
   (in their own turn) and mobs, and answer false for armor stands and the dragon.
   `living.last_attacker(host)` is `LivingEntity.getLastHurtByMob`: who last hurt the entity, within a hundred
   ticks of the hurt, as an `EntityRef` of the current open; `None` once the window has passed or the attacker
-  is gone, and for armor stands, the dragon and clients. A mob attacker that has since changed dimension is
-  still found, in whichever loaded level it is now, under the id it arrived with; never another entity that
-  holds its UUID.
+  is gone, and for armor stands, the dragon and clients. A mob attacker that changed dimension is found in its
+  loaded level under the id it arrived with, never another entity holding its UUID.
   `living.kill_credit(host)` is `LivingEntity.getKillCredit`: it returns the remembered player first, or the
   last hurting mob if there is no remembered player. A remembered player that cannot be resolved gives `None`,
-  not the mob. Both resolve across loaded dimensions. On a credited mob in another level, `kind`, `uuid` and
-  `level` answer from there; its other reads see it as not in the level in place.
+  not the mob. Both resolve across loaded dimensions; a credited mob there answers only `kind`, `uuid`, `level`.
 - An `EntityRef` holds the world's open (`WorldEpoch`) and the entity's id, which no other entity of that open
   gets. A handle of an earlier open, of an entity that is gone or moved to another level (it gets a new id there, as in
   vanilla), or used on a client reads as `None`.
