@@ -1,7 +1,6 @@
 use super::*;
 
 /// Server-level helpers for native mods.
-#[allow(dead_code)]
 impl GameLevel<'_> {
     /// Play a sound event for nearby players in this server level. The return
     /// value means queued, not heard. A `minecraft:` event must be registered:
@@ -93,13 +92,24 @@ impl GameLevel<'_> {
         &self,
         state: BlockStateId,
     ) -> Option<BlockEntity> {
-        let name = &self.registry.state(state)?.name;
+        let placed = self.registry.state(state)?;
+        let name = &placed.name;
         if self.world.block_entities.stateful_entity(state.0) {
             let mut nbt = None;
             self.native_block_entity(name, state, &mut nbt);
             return block_entity_for_block(self.registry, self.facts, name, nbt?);
         }
-        self.new_block_entity(name)
+        let mut entity = self.new_block_entity(name)?;
+        // `TestBlockEntity` takes its mode from the state at construction,
+        // before any block entity data supplied by the item is loaded.
+        if let BlockEntity::TestBlock(test) = &mut entity
+            && let Some(mode) = placed.properties.get("mode").and_then(|mode| {
+                sunrise_client::test_block::TestBlockMode::of_serialized_name(mode)
+            })
+        {
+            test.mode = mode;
+        }
+        Some(entity)
     }
     /// Replaces the block at `pos` with `state` through `Level.setBlock`, as
     /// `Game::native_set_block` does for the Host, from a hook that gets the
