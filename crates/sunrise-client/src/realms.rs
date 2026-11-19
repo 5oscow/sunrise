@@ -54,7 +54,8 @@ use page::centered;
 use page::clamp_text;
 use page::closest_expiration;
 use page::days_left_text;
-use page::human_readable;
+pub use page::human_readable;
+use page::{percent_label, transfer_bar_width, transfer_percentage, upload_limit_size};
 use page::loading_dots;
 use page::main_footer_h;
 use page::pdp_entries;
@@ -7468,7 +7469,7 @@ impl Screen {
                 if progress.written() != 0 && !progress.is_cancelled() {
                     let percentage = progress.percentage();
                     let left = (w - 200.0) / 2.0;
-                    let right = left + (200.0 * percentage as f32).round();
+                    let right = left + transfer_bar_width(percentage);
                     batch.fill(atlas, left - 1.0, 79.0, right - left + 2.0, 17.0, u32::MAX);
                     batch.fill(
                         atlas,
@@ -7478,7 +7479,7 @@ impl Screen {
                         15.0,
                         0xFF80_8080,
                     );
-                    let percent = format!("{:.1}", percentage * 100.0);
+                    let percent = percent_label(percentage);
                     centered(
                         batch,
                         atlas,

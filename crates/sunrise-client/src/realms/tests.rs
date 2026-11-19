@@ -1169,3 +1169,42 @@ fn cancelling_a_restore_aborts_its_worker() {
         }
     ));
 }
+
+#[test]
+fn sizes_read_as_realms_unit_human_readable() {
+    // com.mojang.realmsclient.Unit.humanReadable, run on the 26.3 jar.
+    for (bytes, text) in [
+        (0, "0 B"),
+        (1023, "1023 B"),
+        (1024, "1.0 KB"),
+        (1280, "1.3 KB"),
+        (1535, "1.5 KB"),
+        (10_000, "9.8 KB"),
+        (1_048_575, "1024.0 KB"),
+        (1_048_576, "1.0 MB"),
+        (52_428_800, "50.0 MB"),
+        (262_144_000, "250.0 MB"),
+        (1_073_741_824, "1.0 GB"),
+        ((1 << 50) - 1, "1.0 PB"),
+        (i64::MAX as u64, "8.0 EB"),
+    ] {
+        assert_eq!(human_readable(bytes), text, "{bytes}");
+    }
+}
+
+#[test]
+fn java_upload_limit_uses_only_gigabytes_and_one_decimal() {
+    assert_eq!(upload_limit_size(1536), "2 KB");
+    assert_eq!(upload_limit_size(1 << 40), "1024.0 GB");
+}
+
+#[test]
+fn transfer_percent_and_bar_keep_double_precision() {
+    assert_eq!(percent_label(transfer_percentage(7, 2000)), "0.4");
+    assert_eq!(percent_label(transfer_percentage(0, 0)), "NaN");
+    assert_eq!(percent_label(transfer_percentage(1, 0)), "100.0");
+    // JDK 25 Math.round(200 * NaN) and the double just below 1/400.
+    assert_eq!(transfer_bar_width(f64::NAN), 0.0);
+    assert_eq!(transfer_bar_width(0.0025_f64.next_down()), 0.0);
+    assert_eq!(transfer_bar_width(0.0025), 1.0);
+}
