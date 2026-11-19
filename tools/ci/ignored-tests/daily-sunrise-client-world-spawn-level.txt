@@ -1,0 +1,3 @@
+# The world spawn's level: an End exit to a spawn set in the End, and the client's spawn compass target.
+sunrise-client game::end::tests::leaving_the_end_for_a_world_spawn_there_builds_no_platform lib daily resources
+sunrise-client game::item_draw::tests::the_spawn_compass_target_keeps_the_world_spawn_level lib daily resources

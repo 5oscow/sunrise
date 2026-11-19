@@ -1155,6 +1155,7 @@ impl Game<'_> {
         self.craft_size = 2;
         self.remove_local_player_body();
         self.spawn = None;
+        self.level.world_spawn_dimension = None;
         self.mobs.clear();
         self.clear_remote_objects();
         self.clear_remote_projectiles();
@@ -1427,6 +1428,7 @@ impl Game<'_> {
         self.craft_size = 2;
         self.remove_local_player_body();
         self.spawn = None;
+        self.level.world_spawn_dimension = None;
         self.mobs.clear();
         self.clear_remote_objects();
         self.clear_remote_projectiles();
@@ -5313,11 +5315,17 @@ impl Game<'_> {
             C::BlockEntityData(p) => self.remote_block_entity_packet(p),
             C::OpenSignEditor(p) => self.remote_open_sign_editor(p),
             C::OpenBook(p) => self.remote_open_book(p.hand),
-            // handleSetSpawn: ClientLevel.setRespawnData, which spawn compasses point at.
+            // handleSetSpawn: ClientLevel.setRespawnData, which spawn compasses point at: the
+            // position with the level it is in, which the compass compares with its own.
             C::SetDefaultSpawnPosition(p) => {
                 let [x, y, z] = p.pos.pos;
-                self.spawn = (p.pos.dimension == "minecraft:overworld")
-                    .then(|| Vec3::new(f64::from(x) + 0.5, f64::from(y), f64::from(z) + 0.5));
+                self.spawn = Some(Vec3::new(
+                    f64::from(x) + 0.5,
+                    f64::from(y),
+                    f64::from(z) + 0.5,
+                ));
+                self.level.world_spawn_dimension =
+                    (p.pos.dimension != "minecraft:overworld").then_some(p.pos.dimension);
             }
             C::ServerData(p) => self.remote_server_data(p.icon.as_deref()),
             C::MapItemData(p) => self.remote_map_item_data(&p),
