@@ -4,7 +4,7 @@
 use super::{
     Game, commands::Target, mounts::steering_item, remote::Remote, remote_vehicles::passenger_root,
 };
-use mod_api::{EntityRef, LeashHolder, LivingRef, StartRidingRefusal, WorldEpoch};
+use mod_api::{EntityRef, LeashHolder, LivingRef, StartRidingRefusal};
 use sunrise_client::{
     lan::playerdata::ints_uuid,
     mobs::{Mob, Species, equine, happy_ghast, leash::Holder, nautilus},
@@ -87,32 +87,14 @@ impl Game<'_> {
         if self.is_logical_server() {
             return self.native_entity_target(entity).map(RidingRead::Server);
         }
-        let (remote, id) = self.native_client_entity_context(entity)?;
-        remote
-            .riding_entity_exists(id, self.player.is_some())
-            .then_some(RidingRead::Client(remote))
-    }
-
-    fn client_riding_handle(
-        &self,
-        remote: &Remote,
-        epoch: WorldEpoch,
-        id: u32,
-    ) -> Option<EntityRef> {
-        remote
-            .riding_entity_exists(i32::try_from(id).ok()?, self.player.is_some())
-            .then(|| EntityRef::new(epoch, id))
+        (self.entity(entity.id())? == entity).then_some(RidingRead::Client(self.remote.as_ref()?))
     }
 
     /// What the entity rides (`Entity.getVehicle`), if its vehicle has a handle.
     pub(super) fn entity_vehicle(&self, entity: EntityRef) -> Option<EntityRef> {
         match self.riding_read(entity)? {
             RidingRead::Server(target) => self.entity(self.native_vehicle_id(target)?),
-            RidingRead::Client(remote) => self.client_riding_handle(
-                remote,
-                entity.epoch(),
-                remote.passenger_vehicle(entity.id())?,
-            ),
+            RidingRead::Client(remote) => self.entity(remote.passenger_vehicle(entity.id())?),
         }
     }
     /// Whether the entity rides another object, even one without a handle.
@@ -133,7 +115,7 @@ impl Game<'_> {
             }
             RidingRead::Client(remote) => {
                 let root = passenger_root(&remote.passenger_vehicles, entity.id()).ok()?;
-                self.client_riding_handle(remote, entity.epoch(), root)
+                self.entity(root)
             }
         }
     }
@@ -172,12 +154,7 @@ impl Game<'_> {
             RidingRead::Client(remote) => {
                 let mut seats: Vec<_> = remote
                     .passenger_seats(entity.id())
-                    .filter_map(|(id, index)| {
-                        Some((
-                            index,
-                            self.client_riding_handle(remote, entity.epoch(), id)?,
-                        ))
-                    })
+                    .filter_map(|(id, index)| Some((index, self.entity(id)?)))
                     .collect();
                 seats.sort_unstable_by_key(|seat| seat.0);
                 seats.into_iter().map(|(_, handle)| handle).collect()

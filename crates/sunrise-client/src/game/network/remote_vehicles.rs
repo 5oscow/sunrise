@@ -334,10 +334,21 @@ impl Game<'_> {
 
     /// A death respawn replaces the local entity even if its level and ID stay.
     pub(super) fn reset_remote_player_riding(&mut self) {
+        // The old body is gone, not dismounting. Clear local control before
+        // updating the vehicle's remaining list so it won't play a dismount.
+        if let Some(vehicle) = self.riding.take() {
+            if let Some(mob) = self.mob_index.get_mut(&mut self.mobs, vehicle) {
+                mob.rider = None;
+            }
+            if let Some(i) = self.boats.iter().position(|b| b.id == vehicle) {
+                self.boats.update(i, |b| b.lerp = None);
+            }
+        }
         if let Some(remote) = self.remote.as_mut() {
             let player = remote.entity_id;
             remote.first_passenger = false;
             remote.passenger_index = 0;
+            remote.ghast_dismount = None;
             let parent = remote.passenger_vehicles.remove(&(player as u32));
             self.remote_clear_passengers(player);
             if let Some(parent) = parent
@@ -362,7 +373,6 @@ impl Game<'_> {
                 self.apply_remote_passengers(parent.vehicle as i32, &ids);
             }
         }
-        self.riding = None;
     }
 
     /// Apply the admitted list to the presentation and simulation copies too.

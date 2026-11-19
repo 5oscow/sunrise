@@ -400,17 +400,32 @@ mod tests {
                     assert_eq!(row.vehicle(game), Some(vehicle));
                 }
 
+                game.spawn_entity(20, "minecraft:happy_ghast", [2.5, 70.0, 0.5], [0.0; 3]);
+                let ghast = game.entity(20).unwrap();
+                game.handle_packet(set(20, vec![7])).unwrap();
+                assert_eq!(me.vehicle(game), Some(ghast));
                 game.handle_packet(set(7, vec![99])).unwrap();
                 assert_eq!(late.vehicle(game), Some(me));
                 // Replace the local player in the same level while it is both a rider and
-                // a vehicle, then let its body arrive before any replacement seat list.
+                // a vehicle. A death never plays the ghast's voluntary dismount.
                 game.handle_packet(C::Respawn(play::Respawn {
                     spawn: level(),
                     keep: 0,
                 }))
                 .unwrap();
+                assert_eq!(game.remote.as_ref().unwrap().ghast_dismount, None);
                 game.handle_packet(position(2)).unwrap();
                 assert_eq!(game.entity(7), Some(me));
+                assert_eq!(ghast.position(game), Some([2.5, 70.0, 0.5]));
+                assert_eq!(
+                    game.mobs
+                        .iter()
+                        .find(|mob| mob.id == 20)
+                        .unwrap()
+                        .extra
+                        .counter,
+                    0
+                );
                 let host: &dyn ClientHost = game;
                 assert_eq!(me.is_passenger(host), Some(false));
                 assert_eq!(me.passengers(host), Some(vec![]));
