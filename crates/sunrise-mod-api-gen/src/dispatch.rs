@@ -937,17 +937,19 @@ pub(super) fn emit<'a>(
             },
             inits.join(", "),
         );
-        // A scoped listener with a writable borrowed payload can still share its
-        // pointee, but every Part gets a fresh event with the original inputs.
+        // Each listener gets a fresh event with the original inputs. Writable borrowed
+        // payloads can still share their pointee. The owner filter and chunk I/O checks
+        // use the outer event, so those dispatch paths cannot use a listener-local one.
         let (build, local_event) = if hook.event_per_listener {
             if contract != Contract::Listen
-                || scoped.is_none()
                 || !write_back.is_empty()
                 || !stack_outputs.is_empty()
-                || name == "block_entity_tick"
+                || hook.owner.is_some()
+                || hook.context == Some(PhaseContext::ChunkDisk)
+                || matches!(name, "blocks" | "items" | "block_entity_tick")
             {
                 return Err(format!(
-                    "{name}: event_per_listener requires a scoped listener without scalar or stack writeback"
+                    "{name}: event_per_listener requires a listener without scalar or stack writeback or shared event state"
                 ));
             }
             (String::new(), build)

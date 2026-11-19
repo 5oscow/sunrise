@@ -215,7 +215,7 @@ impl BlockUpdateFlags {
         self.0 & flags.0 == flags.0
     }
 
-    /// The engine's flag word, keeping even bits not exposed as named API flags.
+    // hidden: game-side conversion of the applied engine flag word, not part of the mod surface
     #[doc(hidden)]
     pub const fn from_bits_retain(bits: i32) -> Self {
         Self(bits)

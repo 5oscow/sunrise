@@ -71,15 +71,28 @@ impl Hooks for Mod {
     }
 }
 
-fn mods(listener: &Listener, changed: &Arc<Mutex<Vec<(bool, BlockUpdateFlags)>>>) -> mod_api::Mods {
-    vec![mod_api::ModEntry::new(
+struct OverwriteFlags(Arc<Mutex<Vec<BlockUpdateFlags>>>);
+
+#[mod_api::__subscriptions]
+impl Hooks for OverwriteFlags {
+    #[listener(priority = 10)]
+    fn block_changed(&self, _: &dyn LevelHost, event: &mut BlockChangedEvent) {
+        self.0.lock().unwrap().push(event.flags);
+        event.flags = BlockUpdateFlags::NONE;
+    }
+}
+
+fn state_change_mod(
+    listener: &Listener,
+    changed: &Arc<Mutex<Vec<(bool, BlockUpdateFlags)>>>,
+) -> mod_api::ModEntry {
+    mod_api::ModEntry::new(
         "state_change",
         Box::new(Mod {
             listener: listener.clone(),
             changed: changed.clone(),
         }),
-    )]
-    .into()
+    )
 }
 
 #[test]
@@ -87,7 +100,15 @@ fn mods(listener: &Listener, changed: &Arc<Mutex<Vec<(bool, BlockUpdateFlags)>>>
 fn a_part_hears_a_state_change_after_the_neighbours_shapes_settled() {
     let listener = Listener::default();
     let changed = Arc::new(Mutex::new(Vec::new()));
-    let mods = mods(&listener, &changed);
+    let overwritten = Arc::new(Mutex::new(Vec::new()));
+    let mods: mod_api::Mods = vec![
+        state_change_mod(&listener, &changed),
+        mod_api::ModEntry::new(
+            "overwrite_flags",
+            Box::new(OverwriteFlags(overwritten.clone())),
+        ),
+    ]
+    .into();
     crate::game::api_values::install_parts(&mods).unwrap();
     mod_platform::testing::with_mods(mods, || {
         with_game(|game| {
@@ -114,15 +135,18 @@ fn a_part_hears_a_state_change_after_the_neighbours_shapes_settled() {
             assert_eq!((asked, new), (api(stone), api(stone)));
             // Removing the stone with KNOWN_SHAPE still fires once, but the fence stays connected.
             changed.lock().unwrap().clear();
+            overwritten.lock().unwrap().clear();
             let skip_shapes = flags::UPDATE_CLIENTS | flags::UPDATE_KNOWN_SHAPE;
             game.with_level(|b, level, ticks| {
                 assert!(b.set_block(level, ticks, at, air, skip_shapes));
                 assert!(!b.set_block(level, ticks, at, air, skip_shapes));
             });
             let applied = BlockUpdateFlags::CLIENTS | BlockUpdateFlags::KNOWN_SHAPE;
+            assert_eq!(*overwritten.lock().unwrap(), [applied]);
             let changed = changed.lock().unwrap();
+            // The higher-priority listener reassigned its copy, but the next still gets the applied flags.
             assert_eq!(*changed, [(true, applied)]);
-            assert!(changed[0].1.contains(applied));
+            assert!(changed[0].1.contains(BlockUpdateFlags::KNOWN_SHAPE));
             assert!(!changed[0].1.contains(ordinary));
             let heard = listener.0.lock().unwrap().clone();
             assert_eq!(heard.len(), 2);
@@ -151,7 +175,7 @@ fn a_client_hears_each_block_the_server_sends_and_each_write_of_a_piston_replay(
     };
     let listener = Listener::default();
     let changed = Arc::new(Mutex::new(Vec::new()));
-    let mods = mods(&listener, &changed);
+    let mods: mod_api::Mods = vec![state_change_mod(&listener, &changed)].into();
     crate::game::api_values::install_parts(&mods).unwrap();
     mod_platform::testing::with_mods(mods, || {
         with_game(|game| {

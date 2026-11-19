@@ -30,4 +30,4 @@ and neighbour updates. `event.flags` gives the flags applied to that write. For 
 `event.flags.contains(BlockUpdateFlags::KNOWN_SHAPE)` tells you that this write skips the
 neighbour shape passes, even though the state change itself is still reported. If a transaction
 staged changes, the notice describes the write applied at commit, not each intermediate change.
-Named injections for `block_changed` request `hook_version = 2`.
+Rebuild listeners against the version 2 hook.

@@ -503,7 +503,7 @@ fn block_observation_follows_successful_commits_only() {
     use std::cell::RefCell;
     #[derive(Debug, PartialEq)]
     enum Observation {
-        Block(BlockPos, BlockStateId, BlockStateId),
+        Block(BlockPos, BlockStateId, BlockStateId, i32),
         Neighbor,
     }
     struct Observer {
@@ -533,12 +533,12 @@ fn block_observation_follows_successful_commits_only() {
             pos: BlockPos,
             old: BlockStateId,
             new: BlockStateId,
-            _: i32,
+            flags: i32,
         ) {
             assert_eq!(self.block_state(pos), new);
             self.seen
                 .borrow_mut()
-                .push(Observation::Block(pos, old, new));
+                .push(Observation::Block(pos, old, new, flags));
         }
         fn observe_neighbor_changed(
             &self,
@@ -563,7 +563,7 @@ fn block_observation_follows_successful_commits_only() {
     let stone = f.registry.default_state("minecraft:stone").unwrap();
     assert!(b.set_block(&mut level, &mut ticks, pos, stone, flags::UPDATE_ALL));
     let seen = level.seen.borrow();
-    assert_eq!(seen[0], Observation::Block(pos, b.air(), stone));
+    assert_eq!(seen[0], Observation::Block(pos, b.air(), stone, 3));
     assert!(seen[1..].contains(&Observation::Neighbor));
     drop(seen);
     level.seen.borrow_mut().clear();
@@ -579,10 +579,16 @@ fn block_observation_follows_successful_commits_only() {
         flags::UPDATE_ALL
     ));
     assert!(level.seen.borrow().is_empty());
-    assert!(b.set_block(&mut level, &mut ticks, pos, b.air(), flags::UPDATE_ALL));
+    assert!(b.set_block(
+        &mut level,
+        &mut ticks,
+        pos,
+        b.air(),
+        flags::UPDATE_CLIENTS | flags::UPDATE_KNOWN_SHAPE,
+    ));
     assert_eq!(
-        level.seen.borrow()[0],
-        Observation::Block(pos, stone, b.air())
+        *level.seen.borrow(),
+        [Observation::Block(pos, stone, b.air(), 18)]
     );
 }
 
