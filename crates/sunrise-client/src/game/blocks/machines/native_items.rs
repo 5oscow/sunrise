@@ -2,7 +2,7 @@
 //! container slots and the composter's state-backed input/output, by the rules hoppers follow.
 //! Side-local slots are numbered from zero. It acts where the world is simulated, never on
 //! a client's copy, and only on the level in place.
-use super::{Game, Kind, PlacementAttempt, Pos, Slots, View};
+use super::{Game, Insertion, Kind, PlacementAttempt, Pos, Slots, View};
 use crate::game::transactions::After;
 use mod_api::__private::game::CapabilityChecked;
 use mod_api::{BlockSide, LevelRef, Transaction};
@@ -207,7 +207,7 @@ impl Game<'_> {
     }
     /// Keeps what a capability write to slot `slot` of `view` changes: that slot alone where a
     /// write there changes nothing else, else each block entity of the view whole.
-    fn journal_view_slot(&mut self, view: &View, slot: usize) {
+    pub(super) fn journal_view_slot(&mut self, view: &View, slot: usize) {
         if matches!(view.kind, Kind::Composter(_)) {
             return;
         }
@@ -265,11 +265,11 @@ impl Game<'_> {
         let Some(slot) = view.capability_slots(at.side).nth(slot) else {
             return Some(stack);
         };
-        let fits = self
-            .containers()
-            .fits(&view, slot, &stack, &mut PlacementAttempt::default());
+        let mut attempt = PlacementAttempt::default();
         if matches!(view.kind, Kind::Composter(_)) {
-            if fits == 0 || !self.composter_capability_insert(at.pos, &stack) {
+            if self.containers().fits(&view, slot, &stack, &mut attempt) == 0
+                || !self.composter_capability_insert(at.pos, &stack)
+            {
                 return Some(stack);
             }
             return (amount > 1).then(|| ItemStack {
@@ -277,21 +277,13 @@ impl Game<'_> {
                 ..stack
             });
         }
-        if fits > 0 {
-            let some = ItemStack {
-                count: fits,
-                ..stack.clone()
-            };
-            self.journal_view_slot(&view, slot);
-            // A jukebox's disc starts at the root commit (`JukeboxBlockEntity.setTheItem`).
-            if self.move_in_item(None, &view, some, slot).1 {
-                self.view_told(&view);
-            }
+        let (rest, moved) =
+            self.move_in_item(Insertion::Capability, &view, stack, slot, &mut attempt);
+        // A jukebox's disc starts at the root commit (`JukeboxBlockEntity.setTheItem`).
+        if moved {
+            self.view_told(&view);
         }
-        (fits < stack.count).then(|| ItemStack {
-            count: stack.count - fits,
-            ..stack
-        })
+        rest
     }
     /// How much of `resource` the slots `at`'s side reaches hold in all (`STORAGE`'s amount),
     /// in one pass over one view of the container.
@@ -392,17 +384,11 @@ impl Game<'_> {
                     count: left.min(u64::from(u32::MAX)) as u32,
                     ..resource.clone()
                 };
-                let fits = self.containers().fits(&view, slot, &stack, &mut attempt);
-                if fits == 0 {
-                    continue;
-                }
-                self.journal_view_slot(&view, slot);
-                let some = ItemStack {
-                    count: fits,
-                    ..resource.clone()
-                };
-                if self.move_in_item(None, &view, some, slot).1 {
-                    left -= u64::from(fits);
+                let offered = stack.count;
+                let (rest, moved) =
+                    self.move_in_item(Insertion::Capability, &view, stack, slot, &mut attempt);
+                if moved {
+                    left -= u64::from(offered - rest.map_or(0, |stack| stack.count));
                     told = true;
                 }
             }

@@ -90,13 +90,11 @@ impl ModBlockEntity {
             rows.iter().any(|row| saved_item_slot(row) == Some(slot)))
     }
 
-    /// A write (including an explicit clear) supersedes raw rows for this index and advances
-    /// the revision, like other mutable borrows of the fields.
+    /// A write (including an explicit clear) supersedes raw rows for this index.
     pub fn item_slot_mut(&mut self, slot: usize) -> Option<&mut Option<ItemStack>> {
         if slot >= self.items.len() {
             return None;
         }
-        self.revision.changes += 1;
         if let Some(Tag::List(rows)) = self.fields.nbt.get_mut(&*ITEMS) {
             rows.retain(|row| saved_item_slot(row) != Some(slot));
         }

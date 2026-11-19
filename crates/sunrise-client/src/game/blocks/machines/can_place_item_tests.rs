@@ -292,25 +292,28 @@ fn native_admission_allocates_only_when_preparing_subscribed_snapshots() {
         let plain = make_entity("admission:plain");
         let mut attempt = PlacementAttempt::default();
         let (plain_answers, plain_allocs) =
-            measure(|| [0, 1].map(|slot| black_box(attempt.ask(&plain, slot, &stack))));
+            measure(|| [0, 1].map(|slot| black_box(attempt.ask((0, 64, 0), &plain, slot, &stack))));
         assert_eq!(plain_answers, [None, None]);
         assert_eq!(plain_allocs, 0);
 
         let mut filtered = make_entity("admission:filtered");
         let mut attempt = PlacementAttempt::default();
-        let (first, setup_allocs) = measure(|| black_box(attempt.ask(&filtered, 0, &stack)));
+        let (first, setup_allocs) =
+            measure(|| black_box(attempt.ask(TARGET, &filtered, 0, &stack)));
         assert_eq!(first, Some(false));
         assert!(
             setup_allocs > 0,
             "allocation counter must observe snapshot creation"
         );
         stack.count = 1;
-        let (next, reuse_allocs) = measure(|| black_box(attempt.ask(&filtered, 2, &stack)));
+        let (next, reuse_allocs) = measure(|| black_box(attempt.ask(TARGET, &filtered, 2, &stack)));
         assert_eq!(next, Some(true));
         assert_eq!(reuse_allocs, 0);
 
         *filtered.item_slot_mut(1).unwrap() = Some(ItemStack::new("minecraft:stone", 1));
-        let (refreshed, refresh_allocs) = measure(|| black_box(attempt.ask(&filtered, 2, &stack)));
+        attempt.wrote_entity();
+        let (refreshed, refresh_allocs) =
+            measure(|| black_box(attempt.ask(TARGET, &filtered, 2, &stack)));
         assert_eq!(refreshed, Some(false));
         assert!(refresh_allocs > 0);
         println!(
