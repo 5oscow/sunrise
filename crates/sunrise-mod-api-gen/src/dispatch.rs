@@ -948,14 +948,18 @@ pub(super) fn emit<'a>(
         // payloads can still share their pointee. Write-back, the owner filter and chunk
         // I/O checks use the outer event and cannot use a listener-local one.
         let (build, local_event) = if hook.event_per_listener {
-            if contract != Contract::Listen
+            // A regular collect output is a mutable borrow of one slot, reborrowed
+            // for each listener above. Answered batches and cancellation have
+            // separate dispatch state and do not use this mode.
+            let shared_collect_output = collected.is_some() && !answered && !collect_cancel;
+            if (contract != Contract::Listen && !shared_collect_output)
                 || !write_back.is_empty()
                 || !stack_outputs.is_empty()
                 || hook.owner.is_some()
                 || hook.context == Some(PhaseContext::ChunkDisk)
             {
                 return Err(format!(
-                    "{name}: event_per_listener requires a listener without scalar or stack writeback or shared event state"
+                    "{name}: event_per_listener requires a listen hook or a collect hook with a shared borrowed output, without scalar or stack writeback or other shared event state"
                 ));
             }
             (String::new(), build)
