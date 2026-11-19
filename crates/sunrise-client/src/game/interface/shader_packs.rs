@@ -1316,7 +1316,10 @@ mod toggle_tests {
         assert_eq!(plan("", "A.zip", true, true), "on A.zip");
         assert_eq!(plan("", "", true, true), "hint");
         assert_eq!(plan("", "A.zip", false, true), "hint-clear");
-        assert_eq!(plan("", "native-frame_owner", true, false), "mod-off native-frame_owner");
+        assert_eq!(
+            plan("", "native-frame_owner", true, false),
+            "mod-off native-frame_owner"
+        );
     }
 
     /// The developer override wins over the pick: the key does nothing.
@@ -1363,12 +1366,18 @@ mod toggle_tests {
         s.set_shader_pick("sunrise:warm");
         s.set_shader_pick("");
         assert_eq!(
-            (s.sunrise.shader_pack.as_str(), s.extras.last_shader_pack.as_str()),
+            (
+                s.sunrise.shader_pack.as_str(),
+                s.extras.last_shader_pack.as_str()
+            ),
             ("", "sunrise:warm")
         );
         s.set_shader_pick(&s.extras.last_shader_pack.clone());
         assert_eq!(
-            (s.sunrise.shader_pack.as_str(), s.extras.last_shader_pack.as_str()),
+            (
+                s.sunrise.shader_pack.as_str(),
+                s.extras.last_shader_pack.as_str()
+            ),
             ("sunrise:warm", "sunrise:warm")
         );
     }

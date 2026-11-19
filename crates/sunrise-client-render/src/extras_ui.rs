@@ -363,7 +363,8 @@ mod tests {
     }
 
     #[test]
-    fn the_wheel_flips_a_switch_and_leaves_the_mod_to_scroll() {        let mut s = Settings::default();
+    fn the_wheel_flips_a_switch_and_leaves_the_mod_to_scroll() {
+        let mut s = Settings::default();
         let mut screen = ExtrasScreen;
         let row = ExtraRow::Item(Item::Sort);
         assert_eq!(
