@@ -232,7 +232,10 @@ class ParityRunnerTests(unittest.TestCase):
             manifest = Path(temp, "selection.json")
             found = parity.harnesses()
             names = parity.named_only(parity.host_config())
-            self.assertLessEqual({"frame_identity", "arrow_mob_permission", "command_exec"}, names.keys())
+            self.assertLessEqual({"frame_identity", "command_exec"}, names.keys())
+            # Every row holds back a harness an automatic run would select: not a PARITY_MANUAL proof, which no run
+            # selects, nor a name that no longer exists.
+            self.assertLessEqual(names.keys(), {parity.base_name(name) for name in found})
             expected = {name for name in found if parity.base_name(name) not in names}
             for args, selected in ((["--all", "--skip-named-only"], expected), (["--all"], set(found)),
                                    (["frame_identity"], {"frame_identity"})):
