@@ -153,3 +153,56 @@ fn taking_down_the_last_matching_file_still_passes_review_check_and_build() {
         "{reason}"
     );
 }
+
+#[test]
+fn a_refused_repo_cache_fails_build_check_and_review_without_any_collection() {
+    use std::fs;
+    use sunrise_mod_package::index::registry::Cache;
+
+    let r = Registry::new();
+    let root = r.0.path();
+    let out = root.join("index.json");
+    let build = || r.run("build", &["head"], &["--out", out.to_str().unwrap()]);
+    r.add("following", "1.0.0", "26.3", "");
+    build().unwrap();
+    let index = Index::parse(&fs::read_to_string(&out).unwrap()).unwrap();
+    let cache = Cache {
+        versions: index.project("following").unwrap().versions.clone(),
+        ..Cache::default()
+    };
+    let entry = root.join("head/mods/following.toml");
+    let inline = fs::read_to_string(&entry).unwrap();
+    let (page, _) = inline.split_once("[[versions]]").unwrap();
+    fs::write(&entry, format!("{page}repo='owner/following'\n")).unwrap();
+    let cache_path = root.join("head/versions/following.json");
+    fs::create_dir_all(cache_path.parent().unwrap()).unwrap();
+    fs::write(&cache_path, serde_json::to_vec(&cache).unwrap()).unwrap();
+    build().unwrap();
+    assert!(
+        Index::parse(&fs::read_to_string(&out).unwrap())
+            .unwrap()
+            .project("following")
+            .is_some()
+    );
+
+    fs::create_dir_all(root.join("base/mods")).unwrap();
+    fs::copy(&entry, root.join("base/mods/following.toml")).unwrap();
+    let review = || {
+        super::main(&[
+            "review".into(),
+            root.join("base").to_str().unwrap().into(),
+            root.join("head").to_str().unwrap().into(),
+            "--author".into(),
+            "author".into(),
+        ])
+    };
+    fs::write(&cache_path, b"{invalid JSON").unwrap();
+    for result in [build(), r.check(), review()] {
+        let error = result.unwrap_err();
+        assert!(error.contains("following.json"), "{error}");
+    }
+    fs::remove_file(&cache_path).unwrap();
+    fs::create_dir(&cache_path).unwrap();
+    let error = build().unwrap_err();
+    assert!(error.contains("following.json"), "{error}");
+}

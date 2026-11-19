@@ -1,8 +1,11 @@
 //! Collection entries and their published pages.
-use super::{Checkout, MAX_ICON, Sources, image, image_bytes, owned_by, owner_ids_error};
-use crate::index::{Collection, Member, page, valid_id};
-use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use super::{Checkout, MAX_ICON, Sources, image, owned_by, owner_ids_error, read_regular};
+use crate::index::{Collection, Member, collections::by_default, page, valid_id};
+use serde::{Deserialize, Deserializer, Serialize};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+};
 
 pub const COLLECTIONS: &str = "collections";
 
@@ -19,7 +22,22 @@ pub struct CollectionEntry {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub owner_ids: Vec<u64>,
     pub icon: String,
+    #[serde(deserialize_with = "checkout_members")]
     pub members: Vec<Member>,
+}
+
+fn checkout_members<'de, D: Deserializer<'de>>(input: D) -> Result<Vec<Member>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct CheckoutMember {
+        id: String,
+        #[serde(default = "by_default")]
+        default: bool,
+    }
+    Ok(Vec::<CheckoutMember>::deserialize(input)?
+        .into_iter()
+        .map(|CheckoutMember { id, default }| Member { id, default })
+        .collect())
 }
 
 impl Checkout {
@@ -27,12 +45,9 @@ impl Checkout {
     pub fn check_collections(&self, src: &Sources<'_>) -> Vec<String> {
         let (collections, mut errors) = self.collection_pages(src);
         let listed: BTreeMap<_, _> = self
-            .entries
-            .iter()
-            .filter(|entry| {
-                !entry.versions.is_empty() || (entry.repo.is_some() && super::listed(entry, src))
-            })
-            .map(|entry| (entry.id.as_str(), &entry.kind))
+            .listed()
+            .filter(|(entry, cache)| !entry.versions.is_empty() || cache.is_some())
+            .map(|(entry, _)| (entry.id.as_str(), &entry.kind))
             .collect();
         for collection in collections {
             errors.extend(collection.check(|id| listed.get(id).copied()));
@@ -135,8 +150,8 @@ pub fn review_collections(base: &Checkout, head: &Checkout, author: &str) -> Vec
                 let icon_changed = old.icon != new.icon
                     || (valid_id(id)
                         && page::check_icon_path(id, Some(&new.icon)).is_none()
-                        && image_bytes(&base.directory, &old.icon, "icons/", MAX_ICON).ok()
-                            != image_bytes(&head.directory, &new.icon, "icons/", MAX_ICON).ok());
+                        && read_regular(&base.directory, Path::new(&old.icon), MAX_ICON).ok()
+                            != read_regular(&head.directory, Path::new(&new.icon), MAX_ICON).ok());
                 if old == new && !icon_changed {
                     continue;
                 }

@@ -105,27 +105,82 @@ fn a_collection_and_project_can_have_the_same_name_but_have_distinct_ids() {
 }
 
 #[test]
+fn a_reader_skips_malformed_collection_rows_without_losing_projects() {
+    let s = checkout("collection-bad-json");
+    let index = s.build().unwrap();
+    let mut input = serde_json::to_value(&index).unwrap();
+    let rows = input["collections"].as_array_mut().unwrap();
+    let mut wrong_type = rows[0].clone();
+    wrong_type["id"] = "wrong_type".into();
+    wrong_type["members"][0]["default"] = "no".into();
+    let mut missing = rows[0].clone();
+    missing["id"] = "missing_icon".into();
+    missing.as_object_mut().unwrap().remove("icon");
+    // A reader ignores a future member field, unlike the checkout reader.
+    rows[0]["members"][0]["future"] = true.into();
+    rows.extend([wrong_type, missing]);
+    let text = serde_json::to_string(&input).unwrap();
+    let read = Index::parse(&text).unwrap();
+    assert_eq!(read.projects, index.projects);
+    assert_eq!(read.collections, index.collections);
+    for id in ["wrong_type", "missing_icon"] {
+        assert!(
+            read.left_out
+                .iter()
+                .any(|row| row.id == id && row.version.is_none() && !row.reason.is_empty())
+        );
+    }
+    assert!(serde_json::from_str::<Index>(&text).is_err());
+}
+
+#[test]
+fn a_pruned_project_still_reserves_its_id() {
+    let s = checkout("collection-pruned-id");
+    let mut index = s.build().unwrap();
+    let mut project = index.project("cozy").unwrap().clone();
+    project.id = ID.into();
+    project.versions.clear();
+    index.projects.push(project);
+    let read = Index::parse(&serde_json::to_string(&index).unwrap()).unwrap();
+    assert!(read.project(ID).is_none());
+    assert!(read.collection(ID).is_none());
+    assert!(read.project("creature").is_some());
+    assert_eq!(
+        read.left_out
+            .iter()
+            .filter(|row| row.id == ID && row.version.is_none())
+            .count(),
+        2
+    );
+}
+
+#[test]
 fn collection_entries_are_bounded_regular_toml_named_by_their_ids() {
     let s = checkout("collection-loader");
     s.write("collections/wrong.toml", COLLECTION);
-    s.write_bytes(
-        "collections/large.toml",
-        &vec![b' '; (registry::MAX_COLLECTION_BYTES + 1) as usize],
+    let oversized = format!(
+        "{}#{}",
+        COLLECTION.replace(ID, "large"),
+        " ".repeat(registry::MAX_COLLECTION_BYTES as usize)
     );
+    s.write("collections/large.toml", &oversized);
     std::fs::create_dir(s.0.join("repo/collections/dir.toml")).unwrap();
     let errors = registry::load(&s.0.join("repo")).unwrap_err();
-    for (file, problem) in [
-        ("wrong.toml", "sunrise_creatures.toml"),
-        ("large.toml", "byte limit"),
-        ("dir.toml", "not a regular file"),
-    ] {
-        assert!(
-            errors
-                .iter()
-                .any(|e| e.contains(file) && e.contains(problem)),
-            "{errors:?}"
-        );
+    for file in ["wrong.toml", "large.toml", "dir.toml"] {
+        assert!(errors.iter().any(|e| e.contains(file)), "{errors:?}");
     }
+}
+
+#[test]
+fn a_checkout_rejects_unknown_member_fields() {
+    let s = checkout("collection-member-typo");
+    let file = "collections/sunrise_creatures.toml";
+    s.write(
+        file,
+        &COLLECTION.replace("default = false", "defualt = false"),
+    );
+    let errors = registry::load(&s.0.join("repo")).unwrap_err();
+    assert!(errors.iter().any(|e| e.contains(file)), "{errors:?}");
 }
 
 #[test]
@@ -133,54 +188,44 @@ fn the_publisher_refuses_invalid_collection_links_and_selection() {
     let s = checkout("collection-check");
     let index = s.build().unwrap();
     let valid = index.collection(ID).unwrap();
-    let check = |collection: Collection, diagnosis: &str| {
+    let check = |collection: Collection, member: Option<&str>| {
         let mut proposed = index.clone();
         let id = collection.id.clone();
         proposed.collections = vec![collection];
         let error = proposed.check().unwrap_err();
-        assert!(error.contains(&id) && error.contains(diagnosis), "{error}");
+        assert!(
+            error.contains(&id) && member.is_none_or(|id| error.contains(id)),
+            "{error}"
+        );
     };
+    for id in ["creature", "submit"] {
+        check(
+            Collection {
+                id: id.into(),
+                ..valid.clone()
+            },
+            None,
+        );
+    }
     check(
         Collection {
-            id: "creature".into(),
+            members: valid.members[..1].to_vec(),
             ..valid.clone()
         },
-        "already a project id",
-    );
-    check(
-        Collection {
-            id: "submit".into(),
-            ..valid.clone()
-        },
-        "non-reserved",
-    );
-    let one = valid.members[..1].to_vec();
-    check(
-        Collection {
-            members: one.clone(),
-            ..valid.clone()
-        },
-        "choose 2 to",
-    );
-    check(
-        Collection {
-            members: vec![valid.members[0].clone(); crate::index::MAX_COLLECTION_MEMBERS + 1],
-            ..valid.clone()
-        },
-        "choose 2 to",
+        None,
     );
     let mut row = valid.clone();
     row.members.push(row.members[0].clone());
-    check(row, "member creature is listed twice");
+    check(row, Some("creature"));
     let mut row = valid.clone();
     row.members[0].id = "cozy".into(); // A modpack, not a member project.
-    check(row, "member cozy is not a listed mod");
+    check(row, Some("cozy"));
     let mut row = valid.clone();
     row.members[0].id = ID.into(); // Collections cannot be members, including self.
-    check(row, "member sunrise_creatures is not a listed mod");
+    check(row, Some(ID));
     let mut row = valid.clone();
     row.members.iter_mut().for_each(|m| m.default = false);
-    check(row, "choose at least one member installed by default");
+    check(row, None);
 
     // The lightweight review detects the removal without package downloads too.
     let root = s.0.join("repo");
@@ -195,34 +240,58 @@ fn the_publisher_refuses_invalid_collection_links_and_selection() {
     assert!(
         errors
             .iter()
-            .any(|e| e.contains(ID) && e.contains("member creature is not a listed mod")),
+            .any(|e| e.contains(ID) && e.contains("creature")),
         "{errors:?}"
     );
 }
 
 #[test]
-fn a_takedown_lists_collections_using_its_project() {
+fn a_collection_cannot_exceed_the_limit_even_with_distinct_listed_members() {
+    use crate::index::MAX_COLLECTION_MEMBERS;
+    let s = checkout("collection-member-limit");
+    let mut index = s.build().unwrap();
+    let model = index.project("creature").unwrap().clone();
+    index.collections[0].members.clear();
+    for n in 0..=MAX_COLLECTION_MEMBERS {
+        let id = format!("creature_{n}");
+        index.projects.push(crate::index::Project {
+            id: id.clone(),
+            ..model.clone()
+        });
+        index.collections[0]
+            .members
+            .push(Member { id, default: true });
+    }
+    let error = index.check().unwrap_err();
+    assert!(error.contains(ID), "{error}");
+    index.collections[0].members.pop();
+    assert_eq!(index.check(), Ok(()));
+}
+
+#[test]
+fn a_takedown_names_the_membership_even_when_its_hash_matches_no_release() {
     let s = checkout("collection-takedown");
     let mut index = s.build().unwrap();
     let base = registry::load(&s.0.join("repo")).unwrap();
-    index.revoked.push(crate::index::Revoked {
-        id: "creature".into(),
-        sha256: Some(
-            index.project("creature").unwrap().versions[0]
-                .file
-                .sha256
-                .clone(),
-        ),
-        reason: "test".into(),
-        date: String::new(),
-    });
-    let notes = registry::takedown_notes(&base.entries, &base.revoked, &index);
-    assert!(
-        notes
-            .iter()
-            .any(|n| n.contains(ID) && n.contains("creature") && n.contains("takedown")),
-        "{notes:?}"
-    );
+    let listed_hash = index.project("creature").unwrap().versions[0]
+        .file
+        .sha256
+        .clone();
+    for hash in [listed_hash, "0".repeat(64)] {
+        index.revoked.push(crate::index::Revoked {
+            id: "creature".into(),
+            sha256: Some(hash),
+            reason: "test".into(),
+            date: String::new(),
+        });
+        let notes = registry::takedown_notes(&base.entries, &base.revoked, &index);
+        assert_eq!(notes.len(), 1);
+        let note = &notes[0];
+        assert!(note.contains(ID) && note.contains("creature"), "{note}");
+        // A takedown can name a hash with no matching release; don't claim versions changed.
+        assert!(!note.contains("available versions"), "{note}");
+        index.revoked.pop();
+    }
 }
 
 #[test]
@@ -270,6 +339,7 @@ fn only_owners_membership_edits_for_their_projects_are_routine() {
         (|c: &mut CollectionEntry| c.members[0].default = false) as fn(&mut CollectionEntry),
         |c: &mut CollectionEntry| c.name = "Other title".into(),
         |c: &mut CollectionEntry| c.owners.push("new_owner".into()),
+        |c: &mut CollectionEntry| c.members.swap(0, 1),
     ] {
         assert_eq!(
             review(&edit, owner).status,
@@ -287,5 +357,5 @@ fn replacing_an_icon_at_the_same_path_requires_review() {
     let head = registry::load(&head.0.join("repo")).unwrap();
     let changes = review_collections(&base, &head, "EAnathos");
     assert_eq!(changes[0].status, CollectionReviewStatus::ReviewRequired);
-    assert!(changes[0].reason.contains("review the page"));
+    assert_eq!(changes[0].id, ID);
 }

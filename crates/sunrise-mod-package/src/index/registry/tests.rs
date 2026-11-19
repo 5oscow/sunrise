@@ -678,6 +678,50 @@ fn a_project_listed_by_its_repository_takes_its_versions_from_releases() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn screenshots_and_caches_refuse_linked_ancestor_directories() {
+    use std::{fs, os::unix::fs::symlink};
+    let s = Scratch::new("linked-screenshot-ancestor");
+    let root = s.0.join("repo");
+    let with_screenshot = hud_entry().replace(
+        "[[versions]]",
+        "screenshots = ['screenshots/coords_hud/view.png']\n\n[[versions]]",
+    );
+    s.write("mods/coords_hud.toml", &with_screenshot);
+    s.write_bytes("screenshots/coords_hud/view.png", &png(640, 360));
+    let index = s.build().unwrap();
+    assert_eq!(index.project("coords_hud").unwrap().screenshots.len(), 1);
+    let outside = s.0.join("outside-screenshots");
+    fs::rename(root.join("screenshots"), &outside).unwrap();
+    symlink(outside, root.join("screenshots")).unwrap();
+    let errors = s.build().unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("coords_hud") && e.contains("view.png")),
+        "{errors:?}"
+    );
+    fs::remove_file(root.join("screenshots")).unwrap();
+    s.write("mods/coords_hud.toml", &hud_entry());
+
+    s.write(
+        "mods/cozy.toml",
+        &format!("{COZY_REPO}name='Cozy'\nsummary='Calm.'\nlicense='MIT'\n"),
+    );
+    let cache = Cache {
+        versions: index.project("cozy").unwrap().versions.clone(),
+        ..Cache::default()
+    };
+    s.write_bytes("versions/cozy.json", &serde_json::to_vec(&cache).unwrap());
+    assert!(s.build().unwrap().project("cozy").is_some());
+    let outside = s.0.join("outside-versions");
+    fs::rename(root.join("versions"), &outside).unwrap();
+    symlink(outside, root.join("versions")).unwrap();
+    let errors = s.build().unwrap_err();
+    assert!(errors.iter().any(|e| e.contains("cozy.json")), "{errors:?}");
+}
+
 #[test]
 fn native_binaries_round_trip_and_exact_lookup() {
     let scratch = Scratch::new("native-binaries");

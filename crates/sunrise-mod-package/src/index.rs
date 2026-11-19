@@ -45,11 +45,11 @@ pub struct Index {
     pub left_out: Vec<LeftOut>,
 }
 
-/// A project, a version or a takedown [`Index::parse`] left out, and why.
+/// A project, version, collection or takedown [`Index::parse`] left out, and why.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LeftOut {
     pub id: String,
-    /// None: the whole project (or the takedown).
+    /// None: the whole project, collection or takedown.
     pub version: Option<String>,
     pub reason: String,
 }
@@ -393,7 +393,33 @@ impl Index {
                 head.schema
             ));
         }
-        let mut index: Index = serde_json::from_str(text).map_err(|e| format!("mod index: {e}"))?;
+        // Only readers isolate malformed rows. Deserializing an Index directly stays strict.
+        #[derive(Deserialize)]
+        struct ReadIndex {
+            #[serde(flatten)]
+            index: Index,
+            #[serde(default)]
+            collections: Vec<serde_json::Value>,
+        }
+        let ReadIndex {
+            mut index,
+            collections,
+        } = serde_json::from_str(text).map_err(|e| format!("mod index: {e}"))?;
+        for (position, row) in collections.into_iter().enumerate() {
+            let id = row
+                .get("id")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+                .unwrap_or_else(|| format!("collections[{position}]"));
+            match serde_json::from_value(row) {
+                Ok(collection) => index.collections.push(collection),
+                Err(error) => index.left_out.push(LeftOut {
+                    id,
+                    version: None,
+                    reason: format!("invalid collection: {error}"),
+                }),
+            }
+        }
         index.keep_valid(local_files);
         Ok(index)
     }
@@ -447,11 +473,11 @@ impl Index {
     }
 
     /// What a reader keeps of an index that fails [`Index::check`]: each project, version and
-    /// takedown that fails its own rule is left out with its reason ([`Index::left_out`]), and
+    /// collection or takedown that fails its own rule is left out with its reason ([`Index::left_out`]), and
     /// the rest loads. A modpack version whose mod was left out goes too, and so does a project
     /// left with no version. An id listed twice leaves out every project with that id.
     fn keep_valid(&mut self, local_files: bool) {
-        let mut left_out = Vec::new();
+        let mut left_out = std::mem::take(&mut self.left_out);
         let mut listed: std::collections::HashMap<String, usize> = Default::default();
         for p in &self.projects {
             *listed.entry(p.id.clone()).or_default() += 1;
@@ -517,6 +543,11 @@ impl Index {
             let reason = if collection_counts[&collection.id] > 1 {
                 Some(format!(
                     "collection {}: listed twice; pick distinct ids",
+                    collection.id
+                ))
+            } else if listed.contains_key(&collection.id) {
+                Some(format!(
+                    "collection {}: its id is already a project id: pick another collection id",
                     collection.id
                 ))
             } else {

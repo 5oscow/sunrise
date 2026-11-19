@@ -27,7 +27,7 @@ pub struct Member {
     pub default: bool,
 }
 
-fn by_default() -> bool {
+pub(super) fn by_default() -> bool {
     true
 }
 

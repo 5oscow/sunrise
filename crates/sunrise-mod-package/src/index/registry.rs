@@ -13,7 +13,7 @@ use super::{
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::collections::BTreeMap;
 use std::io::{self, Read};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 mod collections;
 pub use collections::{
@@ -129,8 +129,11 @@ const MAX_CHANGELOG: usize = 6000;
 impl Cache {
     /// `<registry>/versions/<id>.json`; empty when there is none.
     pub fn read(registry: &Path, id: &str) -> Result<Cache, String> {
-        let path = registry.join(CACHE).join(format!("{id}.json"));
-        match read_regular(&path, MAX_PROJECT_BYTES) {
+        if !valid_id(id) {
+            return Err(format!("{id:?}: invalid project id for a release cache"));
+        }
+        let path = Path::new(CACHE).join(format!("{id}.json"));
+        match read_regular(registry, &path, MAX_PROJECT_BYTES) {
             Ok(bytes) => {
                 serde_json::from_slice(&bytes).map_err(|e| format!("{}: {e}", path.display()))
             }
@@ -289,9 +292,24 @@ pub struct Checkout {
     pub entries: Vec<Entry>,
     pub collections: Vec<CollectionEntry>,
     pub revoked: Vec<Revoked>,
+    caches: BTreeMap<String, Cache>,
 }
 
-/// Reads `mods/*.toml`, `collections/*.toml` and `revoked.toml`, reporting all input errors.
+impl Checkout {
+    /// A repo-backed project waits for its first release. A rejected cache never reaches here.
+    fn listed(&self) -> impl Iterator<Item = (&Entry, Option<&Cache>)> {
+        self.entries.iter().filter_map(|entry| {
+            let cache = self.caches.get(&entry.id);
+            let listed = entry.repo.is_none()
+                || !entry.versions.is_empty()
+                || cache.is_some_and(|c| !c.versions.is_empty());
+            listed.then_some((entry, cache))
+        })
+    }
+}
+
+/// Reads `mods/*.toml`, `collections/*.toml`, `revoked.toml` and the repo-backed projects'
+/// release caches, reporting all input errors.
 pub fn load(registry: &Path) -> Result<Checkout, Vec<String>> {
     let mut errors = Vec::new();
     let entries = load_entries(
@@ -310,7 +328,8 @@ pub fn load(registry: &Path) -> Result<Checkout, Vec<String>> {
         |c: &CollectionEntry| &c.id,
         &mut errors,
     );
-    let revoked = match read_regular(&registry.join(REVOKED), MAX_REVOKED_BYTES).and_then(utf8) {
+    let revoked = match read_regular(registry, Path::new(REVOKED), MAX_REVOKED_BYTES).and_then(utf8)
+    {
         Ok(text) => match toml::from_str::<RevokedFile>(&text) {
             Ok(file) => file.revoked,
             Err(e) => {
@@ -324,12 +343,22 @@ pub fn load(registry: &Path) -> Result<Checkout, Vec<String>> {
             Vec::new()
         }
     };
+    let mut caches = BTreeMap::new();
+    for entry in entries.iter().filter(|e| e.repo.is_some()) {
+        match Cache::read(registry, &entry.id) {
+            Ok(cache) => {
+                caches.insert(entry.id.clone(), cache);
+            }
+            Err(error) => errors.push(error),
+        }
+    }
     if errors.is_empty() {
         Ok(Checkout {
             directory: registry.to_owned(),
             entries,
             collections,
             revoked,
+            caches,
         })
     } else {
         Err(errors)
@@ -345,15 +374,7 @@ fn load_entries<T: DeserializeOwned>(
     errors: &mut Vec<String>,
 ) -> Vec<T> {
     let dir = registry.join(folder);
-    let read = std::fs::symlink_metadata(&dir).and_then(|meta| {
-        if !meta.is_dir() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "not a regular directory",
-            ));
-        }
-        std::fs::read_dir(&dir)
-    });
+    let read = checkout_path(registry, Path::new(folder), true).and_then(std::fs::read_dir);
     let read = match read {
         Ok(read) => read,
         Err(error) if optional && error.kind() == io::ErrorKind::NotFound => return Vec::new(),
@@ -365,19 +386,19 @@ fn load_entries<T: DeserializeOwned>(
     let mut paths = Vec::new();
     for row in read {
         match row {
-            Ok(row) => paths.push(row.path()),
+            Ok(row) => paths.push(row.file_name()),
             Err(error) => errors.push(format!("{}: {error}", dir.display())),
         }
     }
     paths.sort();
     let mut entries = Vec::new();
     for path in paths {
-        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        let name = path.to_str().unwrap_or("");
         let Some(stem) = name.strip_suffix(".toml") else {
             errors.push(format!("{folder}/{name}: only <id>.toml files go here"));
             continue;
         };
-        let parsed = read_regular(&path, max_bytes)
+        let parsed = read_regular(registry, &Path::new(folder).join(&path), max_bytes)
             .and_then(utf8)
             .map_err(|e| e.to_string())
             .and_then(|text| toml::from_str::<T>(&text).map_err(|e| e.to_string()));
@@ -394,11 +415,47 @@ fn load_entries<T: DeserializeOwned>(
     entries
 }
 
-fn read_regular(path: &Path, max: u64) -> io::Result<Vec<u8>> {
-    let not_regular = || io::Error::new(io::ErrorKind::InvalidData, "not a regular file");
-    if !std::fs::symlink_metadata(path)?.is_file() {
-        return Err(not_regular());
+/// Only descend through real directories under the trusted checkout root. The same policy
+/// covers entry directories, caches, and images at any depth.
+fn checkout_path(root: &Path, relative: &Path, directory: bool) -> io::Result<PathBuf> {
+    let invalid_path = || {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "expected a relative checkout path",
+        )
+    };
+    let mut path = root.to_owned();
+    let mut components = relative.components().peekable();
+    if components.peek().is_none() {
+        return Err(invalid_path());
     }
+    while let Some(component) = components.next() {
+        let Component::Normal(name) = component else {
+            return Err(invalid_path());
+        };
+        // Push only a single relative name, not a prefix reinterpreted by the host filesystem.
+        if !matches!(
+            Path::new(name).components().next(),
+            Some(Component::Normal(_))
+        ) {
+            return Err(invalid_path());
+        }
+        path.push(name);
+        let meta = std::fs::symlink_metadata(&path)?;
+        let want_dir = directory || components.peek().is_some();
+        if (want_dir && !meta.is_dir()) || (!want_dir && !meta.is_file()) {
+            let expected = if want_dir { "directory" } else { "file" };
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("{} is not a regular {expected}", path.display()),
+            ));
+        }
+    }
+    Ok(path)
+}
+
+fn read_regular(root: &Path, relative: &Path, max: u64) -> io::Result<Vec<u8>> {
+    let path = checkout_path(root, relative, false)?;
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
@@ -408,7 +465,10 @@ fn read_regular(path: &Path, max: u64) -> io::Result<Vec<u8>> {
     }
     let file = options.open(path)?;
     if !file.metadata()?.is_file() {
-        return Err(not_regular());
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "not a regular file",
+        ));
     }
     let mut bytes = Vec::new();
     file.take(max + 1).read_to_end(&mut bytes)?;
@@ -444,20 +504,16 @@ fn plain_date(d: &str) -> bool {
             .all(|(i, c)| i == 4 || i == 7 || c.is_ascii_digit())
 }
 
-/// Whether the index lists the project: a project listed by its repository waits for its first
-/// release version before it appears.
-pub fn listed(entry: &Entry, src: &Sources) -> bool {
-    let cached = entry.repo.is_some()
-        && Cache::read(src.registry, &entry.id).is_ok_and(|c| !c.versions.is_empty());
-    !entry.versions.is_empty() || cached || entry.repo.is_none()
-}
-
 /// One project's entry and its files, as the index lists them.
 pub fn project(entry: &Entry, src: &Sources) -> Result<Project, Vec<String>> {
     let cache = match &entry.repo {
         Some(_) => Cache::read(src.registry, &entry.id).map_err(|e| vec![e])?,
         None => Cache::default(),
     };
+    project_with_cache(entry, &cache, src)
+}
+
+fn project_with_cache(entry: &Entry, cache: &Cache, src: &Sources) -> Result<Project, Vec<String>> {
     let entry = &entry.resolved(&cache.page);
     let mut errors = entry.check_fields();
     let id = &entry.id;
@@ -485,7 +541,7 @@ pub fn project(entry: &Entry, src: &Sources) -> Result<Project, Vec<String>> {
     }
     // The versions read from the repository's releases passed their checks when they were read.
     // Newest first, the registry's own before them on a tie.
-    versions.extend(cache.versions);
+    versions.extend(cache.versions.iter().cloned());
     versions.sort_by(|a: &Version, b| b.published.cmp(&a.published));
     if !errors.is_empty() {
         return Err(errors);
@@ -539,7 +595,7 @@ fn image(
     } else {
         rules::MAX_SCREENSHOT
     };
-    let checked = image_bytes(src.registry, path, folder, max)
+    let checked = read_regular(src.registry, Path::new(path), max)
         .map_err(|e| format!("{path}: {e}"))
         .and_then(|bytes| {
             if icon {
@@ -556,17 +612,6 @@ fn image(
             None
         }
     }
-}
-
-fn image_bytes(registry: &Path, path: &str, folder: &str, max: u64) -> io::Result<Vec<u8>> {
-    let dir = std::fs::symlink_metadata(registry.join(folder.trim_end_matches('/')))?;
-    if !dir.is_dir() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "image folder is not a regular directory",
-        ));
-    }
-    read_regular(&registry.join(path), max)
 }
 
 fn version(entry: &Entry, v: &EntryVersion, src: &Sources) -> Result<Version, String> {
@@ -747,15 +792,10 @@ impl Entry {
 pub fn build(src: &Sources) -> Result<Index, Vec<String>> {
     let checkout = load(src.registry)?;
     let mut errors = Vec::new();
-    for entry in checkout.entries.iter().filter(|e| listed(e, src)) {
+    let empty = Cache::default();
+    for (entry, cache) in checkout.listed() {
         // A listed project's page is complete (registry v2's rollout, step 4).
-        let page = match &entry.repo {
-            Some(_) => Cache::read(src.registry, &entry.id)
-                .map(|c| c.page)
-                .unwrap_or_default(),
-            None => Page::default(),
-        };
-        let e = entry.resolved(&page);
+        let e = entry.resolved(&cache.unwrap_or(&empty).page);
         errors.extend(
             rules::check_required(
                 &e.id,
@@ -786,8 +826,9 @@ pub fn build(src: &Sources) -> Result<Index, Vec<String>> {
 pub fn candidate(checkout: &Checkout, src: &Sources) -> Result<Index, Vec<String>> {
     let mut projects = Vec::new();
     let (collections, mut errors) = checkout.collection_pages(src);
-    for entry in checkout.entries.iter().filter(|e| listed(e, src)) {
-        match project(entry, src) {
+    let empty = Cache::default();
+    for (entry, cache) in checkout.listed() {
+        match project_with_cache(entry, cache.unwrap_or(&empty), src) {
             Ok(p) => projects.push(p),
             Err(e) => errors.extend(e),
         }
@@ -1023,7 +1064,7 @@ pub fn takedown_notes(base: &[Entry], previous: &[Revoked], head: &Index) -> Vec
         for collection in &head.collections {
             if collection.members.iter().any(|member| member.id == r.id) {
                 notes.insert(format!(
-                    "collection {} lists {}: this takedown affects that member's available versions",
+                    "collection {} lists {}, which has a new takedown",
                     collection.id, r.id
                 ));
             }
