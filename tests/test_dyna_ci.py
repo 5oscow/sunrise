@@ -50,7 +50,8 @@ class DynaRoutingTests(unittest.TestCase):
                  ("", str(now - 55 * 60 - 1), 55 * 60, 1, 60, "false"),
                  ("", "9999999999", 3601, 1, 60, "false"),
                  # A re-run two hours after the run was created: its own snapshot, judged at the attempt's start.
-                 ("", str(now + 12 * 60), 2 * 3600, 2, 60, "true"),
+                 # Lapsed by now, valid at the attempt's start: judged at the start, not now.
+                 ("", str(now - 30), 2 * 3600, 2, 60, "true"),
                  ("", str(now - 61), 2 * 3600, 2, 60, "false"),
                  ("", "9999999999", 2 * 3600, 2, 3601, "false"))
         with tempfile.TemporaryDirectory() as directory:
