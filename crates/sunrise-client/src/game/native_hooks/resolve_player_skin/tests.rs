@@ -84,7 +84,7 @@ fn live_skin_selection_reaches_the_hand_body_and_preview_and_restores_vanilla() 
                 // from the hook. Parts outside the sprite do not count (armor, items, GUI chrome).
                 let draw = |game: &mut crate::game::Game<'_>, key: &str| {
                     let Rect { u0, v0, u1, v1, .. } = game.gui.atlas.sprites[key];
-                    let inside = |[u, v]| u0 <= u && u < u1 && v0 <= v && v < v1;
+                    let inside = |[u, v]: [f32; 2]| u0 <= u && u < u1 && v0 <= v && v < v1;
                     let mut hand = Vec::new();
                     let mut body = false;
                     let mut preview = false;
