@@ -324,14 +324,19 @@ impl Game<'_> {
             None => [0.0; 4],
         };
         let none = screen == Screen::Playing;
+        // Only the inventory screen shows a server's menu: a menu staged for
+        // the screen asked for is not the current pause or chat screen's.
+        let menu_shown = screen == Screen::Inventory;
         ScreenView::from(mod_api::__private::built::ScreenView {
             id: screen.id(),
-            menu: self.remote_menu_type().filter(|m| !none && !m.is_empty()),
+            menu: self
+                .remote_menu_type()
+                .filter(|m| menu_shown && !m.is_empty()),
             title: self
                 .remote
                 .as_ref()
                 .and_then(|r| r.menu_title_snapshot())
-                .filter(|_| !none),
+                .filter(|_| menu_shown),
             rect,
             slots: if none { 0 } else { self.slot_count() },
             mouse: self.cursor(),
