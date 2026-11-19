@@ -2221,8 +2221,8 @@ impl Hub {
         });
     }
 
-    /// ClientboundSetDefaultSpawnPositionPacket for the level's respawn data
-    /// (the world spawn, in the Overworld wherever the player is).
+    /// ClientboundSetDefaultSpawnPositionPacket for the world's respawn data:
+    /// the world spawn in `dimension`, its level, wherever the player is.
     pub fn default_spawn(&self, spawn: [f64; 3], angle: [f32; 2], dimension: &str) -> C {
         C::SetDefaultSpawnPosition(play::SetDefaultSpawnPosition {
             pos: play::GlobalPos {
