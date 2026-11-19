@@ -96,9 +96,16 @@ console.log(JSON.stringify(eval(expression)));
                     if row.get("mac"):
                         expected = dedicated if trusted else ("macos-15" if disabled or override else default_mac)
                     else:
-                        expected = row["os"]
+                        expected = row.get("blacksmith", row["os"])
                     with self.subTest(entry=row["name"]):
                         self.assertEqual(evaluate(expressions[1], row, trusted), expected)
+        # BLACKSMITH=off: every leg back on the runner it had before.
+        variables = {"BLACKSMITH": "off"}
+        for row in rows:
+            if not row.get("mac"):
+                with self.subTest(entry=row["name"], blacksmith="off"):
+                    self.assertEqual(evaluate(expressions[1], row, False), row["os"])
+        self.assertEqual({row["name"] for row in rows if row.get("blacksmith")}, {"linux", "linux-musl", "windows"})
 
         timeout = re.search(r"^\s*timeout-minutes:\s*\$\{\{(.*?)\}\}", workflow_jobs["build"], re.M).group(1)
         for repository, trusted, row in itertools.product(["sunrise-org/sunrise", "horizon-rust/horizon"], [False, True], rows):
@@ -155,11 +162,14 @@ console.log(JSON.stringify(Boolean(eval(s.expression))));
     def test_hosted_runners_never_use_machine_specific_tool_setup(self):
         steps = [block for block in GAME.read_text().split("\n      - ") if "bash tools/ci/runner-env.sh" in block]
         self.assertEqual(len(steps), 2)
-        for step in steps:
+        for step, blacksmith_legs in zip(steps, [False, True]):  # the exporters' step, then the build legs'
             condition = re.search(r"^\s*if:\s*(.*)$", step, re.M).group(1)
-            for environment in ["github-hosted", "self-hosted"]:
-                expression = condition.replace("runner.environment", repr(environment))
-                self.assertEqual(eval(expression, {"__builtins__": {}}), environment == "self-hosted")
+            # A Blacksmith machine reports itself as self-hosted, and is set up as GitHub's own.
+            for environment, blacksmith in [("github-hosted", "false"), ("self-hosted", "false"),
+                                            *([("self-hosted", "true")] if blacksmith_legs else [])]:
+                expression = (condition.replace("runner.environment", repr(environment))
+                              .replace("env.ON_BLACKSMITH", repr(blacksmith)).replace("&&", " and ").replace("||", " or "))
+                self.assertEqual(eval(expression, {"__builtins__": {}}), environment == "self-hosted" and blacksmith == "false")
 
     @unittest.skipUnless(os.name == "posix", "The pick step runs in Bash on Linux")
     def test_pick_failure_preserves_its_error_without_missing_notes_noise(self):
