@@ -1,5 +1,11 @@
 use super::*;
 
+/// The creative-slot wire codec bounds a stack's count to 1..=99; an item whose
+/// own max stack size a native mod raised past 99 becomes the ceiling instead.
+fn creative_count_bound(item_max_stack: u32) -> u32 {
+    item_max_stack.max(99)
+}
+
 impl Game<'_> {
     /// DedicatedServer.isUnderSpawnProtection: no operators, an operator or a
     /// radius of 0 or less is never under it; else a block within the radius
@@ -1233,14 +1239,14 @@ impl Game<'_> {
     /// What ServerboundSetCreativeModeSlotPacket asks of a stack. Its codec
     /// (`ItemStack.validatedStreamCodec`) encodes the stack with `ItemStack.CODEC`, whose count is
     /// 1 to 99: more fails the packet and disconnects the player, as vanilla's decoder error does.
-    /// A native mod can raise an item's stack size past 99 (`item_defaults::MAX_STACK_SIZE`), so
-    /// the count is held to what the wire carries instead. handleSetCreativeModeSlot's `validData`
-    /// then ignores a stack beyond its own stack size.
+    /// A native mod can raise an item's own stack size past 99, which raises the ceiling instead.
+    /// handleSetCreativeModeSlot's `validData` then ignores a stack beyond its own stack size.
     pub(super) fn creative_stack_valid(&mut self, gi: usize, s: &ItemStack) -> bool {
+        let size = self.stack_max_size(s);
+        let max = creative_count_bound(size);
         let Some(host) = self.lan.as_mut() else {
             return false;
         };
-        let max = sunrise_world::item_defaults::MAX_STACK_SIZE as u32;
         if s.count > max {
             let g = &host.hub.guests[gi];
             let conn = g.conn;
@@ -1250,7 +1256,7 @@ impl Game<'_> {
                 .kick(conn, sunrise_protocol::text::literal(&reason));
             return false;
         }
-        s.count <= self.stack_max_size(s)
+        s.count <= size
     }
 
     pub(super) fn item_from_network(
@@ -1308,5 +1314,26 @@ impl Game<'_> {
             g.new_body(true);
         });
         host.hub.teleport(gi, Some(at));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::creative_count_bound;
+
+    #[test]
+    fn creative_count_bound_kicks_vanilla_100_but_not_modded_own_size() {
+        // A vanilla item (own max stack 64 or 1) stays on the wire's 1..=99 bound.
+        for own_max in [1, 64] {
+            let bound = creative_count_bound(own_max);
+            assert_eq!(bound, 99);
+            assert!(99 <= bound, "99 must not kick a vanilla item");
+            assert!(100 > bound, "100 must kick a vanilla item");
+        }
+        // An item a native mod raised past 99 is allowed up to its own max stack.
+        let bound = creative_count_bound(500);
+        assert_eq!(bound, 500);
+        assert!(500 <= bound, "500 must not kick a modded item");
+        assert!(501 > bound, "501 must kick a modded item");
     }
 }
