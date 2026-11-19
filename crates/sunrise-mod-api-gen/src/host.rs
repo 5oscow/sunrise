@@ -608,7 +608,7 @@ pub(super) fn game_forwarders(root: &Path) -> Result<String, String> {
 /// The error types a gated method may refuse with: those the mod vocabulary crate implements
 /// `AccessRefusal` for. The `impl` is the marker, so a new refusal-shaped error is one `impl` and
 /// no entry in a list here.
-fn refusal_errors(root: &Path) -> Result<std::collections::BTreeSet<String>, String> {
+pub(crate) fn refusal_errors(root: &Path) -> Result<std::collections::BTreeSet<String>, String> {
     // Every file of the crate's source folder: its module tree is generated, so it is not walked
     // from `lib.rs`.
     let mut errors = std::collections::BTreeSet::new();

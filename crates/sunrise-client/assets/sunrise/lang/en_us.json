@@ -473,6 +473,8 @@
   "sunrise.extras.sort_key.tooltip": "Sorts the part under the cursor. Click, then press a key; Escape unbinds it.",
   "sunrise.extras.ui_sound_reserve": "Keep channels for UI sounds",
   "sunrise.extras.ui_sound_reserve.tooltip": "Sounds in the world leave 16 of the 247 sound channels free, so a flood of them (a big explosion) can't silence menu clicks.",
+  "sunrise.extras.mod_audio_streams": "Mod audio streams",
+  "sunrise.extras.mod_audio_streams.tooltip": "Mods can play audio they make (voice chat, a radio, a music player). Off, all of it plays on unheard.",
   "sunrise.extras.wheel_cycles_list_settings.tooltip": "The scroll wheel over a button in a settings list changes its value. Off, as in vanilla, the wheel scrolls the list.",
   "sunrise.extras.wheel_cycles_settings": "Scroll wheel changes settings",
   "sunrise.extras.zoom": "Zoom",

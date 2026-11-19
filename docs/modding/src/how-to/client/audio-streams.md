@@ -34,12 +34,18 @@ let accepted = stream.push(&samples);
 
 The handle has `push`, `set_placement`, `set_volume`, `state`, `buffered_ms` and `stop`. **Dropping the handle stops the stream**, so keep it for as long as the stream should play. Muffling (`muffle_sounds`) applies to streams like every other sound.
 
+A stopped stream's samples are freed by the game, whatever handles you keep: afterwards `push` returns 0, `state` reads `Stopped` and `buffered_ms` reads 0.
+
+## The player's switch
+
+Sunrise Extras has a "Mod audio streams" switch (Sound section), on by default. Off, every mod stream still opens and its audio is still consumed, but nothing is heard, so a mod needs no special case and builds up no latency.
+
 ## What `state` says
 
 - `Buffering`: silent while the ring fills, or after it ran dry.
 - `Playing`: audible.
 - `Unplaced`: playing, but at a place nobody hears (below).
-- `Stopped`: `stop` was called or the handle dropped. It never plays again.
+- `Stopped`: `stop` was called, the handle dropped, or the game's sound output went away (a device that could not be opened again). It never plays again; open a new stream once the output is back (`open_audio_stream` answers `NoOutput` until then). Changing the output device does not stop streams.
 
 ## Buffering, underruns and overflow
 
@@ -47,7 +53,7 @@ Each stream has a fixed ring, allocated when it opens: `2 * prebuffer_ms + 100` 
 
 - **Underrun waits instead of ending.** A dry ring plays silence, with no time-stretching, and the state goes back to `Buffering` until `prebuffer_ms` is queued again. Only `stop` or a drop ends a stream (vanilla's sound ends for good when its queue runs dry; a mod stream is Sunrise's own surface).
 - **Overflow refuses the excess.** `push` returns the frames it took; the rest is refused, never delayed, so a sender that stalls and then bursts cannot build up latency. Drop what was refused, or push it again later.
-- End to end, the delay is one output period plus `prebuffer_ms`.
+- End to end, the delay is about one output period plus `prebuffer_ms`: a target, not a bound.
 
 ## Placement
 
@@ -58,18 +64,29 @@ Each stream has a fixed ring, allocated when it opens: `2 * prebuffer_ms + 100` 
 
 ## Threading
 
-`AudioStreamRef` is `Send`, and `push` works from any thread. A native mod can push from a `Network`-thread payload handler, so its audio never waits for a client tick, and `push` never waits for the mixer: it writes into a lock-free ring the output callback reads. Only one thread pushes at a time: a push that overlaps another on the same stream is refused (returns 0), so keep each stream to one pushing thread.
+`AudioStreamRef` is `Send`, and `push` works from any thread. A native mod can push from a `Network`-thread payload handler, so its audio never waits for a client tick, and a native `push` never waits for the mixer: it writes straight into a lock-free ring made when the stream opened, which the output callback reads, and allocates nothing. The controls (`set_placement`, `set_volume`) take no lock the output callback takes either. Only one thread pushes at a time: a push that overlaps another on the same stream is refused (returns 0), so keep each stream to one pushing thread.
 
 Opening a stream is a host call and runs where the host does. Every call on the handle works from any thread for a native mod. A wasm mod has one thread and enters from hooks.
 
 ## wasm mods
 
-The handle crosses to a wasm mod as a held resource, and the API is the same. The timing is not: **wasm audio is paced by ticks, with up to 50 ms of jitter**. A wasm instance is entered from hooks, so a frame it pushes waits for the next one. Use a larger `prebuffer_ms` than a native mod would (100 ms or more, raised if `state` keeps reading `Buffering` in play; no figure has been measured yet). The ring is `2 * prebuffer_ms + 100` milliseconds, so it holds a tick's burst.
+The handle crosses to a wasm mod as a held resource, and the API is the same (a call crosses the boundary, which encodes the whole slice pushed). The timing is not: **wasm audio is paced by ticks, with up to 50 ms of jitter**. A wasm instance is entered from hooks, so a frame it pushes waits for the next one, and the 50 ms is the nominal tick spacing: a stalled tick is later still. Use a larger `prebuffer_ms` than a native mod would. The ring is `2 * prebuffer_ms + 100` milliseconds, so it holds a tick's burst.
+
+A simulation of that pacing runs in the game's tests (`tick_paced_underruns` in the mixer: one 50 ms push per tick, each tick up to 50 ms late, 30 s of 48 kHz mono, an output callback every 10 ms). It counts underruns, a stream going from `Playing` back to `Buffering`:
+
+| `prebuffer_ms` | Underruns in 30 s |
+|---|---|
+| 50 | 113 |
+| 100 | 0 |
+| 150 | 0 |
+
+These figures come from the mixer fed on a virtual clock, not from a wasm instance: they say what the pacing costs the mixer, not what a guest's own run time adds. Take 100 ms as the least for a wasm voice mod.
 
 ## Limits
 
 - 32 streams open per mod (`AudioRefusal::ModStreamLimit`) and 64 across every mod (`AudioRefusal::TooManyStreams`). A stopped stream frees its place.
 - Sample rate 8000 to 48000 Hz, 1 or 2 channels, `prebuffer_ms` 20 to 500.
+- A call from no mod, or outside the phases a client opens a stream in, answers `AudioRefusal::Unavailable` on native and wasm alike.
 - Bad input never panics: a rate or channel count out of range, a volume or range that is not a number, or a position that is not finite is refused (`AudioRefusal::BadSpec`, or `false` from `set_volume` and `set_placement`).
 
 ## Known limits

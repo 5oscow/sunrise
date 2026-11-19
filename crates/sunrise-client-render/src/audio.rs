@@ -129,6 +129,8 @@ struct Mixer {
     streams: Vec<streams::StreamVoice>,
     /// Each `SoundSource`'s volume for a stream: master times the group, as every sound's.
     stream_gain: [f32; 11],
+    /// The player turned "Mod audio streams" off: they still play through, unheard.
+    streams_muted: bool,
     /// A mod's muffle of the sounds it does not exempt.
     muffle: Muffle,
     limiter_peak: f32,
@@ -259,6 +261,8 @@ pub struct MixerBackend {
     decoder: Option<std::sync::mpsc::Sender<Decode>>,
     next: ChannelId,
     live: bool,
+    /// Mods' audio streams, which every backend sharing the output shares.
+    streams: Arc<streams::StreamPool>,
     /// Whose channels these are (`Channel::owner`).
     owner: u8,
     world: u32,
@@ -992,7 +996,11 @@ fn mix(mixer: &mut Mixer, data: &mut [f32], channels: usize, rate: u32) {
     streams::mix(
         &mut mixer.streams,
         &mixer.cameras,
-        &mixer.stream_gain,
+        if mixer.streams_muted {
+            &[0.0; 11]
+        } else {
+            &mixer.stream_gain
+        },
         out,
         channels,
         rate,
@@ -1302,7 +1310,11 @@ impl Audio {
                  launcher (or run sunrise-prepare sounds)"
             );
         }
-        let mixer = Arc::new(Mutex::new(Mixer::default()));
+        let mixer = Arc::new(Mutex::new(Mixer {
+            // Room for every stream's voice, so opening one never allocates under the lock.
+            streams: Vec::with_capacity(mod_api::AUDIO_STREAMS_TOTAL as usize),
+            ..Mixer::default()
+        }));
         let opened = if output {
             Self::open_named(mixer.clone(), target_device)
         } else {
@@ -1343,6 +1355,7 @@ impl Audio {
                 decoder: None,
                 next: 0,
                 live,
+                streams: Arc::default(),
                 owner: 0,
                 world: 0,
                 shares: Arc::default(),
@@ -1420,6 +1433,7 @@ impl Audio {
         self._stream = Some(Self::open_named(self.backend.mixer.clone(), name)?);
         self.device_name = name.to_owned();
         self.backend.live = true;
+        self.backend.streams.output_lost(false);
         self.engine.loaded = true;
         self.engine.notify_loaded();
         Ok(())
@@ -1465,13 +1479,17 @@ impl Audio {
     }
     /// World identity for this player's sources and camera. Existing channels keep their world.
     pub fn set_world(&mut self, world: &str) {
+        let mut changed = false;
         if let Ok(mut mixer) = self.backend.mixer.lock() {
             let id = mixer.world_id(world);
-            if self.backend.world != id {
-                mixer.unplace_streams();
-            }
+            changed = self.backend.world != id;
             self.backend.world = id;
             mixer.worlds.insert(self.backend.owner, id);
+        }
+        // The primary listener changed dimension: no stream's place of the old one is heard.
+        // After the mixer's lock is released: the pool is locked before the mixer elsewhere.
+        if changed && self.backend.owner == 0 {
+            self.backend.streams.unplace();
         }
     }
 
@@ -1516,6 +1534,7 @@ impl Audio {
                 next: (SHARED_CHANNELS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1)
                     << 40,
                 live: self.backend.live,
+                streams: self.backend.streams.clone(),
                 owner,
                 world: self.backend.world,
                 shares: self.backend.shares.clone(),
@@ -1663,15 +1682,20 @@ impl Audio {
                 }
                 self.reopen = Reopen::default();
             }
-            Err(e) if self.reopen.failed(retrying) => {
-                log::warn!("Sunrise: could not reopen the audio output ({e}); trying again soon");
-            }
             Err(e) => {
-                log::warn!("Sunrise: could not reopen the audio output ({e}); it stays off");
+                // No output now: nothing starts on it, and mods' streams stop.
+                self.backend.live = false;
+                self.backend.streams.output_lost(true);
+                if self.reopen.failed(retrying) {
+                    log::warn!(
+                        "Sunrise: could not reopen the audio output ({e}); trying again soon"
+                    );
+                } else {
+                    log::warn!("Sunrise: could not reopen the audio output ({e}); it stays off");
+                }
             }
         }
     }
-    /// `SoundManager.tick(paused)`, once per client tick.
     /// Opens a stream for the mod `owner` (`ClientHost::open_audio_stream`): the ring is
     /// allocated here, and the mod pushes PCM into it from any thread.
     pub fn open_stream(
@@ -1682,28 +1706,29 @@ impl Audio {
         if !self.backend.live {
             return Err(mod_api::AudioRefusal::NoOutput);
         }
-        match self.backend.mixer.lock() {
-            Ok(mut mixer) => mixer.open_stream(owner, spec),
-            Err(_) => Err(mod_api::AudioRefusal::NoOutput),
-        }
+        self.backend.streams.open(&self.backend.mixer, owner, spec)
     }
     /// Places each entity-placed stream at its entity's position as `resolve` finds it now, or
-    /// leaves it unplaced where it finds none. Called once a frame.
+    /// leaves it unplaced where it finds none. Called once a frame; it does nothing, and locks
+    /// nothing the output callback takes, with no stream open.
     pub fn follow_stream_entities(
         &self,
         resolve: impl FnMut(mod_api::EntityRef) -> Option<[f64; 3]>,
     ) {
-        if let Ok(mut mixer) = self.backend.mixer.lock() {
-            mixer.follow_stream_entities(resolve);
-        }
+        self.backend.streams.follow_entities(resolve);
     }
-    /// The listener changed level: every positional stream is unplaced until its mod places it
+    /// The listener left its level: every positional stream is unplaced until its mod places it
     /// again.
     pub fn unplace_streams(&self) {
-        if let Ok(mut mixer) = self.backend.mixer.lock() {
-            mixer.unplace_streams();
+        self.backend.streams.unplace();
+    }
+    /// The player's "Mod audio streams" switch: off, every mod stream plays on unheard.
+    pub fn set_mod_streams(&self, on: bool) {
+        if let Ok(mut m) = self.backend.mixer.lock() {
+            m.streams_muted = !on;
         }
     }
+    /// `SoundManager.tick(paused)`, once per client tick.
     pub fn tick(&mut self, paused: bool, ctx: &TickContext) {
         #[cfg(feature = "audio")]
         {
@@ -1716,10 +1741,10 @@ impl Audio {
             }
         }
         self.sync_volumes();
+        self.backend.streams.reap(&self.backend.mixer);
         if let Ok(mut m) = self.backend.mixer.lock() {
-            m.reap_streams();
             for (source, gain) in m.stream_gain.iter_mut().enumerate() {
-                *gain = self.engine.calculate_volume(1.0, source);
+                *gain = self.engine.final_source_volume(source).clamp(0.0, 1.0);
             }
         }
         self.engine.tick(paused, ctx, &mut self.backend);
@@ -2891,6 +2916,7 @@ mod tests {
             decoder: None,
             next: (u64::from(owner)) << 40,
             live: true,
+            streams: Arc::default(),
             owner,
             world: 0,
             shares: shares.clone(),

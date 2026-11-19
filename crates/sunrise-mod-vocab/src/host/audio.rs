@@ -1,5 +1,4 @@
 //! Host method declarations; access defaults and game forwarders are generated.
-#![allow(unused_variables)]
 use crate::*;
 /// The client host's methods of the `audio` area, implemented by the game and reached through [`crate::ClientHost`].
 #[sunrise_mod_api_macros::host_area]
@@ -16,8 +15,9 @@ pub trait AudioClientHost {
     /// waits for a tick; a wasm mod's arrives at tick rate with up to 50 ms of jitter, so it
     /// wants a larger `prebuffer_ms`. Dropping the handle stops the stream. `Err`, with nothing
     /// opened, on a server, without a sound output, for a spec out of range (a stereo stream
-    /// with a placement other than `Flat` included), for a mod already holding 32 streams and
-    /// when 64 are open across every mod.
+    /// with a placement other than `Flat` included), for a mod already holding 32 streams, when
+    /// 64 are open across every mod, and for a call from no mod or outside the phases a client
+    /// opens one in (`Unavailable`).
     #[access(ClientSetup)]
-    fn open_audio_stream(&self, spec: &StreamSpec) -> Result<AudioStreamRef, AudioRefusal>;
+    fn open_audio_stream(&self, _spec: &StreamSpec) -> Result<AudioStreamRef, AudioRefusal>;
 }

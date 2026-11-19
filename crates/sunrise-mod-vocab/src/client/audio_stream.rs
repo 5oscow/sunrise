@@ -49,8 +49,9 @@ pub enum AudioStreamState {
     /// positional stream after the listener changed dimension, until the next `set_placement`.
     /// The audio is still consumed, so no latency builds up.
     Unplaced,
-    /// Over: `stop` was called, or the output went away. It never plays again. What a stream
-    /// reads when a call to the game was refused.
+    /// Over: `stop` was called, the handle was dropped, or the game's sound output went away (a
+    /// device that could not be opened again). It never plays again. What a stream reads when a
+    /// call to the game was refused.
     #[default]
     Stopped,
 }
@@ -248,7 +249,9 @@ impl AudioStreamRef {
     /// Queues interleaved 16-bit samples (`channels` per frame) behind what is waiting and
     /// returns the frames accepted. The ring has a fixed size: what does not fit is refused,
     /// never delayed, so a stalled sender cannot build up latency, and the caller drops it or
-    /// pushes it again later. It never blocks, allocates or waits for a tick. The ring has one
+    /// pushes it again later. For a native mod the push writes straight into a ring made when the
+    /// stream opened: it never blocks, allocates or waits for a tick. (A wasm mod's call crosses
+    /// the boundary, which encodes the whole slice.) The ring has one
     /// producer: if a second thread pushes to the same stream at the same moment, that push
     /// accepts nothing and returns 0. A native mod that shares the handle across threads
     /// pushes from one thread at a time (a lock of its own, or one pushing thread).

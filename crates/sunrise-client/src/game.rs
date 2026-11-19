@@ -6619,6 +6619,8 @@ impl Game<'_> {
         // lets go of its track.
         self.music.stop_playing(None, &mut self.audio);
         self.audio.stop_all();
+        // Mods' streams play on, but no place of the level that is gone is heard.
+        self.audio.unplace_streams();
         if self.remote.is_some() {
             self.world_icon = None;
             return self.leave_server(None);
