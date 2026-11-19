@@ -2245,6 +2245,21 @@ impl Audio {
     pub fn backend_live_for_bench(&mut self) {
         self.backend.live = true;
     }
+    /// The next `frames` of stereo output at 48 kHz, as the output callback mixes them, for a test
+    /// of a mod's pacing that has no device.
+    #[doc(hidden)]
+    pub fn mix_for_bench(&self, frames: usize) -> Vec<f32> {
+        let mut data = vec![0.0; frames * 2];
+        if let Ok(mut mixer) = self.backend.mixer.lock() {
+            mix(&mut mixer, &mut data, 2, 48_000);
+        }
+        data
+    }
+    /// Each open mod stream's `prebuffer_ms` and how many times it ran dry, for the same test.
+    #[doc(hidden)]
+    pub fn stream_underruns_for_bench(&self) -> Vec<(u32, u32)> {
+        self.backend.streams.underruns()
+    }
 }
 impl Sounds for Audio {
     fn engine(&mut self) -> &mut SoundEngine {
