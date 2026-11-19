@@ -502,30 +502,10 @@ pub const BACKDROP_MUTED: u32 = 0x9fa3ae;
 /// brighter than the snowiest title panorama measured (0.49) and a sunlit world.
 pub const BRIGHT_BACKDROP: u32 = 0xe3e3e3;
 
-impl Palette {
-    /// Every colour with its token name, in the order the docs list them.
-    pub fn named(&self) -> [(&'static str, u32); 12] {
-        [
-            ("page", self.page),
-            ("plate-soft", self.plate_soft),
-            ("plate", self.plate),
-            ("surface", self.surface),
-            ("rule", self.rule),
-            ("ink", self.ink),
-            ("ink-soft", self.ink_soft),
-            ("muted", self.muted),
-            ("accent", self.accent),
-            ("on-accent", self.on_accent),
-            ("danger", self.danger),
-            ("success", self.success),
-        ]
-    }
-}
-
 impl Blocks {
-    /// Every colour by its CSS name. The website reads the Blocks palettes; the first twelve keep
-    /// the names of [`Palette::named`] (`plate-soft` is `raised`, `plate` is `button`, `surface`
-    /// is `panel`, `on-accent` is `on_face`), so styles written for those still apply.
+    /// Every colour by its CSS name. The first twelve keep the names of the original website
+    /// palette (`plate-soft` is `raised`, `plate` is `button`, `surface` is `panel`, and
+    /// `on-accent` is `on_face`), so styles written for those still apply.
     pub fn named(&self) -> [(&'static str, u32); 25] {
         [
             ("page", self.page),
