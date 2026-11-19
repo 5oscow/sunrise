@@ -315,6 +315,9 @@ fn checked_paint_refuses_what_the_gui_atlas_lacks_and_atlas_sprites_use_the_bloc
         .unwrap()
         .write_image_data(&[1, 2, 3, 255])
         .unwrap();
+    let staged = root.join("assets/demo/textures/gui/atlases/icons/demo");
+    std::fs::create_dir_all(&staged).unwrap();
+    std::fs::copy(sheet.join("sheet.png"), staged.join("heart.png")).unwrap();
     std::fs::write(atlases.join("blocks.json"), r#"{"sources":[]}"#).unwrap();
     std::fs::write(
         atlases.join("items.json"),
@@ -366,12 +369,20 @@ fn checked_paint_refuses_what_the_gui_atlas_lacks_and_atlas_sprites_use_the_bloc
     // keeps the packed model's, and the refusal and the draw agree.
     let live = atlas.sprites["sunrise/white"];
     atlas.live.insert("demo:item/modeled".into(), live);
-    let blit = blit("demo:item/modeled", Blend::Textured, [8, 8]);
-    assert_eq!(undrawable(&atlas, std::slice::from_ref(&blit)), None);
+    let live_blit = blit("demo:item/modeled", Blend::Textured, [8, 8]);
+    assert_eq!(undrawable(&atlas, std::slice::from_ref(&live_blit)), None);
     let mut batch = HudBatch::scratch([64, 64]);
-    paint(&mut batch, &atlas, &[blit]);
+    paint(&mut batch, &atlas, &[live_blit]);
     assert_eq!(batch.vertices[0].uv, [live.u0, live.v0], "the live texture");
     assert_ne!([live.u0, live.v0], [model.u0, model.v0]);
+    // A registered atlas's sprite no packed sprite shares its name with draws as a `Blit`.
+    let name = "demo:gui/atlases/icons/demo/heart";
+    let registered = atlas.registered[name];
+    let heart = blit(name, Blend::Textured, [8, 8]);
+    assert_eq!(undrawable(&atlas, std::slice::from_ref(&heart)), None);
+    let mut batch = HudBatch::scratch([64, 64]);
+    paint(&mut batch, &atlas, &[heart]);
+    assert_eq!(batch.vertices[0].uv, [registered.u0, registered.v0]);
 }
 
 #[test]

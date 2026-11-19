@@ -680,6 +680,9 @@ mod tests {
         };
         tables.gui.insert("demo:listed".to_owned(), listed);
         tables.gui.insert("other:listed".to_owned(), listed);
+        tables
+            .registered
+            .insert("demo:registered".to_owned(), pool.rect(0, 0, [1, 1]));
         let mut create = |owner: &str, name: &str| {
             textures.create(
                 Some(&pool),
@@ -691,6 +694,7 @@ mod tests {
             )
         };
         assert_eq!(create("demo", "demo:listed"), Err(NameTaken));
+        assert_eq!(create("demo", "demo:registered"), Err(NameTaken));
         assert_eq!(create("demo", "other:listed"), Err(NotOwned));
         assert_eq!(create("demo", "demo:free"), Ok(()));
     }

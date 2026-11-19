@@ -1039,9 +1039,10 @@ impl HudAtlas {
         }
         self.packed = Some(slot);
     }
-    /// The sprite of the GUI id `id` (`minecraft:` dropped) that is there: a live texture's, else
-    /// the GUI list's own, else a packed sprite of the name where the list says nothing of the id
-    /// and no model or GUI entry owns the packed name, with its scaling.
+    /// The sprite of the GUI id `id` (`minecraft:` dropped) that is there, with its scaling: a live
+    /// texture's; else the GUI list's own (a removed or failed entry ends the search); else, where
+    /// the list says nothing of the id, a registered atlas's sprite of the name, and last a packed
+    /// sprite no model or GUI entry owns.
     fn gui_present(&self, id: &str) -> Option<(&Rect, Option<crate::ui::NineSlice>)> {
         if let Some(rect) = self.live.get(id) {
             return Some((rect, None));
@@ -1058,8 +1059,8 @@ impl HudAtlas {
     }
     /// A GUI atlas sprite by its id (`minecraft:container/slot`, `container/slot`, a mod's
     /// `mymod:panel`; the two spellings of a vanilla id are one key): [`GuiSprite::Present`] for a
-    /// live texture, the GUI list's sprite, or an unlisted packed sprite no model or GUI entry
-    /// owns; [`GuiSprite::Missing`] for an id the list removed or failed; none for an id the GUI
+    /// live texture, the GUI list's sprite, or for an unlisted id a registered atlas's sprite or a
+    /// packed sprite no model or GUI entry owns, in that order; [`GuiSprite::Missing`] for an id the list removed or failed; none for an id the GUI
     /// atlas does not own. The sprite carries the scaling of the entry itself.
     pub fn gui_lookup(&self, id: &str) -> Option<GuiSprite> {
         let id = id.strip_prefix("minecraft:").unwrap_or(id);
@@ -1084,12 +1085,20 @@ impl HudAtlas {
                 .flatten(),
         }
     }
-    /// The rect of a `Blit` texture by its packed name: a live texture's first, else the packed
-    /// sprite. One lookup for the refusal and the draw, apart from the GUI lookup.
+    /// The rect of a texture by its name: the packed sprite, else a registered atlas's sprite of
+    /// the name. The raw lookup of the camera draw; a GUI id goes through [`HudAtlas::gui_lookup`].
+    pub fn texture_rect(&self, name: &str) -> Option<&Rect> {
+        self.sprites.get(name).or_else(|| {
+            self.registered
+                .get(name.strip_prefix("minecraft:").unwrap_or(name))
+        })
+    }
+    /// The rect of a `Blit` texture by its name: a live texture's first, else
+    /// [`HudAtlas::texture_rect`]. One lookup for the refusal and the draw.
     pub fn blit_rect(&self, texture: &str) -> Option<&Rect> {
         self.live
             .get(texture.strip_prefix("minecraft:").unwrap_or(texture))
-            .or_else(|| self.sprites.get(texture))
+            .or_else(|| self.texture_rect(texture))
     }
     /// The pool and the tables a client mod's dynamic texture is named in.
     pub fn dynamic_names(
@@ -1796,17 +1805,24 @@ impl HudAtlas {
             let Some(rect) = sprites.get(&name).copied() else {
                 continue;
             };
+            // A registered atlas's sprite is named by its public name under its key.
+            let registered = name.strip_prefix(REGISTERED_KEY);
+            let public = registered.unwrap_or(&name);
             // Another namespace's sprite is named with it (`lobby:item/...`).
-            let id = if name.contains(':') {
-                name.clone()
+            let id = if public.contains(':') {
+                public.to_owned()
             } else {
-                format!("minecraft:{name}")
+                format!("minecraft:{public}")
             };
             // A GUI sprite animates the file it was made from, an alias's source included; a
+            // registered atlas's sprite its staged file, never a model's origin of the name; a
             // block or item sprite is as its atlas finishes it; the other atlases' are files.
-            let Ok(layer) = (match gui_files.get(&name) {
-                Some(file) => loaded.insert_file(file),
-                None => loaded.try_insert(&id).or_else(|_| {
+            let Ok(layer) = (match (gui_files.get(&name), registered) {
+                (Some(file), _) => loaded.insert_file(file),
+                (None, Some(_)) => {
+                    loaded.insert_file(&crate::atlas_sources::texture_resource(&id, "textures"))
+                }
+                (None, None) => loaded.try_insert(&id).or_else(|_| {
                     loaded.insert_file(&crate::atlas_sources::texture_resource(&id, "textures"))
                 }),
             }) else {
@@ -1885,6 +1901,16 @@ impl HudAtlas {
             .filter_map(|(key, rect)| Some((key.strip_prefix(REGISTERED_KEY)?.to_owned(), *rect)))
             .collect();
         sprites.retain(|name, _| !name.starts_with(GUI_KEY) && !name.starts_with(REGISTERED_KEY));
+        // A registered sprite no packed sprite shares its name with keeps its sampling flags under
+        // the public name, where a raw texture lookup finds both.
+        for name in registered
+            .keys()
+            .filter(|name| !sprites.contains_key(*name))
+        {
+            if let Some(value) = flags.remove(&format!("{REGISTERED_KEY}{name}")) {
+                flags.insert(name.clone(), value);
+            }
+        }
         Ok(Self {
             pictures: std::sync::Mutex::new(pictures::Cache::new(root, defaults)),
             revision: Self::next_revision(),
@@ -3986,15 +4012,42 @@ mod tests {
         );
         let root = model_atlas_root("gui-registered-model", &items, r#"{"sources":[]}"#);
         write_vanilla_gui_definition(&root);
-        // The staged file of the registered atlas's sprite, as its projection lays it down.
-        write_pixel(
-            &root.join("assets/demo/textures/gui/atlases/icons/demo/heart.png"),
-            [0, 200, 0, 255],
-        );
+        // The staged file of the registered atlas's sprite, as its projection lays it down: two
+        // frames (green, blue), played from the second.
+        let staged = root.join("assets/demo/textures/gui/atlases/icons/demo/heart.png");
+        std::fs::create_dir_all(staged.parent().unwrap()).unwrap();
+        let mut encoder = png::Encoder::new(std::fs::File::create(&staged).unwrap(), 1, 2);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder
+            .write_header()
+            .unwrap()
+            .write_image_data(&[0, 200, 0, 255, 0, 0, 200, 255])
+            .unwrap();
+        std::fs::write(
+            staged.with_extension("png.mcmeta"),
+            r#"{"animation":{"width":1,"height":1,"frames":[1,0]}}"#,
+        )
+        .unwrap();
         let atlas = HudAtlas::build(&ResourceSource::directory(root.clone())).unwrap();
         std::fs::remove_dir_all(&root).unwrap();
         let registered = *atlas.gui_rect(name).expect("the registered sprite");
-        assert_eq!(texel_at(&atlas, registered, 0, 0), [0, 200, 0, 255]);
+        assert_eq!(
+            texel_at(&atlas, registered, 0, 0),
+            [0, 0, 200, 255],
+            "the first frame of the staged file's animation"
+        );
+        let (_, animation) = atlas
+            .sprite_animations
+            .iter()
+            .find(|(rect, _)| rect.u0 == registered.u0 && rect.v0 == registered.v0)
+            .expect("the registered sprite animates");
+        assert_eq!(
+            animation.resized_pixels(0, 1, 1),
+            [0, 200, 0, 255],
+            "a later frame"
+        );
+        assert_eq!(atlas.texture_rect(name), atlas.sprites.get(name));
         let model = *atlas.sprites.get(name).expect("the model's sprite");
         assert_eq!(texel_at(&atlas, model, 0, 0), [255, 0, 0, 255]);
         assert!(
