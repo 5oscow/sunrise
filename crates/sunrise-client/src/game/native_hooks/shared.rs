@@ -178,7 +178,7 @@ impl Game<'_> {
     /// `screen_opening` or `screen_closing`, on a client's own `Game` (not a
     /// server's, not on a guest's behalf, not the screen a mod's `Vanilla`
     /// answer opens). Otherwise it is a plain assignment.
-    fn screen_hooks_heard(&self) -> bool {
+    pub(in crate::game) fn screen_hooks_heard(&self) -> bool {
         (mod_api::__private::listened(mod_api::HookId::ScreenOpening)
             || mod_api::__private::listened(mod_api::HookId::ScreenClosing))
             && self.options.execution_role.is_client()
@@ -200,9 +200,10 @@ impl Game<'_> {
     /// where a mod's screen can open (`mod_screen_blocked`), a `Vanilla`
     /// target only where it opens (a title screen while the title shows, a
     /// world's screen where a mod's could open in a world), else the change
-    /// goes ahead and the refused target is logged.
+    /// goes ahead and the refused target is logged. Records whether a mod's
+    /// answer changed what shows (`ScreenState::answered`).
     fn screen_decision(&self, answer: Option<Answered<ScreenOpening>>) -> ScreenDecision {
-        match answer {
+        let decision = match answer {
             Some(Answered {
                 answer: ScreenOpening::Cancel,
                 ..
@@ -223,15 +224,20 @@ impl Game<'_> {
                     None => self.title.is_none() && !self.mod_screen_blocked(),
                 };
                 if opens {
-                    return ScreenDecision::Vanilla(target);
+                    ScreenDecision::Vanilla(target)
+                } else {
+                    log::warn!(
+                        "Sunrise: mod {mod_id} answered screen_opening with {target:?}, which can't open here; the screen asked for opens"
+                    );
+                    ScreenDecision::Open
                 }
-                log::warn!(
-                    "Sunrise: mod {mod_id} answered screen_opening with {target:?}, which can't open here; the screen asked for opens"
-                );
-                ScreenDecision::Open
             }
             _ => ScreenDecision::Open,
-        }
+        };
+        self.screen_state
+            .answered
+            .set(!matches!(decision, ScreenDecision::Open));
+        decision
     }
     /// Opens vanilla screen `target` as it opens on its own, in place of the
     /// one asked for (`ScreenOpening::Vanilla`, which `screen_decision` let
