@@ -125,6 +125,8 @@ pub mod wither;
 
 #[cfg(test)]
 mod invisible_follow_tests;
+#[cfg(test)]
+mod template_mob_tests;
 mod world;
 pub use world::{TargetInfo, single_player_pos, visual_clip};
 pub mod dragon_contacts;
