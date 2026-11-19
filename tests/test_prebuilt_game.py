@@ -537,12 +537,13 @@ class AllocatorSelectionTests(unittest.TestCase):
             self.assertEqual(prebuilt_game.cargo_features(True, platform),
                              ["--no-default-features", "--features", "system-allocator"])
 
-    def test_sdk_build_refuses_an_output_that_holds_its_target_folder(self):
+    def test_sdk_build_refuses_an_output_that_overlaps_its_target_folder(self):
         with tempfile.TemporaryDirectory() as directory, \
              patch.dict(os.environ, CARGO_TARGET_DIR=str(Path(directory) / "target")), \
              patch.object(prebuilt_game, "_build_locked") as build_locked:
-            with self.assertRaises(SystemExit):
-                prebuilt_game.build(Path(directory), server=False)
+            for out in (Path(directory), Path(directory) / "target" / "prebuilt" / "stage"):
+                with self.subTest(out=out), self.assertRaises(SystemExit):
+                    prebuilt_game.build(out, server=False)
             build_locked.assert_not_called()
 
     def test_linux_keeps_mimalloc(self):
@@ -571,7 +572,7 @@ class AllocatorSelectionTests(unittest.TestCase):
                                                    "CARGO_TARGET_DIR": target}):
             # Its own target folder: the build takes that folder's lock, never the checkout's.
             with self.assertRaises(Captured):
-                prebuilt_game.build(Path("unused-sdk"), False)
+                prebuilt_game.build(Path(target) / "unused-sdk", False)
 
 
 class ExecutableLinkPolicyTests(unittest.TestCase):

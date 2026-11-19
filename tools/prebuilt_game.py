@@ -492,9 +492,11 @@ def build(out: Path, server: bool) -> None:
     # Resolve before entering the staged copy. Keep its source and Cargo outputs exclusively owned until collection
     # and validation are done. Closing the file releases the lock; leave its name in place for future builds.
     target_dir = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")).resolve() / "prebuilt"
-    # Collection empties `out`: it must not hold the build's target folder, whose lock file it would delete.
-    if target_dir.is_relative_to(out.resolve()):
-        sys.exit(f"The SDK output {out} holds the build's target folder {target_dir}: choose another output.")
+    # Collection empties `out`: it must neither hold the build's target folder (its lock file) nor sit inside it
+    # (the stage that Cargo still reads).
+    output = out.resolve()
+    if target_dir.is_relative_to(output) or output.is_relative_to(target_dir):
+        sys.exit(f"The SDK output {out} overlaps the build's target folder {target_dir}: choose another output.")
     target_dir.mkdir(parents=True, exist_ok=True)
     with (target_dir / ".sdk-build.lock").open("a+b") as lock:
         try:
