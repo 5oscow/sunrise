@@ -142,6 +142,7 @@ impl Renderer {
                 encoder,
                 surface: surface_frame,
                 after,
+                lost: Some(self.device_lost.clone()),
             };
             match self.queue.submit_later(job) {
                 Ok(()) => {
@@ -165,6 +166,11 @@ impl Renderer {
             self.first_frame = FirstFrame::Drawn;
         }
         let submission = crate::spans::time("submit", || self.queue.submit([commands]));
+        // The submission is often where a loss shows: no readbacks, screenshot or present
+        // after it (the acquired surface texture is dropped undrawn).
+        if self.device_lost() {
+            return Err(super::in_flight::LOST.into());
+        }
         if let Some(read) = after.or_else(|| self.after_submit()) {
             read();
         }

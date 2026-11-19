@@ -4787,13 +4787,18 @@ impl PackPost {
         }
     }
 
-    fn resize(&mut self, device: &wgpu::Device, size: [u32; 2]) {
+    fn resize(
+        &mut self,
+        device: &wgpu::Device,
+        size: [u32; 2],
+        lost: &std::sync::atomic::AtomicBool,
+    ) -> Result<(), String> {
         if pack_images::resize_images(device, &mut self.images, size) {
             self.forget_groups();
         }
         self.buffers.resize(device, size);
         if self.targets.as_ref().is_some_and(|t| t.size == size) {
-            return;
+            return Ok(());
         }
         self.setup_pending = true;
         self.rgb_unset = true;
@@ -4803,7 +4808,8 @@ impl PackPost {
         // them, so wait for it; a resize is rare.
         if self.targets.take().is_some() {
             self.forget_groups();
-            let _ = device.poll(wgpu::PollType::wait_indefinitely());
+            // A lost device stops the frame here, before the new targets are made.
+            super::in_flight::poll_live(device, lost, wgpu::PollType::wait_indefinitely())?;
         }
         let sizes: [[u32; 2]; BUFFERS] =
             std::array::from_fn(|i| self.sizes[i].map_or(size, |s| s.resolve(size)));
@@ -4974,6 +4980,7 @@ impl PackPost {
                 size[1]
             );
         }
+        Ok(())
     }
 
     /// The shadow pass (2.1, passes 2 and 3): the shadow buffers cleared, then the `shadowcomp`
@@ -5219,7 +5226,7 @@ impl PackPost {
         terrain: &mut TerrainDraw<'_>,
         lost: &std::sync::atomic::AtomicBool,
     ) -> Result<(), String> {
-        self.resize(device, size);
+        self.resize(device, size, lost)?;
         // Last frame's water patches (or a new texture's zeros) out: depth 1 is no patch.
         if self.water_mask_dirty
             && let Some((_, view)) = self.targets.as_ref().and_then(|t| t.water_mask.as_ref())

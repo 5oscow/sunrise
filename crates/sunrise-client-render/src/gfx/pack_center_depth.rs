@@ -339,6 +339,7 @@ mod tests {
                         encoder,
                         surface: None,
                         after: Some(Box::new(after)),
+                        lost: None,
                     };
                     assert!(queue.submit_later(job).is_ok());
                     queue.wait();
@@ -409,6 +410,7 @@ mod tests {
                 encoder,
                 surface: None,
                 after,
+                lost: None,
             };
             assert!(queue.submit_later(job).is_ok());
             queue.wait();

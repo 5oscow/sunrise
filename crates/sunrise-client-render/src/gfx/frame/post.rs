@@ -55,7 +55,7 @@ impl Renderer {
         &mut self,
         mut encoder: wgpu::CommandEncoder,
         args: PostPassArgs<'_>,
-    ) -> (wgpu::CommandEncoder, PostPassResult) {
+    ) -> std::result::Result<(wgpu::CommandEncoder, PostPassResult), String> {
         let PostPassArgs {
             frame,
             scaled,
@@ -208,8 +208,8 @@ impl Renderer {
                 indices: self.indices.clone(),
                 quads: cloud_quads,
             }));
-            // Fails only on a device lost under its waits: the frame stops in `draw_frame`
-            // right after the passes.
+            // Fails only on a wait that found the device lost: the frame stops here, with
+            // the pack kept for the next one and nothing more encoded.
             let ran = post.run(
                 &self.device,
                 &self.queue,
@@ -225,15 +225,11 @@ impl Renderer {
                 &mut terrain,
                 &self.device_lost,
             );
-            if let Err(error) = ran
-                && !self.device_lost()
-            {
-                log::warn!("Sunrise renderer: the shader pack's frame stopped early: {error}");
-            }
             // Keep the capacity, not the buffers: a page the arena frees must not stay alive
             // here until the next shader-pack frame (or forever once the pack is off).
             self.pack_pages.clear();
             self.pack_post = Some((dimension, Some(post)));
+            ran?;
         } else if let Some((color, depth)) = &scaled
             && native_post
             && let Some(native) = &mut self.native
@@ -365,13 +361,13 @@ impl Renderer {
             timer.end(&self.device, &mut encoder, (&view_target, overlay_format));
         }
 
-        (
+        Ok((
             encoder,
             PostPassResult {
                 readback,
                 target_texture,
                 fg_made,
             },
-        )
+        ))
     }
 }

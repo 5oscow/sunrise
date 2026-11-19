@@ -3430,7 +3430,7 @@ impl Renderer {
                 cpu,
                 lifts_world,
             },
-        );
+        )?;
         laps.lap("r_passes");
         // A loss the passes' waits found (a shader pack's timing, its image dump): no submit.
         if self.device_lost() {

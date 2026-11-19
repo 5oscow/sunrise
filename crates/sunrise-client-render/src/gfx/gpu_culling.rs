@@ -3342,6 +3342,7 @@ mod tests {
                         encoder,
                         surface: None,
                         after,
+                        lost: None,
                     };
                     if let Err(back) = queue.submit_later(job) {
                         queue.submit([back.encoder.finish()]);
