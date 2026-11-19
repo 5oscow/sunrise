@@ -59,7 +59,9 @@ fn a_compiled_wasm_mod_pushing_at_tick_pace_does_not_underrun_at_the_prebuffer_t
                     std::path::PathBuf::from("/nonexistent/sunrise-test-audio"),
                 ));
             audio.backend_live_for_bench();
-            let client = Client { audio };
+            let mut client = Client { audio };
+            // One 10 ms callback of stereo output at 48 kHz.
+            let mut output = [0.0f32; 960];
             // Tick k is due at k * 50 ms, and arrives up to 50 ms late (a fixed series, so the
             // figures repeat). The output callback runs every 10 ms for 30 s.
             let mut seed = 0x9e37_79b9u32;
@@ -76,7 +78,8 @@ fn a_compiled_wasm_mod_pushing_at_tick_pace_does_not_underrun_at_the_prebuffer_t
                     ticks += 1;
                     next_tick = ticks * 50 + late();
                 }
-                client.audio.mix_for_bench(480);
+                output.fill(0.0);
+                client.audio.mix_buffer(&mut output, 2, 48_000);
             }
             let figures = client.audio.stream_underruns_for_bench();
             eprintln!("wasm-paced underruns in 30 s, by prebuffer_ms: {figures:?}");

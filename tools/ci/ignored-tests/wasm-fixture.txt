@@ -13,4 +13,3 @@ sunrise-client game::native_hooks::runtime_environment::tests::native_and_wasm_p
 sunrise-client game::registration_capability_coverage_wasm_tests::compiled_guest_reads_game_coverage_during_registration SUNRISE_WASM_FIXTURE needs
 sunrise-client-lib raw_payloads::wasm_tests::compiled_guest_observes_physical_provider_pressure SUNRISE_WASM_FIXTURE needs
 sunrise-client game::native_hooks::math::tests::math_profile_selection_matches_platform_and_is_stable SUNRISE_WASM_FIXTURE needs-plain
-sunrise-client game::audio_stream_wasm_tests::a_compiled_wasm_mod_pushing_at_tick_pace_does_not_underrun_at_the_prebuffer_the_book_recommends lib daily wasm-fixture
