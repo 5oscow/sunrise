@@ -5,7 +5,7 @@ use std::{collections::BTreeMap, path::Path};
 use sunrise_mod_package::{
     index::{
         Index,
-        resolve::{self, InstallPlan, ModVersion, Request, RequestResult},
+        resolve::{self, InstallPlan, InstalledMod, ModVersion, Request, RequestResult},
     },
     manifest::Side,
 };
@@ -21,7 +21,7 @@ struct Fixture {
 struct Case {
     name: String,
     requests: Vec<Request>,
-    installed: Vec<ModVersion>,
+    installed: Vec<InstalledMod>,
     side: Side,
     native_fits: BTreeMap<String, BTreeMap<String, bool>>,
     expected: InstallPlan,

@@ -158,9 +158,12 @@ fn a_content_mod_lists_manifest_dependencies_and_checks_index_claims() {
     assert!(facts.matches(p, &version).is_ok());
     version.dependencies = Some(facts.dependencies.clone());
     assert!(facts.matches(p, &version).is_ok());
-    version.dependencies.as_mut().unwrap().remove(0);
+    version.dependencies = Some(Vec::new());
+    let serialized = serde_json::to_value(&version).unwrap();
+    assert_eq!(serialized["dependencies"], serde_json::json!([]));
+    let version = serde_json::from_value(serialized).unwrap();
     let error = facts.matches(p, &version).unwrap_err();
-    for word in ["coords_hud", "0.1.0", "dependencies", "rebuild the index"] {
+    for word in ["coords_hud", "0.1.0", "dependencies"] {
         assert!(error.contains(word), "{error}");
     }
 }
@@ -238,7 +241,10 @@ fn a_required_dependency_needs_a_listed_matching_mod() {
         ..Index::default()
     };
     let assert_error = |index: &Index, range: &str, words: &[&str]| {
-        let e = index.check().unwrap_err();
+        assert_eq!(index.check(), Ok(()));
+        let errors = resolve::uninstallable_versions(index, |_| true);
+        assert_eq!(errors.len(), 2, "{errors:?}");
+        let e = &errors[0];
         for word in ["fireflies", "0.1.0", "creature", range]
             .into_iter()
             .chain(words.iter().copied())
@@ -246,11 +252,7 @@ fn a_required_dependency_needs_a_listed_matching_mod() {
             assert!(e.contains(word), "missing {word:?} in {e:?}");
         }
     };
-    assert_error(
-        &index,
-        "^3.6",
-        &["does not list", "list it first", "mark it optional"],
-    );
+    assert_error(&index, "^3.6", &["not listed as a mod"]);
     index.projects.push(indexed_mod(
         "creature",
         "3.6.30-sunrise.1",
@@ -258,13 +260,9 @@ fn a_required_dependency_needs_a_listed_matching_mod() {
     ));
     assert_error(&index, "^3.6", &["prerelease", "=3.6.30-sunrise.1"]);
     index.projects[0] = mod_for("^4.0");
-    assert_error(
-        &index,
-        "^4.0",
-        &["no listed version matches", "correct the range"],
-    );
+    assert_error(&index, "^4.0", &["no listed version satisfies"]);
     index.projects[0] = mod_for("=3.6.30-sunrise.1");
-    assert_eq!(index.check(), Ok(()));
+    assert!(resolve::uninstallable_versions(&index, |_| true).is_empty());
 }
 
 #[test]
@@ -289,14 +287,43 @@ fn only_required_cycles_on_the_same_installation_are_refused() {
         ],
         ..Index::default()
     };
-    assert_eq!(index.check(), Ok(()));
+    assert!(resolve::uninstallable_versions(&index, |_| true).is_empty());
     index.projects[1].versions[0].dependencies.as_mut().unwrap()[0].side = None;
-    let error = index.check().unwrap_err();
-    for word in ["cycle", "fireflies 0.1.0", "creature 0.1.1", "break it"] {
-        assert!(error.contains(word), "{error}");
+    assert_eq!(index.check(), Ok(()));
+    let errors = resolve::uninstallable_versions(&index, |_| true);
+    assert_eq!(errors.len(), 2, "{errors:?}");
+    for error in errors {
+        for word in ["cycle", "fireflies 0.1.0", "creature 0.1.1", "client"] {
+            assert!(error.contains(word), "{error}");
+        }
     }
     index.projects[1].versions[0].dependencies.as_mut().unwrap()[0].optional = true;
-    assert_eq!(index.check(), Ok(()));
+    assert!(resolve::uninstallable_versions(&index, |_| true).is_empty());
+}
+
+#[test]
+fn malformed_dependency_rows_fail_publication_and_are_left_out_by_readers() {
+    for rows in [
+        serde_json::json!([{"id": "another", "version": "not semver"}]),
+        serde_json::json!([{"id": "another", "version": "^1"}, {"id": "another", "version": "^2"}]),
+        serde_json::json!([{"id": "NotValid", "version": "^1"}]),
+    ] {
+        let id = rows[0]["id"].as_str().unwrap().to_owned();
+        let index = Index {
+            schema: SCHEMA,
+            projects: vec![indexed_mod("fireflies", "0.1.0", rows)],
+            ..Index::default()
+        };
+        let error = index.check().unwrap_err();
+        for word in ["fireflies", "0.1.0", &id] {
+            assert!(error.contains(word), "{error}");
+        }
+        let read = Index::parse(&serde_json::to_string(&index).unwrap()).unwrap();
+        assert!(read.projects.is_empty());
+        assert!(read.left_out.iter().any(|row| row.id == "fireflies"
+            && row.version.as_deref() == Some("0.1.0")
+            && row.reason == error));
+    }
 }
 
 #[test]

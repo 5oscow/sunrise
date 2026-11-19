@@ -2,9 +2,13 @@
 //! (`horizon-rust/horizon-mods`, docs/modding/src/reference/registry-index.md). Network-free: the
 //! workflow downloads the files and publishes what this writes.
 use std::path::Path;
+
+#[cfg(test)]
+mod tests;
 use sunrise_mod_package::index::{
     FILE_HOST,
     registry::{self, Sources},
+    resolve::uninstallable_versions,
 };
 
 /// Where the registry's site is published (its icons).
@@ -65,6 +69,9 @@ pub fn main(args: &[String]) -> Result<(), String> {
                 generated,
             })
             .map_err(lines)?;
+            for problem in uninstallable_versions(&index, |_| true) {
+                eprintln!("warning: {problem}");
+            }
             // GitHub's download and star counts, which the workflow fetched.
             if let Some(path) = flag(rest, "--counts") {
                 let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
@@ -144,13 +151,13 @@ pub fn main(args: &[String]) -> Result<(), String> {
                 return Err(USAGE.into());
             };
             let files = Path::new(flag(rest, "--files").ok_or(USAGE)?);
-            let old: Vec<String> = match registry::load(Path::new(base)) {
+            let old: std::collections::HashSet<String> = match registry::load(Path::new(base)) {
                 Ok((entries, _)) => entries
                     .iter()
                     .flat_map(|e| e.versions.iter().map(|v| v.sha256.clone()))
                     .collect(),
                 // The first pull request has no entries to compare with.
-                Err(_) => Vec::new(),
+                Err(_) => Default::default(),
             };
             let checkout = Path::new(head);
             let (entries, revoked) = registry::load(checkout).map_err(lines)?;
@@ -170,11 +177,26 @@ pub fn main(args: &[String]) -> Result<(), String> {
             let errors = match assembled {
                 Err(errors) => errors,
                 Ok(index) => {
-                    let mut errors: Vec<_> = index.check().err().into_iter().collect();
-                    // The candidate has already validated filenames, hashes and the files they
-                    // name. Show the package reports only for files added by this submission.
+                    // Cache versions are already published. Check only the files added to the
+                    // entries by this submission, not unchanged listings harmed by a takedown.
+                    let submitted: std::collections::HashSet<_> = entries
+                        .iter()
+                        .flat_map(|e| &e.versions)
+                        .filter(|v| !old.contains(&v.sha256))
+                        .map(|v| v.sha256.as_str())
+                        .collect();
+                    let mut errors = match index.check() {
+                        Ok(()) => uninstallable_versions(&index, |v| {
+                            submitted.contains(v.file.sha256.as_str())
+                        }),
+                        Err(error) => vec![error],
+                    };
                     for e in &entries {
-                        for v in e.versions.iter().filter(|v| !old.contains(&v.sha256)) {
+                        for v in e
+                            .versions
+                            .iter()
+                            .filter(|v| submitted.contains(v.sha256.as_str()))
+                        {
                             match crate::check::check(
                                 &files.join(&v.sha256),
                                 e.kind.clone(),

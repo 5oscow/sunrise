@@ -17,8 +17,9 @@ incompatible versions and cycles refuse resolution with the mods named. An absen
 is permitted; an installed optional dependency must match its requirement.
 
 The [registry index and installers](../reference/registry-index.md#planning-installs-and-removals) use these
-same manifest declarations. List a required dependency before submitting the mod that requires it. Optional
-dependencies may be shown but never install automatically. `cargo sunrise-mod check <file>` shows both kinds.
+same manifest declarations. A new submission must resolve with the listed dependencies on its Minecraft release.
+Optional dependencies never install automatically, but an installed or selected target must match the declared range.
+`cargo sunrise-mod check <file>` shows both kinds.
 
 A version such as `3.6.30-sunrise.1` is a SemVer prerelease, even when the mod author uses the suffix to name
 an ordinary port release. `^3.6` cannot select it. To require that release, declare `"=3.6.30-sunrise.1"`.

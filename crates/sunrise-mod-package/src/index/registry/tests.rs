@@ -421,10 +421,13 @@ fn a_takedown_review_names_the_dependents_of_a_removed_version() {
     }];
     let notes = takedown_notes(std::slice::from_ref(&base), &[], &index);
     assert_eq!(notes.len(), 1);
-    for word in ["fireflies", "0.1.0", "coords_hud", "^0.1", "check"] {
+    for word in ["fireflies", "0.1.0", "coords_hud", "^0.1"] {
         assert!(notes[0].contains(word), "{notes:?}");
     }
-    assert!(takedown_notes(&[base], &index.revoked, &index).is_empty());
+    assert!(takedown_notes(std::slice::from_ref(&base), &index.revoked, &index).is_empty());
+    index.revoked[0].sha256 = None;
+    assert_eq!(takedown_notes(&[base], &[], &index), notes);
+    // `another` requires ^2, which never matched any affected version either way.
 }
 
 #[test]

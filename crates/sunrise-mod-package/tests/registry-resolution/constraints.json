@@ -54,7 +54,7 @@
     {
       "name": "an already-installed owner can rule out the newest candidate",
       "requests": [{"id": "fireflies"}],
-      "installed": [{"id": "wrapper", "version": "1.0.0"}],
+      "installed": [{"id": "wrapper", "version": "1.0.0", "sha256": "0000000000000000000000000000000000000000000000000000000000000001"}],
       "side": "client",
       "native_fits": {},
       "expected": {"requested": {"fireflies": {"status": "installable", "version": "0.1.0"}}, "install": [{"id": "fireflies", "version": "0.1.0"}, {"id": "library", "version": "1.0.0"}], "required_by": {"library": ["fireflies"]}},
@@ -63,7 +63,7 @@
     {
       "name": "an upgrade cannot break an installed owner",
       "requests": [{"id": "library", "version": "2.0.0"}],
-      "installed": [{"id": "wrapper", "version": "1.0.0"}, {"id": "library", "version": "1.0.0"}],
+      "installed": [{"id": "wrapper", "version": "1.0.0", "sha256": "0000000000000000000000000000000000000000000000000000000000000001"}, {"id": "library", "version": "1.0.0", "sha256": "0000000000000000000000000000000000000000000000000000000000000003"}],
       "side": "client",
       "native_fits": {},
       "expected": {},

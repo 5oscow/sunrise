@@ -24,9 +24,6 @@
       {"id": "unknown_capability", "kind": "mod", "name": "Unknown_Capability", "summary": "A dependency-resolution fixture.", "license": "MIT", "source": "https://example.test/mods", "versions": [
         {"api": "0.2", "file": {"name": "unknown_capability.smod", "url": "https://example.test/unknown_capability/1.0.0", "size": 1, "sha256": "0000000000000000000000000000000000000000000000000000000000000001"}, "version": "1.0.0", "game": "26.3", "capabilities": ["unknown-capability"]}
       ]},
-      {"id": "broken_range", "kind": "mod", "name": "Broken_Range", "summary": "A dependency-resolution fixture.", "license": "MIT", "source": "https://example.test/mods", "versions": [
-        {"api": "0.2", "file": {"name": "broken_range.smod", "url": "https://example.test/broken_range/1.0.0", "size": 1, "sha256": "0000000000000000000000000000000000000000000000000000000000000001"}, "version": "1.0.0", "game": "26.3", "dependencies": [{"id": "missing", "version": "not semver"}]}
-      ]},
       {"id": "loop_a", "kind": "mod", "name": "Loop_A", "summary": "A dependency-resolution fixture.", "license": "MIT", "source": "https://example.test/mods", "versions": [
         {"api": "0.2", "file": {"name": "loop_a.smod", "url": "https://example.test/loop_a/1.0.0", "size": 1, "sha256": "0000000000000000000000000000000000000000000000000000000000000001"}, "version": "1.0.0", "game": "26.3", "dependencies": [{"id": "loop_b", "version": "^1"}]}
       ]},
@@ -72,16 +69,7 @@
       "side": "client",
       "native_fits": {"native_lib": {"1.0.0": false, "1.1.0": false}},
       "expected": {},
-      "refusals": {"needs_missing": ["needs_missing", "missing", "^1", "no such mod"], "needs_revoked": ["needs_revoked", "revoked", "^1", "taken down"], "unknown_capability": ["unknown_capability", "no matching version fits"], "wrong_game": ["wrong_game", "no matching version fits", "Minecraft 26.3"], "loop_a": ["cycle", "loop_a", "loop_b"]}
-    },
-    {
-      "name": "a malformed range is refused by name",
-      "requests": [{"id": "broken_range"}],
-      "installed": [],
-      "side": "client",
-      "native_fits": {"native_lib": {"1.0.0": false, "1.1.0": false}},
-      "expected": {},
-      "refusals": {"broken_range": ["broken_range", "1.0.0", "missing", "not semver", "rebuild the index"]}
+      "refusals": {"needs_missing": ["needs_missing", "missing", "^1", "not listed as a mod"], "needs_revoked": ["needs_revoked", "revoked", "^1", "taken down"], "unknown_capability": ["unknown_capability", "unknown-capability"], "wrong_game": ["wrong_game", "no matching version fits", "Minecraft 26.3"], "loop_a": ["cycle", "loop_a", "loop_b"]}
     }
   ]
 }

@@ -916,7 +916,11 @@ pub fn takedown_notes(base: &[Entry], previous: &[Revoked], head: &Index) -> Vec
             .flat_map(|p| p.versions.iter().map(|v| (&v.version, &v.file.sha256)));
         let affected: Vec<_> = old
             .chain(new)
-            .filter(|(_, hash)| r.sha256.as_ref().is_none_or(|h| h == *hash))
+            .filter(|(_, hash)| {
+                r.sha256
+                    .as_ref()
+                    .is_none_or(|h| h.eq_ignore_ascii_case(hash))
+            })
             .filter_map(|(v, _)| crate::dependencies::parse_version(v).ok())
             .collect();
         for p in &head.projects {
@@ -927,10 +931,9 @@ pub fn takedown_notes(base: &[Entry], previous: &[Revoked], head: &Index) -> Vec
                     .flatten()
                     .filter(|d| !d.optional && d.id == r.id)
                 {
-                    if r.sha256.is_none()
-                        || dep
-                            .range(&p.id, &v.version)
-                            .is_ok_and(|range| affected.iter().any(|n| range.matches(n)))
+                    if dep
+                        .range(&p.id, &v.version)
+                        .is_ok_and(|range| affected.iter().any(|n| range.matches(n)))
                     {
                         notes.insert(format!(
                             "{} {} requires {} {}: this takedown removes a matching file; check that a usable version remains",

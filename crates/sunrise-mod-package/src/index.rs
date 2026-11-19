@@ -210,7 +210,7 @@ pub struct Version {
     /// The Minecraft version it is for.
     pub game: String,
     /// A mod's dependencies, sorted by id. None means the index did not list the field.
-    #[serde(default, skip_serializing_if = "dependencies_empty")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dependencies: Option<Vec<Dependency>>,
     /// A modpack's mods, as its manifest lists them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -324,10 +324,6 @@ pub struct Dependency {
     pub side: Option<Side>,
 }
 
-fn dependencies_empty(dependencies: &Option<Vec<Dependency>>) -> bool {
-    dependencies.as_ref().is_none_or(Vec::is_empty)
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Requirement {
     pub id: String,
@@ -402,8 +398,8 @@ impl Index {
     /// Every rule a reader relies on: unique valid ids, at least one
     /// version each, plain file names with the kind's extension, `https`
     /// URLs, hex hashes, keys and signatures that decode, and each
-    /// modpack's mods present in the index with the same hash. The publisher also checks that
-    /// required mod dependencies name listed versions and don't form a cycle.
+    /// modpack's mods present in the index with the same hash. A mod dependency row must be
+    /// well-formed, but resolving it is a separate install decision.
     pub fn check(&self) -> Result<(), String> {
         self.check_with(false)
     }
@@ -428,7 +424,7 @@ impl Index {
         for r in &self.revoked {
             check_revoked(r)?;
         }
-        self.check_dependencies()
+        Ok(())
     }
 
     /// What a reader keeps of an index that fails [`Index::check`]: each project, version and
@@ -595,6 +591,7 @@ fn check_version(p: &Project, v: &Version, local_files: bool) -> Result<(), Stri
     if v.version.trim().is_empty() {
         return Err(at("empty or repeated version".into()));
     }
+    dependencies::check_shape(p, v)?;
     let mut pairs = std::collections::HashSet::new();
     for b in &v.native_binaries {
         if b.build.len() > MAX_NATIVE_BUILD

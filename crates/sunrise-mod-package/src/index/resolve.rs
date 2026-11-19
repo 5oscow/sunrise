@@ -2,7 +2,7 @@
 use super::{Dependency, Index, Kind, Project, Version, dependencies::required_cycle};
 use crate::dependencies::parse_version;
 use mod_vocab::Side;
-use semver::VersionReq;
+use semver::{Comparator, Op, VersionReq};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -11,6 +11,27 @@ pub struct ModVersion {
     pub id: String,
     pub version: String,
 }
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InstalledMod {
+    pub id: String,
+    pub version: String,
+    /// Only an exact hash match identifies the registry artifact. Otherwise this is a local copy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
+}
+
+impl InstalledMod {
+    fn is_file(&self, version: &Version) -> bool {
+        self.version == version.version
+            && self
+                .sha256
+                .as_ref()
+                .is_some_and(|h| h.eq_ignore_ascii_case(&version.file.sha256))
+    }
+}
+
+type Present<'a> = BTreeMap<&'a str, &'a InstalledMod>;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Request {
@@ -65,11 +86,12 @@ pub struct InstallPlan {
 /// native mod was made for, not whether its used API surface is unchanged on another build.
 /// `side` is the installation (client or dedicated server); `Both` considers all declarations.
 /// The caller checks takedowns by hash for installed files: only it has their actual bytes.
-/// A kept unindexed version has no dependency metadata to walk; the loader checks its manifest.
+/// A local copy with no matching index hash has no dependency metadata to walk. This planner
+/// checks its version range and any project-wide takedown; the loader checks its manifest.
 pub fn install(
     index: &Index,
     requests: &[Request],
-    installed: &[ModVersion],
+    installed: &[InstalledMod],
     game: &str,
     side: Side,
     native_fits: impl Fn(&Project, &Version) -> bool,
@@ -80,12 +102,12 @@ pub fn install(
     }
     let mut present = BTreeMap::new();
     for m in installed {
-        if let Some(previous) = present.insert(m.id.as_str(), m.version.as_str())
-            && previous != m.version
+        if let Some(previous) = present.insert(m.id.as_str(), m)
+            && previous != m
         {
             let reason = format!(
-                "{} has both {previous} and {} installed: keep only one version",
-                m.id, m.version
+                "{} has conflicting installed files ({} and {}): keep only one",
+                m.id, previous.version, m.version
             );
             plan.requested.extend(requests.iter().map(|r| {
                 (
@@ -99,170 +121,138 @@ pub fn install(
         }
     }
     let catalog = Catalog::new(index, game, side, native_fits, &present);
-    let installed_edges: Vec<_> = present
-        .iter()
-        .filter_map(|(id, version)| {
-            Some((
-                *id,
-                catalog
-                    .mods
-                    .get(id)?
-                    .iter()
-                    .find(|c| c.version == *version)?,
-            ))
-        })
+    let installed_edges: Selected<'_> = present
+        .keys()
+        .filter_map(|&id| Some((id, catalog.mods.get(id)?.iter().find(|c| c.installed)?)))
         .collect();
 
-    let mut pending: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    let mut roots = Roots::new();
     for r in requests {
-        pending
-            .entry(&r.id)
-            .or_default()
-            .extend(r.version.as_deref());
+        roots.entry(&r.id).or_default().extend(r.version.as_deref());
     }
-    // Only follow possible required edges *from* requested mods. An unrelated, unrequested
-    // mod that happens to depend on two of these projects must not tie their plans together.
-    let mut neighbors: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-    let mut reachable = BTreeSet::new();
-    let mut queue: Vec<_> = pending.keys().copied().collect();
-    while let Some(id) = queue.pop() {
-        if !reachable.insert(id) {
-            continue;
-        }
-        for candidate in catalog.mods.get(id).into_iter().flatten().filter(|c| {
-            c.fit == Fit::Yes
-                && pending
-                    .get(id)
-                    .is_none_or(|pins| pins.iter().all(|v| *v == c.version))
-        }) {
-            for dep in &candidate.required {
-                let target = dep.row.id.as_str();
-                neighbors.entry(id).or_default().push(target);
-                neighbors.entry(target).or_default().push(id);
-                queue.push(target);
-            }
-        }
-    }
-    // A possible replacement may remove the old version's guard on another requested mod.
-    // They have to be planned together, but a fixed, unrelated installed mod only adds guards.
-    for &(id, candidate) in &installed_edges {
-        if reachable.contains(id) {
-            for target in candidate
-                .required
-                .iter()
-                .map(|d| d.row.id.as_str())
-                .filter(|target| reachable.contains(target))
-            {
-                neighbors.entry(id).or_default().push(target);
-                neighbors.entry(target).or_default().push(id);
-            }
-        }
-    }
-    let mut seen = BTreeSet::new();
-    let mut needed_by = BTreeMap::<_, BTreeSet<_>>::new();
-    while let Some((&first, _)) = pending.first_key_value() {
-        let mut groups = BTreeMap::new();
-        let mut queue = vec![first];
-        while let Some(id) = queue.pop() {
-            if !seen.insert(id) {
-                continue;
-            }
-            if let Some(pins) = pending.remove(id) {
-                groups.insert(id, pins);
-            }
-            queue.extend(neighbors.get(id).into_iter().flatten().copied());
-        }
-        match catalog.solve(&groups, &present, &installed_edges) {
+    let mut groups = Vec::new();
+    for (id, pins) in roots {
+        let roots = Roots::from([(id, pins)]);
+        match catalog.solve(&roots, &present, &installed_edges) {
+            Ok(selected) => groups.push((roots, selected)),
             Err(reason) => {
-                let reason = if groups.len() > 1 {
-                    let ids = groups.keys().copied().collect::<Vec<_>>().join(", ");
-                    format!("{ids} cannot be installed together: {reason}")
-                } else {
-                    reason
-                };
-                plan.requested.extend(groups.keys().map(|id| {
-                    (
-                        (*id).to_owned(),
+                plan.requested
+                    .insert(id.to_owned(), RequestResult::Refused { reason });
+            }
+        }
+    }
+    // Group only feasible selections. If joint solving picks different dependencies,
+    // repeat: new overlaps or active optional edges may tie that plan to another group.
+    loop {
+        let owners: BTreeMap<_, _> = groups
+            .iter()
+            .enumerate()
+            .flat_map(|(i, (_, selected))| selected.keys().map(move |&id| (id, i)))
+            .collect();
+        let pair = groups.iter().enumerate().find_map(|(i, (_, selected))| {
+            selected.iter().find_map(|(&id, c)| {
+                std::iter::once(id)
+                    .chain(c.optional.iter().map(|r| r.row.id.as_str()))
+                    // Replacing an installed owner can change another selection's guards.
+                    .chain(
+                        installed_edges
+                            .get(id)
+                            .into_iter()
+                            .flat_map(|old| old.required.iter().chain(&old.optional))
+                            .map(|r| r.row.id.as_str()),
+                    )
+                    .filter_map(|target| owners.get(target).copied())
+                    .find(|&j| i != j)
+                    .map(|j| (i.min(j), i.max(j)))
+            })
+        });
+        let Some((i, j)) = pair else { break };
+        let (other, _) = groups.remove(j);
+        groups[i].0.extend(other);
+        let roots = &groups[i].0;
+        match catalog.solve(roots, &present, &installed_edges) {
+            Ok(selected) => groups[i].1 = selected,
+            Err(reason) => {
+                let ids = roots.keys().copied().collect::<Vec<_>>().join(", ");
+                let reason = format!("{ids} cannot be installed together: {reason}");
+                for &id in roots.keys() {
+                    plan.requested.insert(
+                        id.to_owned(),
                         RequestResult::Refused {
                             reason: reason.clone(),
                         },
-                    )
-                }));
-            }
-            Ok(selected) => {
-                for &root in groups.keys() {
-                    let mut todo = vec![root];
-                    let mut visited = BTreeSet::new();
-                    while let Some(id) = todo.pop() {
-                        if !visited.insert(id) {
-                            continue;
-                        }
-                        if id != root {
-                            needed_by
-                                .entry(id.to_owned())
-                                .or_default()
-                                .insert(root.to_owned());
-                        }
-                        todo.extend(selected[id].required.iter().map(|d| d.row.id.as_str()));
-                    }
+                    );
                 }
-                for (id, candidate) in selected {
-                    let version = candidate.version;
-                    let row = ModVersion {
-                        id: id.into(),
+                groups.remove(i);
+            }
+        }
+    }
+    let mut needed_by = BTreeMap::<_, BTreeSet<_>>::new();
+    for (groups, selected) in groups {
+        for &root in groups.keys() {
+            let mut todo = vec![root];
+            let mut visited = BTreeSet::new();
+            while let Some(id) = todo.pop() {
+                if !visited.insert(id) {
+                    continue;
+                }
+                if id != root {
+                    needed_by
+                        .entry(id.to_owned())
+                        .or_default()
+                        .insert(root.to_owned());
+                }
+                todo.extend(selected[id].required.iter().map(|d| d.row.id.as_str()));
+            }
+        }
+        for (id, candidate) in selected {
+            let version = candidate.version;
+            let row = ModVersion {
+                id: id.into(),
+                version: version.into(),
+            };
+            let outcome = match present.get(id) {
+                Some(_) if candidate.installed => {
+                    if candidate.unindexed {
+                        plan.kept_unindexed.push(row.clone());
+                    } else {
+                        plan.kept.push(row.clone());
+                    }
+                    RequestResult::AlreadyInstalled {
                         version: version.into(),
-                    };
-                    let outcome = match present.get(id) {
-                        Some(old) if *old == version => {
-                            if candidate.unindexed {
-                                plan.kept_unindexed.push(row.clone());
-                            } else {
-                                plan.kept.push(row.clone());
-                            }
-                            RequestResult::AlreadyInstalled {
-                                version: version.into(),
-                            }
-                        }
-                        Some(old) => {
-                            let downgrade = candidate
-                                .number
-                                .as_ref()
-                                .zip(
-                                    catalog.mods[id]
-                                        .iter()
-                                        .find(|c| c.version == *old)
-                                        .and_then(|c| c.number.as_ref()),
-                                )
-                                .is_some_and(|(next, previous)| {
-                                    next.cmp_precedence(previous).is_lt()
-                                });
-                            plan.update.push(Update {
-                                id: id.into(),
-                                from: (*old).into(),
-                                to: version.into(),
-                                downgrade,
-                            });
-                            RequestResult::Installable {
-                                version: version.into(),
-                            }
-                        }
-                        None => {
-                            plan.install.push(row.clone());
-                            RequestResult::Installable {
-                                version: version.into(),
-                            }
-                        }
-                    };
-                    if groups.contains_key(id) {
-                        plan.requested.insert(id.into(), outcome);
                     }
-                    plan.optional
-                        .extend(candidate.optional.iter().map(|dep| OptionalDependency {
-                            from: row.clone(),
-                            dependency: (*dep).clone(),
-                        }));
                 }
+                Some(old) => {
+                    let downgrade = candidate
+                        .number
+                        .as_ref()
+                        .zip(parse_version(&old.version).ok().as_ref())
+                        .is_some_and(|(next, previous)| next.cmp_precedence(previous).is_lt());
+                    plan.update.push(Update {
+                        id: id.into(),
+                        from: old.version.clone(),
+                        to: version.into(),
+                        downgrade,
+                    });
+                    RequestResult::Installable {
+                        version: version.into(),
+                    }
+                }
+                None => {
+                    plan.install.push(row.clone());
+                    RequestResult::Installable {
+                        version: version.into(),
+                    }
+                }
+            };
+            if groups.contains_key(id) {
+                plan.requested.insert(id.into(), outcome);
             }
+            plan.optional
+                .extend(candidate.optional.iter().map(|dep| OptionalDependency {
+                    from: row.clone(),
+                    dependency: dep.row.clone(),
+                }));
         }
     }
     plan.install.sort_by(|a, b| a.id.cmp(&b.id));
@@ -279,19 +269,19 @@ pub fn install(
 }
 
 /// List installed mods that directly or transitively require `id`, from the indexed metadata
-/// for their exact installed versions. An optional or out-of-side dependency is not a blocker.
+/// for matching installed artifacts. An optional or out-of-side dependency is not a blocker.
 pub fn removal_dependents(
     index: &Index,
-    installed: &[ModVersion],
+    installed: &[InstalledMod],
     id: &str,
     side: Side,
 ) -> Result<Vec<ModVersion>, String> {
-    let mut reverse = BTreeMap::<&str, Vec<&ModVersion>>::new();
+    let mut reverse = BTreeMap::<&str, Vec<&InstalledMod>>::new();
     for m in installed {
         let Some(version) = index
             .project(&m.id)
             .filter(|p| p.kind.is_mod())
-            .and_then(|p| p.versions.iter().find(|v| v.version == m.version))
+            .and_then(|p| p.versions.iter().find(|v| m.is_file(v)))
         else {
             continue;
         };
@@ -312,7 +302,10 @@ pub fn removal_dependents(
         for m in reverse.get(id).into_iter().flatten() {
             if seen.insert(&m.id) {
                 queue.push(&m.id);
-                dependents.push((*m).clone());
+                dependents.push(ModVersion {
+                    id: m.id.clone(),
+                    version: m.version.clone(),
+                });
             }
         }
     }
@@ -320,11 +313,12 @@ pub fn removal_dependents(
     Ok(dependents)
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
 enum Fit {
     Yes,
     Revoked,
     WrongGame,
+    Unsupported(String),
     WrongSunrise,
 }
 
@@ -335,12 +329,12 @@ struct Range<'a> {
 
 struct Candidate<'a> {
     version: &'a str,
+    installed: bool,
     unindexed: bool,
     number: Option<semver::Version>,
     fit: Fit,
     required: Vec<Range<'a>>,
-    optional: Vec<&'a Dependency>,
-    invalid_optional: Option<String>,
+    optional: Vec<Range<'a>>,
 }
 
 struct Catalog<'a> {
@@ -348,6 +342,7 @@ struct Catalog<'a> {
     mods: BTreeMap<&'a str, Vec<Candidate<'a>>>,
 }
 
+type Roots<'a> = BTreeMap<&'a str, Vec<&'a str>>;
 type Selected<'a> = BTreeMap<&'a str, &'a Candidate<'a>>;
 
 struct Need<'a> {
@@ -385,7 +380,7 @@ impl<'a> Catalog<'a> {
         game: &'a str,
         side: Side,
         native_fits: impl Fn(&Project, &Version) -> bool,
-        present: &BTreeMap<&'a str, &'a str>,
+        present: &Present<'a>,
     ) -> Self {
         let mut mods: BTreeMap<_, Vec<_>> = index
             .projects
@@ -398,26 +393,25 @@ impl<'a> Catalog<'a> {
                     .map(|v| {
                         let mut required = Vec::new();
                         let mut optional = Vec::new();
-                        let mut invalid_optional = None;
                         for dep in v.dependencies.iter().flatten().filter(|d| d.applies(side)) {
                             let parsed = dep.range(&p.id, &v.version);
                             if dep.optional {
-                                if let Err(err) = parsed {
-                                    invalid_optional = Some(err);
-                                }
-                                optional.push(dep);
+                                optional.push(Range { row: dep, parsed });
                             } else {
                                 required.push(Range { row: dep, parsed });
                             }
                         }
                         Candidate {
                             version: &v.version,
+                            installed: present.get(p.id.as_str()).is_some_and(|m| m.is_file(v)),
                             unindexed: false,
                             number: parse_version(&v.version).ok(),
                             fit: if index.revoked(&p.id, &v.file.sha256).is_some() {
                                 Fit::Revoked
-                            } else if !v.fits_game(game) {
+                            } else if v.game != game {
                                 Fit::WrongGame
+                            } else if let Some(reason) = v.capabilities.unsupported() {
+                                Fit::Unsupported(reason)
                             } else if p.kind == Kind::NativeMod && !native_fits(p, v) {
                                 Fit::WrongSunrise
                             } else {
@@ -425,7 +419,6 @@ impl<'a> Catalog<'a> {
                             },
                             required,
                             optional,
-                            invalid_optional,
                         }
                     })
                     .collect();
@@ -437,11 +430,13 @@ impl<'a> Catalog<'a> {
                 (p.id.as_str(), versions)
             })
             .collect();
-        for (&id, &version) in present {
+        for (&id, &row) in present {
+            let version = &row.version;
             let candidates = mods.entry(id).or_default();
-            if !candidates.iter().any(|c| c.version == version) {
+            if !candidates.iter().any(|c| c.installed) {
                 candidates.push(Candidate {
                     version,
+                    installed: true,
                     unindexed: true,
                     number: parse_version(version).ok(),
                     fit: if index.revoked(id, "").is_some() {
@@ -451,7 +446,6 @@ impl<'a> Catalog<'a> {
                     },
                     required: Vec::new(),
                     optional: Vec::new(),
-                    invalid_optional: None,
                 });
             }
         }
@@ -468,10 +462,33 @@ impl<'a> Catalog<'a> {
             }
         };
         let Some(versions) = self.mods.get(id) else {
-            return Err(format!("{}: no such mod in the registry", describe()));
+            return Err(format!(
+                "{}: not listed as a mod in the registry",
+                describe()
+            ));
         };
         let mut matches = versions.iter().filter(|c| need.accepts(c)).peekable();
         if matches.peek().is_none() {
+            if need.pins.is_empty()
+                && !need.ranges.is_empty()
+                && let Some(pre) = versions
+                    .iter()
+                    .filter(|c| !c.unindexed)
+                    .filter_map(|c| c.number.as_ref())
+                    .find(|n| {
+                        !n.pre.is_empty()
+                            && need.ranges.iter().all(|(_, r)| {
+                                r.parsed.as_ref().is_ok_and(|range| {
+                                    range.matches(n) || excluded_as_prerelease(range, n)
+                                })
+                            })
+                    })
+            {
+                return Err(format!(
+                    "{}: no listed version satisfies all requirements; use a range that names the prerelease, such as ={pre}",
+                    describe()
+                ));
+            }
             return Err(format!(
                 "{}: no listed version satisfies all requirements",
                 describe()
@@ -485,14 +502,22 @@ impl<'a> Catalog<'a> {
             ));
         }
         let mut game_fits = unrevoked.filter(|c| c.fit != Fit::WrongGame).peekable();
-        if game_fits.peek().is_none() {
+        let Some(first) = game_fits.peek().copied() else {
             return Err(format!(
                 "{}: no matching version fits this instance (Minecraft {})",
                 describe(),
                 self.game
             ));
+        };
+        let mut supported = game_fits
+            .filter(|c| !matches!(c.fit, Fit::Unsupported(_)))
+            .peekable();
+        if supported.peek().is_none()
+            && let Fit::Unsupported(reason) = &first.fit
+        {
+            return Err(format!("{} {}: {reason}", describe(), first.version));
         }
-        let fits: Vec<_> = game_fits.filter(|c| c.fit == Fit::Yes).collect();
+        let fits: Vec<_> = supported.filter(|c| c.fit == Fit::Yes).collect();
         if fits.is_empty() {
             return Err(format!(
                 "{}: no matching native version fits this Sunrise build",
@@ -506,9 +531,9 @@ impl<'a> Catalog<'a> {
     /// can narrow an earlier choice; undo it and retry instead of keeping stale outgoing edges.
     fn solve<'s>(
         &'s self,
-        roots: &BTreeMap<&'s str, Vec<&'s str>>,
-        present: &BTreeMap<&str, &str>,
-        installed: &[(&'s str, &'s Candidate<'a>)],
+        roots: &Roots<'s>,
+        present: &Present<'_>,
+        installed: &Selected<'s>,
     ) -> Result<Selected<'s>, String>
     where
         'a: 's,
@@ -533,9 +558,6 @@ impl<'a> Catalog<'a> {
                     })
                     .collect();
                 for (&id, &c) in &selected {
-                    if let Some(e) = &c.invalid_optional {
-                        return Err(e.clone());
-                    }
                     for range in &c.required {
                         range.parsed.as_ref().map_err(Clone::clone)?;
                         needs
@@ -548,14 +570,30 @@ impl<'a> Catalog<'a> {
                             .push((id, range));
                     }
                 }
-                // An installed owner that is not being replaced still needs its own ranges.
-                // Delay its guard until the owner can't be changed by a pending request; at the
-                // final check these guards all apply. Never install an unrelated mod's missing deps.
-                let complete = needs.keys().all(|id| selected.contains_key(id));
-                if complete {
-                    for &(owner, c) in installed {
+                // Optional ranges constrain a selected target, or a target already installed.
+                // They never add a target to the closure. Check the fixed installed owners
+                // only once no pending selection can replace them.
+                if needs.keys().all(|id| selected.contains_key(id)) {
+                    for (&owner, c) in &selected {
+                        for range in &c.optional {
+                            let target = range.row.id.as_str();
+                            if let Some(need) = needs.get_mut(target) {
+                                range.parsed.as_ref().map_err(Clone::clone)?;
+                                need.ranges.push((owner, range));
+                            } else if let Some(row) = present.get(target) {
+                                let req = range.parsed.as_ref().map_err(Clone::clone)?;
+                                if !parse_version(&row.version).is_ok_and(|n| req.matches(&n)) {
+                                    return Err(format!(
+                                        "{target} {} is installed, but {owner} needs {}",
+                                        row.version, range.row.version
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    for (&owner, &c) in installed {
                         if !selected.contains_key(owner) {
-                            for range in &c.required {
+                            for range in c.required.iter().chain(&c.optional) {
                                 if let Some(need) = needs.get_mut(range.row.id.as_str()) {
                                     range.parsed.as_ref().map_err(Clone::clone)?;
                                     need.ranges.push((owner, range));
@@ -583,10 +621,7 @@ impl<'a> Catalog<'a> {
                     .find(|id| !selected.contains_key(**id));
                 if let Some(&id) = next {
                     let mut choices = self.choices(id, &needs[id])?;
-                    if let Some(at) = choices
-                        .iter()
-                        .position(|c| present.get(id).is_some_and(|v| *v == c.version))
-                    {
+                    if let Some(at) = choices.iter().position(|c| c.installed) {
                         choices[..=at].rotate_right(1);
                     }
                     return Ok(Some((id, choices.into_iter())));
@@ -602,7 +637,10 @@ impl<'a> Catalog<'a> {
                     })
                     .collect();
                 if let Some(cycle) = required_cycle(&edges) {
-                    let names: Vec<_> = cycle.into_iter().map(|i| nodes[i]).collect();
+                    let names: Vec<_> = cycle
+                        .into_iter()
+                        .map(|i| format!("{} {}", nodes[i], selected[nodes[i]].version))
+                        .collect();
                     return Err(format!("required dependency cycle: {}", names.join(" -> ")));
                 }
                 Ok(None)
@@ -632,4 +670,51 @@ impl<'a> Catalog<'a> {
             roots.keys().copied().collect::<Vec<_>>().join(", ")
         ))
     }
+}
+
+/// Check selected versions as exact pins, reusing the install catalog per Minecraft release and side.
+/// This has no installed files and assumes native SDK fit: a publisher can't know a player's build.
+/// Package side is a join contract; only dependency side filters client and dedicated installations.
+pub fn uninstallable_versions(index: &Index, include: impl Fn(&Version) -> bool) -> Vec<String> {
+    let mut by_game = BTreeMap::<_, Vec<_>>::new();
+    for p in index.projects.iter().filter(|p| p.kind.is_mod()) {
+        for v in p.versions.iter().filter(|v| include(v)) {
+            by_game
+                .entry(v.game.as_str())
+                .or_default()
+                .push((p.id.as_str(), v.version.as_str()));
+        }
+    }
+    let mut problems = Vec::new();
+    for (game, versions) in by_game {
+        let present = Present::new();
+        let installed = Selected::new();
+        for (side, label) in [(Side::Client, "client"), (Side::Server, "dedicated server")] {
+            let catalog = Catalog::new(index, game, side, |_, _| true, &present);
+            for &(id, version) in &versions {
+                let roots = Roots::from([(id, vec![version])]);
+                if let Err(reason) = catalog.solve(&roots, &present, &installed) {
+                    problems.push(format!("{id} {version} ({label}): {reason}"));
+                }
+            }
+        }
+    }
+    problems
+}
+
+/// Test the same comparators with an extra exact comparator to opt in to the prerelease. If it
+/// then matches, SemVer's prerelease opt-in (rather than the numeric bounds) was the only block.
+fn excluded_as_prerelease(range: &VersionReq, version: &semver::Version) -> bool {
+    if version.pre.is_empty() {
+        return false;
+    }
+    let mut opted_in = range.clone();
+    opted_in.comparators.push(Comparator {
+        op: Op::Exact,
+        major: version.major,
+        minor: Some(version.minor),
+        patch: Some(version.patch),
+        pre: version.pre.clone(),
+    });
+    opted_in.matches(version)
 }

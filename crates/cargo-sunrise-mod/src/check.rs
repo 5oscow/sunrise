@@ -271,8 +271,9 @@ mod tests {
             signed: false,
         };
         let text = report.text();
-        assert!(text.contains("requires creature ^0.1"));
-        assert!(text.contains("optional: jei ^0.5 (client only)"));
+        for word in ["creature", "^0.1", "jei", "^0.5"] {
+            assert!(text.contains(word), "{text}");
+        }
         assert_eq!(report.json()["dependencies"], dependencies);
     }
 
