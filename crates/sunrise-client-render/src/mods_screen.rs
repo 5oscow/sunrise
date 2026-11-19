@@ -180,6 +180,17 @@ struct Geo {
     footer: [[i32; 4]; 2],
 }
 
+impl Geo {
+    fn panel_track(&self, pinned: i32) -> [i32; 4] {
+        [
+            self.frame[0] + self.frame[2] - FRAME_PAD - SCROLLBAR_W,
+            self.panel[1] + pinned,
+            SCROLLBAR_W,
+            self.panel[3] - pinned,
+        ]
+    }
+}
+
 fn hit(r: [i32; 4], x: f64, y: f64) -> bool {
     x >= f64::from(r[0])
         && y >= f64::from(r[1])
@@ -750,19 +761,20 @@ impl ModsScreen {
             };
             return (action.clone(), action != Action::None);
         }
-        if !hit(g.panel, x, y) {
+        let in_text = hit(g.panel, x, y);
+        if !in_text && !hit(g.panel_track(0), x, y) {
             return (Action::None, false);
         }
-        let e = e.clone();
-        let (items, content, _, pinned) = self.panel_items(m, &e);
+        let (items, content, _, pinned) = self.panel_items(m, e);
         self.panel_content.set(content);
         self.panel_pinned.set(pinned);
         let view = g.panel[3];
-        if Scroll::max(content, view) > 0
-            && y >= f64::from(g.panel[1] + pinned)
-            && x >= f64::from(g.frame[0] + g.frame[2] - FRAME_PAD - SCROLLBAR_W)
-        {
+        self.panel.set(self.panel.amount, content, view);
+        if Scroll::max(content, view) > 0 && hit(g.panel_track(pinned), x, y) {
             self.panel.held = Some(y);
+            return (Action::None, false);
+        }
+        if !in_text {
             return (Action::None, false);
         }
         for placed in &items {
@@ -830,7 +842,13 @@ impl ModsScreen {
 
     /// The screen's calls over the menu background. `blink_ms` is the time since the search box
     /// took the focus.
-    pub fn draw(&self, m: &Measure, mouse: (i32, i32), blink_ms: u64, now_ms: i64) -> Vec<Draw> {
+    pub fn draw(
+        &mut self,
+        m: &Measure,
+        mouse: (i32, i32),
+        blink_ms: u64,
+        now_ms: i64,
+    ) -> Vec<Draw> {
         let g = self.geo();
         let mut out = Vec::new();
         let prefix = if self.in_world { "inworld_" } else { "" };
@@ -892,12 +910,12 @@ impl ModsScreen {
         self.draw_list(&mut out, m, &g);
 
         // The info panel's contents.
-        let selected = self.current();
-        if let Some(e) = selected {
+        if let Some(e) = self.current() {
             let (items, content, width, pinned) = self.panel_items(m, e);
             self.panel_content.set(content);
             self.panel_pinned.set(pinned);
-            let scroll = self.panel.amount.min(f64::from(Scroll::max(content, view))) as i32;
+            self.panel.set(self.panel.amount, content, view);
+            let scroll = self.panel.amount as i32;
             out.push(Draw::Scissor {
                 x0: fx,
                 y0: py,
@@ -984,15 +1002,11 @@ impl ModsScreen {
                 }
             }
             out.push(Draw::NoScissor);
-            self.panel.draw(
-                &mut out,
-                fx + frame_w - FRAME_PAD - SCROLLBAR_W,
-                py + pinned,
-                content - pinned,
-                view - pinned,
-            );
+            let [track_x, track_y, _, track_h] = g.panel_track(pinned);
+            self.panel
+                .draw(&mut out, track_x, track_y, content - pinned, track_h);
         }
-        let e = selected;
+        let e = self.current();
         let enabled = [
             e.is_some_and(|e| e.homepage.is_some()),
             e.is_some_and(|e| e.issues.is_some()),
@@ -1575,6 +1589,90 @@ mod tests {
         });
     }
 
+    fn sprite_rect(draws: &[Draw], name: &str) -> [i32; 4] {
+        draws
+            .iter()
+            .find_map(|draw| match draw {
+                Draw::Sprite {
+                    sprite, x, y, w, h, ..
+                } if sprite == name => Some([*x, *y, *w, *h]),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("missing sprite {name}"))
+    }
+
+    #[test]
+    fn every_painted_panel_scrollbar_pixel_can_start_a_drag() {
+        let atlas = atlas();
+        let m = Measure(&atlas.font);
+        let (mut row, info) = installed("long", "Long", None);
+        row.description = "A long description. ".repeat(80);
+        let mut screen = ModsScreen::with_rows(427, 240, false, &mods(&[(row, info)]), &[]);
+        screen.select(1);
+        let draws = screen.draw(&m, (0, 0), 0, 0);
+        let [x, y, width, _] = sprite_rect(&draws, "widget/scroller_background");
+        let thumb_y = sprite_rect(&draws, "widget/scroller")[1];
+        assert_eq!(width, 6);
+        for px in x..x + width {
+            let mut screen = screen.clone();
+            screen.click(&m, f64::from(px), f64::from(y + 1));
+            screen.drag(f64::from(y + 12));
+            let after = screen.draw(&m, (0, 0), 0, 0);
+            assert!(
+                sprite_rect(&after, "widget/scroller")[1] > thumb_y,
+                "x = {px}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_wider_panel_clamps_the_thumb_and_license_click_to_the_rewrapped_text() {
+        let atlas = atlas();
+        let m = Measure(&atlas.font);
+        let (mut row, mut info) = installed("long", "Long", None);
+        row.description.clear();
+        info.authors.clear();
+        info.license = "MIT".into();
+        info.license_url = Some("https://example.org/LICENSE".into());
+        info.warnings = vec![("test.long".into(), vec!["A warning sentence. ".repeat(80)])];
+        let language = crate::lang::Language::of(
+            "en_us",
+            [
+                ("test.long".to_owned(), "%s".to_owned()),
+                (
+                    "sunrise.mods.screen.license".to_owned(),
+                    "License: %s".to_owned(),
+                ),
+            ],
+        );
+        crate::lang::scoped(language, || {
+            let mut screen = ModsScreen::with_rows(320, 240, false, &mods(&[(row, info)]), &[]);
+            screen.select(1);
+            screen.draw(&m, (0, 0), 0, 0);
+            // Scroll the narrow pane to the end, then rewrap the text without repainting yet.
+            screen.scroll(180.0, 100.0, -10_000.0);
+            screen.resize(640, 240);
+            let draws = screen.clone().draw(&m, (0, 0), 0, 0);
+            let [_, track_y, _, track_h] = sprite_rect(&draws, "widget/scroller_background");
+            let [_, thumb_y, _, thumb_h] = sprite_rect(&draws, "widget/scroller");
+            assert_eq!(thumb_y + thumb_h, track_y + track_h);
+            let (x, y) = draws
+                .iter()
+                .find_map(|draw| match draw {
+                    Draw::Text { text, x, y, .. } if text.plain() == "License: MIT" => {
+                        Some((*x, *y))
+                    }
+                    _ => None,
+                })
+                .unwrap();
+            assert!(y >= track_y && y + 9 <= track_y + track_h);
+            assert_eq!(
+                screen.click(&m, f64::from(x + 1), f64::from(y + 1)).0,
+                Action::Link("https://example.org/LICENSE".into())
+            );
+        });
+    }
+
     #[test]
     fn a_tall_failure_status_leaves_the_whole_small_pane_scrollable() {
         let atlas = atlas();
@@ -1599,7 +1697,7 @@ mod tests {
     fn the_info_panel_has_the_lists_background_and_separators() {
         let atlas = atlas();
         let m = Measure(&atlas.font);
-        let screen = ModsScreen::new(427, 240, false, &ModList::default());
+        let mut screen = ModsScreen::new(427, 240, false, &ModList::default());
         let draws = screen.draw(&m, (0, 0), 0, 0);
         let blit = |texture: &str, x: i32, y: i32, w: i32, h: i32| {
             draws.iter().any(|call| {
