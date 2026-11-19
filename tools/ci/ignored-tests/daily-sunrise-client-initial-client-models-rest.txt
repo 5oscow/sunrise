@@ -1,0 +1,1 @@
+sunrise-client game::initial_client_models_tests::a_client_start_joins_the_world_rest_worker_before_it_resolves_the_renderers lib daily resources
