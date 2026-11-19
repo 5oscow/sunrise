@@ -12,18 +12,22 @@ const NAME: &str = "game::payload_transport::phase_refusal_tests::a_payload_hand
 const CHANNEL: &str = "refusalprobe:message";
 
 /// A handler that reads the world through the Host, as a mod's handler may.
-struct Reads(AtomicU32);
+struct Reads {
+    entered: AtomicU32,
+    completed: AtomicU32,
+}
 impl IPayloadHandler for Reads {
     fn handle(
         &self,
         _: PayloadBytes,
         context: &mut dyn IPayloadContext,
     ) -> Result<(), mod_api::PayloadHandleError> {
-        self.0.fetch_add(1, Ordering::Relaxed);
+        self.entered.fetch_add(1, Ordering::Relaxed);
         let host = context
             .server_host()
             .map_err(|e| mod_api::PayloadHandleError::Failed(format!("{e:?}")))?;
         let _ = host.level("minecraft:overworld");
+        self.completed.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
 }
@@ -94,7 +98,10 @@ fn a_payload_handler_outside_the_world_is_refused_not_a_panic() {
     ) {
         return;
     }
-    let reads = Arc::new(Reads(AtomicU32::new(0)));
+    let reads = Arc::new(Reads {
+        entered: AtomicU32::new(0),
+        completed: AtomicU32::new(0),
+    });
     let mods: mod_api::Mods = vec![ModEntry::new(
         "refusalprobe",
         Box::new(Declares(reads.clone())),
@@ -118,16 +125,18 @@ fn a_payload_handler_outside_the_world_is_refused_not_a_panic() {
                     .handle(PayloadBytes(vec![]), &mut Context(game))
                     .unwrap_err();
                 assert!(
-                    matches!(&refused, mod_api::PayloadHandleError::Failed(m) if m.contains("refused")),
+                    matches!(refused, mod_api::PayloadHandleError::Failed(_)),
                     "{refused:?}"
                 );
+                assert_eq!(reads.completed.load(Ordering::Relaxed), 0);
                 assert!(receiver.enabled(), "a refusal does not poison the owner");
             }
             let _world = PhaseOwner::scope(ModPhase::World);
             receiver
                 .handle(PayloadBytes(vec![]), &mut Context(game))
                 .unwrap();
-            assert_eq!(reads.0.load(Ordering::Relaxed), 3);
+            assert_eq!(reads.entered.load(Ordering::Relaxed), 3);
+            assert_eq!(reads.completed.load(Ordering::Relaxed), 1);
             assert!(receiver.enabled());
         });
     });

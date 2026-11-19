@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 static ACTIVE: [AtomicBool; 1] = [AtomicBool::new(false)];
 static TABLE: Table = Table::new(&ACTIVE);
 static CALLS: AtomicU32 = AtomicU32::new(0);
+static READS_DONE: AtomicU32 = AtomicU32::new(0);
 
 /// A listener that reads the world through the Host, as a mod's listener may.
 struct Reads;
@@ -21,6 +22,7 @@ impl Forward for Reads {
             unreachable!("the site passes the server host")
         };
         let _ = host.level("minecraft:overworld");
+        READS_DONE.fetch_add(1, Ordering::Relaxed);
     }
 }
 static READS: Reads = Reads;
@@ -72,9 +74,19 @@ fn a_point_outside_the_world_skips_the_listener_not_a_panic() {
                 2,
                 "each call ran up to its refused read"
             );
+            assert_eq!(
+                READS_DONE.load(Ordering::Relaxed),
+                0,
+                "no refused read completed"
+            );
             let _world = PhaseOwner::scope(ModPhase::World);
             fire(game);
             assert_eq!(CALLS.load(Ordering::Relaxed), 3);
+            assert_eq!(
+                READS_DONE.load(Ordering::Relaxed),
+                1,
+                "the World read completed"
+            );
         });
     });
 }
