@@ -146,8 +146,10 @@ pub trait LevelBlocksBackendMut {
     /// Side: server.
     /// Run `Block.setPlacedBy` on the block currently at `pos`, without a placer. `stack` is
     /// a detached item value (`None` is the empty stack); the block may inspect its components.
-    /// Write the initial state and load any block entity data before calling. The callback can
-    /// write companion cells and produce block-specific effects, but will not load stack NBT.
+    /// Write the initial state and load any block entity data before calling. Vanilla's part can
+    /// write companion cells and produce block-specific effects, but does not load stack NBT.
+    /// The block's subscribed `BlockPart::set_placed_by` runs after vanilla's work, with
+    /// the same read-only stack and no placer. This does not notify the item's part.
     /// `Ok(false)` at an unloaded or out-of-height origin or on carrier-transfer refusal.
     /// The fence check covers the origin and cells the callback writes directly, including
     /// companions; neighbour updates follow the level's normal rules.
