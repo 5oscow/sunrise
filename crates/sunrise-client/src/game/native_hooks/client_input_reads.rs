@@ -49,7 +49,8 @@ impl Game<'_> {
         &self,
         name: &str,
     ) -> Result<Option<bool>, mod_api::LevelReadError> {
-        if !MAPPINGS.iter().any(|m| m.0 == name) {
+        // The mappings `mapping` and `mapping_state` answer for, and no others.
+        if self.mapping_held(name).is_none() {
             return Ok(None);
         }
         Ok(Some(self.is_key_down(self.settings.keys.get(name))))
