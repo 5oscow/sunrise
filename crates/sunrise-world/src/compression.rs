@@ -1,7 +1,7 @@
 //! Region codecs, including lz4-java's block framing (not the LZ4 frame format).
 use flate2::{Compression as Level, Decompress, FlushDecompress, Status};
 use std::{
-    io::{self, Read, Write},
+    io::{self, Write},
     sync::atomic::{AtomicU8, Ordering},
 };
 
@@ -87,29 +87,7 @@ impl Compression {
                 output.extend_from_slice(bytes);
                 Ok(())
             }
-            Self::Gzip => {
-                let mut decoder = flate2::bufread::GzDecoder::new(bytes);
-                loop {
-                    decoder
-                        .by_ref()
-                        .take((max_output.saturating_sub(output.len()) as u64).saturating_add(1))
-                        .read_to_end(output)?;
-                    if output.len() > max_output {
-                        return Err(invalid("decompression limit exceeded"));
-                    }
-                    let remaining = decoder.into_inner();
-                    if remaining.is_empty() {
-                        return Ok(());
-                    }
-                    decoder = flate2::bufread::GzDecoder::new(remaining);
-                    // GZIPInputStream probes for another member only after a valid
-                    // trailer. An invalid next header ends the stream, but a bad
-                    // body or trailer after a valid header is still an error.
-                    if decoder.header().is_none() {
-                        return Ok(());
-                    }
-                }
-            }
+            Self::Gzip => gzip_into(bytes, max_output, output),
             Self::Zlib => zlib_into(bytes, max_output, output),
             Self::Lz4 => {
                 LZ4_BUFFER.with_borrow_mut(|buffer| decode_lz4(bytes, max_output, output, buffer))
@@ -141,6 +119,95 @@ thread_local! {
     static INFLATER: std::cell::RefCell<Option<Decompress>> = const { std::cell::RefCell::new(None) };
     /// This thread's LZ4 compressed-block scratch, retained between chunk reads.
     static LZ4_BUFFER: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// `GZIPInputStream` recognizes optional fields and verifies FHCRC, but does
+/// not reject reserved FLG bits. Return the raw DEFLATE input, if recognized.
+fn gzip_body(bytes: &[u8]) -> Option<&[u8]> {
+    let (header, mut body) = bytes.split_at_checked(10)?;
+    if header[..3] != [0x1f, 0x8b, 8] {
+        return None;
+    }
+    let flags = header[3];
+    if flags & 4 != 0 {
+        let (len, rest) = body.split_first_chunk::<2>()?;
+        body = rest.get(usize::from(u16::from_le_bytes(*len))..)?;
+    }
+    for flag in [8, 16] {
+        if flags & flag != 0 {
+            let end = body.iter().position(|&b| b == 0)?;
+            body = &body[end + 1..];
+        }
+    }
+    if flags & 2 != 0 {
+        let (expected, rest) = body.split_first_chunk::<2>()?;
+        let actual = crc32fast::hash(&bytes[..bytes.len() - body.len()]);
+        if actual as u16 != u16::from_le_bytes(*expected) {
+            return None;
+        }
+        body = rest;
+    }
+    Some(body)
+}
+
+fn gzip_into(bytes: &[u8], max_output: usize, output: &mut Vec<u8>) -> io::Result<()> {
+    let mut body = gzip_body(bytes).ok_or_else(|| invalid("invalid gzip header"))?;
+    if output.len() > max_output {
+        return Err(invalid("decompression limit exceeded"));
+    }
+    let limit = max_output.saturating_add(1);
+    INFLATER.with_borrow_mut(|inflater| {
+        let decoder = inflater.get_or_insert_with(|| Decompress::new(false));
+        loop {
+            decoder.reset(false);
+            let start = output.len();
+            loop {
+                let before_in = decoder.total_in() as usize;
+                let before_out = output.len();
+                let input = &body[before_in..];
+                let room = limit - before_out;
+                if output.capacity() == before_out {
+                    let want = (before_out - start).max(input.len().min(1024)).max(64);
+                    output.reserve_exact(want.min(room));
+                }
+                let status = if output.capacity() - before_out <= room {
+                    decoder.decompress_vec(input, output, FlushDecompress::None)
+                } else {
+                    // A reused buffer can already have more spare space than
+                    // the limit allows. Don't inflate past the one-byte probe.
+                    output.resize(before_out + room.min(8192), 0);
+                    let status =
+                        decoder.decompress(input, &mut output[before_out..], FlushDecompress::None);
+                    output.truncate(start + decoder.total_out() as usize);
+                    status
+                }
+                .map_err(|e| invalid(e.to_string()))?;
+                if output.len() > max_output {
+                    return Err(invalid("decompression limit exceeded"));
+                }
+                if status == Status::StreamEnd {
+                    break;
+                }
+                if decoder.total_in() as usize == before_in && output.len() == before_out {
+                    return Err(invalid("truncated gzip body"));
+                }
+            }
+            let (trailer, remaining) = body[decoder.total_in() as usize..]
+                .split_first_chunk::<8>()
+                .ok_or_else(|| invalid("truncated gzip trailer"))?;
+            let crc = u32::from_le_bytes(trailer[..4].try_into().unwrap());
+            let size = u32::from_le_bytes(trailer[4..].try_into().unwrap());
+            if crc != crc32fast::hash(&output[start..]) || size != (output.len() - start) as u32 {
+                return Err(invalid("invalid gzip trailer"));
+            }
+            // A bad next header ends the stream. Once a header is recognized,
+            // a damaged or missing block/trailer remains an error.
+            let Some(next) = gzip_body(remaining) else {
+                return Ok(());
+            };
+            body = next;
+        }
+    })
 }
 
 /// The zlib stream in `bytes` decoded onto `output`, at most `max_output`
@@ -453,6 +520,39 @@ mod tests {
         two[2 * first.len() - 8] ^= 1;
         assert!(Compression::Gzip.decode(&two, 2).is_err());
         assert!(Compression::Gzip.decode(&first[..3], 2).is_err());
+    }
+
+    #[test]
+    fn gzip_accepts_reserved_bits_and_checks_optional_header_crc() {
+        // Temurin 25.0.5 GZIPInputStream reads [41] from this fixture: all
+        // FLG bits set, 3 extra bytes, a name, a comment and a valid FHCRC.
+        let member = [
+            0x1f, 0x8b, 8, 0xff, 0, 0, 0, 0, 0, 0xff, 3, 0, 0xa6, 0, 0xc4, b't', b'e', b's', b't',
+            0, b'n', b'a', b'm', b'e', 0, 0x14, 0x67, 0xd3, 4, 0, 0xe1, 0x77, 0xb0, 0x90, 1, 0, 0,
+            0,
+        ];
+        assert_eq!(Compression::Gzip.decode(&member, 1).unwrap(), [41]);
+        assert_eq!(
+            Compression::Gzip
+                .decode(&[member, member].concat(), 2)
+                .unwrap(),
+            [41, 41],
+        );
+        let mut wrong_crc = member;
+        wrong_crc[26] ^= 1;
+        assert!(Compression::Gzip.decode(&wrong_crc, 1).is_err());
+        assert_eq!(
+            Compression::Gzip
+                .decode(&[member, wrong_crc].concat(), 1)
+                .unwrap(),
+            [41],
+        );
+        // A good continuation header with no body is not trailing junk.
+        assert!(
+            Compression::Gzip
+                .decode(&[&member[..], &member[..27]].concat(), 2)
+                .is_err()
+        );
     }
 
     #[test]
