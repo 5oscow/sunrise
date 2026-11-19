@@ -1,14 +1,10 @@
 """tools/book_quickstart.py: which blocks of a page run, and how a failing one is named."""
-import io
 import os
 from pathlib import Path
-import sys
 import tempfile
 import unittest
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "tools"))
-import book_quickstart  # noqa: E402
+from tools import book_quickstart
 
 PAGE = """# A page
 
