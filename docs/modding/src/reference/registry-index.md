@@ -27,6 +27,7 @@ entry leaves out.
     "versions": [{
       "version": "0.1.0", "published": "2026-10-24", "changelog": "",
       "api": "0.2", "side": "client", "capabilities": ["registries"], "game": "26.3",
+      "dependencies": [{ "id": "jei", "version": "^0.5", "optional": true }],
       "file": { "name": "coords_hud-0.1.0.smod", "url": "https://github.com/sunrise-org/sunrise-mods/releases/download/...",
                 "size": 438, "sha256": "e113...", "signature": "untrusted comment: ...\n...\ntrusted comment: ...\n...\n" }
     }]
@@ -55,17 +56,19 @@ entry leaves out.
 | `api` | A mod's API line (its manifest's `api`); a native mod's pinned revisions (`native-1/<sunrise>/<mixins>`); a modpack's manifest format (`1`). |
 | `side`, `capabilities` | A mod's, read from its manifest during validation. |
 | `game` | The Minecraft version it is for. |
-| `requires` | A modpack's mods: `{ id, version, sha256 }`, each a version in this index with that hash. |
+| `dependencies` | A mod or native mod's [manifest dependencies](../concepts/dependencies.md): `{ id, version, optional, side }`, sorted by `id`. `version` is a SemVer range rendered as text. `optional` is omitted unless true; `side` is omitted unless limited to `client` or `server`. The publisher omits this field when a mod has no dependencies. An explicit `[]` asserts that the manifest has none. Never add this field to `mods/<id>.toml`. |
+| `requires` | A modpack's exact pins: `{ id, version, sha256 }`, each a version in this index with that hash. These are not mod dependencies. |
 | `file` | A plain name with the kind's extension (`.smod`, `.spack`, `.zip`, `.sshader`), an `https://` URL (the registry's release `https://github.com/sunrise-org/sunrise-mods/releases/download/<id>-<version>/<name>`, or an asset of the project's own repository, `https://github.com/<owner>/<repo>/releases/download/<tag>/<name>`: the launcher accepts exactly these shapes), the size (at most 64 MiB), the lowercase hex SHA-256, and the `.minisig` text when the project has a key. |
 | `revoked` | Files taken down: one file by `sha256`, or every version of `id` without it. The launcher refuses to install them and turns installed copies off with the reason. |
 
 Readers ignore fields they don't know, so an optional field can be added to schema 1. Renaming or removing a field, or
 changing what one means, makes schema 2.
 
-The registry's CI holds the whole index to these rules. A reader keeps what passes them: a version that breaks one is
-left out with its reason, a project left with no version goes too, a modpack version whose mod was left out goes with
-it, and an id listed twice leaves out every project with that id. The rest of the index still loads; only text that is
-not an index, or a newer schema, fails as a whole.
+The registry's CI checks the whole index. A reader leaves out individual entries that break file or metadata rules:
+a project left with no versions goes too, a modpack version whose mod was left out goes with it, and an id listed twice
+leaves out every project with that id. Dependency failures are diagnosed when planning an install, so the reader can
+tell you which mod is missing or why it cannot be installed. The rest of the index still loads; only text that is not
+an index, or a newer schema, fails as a whole.
 
 Each version may list `native_binaries`, an array of records with `build` (the
 exact game build ID, at most 128 bytes with no ASCII control characters), `target` (the canonical Rust target triple), and `file`.
@@ -78,18 +81,77 @@ registry-produced metadata, independent of project package keys. The launcher
 builds native mods locally with its pinned Rust toolchain against the prebuilt
 game; registry-built native binaries are not used.
 
+## Dependency checks
+
+`cargo sunrise-mod check <file>` prints the manifest's required and optional dependencies. `registry check` reports
+those facts for new files. It pins each newly submitted mod version and runs the install planner against the proposed
+index for a client and a dedicated server on that version's Minecraft release. A taken-down file isn't a candidate.
+The publisher assumes native SDK fit because it doesn't know each player's Sunrise build. Both check commands offer
+`--json` for machine-readable reports.
+
+The index checks the dependency rows themselves, not whether their requirements can still be satisfied. `registry build`
+warns about listed versions that no longer resolve without blocking publication. Existing listings do not fail `registry check`
+when a takedown breaks a requirement.
+
+- **The registry does not list it:** list the required mod first, or mark it optional if the dependent actually
+  works without it. Optional dependencies can name unlisted mods.
+- **No listed version matches:** list a version in range, or correct the range in `sunrise-mod.toml` and rebuild the mod.
+- **The range excludes the registry's prereleases:** a range such as `^3.6` won't select `3.6.30-sunrise.1`.
+  Use a range that names the prerelease, such as `=3.6.30-sunrise.1`.
+- **Required dependency cycle:** read the named chain of versions and break a required link in the manifests.
+  Optional links and links that never apply on the same installation do not create a required cycle.
+
+Run `registry review <base> <head> --author <login> --files <dir>` with the head checkout's packages in the same
+SHA-256–named file store used by `registry check`. For a new takedown it reports required ranges the taken-down
+files satisfied, so reviewers can check whether a usable alternative remains. A takedown may stay listed for
+review and history; it is not a candidate for installation.
+
+## Planning installs and removals
+
+`sunrise_mod_package::index::resolve` plans an install without downloading or writing anything:
+
+1. Start with the requested mod ids and any exact versions requested. Follow required dependencies on this
+   installation (client or dedicated server). Never install a target just because it is optional. If the target
+   is already installed or selected, it must match the applicable optional ranges too.
+2. Use one version of each mod for the whole group. Keep an eligible installed version that satisfies the active
+   ranges and exact requests. An installed artifact inherits index data only when its id, version and SHA-256 match
+   the indexed file. A local copy with a different or unknown hash can be kept in range without index data, unless
+   the entire project was taken down. The game loader checks that copy's dependencies; the caller checks takedowns
+   against the actual installed file's hash.
+3. Otherwise choose the newest fitting version by SemVer, with index order breaking ties. A version must fit the
+   Minecraft release, request only known capabilities and not be taken down. For a native mod, the caller also
+   supplies eligibility for each version: `native-1/<sunrise>/<mixins>` says what it was made for, not whether
+   the used SDK surface is unchanged on this build. Try another eligible version if a later range rules out a
+   choice. Do not change a dependency to a version that breaks an installed mod's known range.
+4. Try each request on its own. If an installed version blocks it and the batch also requests a change to that mod,
+   try those requests together before refusing. Plan feasible requests together when their selections share a mod or
+   activate a dependency constraint across requests. If a group can't be resolved, report the refusal for that group;
+   an independent group can still install. A plan gives each request's outcome and version or refusal reason,
+   lists what to install, keep or update, and identifies which requests need each dependency. Lists are ordered by id.
+   An update with `downgrade: true` moves to a lower SemVer; the installer names that downgrade in its status line
+   (for example, “Downgraded Sunrise Creatures from 0.2.0 to 0.1.3”).
+5. Before removing a mod, use its id and the installed artifacts to find the known installed mods that require
+   it directly or through another mod. Optional dependencies do not block removal.
+
+Cross-installer cases are in `crates/sunrise-mod-package/tests/registry-resolution/` in the Sunrise repository.
+Each JSON fixture has an index and cases with requests, installed artifacts (`id`, `version`, optional `sha256`),
+per-version native fit decisions, and an expected plan or refusal details.
+
 ## Before a file is installed
 
 `index::check_file` runs on the downloaded file, before it reaches the game folder:
 
 1. Its size and SHA-256 are the ones the entry lists, and it isn't revoked.
 2. With a project key: its signature verifies with that key (minisign's prehashed and legacy signatures both).
-3. What the file says matches the entry: a mod's `sunrise-mod.toml` (id, version, API, side, capabilities) and its
-   content's fence ([making a content mod](../how-to/content-mods.md#content-mods-api-02)); for code, the same manifest's `[native]`
+3. What the file says matches the entry: a mod's `sunrise-mod.toml` (id, version, API, side, capabilities, and
+   dependencies when listed) and its content's fence ([making a content mod](../how-to/content-mods.md#content-mods-api-02)); for code, the same manifest's `[native]`
    (game, the exact Sunrise and horizon-mixins revisions) and checked root Cargo project; a modpack's manifest (id, version, format, game,
    mods); a resource pack's `pack.mcmeta`; a shader pack's `sunrise_shader_api::check` and manifest (id, version,
    shader API).
 4. A kind this build can't install is refused with "this Sunrise can't install a … yet".
+
+An absent `dependencies` field makes no claim about the package's dependencies: an older schema 1 index may omit
+it. The hash still pins the file; the game loader checks the manifest.
 
 ## `.spack`
 

@@ -209,6 +209,9 @@ pub struct Version {
     pub capabilities: Capabilities,
     /// The Minecraft version it is for.
     pub game: String,
+    /// A mod's dependencies, sorted by id. None means the index did not list the field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dependencies: Option<Vec<Dependency>>,
     /// A modpack's mods, as its manifest lists them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub requires: Vec<Requirement>,
@@ -230,6 +233,10 @@ pub struct NativeBinary {
 pub struct NativeBinaryAbsent;
 
 impl Version {
+    fn fits_game(&self, game: &str) -> bool {
+        self.game == game && self.capabilities.unknown().is_empty()
+    }
+
     /// Exact lookup only. Absence lets the caller prepare from source.
     pub fn native_binary(
         &self,
@@ -306,6 +313,18 @@ impl From<Capabilities> for Vec<String> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Dependency {
+    pub id: String,
+    /// The manifest's semver requirement, rendered as text.
+    pub version: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub optional: bool,
+    /// Absent if it applies to both installations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub side: Option<Side>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Requirement {
     pub id: String,
     pub version: String,
@@ -379,7 +398,8 @@ impl Index {
     /// Every rule a reader relies on: unique valid ids, at least one
     /// version each, plain file names with the kind's extension, `https`
     /// URLs, hex hashes, keys and signatures that decode, and each
-    /// modpack's mods present in the index with the same hash.
+    /// modpack's mods present in the index with the same hash. A mod dependency row must be
+    /// well-formed, but resolving it is a separate install decision.
     pub fn check(&self) -> Result<(), String> {
         self.check_with(false)
     }
@@ -513,11 +533,10 @@ impl Index {
     /// A project's newest version for Minecraft `game` that wasn't taken down and asks for no
     /// capability this build doesn't know.
     pub fn installable<'a>(&self, project: &'a Project, game: &str) -> Option<&'a Version> {
-        project.versions.iter().find(|v| {
-            v.game == game
-                && v.capabilities.unknown().is_empty()
-                && self.revoked(&project.id, &v.file.sha256).is_none()
-        })
+        project
+            .versions
+            .iter()
+            .find(|v| v.fits_game(game) && self.revoked(&project.id, &v.file.sha256).is_none())
     }
     pub fn project(&self, id: &str) -> Option<&Project> {
         self.projects.iter().find(|p| p.id == id)
@@ -572,6 +591,7 @@ fn check_version(p: &Project, v: &Version, local_files: bool) -> Result<(), Stri
     if v.version.trim().is_empty() {
         return Err(at("empty or repeated version".into()));
     }
+    dependencies::check_shape(p, v)?;
     let mut pairs = std::collections::HashSet::new();
     for b in &v.native_binaries {
         if b.build.len() > MAX_NATIVE_BUILD
@@ -791,6 +811,8 @@ pub struct Facts {
     pub capabilities: Vec<Capability>,
     /// The Minecraft version, when the file names one (a modpack does).
     pub game: Option<String>,
+    /// The mod's dependencies, sorted by id.
+    pub dependencies: Vec<Dependency>,
     pub requires: Vec<Requirement>,
     /// A mod that declares `[wasm]`: its `mod.wasm` runs in the game's sandbox.
     pub wasm: bool,
@@ -814,6 +836,16 @@ pub(crate) fn same_version(kind: &Kind, found: &str, listed: &str) -> bool {
 impl Facts {
     /// Whether the file is the one `version` of `project` describes.
     pub fn matches(&self, project: &Project, version: &Version) -> Result<(), String> {
+        // Schema 1 predates this field, and a new index omits it when empty. There is no
+        // dependency assertion to compare when it is absent; the file's hash still pins it.
+        if let Some(listed) = &version.dependencies
+            && *listed != self.dependencies
+        {
+            return Err(format!(
+                "{} {}: its sunrise-mod.toml dependencies aren't what the index lists: use the reviewed file and rebuild the index",
+                project.id, version.version
+            ));
+        }
         let (mut caps, mut listed) = (
             self.capabilities.clone(),
             version.capabilities.known().to_vec(),
@@ -877,6 +909,7 @@ pub fn inspect(kind: &Kind, path: &Path) -> Result<Facts, String> {
             crate::Content::read(path, &m)?;
             Ok(Facts {
                 wasm: m.wasm.is_some(),
+                dependencies: manifest_dependencies(&m),
                 capabilities: m.capabilities,
                 id: Some(m.id),
                 version: Some(m.version.to_string()),
@@ -936,6 +969,22 @@ pub fn inspect(kind: &Kind, path: &Path) -> Result<Facts, String> {
         }),
         Kind::Other(name) => Err(format!("this Sunrise can't read a {name} yet")),
     }
+}
+
+fn manifest_dependencies(manifest: &crate::Manifest) -> Vec<Dependency> {
+    manifest
+        .dependencies
+        .iter()
+        .map(|(id, dependency)| {
+            let details = dependency.details();
+            Dependency {
+                id: id.clone(),
+                version: details.version.to_string(),
+                optional: details.optional,
+                side: (details.side != Side::Both).then_some(details.side),
+            }
+        })
+        .collect()
 }
 
 /// A resource pack: a zip with `pack.mcmeta` at its root holding a `pack`
@@ -1052,8 +1101,10 @@ fn names(caps: &[Capability]) -> String {
     format!("[{}]", names.join(", "))
 }
 
+mod dependencies;
 pub mod native;
 pub mod page;
 pub mod registry;
+pub mod resolve;
 #[cfg(test)]
 mod tests;

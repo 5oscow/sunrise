@@ -4,7 +4,7 @@
 //! them into `index.json` with [`build`], reading every listed file, and
 //! checks a pull request's changes with [`review`].
 //!
-//! What an entry can't say for itself (a mod's API, side and capabilities,
+//! What an entry can't say for itself (a mod's API, side, capabilities and dependencies,
 //! a modpack's mods, a file's size) is read from the file, never typed.
 pub use super::open;
 use super::{
@@ -477,9 +477,15 @@ fn version_at(
         return Err(format!("published {:?} is not YYYY-MM-DD", v.published));
     }
     hex64(&v.sha256)?;
-    let size = std::fs::metadata(path)
-        .map_err(|e| format!("its file {}: {e}", v.sha256))?
-        .len();
+    let metadata =
+        std::fs::symlink_metadata(path).map_err(|e| format!("its file {}: {e}", v.sha256))?;
+    let size = metadata.len();
+    if !metadata.is_file() || size == 0 || size > super::MAX_FILE {
+        return Err(format!(
+            "its file must be a regular file of 1 byte to {} MiB: supply the package named by its SHA-256",
+            super::MAX_FILE >> 20
+        ));
+    }
     if super::sha256_file(path)? != v.sha256 {
         return Err("the file isn't the one its sha256 names".into());
     }
@@ -523,6 +529,7 @@ fn version_at(
         side: facts.side,
         capabilities: facts.capabilities.into(),
         game: v.game.clone(),
+        dependencies: (!facts.dependencies.is_empty()).then_some(facts.dependencies),
         requires: facts.requires,
         file: File {
             url,
@@ -630,10 +637,8 @@ impl Entry {
 /// The index of the whole registry: every entry and file checked, then the
 /// index's own rules ([`Index::check`]: names, a modpack's mods present).
 pub fn build(src: &Sources) -> Result<Index, Vec<String>> {
-    let (mut entries, revoked) = load(src.registry)?;
-    entries.sort_by(|a, b| a.id.cmp(&b.id));
+    let (entries, revoked) = load(src.registry)?;
     let mut errors = Vec::new();
-    let mut projects = Vec::new();
     for entry in entries.iter().filter(|e| listed(e, src)) {
         // A listed project's page is complete (registry v2's rollout, step 4).
         let page = match &entry.repo {
@@ -654,6 +659,30 @@ pub fn build(src: &Sources) -> Result<Index, Vec<String>> {
             .into_iter()
             .map(|problem| format!("{}: {problem}", e.id)),
         );
+    }
+    let index = match candidate(&entries, revoked, src) {
+        Ok(index) if errors.is_empty() => index,
+        Ok(_) => return Err(errors),
+        Err(e) => {
+            errors.extend(e);
+            return Err(errors);
+        }
+    };
+    let local = src.release.starts_with("file:///");
+    index.check_with(local).map_err(|e| vec![e])?;
+    Ok(index)
+}
+
+/// Assemble the entries from their package files, before checking links between projects.
+/// Review can still report the impact of a takedown on a candidate that fails [`Index::check`].
+pub fn candidate(
+    entries: &[Entry],
+    revoked: Vec<Revoked>,
+    src: &Sources,
+) -> Result<Index, Vec<String>> {
+    let mut projects = Vec::new();
+    let mut errors = Vec::new();
+    for entry in entries.iter().filter(|e| listed(e, src)) {
         match project(entry, src) {
             Ok(p) => projects.push(p),
             Err(e) => errors.extend(e),
@@ -662,16 +691,14 @@ pub fn build(src: &Sources) -> Result<Index, Vec<String>> {
     if !errors.is_empty() {
         return Err(errors);
     }
-    let index = Index {
+    projects.sort_by(|a, b| a.id.cmp(&b.id));
+    Ok(Index {
         schema: SCHEMA,
         generated: src.generated.clone(),
         projects,
         revoked,
         left_out: Vec::new(),
-    };
-    let local = src.release.starts_with("file:///");
-    index.check_with(local).map_err(|e| vec![e])?;
-    Ok(index)
+    })
 }
 
 /// What GitHub counts for the registry, gathered by its publish workflow (this crate makes no
@@ -862,6 +889,64 @@ pub fn review_with_revoked(
         }
     }
     r
+}
+
+/// Newly added takedowns (changing a reason or date doesn't take down a new file).
+pub fn new_takedowns<'a>(
+    base: &'a [Revoked],
+    head: &'a [Revoked],
+) -> impl Iterator<Item = &'a Revoked> {
+    head.iter().filter(|r| {
+        !base
+            .iter()
+            .any(|old| old.id == r.id && old.sha256 == r.sha256)
+    })
+}
+
+/// Notes for the required ranges each newly revoked file satisfied. A hash-specific takedown
+/// can remove the version from its entry in the same submission, so look in the base as well.
+pub fn takedown_notes(base: &[Entry], previous: &[Revoked], head: &Index) -> Vec<String> {
+    let mut notes = std::collections::BTreeSet::new();
+    for r in new_takedowns(previous, &head.revoked) {
+        let old = base
+            .iter()
+            .filter(|p| p.id == r.id)
+            .flat_map(|p| p.versions.iter().map(|v| (&v.version, &v.sha256)));
+        let new = head
+            .project(&r.id)
+            .into_iter()
+            .flat_map(|p| p.versions.iter().map(|v| (&v.version, &v.file.sha256)));
+        let affected: Vec<_> = old
+            .chain(new)
+            .filter(|(_, hash)| {
+                r.sha256
+                    .as_ref()
+                    .is_none_or(|h| h.eq_ignore_ascii_case(hash))
+            })
+            .filter_map(|(v, _)| crate::dependencies::parse_version(v).ok())
+            .collect();
+        for p in &head.projects {
+            for v in &p.versions {
+                for dep in v
+                    .dependencies
+                    .iter()
+                    .flatten()
+                    .filter(|d| !d.optional && d.id == r.id)
+                {
+                    if dep
+                        .range(&p.id, &v.version)
+                        .is_ok_and(|range| affected.iter().any(|n| range.matches(n)))
+                    {
+                        notes.insert(format!(
+                            "{} {} requires {} {}: this takedown removes a matching file; check that a usable version remains",
+                            p.id, v.version, dep.id, dep.version
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    notes.into_iter().collect()
 }
 
 #[cfg(test)]

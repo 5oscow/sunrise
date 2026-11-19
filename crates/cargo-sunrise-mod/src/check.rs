@@ -31,6 +31,7 @@ impl Report {
             "side": self.facts.side,
             "capabilities": self.facts.capabilities,
             "game": self.facts.game,
+            "dependencies": self.facts.dependencies,
             "requires": requires,
             "sha256": self.sha256,
             "size": self.size,
@@ -69,6 +70,19 @@ impl Report {
         );
         for c in &f.capabilities {
             out += &format!("  may {}\n", c.describe());
+        }
+        for dep in &f.dependencies {
+            let label = if dep.optional {
+                "optional:"
+            } else {
+                "requires"
+            };
+            let side = match dep.side {
+                Some(sunrise_mod_package::manifest::Side::Client) => " (client only)",
+                Some(sunrise_mod_package::manifest::Side::Server) => " (dedicated server only)",
+                _ => "",
+            };
+            out += &format!("  {label} {} {}{side}\n", dep.id, dep.version);
         }
         for r in &f.requires {
             out += &format!("  needs {} {} ({})\n", r.id, r.version, &r.sha256[..12]);
@@ -251,6 +265,31 @@ mod tests {
         let e = check(&pack, Kind::Shader, None, None).err().unwrap();
         assert!(e.contains("sunrise-shaders.toml"), "{e}");
         assert!(check(&pack, Kind::Mod, None, None).is_err());
+    }
+
+    #[test]
+    fn dependencies_are_reported_as_required_or_optional() {
+        let dependencies = json!([
+            {"id": "creature", "version": "^0.1"},
+            {"id": "jei", "version": "^0.5", "optional": true, "side": "client"}
+        ]);
+        let report = Report {
+            kind: Kind::NativeMod,
+            facts: Facts {
+                id: Some("fireflies".into()),
+                version: Some("1.0.0".into()),
+                dependencies: serde_json::from_value(dependencies.clone()).unwrap(),
+                ..Facts::default()
+            },
+            sha256: "0".repeat(64),
+            size: 1,
+            signed: false,
+        };
+        let text = report.text();
+        for word in ["creature", "^0.1", "jei", "^0.5"] {
+            assert!(text.contains(word), "{text}");
+        }
+        assert_eq!(report.json()["dependencies"], dependencies);
     }
 
     #[test]
