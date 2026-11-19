@@ -626,15 +626,6 @@ fn list_atlas(
 ) -> Listed {
     list(sources, textures, &mut |kind, config| {
         if !asked {
-            if atlas.to_string() == "minecraft:gui" {
-                log::warn!(
-                    "Sunrise: the {atlas} atlas's definition lists a source of type {kind} (registered by the \
-                 mod `{}`), which only runs in the blocks and items atlases and the atlases a mod \
-                 registers: its sprites are ignored",
-                    kind.split_once(':')
-                        .map_or(kind, |(namespace, _)| namespace),
-                );
-            }
             return Vec::new();
         }
         let resources = Arc::new(LoadResources(Mutex::new(Some(source.clone()))));
@@ -675,8 +666,8 @@ pub fn registered(
         .collect()
 }
 
-/// The game atlases whose registered source types are asked: the blocks and items atlases.
-const ASKED_ATLASES: [&str; 2] = ["minecraft:blocks", "minecraft:items"];
+/// The game atlases whose registered source types are asked: the blocks, items and GUI atlases.
+const ASKED_ATLASES: [&str; 3] = ["minecraft:blocks", "minecraft:items", "minecraft:gui"];
 
 /// Every atlas definition of a resource tree with the sprites its merged definition lists, from one
 /// listing of the textures. The registered types of mods are asked for the game's blocks and
@@ -690,7 +681,7 @@ pub struct Listing {
 }
 impl Listing {
     /// The listing of `source`, asking `mods` for each entry of a registered type in an atlas
-    /// the game has that mods may add sprites to.
+    /// the game has that mods may add sprites to (blocks, items and GUI).
     pub fn build(source: &crate::resource_source::ResourceSource, mods: &dyn ModSources) -> Self {
         let textures = sorted_textures(source);
         let atlases = atlases(source, mods, &|_| true)
@@ -1245,11 +1236,10 @@ mod tests {
             asked,
             [
                 ("minecraft:blocks".to_owned(), "srcgame:own".to_owned()),
+                ("minecraft:gui".to_owned(), "srcgame:own".to_owned()),
                 ("minecraft:items".to_owned(), "srcgame:own".to_owned()),
-            ],
-            "the blocks and items atlases are asked; another game atlas lists its built-in sources only"
+            ]
         );
-        assert!(first.sprites("minecraft:gui").is_empty());
         let materials = Materials::over(first, &source);
         let red = |origin: &SpriteOrigin| match origin {
             SpriteOrigin::Pixels((_, _, rgba)) => Some(rgba[0]),

@@ -61,8 +61,9 @@ afterwards and keeps nothing alive. It reads the same on native and wasm, each c
 
 Each entry is asked once per atlas each time the client prepares its resources, and the answer is kept
 for everything that reads the atlas, so a source that counts or varies its answers is still seen as one
-answer. Sprite sources run in the game's blocks and items atlas definitions (`assets/minecraft/atlases/blocks.json`
-and `items.json`, the sprites block and item models name) and in the definition of an atlas a mod
+answer. Sprite sources run in the game's blocks, items and GUI atlas definitions (`assets/minecraft/atlases/blocks.json`,
+`items.json` and `gui.json`: the sprites block and item models name, and the GUI's own, which `DrawContext::sprite` and
+`gui_sprite` find by id: `minecraft:container/slot`, a mod's `mymod:panel`) and in the definition of an atlas a mod
 registered (`register_texture_atlases`); an atlas is asked under its own id, so two atlases sharing a
 definition each get their own question. Each atlas keeps its own sprites, by its own id: when the blocks
 and items atlases both list an id, a model's material is the items atlas's, and `texture_sprites` finds
