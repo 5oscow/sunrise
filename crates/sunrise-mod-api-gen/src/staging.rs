@@ -202,7 +202,7 @@ mod tests {
             let lists = root.join("crates/sunrise-mod-api-gen");
             std::fs::create_dir_all(&lists).unwrap();
             std::fs::write(lists.join("internals.txt"), "").unwrap();
-            std::fs::write(lists.join("crossing-foreign.json"), "[]").unwrap();
+            std::fs::write(root.join(crate::crossing::CROSSING_FOREIGN_FILE), "[]").unwrap();
             let package = root.join("crates/sunrise-engine-slots");
             std::fs::create_dir_all(&package).unwrap();
             std::fs::write(

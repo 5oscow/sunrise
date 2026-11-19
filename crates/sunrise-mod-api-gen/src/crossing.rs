@@ -192,7 +192,8 @@ pub fn foreign(path: &str) -> Option<Foreign> {
 
 /// The checked-in [`CROSSING_FOREIGN`] layouts, written by `cargo run -p xtask -- mod-api` from
 /// the locked source. Staging also runs where Cargo may not be yet, so it reads this file.
-const CROSSING_FOREIGN_FILE: &str = "crates/sunrise-mod-api-gen/crossing-foreign.json";
+/// Path relative to the source tree being staged, not the tool's checkout.
+pub const CROSSING_FOREIGN_FILE: &str = "crates/sunrise-mod-api-gen/crossing-foreign.json";
 
 /// One [`CROSSING_FOREIGN`] type's layout, as its crate's source declares it.
 #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]

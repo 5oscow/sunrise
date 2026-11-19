@@ -59,7 +59,7 @@ mod tests {
     use std::fs;
 
     #[test]
-    fn listed_internals_are_only_collected_when_requested() {
+    fn exports_points_and_loops_from_source_with_opt_in_internals() {
         let tree = tempfile::tempdir().unwrap();
         let root = tree.path();
         let write = |file: &str, text: &str| {
@@ -68,25 +68,70 @@ mod tests {
             fs::write(path, text).unwrap();
         };
         write("crates/sunrise-engine-slots/Cargo.toml", "[dependencies]\n");
-        write(
-            "crates/sunrise-client/src/game.rs",
-            "fn tick() {}\n#[cfg(unix)] fn helper() {}\n",
-        );
+        let game = "crates/sunrise-client/src/game.rs";
+        let source = r#"
+fn tick() {}
+#[cfg(unix)] fn helper() {}
+struct Game;
+impl Game {
+    #[sunrise_mod_api_macros::sunrise_loop(name = "things.tick", side = "server")]
+    fn tick_things(&mut self) { self.tick_things_with(&mut ()) }
+    fn tick_things_with<S: ThingSlot>(&mut self, _slot: &mut S) {}
+}
+"#;
+        write(game, source);
         let wire = Default::default();
         let default = collect(root, &wire, false).unwrap();
-        assert_eq!(default.len(), 1);
-        assert_eq!(default[0].id, "point:sunrise_client::game::tick");
+        assert!(default.iter().any(|item| {
+            item.id == "point:sunrise_client::game::tick"
+                && matches!(&item.contract, EngineContract::Point { .. })
+        }));
+        assert_eq!(
+            default
+                .iter()
+                .find(|item| item.id == "loop:things.tick")
+                .map(|item| &item.contract),
+            Some(&EngineContract::Loop {
+                entry: "sunrise_client::game::Game::tick_things".into(),
+                generic: "tick_things_with".into(),
+                slot: "ThingSlot".into(),
+                side: "server".into(),
+            })
+        );
 
         write("crates/sunrise-client/Cargo.toml", "[dependencies]\n");
         write("crates/sunrise-client/src/entry.rs", "");
         write("crates/sunrise-mod-api-gen/internals.txt", "");
-        write("crates/sunrise-mod-api-gen/crossing-foreign.json", "[]");
+        write(crate::crossing::CROSSING_FOREIGN_FILE, "[]");
         let audit = collect(root, &wire, true).unwrap();
-        assert!(audit.iter().any(|item| item.id == default[0].id));
+        assert_eq!(&audit[..default.len()], default.as_slice());
         assert!(
             audit
                 .iter()
                 .any(|item| item.id == "internal:fn:sunrise_client::game::helper [unix]")
+        );
+
+        write(game, &source.replace("things.tick", "things.step"));
+        let surface = |items| {
+            mod_surface::Surface::new(
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+            )
+            .with_engine_items(items)
+        };
+        let renamed = surface(collect(root, &wire, false).unwrap());
+        let diff = mod_surface::diff(&surface(default), &renamed);
+        assert_eq!(
+            diff.undeclared()
+                .map(|change| change.id.as_str())
+                .collect::<Vec<_>>(),
+            ["loop:things.tick"]
         );
     }
 }

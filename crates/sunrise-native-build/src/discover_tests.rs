@@ -1,6 +1,7 @@
 use super::*;
 use crate::tests::{dir, write_bundle};
 use std::cell::Cell;
+use sunrise_platform::mod_build::api_gen::crossing::CROSSING_FOREIGN_FILE;
 
 const STRUCT: &str = "sunrise_client::game::ported_level::PortedGame";
 const METHOD: &str = "sunrise_client::game::ported_level::PortedGame::tick";
@@ -35,7 +36,7 @@ impl Fixture {
             ("crates/sunrise-client/src/entry.rs", ""),
             ("crates/sunrise-client/src/game.rs", ""),
             ("crates/sunrise-mod-api-gen/internals.txt", ""),
-            ("crates/sunrise-mod-api-gen/crossing-foreign.json", "[]"),
+            (CROSSING_FOREIGN_FILE, "[]"),
             (
                 "crates/sunrise-engine-slots/Cargo.toml",
                 "[package]\nname='sunrise-engine-slots'\n",

@@ -135,9 +135,11 @@ migrate = "Replacement ids: point:sunrise_client::game::level_tick::Game<'_>::ti
 
 The reader checks new top-level notes; a note with an unknown key, a missing `ids` or `why`, an empty `ids`, or an id
 that did not change is refused. `changes/history/` holds backfilled notes in the same format. The reader does not
-scan that directory, so they neither waive the gate nor appear in the SDK diff. For active notes, the SDK's `sdk.json`
-carries the notes of the changes since the SDK before it (`surface.notes`), and `cargo sunrise-mod update` prints a
-changed item's `migrate` line beside it.
+scan that directory, so they neither waive the gate nor appear in the SDK diff. CI checks engine notes against the
+catalogs it compares, but SDK publishing leaves engine ids out of its API-only comparison. If a note names both
+API and engine ids, publishing still checks its API ids and carries the note for those that changed. `sdk.json`
+holds these notes since the previous SDK (`surface.notes`); `cargo sunrise-mod update` prints a changed item's
+`migrate` line beside it.
 
 ## Behaviours
 

@@ -956,12 +956,21 @@ impl Diff {
     /// The verdict and counts, engine catalog changes, then API changes by class.
     pub fn to_text(&self) -> String {
         let count = |class| self.changes.iter().filter(|c| c.class == class).count();
-        let (breaking, conditional, additive, advisory) = (
+        let (breaking, conditional, additive) = (
             count(Class::Breaking),
             count(Class::Conditional),
             count(Class::Additive),
-            count(Class::Advisory),
         );
+        let engine_changes = self.changes.iter().any(|change| {
+            ENGINE_KINDS
+                .iter()
+                .any(|(kind, _)| *kind == record_kind(&change.id))
+        });
+        let advisory = if engine_changes {
+            format!(", {} advisory", count(Class::Advisory))
+        } else {
+            String::new()
+        };
         let verdict = match self.verdict {
             Verdict::Identical => "identical",
             Verdict::Advisory => "advisory",
@@ -970,27 +979,31 @@ impl Diff {
             Verdict::Breaking => "breaking",
         };
         let mut text = format!(
-            "Surface: {verdict} ({breaking} breaking, {conditional} conditional, {additive} additive, {advisory} advisory; {} breaking without a note)\nOld {}, new {}\n",
+            "Surface: {verdict} ({breaking} breaking, {conditional} conditional, {additive} additive{advisory}; {} breaking without a note)\nOld {}, new {}\n",
             self.undeclared().count(),
             self.old,
             self.new
         );
-        text.push_str("\nEngine catalogs (point and loop removals and changes are breaking)\n");
-        for (prefix, title) in ENGINE_KINDS {
-            let records = || self.changes.iter().filter(|c| record_kind(&c.id) == prefix);
-            // An ordinary export has no internal rows. Only show their section when they change.
-            if prefix == "internal" && records().next().is_none() {
-                continue;
-            }
-            let count = |kind| records().filter(|c| c.kind == kind).count();
-            text.push_str(&format!(
-                "{title}: {} added, {} removed, {} changed\n",
-                count(ChangeKind::Added),
-                count(ChangeKind::Removed),
-                count(ChangeKind::Changed),
-            ));
-            for change in records().filter(|c| c.kind != ChangeKind::Added || !c.notes.is_empty()) {
-                write_change(&mut text, change);
+        if engine_changes {
+            text.push_str("\nEngine catalogs (point and loop removals and changes are breaking)\n");
+            for (prefix, title) in ENGINE_KINDS {
+                let records = || self.changes.iter().filter(|c| record_kind(&c.id) == prefix);
+                // Only an audit includes internals; show their section when they change.
+                if prefix == "internal" && records().next().is_none() {
+                    continue;
+                }
+                let count = |kind| records().filter(|c| c.kind == kind).count();
+                text.push_str(&format!(
+                    "{title}: {} added, {} removed, {} changed\n",
+                    count(ChangeKind::Added),
+                    count(ChangeKind::Removed),
+                    count(ChangeKind::Changed),
+                ));
+                for change in
+                    records().filter(|c| c.kind != ChangeKind::Added || !c.notes.is_empty())
+                {
+                    write_change(&mut text, change);
+                }
             }
         }
         for (class, title) in [
