@@ -496,11 +496,9 @@ pub fn gift_table(m: &Mob, maps: &crate::neoforge_mob_maps::NeoForgeMobMaps) -> 
 
 /// `VillagerFood` nutrition (`DataComponents.VILLAGER_FOOD`).
 ///
-/// The value in `items`, the registry the villager lives with: a data pack's
-/// or a mod's item with the component counts, as one with vanilla's four does;
-/// an item the registry lacks feeds nothing.
-pub fn food_points(items: &Items, item: &str) -> i32 {
-    items.villager_food(item).unwrap_or(0)
+/// Reads the stack's effective component, including overrides and removals.
+pub fn food_points(items: &Items, stack: &ItemStack) -> i32 {
+    stack.villager_food(items.get(&stack.item)).unwrap_or(0)
 }
 /// The farmer's `requestedItems` (`VillagerProfession.FARMER`). Food is picked
 /// up and traded separately, through its villager food value.
@@ -574,10 +572,9 @@ pub(crate) fn load_container(
 impl Ext {
     /// `countFoodPointsInInventory`, by the food values of `items`.
     pub fn food_in_inventory(&self, items: &Items) -> i32 {
-        self.inventory
-            .iter()
-            .map(|s| food_points(items, &s.item) * s.count as i32)
-            .sum()
+        self.inventory.iter().fold(0i32, |total, stack| {
+            total.wrapping_add(food_points(items, stack).wrapping_mul(stack.count as i32))
+        })
     }
     /// `hasExcessFood` and `wantsMoreFood`.
     pub fn has_excess_food(&self, items: &Items) -> bool {
@@ -594,10 +591,11 @@ impl Ext {
         if self.hungry() {
             let mut slot = 0;
             while slot < self.inventory.len() && self.hungry() {
-                let points = food_points(items, &self.inventory[slot].item);
-                if points > 0 {
+                if let Some(points) =
+                    self.inventory[slot].villager_food(items.get(&self.inventory[slot].item))
+                {
                     while self.inventory[slot].count > 0 && self.hungry() {
-                        self.food_level += points;
+                        self.food_level = self.food_level.wrapping_add(points);
                         self.inventory[slot].count -= 1;
                     }
                     if self.inventory[slot].count == 0 {
@@ -608,7 +606,7 @@ impl Ext {
                 slot += 1;
             }
         }
-        self.food_level -= 12;
+        self.food_level = self.food_level.wrapping_sub(12);
     }
     /// Whether the stack fits (`SimpleContainer.canAddItem`).
     pub fn can_add(&self, stack: &ItemStack, max_stack: u32) -> bool {
@@ -813,8 +811,8 @@ pub fn meet(
     let mut thrown = Vec::new();
     if excess
         && (farmer || wants_more)
-        && let Some(s) =
-            ext_mut(&mut mobs[a]).take_half_stack(|s| food_points(items, &s.item) > 0, max_stack)
+        && let Some(s) = ext_mut(&mut mobs[a])
+            .take_half_stack(|s| s.villager_food(items.get(&s.item)).is_some(), max_stack)
     {
         thrown.push(s);
     }
@@ -992,7 +990,7 @@ pub fn can_breed(m: &Mob, items: &Items) -> bool {
     m.species() == Species::Villager
         && m.extra.age == 0
         && !sleeping(m)
-        && ext(m).map_or(0, |e| e.food_level + e.food_in_inventory(items)) >= 12
+        && ext(m).map_or(0, |e| e.food_level.wrapping_add(e.food_in_inventory(items))) >= 12
 }
 /// [`can_breed`] by the registry of `w`: a world without item data counts no
 /// food, so its villagers never breed.
@@ -1762,6 +1760,35 @@ mod tests {
         assert!(e.inventory.is_empty());
     }
     #[test]
+    fn villager_food_math_wraps_like_java_ints() {
+        use sunrise_core::nbt::Tag;
+        let items = &vanilla_food();
+        let mut rich = stack("minecraft:bread", 2);
+        rich.data_mut().set_other(
+            "minecraft:villager_food",
+            Some(Tag::compound([("nutrition", Tag::Int(i32::MAX))])),
+        );
+        let mut m = villager();
+        let e = ext_mut(&mut m);
+        e.inventory.push(rich.clone());
+        assert_eq!(e.food_in_inventory(items), -2);
+        e.food_level = 10;
+        e.eat_and_digest(items);
+        assert_eq!(e.food_level, -4);
+        assert!(e.inventory.is_empty());
+        e.food_level = i32::MIN;
+        e.eat_and_digest(items);
+        assert_eq!(e.food_level, 2_147_483_636);
+
+        rich.count = 1;
+        e.inventory.extend([rich.clone(), rich]);
+        assert_eq!(e.food_in_inventory(items), -2);
+        e.inventory.pop();
+        e.food_level = 1;
+        assert!(!can_breed(&m, items));
+    }
+
+    #[test]
     fn willingness_to_breed_needs_twelve_food_points() {
         let items = &vanilla_food();
         let mut e = Ext::default();
@@ -1852,9 +1879,12 @@ mod tests {
     #[test]
     fn villager_food_values() {
         let items = &vanilla_food();
-        assert_eq!(food_points(items, "minecraft:bread"), 4);
-        assert_eq!(food_points(items, "minecraft:beetroot"), 1);
-        assert_eq!(food_points(items, "minecraft:apple"), 0);
+        assert_eq!(food_points(items, &ItemStack::new("minecraft:bread", 1)), 4);
+        assert_eq!(
+            food_points(items, &ItemStack::new("minecraft:beetroot", 1)),
+            1
+        );
+        assert_eq!(food_points(items, &ItemStack::new("minecraft:apple", 1)), 0);
     }
     /// A villager's snapshot counts its food by the registry it is taken with:
     /// another registry built since, or alongside, never answers for it.
