@@ -228,6 +228,9 @@ fn entries(surface: &Surface) -> BTreeMap<String, Entry> {
         let extra = take(&mut view, &["version"]);
         put(&r.id, &r.hash, view, extra);
     }
+    for r in &surface.engine_items {
+        put(&r.id, &r.hash, json(&r.contract), Map::new());
+    }
     map
 }
 
@@ -883,6 +886,39 @@ fn pair<T>(
     lines
 }
 
+const ENGINE_KINDS: [(&str, &str); 3] = [
+    ("point", "Injection points"),
+    ("loop", "Published loops"),
+    ("internal", "Listed internals"),
+];
+
+fn record_kind(id: &str) -> &str {
+    id.split_once(':').map_or("", |(kind, _)| kind)
+}
+
+fn write_change(text: &mut String, change: &Change) {
+    let kind = match change.kind {
+        ChangeKind::Added => "added",
+        ChangeKind::Removed => "removed",
+        ChangeKind::Changed => "changed",
+    };
+    text.push_str(&format!("- {} ({kind})\n", change.id));
+    for line in &change.what {
+        if line != kind {
+            text.push_str(&format!("    {line}\n"));
+        }
+    }
+    if !change.members.is_empty() {
+        text.push_str(&format!("    members: {}\n", change.members.join(", ")));
+    }
+    for note in &change.notes {
+        text.push_str(&format!("    why ({}): {}\n", note.file, note.why));
+        if let Some(migrate) = &note.migrate {
+            text.push_str(&format!("    migrate: {migrate}\n"));
+        }
+    }
+}
+
 impl Diff {
     /// Attaches a note to the changes it names; returns the ids it names that did not change.
     pub fn attach(&mut self, note: &Note, ids: &[String]) -> Vec<String> {
@@ -908,7 +944,7 @@ impl Diff {
             .filter(|c| c.class == Class::Breaking && c.notes.is_empty())
     }
 
-    /// The report as text: the verdict and counts, then breaking, conditional and additive changes.
+    /// The verdict and counts, engine catalog changes, then API changes by class.
     pub fn to_text(&self) -> String {
         let count = |class| self.changes.iter().filter(|c| c.class == class).count();
         let (breaking, conditional, additive) = (
@@ -928,39 +964,42 @@ impl Diff {
             self.old,
             self.new
         );
-        for (class, title, n) in [
-            (Class::Breaking, "Breaking", breaking),
+        text.push_str("\nEngine catalogs (removals and changes are breaking)\n");
+        for (prefix, title) in ENGINE_KINDS {
+            let records = || self.changes.iter().filter(|c| record_kind(&c.id) == prefix);
+            let count = |kind| records().filter(|c| c.kind == kind).count();
+            text.push_str(&format!(
+                "{title}: {} added, {} removed, {} changed\n",
+                count(ChangeKind::Added),
+                count(ChangeKind::Removed),
+                count(ChangeKind::Changed),
+            ));
+            for change in records().filter(|c| c.kind != ChangeKind::Added || !c.notes.is_empty()) {
+                write_change(&mut text, change);
+            }
+        }
+        for (class, title) in [
+            (Class::Breaking, "Breaking"),
             (
                 Class::Conditional,
                 "Conditional: breaks only some mods (the fit test names them; a behaviour's version is for the mods that rely on it)",
-                conditional,
             ),
-            (Class::Additive, "Additive", additive),
+            (Class::Additive, "Additive"),
         ] {
-            if n == 0 {
-                continue;
-            }
-            text.push_str(&format!("\n{title} ({n})\n"));
-            for change in self.changes.iter().filter(|c| c.class == class) {
-                let kind = match change.kind {
-                    ChangeKind::Added => "added",
-                    ChangeKind::Removed => "removed",
-                    ChangeKind::Changed => "changed",
-                };
-                text.push_str(&format!("- {} ({kind})\n", change.id));
-                for line in &change.what {
-                    if line != kind {
-                        text.push_str(&format!("    {line}\n"));
-                    }
-                }
-                if !change.members.is_empty() {
-                    text.push_str(&format!("    members: {}\n", change.members.join(", ")));
-                }
-                for note in &change.notes {
-                    text.push_str(&format!("    why ({}): {}\n", note.file, note.why));
-                    if let Some(migrate) = &note.migrate {
-                        text.push_str(&format!("    migrate: {migrate}\n"));
-                    }
+            let changes: Vec<_> = self
+                .changes
+                .iter()
+                .filter(|c| {
+                    c.class == class
+                        && !ENGINE_KINDS
+                            .iter()
+                            .any(|(kind, _)| *kind == record_kind(&c.id))
+                })
+                .collect();
+            if !changes.is_empty() {
+                text.push_str(&format!("\n{title} ({})\n", changes.len()));
+                for change in changes {
+                    write_change(&mut text, change);
                 }
             }
         }

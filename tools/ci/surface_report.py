@@ -4,7 +4,8 @@ Exports the surface of the merge base and of the checked-out tree with the head'
 writes the classified report to the job summary. The base comes from the event: on `pull_request` the checkout is
 GitHub's merge commit, whose first parent is the base; on a dispatch with `pr`, GitHub's compare API gives the merge
 base of that pull request's head and its base branch. Only that one commit is fetched (`--depth 1`), and only its
-`crates/` and `tools/layering` are unpacked.
+`Cargo.toml`, `crates/` and `tools/layering` are unpacked. The engine catalogs are read from source; the workspace
+manifest resolves inherited dependencies for crates with injection points.
 
 It passes when the base cannot be found or fetched, or when the head's tool cannot read
 the base tree (a change to the declaration format), saying so in one line. It fails for a new change note that names
@@ -12,6 +13,7 @@ an id that did not change or cannot be read, and, with `gate = true` in tools/ci
 change no new note names.
 """
 
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 import subprocess
@@ -71,7 +73,8 @@ def git(*args: str) -> str:
 
 def unpack(sha: str, into: Path) -> None:
     git("fetch", "-q", "--no-tags", "--depth", "1", "origin", sha)
-    archive = subprocess.Popen(["git", "archive", sha, "crates", "tools/layering"], cwd=ROOT, stdout=subprocess.PIPE)
+    archive = subprocess.Popen(["git", "archive", sha, "Cargo.toml", "crates", "tools/layering"],
+                               cwd=ROOT, stdout=subprocess.PIPE)
     subprocess.run(["tar", "-x", "-C", str(into)], stdin=archive.stdout, check=True)
     if archive.wait() != 0:
         raise subprocess.CalledProcessError(archive.returncode, "git archive")
@@ -86,16 +89,24 @@ def report(tool: str, base: Path, head: Path, work: Path, gate_on: bool) -> tupl
     """Exports both trees at once, diffs them; (exit code, report text)."""
     # The base's records may predate the call names: its export names none (`--without-calls`),
     # which no comparison reads.
-    exports = {name: subprocess.Popen([tool, "surface", str(tree), str(work / f"{name}.json"), *flags],
-                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-               for name, tree, flags in (("base", base, ["--without-calls"]), ("head", head, []))}
-    results = {name: process.communicate() for name, process in exports.items()}
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        # Drain both subprocesses' diagnostics while they run so a full pipe cannot stall an export.
+        exports = {name: pool.submit(subprocess.run,
+                                    [tool, "surface", str(tree), str(work / f"{name}.json"), *flags],
+                                    capture_output=True, text=True)
+                   for name, tree, flags in (("base", base, ["--without-calls"]), ("head", head, []))}
     # This tree failing is a broken generator, which no other step would catch; the base failing
     # is an older tree this tool cannot read, which is no fault of the pull request.
-    if exports["head"].returncode != 0:
-        return 1, f"The surface export of this tree failed: {last_line(results['head'][1])}.\n"
-    if exports["base"].returncode != 0:
-        return 0, f"No surface report: the head's sunrise-stage cannot read the base tree ({last_line(results['base'][1])}).\n"
+    head_export, base_export = exports["head"].result(), exports["base"].result()
+    if head_export.returncode != 0:
+        return 1, f"The surface export of this tree failed: {last_line(head_export.stderr)}.\n"
+    if base_export.returncode != 0:
+        return 0, f"No surface report: the head's sunrise-stage cannot read the base tree ({last_line(base_export.stderr)}).\n"
+    return compare(tool, base, head, work, gate_on)
+
+
+def compare(tool: str, base: Path, head: Path, work: Path, gate_on: bool) -> tuple[int, str]:
+    """Run the gate on the exported documents and the trees' change notes."""
     command = [tool, "surface-diff", str(work / "base.json"), str(work / "head.json"),
                "--notes", str(head / NOTES), "--base-notes", str(base / NOTES), "--json", str(work / "diff.json")]
     if gate_on:

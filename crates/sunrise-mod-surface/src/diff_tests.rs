@@ -3,6 +3,71 @@
 use super::*;
 use crate::*;
 
+#[test]
+fn engine_catalogs_share_the_diff_and_note_gate() {
+    let point = |signature_hash: &str| {
+        EngineItem::new(
+            "point:game::tick".into(),
+            EngineContract::Point {
+                name: "game_tick".into(),
+                signature_hash: signature_hash.into(),
+            },
+        )
+    };
+    let old = functions(vec![]).with_engine_items(vec![
+        point("old"),
+        EngineItem::new(
+            "loop:entities.tick".into(),
+            EngineContract::Loop {
+                entry: "Game::tick_entities".into(),
+                generic: "tick_entities_with".into(),
+                slot: "Slot".into(),
+                side: "server".into(),
+            },
+        ),
+    ]);
+    let new = functions(vec![]).with_engine_items(vec![
+        point("new"),
+        EngineItem::new(
+            "internal:fn:game::step".into(),
+            EngineContract::Internal {
+                signature: "fn step()".into(),
+                signature_hash: "step".into(),
+                shape_only: false,
+                opaque_reason: None,
+            },
+        ),
+    ]);
+    let mut report = diff(&old, &new);
+    assert_eq!(
+        report
+            .changes
+            .iter()
+            .map(|c| (c.id.as_str(), c.kind, c.class))
+            .collect::<Vec<_>>(),
+        [
+            ("loop:entities.tick", ChangeKind::Removed, Class::Breaking),
+            ("point:game::tick", ChangeKind::Changed, Class::Breaking),
+            ("internal:fn:game::step", ChangeKind::Added, Class::Additive),
+        ]
+    );
+    assert_eq!(report.changes[1].what, ["signature hash: `old` → `new`"]);
+    assert_eq!(report.undeclared().count(), 2);
+    assert!(
+        report
+            .attach(
+                &Note {
+                    file: "tick.toml".into(),
+                    why: "Tick moved.".into(),
+                    migrate: None
+                },
+                &["loop:entities.tick".into(), "point:game::tick".into()],
+            )
+            .is_empty()
+    );
+    assert_eq!(report.undeclared().count(), 0);
+}
+
 fn hook(name: &str, side: Side, arguments: &[(&str, &str)]) -> Hook {
     Hook::new(
         format!("hook:{name}"),
@@ -786,6 +851,11 @@ fn breaking_changes_come_first_and_notes_declare_them() {
         d.to_text(),
         "Surface: breaking (1 breaking, 0 conditional, 1 additive; 0 breaking without a note)\n\
          Old OLD, new NEW\n\
+         \n\
+         Engine catalogs (removals and changes are breaking)\n\
+         Injection points: 0 added, 0 removed, 0 changed\n\
+         Published loops: 0 added, 0 removed, 0 changed\n\
+         Listed internals: 0 added, 0 removed, 0 changed\n\
          \n\
          Breaking (1)\n\
          - fn:a (removed)\n    why (rename.toml): Shorter name.\n    migrate: Call `b`.\n\

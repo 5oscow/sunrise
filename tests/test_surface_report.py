@@ -2,6 +2,7 @@
 import contextlib
 import importlib.util
 import io
+import json
 import os
 from pathlib import Path
 import shutil
@@ -116,6 +117,62 @@ exit {diff_exit}
         # An unreadable note (exit 2) fails too.
         code, _, _ = self.run_report(diff_exit=2)
         self.assertEqual(code, 1)
+
+
+@unittest.skipUnless(os.environ.get("SUNRISE_STAGE_TOOL"), "set SUNRISE_STAGE_TOOL to test the real gate")
+class EngineCatalogGateTests(unittest.TestCase):
+    ITEMS = [
+        {"id": "point:sunrise_client::game::Game::tick", "kind": "point", "hash": "point-1",
+         "name": "tick", "signature_hash": "old-point"},
+        {"id": "loop:entities.tick", "kind": "loop", "hash": "loop-1", "entry": "Game::tick_entities",
+         "generic": "tick_entities_with", "slot": "TickSlot", "side": "server"},
+        {"id": "internal:fn:sunrise_client::game::Game::tick [feature = \"fixture\"]",
+         "kind": "internal", "hash": "internal-1", "signature": "fn tick(&self)",
+         "signature_hash": "old-internal"},
+    ]
+
+    def compare(self, old, new, *, notes=()):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            for name, records in (("base", old), ("head", new)):
+                (work / f"{name}.json").write_text(json.dumps({"schema": 2, "hash": name, "engine_items": records}))
+            if notes:
+                changes = work / "head" / surface_report.NOTES
+                changes.mkdir(parents=True)
+                (changes / "engine-change.toml").write_text(f'ids = {json.dumps(notes)}\nwhy = "Use the new sites."\n')
+            return surface_report.compare(os.environ["SUNRISE_STAGE_TOOL"], work / "base", work / "head", work, True)
+
+    def test_undeclared_removals_fail_and_declared_removals_pass(self):
+        code, text = self.compare(self.ITEMS, [])
+        self.assertEqual(code, 1, text)
+        ids = [item["id"] for item in self.ITEMS]
+        for id in ids:
+            self.assertIn(f"- {id} (removed)", text)
+            self.assertIn(f"breaking change without a change note: {id}", text)
+        code, text = self.compare(self.ITEMS, [], notes=ids)
+        self.assertEqual(code, 0, text)
+        self.assertNotIn("breaking change without a change note:", text)
+
+    def test_additions_pass_and_each_kind_has_a_count(self):
+        code, text = self.compare([], self.ITEMS)
+        self.assertEqual(code, 0, text)
+        for kind in ("Injection points", "Published loops", "Listed internals"):
+            self.assertIn(f"{kind}: 1 added, 0 removed, 0 changed", text)
+
+    def test_changed_contracts_keep_their_ids(self):
+        point, loop, internal = self.ITEMS
+        code, text = self.compare(self.ITEMS, [
+            dict(point, hash="point-2", signature_hash="new-point"),
+            dict(loop, hash="loop-2", slot="NewTickSlot"),
+            dict(internal, hash="internal-2", signature="fn tick(&mut self)", signature_hash="new-internal"),
+        ])
+        self.assertEqual(code, 1, text)
+        for item, detail in zip(self.ITEMS, ("`old-point` → `new-point`", "`TickSlot` → `NewTickSlot`",
+                                            "`fn tick(&self)` → `fn tick(&mut self)`")):
+            self.assertIn(f"- {item['id']} (changed)", text)
+            self.assertIn(detail, text)
+        self.assertNotIn("(removed)", text)
+        self.assertNotIn("(added)", text)
 
 
 class SummaryTests(unittest.TestCase):

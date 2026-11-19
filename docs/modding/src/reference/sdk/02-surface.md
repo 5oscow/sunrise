@@ -1,8 +1,8 @@
 # `surface.json`
 
-`surface.json` is the stable surface of one build: everything a mod on the mod API alone can name. It is generated
-from the declarations the build parses (`sunrise-stage surface ROOT OUT`), never kept by hand or committed, and is
-byte-identical for one commit: sorted, with no paths or timestamps.
+`surface.json` describes what a mod can name in one build: the stable mod API and the build's published engine
+catalogs. It is generated from the declarations the build parses (`sunrise-stage surface ROOT OUT`), never kept by
+hand or committed, and is byte-identical for one commit: sorted, with no machine paths or timestamps.
 
 ## Records
 
@@ -16,7 +16,17 @@ public, so a re-export added later never changes its id; otherwise its shortest 
 lists every public path a mod can name it by. Types inside signatures are normalised Rust, with paths relative to
 `mod_api` and lifetimes kept.
 
-`cargo sunrise-mod hooks <text>` searches these records offline ([Commands](05-commands.md)).
+`cargo sunrise-mod hooks <text>` searches the API records offline ([Commands](05-commands.md)). The engine records
+come from the same collectors as `points.json`, `loops.json` and `internals.json`; they do not make the native route
+stable across builds:
+
+- A point's id is `point:<target>`, using the function path as listed in `points.json`. Functions that refuse all API
+  listeners are not injection points. Its contract includes the published place name and signature hash.
+- A loop's id is `loop:<name>`, using its `[[native.loop]]` name. The report compares its entry path, generic method,
+  slot trait and side.
+- An internal's id is `internal:<kind>:<path>` as listed in `internals.json`, with ` [<cfg>]` appended for a guarded
+  alternative. The report compares its signature and hash, and whether the row is a type shape rather than an exposed
+  internal.
 
 ## What a hash covers
 
@@ -47,14 +57,14 @@ one of three classes:
 - **Breaking**: it can stop any mod that uses the item from compiling or meaning the same. A record removed; a
   contract changed (a hook's side or kind, a retyped field or argument, a signature, a method no longer on wasm); a
   variant added to an exhaustive enum; a required item added to a trait mods implement; an impl a type no longer
-  has; a behaviour removed.
+  has; a behaviour removed. An injection point, published loop or listed internal removed or changed is breaking.
 - **Conditional**: it breaks only some mods, which the [fit test](04-fit.md) finds from each mod's source (except a
   behaviour's `version`, which no fit report shows: a mod relies on a behaviour without naming it). A field
   added to a struct mods can build, or an argument added to a hook (only a mod that writes it out in full); a struct
   no longer constructible; a public path that goes (only a mod that writes that path); a hook's `version` (only a mod
   whose manifest names it) or a behaviour's `version` (only a mod that relies on it); a type's wire form or layout
   (wasm mods only).
-- **Additive**: a new record (a behaviour too), and changes that only widen an item: now on wasm, an impl gained, a new public path, an
+- **Additive**: a new record, including an engine catalog item or behaviour, and changes that only widen an item: now on wasm, an impl gained, a new public path, an
   item no longer required, an enum no longer `#[non_exhaustive]`.
 
 Each change says what changed in words a mod author can act on, for example
@@ -62,7 +72,8 @@ Each change says what changed in words a mod author can act on, for example
 same report for two published builds.
 
 When the `verify` check runs on a pull request that changes Rust, its summary carries this report, comparing the
-merge base with the head. It reports, and fails the check only when:
+merge base with the head. The engine catalogs have a section of their own, with counts for additions, removals and
+changes and details for every removal or change. It reports, and fails the check only when:
 
 - the head's tree cannot be exported;
 - a change note cannot be read, or names an item that did not change;
@@ -92,6 +103,7 @@ why = "The hook now fires on the server only."
 migrate = "Take `ServerPlayerRef` instead of `PlayerRef`."   # optional
 ```
 
+Use the exact id printed by `surface-diff`, including `point:`, `loop:` or `internal:` for an engine catalog item.
 A note with an unknown key, a missing `ids` or `why`, an empty `ids`, or an id that did not change is refused. The SDK's `sdk.json`
 carries the notes of the changes since the SDK before it (`surface.notes`), and `cargo sunrise-mod update` prints a
 changed item's `migrate` line beside it.
