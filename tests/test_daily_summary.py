@@ -12,8 +12,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from tools import sunrise_mod_binstall
 from tests.test_ci_concurrency import ROOT, yaml
+from tools import sunrise_mod_binstall
 from tools.ci import daily_summary as summary, parity_verdict
 
 COMMIT = "c" * 40
@@ -612,6 +612,7 @@ class DailySummaryTests(unittest.TestCase):
         self.assertEqual(out.splitlines(), ["green=false", "sdk_green=true"])
         self.assertEqual([body["title"] for _, path, body in api.writes if path == "issues"],
                          [f"Daily: {failed} did not complete"])
+
     def test_a_comparison_skipped_by_a_failed_build_is_not_its_own_issue_but_one_that_failed_or_skipped_alone_is(self):
         def run(**replace):
             jobs = [job(entry["name"], *replace[entry["name"]]) if entry["name"] in replace else entry
