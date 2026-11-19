@@ -2,4 +2,4 @@
 # where it must pass (README.md). Rows: PACKAGE TEST TARGET daily REASON, sorted; tools/ci/move_to_daily.py writes them.
 sunrise-client-render gfx::core_lightmap::tests::a_pack_lightmap_shader_fills_the_texture_by_sky_row_and_block_column lib daily slow
 sunrise-client-render gfx::core_lightmap::tests::the_light_texture_is_read_back_only_while_f3_charts_it lib daily slow
-sunrise-client-render gfx::core_lightmap::tests::vanillas_lightmap_shaders_draw_the_native_lightmap lib daily resources
+sunrise-client-render gfx::core_lightmap::tests::vanillas_lightmap_shaders_draw_vanillas_light_texture lib daily resources

@@ -29,6 +29,13 @@ const STATES: [LightmapInfo; 2] = [
     },
 ];
 
+/// The probe shader's state: values a unorm byte holds exactly (0.6 is 153 of 255, 0.4 is 102).
+const PROBE: LightmapInfo = LightmapInfo {
+    sky_factor: 0.6,
+    night_vision_color: [0.0, 0.4, 0.0],
+    ..STATES[1]
+};
+
 /// `LightmapInfo` as `lightmap.fsh` declares it in std140: six floats, then four vec3s each on
 /// its own 16 bytes.
 #[test]
@@ -85,9 +92,14 @@ fn draw(
     info: &LightmapInfo,
 ) -> [u8; 16 * 16 * 4] {
     let target = target(device);
-    queue.write_buffer(&core.uniform, 0, &core.uniforms([0; 48], info));
+    let (buffer, data) = core.uniforms([0; 48], info);
+    queue.write_buffer(buffer, 0, data);
     let mut encoder = device.create_command_encoder(&Default::default());
-    core.draw(&mut encoder, &target);
+    core.draw(
+        &mut encoder,
+        &target,
+        &target.create_view(&Default::default()),
+    );
     queue.submit([encoder.finish()]);
     (core.submitted().expect("a readback"))();
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
@@ -134,23 +146,27 @@ fn a_pack_lightmap_shader_fills_the_texture_by_sky_row_and_block_column() {
     .expect("the shaders translate");
     let mut core = CoreLightmap::new(&device, &program).expect("the lightmap pipeline");
     core.set_readback(&device, true);
-    let pixels = draw(&device, &queue, &mut core, &STATES[1]);
+    let pixels = draw(&device, &queue, &mut core, &PROBE);
     for sky in 0..16usize {
         for block in 0..16usize {
             let got = &pixels[(sky * 16 + block) * 4..][..4];
-            let want = [block as u8 * 17, sky as u8 * 17, 179, 153];
-            assert!(
-                got.iter().zip(want).all(|(g, w)| g.abs_diff(w) <= 1),
-                "sky {sky} block {block}: {got:?}, want {want:?}"
-            );
+            // Level n of 15 is byte 17n; `SkyFactor` 0.6 is 153, `NightVisionColor.g` 0.4 is 102.
+            let want = [block as u8 * 17, sky as u8 * 17, 153, 102];
+            assert_eq!(got, want, "sky {sky} block {block}");
         }
     }
     // Frames read back out of their buffers' order: the newest one wins. P lands in buffer 0
     // and is taken in; Q goes to buffer 1, R to buffer 0 again, and both land before F3 looks.
     let frame = |core: &mut CoreLightmap, info: &LightmapInfo, poll: bool| {
-        queue.write_buffer(&core.uniform, 0, &core.uniforms([0; 48], info));
+        let (buffer, data) = core.uniforms([0; 48], info);
+        queue.write_buffer(buffer, 0, data);
         let mut encoder = device.create_command_encoder(&Default::default());
-        core.draw(&mut encoder, &target(&device));
+        let target = target(&device);
+        core.draw(
+            &mut encoder,
+            &target,
+            &target.create_view(&Default::default()),
+        );
         queue.submit([encoder.finish()]);
         (core.submitted().expect("a readback"))();
         if poll {
@@ -159,11 +175,11 @@ fn a_pack_lightmap_shader_fills_the_texture_by_sky_row_and_block_column() {
     };
     let mut pixels = [0u8; 16 * 16 * 4];
     frame(&mut core, &STATES[0], true);
-    frame(&mut core, &STATES[1], false);
+    frame(&mut core, &PROBE, false);
     assert!(core.collect(&mut pixels), "P");
     frame(&mut core, &STATES[0], true);
     assert!(core.collect(&mut pixels));
-    assert_eq!(pixels[2], 0, "R's SkyFactor, not Q's");
+    assert_eq!(pixels[2], 0, "R's SkyFactor (0), not Q's (153)");
 }
 
 fn resources() -> std::path::PathBuf {
@@ -176,11 +192,15 @@ fn resources() -> std::path::PathBuf {
         })
 }
 
-/// Vanilla's own `screenquad` and `lightmap` through the pack path draw the texture the
-/// native path computes, row by sky level and column by block level, in two lighting states.
+/// Vanilla's own `screenquad` and `lightmap` through the pack path draw vanilla's light texture
+/// in two lighting states. The expected bytes are not Sunrise's: they come from
+/// `lightmap.fsh`'s math run line by line in float32 by an independent script (numpy, written
+/// for this test; rounded to the nearest byte as a unorm target stores them), at texels whose
+/// every channel is at least a tenth of a byte from a rounding tie, row by sky level and column
+/// by block level.
 #[test]
 #[ignore = "daily"]
-fn vanillas_lightmap_shaders_draw_the_native_lightmap() {
+fn vanillas_lightmap_shaders_draw_vanillas_light_texture() {
     let _gpu = crate::gfx::test_gpu::lock();
     let root = crate::resource_source::ResourceSource::directory(resources());
     let shader = |name: &str| root.read_to_string(&format!("assets/minecraft/shaders/core/{name}"));
@@ -206,19 +226,31 @@ fn vanillas_lightmap_shaders_draw_the_native_lightmap() {
     };
     let mut core = CoreLightmap::new(&device, &program).expect("the lightmap pipeline");
     core.set_readback(&device, true);
-    for info in STATES {
-        let gpu = draw(&device, &queue, &mut core, &info);
-        let native = native_lightmap(&info);
-        for sky in 0..16 {
-            for block in 0..16 {
-                let i = (sky * 16 + block) * 4;
-                let (n, g) = (&native[i..i + 4], &gpu[i..i + 4]);
-                // The native path truncates, the GPU rounds.
-                assert!(
-                    n.iter().zip(g).all(|(a, b)| a.abs_diff(*b) <= 1),
-                    "sky {sky} block {block}: native {n:?} shader {g:?}"
-                );
-            }
+    // (sky level, block level, RGBA) per state.
+    let expected: [&[(usize, usize, [u8; 4])]; 2] = [
+        &[
+            (0, 0, [165, 186, 165, 255]),
+            (0, 15, [255, 255, 255, 255]),
+            (15, 0, [165, 186, 165, 255]),
+            (15, 15, [255, 255, 255, 255]),
+            (7, 7, [239, 235, 185, 255]),
+            (8, 1, [175, 194, 173, 255]),
+            (1, 8, [245, 238, 184, 255]),
+        ],
+        &[
+            (0, 0, [32, 26, 26, 255]),
+            (0, 15, [255, 255, 255, 255]),
+            (15, 0, [176, 164, 201, 255]),
+            (15, 15, [255, 255, 255, 255]),
+            (1, 8, [145, 90, 57, 255]),
+            (10, 10, [204, 145, 123, 255]),
+        ],
+    ];
+    for (info, texels) in STATES.iter().zip(expected) {
+        let gpu = draw(&device, &queue, &mut core, info);
+        for &(sky, block, want) in texels {
+            let i = (sky * 16 + block) * 4;
+            assert_eq!(gpu[i..i + 4], want, "sky {sky} block {block}");
         }
     }
 }
@@ -281,25 +313,31 @@ fn the_light_texture_is_read_back_only_while_f3_charts_it() {
     let mut core = CoreLightmap::new(&device, &program).expect("the lightmap pipeline");
     // One frame: its uniforms, its draw, its submission, and the readback it starts (if any).
     let frame = |core: &mut CoreLightmap, info: &LightmapInfo| {
-        queue.write_buffer(&core.uniform, 0, &core.uniforms([0; 48], info));
+        let (buffer, data) = core.uniforms([0; 48], info);
+        queue.write_buffer(buffer, 0, data);
         let mut encoder = device.create_command_encoder(&Default::default());
-        core.draw(&mut encoder, &target(&device));
+        let target = target(&device);
+        core.draw(
+            &mut encoder,
+            &target,
+            &target.create_view(&Default::default()),
+        );
         queue.submit([encoder.finish()]);
         let started = core.submitted().map(|read| read()).is_some();
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         started
     };
     assert!(core.readback.is_none(), "closed when made");
-    assert!(!frame(&mut core, &STATES[1]), "no copy while closed");
+    assert!(!frame(&mut core, &PROBE), "no copy while closed");
     let mut pixels = [7u8; 16 * 16 * 4];
     assert!(!core.collect(&mut pixels));
     assert_eq!(pixels, [7; 16 * 16 * 4], "nothing read while closed");
 
     core.set_readback(&device, true);
-    assert!(frame(&mut core, &STATES[1]), "a copy while open");
+    assert!(frame(&mut core, &PROBE), "a copy while open");
     assert!(core.collect(&mut pixels));
-    // STATES[1]'s SkyFactor (0.7, 178.5 of 255) in blue.
-    assert!(pixels[2].abs_diff(179) <= 1, "{}", pixels[2]);
+    // PROBE's SkyFactor (0.6, 153 of 255) in blue.
+    assert_eq!(pixels[2], 153);
 
     // A copy is mapped and waiting when the chart closes: the buffers go with it.
     assert!(frame(&mut core, &STATES[0]));
@@ -375,4 +413,39 @@ fn a_lightmap_shader_reading_more_expression_uniforms_than_the_device_binds_is_r
     assert_eq!(device.limits().max_uniform_buffers_per_shader_stage, 12);
     assert!(CoreLightmap::new(&device, &expression_shader(7)).is_some());
     assert!(CoreLightmap::new(&device, &expression_shader(8)).is_none());
+}
+
+/// What F3's lightmap chart paints across the chart closing and opening again and fullbright
+/// turning on and off (the renderer's `lightmap_sample`): only pixels of the texture drawn now,
+/// never an old sample. No adapter needed: the chart's state alone.
+#[test]
+fn the_lightmap_chart_never_shows_a_stale_sample() {
+    let mut chart = LightmapChart::new();
+    let pack = Drawn::now(false, true);
+    let (native, white) = (Drawn::now(false, false), Drawn::now(true, true));
+    assert_eq!(
+        (pack, native, white),
+        (Drawn::Pack, Drawn::Native, Drawn::Native)
+    );
+    assert_eq!(chart.shown(pack), None, "nothing read yet");
+    // The chart open: a pack-drawn copy lands.
+    chart.pixels = [9; 16 * 16 * 4];
+    chart.pack_copied();
+    assert_eq!(chart.shown(pack), Some(&[9; 16 * 16 * 4]));
+    // Closed, then opened again: nothing until a fresh copy.
+    chart.forget_pack();
+    assert_eq!(chart.shown(pack), None);
+    chart.pixels = [10; 16 * 16 * 4];
+    chart.pack_copied();
+    assert_eq!(chart.shown(pack), Some(&[10; 16 * 16 * 4]));
+    // Fullbright on: the pack's copy is not the white texture drawn now, until the native path
+    // writes it.
+    assert_eq!(chart.shown(white), None);
+    chart.native([255; 16 * 16 * 4]);
+    assert_eq!(chart.shown(white), Some(&[255; 16 * 16 * 4]));
+    // Fullbright off with the pack's shader: the white pixels are not its texture.
+    assert_eq!(chart.shown(pack), None);
+    // Closing the chart leaves a native sample alone: it is current.
+    chart.forget_pack();
+    assert_eq!(chart.shown(native), Some(&[255; 16 * 16 * 4]));
 }

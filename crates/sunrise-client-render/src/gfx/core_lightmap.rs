@@ -124,7 +124,7 @@ const MAPPED: u8 = 3;
 /// A readback's row: copies need 256 bytes a row, and the texture has 64.
 const ROW: u64 = 256;
 
-/// The pack-drawn texture read back for F3's lightmap chart (`Renderer::lightmap_pixels`), one
+/// The pack-drawn texture read back for F3's lightmap chart (`Renderer::lightmap_sample`), one
 /// frame late, through two buffers in turn. It exists only while the chart is shown
 /// ([`CoreLightmap::set_readback`]): its buffers are made when the chart opens and dropped when
 /// it closes, so a chart opened again never shows a copy from before.
@@ -168,6 +168,8 @@ pub(super) struct CoreLightmap {
     /// The packs' expression uniforms the shader reads (`shader_modifiers`), in its blocks'
     /// order after `LightmapInfo`, each with this frame's value (0 until the game gives one).
     expressions: Vec<(String, f32)>,
+    /// The bytes a frame writes to `uniform`, kept between frames.
+    bytes: Vec<u8>,
     readback: Option<Readback>,
 }
 
@@ -294,6 +296,7 @@ impl CoreLightmap {
             pipeline,
             group,
             uniform,
+            bytes: vec![0; expression_offset(expressions.len()) as usize],
             expressions: expressions
                 .into_iter()
                 .map(|(_, n)| (n.clone(), 0.0))
@@ -310,10 +313,11 @@ impl CoreLightmap {
         }
     }
 
-    /// The frame's blocks in the uniform buffer's layout: `globals` at 0, `info` at its own,
-    /// then each expression uniform's value (`{ float value; }`).
-    fn uniforms(&self, globals: [u8; 48], info: &LightmapInfo) -> Vec<u8> {
-        let mut data = vec![0u8; expression_offset(self.expressions.len()) as usize];
+    /// The frame's blocks in the uniform buffer's layout, in the bytes the pipeline keeps for
+    /// them (no allocation a frame): `globals` at 0, `info` at its own, then each expression
+    /// uniform's value (`{ float value; }`). With the buffer they go to.
+    fn uniforms(&mut self, globals: [u8; 48], info: &LightmapInfo) -> (&wgpu::Buffer, &[u8]) {
+        let data = &mut self.bytes;
         data[..48].copy_from_slice(&globals);
         let info_at = INFO_OFFSET as usize;
         data[info_at..info_at + INFO_SIZE as usize].copy_from_slice(&info.std140());
@@ -321,18 +325,23 @@ impl CoreLightmap {
             let at = expression_offset(i) as usize;
             data[at..at + 4].copy_from_slice(&value.to_le_bytes());
         }
-        data
+        (&self.uniform, data)
     }
 
-    /// `Lightmap.render`'s pass: the screen quad over the whole of `texture`, then, while F3
-    /// charts it, its copy for the readback when a buffer is free.
-    fn draw(&mut self, encoder: &mut wgpu::CommandEncoder, texture: &wgpu::Texture) {
-        let view = texture.create_view(&Default::default());
+    /// `Lightmap.render`'s pass: the screen quad over the whole of `texture` (through `view`,
+    /// the renderer's own), then, while F3 charts it, its copy for the readback when a buffer
+    /// is free.
+    fn draw(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        texture: &wgpu::Texture,
+        view: &wgpu::TextureView,
+    ) {
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Resource pack lightmap"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
+                    view,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
@@ -420,6 +429,70 @@ impl CoreLightmap {
     }
 }
 
+/// What drew the light texture: the native path (computed here, white under fullbright), or a
+/// pack's shader.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Drawn {
+    Native,
+    Pack,
+}
+
+impl Drawn {
+    /// What draws the frame's light texture: a pack's shader when one is loaded, unless
+    /// fullbright keeps the texture white.
+    pub(crate) fn now(fullbright: bool, pack: bool) -> Self {
+        if pack && !fullbright {
+            Self::Pack
+        } else {
+            Self::Native
+        }
+    }
+}
+
+/// The light texture's pixels F3's lightmap chart paints (RGBA rows of sky level by block level),
+/// with what drew them. The native path's are current as soon as it computes them; a
+/// pack-drawn texture's arrive through the readback a frame later, and only while the chart is
+/// open. A sample from another source than the one drawing now is never shown: after the chart
+/// closes and opens again, or fullbright turns on or off, it paints nothing until the texture
+/// being drawn comes back.
+pub(crate) struct LightmapChart {
+    pub(crate) pixels: [u8; 16 * 16 * 4],
+    drawn: Option<Drawn>,
+}
+
+impl LightmapChart {
+    pub(crate) fn new() -> Self {
+        Self {
+            pixels: [0; 16 * 16 * 4],
+            drawn: None,
+        }
+    }
+
+    /// The native path's pixels, current at once.
+    fn native(&mut self, pixels: [u8; 16 * 16 * 4]) {
+        self.pixels = pixels;
+        self.drawn = Some(Drawn::Native);
+    }
+
+    /// A pack-drawn texture read back into `pixels`.
+    fn pack_copied(&mut self) {
+        self.drawn = Some(Drawn::Pack);
+    }
+
+    /// The readback closed: a pack-drawn sample is no longer kept current.
+    fn forget_pack(&mut self) {
+        if self.drawn == Some(Drawn::Pack) {
+            self.drawn = None;
+        }
+    }
+
+    /// What the chart paints while `drawing` draws the texture: its pixels, once they are
+    /// that texture's.
+    pub(crate) fn shown(&self, drawing: Drawn) -> Option<&[u8; 16 * 16 * 4]> {
+        (self.drawn == Some(drawing)).then_some(&self.pixels)
+    }
+}
+
 /// The renderer's light texture: the pack's shader draws it, or it is computed here.
 impl super::Renderer {
     /// The resource packs' `core/lightmap` (`HudAtlas::lightmap_shader`), or the native one.
@@ -445,12 +518,22 @@ impl super::Renderer {
     }
 
     /// Whether F3's lightmap chart is shown (the game's `debug_shows_lightmap`): only then is a
-    /// pack-drawn light texture read back into `lightmap_pixels`. Without a pack's shader it
+    /// pack-drawn light texture read back for it (`lightmap_sample`). Without a pack's shader it
     /// does nothing: the native pixels are there already.
     pub fn set_lightmap_readback(&mut self, on: bool) {
         if let Some(core) = self.core_lightmap.as_mut() {
             core.set_readback(&self.device, on);
+            if !on {
+                self.lightmap_chart.forget_pack();
+            }
         }
+    }
+
+    /// The light texture's pixels for F3's lightmap chart, RGBA rows of sky level by block
+    /// level: none until the texture drawn now has been read (`LightmapChart`).
+    pub fn lightmap_sample(&self) -> Option<&[u8; 16 * 16 * 4]> {
+        let drawing = Drawn::now(self.fullbright, self.core_lightmap.is_some());
+        self.lightmap_chart.shown(drawing)
     }
 
     /// The frame's light texture (`LightmapRenderStateExtractor.extract`, then
@@ -475,14 +558,18 @@ impl super::Renderer {
             ambient_color: sky.ambient_light_color,
             night_vision_color: [0.6; 3],
         };
-        let globals = self.pack_globals(frame);
-        if !self.fullbright
+        // Only a pack's shader reads the globals: none are made without one.
+        let globals =
+            (!self.fullbright && self.core_lightmap.is_some()).then(|| self.pack_globals(frame));
+        if let Some(globals) = globals
             && let Some(core) = self.core_lightmap.as_mut()
         {
-            let data = core.uniforms(globals, &info);
-            self.uploads.buffer(encoder, &core.uniform, 0, &data);
-            core.collect(&mut self.lightmap_pixels);
-            core.draw(encoder, &self.lightmap);
+            let (buffer, data) = core.uniforms(globals, &info);
+            self.uploads.buffer(encoder, buffer, 0, data);
+            if core.collect(&mut self.lightmap_chart.pixels) {
+                self.lightmap_chart.pack_copied();
+            }
+            core.draw(encoder, &self.lightmap, &self.lightmap_view);
             // The native pixels go up again when the pack's shader stops drawing.
             self.lightmap_uploaded = false;
             return;
@@ -493,7 +580,8 @@ impl super::Renderer {
         }
         // The lightmap changes with the time of day, flicker and effects,
         // not every frame: upload only what differs from the texture.
-        if pixels == self.lightmap_pixels && self.lightmap_uploaded {
+        if pixels == self.lightmap_chart.pixels && self.lightmap_uploaded {
+            self.lightmap_chart.native(pixels);
             return;
         }
         self.uploads.texture(
@@ -508,7 +596,7 @@ impl super::Renderer {
             16,
             &pixels,
         );
-        self.lightmap_pixels = pixels;
+        self.lightmap_chart.native(pixels);
         self.lightmap_uploaded = true;
     }
 }

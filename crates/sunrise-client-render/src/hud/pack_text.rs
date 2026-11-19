@@ -72,9 +72,12 @@ pub(super) fn load_pair(
 }
 
 /// [`load_pair`]'s program: none when no pack replaces either stage, else the translation, or
-/// why the shader is refused. Each stage and include is read only up to the translator's budget
-/// ([`read_shader_file`]); a file over it, in a pack or the defaults, refuses the shader by its
-/// path, rather than leaving the stage or include to another file of that name.
+/// why the shader is refused. A stage the packs don't replace, and every include, is the stack's
+/// (`root`: what the selected packs left of the game's resources), never `defaults` beside it,
+/// so a file a pack's filter hid stays hidden and refuses the shader. `defaults` only tells a
+/// pack's stage from the game's. Each stage and include is read only up to the translator's
+/// budget ([`read_shader_file`]); a file over it refuses the shader by its path. A panic in the
+/// translator refuses it too ([`contained`]).
 fn translate_pair(
     root: &ResourceSource,
     defaults: &ResourceSource,
@@ -91,35 +94,47 @@ fn translate_pair(
         })
     };
     let refused = || Some(Err(rejected.borrow().join("; ")));
-    let own =
-        |path: &str| read(root, path).filter(|text| read(defaults, path).as_ref() != Some(text));
     let vertex_path = format!("assets/minecraft/shaders/core/{vertex_name}.vsh");
     let fragment_path = format!("assets/minecraft/shaders/core/{name}.fsh");
-    let (own_vertex, own_fragment) = (own(&vertex_path), own(&fragment_path));
+    let (vertex, fragment) = (read(root, &vertex_path), read(root, &fragment_path));
+    let own = |path: &str, text: &Option<String>| {
+        text.is_some() && read(defaults, path).as_ref() != text.as_ref()
+    };
+    let replaced = own(&vertex_path, &vertex) || own(&fragment_path, &fragment);
     if !rejected.borrow().is_empty() {
         return refused();
     }
-    if own_vertex.is_none() && own_fragment.is_none() {
+    if !replaced {
         return None;
     }
-    let vertex = own_vertex.or_else(|| read(defaults, &vertex_path));
-    let fragment = own_fragment.or_else(|| read(defaults, &fragment_path));
-    if !rejected.borrow().is_empty() {
-        return refused();
-    }
-    let (vertex, fragment) = (vertex?, fragment?);
+    let (Some(vertex), Some(fragment)) = (&vertex, &fragment) else {
+        let missing = if vertex.is_none() {
+            &vertex_path
+        } else {
+            &fragment_path
+        };
+        return Some(Err(format!("{missing}: not in the selected packs")));
+    };
     let include = |id: &str| {
         let (namespace, path) = id.split_once(':')?;
-        let path = format!("assets/{namespace}/{path}");
-        read(root, &path).or_else(|| read(defaults, &path))
+        read(root, &format!("assets/{namespace}/{path}"))
     };
-    let translated = crate::core_shader::translate_core_with(
-        &vertex, &fragment, defines, &include, glue, provided,
-    );
+    let translated = contained(|| {
+        crate::core_shader::translate_core_with(vertex, fragment, defines, &include, glue, provided)
+    });
     if !rejected.borrow().is_empty() {
         return refused();
     }
     Some(translated)
+}
+
+/// `translate`'s result, or its panic as a refusal: a pack's GLSL is untrusted, and a fault the
+/// translator or naga meets in it must not end the game.
+fn contained(
+    translate: impl FnOnce() -> Result<CoreProgram, String>,
+) -> Result<CoreProgram, String> {
+    crate::crash::contain(translate)
+        .unwrap_or_else(|panic| Err(format!("the shader translator failed: {panic}")))
 }
 
 /// A shader file (a stage or an include) of `base`, read only up to the translator's budget
@@ -533,6 +548,68 @@ mod tests {
         layout(location = 0) in vec2 texCoord;\nlayout(location = 0) out vec4 fragColor;\n\
         void main() {\n    fragColor = tint(info.SkyFactor);\n}\n";
     const TINT_GLSL: &str = "vec4 tint(float f) { return vec4(f, 0.5 * f, 0.0, 1.0); }\n";
+
+    /// A stage the pack doesn't replace, and an include, come from the stack the selected packs
+    /// left, never from the game's resources beside it: one a pack's filter hid refuses the
+    /// shader, named, instead of coming back.
+    #[test]
+    fn a_file_the_selected_packs_hid_does_not_come_back() {
+        use sunrise_assets::resource_source::Resource;
+        let fsh = "assets/minecraft/shaders/core/lightmap.fsh";
+        let vsh = "assets/minecraft/shaders/core/screenquad.vsh";
+        let tint = "assets/minecraft/shaders/core/tint.glsl";
+        let (full, defaults) = lightmap_packs(&[(fsh, IMPORTING_FSH), (tint, TINT_GLSL)]);
+        // The stack without one file: a filter hid it, though the game's resources have it.
+        let hiding = |hidden: &str| {
+            let files = full
+                .list("assets/")
+                .into_iter()
+                .filter(|p| p != hidden)
+                .map(|p| {
+                    let text = full.read(&p).unwrap();
+                    (p, Resource::bytes(text))
+                })
+                .collect();
+            ResourceSource::indexed(files)
+        };
+        let defaults_with_tint = {
+            let mut files: std::collections::BTreeMap<String, Resource> = defaults
+                .list("assets/")
+                .into_iter()
+                .map(|p| {
+                    let text = defaults.read(&p).unwrap();
+                    (p, Resource::bytes(text))
+                })
+                .collect();
+            files.insert(
+                tint.to_owned(),
+                Resource::bytes(TINT_GLSL.as_bytes().to_vec()),
+            );
+            ResourceSource::indexed(files)
+        };
+        let translate = |root: &ResourceSource| {
+            translate_pair(
+                root,
+                &defaults_with_tint,
+                ("screenquad", "lightmap"),
+                &[],
+                &crate::gfx::core_lightmap::GLUE,
+                &|block| block == crate::gfx::core_lightmap::INFO_BLOCK,
+            )
+            .expect("the pack replaces a stage")
+        };
+        assert!(translate(&full).is_ok(), "nothing hidden");
+        let why = translate(&hiding(vsh)).expect_err("the screen quad hidden");
+        assert!(why.starts_with(vsh), "{why}");
+        let why = translate(&hiding(tint)).expect_err("the include hidden");
+        assert!(why.contains("minecraft:shaders/core/tint.glsl"), "{why}");
+    }
+
+    /// A panic in the translator is a refusal, not the game's end.
+    #[test]
+    fn a_translator_panic_refuses_the_shader() {
+        assert!(contained(|| panic!("a fault in the translator")).is_err());
+    }
 
     /// A quoted import in a pack's `core/lightmap` is read from the shader's own folder,
     /// `minecraft:shaders/core/`, not from `shaders/include/`.
