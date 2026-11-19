@@ -144,6 +144,15 @@ bundles (Copyright (c) 2018-2025 Microsoft Corporation, Daan Leijen), both under
 change: `mi_popcount` in `include/mimalloc/bits.h` uses mimalloc's portable bit count on MSVC
 x86/x64 instead of the POPCNT instruction, which CPUs before Nehalem lack (#7264).
 
+## winit
+
+`third_party/winit` is [winit](https://github.com/rust-windowing/winit) 0.30.13 by the winit
+contributors, licensed under Apache-2.0 (`LICENSE` in that folder), without its examples and tests.
+One change: its X11 backend takes raw input events from the slave devices attached to a master
+instead of the masters' copies. While winit holds its own pointer grab (`CursorGrabMode::Confined`,
+X11's only grab), an X server speaking XInput 2.1 or later sends a client each master raw event
+twice, so mouse look turned twice as far (#3022); each slave raw event arrives once.
+
 ## Pixelify Sans
 
 `crates/sunrise-theme/fonts/PixelifySans-*.ttf` is [Pixelify Sans](https://github.com/eifetx/Pixelify-Sans)

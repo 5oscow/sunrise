@@ -1404,6 +1404,14 @@ impl EventProcessor {
         }
     }
 
+    /// Whether a raw event is an attached slave's own copy, the one `update_listen_device_events` takes.
+    fn from_attached_slave(&self, xev: &XIRawEvent) -> bool {
+        self.devices
+            .borrow()
+            .get(&DeviceId(xev.deviceid as xinput::DeviceId))
+            .is_some_and(|device| device.attached_slave)
+    }
+
     fn xinput2_raw_button_input<T: 'static, F>(
         &self,
         xev: &XIRawEvent,
@@ -1412,6 +1420,10 @@ impl EventProcessor {
     ) where
         F: FnMut(&RootAEL, Event<T>),
     {
+        if !self.from_attached_slave(xev) {
+            return;
+        }
+
         let wt = Self::window_target(&self.target);
 
         // Set the timestamp.
@@ -1430,6 +1442,10 @@ impl EventProcessor {
     where
         F: FnMut(&RootAEL, Event<T>),
     {
+        if !self.from_attached_slave(xev) {
+            return;
+        }
+
         let wt = Self::window_target(&self.target);
 
         // Set the timestamp.
@@ -1494,6 +1510,10 @@ impl EventProcessor {
     ) where
         F: FnMut(&RootAEL, Event<T>),
     {
+        if !self.from_attached_slave(xev) {
+            return;
+        }
+
         let wt = Self::window_target(&self.target);
 
         // Set the timestamp.
@@ -1522,6 +1542,9 @@ impl EventProcessor {
         wt.xconn.set_timestamp(xev.time as xproto::Timestamp);
         let infos = unsafe { slice::from_raw_parts(xev.info, xev.num_info as usize) };
         for info in infos {
+            if 0 != info.flags & (xinput2::XISlaveAttached | xinput2::XISlaveDetached) {
+                self.init_device(info.deviceid as xinput::DeviceId);
+            }
             if 0 != info.flags & (xinput2::XISlaveAdded | xinput2::XIMasterAdded) {
                 self.init_device(info.deviceid as xinput::DeviceId);
                 callback(&self.target, Event::DeviceEvent {
