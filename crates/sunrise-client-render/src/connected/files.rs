@@ -488,13 +488,18 @@ mod tests {
                 ),
             ],
         );
+        // The fields in `extra` replace the base file's: a repeated key is refused by serde.
         let file = |extra: &str| {
-            parse_in(
-                &root,
-                &format!(
-                    r#"{{"method":"table","blocks":["demo:casing"],"sheet":"demo:block/casing_sheet","table":"row"{extra}}}"#
-                ),
+            let mut json: serde_json::Value = serde_json::from_str(
+                r#"{"method":"table","blocks":["demo:casing"],"sheet":"demo:block/casing_sheet","table":"row"}"#,
             )
+            .unwrap();
+            let replaced: serde_json::Value =
+                serde_json::from_str(&format!("{{{}}}", extra.trim_start_matches(','))).unwrap();
+            json.as_object_mut()
+                .unwrap()
+                .extend(replaced.as_object().unwrap().clone());
+            parse_in(&root, &json.to_string())
         };
         assert!(file("").is_ok());
         let err = file(r#","sheet":"demo:block/missing""#).unwrap_err();
