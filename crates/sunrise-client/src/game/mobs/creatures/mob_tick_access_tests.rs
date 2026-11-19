@@ -520,9 +520,9 @@ fn a_mob_outside_the_entity_tick_list_checks_no_despawn() {
 }
 
 /// What a tick listener heard: each call's phase and entities, and at a Post where the first
-/// of them stands. Names `minecraft:pig` to `entity_tick_each` when `named`.
+/// of them stands. Names the types of `named` to `entity_tick_each`.
 struct TickTiming {
-    named: bool,
+    named: &'static [&'static str],
     heard: Arc<Mutex<TickCalls>>,
 }
 
@@ -549,8 +549,8 @@ impl mod_api::Hooks for TickTiming {
         heard.push(("post", event.entities.to_vec(), at));
     }
     fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
-        if self.named {
-            r.entity_tick_each("minecraft:pig");
+        for kind in self.named {
+            r.entity_tick_each(kind);
         }
     }
 }
@@ -561,7 +561,7 @@ fn pig_ticks(named: bool) -> TickCalls {
     let mods: mod_api::Mods = vec![ModEntry::new(
         "mob-tick-timing",
         Box::new(TickTiming {
-            named,
+            named: if named { &["minecraft:pig"] } else { &[] },
             heard: heard.clone(),
         }),
     )]
@@ -617,4 +617,119 @@ fn an_unnamed_family_hears_one_pre_and_one_post() {
         .map(|(phase, entities, _)| (phase, entities))
         .collect();
     assert_eq!(phases, [("pre", vec![71, 72]), ("post", vec![71, 72])]);
+}
+
+/// Two arrows of a type a mod names, on the server: each told alone, its Post right after its own
+/// flight and before the next arrow's Pre, and a Post handle reads where its flight took it.
+#[test]
+#[ignore = "daily"]
+fn named_projectiles_hear_each_their_own_pre_and_post() {
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    let mods: mod_api::Mods = vec![ModEntry::new(
+        "projectile-tick-timing",
+        Box::new(TickTiming {
+            named: &["minecraft:arrow"],
+            heard: heard.clone(),
+        }),
+    )]
+    .into();
+    let mut ids = Vec::new();
+    mod_platform::testing::with_mods(mods, || {
+        with_two_pigs(|game| {
+            game.build_registries();
+            game.set_allow_commands(true);
+            for z in [0.5, 2.5] {
+                assert!(game.run_command(&format!(
+                    "summon minecraft:arrow 1.5 80.5 {z} {{NoGravity:1b,Motion:[0.5d,0.0d,0.0d]}}"
+                )));
+            }
+            ids = game.creatures.projectiles.iter().map(|p| p.id).collect();
+            game.ticked_entities_through = u32::MAX;
+            game.tick_projectiles().unwrap();
+        });
+    });
+    let heard = heard.lock().unwrap();
+    let phases: Vec<_> = heard
+        .iter()
+        .map(|(phase, entities, _)| (*phase, entities.clone()))
+        .collect();
+    assert_eq!(
+        phases,
+        [
+            ("pre", vec![ids[0]]),
+            ("post", vec![ids[0]]),
+            ("pre", vec![ids[1]]),
+            ("post", vec![ids[1]]),
+        ]
+    );
+    let first = heard[1].2.expect("the Post reads the first arrow");
+    assert!(
+        first[0] > 1.5,
+        "the first arrow flew in its own tick: {first:?}"
+    );
+}
+
+/// Moves pig 72 into a second arrow's path in the Post of the arrow `first` (an arrow named to
+/// `entity_tick_each`, so told alone).
+struct MoveOnArrowPost {
+    first: Arc<AtomicU32>,
+}
+
+#[mod_api::__subscriptions]
+impl mod_api::Hooks for MoveOnArrowPost {
+    fn entity_tick_listened(&self, _: HostSide<'_>, event: &mut EntityTickListenedEvent) {
+        event.listened = true;
+    }
+    fn entity_tick_post(&self, host: HostSide<'_>, event: &mut mod_api::EntityTickPostEvent<'_>) {
+        let HostSide::Server(host) = host else {
+            panic!("server fixture");
+        };
+        if event.entities == [self.first.load(Ordering::Relaxed)] {
+            let pig = host.entity(72).expect("the pig");
+            assert!(pig.teleport_to(host, [4.0, 80.0, 5.5], None));
+        }
+    }
+    fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+        r.entity_tick_each("minecraft:arrow");
+    }
+}
+
+/// As on NeoForge, where each projectile ticks in turn: a mod that moves a mob in one arrow's
+/// Post moves it for the next arrow of the same tick, which hits it there.
+#[test]
+#[ignore = "daily"]
+fn a_mob_moved_in_one_arrows_post_is_hit_by_the_next_arrow() {
+    let first = Arc::new(AtomicU32::new(0));
+    let mods: mod_api::Mods = vec![ModEntry::new(
+        "projectile-post-move",
+        Box::new(MoveOnArrowPost {
+            first: first.clone(),
+        }),
+    )]
+    .into();
+    mod_platform::testing::with_mods(mods, || {
+        with_two_pigs(|game| {
+            game.build_registries();
+            game.set_allow_commands(true);
+            // The first arrow far from both pigs; the second flies east along z = 5.5, where
+            // no pig stands until the first arrow's Post moves one there.
+            for command in [
+                "summon minecraft:arrow 1.5 80.5 12.5 {NoGravity:1b,Motion:[0.1d,0.0d,0.0d]}",
+                "summon minecraft:arrow 1.5 80.5 5.5 {NoGravity:1b,Motion:[3.0d,0.0d,0.0d]}",
+            ] {
+                assert!(game.run_command(command), "{command}");
+            }
+            first.store(game.creatures.projectiles[0].id, Ordering::Relaxed);
+            let health = game.mobs.iter().find(|m| m.id == 72).unwrap().health;
+            game.ticked_entities_through = u32::MAX;
+            game.tick_projectiles().unwrap();
+            let pig = game.mobs.iter().find(|m| m.id == 72).unwrap();
+            assert_eq!(pig.position.z, 5.5, "the first arrow's Post moved the pig");
+            assert!(
+                pig.health < health,
+                "the second arrow hit the pig where the Post moved it: {} of {health}",
+                pig.health
+            );
+        });
+    });
 }

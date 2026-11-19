@@ -1092,6 +1092,7 @@ impl Game<'_> {
                 .guests
                 .iter()
                 .find(|g| g.conn == conn && host.hub.here(g))
+                .filter(|_| !self.player_tick_canceled(conn))
             else {
                 continue;
             };
@@ -1173,7 +1174,7 @@ impl Game<'_> {
             let Some(g) = host.hub.guests.iter().find(|g| g.conn == conn) else {
                 continue;
             };
-            if !host.hub.here(g) {
+            if !host.hub.here(g) || self.player_tick_canceled(conn) {
                 continue;
             }
             if self.lan_lectern_valid(g, key) {

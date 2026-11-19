@@ -521,7 +521,7 @@ impl Game<'_> {
             .hub
             .guests
             .iter()
-            .filter(|g| host.hub.here(g))
+            .filter(|g| host.hub.here(g) && !self.player_tick_canceled(g.conn))
             .filter(|g| {
                 (g.dead && super::super::native_menus::open_menu_of(host, g.conn).is_some())
                     || !self.container_menu_valid(g)
