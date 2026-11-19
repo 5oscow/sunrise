@@ -498,7 +498,8 @@ mod tests {
                 &[],
                 &[],
             );
-            game.open_world_tables(&stack, &root).unwrap();
+            let staged = game.stage_world_tables(&stack, false, &root).unwrap();
+            game.open_world_tables(staged).unwrap();
 
             let pig = game.res.mob_types().get("minecraft:pig").unwrap().clone();
             game.mobs
