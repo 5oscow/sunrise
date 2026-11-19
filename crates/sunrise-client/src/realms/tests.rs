@@ -1,7 +1,9 @@
 //! The Realms screens' tests: the fixtures they build their `Screen`s from, and what
 //! vanilla says about the list, the settings draft, the reset tiles and the templates.
 
+use super::page::pdp_row_lines;
 use super::*;
+use std::time::UNIX_EPOCH;
 
 fn server(id: i64, owner_uuid: Option<&str>) -> RealmServer {
     RealmServer {
