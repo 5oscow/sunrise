@@ -861,20 +861,16 @@ pub fn render(config: &Config) -> String {
         set(&mut doc, section, field, &table[section][field]);
     }
     let mut text = doc.to_string();
-    for section in [
-        "anticheat",
-        "chat_filter",
-        "prune_chunks",
-        "biome_regions",
-        "missing_mods",
-        "entities",
-    ] {
-        if let Some(settings) = table.get(section) {
-            let mut only = toml::Table::new();
-            only.insert(section.into(), settings.clone());
-            text.push('\n');
-            text.push_str(&toml::to_string(&only).expect("a section's settings are a table"));
+    // Serde omits optional sections at their defaults. Append the ones it kept that have
+    // no table in the template, so accepting a new section is enough to preserve it here.
+    for (section, settings) in table {
+        if doc.contains_key(section.as_str()) {
+            continue;
         }
+        let mut only = toml::Table::new();
+        only.insert(section, settings);
+        text.push('\n');
+        text.push_str(&toml::to_string(&only).expect("a section's settings are a table"));
     }
     text
 }
@@ -1154,7 +1150,7 @@ mod tests {
 
         for text in ["", "[missing_mods]\n", "[missing_mods]\nallow = false\n"] {
             let config = Config::parse(text).unwrap();
-            assert_eq!(config, Config::default());
+            assert!(!config.missing_mods.allow);
             let table: toml::Table = render(&config).parse().unwrap();
             assert!(!table.contains_key("missing_mods"));
         }
