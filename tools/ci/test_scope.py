@@ -87,7 +87,10 @@ READERS = {
     "sunrise-prepare": [
         "crates/sunrise-client/src/game/runtime/launch_api.rs", "mods/sunrise/src/test/java", "research-lock.json",
     ],
-    "sunrise-release-sign": ["tools/ci/sign_native_build.sh", "tools/ci/sign_release.sh"],
+    "sunrise-release-sign": [
+        "packaging/server", "tests/install_ps1_signature.ps1", "tests/install_sh_signature.sh",
+        "tools/ci/sign_native_build.sh", "tools/ci/sign_release.sh",
+    ],
     "sunrise-server": [
         "crates/sunrise-theme/fonts", "crates/sunrise-theme/icons", "docs/api/server-reference.md",
         "packaging/executable_link.rs",
