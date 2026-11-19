@@ -3,7 +3,7 @@
 mod admin;
 mod clone_payload;
 pub(super) mod compute;
-mod data;
+pub(in crate::game) mod data;
 mod difficulty;
 mod display_names;
 pub(super) use data::{place_summoned, strip_finalize_tree};

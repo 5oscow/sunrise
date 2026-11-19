@@ -491,6 +491,9 @@ struct GameLevel<'w> {
     /// `LootContextParams.INTERACTING_ENTITY` of a block-interaction drop: the
     /// player whose click `use_without_item` runs for.
     interacting: Option<sunrise_world::loot::LootEntity>,
+    /// What a location predicate of such a drop reads beyond the level's own
+    /// fields (`blocks::location_world`).
+    location: location_world::LocationRefs<'w>,
     /// The block a mod's machine breaks and the tool it breaks it with
     /// (`native_machine_destroy_block`): `Block.dropResources` rolls that
     /// block's loot with the tool instead of with none. Neighbours that pop
@@ -3201,6 +3204,16 @@ impl Game<'_> {
             drop_tool: None,
             drop_entity: None,
             interacting: None,
+            location: location_world::LocationRefs {
+                dimension: self.dim.id(),
+                end: &self.end,
+                tags: advancements::TagSources {
+                    pack_tags: self.world_tables.as_ref().map(|t| &t.pack_tags),
+                    items: world_items!(self),
+                    mob_data: self.res.mob_data(),
+                    resources: &self.options.resources,
+                },
+            },
             drop_breaker_at: None,
             drop_into: None,
         };

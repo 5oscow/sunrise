@@ -24,6 +24,28 @@ pub(in crate::game) enum DataRef {
 fn empty() -> Tag {
     Tag::Compound(Compound::new())
 }
+/// What the model keeps outside a stored block entity's `encoded` form
+/// (`BlockEntity.saveWithFullMetadata`): the lock, the hopper's
+/// `TransferCooldown` (`HopperBlockEntity.saveAdditional`), the custom name
+/// and the pending loot table.
+pub(in crate::game) fn stored_block_entity_data(
+    world: &sunrise_client::world::World,
+    key: (i32, i32, i32),
+    name: &str,
+    encoded: Tag,
+    hopper_cooldown: impl FnOnce() -> i32,
+) -> Tag {
+    let mut tag = save::command_block_entity_data(encoded, world.block_lock(key));
+    if name == "minecraft:hopper" {
+        set_key(&mut tag, "TransferCooldown", Tag::Int(hopper_cooldown()));
+    }
+    if let (Some(custom), Tag::Compound(map)) = (world.block_names.get(&key), &mut tag) {
+        map.entry("CustomName".into())
+            .or_insert_with(|| custom.clone());
+    }
+    Game::write_pending_loot(world, key, &mut tag);
+    tag
+}
 fn set_key(tag: &mut Tag, key: &str, value: Tag) {
     if let Tag::Compound(c) = tag {
         c.insert(JavaString::from(key), value);
@@ -1233,23 +1255,13 @@ impl Game<'_> {
         let key = (p[0], p[1], p[2]);
         let name = self.data_block_name(p);
         let e = self.world.block_entities.get(&key)?;
-        let mut tag = save::command_block_entity_data(
+        Some(stored_block_entity_data(
+            &self.world,
+            key,
+            &name,
             self.encode_live_block_entity(key, e, &name, self.items()),
-            self.world.block_lock(key),
-        );
-        if name == "minecraft:hopper" {
-            set_key(
-                &mut tag,
-                "TransferCooldown",
-                Tag::Int(self.hopper_cooldown(key)),
-            );
-        }
-        if let (Some(custom), Tag::Compound(map)) = (self.world.block_names.get(&key), &mut tag) {
-            map.entry("CustomName".into())
-                .or_insert_with(|| custom.clone());
-        }
-        Self::write_pending_loot(&self.world, key, &mut tag);
-        Some(tag)
+            || self.hopper_cooldown(key),
+        ))
     }
     pub(in crate::game) fn set_data_of(&mut self, r: &DataRef, tag: Tag) -> R<()> {
         match r {

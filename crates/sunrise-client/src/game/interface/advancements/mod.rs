@@ -244,32 +244,57 @@ impl adv::World for View<'_, '_> {
         self.0.block_entity_nbt(p)
     }
     fn in_tag(&self, registry: &str, tag: &str, id: &str) -> bool {
+        let tags = TagSources {
+            pack_tags: self.0.world_tables.as_ref().map(|t| &t.pack_tags),
+            items: self.0.items(),
+            mob_data: self.0.res.mob_data(),
+            resources: &self.0.options.resources,
+        };
+        tags.contains(registry, tag, id).unwrap_or_else(|| {
+            registry == "damage_type"
+                && self
+                    .0
+                    .health_resources
+                    .damage
+                    .id(id)
+                    .is_some_and(|source| self.0.health_resources.damage.in_tag(source, tag))
+        })
+    }
+}
+/// The tag tables a predicate's `#tag` reads, as borrows of the game's fields.
+#[derive(Clone, Copy)]
+pub(in crate::game) struct TagSources<'a> {
+    /// The world's packs' tags over the game's own, by registry.
+    pub(in crate::game) pack_tags: Option<
+        &'a std::collections::HashMap<
+            &'static str,
+            std::collections::HashMap<String, std::collections::HashSet<String>>,
+        >,
+    >,
+    pub(in crate::game) items: &'a sunrise_client::items::Items,
+    pub(in crate::game) mob_data: &'a sunrise_client::mobs::MobData,
+    pub(in crate::game) resources: &'a std::path::Path,
+}
+impl TagSources<'_> {
+    /// Whether `id` is in `#tag` of `registry`, `None` for a registry that
+    /// has no table here.
+    pub(in crate::game) fn contains(&self, registry: &str, tag: &str, id: &str) -> Option<bool> {
         // The world's packs' tags over the game's own, as the server's
         // registries bind them (`TagLoader.loadTagsForExistingRegistries`).
-        if let Some(tags) = self
-            .0
-            .world_tables
-            .as_ref()
-            .and_then(|t| t.pack_tags.get(registry))
-        {
-            return tags.get(tag).is_some_and(|t| t.contains(id));
+        if let Some(tags) = self.pack_tags.and_then(|t| t.get(registry)) {
+            return Some(tags.get(tag).is_some_and(|t| t.contains(id)));
         }
-        let items = self.0.items();
         match registry {
-            "item" => items.item_in_tag(tag, id),
-            "block" => items.block_in_tag(tag, id),
-            "entity_type" => self.0.res.mob_data().entity_has(tag, id),
-            "worldgen/biome" => self.0.res.mob_data().biome_has(tag, id),
-            "worldgen/structure" => vanilla_structure_tags(&self.0.options.resources)
-                .get(tag)
-                .is_some_and(|t| t.contains(id)),
-            "damage_type" => self
-                .0
-                .health_resources
-                .damage
-                .id(id)
-                .is_some_and(|source| self.0.health_resources.damage.in_tag(source, tag)),
-            _ => false,
+            "item" => Some(self.items.item_in_tag(tag, id)),
+            "block" => Some(self.items.block_in_tag(tag, id)),
+            "entity_type" => Some(self.mob_data.entity_has(tag, id)),
+            "worldgen/biome" => Some(self.mob_data.biome_has(tag, id)),
+            "worldgen/structure" => Some(
+                vanilla_structure_tags(self.resources)
+                    .get(tag)
+                    .is_some_and(|t| t.contains(id)),
+            ),
+            _ => None,
         }
     }
 }
@@ -533,7 +558,7 @@ impl Game<'_> {
     /// of conditions or an item modifier): the player with the level,
     /// statistics, advancements and recipes it may ask for, and nothing
     /// copied when it asks for none.
-    pub(super) fn entity_view_asked(
+    pub(in crate::game) fn entity_view_asked(
         &self,
         t: super::commands::Target,
         predicate: &Value,

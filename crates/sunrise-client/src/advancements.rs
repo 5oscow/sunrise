@@ -946,6 +946,33 @@ pub fn block(v: &Value, pos: [i32; 3], w: &dyn World) -> bool {
     }
     true
 }
+/// Where `LocationCheck.test` looks: the block centre of `block_pos` (else
+/// `origin`) plus the check's offsets.
+pub fn location_check_position(
+    v: &Value,
+    block_pos: Option<[i32; 3]>,
+    origin: [f64; 3],
+) -> [f64; 3] {
+    let base = block_pos.map_or(origin, |b| b.map(|c| f64::from(c) + 0.5));
+    [
+        base[0] + v["offsetX"].as_f64().unwrap_or(0.0),
+        base[1] + v["offsetY"].as_f64().unwrap_or(0.0),
+        base[2] + v["offsetZ"].as_f64().unwrap_or(0.0),
+    ]
+}
+/// `LocationCheck.test`: [`location`] at [`location_check_position`].
+pub fn location_check(
+    v: &Value,
+    block_pos: Option<[i32; 3]>,
+    origin: [f64; 3],
+    w: &dyn World,
+) -> bool {
+    location(
+        &v["predicate"],
+        location_check_position(v, block_pos, origin),
+        w,
+    )
+}
 /// `LocationPredicate`.
 pub fn location(v: &Value, p: [f64; 3], w: &dyn World) -> bool {
     if v.is_null() {
@@ -1645,25 +1672,7 @@ fn condition_leaf(v: &Value, ctx: &Entities, w: &dyn World) -> bool {
                 "minecraft:entity_properties" => ctx
                     .entity(v["entity"].as_str().unwrap_or("this"))
                     .is_some_and(|e| entity(&v["predicate"], e, w, ctx.origin)),
-                "minecraft:location_check" => {
-                    let base = ctx.block_pos.map_or(ctx.origin, |b| {
-                        [
-                            f64::from(b[0]) + 0.5,
-                            f64::from(b[1]) + 0.5,
-                            f64::from(b[2]) + 0.5,
-                        ]
-                    });
-                    let off = [
-                        v["offsetX"].as_f64().unwrap_or(0.0),
-                        v["offsetY"].as_f64().unwrap_or(0.0),
-                        v["offsetZ"].as_f64().unwrap_or(0.0),
-                    ];
-                    location(
-                        &v["predicate"],
-                        [base[0] + off[0], base[1] + off[1], base[2] + off[2]],
-                        w,
-                    )
-                }
+                "minecraft:location_check" => location_check(v, ctx.block_pos, ctx.origin, w),
                 "minecraft:match_block" => ctx.block_pos.is_some_and(|b| block(v, b, w)),
                 "minecraft:block_state_property" => ctx.block_pos.is_some_and(|b| {
                     let mut pred = serde_json::Map::new();

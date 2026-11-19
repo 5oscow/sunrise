@@ -17,23 +17,6 @@ fn loot_location_block(
     registry: &sunrise_world::registry::BlockRegistry,
     items: &sunrise_client::items::Items,
 ) -> Option<bool> {
-    let state_at = |at: [i32; 3]| {
-        chunks
-            .get(&(at[0] >> 4, at[2] >> 4))
-            .map(|chunk| chunk.block(at[0] & 15, at[1], at[2] & 15))
-    };
-    loot_location_state(condition, origin, state_at, registry, items)
-}
-
-/// [`loot_location_block`] over any reader of the loaded block states
-/// (`None` where the position is unloaded).
-pub(in crate::game) fn loot_location_state(
-    condition: &serde_json::Value,
-    origin: [i32; 3],
-    state_at: impl Fn([i32; 3]) -> Option<sunrise_world::registry::BlockStateId>,
-    registry: &sunrise_world::registry::BlockRegistry,
-    items: &sunrise_client::items::Items,
-) -> Option<bool> {
     let condition = condition.as_object()?;
     if condition.keys().any(|k| {
         !matches!(
@@ -71,10 +54,10 @@ pub(in crate::game) fn loot_location_state(
     }
     // Unloaded positions are unsupported: never load or invent a block here.
     // `LocationPredicate.matches`: a block check fails where `Level.isLoaded` is false.
-    let Some(state) = state_at(at) else {
+    let Some(chunk) = chunks.get(&(at[0] >> 4, at[2] >> 4)) else {
         return Some(false);
     };
-    let state = registry.state(state)?;
+    let state = registry.state(chunk.block(at[0] & 15, at[1], at[2] & 15))?;
     Some(items.matches_block_state(&predicate["block"], &state.name, &state.properties))
 }
 
