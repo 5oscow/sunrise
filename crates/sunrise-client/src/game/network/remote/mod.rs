@@ -10361,32 +10361,56 @@ pub(crate) mod tests {
     mod chat_window_and_input_tests {
         include!("chat_window_and_input_tests.rs");
     }
+    mod chunk_storage_tests {
+        include!("chunk_storage_tests.rs");
+    }
+    mod client_attributes_tests {
+        include!("client_attributes_tests.rs");
+    }
     mod client_block_changed_tests {
         include!("client_block_changed_tests.rs");
-    }
-    mod client_day_time_tests {
-        include!("client_day_time_tests.rs");
-    }
-    mod client_handles_tests {
-        include!("client_handles_tests.rs");
     }
     mod client_camera_tests {
         include!("client_camera_tests.rs");
     }
+    mod client_day_time_tests {
+        include!("client_day_time_tests.rs");
+    }
     mod client_epochs_tests {
         include!("client_epochs_tests.rs");
+    }
+    mod client_handles_tests {
+        include!("client_handles_tests.rs");
+    }
+    mod client_menu_tests {
+        include!("client_menu_tests.rs");
     }
     mod client_player_reads_tests {
         include!("client_player_reads_tests.rs");
     }
+    mod creative_sync_tests {
+        include!("creative_sync_tests.rs");
+    }
+    mod damage_sound_tests {
+        include!("damage_sound_tests.rs");
+    }
     mod dig_abort_tests {
         include!("dig_abort_tests.rs");
+    }
+    mod dimension_transition_tests {
+        include!("dimension_transition_tests.rs");
     }
     mod hand_swap_tests {
         include!("hand_swap_tests.rs");
     }
     mod hanging_entity_age_tests {
         include!("hanging_entity_age_tests.rs");
+    }
+    mod menu_generation_tests {
+        include!("menu_generation_tests.rs");
+    }
+    mod menu_packets_tests {
+        include!("menu_packets_tests.rs");
     }
     mod menu_title_tests {
         include!("menu_title_tests.rs");
@@ -10403,194 +10427,20 @@ pub(crate) mod tests {
     mod player_sleep_tests {
         include!("player_sleep_tests.rs");
     }
-    mod remote_columns_tests {
-        include!("remote_columns_tests.rs");
-    }
     mod predicted_block_notice_tests {
         include!("predicted_block_notice_tests.rs");
     }
+    mod remote_columns_tests {
+        include!("remote_columns_tests.rs");
+    }
+    mod slot_mapping_tests {
+        include!("slot_mapping_tests.rs");
+    }
+    mod sound_entity_tests {
+        include!("sound_entity_tests.rs");
+    }
     mod spear_jab_tests {
         include!("spear_jab_tests.rs");
-    }
-
-    /// After `ClientboundUpdateAttributes`, the local player's `LivingRef`
-    /// reads its attribute value, base, modifiers and attribute list from the
-    /// client's own copy of the synced instances. A mob the server tracks
-    /// keeps no attribute state of its own on the client, so its reads are
-    /// `None` there.
-    #[test]
-    #[ignore = "daily"]
-    fn update_attributes_answers_the_local_players_living_reads() {
-        use super::super::native_entity_refs::tests::with_client_game;
-        use sunrise_client::{mobs::Mob, motion::PlayerMotion};
-        use sunrise_core::geometry::Vec3;
-        use sunrise_protocol::{
-            buf::Reader,
-            connection::Pipe,
-            packets::play::{self, Clientbound as C},
-        };
-
-        with_client_game(|game| {
-            let (client, _server) = Pipe::pair();
-            game.connect_local(client, "attributes-client").unwrap();
-            let zombie = game
-                .res
-                .mob_types()
-                .get("minecraft:zombie")
-                .unwrap()
-                .clone();
-            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
-            game.player.as_mut().unwrap().entity_id = 42;
-            game.mobs.push(Mob::new(60, zombie, Vec3::ZERO, 0.0));
-            let remote = game.remote.as_mut().unwrap();
-            remote.entity_id = 42;
-            remote.logged_in = true;
-            remote.entities.insert(
-                60,
-                super::Tracked {
-                    kind: "minecraft:zombie".into(),
-                    position: [0.0; 3],
-                    codec_base: [0.0; 3],
-                    on_fire: false,
-                    silent: false,
-                    vehicle: None,
-                },
-            );
-
-            let health = "minecraft:max_health";
-            let living = game.living(game.entity(42).unwrap()).unwrap();
-            // Before the server says anything, the client's own map holds the
-            // type's defaults, as a vanilla client's does before its sync.
-            assert_eq!(living.attribute_value(game, health), Some(20.0));
-            assert_eq!(living.attribute_modifiers(game, health), Some(Vec::new()));
-
-            let registry_id = game.motion.attributes.id(health).unwrap().registry_id();
-            let packet = C::UpdateAttributes(play::UpdateAttributes {
-                id: 42,
-                values: vec![play::AttributeSnapshot {
-                    attribute: registry_id,
-                    base: 30.0,
-                    modifiers: vec![play::AttributeModifier {
-                        id: "test:bonus".into(),
-                        amount: 5.0,
-                        operation: 0,
-                    }],
-                }],
-            });
-            let body = packet.encode();
-            let mut reader = Reader::new(&body);
-            let id = reader.varint().unwrap();
-            game.handle_packet(C::decode(id, reader.rest()).unwrap())
-                .unwrap();
-
-            assert_eq!(living.attribute_value(game, health), Some(35.0));
-            assert_eq!(living.attribute_base(game, health), Some(30.0));
-            assert_eq!(
-                living.attribute_modifiers(game, health),
-                Some(vec![mod_api::AttributeModifier::new(
-                    mod_api::Identifier::parse("test:bonus").unwrap(),
-                    5.0,
-                    mod_api::AttributeOperation::AddValue,
-                )])
-            );
-            let listed = living.attributes(game).unwrap();
-            assert!(listed.contains(&mod_api::Identifier::parse(health).unwrap()));
-
-            // The mob's attributes are the server's business: no client state,
-            // no read.
-            let mob = mod_api::LivingRef::new(game.entity(60).unwrap());
-            assert_eq!(mob.attribute_value(game, health), None);
-            assert_eq!(mob.attribute_base(game, health), None);
-            assert_eq!(mob.attribute_modifiers(game, health), None);
-            assert_eq!(mob.attributes(game), None);
-        });
-    }
-
-    #[test]
-    #[ignore = "daily"]
-    fn rejected_menu_packets_retire_the_previous_client_menu() {
-        use super::super::{
-            Screen, execution_role::ExecutionRole, native_entity_refs::tests::with_game,
-        };
-        use sunrise_client::items::ItemStack;
-        use sunrise_core::nbt::Tag;
-        use sunrise_protocol::{
-            connection::Pipe,
-            packets::play::{Clientbound as C, MountScreenOpen, OpenScreen},
-        };
-
-        with_game(|game| {
-            game.options.execution_role = ExecutionRole::Client;
-            let (client, _server) = Pipe::pair();
-            game.connect_local(client, "MenuTest").unwrap();
-            for packet in [
-                C::OpenScreen(OpenScreen {
-                    container: 7,
-                    menu: -1,
-                    title: Tag::String("unsupported".into()),
-                }),
-                C::MountScreenOpen(MountScreenOpen {
-                    container: 7,
-                    columns: 0,
-                    entity: i32::MAX,
-                }),
-            ] {
-                let remote = game.remote.as_mut().unwrap();
-                remote.menu.set(Some((7, "minecraft:generic_9x3".into())));
-                let generation = remote.menu.generation;
-                game.set_screen(Screen::Inventory);
-                game.carried = Some(ItemStack::new("minecraft:stone", 1));
-                game.handle_packet(packet).unwrap();
-                let remote = game.remote.as_ref().unwrap();
-                assert!(remote.menu.as_ref().is_none());
-                assert_ne!(remote.menu.generation, generation);
-                assert!(game.carried.is_none());
-                assert!(game.screen == Screen::Playing);
-            }
-        });
-    }
-
-    #[test]
-    fn client_menu_generation_changes_on_reused_window_ids() {
-        let mut menu = super::ClientMenu::default();
-        let inventory = menu.generation;
-        menu.set(Some((7, "minecraft:generic_9x3".to_owned())));
-        let first = menu.generation;
-        assert_ne!(inventory, first);
-        menu.set(None);
-        let closed = menu.generation;
-        assert_ne!(first, closed);
-        assert!(menu.as_ref().is_none());
-        menu.set(Some((7, "minecraft:generic_9x3".to_owned())));
-        assert_ne!(closed, menu.generation);
-        assert_ne!(first, menu.generation);
-        assert_eq!(menu.as_ref().map(|entry| entry.0), Some(7));
-        let before_replacement = menu.generation;
-        menu.set(Some((7, "minecraft:generic_9x3".to_owned())));
-        assert_ne!(before_replacement, menu.generation);
-    }
-
-    #[test]
-    fn client_menu_slot_mapping_covers_inventory_and_containers() {
-        for (name, count, first, last) in [
-            ("inventory", 46, 200, 504),
-            ("minecraft:crafting", 46, 200, 8),
-            ("minecraft:generic_9x3", 63, 300, 8),
-            ("minecraft:hopper", 41, 300, 8),
-            ("minecraft:furnace", 39, 300, 8),
-            ("minecraft:brewing_stand", 41, 300, 8),
-        ] {
-            assert_eq!(super::Game::inventory_screen_slot(name, 0), Some(first));
-            assert_eq!(
-                super::Game::inventory_screen_slot(name, count - 1),
-                Some(last)
-            );
-            assert_eq!(super::Game::inventory_screen_slot(name, count), None);
-        }
-        assert_eq!(
-            super::Game::inventory_screen_slot("minecraft:unknown", 0),
-            None
-        );
     }
 
     /// A client connecting through a local pipe and through configuration, as
@@ -10647,97 +10497,6 @@ pub(crate) mod tests {
         (reader, writer)
     }
 
-    #[test]
-    #[ignore = "daily"]
-    fn dimension_transition_screen_is_selected_at_entry_drawn_and_dropped() {
-        use super::super::{execution_role::ExecutionRole, native_entity_refs::tests::with_game};
-        use mod_api::__private::game::RegistrationContextNew;
-        use mod_api::{DimensionTransition, DimensionTransitionScreen};
-        use sunrise_client::{hud::HudBatch, level_loading::Reason};
-
-        struct Arrival;
-        #[mod_api::__subscriptions]
-        impl mod_api::Hooks for Arrival {
-            fn register_dimension_transition_screen(
-                &self,
-                _: &mod_api::RegistrationContext,
-                event: &mut mod_api::RegisterDimensionTransitionScreenEvent<'_>,
-            ) {
-                event.screens.push(DimensionTransitionScreen {
-                    screen: "transition_test:arrival".into(),
-                    transition: DimensionTransition::Conditional {
-                        to: "transition_test:b".into(),
-                        from: "transition_test:a".into(),
-                    },
-                });
-            }
-            fn dimension_transition_screen_draw(
-                &self,
-                _: &dyn mod_api::ClientHost,
-                event: &mut mod_api::DimensionTransitionScreenDrawEvent<'_>,
-            ) {
-                assert_eq!(event.screen, "transition_test:arrival");
-                assert_eq!(event.reason, mod_api::DimensionTransitionReason::Other);
-                assert_eq!(event.progress, Some(0.25));
-                event.draw.fill([0.0, 0.0, 80.0, 10.0], 0xFF102030);
-            }
-        }
-        mod_platform::testing::with_mods(
-            vec![mod_api::ModEntry::new("transition_test", Box::new(Arrival))].into(),
-            || {
-                let mut registrations = Vec::new();
-                super::Game::native_register_dimension_transition_screen(
-                    &mod_api::RegistrationContext::new(),
-                    &mut registrations,
-                );
-                sunrise_client_render::dimension_transition::register(registrations);
-                with_game(|game| {
-                    game.options.execution_role = ExecutionRole::Client;
-                    let (client, _server) = sunrise_protocol::connection::Pipe::pair();
-                    game.connect_local(client, "TransitionTest").unwrap();
-                    let mut spawn = sunrise_protocol::packets::play::SpawnInfo {
-                        dimension_type: 0,
-                        dimension: "transition_test:a".into(),
-                        seed: 0,
-                        game_type: 0,
-                        previous_game_type: None,
-                        debug: false,
-                        flat: true,
-                        last_death: None,
-                        portal_cooldown: 0,
-                        sea_level: 63,
-                    };
-                    game.enter_remote_dimension(&spawn, false, Reason::Other);
-                    assert_eq!(
-                        game.remote.as_ref().unwrap().level_load.transition_screen(),
-                        None
-                    );
-                    spawn.dimension = "transition_test:b".into();
-                    game.enter_remote_dimension(&spawn, true, Reason::Other);
-                    let tracker = game.remote.as_ref().unwrap().level_load;
-                    assert!(tracker.transition_screen().is_some());
-                    let mut batch = HudBatch::scratch([320, 240]);
-                    assert!(game.draw_dimension_transition_screen(
-                        &mut batch,
-                        &tracker,
-                        Some(0.25)
-                    ));
-                    assert!(!batch.vertices.is_empty());
-                    game.remote.as_mut().unwrap().level_load.finish();
-                    let tracker = game.remote.as_ref().unwrap().level_load;
-                    assert!(!game.draw_dimension_transition_screen(&mut batch, &tracker, None));
-                    spawn.dimension = "transition_test:c".into();
-                    game.enter_remote_dimension(&spawn, true, Reason::Other);
-                    let tracker = game.remote.as_ref().unwrap().level_load;
-                    let mut vanilla = HudBatch::scratch([320, 240]);
-                    assert!(!game.draw_dimension_transition_screen(&mut vanilla, &tracker, None));
-                    game.draw_level_loading_background(&mut vanilla, tracker.reason);
-                    assert!(!vanilla.vertices.is_empty());
-                });
-            },
-        );
-    }
-
     /// Spawns the connected client in the overworld as entity 7, profile 42.
     fn spawn_menu_test(game: &mut super::Game<'_>) -> sunrise_protocol::packets::play::SpawnInfo {
         use sunrise_client::level_loading::Reason;
@@ -10760,451 +10519,6 @@ pub(crate) mod tests {
         remote.entity_id = 7;
         remote.profile = 42;
         spawn
-    }
-
-    #[test]
-    #[ignore = "daily"]
-    fn client_menu_reads_follow_packets_and_lifetimes() {
-        use super::super::{
-            Screen, execution_role::ExecutionRole, native_entity_refs::tests::with_game,
-        };
-        use sunrise_client::level_loading::Reason;
-        use sunrise_core::nbt::Tag;
-        use sunrise_protocol::{
-            connection::Pipe,
-            item::Stack,
-            packets::play::{self, Clientbound as C},
-        };
-
-        with_game(|game| {
-            let (mut reader, _writer) = connect_menu_test(game);
-            assert!(
-                game.local_player()
-                    .and_then(|player| game.player_container_menu(player))
-                    .is_none()
-            );
-            let spawn = spawn_menu_test(game);
-            let menu = game
-                .local_player()
-                .and_then(|player| game.player_container_menu(player))
-                .unwrap();
-            assert_eq!(game.menu_slot_count(menu), Some(46));
-            assert_eq!(game.menu_slot(menu, 46), None);
-            assert_eq!(game.menu_slot(menu, 36), Some(None));
-            let stone = Some(Stack::new(game.item_id("minecraft:stone"), 3));
-            game.handle_packet(C::SetPlayerInventory(play::SetPlayerInventory {
-                slot: 0,
-                item: stone.clone(),
-            }))
-            .unwrap();
-            assert_eq!(game.menu_slot(menu, 36).unwrap().unwrap().count, 3);
-            use mod_api::{DragKind, MenuClick, MouseButton, SwapWith};
-            let pickup = |slot| MenuClick::Pickup {
-                slot: Some(slot),
-                button: MouseButton::Left,
-            };
-            for invalid in [
-                pickup(46),
-                pickup(usize::MAX),
-                MenuClick::Swap {
-                    slot: 36,
-                    with: SwapWith::Hotbar(9),
-                },
-                MenuClick::Clone { slot: 36 },
-                MenuClick::Drag {
-                    kind: DragKind::Clone,
-                    slots: vec![36],
-                },
-                MenuClick::Drag {
-                    kind: DragKind::Split,
-                    slots: vec![36, usize::MAX],
-                },
-            ] {
-                assert!(!menu.click(game, &[invalid]));
-                assert_eq!(menu.slot(game, 36).unwrap().unwrap().count(), 3);
-                assert_eq!(menu.carried(game), Some(None));
-            }
-            game.options.execution_role = ExecutionRole::IntegratedServer;
-            assert!(!menu.click(game, &[pickup(36)]));
-            game.options.execution_role = ExecutionRole::Client;
-            let screen = game.screen;
-            game.screen = Screen::Creative;
-            assert!(!menu.click(game, &[pickup(36)]));
-            game.screen = screen;
-            game.remote.as_mut().unwrap().state_id = 17;
-            assert!(menu.click(game, &[pickup(36)]));
-            let (id, body) = reader.recv().unwrap();
-            let play::Serverbound::ContainerClick(sent) =
-                play::Serverbound::decode(id, &body).unwrap()
-            else {
-                panic!("expected the first valid click, not a refused request");
-            };
-            assert_eq!(
-                (
-                    sent.container,
-                    sent.state,
-                    sent.slot,
-                    sent.button,
-                    sent.input
-                ),
-                (0, 17, 36, 0, 0)
-            );
-            assert_eq!(sent.changed.len(), 1);
-            assert_eq!(sent.changed[0].0, 36);
-            assert!(sent.changed[0].1.is_none());
-            assert_eq!(sent.carried.unwrap().count, 3);
-            assert_eq!(menu.slot(game, 36), Some(None));
-            assert_eq!(menu.carried(game).unwrap().unwrap().count(), 3);
-            assert!(!menu.click(game, &[pickup(36), pickup(usize::MAX),]));
-            assert_eq!(menu.slot(game, 36), Some(None));
-            assert_eq!(menu.carried(game).unwrap().unwrap().count(), 3);
-            assert!(menu.click(
-                game,
-                &[MenuClick::Drag {
-                    kind: DragKind::Split,
-                    slots: vec![37]
-                },]
-            ));
-            assert_eq!(menu.slot(game, 37).unwrap().unwrap().count(), 3);
-            assert_eq!(menu.carried(game), Some(None));
-            assert!(menu.click(game, &[pickup(37)]));
-            assert!(menu.click(game, &[pickup(36)]));
-            assert_eq!(menu.carried(game), Some(None));
-            assert_eq!(menu.slot(game, 36).unwrap().unwrap().count(), 3);
-            game.handle_packet(C::SetPlayerInventory(play::SetPlayerInventory {
-                slot: 0,
-                item: Some(Stack::new(game.item_id("minecraft:stone"), 2)),
-            }))
-            .unwrap();
-            assert_eq!(menu.slot(game, 36).unwrap().unwrap().count(), 2);
-            assert!(menu.click(game, &[MenuClick::QuickMove { slot: 36 }]));
-            assert_eq!(menu.slot(game, 36), Some(None));
-            assert_eq!(menu.slot(game, 9).unwrap().unwrap().count(), 2);
-            assert!(menu.click(
-                game,
-                &[MenuClick::Swap {
-                    slot: 9,
-                    with: SwapWith::Hotbar(1)
-                }]
-            ));
-            assert_eq!(menu.slot(game, 9), Some(None));
-            assert_eq!(menu.slot(game, 37).unwrap().unwrap().count(), 2);
-            assert!(menu.click(
-                game,
-                &[MenuClick::Throw {
-                    slot: 37,
-                    whole_stack: true
-                }]
-            ));
-            assert_eq!(menu.slot(game, 37), Some(None));
-            game.handle_packet(C::SetCursorItem(play::SetCursorItem {
-                item: stone.clone(),
-            }))
-            .unwrap();
-            assert_eq!(game.menu_carried(menu).unwrap().unwrap().count, 3);
-            let crafting_id = game
-                .remote
-                .as_ref()
-                .unwrap()
-                .builtin
-                .get("minecraft:menu")
-                .unwrap()
-                .id("minecraft:crafting")
-                .unwrap();
-            let open = || {
-                C::OpenScreen(play::OpenScreen {
-                    container: 7,
-                    menu: crafting_id,
-                    title: Tag::String("Crafting".into()),
-                })
-            };
-            game.handle_packet(open()).unwrap();
-            assert_eq!(game.menu_slot_count(menu), None);
-            assert!(!menu.click(game, &[pickup(36)]));
-            let crafting = game
-                .local_player()
-                .and_then(|player| game.player_container_menu(player))
-                .unwrap();
-            assert_eq!(game.menu_slot_count(crafting), Some(46));
-            game.handle_packet(C::ContainerSetSlot(play::ContainerSetSlot {
-                container: 7,
-                state: 0,
-                slot: 1,
-                item: stone.clone(),
-            }))
-            .unwrap();
-            assert_eq!(game.menu_slot(crafting, 1).unwrap().unwrap().count, 3);
-            game.handle_packet(C::ContainerSetSlot(play::ContainerSetSlot {
-                container: 7,
-                state: 0,
-                slot: 0,
-                item: stone,
-            }))
-            .unwrap();
-            assert_eq!(game.menu_slot(crafting, 0).unwrap().unwrap().count, 3);
-            game.handle_packet(open()).unwrap();
-            assert_eq!(game.menu_slot_count(crafting), None);
-            assert!(!crafting.click(game, &[pickup(1)]));
-            let crafting = game
-                .local_player()
-                .and_then(|player| game.player_container_menu(player))
-                .unwrap();
-            game.handle_packet(C::Respawn(play::Respawn {
-                spawn: spawn.clone(),
-                keep: 0,
-            }))
-            .unwrap();
-            assert_eq!(game.menu_slot_count(crafting), None);
-            assert!(!crafting.click(game, &[pickup(1)]));
-            let inventory = game
-                .local_player()
-                .and_then(|player| game.player_container_menu(player))
-                .unwrap();
-            assert_ne!(inventory, menu);
-            let chest_id = game
-                .remote
-                .as_ref()
-                .unwrap()
-                .builtin
-                .get("minecraft:menu")
-                .unwrap()
-                .id("minecraft:generic_9x3")
-                .unwrap();
-            game.handle_packet(C::OpenScreen(play::OpenScreen {
-                container: 7,
-                menu: chest_id,
-                title: Tag::String("Chest".into()),
-            }))
-            .unwrap();
-            let chest = game
-                .local_player()
-                .and_then(|player| game.player_container_menu(player))
-                .unwrap();
-            assert_eq!(game.menu_slot_count(chest), Some(63));
-            let stone = Some(Stack::new(game.item_id("minecraft:stone"), 4));
-            game.handle_packet(C::ContainerSetSlot(play::ContainerSetSlot {
-                container: 7,
-                state: 0,
-                slot: 2,
-                item: stone,
-            }))
-            .unwrap();
-            assert_eq!(game.menu_slot(chest, 2).unwrap().unwrap().count, 4);
-            assert_eq!(game.menu_slot(chest, 3), Some(None));
-            game.handle_packet(C::SetCursorItem(play::SetCursorItem { item: None }))
-                .unwrap();
-            assert!(chest.click(game, &[pickup(2)]));
-            assert_eq!(chest.slot(game, 2), Some(None));
-            assert_eq!(chest.carried(game).unwrap().unwrap().count(), 4);
-            assert!(chest.click(game, &[pickup(2)]));
-            assert_eq!(chest.slot(game, 2).unwrap().unwrap().count(), 4);
-            assert_eq!(chest.carried(game), Some(None));
-            for expected in [
-                (0, 17, -999, 0, 5),
-                (0, 17, 37, 1, 5),
-                (0, 17, -999, 2, 5),
-                (0, 17, 37, 0, 0),
-                (0, 17, 36, 0, 0),
-                (0, 17, 36, 0, 1),
-                (0, 17, 9, 1, 2),
-                (0, 17, 37, 1, 4),
-                (7, 0, 2, 0, 0),
-                (7, 0, 2, 0, 0),
-            ] {
-                let sent = (0..32)
-                    .find_map(|_| {
-                        let (id, body) = reader.recv().unwrap();
-                        match play::Serverbound::decode(id, &body).unwrap() {
-                            play::Serverbound::ContainerClick(sent) => Some(sent),
-                            _ => None,
-                        }
-                    })
-                    .expect("expected click packet");
-                assert_eq!(
-                    (
-                        sent.container,
-                        sent.state,
-                        sent.slot,
-                        sent.button,
-                        sent.input
-                    ),
-                    expected
-                );
-                if expected == (0, 17, -999, 2, 5) {
-                    assert!(sent.carried.is_none());
-                    assert_eq!(sent.changed.len(), 1);
-                    assert_eq!(sent.changed[0].0, 37);
-                    assert_eq!(sent.changed[0].1.as_ref().unwrap().count, 3);
-                }
-            }
-            reader
-                .set_read_timeout(Some(std::time::Duration::from_millis(20)))
-                .unwrap();
-            assert!(reader.recv().unwrap_err().is_timed_out());
-            game.remote
-                .as_mut()
-                .unwrap()
-                .menu
-                .set(Some((7, "minecraft:unknown".into())));
-            assert!(
-                game.local_player()
-                    .and_then(|player| game.player_container_menu(player))
-                    .is_none()
-            );
-            assert_eq!(game.menu_slot_count(inventory), None);
-            assert_eq!(game.menu_slot_count(chest), None);
-            game.remote.as_mut().unwrap().menu.set(None);
-            let before_replacement = game
-                .local_player()
-                .and_then(|player| game.player_container_menu(player))
-                .unwrap();
-            let mut other = spawn;
-            other.dimension = "test:other_overworld".into();
-            game.enter_remote_dimension(&other, true, Reason::Other);
-            assert_eq!(game.menu_slot_count(before_replacement), None);
-            assert!(!before_replacement.click(game, &[pickup(36)]));
-            let before_logout = game
-                .local_player()
-                .and_then(|player| game.player_container_menu(player))
-                .unwrap();
-            game.client_logging_out();
-            assert_eq!(game.menu_slot_count(before_logout), None);
-            assert!(!before_logout.click(game, &[pickup(36)]));
-            assert!(
-                game.local_player()
-                    .and_then(|player| game.player_container_menu(player))
-                    .is_none()
-            );
-            let (client, _server) = Pipe::pair();
-            game.connect_local(client, "MenuReadTest").unwrap();
-            game.enter_remote_dimension(&other, false, Reason::Other);
-            let remote = game.remote.as_mut().unwrap();
-            remote.logged_in = true;
-            remote.entity_id = 7;
-            remote.profile = 42;
-            let reconnected = game
-                .local_player()
-                .and_then(|player| game.player_container_menu(player))
-                .unwrap();
-            assert_eq!(game.menu_slot_count(before_logout), None);
-            assert_eq!(game.menu_slot_count(reconnected), Some(46));
-            assert_ne!(reconnected, before_logout);
-        });
-    }
-
-    /// `MenuRef::close` and `click_button` go through the screen's own close
-    /// and the button packet, and refuse a menu that is not open or stale.
-    #[test]
-    #[ignore = "daily"]
-    fn client_menu_close_and_button_click_reach_the_server() {
-        use super::super::{
-            Screen, execution_role::ExecutionRole, native_entity_refs::tests::with_game,
-        };
-        use sunrise_core::nbt::Tag;
-        use sunrise_protocol::packets::play::{self, Clientbound as C};
-
-        with_game(|game| {
-            let (mut reader, _writer) = connect_menu_test(game);
-            spawn_menu_test(game);
-            let sent = |reader: &mut sunrise_protocol::connection::ConnReader| {
-                (0..32).find_map(|_| {
-                    let (id, body) = reader.recv().ok()?;
-                    match play::Serverbound::decode(id, &body).unwrap() {
-                        p @ (play::Serverbound::ContainerClose(_)
-                        | play::Serverbound::ContainerButtonClick(_)) => Some(p),
-                        _ => None,
-                    }
-                })
-            };
-            // The inventory menu while playing: no screen to close, no buttons.
-            let inventory = game
-                .local_player()
-                .and_then(|player| game.player_container_menu(player))
-                .unwrap();
-            assert_eq!(game.screen, Screen::Playing);
-            assert!(!inventory.close(game));
-            assert!(!inventory.click_button(game, 0));
-            let loom = game
-                .remote
-                .as_ref()
-                .unwrap()
-                .builtin
-                .get("minecraft:menu")
-                .unwrap()
-                .id("minecraft:loom")
-                .unwrap();
-            let open = |game: &mut super::Game<'_>| {
-                game.handle_packet(C::OpenScreen(play::OpenScreen {
-                    container: 5,
-                    menu: loom,
-                    title: Tag::String("Loom".into()),
-                }))
-                .unwrap();
-                game.local_player()
-                    .and_then(|player| game.player_container_menu(player))
-                    .unwrap()
-            };
-            let menu = open(game);
-            assert_eq!(game.screen, Screen::Inventory);
-            // The old inventory handle is stale now that the loom replaced it.
-            assert!(!inventory.close(game));
-            assert!(!inventory.click_button(game, 0));
-            game.options.execution_role = ExecutionRole::IntegratedServer;
-            assert!(!menu.click_button(game, 3));
-            assert!(!menu.close(game));
-            game.options.execution_role = ExecutionRole::Client;
-            assert_eq!(game.screen, Screen::Inventory);
-            assert!(menu.click_button(game, 3));
-            let Some(play::Serverbound::ContainerButtonClick(click)) = sent(&mut reader) else {
-                panic!("expected the button click, not a refused request");
-            };
-            assert_eq!((click.container, click.button), (5, 3));
-            assert!(menu.close(game));
-            assert_eq!(game.screen, Screen::Playing);
-            let Some(play::Serverbound::ContainerClose(close)) = sent(&mut reader) else {
-                panic!("expected the close");
-            };
-            assert_eq!(close.container, 5);
-            assert!(game.remote.as_ref().unwrap().menu.as_ref().is_none());
-            // Closed: the handle is stale and nothing more is sent.
-            assert!(!menu.close(game));
-            assert!(!menu.click_button(game, 3));
-            // A server-side close leaves a reopened menu's old handle stale too.
-            let first = open(game);
-            game.handle_packet(C::ContainerClose(play::ContainerClose { container: 5 }))
-                .unwrap();
-            let second = open(game);
-            assert!(!first.close(game));
-            assert!(!first.click_button(game, 3));
-            assert!(second.close(game));
-            reader
-                .set_read_timeout(Some(std::time::Duration::from_millis(20)))
-                .unwrap();
-            let Some(play::Serverbound::ContainerClose(close)) = sent(&mut reader) else {
-                panic!("expected the second close");
-            };
-            assert_eq!(close.container, 5);
-            assert!(sent(&mut reader).is_none());
-        });
-    }
-
-    #[test]
-    fn the_chunk_storage_takes_any_radius_and_centre_a_server_sends() {
-        use super::in_storage_range;
-        // Vanilla's storage: radius at least 2, plus 3, each way from the centre.
-        assert!(in_storage_range(10, (0, 0), 13, -13));
-        assert!(!in_storage_range(10, (0, 0), 14, 0));
-        assert!(in_storage_range(-5, (100, 100), 105, 95));
-        assert!(!in_storage_range(0, (100, 100), 106, 100));
-        // Out of i32's range, as a server may send: no overflow, and the sums a wrap got wrong.
-        assert!(in_storage_range(i32::MAX, (0, 0), i32::MAX, i32::MIN + 1));
-        assert!(!in_storage_range(10, (i32::MIN, 0), i32::MAX, 0));
-        assert!(in_storage_range(
-            10,
-            (i32::MIN, i32::MAX),
-            i32::MIN + 13,
-            i32::MAX - 13
-        ));
     }
 
     use super::{
@@ -12439,104 +11753,6 @@ pub(crate) mod tests {
         assert_eq!(pitch(0.0, 120.0, false), 90.0);
     }
 
-    /// The hurt sound of `ClientboundDamageEventPacket` follows its damage
-    /// type (`Player.getHurtSound`: the type's effects), with the codec's
-    /// `hurt` default for an unknown type (#4149).
-    #[test]
-    fn the_hurt_sound_follows_the_damage_events_type() {
-        use super::hurt_sound_for;
-        use sunrise_protocol::registry::Dynamic;
-        use sunrise_world::damage_source::Catalog;
-        let types = [
-            ("minecraft:in_fire", "burning"),
-            ("minecraft:drown", "drowning"),
-            ("minecraft:sweet_berry_bush", "poking"),
-            ("minecraft:freeze", "freezing"),
-            ("minecraft:arrow", "hurt"),
-        ];
-        // The types the server synchronized, in registry order.
-        let mut registries = Dynamic::default();
-        registries.add(sunrise_protocol::packets::configuration::RegistryData {
-            registry: "minecraft:damage_type".into(),
-            entries: types
-                .iter()
-                .map(
-                    |(id, _)| sunrise_protocol::packets::configuration::RegistryEntry {
-                        id: (*id).into(),
-                        data: None,
-                    },
-                )
-                .collect(),
-        });
-        // The damage catalog: one entry per type above, each with its effects.
-        let bits = |f: f32| format!("{:08x}", f.to_bits());
-        let catalog = Catalog::from_json(
-            &serde_json::json!({
-                "data_version": i64::from(sunrise_world::DATA_VERSION),
-                "types": types.iter().map(|(id, effects)| serde_json::json!({
-                    "id": id,
-                    "message_id": id.trim_start_matches("minecraft:"),
-                    "exhaustion": bits(0.1),
-                    "scaling": "when_caused_by_living_non_player",
-                    "effects": effects,
-                    "death_message_type": "default",
-                })).collect::<Vec<_>>(),
-            }),
-            &serde_json::json!({}),
-        )
-        .unwrap();
-        for (id, (name, effects)) in types.iter().enumerate() {
-            assert_eq!(
-                hurt_sound_for(&registries, &catalog, id as i32),
-                sunrise_client::health::hurt_sound(effects),
-                "{name}"
-            );
-        }
-        // An unknown id falls back to the codec's default effects.
-        assert_eq!(
-            hurt_sound_for(&registries, &catalog, types.len() as i32),
-            "minecraft:entity.player.hurt"
-        );
-        // A server-defined damage type with inline NBT effects needs no entry in
-        // the client's built-in catalog.
-        let mut custom = sunrise_core::nbt::Compound::new();
-        custom.insert(
-            "effects".into(),
-            sunrise_core::nbt::Tag::String("burning".into()),
-        );
-        registries.add(sunrise_protocol::packets::configuration::RegistryData {
-            registry: "minecraft:damage_type".into(),
-            entries: vec![sunrise_protocol::packets::configuration::RegistryEntry {
-                id: "custom:lava_splash".into(),
-                data: Some(sunrise_core::nbt::Tag::Compound(custom)),
-            }],
-        });
-        assert_eq!(
-            hurt_sound_for(&registries, &catalog, 0),
-            "minecraft:entity.player.hurt_on_fire"
-        );
-    }
-
-    #[test]
-    fn synchronized_damage_defaults_override_a_different_local_definition() {
-        let local = sunrise_world::damage_source::Catalog::from_json(&serde_json::json!({
-            "data_version": sunrise_world::DATA_VERSION,
-            "types": [{"id":"demo:heat", "message_id":"heat", "exhaustion":"00000000", "scaling":"never", "effects":"burning", "death_message_type":"default"}]
-        }), &serde_json::json!({})).unwrap();
-        let mut registries = sunrise_protocol::registry::Dynamic::default();
-        registries.add(sunrise_protocol::packets::configuration::RegistryData {
-            registry: "minecraft:damage_type".into(),
-            entries: vec![sunrise_protocol::packets::configuration::RegistryEntry {
-                id: "demo:heat".into(),
-                data: Some(sunrise_core::nbt::Tag::Compound(Default::default())),
-            }],
-        });
-        assert_eq!(
-            super::hurt_sound_for(&registries, &local, 0),
-            "minecraft:entity.player.hurt"
-        );
-    }
-
     /// `ClientPacketListener.handleSetEntityPassengersPacket`: the vehicle
     /// ejects its passengers, then each listed entity `startRiding`s it, so
     /// `isVehicle` holds while the list is not empty, whatever the passenger's
@@ -12574,81 +11790,6 @@ pub(crate) mod tests {
         // An empty list: nobody rides 43 any more.
         super::seat_passengers(&mut entities, 43, &[]);
         assert!(vehicles(&entities).is_empty());
-    }
-
-    /// `ClientboundSoundEntityPacket`: the sound is heard where the entity it
-    /// names is — the local player included, which is no tracked entity — and
-    /// an id this level doesn't have plays nothing at all.
-    #[test]
-    fn a_sound_entity_is_heard_where_its_entity_is() {
-        use std::collections::HashMap;
-        let mut tracked = HashMap::new();
-        tracked.insert(
-            7,
-            super::Tracked {
-                kind: "minecraft:cow".to_owned(),
-                position: [8.5, 64.0, -3.5],
-                codec_base: [8.5, 64.0, -3.5],
-                on_fire: false,
-                silent: false,
-                vehicle: None,
-            },
-        );
-        let player = Some((2, [0.5, 70.0, 0.5], false));
-        assert_eq!(
-            super::entity_sound_state(2, player, None, &tracked, None)
-                .filter(|s| !s.silent)
-                .map(|s| s.position),
-            Some([0.5, 70.0, 0.5]),
-            "the local player is named by Remote.entity_id"
-        );
-        assert_eq!(
-            super::entity_sound_state(7, player, None, &tracked, None)
-                .filter(|s| !s.silent)
-                .map(|s| s.position),
-            Some([8.5, 64.0, -3.5]),
-            "another entity the server spawned"
-        );
-        assert_eq!(
-            super::entity_sound_state(9, player, None, &tracked, None)
-                .filter(|s| !s.silent)
-                .map(|s| s.position),
-            None,
-            "getEntity is null: handleSoundEntityEvent returns"
-        );
-        assert_eq!(
-            super::entity_sound_state(2, None, None, &tracked, None)
-                .filter(|s| !s.silent)
-                .map(|s| s.position),
-            None,
-            "a player with no position yet"
-        );
-    }
-
-    #[test]
-    fn a_sound_entity_retains_silence_for_players_and_non_mob_targets() {
-        use std::collections::HashMap;
-        let mut tracked = HashMap::new();
-        tracked.insert(
-            7,
-            super::Tracked {
-                kind: "minecraft:arrow".to_owned(),
-                position: [8.5, 64.0, -3.5],
-                codec_base: [8.5, 64.0, -3.5],
-                on_fire: false,
-                silent: true,
-                vehicle: None,
-            },
-        );
-        let state = super::entity_sound_state(7, None, None, &tracked, None).unwrap();
-        assert!(state.silent);
-        assert!(!state.removed);
-        assert_eq!(state.position, [8.5, 64.0, -3.5]);
-        let player =
-            super::entity_sound_state(2, Some((2, [1.0, 2.0, 3.0], true)), None, &tracked, None)
-                .unwrap();
-        assert!(player.silent);
-        assert!(super::entity_sound_state(9, None, None, &tracked, None).is_none());
     }
 
     #[test]
@@ -12892,94 +12033,6 @@ pub(crate) mod tests {
                 assert_eq!(base.block_state(BlockPos::new(0, 1, 0)), base.air);
             }
         }
-    }
-
-    #[test]
-    fn the_creative_sync_covers_inventory_menu_slots_5_to_45_once_each() {
-        // CreativeInventoryListener sends every InventoryMenu slot but the crafting ones: the
-        // armour (5..=8), the inventory (9..=44) and the off hand (45).
-        let stack = |item: &str| Some(sunrise_client::items::ItemStack::new(item, 1));
-        let inventory: Vec<_> = (0..36)
-            .map(|i| stack(&format!("minecraft:item_{i}")))
-            .collect();
-        let offhand = stack("minecraft:shield");
-        let armor = [
-            stack("minecraft:diamond_helmet"),
-            stack("minecraft:diamond_chestplate"),
-            stack("minecraft:diamond_leggings"),
-            stack("minecraft:diamond_boots"),
-        ];
-        let stacks = super::creative_sync_stacks(&inventory, &offhand, &armor);
-        assert_eq!(stacks.len(), super::CREATIVE_SYNCED);
-        let mut slots: Vec<i16> = (0..stacks.len()).map(super::creative_sync_slot).collect();
-        // Each entry goes to the menu slot that holds that stack.
-        for (i, &slot) in slots.iter().enumerate() {
-            let game_slot = Game::inventory_screen_slot("inventory", i32::from(slot)).unwrap();
-            let expected = match game_slot {
-                0..36 => &inventory[game_slot],
-                504 => &offhand,
-                500..504 => &armor[game_slot - 500],
-                _ => panic!("entry {i} went to game slot {game_slot}"),
-            };
-            assert_eq!(&stacks[i], expected, "entry {i}, menu slot {slot}");
-        }
-        slots.sort();
-        assert_eq!(slots, (5..=45).collect::<Vec<i16>>());
-    }
-
-    #[test]
-    fn a_server_slot_update_leaves_an_unsent_creative_click_to_be_sent() {
-        let stack = |item: &str| Some(sunrise_client::items::ItemStack::new(item, 1));
-        let none = || vec![None; super::CREATIVE_SYNCED];
-        // Synced: nothing. A click puts a helmet on (entry 37, not sent yet), then the server
-        // sets hotbar slot 0 (a pickup): only that entry counts as synced.
-        let mut synced = none();
-        let mut before = none();
-        before[37] = stack("minecraft:diamond_helmet");
-        let mut now = before.clone();
-        now[0] = stack("minecraft:stick");
-        super::mark_synced(&mut synced, &before, now.clone());
-        assert_eq!(synced[0], now[0]);
-        assert_eq!(
-            synced[37], None,
-            "the helmet still differs, so the next tick sends it"
-        );
-    }
-
-    #[test]
-    fn every_inventory_menu_slot_is_a_game_slot_and_45_is_the_off_hand() {
-        // InventoryMenu: result, 2x2 grid, armour, 27 + 9 inventory slots, then the off hand.
-        assert_eq!(Game::inventory_screen_slot("inventory", 45), Some(504));
-        let mut seen = std::collections::HashSet::new();
-        for slot in 0..46 {
-            let internal = Game::inventory_screen_slot("inventory", slot);
-            assert!(internal.is_some_and(|i| seen.insert(i)), "slot {slot}");
-        }
-        assert_eq!(Game::inventory_screen_slot("inventory", 46), None);
-    }
-
-    #[test]
-    fn remote_clicks_find_slots_past_the_old_large_chest_cutoff() {
-        for (menu, internal, index) in [
-            ("minecraft:generic_9x6", 18, 63),
-            ("minecraft:generic_9x6", 19, 64),
-            ("minecraft:generic_9x6", 0, 81),
-            ("minecraft:generic_9x6", 8, 89),
-            ("minecraft:generic_9x6", 353, 53),
-            ("minecraft:generic_9x5", 8, 80),
-            ("minecraft:generic_9x4", 8, 71),
-            ("minecraft:generic_9x3", 8, 62),
-            ("inventory", 504, 45),
-        ] {
-            assert_eq!(
-                Game::menu_slot_index(menu, internal),
-                Some(index),
-                "{menu}, game slot {internal}"
-            );
-        }
-        assert_eq!(Game::menu_slot_index("minecraft:generic_9x6", 354), None);
-        assert_eq!(Game::menu_slot_index("minecraft:generic_9x6", 504), None);
-        assert_eq!(Game::menu_slot_index("unknown", 0), None);
     }
 
     /// `FireworkRocketItem.use` is SUCCESS while gliding: the main hand's
