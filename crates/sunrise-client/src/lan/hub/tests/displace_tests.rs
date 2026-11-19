@@ -73,7 +73,7 @@ fn warned(events: &[HostEvent]) -> bool {
 /// walk on from there is accepted as an ordinary move.
 #[test]
 #[ignore = "daily"]
-fn a_displacement_is_a_relative_teleport_that_drops_position_keeps_rotation_and_lands_on_the_target()
+fn a_displacement_is_a_relative_teleport_that_drops_position_keeps_rotation_and_lands_where_the_client_walked()
  {
     use play::relative::{DELTA_X, DELTA_Y, DELTA_Z, ROTATE_DELTA, X, X_ROT, Y, Y_ROT, Z};
     let Some(fixture) = crate::test_fixtures::vanilla() else {
