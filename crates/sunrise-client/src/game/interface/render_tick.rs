@@ -663,6 +663,15 @@ impl Game<'_> {
         Some((TrackingTarget::Entity(id), mob_tracking_body(mob)))
     }
 
+    /// `Hud.updateVignetteBrightness`, from the camera's eye: `Gui.tick` runs it on every tick
+    /// the game isn't paused, frozen level or not.
+    pub(in crate::game) fn tick_vignette(&mut self) {
+        if let Some(e) = self.eye_position() {
+            let brightness = self.eye_brightness(e);
+            self.screen_fx.tick_vignette(brightness);
+        }
+    }
+
     pub(super) fn tick_particles(&mut self) {
         // A client mod's `clear_particles`, before this tick adds any.
         self.apply_mod_particle_clear();
@@ -670,9 +679,13 @@ impl Game<'_> {
         let mut laps = sunrise_client::spans::laps();
         let eye = self.eye_position();
         if let Some(e) = eye {
-            let brightness = self.eye_brightness(e);
+            // A client of a server eases the vignette in `tick_hud`, frozen level or not.
+            if self.remote.is_none() {
+                let brightness = self.eye_brightness(e);
+                self.screen_fx.tick_vignette(brightness);
+            }
             let inside_portal = self.client_portal_effect();
-            self.screen_fx.tick(brightness, inside_portal);
+            self.screen_fx.tick_portal(inside_portal);
             // LocalPlayer.aiStep: processPortalCooldown after the transition
             // effect (a local world's player counts down in handlePortal).
             if self.remote.is_some() && self.portals.player.cooldown > 0 {
