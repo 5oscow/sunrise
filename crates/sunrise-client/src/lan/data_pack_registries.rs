@@ -122,9 +122,25 @@ impl PackRegistryDefinitions {
                 // The pack winner (even if refused or skipped) hides resources below it.
                 prepared.retain(|(key, _, _)| !entries.contains_key(key));
                 condition_filter::filter(&mut prepared, false, overlay.conditions, kind);
-                entries.extend(prepared.into_iter().map(|(key, value, from_pack)| {
+                for (key, value, from_pack) in prepared {
                     let definition = if kind == "enchantment" {
                         Definition::Enchantment(value)
+                    } else if from_pack {
+                        let id = format!("{}:{}", key.0, key.1);
+                        match decode_definition(
+                            registry,
+                            &id,
+                            value,
+                            text_registries,
+                            &sound_exists,
+                        ) {
+                            Ok(definition) => definition,
+                            Err(error) => {
+                                errors.entry(registry).or_default().insert(id, error);
+                                entries.insert(key, None);
+                                continue;
+                            }
+                        }
                     } else {
                         let wire = json_to_nbt(&value);
                         match Instrument::decode(&value) {
@@ -132,8 +148,8 @@ impl PackRegistryDefinitions {
                             Err(_) => Definition::Encoded(wire),
                         }
                     };
-                    (key, Some((definition, from_pack)))
-                }));
+                    entries.insert(key, Some((definition, from_pack)));
+                }
             }
         }
         if let Some(entries) = definitions.entries.get_mut("minecraft:enchantment") {
@@ -749,6 +765,13 @@ mod tests {
         let io = BTreeMap::from([("enchantment/test:not_read".into(), "read failed".into())]);
         let root = tempfile::tempdir().unwrap();
         std::fs::write(root.path().join("items.json"), b"{}").unwrap();
+        let instruments = root.path().join("data/test/instrument");
+        std::fs::create_dir_all(&instruments).unwrap();
+        std::fs::write(
+            instruments.join("resource_duration.json"),
+            br#"{"sound_event":"test:horn","use_duration":"four","range":128,"description":"Broken resource horn"}"#,
+        )
+        .unwrap();
         let defaults = sunrise_world::item_defaults::read(root.path()).unwrap();
         let Err(error) = super::super::SyncData::stage_registry_definitions(
             root.path(),
@@ -803,6 +826,7 @@ mod tests {
                 "instrument",
                 &[
                     ("bad", "use_duration"),
+                    ("resource_duration", "use_duration"),
                     ("wrong_sound_range", "sound_event.range"),
                 ],
             ),
