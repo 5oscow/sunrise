@@ -472,39 +472,33 @@ pub fn generate(
             if width <= 0 || height <= 0 {
                 return None;
             }
-            // The region and divisors come from an atlas definition a mod or pack writes: refuse a
-            // sprite over the stated side before sizing anything.
-            if width > MAX_SPRITE_SIDE || height > MAX_SPRITE_SIDE {
+            // The whole rectangle must lie inside the sheet, as `SpriteContents.createSubImage`
+            // takes it: a cut that doesn't fits nothing, and the sprite is absent. Checked before
+            // anything is sized, so numbers a pack made up allocate nothing.
+            if x < 0
+                || y < 0
+                || x.saturating_add(width) > i64::from(w)
+                || y.saturating_add(height) > i64::from(h)
+            {
                 log::warn!(
-                    "atlas region {} of {texture}: {width}x{height} exceeds the {MAX_SPRITE_SIDE}-pixel \
-                     sprite side; skipped",
+                    "atlas region {} of {texture}: outside the {w}x{h} sheet; skipped",
                     region.sprite
                 );
                 return None;
             }
-            // Up to 4 GiB at the largest side: as vanilla's `NativeImage` allocation does, a
-            // refused allocation skips the sprite instead of ending the process.
-            let bytes = (width * height * 4) as usize;
+            // The sheet is a decoded image, so its side is within the sprite side already.
+            let (x, y, width, height) = (x as usize, y as usize, width as usize, height as usize);
             let mut out = Vec::new();
-            if out.try_reserve_exact(bytes).is_err() {
+            if out.try_reserve_exact(width * height * 4).is_err() {
                 log::warn!(
                     "atlas region {} of {texture}: {width}x{height} could not be allocated; skipped",
                     region.sprite
                 );
                 return None;
             }
-            out.resize(bytes, 0u8);
             for row in 0..height {
-                for col in 0..width {
-                    // The offset is the pack's too: saturate, and the bounds check skips it.
-                    let (sx, sy) = (x.saturating_add(col), y.saturating_add(row));
-                    if sx < 0 || sy < 0 || sx >= i64::from(w) || sy >= i64::from(h) {
-                        continue;
-                    }
-                    let s = ((sy * i64::from(w) + sx) * 4) as usize;
-                    let d = ((row * width + col) * 4) as usize;
-                    out[d..d + 4].copy_from_slice(&pixels[s..s + 4]);
-                }
+                let from = ((y + row) * w as usize + x) * 4;
+                out.extend_from_slice(&pixels[from..from + width * 4]);
             }
             Some((width as u32, height as u32, out))
         }
@@ -715,13 +709,31 @@ mod tests {
         ] {
             assert_eq!(region_of(0.0, 0.0, width, height), None, "{width}x{height}");
         }
-        // The largest side is still a sprite (one row, so the test allocates little).
-        let (w, h, out) = region_of(0.0, 0.0, MAX_SPRITE_SIDE as f64, 1.0).unwrap();
-        assert_eq!((w, h), (MAX_SPRITE_SIDE as u32, 1));
-        assert_eq!(&out[..4], [0, 0, 0, 255]);
-        // An offset near the integer limit: the pixels outside the texture stay transparent.
-        let (w, h, out) = region_of(i64::MAX as f64, -(i64::MAX as f64), 2.0, 2.0).unwrap();
+        // An offset near the integer limit is outside the sheet.
+        assert_eq!(
+            region_of(i64::MAX as f64, -(i64::MAX as f64), 2.0, 2.0),
+            None
+        );
+    }
+
+    /// A cut that is not wholly inside the sheet is absent, beside one that is.
+    #[test]
+    fn a_cut_outside_the_sheet_is_absent() {
+        // Rows of the 4x4 sheet hold 0..3, 4..7, ... in every channel.
+        let (w, h, out) = region_of(1.0, 2.0, 2.0, 2.0).unwrap();
         assert_eq!((w, h), (2, 2));
-        assert!(out.iter().all(|&byte| byte == 0));
+        let reds: Vec<u8> = out.chunks(4).map(|p| p[0]).collect();
+        assert_eq!(reds, [9, 10, 13, 14]);
+        for (x, y, width, height) in [
+            (3.0, 0.0, 2.0, 1.0),
+            (0.0, 3.0, 1.0, 2.0),
+            (-1.0, 0.0, 2.0, 2.0),
+        ] {
+            assert_eq!(
+                region_of(x, y, width, height),
+                None,
+                "{x},{y} {width}x{height}"
+            );
+        }
     }
 }
