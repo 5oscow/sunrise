@@ -209,16 +209,6 @@ pub fn fix_within_piston_base(
     }
 }
 
-/// `PistonMovingBlockEntity.getCollisionRelatedBlockState` uses the moved state
-/// unless a source piston is retracting, where it shows a piston head instead.
-/// The state itself comes from [`PistonBlockBindings::collision_related_state`].
-///
-/// [`PistonBlockBindings::collision_related_state`]:
-///     crate::piston_shape::PistonBlockBindings::collision_related_state
-pub fn uses_moved_state(piston: MovingPistonState) -> bool {
-    piston.extending || !piston.source
-}
-
 /// `moveCollidedEntities`' slime bounce: a slime block sets the velocity along
 /// the movement axis to that direction's step, leaving the other axes.
 pub fn bounce_velocity(movement: Direction, velocity: Vec3) -> Vec3 {
