@@ -41,10 +41,14 @@ fn a_mods_jars_layer_under_its_files_in_mod_order() {
     fs::create_dir_all(base.join("assets/minecraft/atlases")).unwrap();
     fs::write(
         base.join("assets/minecraft/atlases/blocks.json"),
-        r#"{"sources": [{"type": "directory", "source": "block"}]}"#,
+        r#"{"sources": [{"type": "directory", "source": "block", "prefix": "block/"}]}"#,
     )
     .unwrap();
-    let atlas = |source: &str| format!("{{\"sources\": [{{\"source\": \"{source}\"}}]}}");
+    let atlas = |source: &str| {
+        format!(
+            "{{\"sources\": [{{\"type\": \"directory\", \"source\": \"{source}\", \"prefix\": \"\"}}]}}"
+        )
+    };
     // A jar in the store as the launcher names it: `<sha512>.jar`, with
     // entries in any namespace (a jar is not fenced as a mod's files are).
     let jar = |name: &str, entries: &[(&str, String)]| {
