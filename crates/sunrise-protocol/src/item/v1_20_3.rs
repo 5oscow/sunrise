@@ -213,7 +213,7 @@ pub(super) fn read_stack(r: &mut Reader) -> Result<Option<Stack>> {
         ("Count", Tag::Byte(count as i8)),
     ]);
     if !matches!(tag, Tag::End) {
-        d::set(&mut saved, "tag", tag.clone());
+        d::put(&mut saved, "tag", tag.clone());
     }
     let from = ids::quirks().legacy_item_data_version;
     if from <= 0 {
@@ -304,7 +304,7 @@ fn from_tag(saved: &Tag, known: Option<(i32, i32)>) -> Result<Stack> {
                 if let Tag::Compound(entries) = &mut value {
                     entries.for_each_mut(|_, entry| {
                         if let Some(name) = text(entry.get("type")) {
-                            d::set(entry, "type", d::string(&d::namespaced(&name)));
+                            d::put(entry, "type", d::string(&d::namespaced(&name)));
                         }
                     });
                 }
@@ -495,7 +495,7 @@ fn profile(value: &Tag) -> Profile {
 fn typed_data(value: &Tag, registry: &str) -> Result<Component> {
     let mut data = value.clone();
     let id = id_tag(registry, data.get("id"))?;
-    d::remove(&mut data, "id");
+    d::take(&mut data, "id");
     let mut w = Writer::new();
     w.varint(id);
     w.nbt(&data);
@@ -710,9 +710,9 @@ pub(super) fn write_stack(stack: Option<&Stack>, w: &mut Writer) {
 }
 fn set_sub(tag: &mut Tag, outer: &str, key: &str, value: Tag) {
     if !matches!(tag.get(outer), Some(Tag::Compound(_))) {
-        d::set(tag, outer, d::empty_map());
+        d::put(tag, outer, d::empty_map());
     }
-    d::set(tag.get_mut(outer).unwrap(), key, value);
+    d::put(tag.get_mut(outer).unwrap(), key, value);
 }
 fn json_text(value: &Tag) -> Tag {
     fn fix(value: &mut datafix::json::Json) {
@@ -756,7 +756,7 @@ fn legacy_saved(stack: &Stack) -> Result<Tag> {
         ("Count", Tag::Byte(stack.count as i8)),
     ]);
     if !matches!(&tag, Tag::Compound(m) if m.is_empty()) {
-        d::set(&mut result, "tag", tag);
+        d::put(&mut result, "tag", tag);
     }
     Ok(result)
 }
@@ -774,9 +774,9 @@ fn legacy_tag(stack: &Stack) -> Result<Tag> {
     let mut hide = 0;
     for (kind, value) in &stack.added {
         match (*kind, value) {
-            (3, Component::Int(value)) => d::set(&mut tag, "Damage", Tag::Int(*value)),
-            (19, Component::Int(value)) => d::set(&mut tag, "RepairCost", Tag::Int(*value)),
-            (4, Component::Unit) => d::set(&mut tag, "Unbreakable", Tag::Byte(1)),
+            (3, Component::Int(value)) => d::put(&mut tag, "Damage", Tag::Int(*value)),
+            (19, Component::Int(value)) => d::put(&mut tag, "RepairCost", Tag::Int(*value)),
+            (4, Component::Unit) => d::put(&mut tag, "Unbreakable", Tag::Byte(1)),
             (6 | 9, Component::Text(value)) => {
                 set_sub(&mut tag, "display", "Name", json_text(value))
             }
@@ -799,7 +799,7 @@ fn legacy_tag(stack: &Stack) -> Result<Tag> {
                         ]))
                     })
                     .collect::<Result<Vec<_>>>()?;
-                d::set(
+                d::put(
                     &mut tag,
                     if *kind == 13 {
                         "Enchantments"
@@ -811,7 +811,7 @@ fn legacy_tag(stack: &Stack) -> Result<Tag> {
             }
             (17, Component::CustomModelData { floats, .. }) => {
                 if let Some(value) = floats.first() {
-                    d::set(&mut tag, "CustomModelData", Tag::Int(*value as i32));
+                    d::put(&mut tag, "CustomModelData", Tag::Int(*value as i32));
                 }
             }
             (18, Component::TooltipDisplay { hide: all, hidden }) => {
@@ -835,13 +835,13 @@ fn legacy_tag(stack: &Stack) -> Result<Tag> {
             }
             (21, Component::Bool(true)) => {
                 if stack.component(component::ENCHANTMENTS).is_none() {
-                    d::set(&mut tag, "Enchantments", Tag::List(Vec::new()));
+                    d::put(&mut tag, "Enchantments", Tag::List(Vec::new()));
                 }
             }
             (47, Component::Int(value)) => set_sub(&mut tag, "display", "color", Tag::Int(*value)),
-            (48, Component::Int(value)) => d::set(&mut tag, "map", Tag::Int(*value)),
+            (48, Component::Int(value)) => d::put(&mut tag, "map", Tag::Int(*value)),
             (51 | 52, Component::Stacks(values)) => {
-                d::set(
+                d::put(
                     &mut tag,
                     if *kind == 51 {
                         "ChargedProjectiles"
@@ -851,7 +851,7 @@ fn legacy_tag(stack: &Stack) -> Result<Tag> {
                     Tag::List(values.iter().map(legacy_saved).collect::<Result<_>>()?),
                 );
                 if *kind == 51 {
-                    d::set(&mut tag, "Charged", Tag::Byte(i8::from(!values.is_empty())));
+                    d::put(&mut tag, "Charged", Tag::Byte(i8::from(!values.is_empty())));
                 }
             }
             (
@@ -863,14 +863,14 @@ fn legacy_tag(stack: &Stack) -> Result<Tag> {
                 },
             ) => {
                 if let Some(id) = potion {
-                    d::set(
+                    d::put(
                         &mut tag,
                         "Potion",
                         d::string(&registry_name("minecraft:potion", *id)?),
                     );
                 }
                 if let Some(color) = color {
-                    d::set(&mut tag, "CustomPotionColor", Tag::Int(*color));
+                    d::put(&mut tag, "CustomPotionColor", Tag::Int(*color));
                 }
                 if !rest.is_empty() {
                     let mut r = Reader::new(rest);
@@ -879,14 +879,14 @@ fn legacy_tag(stack: &Stack) -> Result<Tag> {
                         .map(|_| legacy_effect(&mut r))
                         .collect::<Result<Vec<_>>>()?;
                     if !effects.is_empty() {
-                        d::set(&mut tag, "custom_potion_effects", Tag::List(effects));
+                        d::put(&mut tag, "custom_potion_effects", Tag::List(effects));
                     }
                     if r.bool()? {
                         r.string(32767)?;
                     } // New custom potion names have no old field.
                 }
             }
-            (55, Component::StewEffects(values)) => d::set(
+            (55, Component::StewEffects(values)) => d::put(
                 &mut tag,
                 "effects",
                 Tag::List(
@@ -905,7 +905,7 @@ fn legacy_tag(stack: &Stack) -> Result<Tag> {
                 ),
             ),
             (56, Component::WritableBook { pages, filtered }) => {
-                d::set(
+                d::put(
                     &mut tag,
                     "pages",
                     Tag::List(pages.iter().map(|s| d::string(s)).collect()),
@@ -913,22 +913,22 @@ fn legacy_tag(stack: &Stack) -> Result<Tag> {
                 let mut filtered_pages = d::empty_map();
                 for (i, value) in filtered.iter().enumerate() {
                     if let Some(value) = value {
-                        d::set(&mut filtered_pages, &i.to_string(), d::string(value));
+                        d::put(&mut filtered_pages, &i.to_string(), d::string(value));
                     }
                 }
                 if !matches!(&filtered_pages,Tag::Compound(m) if m.is_empty()) {
-                    d::set(&mut tag, "filtered_pages", filtered_pages);
+                    d::put(&mut tag, "filtered_pages", filtered_pages);
                 }
             }
             (57, Component::WrittenBook(book)) => {
-                d::set(&mut tag, "title", d::string(&book.title));
-                d::set(&mut tag, "author", d::string(&book.author));
-                d::set(&mut tag, "generation", Tag::Int(book.generation));
-                d::set(&mut tag, "resolved", Tag::Byte(i8::from(book.resolved)));
+                d::put(&mut tag, "title", d::string(&book.title));
+                d::put(&mut tag, "author", d::string(&book.author));
+                d::put(&mut tag, "generation", Tag::Int(book.generation));
+                d::put(&mut tag, "resolved", Tag::Byte(i8::from(book.resolved)));
                 if let Some(filtered) = &book.title_filtered {
-                    d::set(&mut tag, "filtered_title", d::string(filtered));
+                    d::put(&mut tag, "filtered_title", d::string(filtered));
                 }
-                d::set(
+                d::put(
                     &mut tag,
                     "pages",
                     Tag::List(book.pages.iter().map(json_text).collect()),
@@ -936,14 +936,14 @@ fn legacy_tag(stack: &Stack) -> Result<Tag> {
                 let mut filtered_pages = d::empty_map();
                 for (i, value) in book.pages_filtered.iter().enumerate() {
                     if let Some(value) = value {
-                        d::set(&mut filtered_pages, &i.to_string(), json_text(value));
+                        d::put(&mut filtered_pages, &i.to_string(), json_text(value));
                     }
                 }
                 if !matches!(&filtered_pages,Tag::Compound(m) if m.is_empty()) {
-                    d::set(&mut tag, "filtered_pages", filtered_pages);
+                    d::put(&mut tag, "filtered_pages", filtered_pages);
                 }
             }
-            (58, Component::Trim { material, pattern }) => d::set(
+            (58, Component::Trim { material, pattern }) => d::put(
                 &mut tag,
                 "Trim",
                 Tag::compound([
@@ -957,15 +957,15 @@ fn legacy_tag(stack: &Stack) -> Result<Tag> {
                     ),
                 ]),
             ),
-            (63, Component::Instrument(id)) => d::set(
+            (63, Component::Instrument(id)) => d::put(
                 &mut tag,
                 "instrument",
                 d::string(&registry_name("minecraft:instrument", *id)?),
             ),
             (69, Component::LodestoneTracker { target, tracked }) => {
                 if let Some((dimension, [x, y, z])) = target {
-                    d::set(&mut tag, "LodestoneDimension", d::string(dimension));
-                    d::set(
+                    d::put(&mut tag, "LodestoneDimension", d::string(dimension));
+                    d::put(
                         &mut tag,
                         "LodestonePos",
                         Tag::compound([
@@ -975,16 +975,16 @@ fn legacy_tag(stack: &Stack) -> Result<Tag> {
                         ]),
                     );
                 }
-                d::set(&mut tag, "LodestoneTracked", Tag::Byte(i8::from(*tracked)));
+                d::put(&mut tag, "LodestoneTracked", Tag::Byte(i8::from(*tracked)));
             }
             (70, Component::FireworkExplosion(value)) => {
-                d::set(&mut tag, "Explosion", legacy_explosion(value))
+                d::put(&mut tag, "Explosion", legacy_explosion(value))
             }
             (71, Component::Fireworks { flight, .. }) => {
                 set_sub(&mut tag, "Fireworks", "Flight", Tag::Byte(*flight as i8))
             }
             (72, Component::Profile(profile)) => {
-                d::set(&mut tag, "SkullOwner", legacy_profile(profile))
+                d::put(&mut tag, "SkullOwner", legacy_profile(profile))
             }
             (74, Component::BannerPatterns(layers)) => {
                 let layers = layers
@@ -1023,7 +1023,7 @@ fn legacy_tag(stack: &Stack) -> Result<Tag> {
         }
     }
     if hide != 0 {
-        d::set(&mut tag, "HideFlags", Tag::Int(hide));
+        d::put(&mut tag, "HideFlags", Tag::Int(hide));
     }
     Ok(tag)
 }
@@ -1033,39 +1033,39 @@ fn legacy_explosion(value: &FireworkExplosion) -> Tag {
         ("Colors", Tag::IntArray(value.colors.clone())),
     ]);
     if !value.fade.is_empty() {
-        d::set(&mut out, "FadeColors", Tag::IntArray(value.fade.clone()));
+        d::put(&mut out, "FadeColors", Tag::IntArray(value.fade.clone()));
     }
     if value.trail {
-        d::set(&mut out, "Trail", Tag::Byte(1));
+        d::put(&mut out, "Trail", Tag::Byte(1));
     }
     if value.twinkle {
-        d::set(&mut out, "Flicker", Tag::Byte(1));
+        d::put(&mut out, "Flicker", Tag::Byte(1));
     }
     out
 }
 fn legacy_profile(profile: &Profile) -> Tag {
     let mut tag = d::empty_map();
     if let Some(name) = &profile.name {
-        d::set(&mut tag, "Name", d::string(name));
+        d::put(&mut tag, "Name", d::string(name));
     }
     if let Some(id) = profile.id {
-        d::set(&mut tag, "Id", uuid_tag(id));
+        d::put(&mut tag, "Id", uuid_tag(id));
     }
     let mut properties = d::empty_map();
     for (name, value, signature) in &profile.properties {
         let mut entry = Tag::compound([("Value", d::string(value))]);
         if let Some(signature) = signature {
-            d::set(&mut entry, "Signature", d::string(signature));
+            d::put(&mut entry, "Signature", d::string(signature));
         }
         if properties.get(name).is_none() {
-            d::set(&mut properties, name, Tag::List(Vec::new()));
+            d::put(&mut properties, name, Tag::List(Vec::new()));
         }
         if let Some(Tag::List(values)) = properties.get_mut(name) {
             values.push(entry);
         }
     }
     if !profile.properties.is_empty() {
-        d::set(&mut tag, "Properties", properties);
+        d::put(&mut tag, "Properties", properties);
     }
     tag
 }
@@ -1091,10 +1091,10 @@ fn legacy_effect(r: &mut Reader) -> Result<Tag> {
     }
     let mut result = details.pop().unwrap();
     while let Some(mut outer) = details.pop() {
-        d::set(&mut outer, "hidden_effect", result);
+        d::put(&mut outer, "hidden_effect", result);
         result = outer;
     }
-    d::set(
+    d::put(
         &mut result,
         "id",
         d::string(&registry_name("minecraft:mob_effect", id)?),
@@ -1187,9 +1187,9 @@ fn legacy_raw(tag: &mut Tag, kind: i32, bytes: &[u8]) -> Result<()> {
                     }
                 }
             }
-            d::set(tag, "Decorations", Tag::List(entries));
+            d::put(tag, "Decorations", Tag::List(entries));
         }
-        14 | 15 => d::set(
+        14 | 15 => d::put(
             tag,
             if kind == 14 {
                 "CanPlaceOn"
@@ -1203,19 +1203,19 @@ fn legacy_raw(tag: &mut Tag, kind: i32, bytes: &[u8]) -> Result<()> {
                     .collect(),
             ),
         ),
-        16 => d::set(
+        16 => d::put(
             tag,
             "AttributeModifiers",
             Tag::List(legacy_attributes(&mut r)?),
         ),
-        59 => d::set(tag, "DebugProperty", r.nbt()?),
+        59 => d::put(tag, "DebugProperty", r.nbt()?),
         60 | 62 => {
             let id = r.varint()?;
             let mut data = r.nbt()?;
             if let Some(name) = data.get("CustomName").cloned() {
-                d::set(&mut data, "CustomName", json_text(&name));
+                d::put(&mut data, "CustomName", json_text(&name));
             }
-            d::set(
+            d::put(
                 &mut data,
                 "id",
                 d::string(&registry_name(
@@ -1227,7 +1227,7 @@ fn legacy_raw(tag: &mut Tag, kind: i32, bytes: &[u8]) -> Result<()> {
                     id,
                 )?),
             );
-            d::set(
+            d::put(
                 tag,
                 if kind == 60 {
                     "EntityTag"
@@ -1240,11 +1240,11 @@ fn legacy_raw(tag: &mut Tag, kind: i32, bytes: &[u8]) -> Result<()> {
         61 => {
             if let Tag::Compound(data) = r.nbt()? {
                 for (key, value) in data {
-                    d::set(tag, &key.to_string_lossy(), value);
+                    d::put(tag, &key.to_string_lossy(), value);
                 }
             }
         }
-        68 => d::set(tag, "Recipes", r.nbt()?),
+        68 => d::put(tag, "Recipes", r.nbt()?),
         76 => {
             let mut sherds = Vec::new();
             for _ in 0..4 {
@@ -1264,7 +1264,7 @@ fn legacy_raw(tag: &mut Tag, kind: i32, bytes: &[u8]) -> Result<()> {
             for slot in 0..r.count(256)? {
                 if r.bool()? {
                     let mut item = legacy_saved(&Template::read(&mut r)?)?;
-                    d::set(&mut item, "Slot", Tag::Byte(slot as i8));
+                    d::put(&mut item, "Slot", Tag::Byte(slot as i8));
                     items.push(item);
                 }
             }
@@ -1274,9 +1274,9 @@ fn legacy_raw(tag: &mut Tag, kind: i32, bytes: &[u8]) -> Result<()> {
             let mut state = d::empty_map();
             for _ in 0..r.count(65536)? {
                 let key = r.string(32767)?;
-                d::set(&mut state, &key, d::string(&r.string(32767)?));
+                d::put(&mut state, &key, d::string(&r.string(32767)?));
             }
-            d::set(tag, "BlockStateTag", state);
+            d::put(tag, "BlockStateTag", state);
         }
         79 => {
             let mut bees = Vec::new();
@@ -1284,9 +1284,9 @@ fn legacy_raw(tag: &mut Tag, kind: i32, bytes: &[u8]) -> Result<()> {
                 let id = r.varint()?;
                 let mut data = r.nbt()?;
                 if let Some(name) = data.get("CustomName").cloned() {
-                    d::set(&mut data, "CustomName", json_text(&name));
+                    d::put(&mut data, "CustomName", json_text(&name));
                 }
-                d::set(
+                d::put(
                     &mut data,
                     "id",
                     d::string(&registry_name("minecraft:entity_type", id)?),
@@ -1353,7 +1353,7 @@ fn legacy_attributes(r: &mut Reader) -> Result<Vec<Tag>> {
         if let Some(name) = usize::try_from(slot).ok().and_then(|i| SLOTS.get(i))
             && slot != 0
         {
-            d::set(&mut value, "Slot", d::string(name));
+            d::put(&mut value, "Slot", d::string(name));
         }
         attributes.push(value);
     }
@@ -1932,7 +1932,7 @@ mod tests {
         let mut r = Reader::new(data);
         let kind = r.varint().unwrap();
         let mut entity = r.nbt().unwrap();
-        d::set(entity.get_mut("item").unwrap(), "count", Tag::Int(2));
+        d::put(entity.get_mut("item").unwrap(), "count", Tag::Int(2));
         let mut w = Writer::new();
         w.varint(kind);
         w.nbt(&entity);

@@ -159,7 +159,7 @@ pub(super) fn upgrade_block_entity(
     };
     let inserted_id = tag.get("id").is_none();
     if inserted_id {
-        d::set(tag, "id", d::string(name));
+        d::put(tag, "id", d::string(name));
     }
     // Vanilla's typed write merges these dropped fields back from the original
     // record remainder. Retain the exact values while reusing the saved-data DFU.
@@ -180,10 +180,10 @@ pub(super) fn upgrade_block_entity(
         datafix::CURRENT,
     );
     if let Some((field, value)) = remainder {
-        d::set(tag, field, value);
+        d::put(tag, field, value);
     }
     if inserted_id {
-        d::remove(tag, "id");
+        d::take(tag, "id");
     }
 }
 
@@ -548,8 +548,8 @@ mod tests {
                     let mut before = before.clone();
                     let mut expected = after.clone();
                     if !with_id {
-                        d::remove(&mut before, "id");
-                        d::remove(&mut expected, "id");
+                        d::take(&mut before, "id");
+                        d::take(&mut expected, "id");
                     }
                     let mut old = Writer::new();
                     <crate::buf::Pos>::write(&[1, 64, 2], &mut old);
@@ -599,8 +599,8 @@ mod tests {
                 let mut expected = Vec::new();
                 for (old_kind, new_kind, mut before, mut after) in fixtures {
                     if !with_id {
-                        d::remove(&mut before, "id");
-                        d::remove(&mut after, "id");
+                        d::take(&mut before, "id");
+                        d::take(&mut after, "id");
                     }
                     old.i8(0x12);
                     old.i16(64);

@@ -125,6 +125,16 @@ impl Compound {
     pub fn new() -> Self {
         Self::default()
     }
+    /// `CompoundTag.shallowCopy` when the source is owned: rebuild the outer
+    /// map at Java's copy-constructor capacity and move its values unchanged.
+    /// Unlike [`copy_tag`], this preserves the history of every nested map.
+    pub fn into_shallow_copy(self) -> Self {
+        Self(
+            self.0
+                .filter(|map| !map.is_empty())
+                .map(|map| Box::new(map.into_copy())),
+        )
+    }
     pub fn len(&self) -> usize {
         self.0.as_deref().map_or(0, JavaHashMap::len)
     }

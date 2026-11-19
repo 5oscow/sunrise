@@ -289,14 +289,24 @@ impl<K: JavaKey, V> JavaHashMap<K, V> {
         K: Clone,
         V: Clone,
     {
+        Self::from_copy_entries(
+            self.len,
+            self.entries().map(|(k, v)| (k.clone(), v.clone())),
+        )
+    }
+    /// Rebuild at the Java copy-constructor capacity, moving the owned entries.
+    pub(crate) fn into_copy(self) -> Self {
+        Self::from_copy_entries(self.len, self)
+    }
+    fn from_copy_entries(size: usize, entries: impl IntoIterator<Item = (K, V)>) -> Self {
         let mut copy = Self::default();
-        if self.len > 0 {
-            // The smallest power of two at least len / 0.75.
-            let wanted = self.len.saturating_mul(4).div_ceil(3);
+        if size > 0 {
+            // The smallest power of two at least size / 0.75.
+            let wanted = size.saturating_mul(4).div_ceil(3);
             copy.initial_capacity = wanted.min(MAX_CAPACITY).next_power_of_two();
-            copy.nodes.reserve(self.len);
-            for (key, value) in self.entries() {
-                copy.put(key.clone(), value.clone());
+            copy.nodes.reserve(size);
+            for (key, value) in entries {
+                copy.put(key, value);
             }
         }
         copy
