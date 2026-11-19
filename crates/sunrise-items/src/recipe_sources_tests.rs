@@ -107,8 +107,7 @@ fn filters_and_readers_see_the_decoded_type() {
         r#"{"type":"Not An Id","neoforge:conditions":[{"type":"neoforge:not","value":{"type":"neoforge:always"}}]}"#,
     )
     .unwrap();
-    let conditions = sunrise_world::conditions::LoadConditions::new([])
-        .with_lookup(std::collections::BTreeMap::new(), |_, _| None);
+    let conditions = sunrise_world::conditions::LoadConditions::new([]);
     let overlay = PackOverlay {
         files: &[],
         conditions: &conditions,
