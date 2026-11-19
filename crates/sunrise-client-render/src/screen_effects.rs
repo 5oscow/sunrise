@@ -383,10 +383,11 @@ mod tests {
     fn portal_intensity_ramps() {
         let mut e = ScreenEffects::default();
         for _ in 0..80 {
-            e.tick(1.0, true);
+            e.tick_portal(true);
+            e.tick_vignette(1.0);
         }
         assert!((e.portal - 1.0).abs() < 1e-5);
-        e.tick(1.0, false);
+        e.tick_portal(false);
         assert!((e.portal - 0.95).abs() < 1e-5);
         // Vignette fades towards 1 - brightness at 1% per tick.
         assert!(e.vignette_brightness < 1.0);
