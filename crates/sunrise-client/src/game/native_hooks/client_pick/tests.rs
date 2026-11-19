@@ -642,6 +642,25 @@ fn a_click_on_a_cushion_with_a_synced_passenger_passes_to_the_item() {
     });
 }
 
+#[test]
+#[ignore = "daily"]
+fn a_click_on_a_free_cushion_while_sneaking_passes_to_the_item() {
+    with_picked_cushion(|game, server, target| {
+        game.set_sent_sneak_for_test();
+        game.refresh_client_pick(1.0);
+        assert_eq!(game.crosshair_target(), Some(target));
+        game.remote_use(mod_api::InteractionAttempt::Press);
+        let packets = sent_packets(game, server);
+        assert!(packets.contains(&("item", 0)), "{packets:?}");
+        assert!(
+            !packets
+                .iter()
+                .any(|(kind, _)| matches!(*kind, "block" | "swing")),
+            "{packets:?}"
+        );
+    });
+}
+
 struct CountPicks(Arc<Mutex<Vec<f32>>>);
 #[mod_api::__subscriptions]
 impl Hooks for CountPicks {
