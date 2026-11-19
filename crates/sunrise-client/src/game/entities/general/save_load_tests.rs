@@ -555,6 +555,53 @@ fn a_general_entity_turns_in_place_without_dismounting() {
     });
 }
 
+#[test]
+#[ignore = "daily"]
+fn a_general_row_has_its_declared_kind_and_is_selectable_by_type() {
+    with_types(|game| {
+        for (key, uuid) in [("mymod:robot", [1, 2, 3, 4]), ("mymod:ghost", [4, 3, 2, 1])] {
+            game.load_listed(key, None, None, record_tag(key, uuid, b"", Vec::new()))
+                .unwrap();
+        }
+        let rows = &game.resident_entities.general.rows;
+        let (robot, ghost) = (
+            game.entity(rows[0].id).unwrap(),
+            game.entity(rows[1].id).unwrap(),
+        );
+        game.build_registries();
+        let _world = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+
+        assert_eq!(robot.kind(game).unwrap().id(game), "mymod:robot");
+        assert_eq!(ghost.kind(game).unwrap().id(game), "mymod:ghost");
+        assert!(game.as_console(|game| game.run_command("kill @e[type=mymod:robot]")));
+        assert_eq!(robot.position(game), None);
+        assert_eq!(ghost.position(game), Some([0.5, 64.0, 0.5]));
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn a_volume_selector_finds_a_general_rows_box_without_its_origin() {
+    with_types(|game| {
+        game.load_listed(
+            "mymod:robot",
+            None,
+            None,
+            record_tag("mymod:robot", [1, 2, 3, 4], b"", Vec::new()),
+        )
+        .unwrap();
+        let id = game.resident_entities.general.rows[0].id;
+        game.build_registries();
+        // The 0.8-wide row is centered at x=0.5. The selector starts at x=0.75,
+        // so the edge of the box enters its volume but the position does not.
+        let _world = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+        assert!(game.as_console(|game| {
+            game.run_command("kill @e[type=mymod:robot,x=0.75,y=64,z=0,dx=0,dy=0,dz=0]")
+        }));
+        assert!(game.resident_entities.general.row(id).is_none());
+    });
+}
+
 /// A tree travels between dimensions with its riders: the source ends with
 /// zero rows and stale ids, the destination holds the same tree — same
 /// UUIDs, same mount links — with fresh join identities, the root placed.

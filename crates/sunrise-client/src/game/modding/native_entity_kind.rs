@@ -15,7 +15,10 @@ impl Game<'_> {
                 .find(|p| p.id == id)?
                 .entity_type(),
             Target::Stand(_) => "minecraft:armor_stand",
-            Target::General(_) => return None,
+            Target::General(id) => {
+                let row = self.resident_entities.general.row(id)?;
+                super::general::general_type_catalog().key(row.type_slot)
+            }
             Target::Frame(id) => {
                 if self
                     .item_frames

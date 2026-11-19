@@ -519,6 +519,10 @@ impl GeneralTypeCatalog {
         &self.entries[slot].id
     }
 
+    pub(in crate::game) fn keys(&self) -> impl Iterator<Item = &str> {
+        self.entries.iter().map(|entry| entry.id.as_str())
+    }
+
     /// The type's declared width and height, for the row's bounds.
     pub fn dimensions(&self, slot: usize) -> (f64, f64) {
         let entry = &self.entries[slot];
@@ -1143,8 +1147,7 @@ impl Entity for GeneralRow {
         general_type_catalog().bounds(self.type_slot, self.position)
     }
     fn selector_target(&self) -> Option<Target> {
-        // Stage 2 rows never join a world; a selector cannot name one yet.
-        None
+        Some(Target::General(self.id))
     }
     fn native_type(&self) -> Cow<'static, str> {
         Cow::Owned(general_type_catalog().key(self.type_slot).to_owned())

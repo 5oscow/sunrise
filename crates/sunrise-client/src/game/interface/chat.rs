@@ -880,6 +880,11 @@ impl Game<'_> {
             types.push("minecraft:player".into());
             types.sort();
         }
+        for key in super::general::general_type_catalog().keys() {
+            if !types.iter().any(|id| id == key) {
+                types.push(key.to_owned());
+            }
+        }
         reg.entity_types = types;
         // The mob effect registry: every effect `/effect` and the
         // `mob_effect` resource arguments accept.
