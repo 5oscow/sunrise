@@ -66,7 +66,10 @@ Unsure? Add `needs-proof`: it costs a few hours, a broken release costs more.
 
 The [daily run](#daily-run) is the only CI entry point for vanilla parity. It calls `.github/workflows/parity.yml`
 on every real (writing) run, which takes only commits of main, so no run can move `daily-green` or start the
-Nightly without it. Dry runs, rollups and pull requests do not run parity. The Dyna runners use their prepared vanilla data and run all automatic harnesses from scratch, as several shares of one planned selection (`tools/ci/parity_shards.py`, `tools/parity.py --harness-file`), and the daily summary reads the one verdict the shares merge into.
+Nightly without it. Dry runs, rollups and pull requests do not run parity. The Dyna runners use their prepared
+vanilla data and run all automatic harnesses in shares of one plan (`tools/ci/parity_shards.py`,
+`tools/parity.py --harness-file`). They replay an earlier vanilla oracle run from the CI host's keep only when its
+command, JDK and inputs match ([parity workflow](parity-workflow.md)); the daily summary reads the shares' merged verdict.
 `named_only` in `tools/parity_hosts.json` lists the exceptions, such as `frame_identity`, each with its reason; run them
 locally by name. Proofs that need arguments (a saved capture to replay) declare `PARITY_MANUAL` in their script instead,
 which no automatic run selects.
@@ -131,7 +134,7 @@ the ignored-tests data shards (`ignored-tests.yml`), the wasm fixture and guest 
 `fn-replace-check.yml`, the game's Windows runtime-lease tests (`windows-runtime-leases.yml`), every
 `cargo-sunrise-mod` binstall archive built from the commit and published nowhere (`cargo-sunrise-mod-build.yml`; a pull
 request's check builds only the Linux x86_64 archive, and only a `cargo-sunrise-mod-v*` tag's push publishes, from
-`cargo-sunrise-mod.yml`), the machine sample built against the commit's mod API (`machine-sample.yml`) and the
+`cargo-sunrise-mod.yml`), the wasm std member's names built on Linux and on Windows (`wasm-std-names.yml`), the machine sample built against the commit's mod API (`machine-sample.yml`) and the
 prebuilt SDK of the commit
 (`prebuilt-game-build.yml`; each leg packs its slices after the checks, including the [native linkage probe](native-dylib-probe.md)
 on the Linux and Windows client builds. `sdk-publish` signs and publishes the slices as the mod SDK's

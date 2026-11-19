@@ -8377,6 +8377,7 @@ impl Game<'_> {
             // Native mods' overlays first, then the packs' OptiFine emissive blocks.
             sunrise_client::native_emissive::table(
                 &self.pack.render.sprite_layers,
+                &self.pack.render.file_layers,
                 requests,
                 &self.pack.render.emissive,
             )
