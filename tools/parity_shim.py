@@ -227,9 +227,12 @@ def reusable(saved, paths, hashes):
 
 
 def direct_jdk(program, name):
-    """Whether `program` is $JAVA_HOME's own `name`: a wrapper's or selector's JDK can change behind the same file."""
+    """Whether `program` is $JAVA_HOME's own `name`, resolving to a file in the JDK's own bin/: a wrapper's or
+    selector's JDK, or a link out of the JDK, can change behind the same file."""
     home = os.environ.get("JAVA_HOME")
-    return bool(home) and os.path.realpath(program) == os.path.realpath(os.path.join(home, "bin", name))
+    resolved = os.path.realpath(program)
+    return (bool(home) and os.path.basename(resolved) == name
+            and os.path.dirname(resolved) == os.path.join(os.path.realpath(home), "bin"))
 
 
 def toolchain(program, hashes):
@@ -346,6 +349,9 @@ def main():
     paths = named_paths(arguments) + environment_paths(environment)
     command = {"program": os.path.realpath(program), "arguments": arguments, "cwd": os.getcwd(), "stdin": stdin,
                "environment": environment}
+    if KEEP:
+        # The JDK's content is part of both caches' keys: an update in place replays nothing of the old one.
+        command["jdk"] = toolchain(command["program"], hashes)
     key = hashlib.sha256(json.dumps(command, sort_keys=True).encode()).hexdigest()
     record = CACHE / f"{key}.json"
     saved = json.loads(record.read_text()) if record.exists() else None
@@ -356,7 +362,7 @@ def main():
         return 0
     before = snapshot(paths)
     inputs = {path: hashes.file(path) for path in files_under(paths)}
-    entry = keep_entry(command, toolchain(command["program"], hashes), inputs) if KEEP else None
+    entry = keep_entry(command, command["jdk"], inputs) if KEEP else None
     kept = restore(entry) if entry else None
     if kept:
         paths_written, stdout, stderr = kept

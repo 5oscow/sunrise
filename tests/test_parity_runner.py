@@ -612,6 +612,24 @@ class OracleReuseTests(unittest.TestCase):
         self.new_checkout()
         self.assertEqual(self.oracle(), 3)  # the same JDK and options as the last run: replayed
 
+    def test_with_a_keep_an_update_of_the_jdk_in_place_replays_nothing_from_the_checkout_either(self):
+        self.env["PARITY_ORACLE_KEEP"] = str(self.bin.parent / "keep")
+        self.assertEqual(self.oracle(), 1)
+        self.assertEqual(self.oracle(), 1)
+        (self.bin.parent / "release").write_text('JAVA_VERSION="25.0.2"\n')
+        self.assertEqual(self.oracle(), 2)  # warm: the checkout's own record was of the old JDK
+
+    def test_with_a_keep_a_launcher_linked_out_of_the_jdk_is_never_reused(self):
+        import os
+        from tools import parity_shim
+        home = self.bin.parent / "jdk"
+        (home / "bin").mkdir(parents=True)
+        (home / "bin" / "java").symlink_to(self.bin / "java")  # resolves outside $JAVA_HOME/bin
+        with mock.patch.dict(os.environ, JAVA_HOME=str(home)):
+            self.assertFalse(parity_shim.direct_jdk(str(home / "bin" / "java"), "java"))
+        with mock.patch.dict(os.environ, JAVA_HOME=str(self.bin.parent)):
+            self.assertTrue(parity_shim.direct_jdk(str(self.bin / "java"), "java"))
+
     def test_a_file_named_through_an_oracle_variable_is_an_input(self):
         keep = self.bin.parent / "keep"
         self.env["PARITY_ORACLE_KEEP"] = str(keep)
@@ -785,6 +803,23 @@ class OracleKeepTests(unittest.TestCase):
                     (entry / "run.json").write_text('{"outputs": ["' + str(root / "out") + "/" + name + '"]}')
                     self.assertIsNone(parity_shim.restore(entry))
                     self.assertFalse((root / "out").exists())
+
+    def test_a_destination_that_appears_while_publishing_keeps_its_bytes_and_the_replay_takes_back_its_own(self):
+        import os
+        from tools import parity_shim
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first, second = root / "out" / "a.txt", root / "out" / "b.txt"
+            entry = self.kept_run(root, [first, second])
+            link = os.link
+            def racing_link(source, destination):
+                if destination == str(second):
+                    second.write_text("written meanwhile")
+                link(source, destination)
+            with mock.patch.object(parity_shim.os, "link", racing_link):
+                self.assertIsNone(parity_shim.restore(entry))
+            self.assertEqual(second.read_text(), "written meanwhile")
+            self.assertEqual(sorted(path.name for path in first.parent.iterdir()), ["b.txt"])
 
     def test_a_replay_never_writes_over_a_file_at_its_staging_name(self):
         import os
