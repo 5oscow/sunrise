@@ -136,11 +136,10 @@ pub enum Event {
     ServerLinks(Vec<cfg::ServerLink>),
     /// The connection ended. `from_server`: the server gave the reason (or
     /// the connection was refused for good), rather than the connection
-    /// failing (auto-reconnect retries only failures and shutdowns).
+    /// failing.
     Disconnected {
         reason: String,
-        /// The reason's translation key, when it had one (auto-reconnect
-        /// classifies by it, through `sunrise_hooks::Hooks::ended`).
+        /// The reason's translation key, when it had one.
         key: Option<String>,
         from_server: bool,
     },
@@ -755,9 +754,7 @@ fn tr(lang: &Language, key: &str) -> String {
 }
 
 /// Why a connection ended: the shown text and, when the reason was a
-/// translatable component or a known Sunrise error, its translation key —
-/// the auto-reconnect classifies by key (`Hooks::ended`), the
-/// English keyword scan of the text is the fallback for plain reasons.
+/// translatable component or a known Sunrise error, its translation key.
 #[derive(Clone)]
 pub struct Reason {
     pub text: String,
@@ -913,8 +910,6 @@ fn run(
             Some(code) => join_friend(code, lang, send)?,
             None => {
                 let Some(target) = parse_address(address) else {
-                    // A refusal: never retried (`sunrise.multiplayer
-                    // .invalid_address` is in auto-reconnect's key list).
                     return Err(Reason::keyed_arg(
                         "sunrise.multiplayer.invalid_address",
                         lang,
@@ -988,8 +983,7 @@ fn run(
                             let hash = server_hash(&hello.server_id, &secret, &hello.public_key);
                             // The session service's refusal: the wrapped
                             // `disconnect.loginFailedInfo` text is shown, and
-                            // the inner key (the reason's own) classifies
-                            // (auto-reconnect's, through `Hooks::ended`).
+                            // the reason retains the inner key.
                             crate::auth::join_server(account, &hash).map_err(|err| {
                                 let (reason, key) = match err.reason() {
                                     Ok(key) => (tr(lang, key), Some(key.to_owned())),

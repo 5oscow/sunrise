@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "एजेंट नियंत्रण",
   "sunrise.extras.agent_control.tooltip": "आपका अपना AI एजेंट sunrise-ctl या MCP क्लाइंट के माध्यम से, केवल इस कंप्यूटर पर इस गेम को खेल सकता है।",
-  "sunrise.extras.auto_reconnect": "ऑटो-रीकनेक्ट",
-  "sunrise.extras.auto_reconnect.tooltip": "कनेक्शन टूटने या रीस्टार्ट के बाद सर्वर से दोबारा जुड़ता है, किक या बैन होने के बाद कभी नहीं।",
   "sunrise.extras.chat_animation": "सुचारू चैट",
   "sunrise.extras.chat_animation.tooltip": "एक नई चैट लाइन पूरी तरह से प्रकट होने के बजाय फीका पड़ने के दौरान बाईं ओर से स्लाइड करती है।",
   "sunrise.extras.chat_indicator": "संदेश संकेतक",

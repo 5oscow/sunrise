@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Kōntrola agyntōw",
   "sunrise.extras.agent_control.tooltip": "Wosz włosny agynt sztucznyj inteligyncyje może grać w ta gra bez sunrise-ctl abo kliynta MCP, ino na tym kōmputrze.",
-  "sunrise.extras.auto_reconnect": "Automatyczne pōnowne połōnczynie",
-  "sunrise.extras.auto_reconnect.tooltip": "Prziłōnczo sie do serwera po stracōnym połōnczyniu abo restartu, nikej po wyciepniyńciu abo zakazu.",
   "sunrise.extras.chat_animation": "Gładki czat",
   "sunrise.extras.chat_animation.tooltip": "Nowo linijo czatu wsudzo sie z lewyj zajty, w czasie kej ôna blanknie, zamiast wydować sie cołko.",
   "sunrise.extras.chat_indicator": "Wskoźnik kōmunikatu",

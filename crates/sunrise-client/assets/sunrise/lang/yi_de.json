@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "אַגענט קאָנטראָל",
   "sunrise.extras.agent_control.tooltip": "דיין אייגענע אַי אַגענט קענען שפּילן דעם שפּיל דורך האָריזאָנט-קטל אָדער אַ MCP קליענט בלויז אויף דעם קאָמפּיוטער.",
-  "sunrise.extras.auto_reconnect": "אַוטאָ-ריקאַנעקט",
-  "sunrise.extras.auto_reconnect.tooltip": "רידזשאַנז אַ סערווער נאָך אַ פאַרפאַלן קשר אָדער אַ ריסטאַרט, קיינמאָל נאָך אַ בריק אָדער פאַרבאָט.",
   "sunrise.extras.chat_animation": "גלאַט שמועסן",
   "sunrise.extras.chat_animation.tooltip": "א נייַע שמועס שורה סליידז אין פון די לינקס בשעת עס פיידז אין, אַנשטאָט פון אנטפלעקונג.",
   "sunrise.extras.chat_indicator": "אָנזאָג גראדן",

@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "代理控制",
   "sunrise.extras.agent_control.tooltip": "你自己的 AI 代理可以通过 sunrise-ctl 或 MCP 客户端玩这个游戏，仅限本机。",
-  "sunrise.extras.auto_reconnect": "自动重连",
-  "sunrise.extras.auto_reconnect.tooltip": "连接中断或服务器重启后自动重新加入，被踢出或封禁后不会。",
   "sunrise.extras.chat_animation": "平滑聊天",
   "sunrise.extras.chat_animation.tooltip": "新聊天行从左侧滑入并淡入，而不是整行直接出现。",
   "sunrise.extras.chat_indicator": "消息指示条",

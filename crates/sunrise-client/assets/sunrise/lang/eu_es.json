@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Agenteen Kontrola",
   "sunrise.extras.agent_control.tooltip": "Zure AI agenteak sunrise-ctl edo MCP bezero baten bidez jolastu dezake joko honetara, ordenagailu honetan soilik.",
-  "sunrise.extras.auto_reconnect": "Berriro konektatu automatikoki",
-  "sunrise.extras.auto_reconnect.tooltip": "Konexioa galdu edo berrabiarazi ondoren zerbitzari batean sartzen da berriro, inoiz ez ostiko bat edo debeku baten ondoren.",
   "sunrise.extras.chat_animation": "Txat leuna",
   "sunrise.extras.chat_animation.tooltip": "Txat-lerro berri bat ezkerretik sartzen da desagertzen den bitartean, osorik agertu beharrean.",
   "sunrise.extras.chat_indicator": "Mezuen adierazlea",

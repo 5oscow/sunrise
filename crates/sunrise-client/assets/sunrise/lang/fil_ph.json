@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Kontrol ng Ahente",
   "sunrise.extras.agent_control.tooltip": "Ang iyong sariling ahente ng AI ay maaaring laruin ang larong ito sa pamamagitan ng sunrise-ctl o isang MCP client, sa computer na ito lamang.",
-  "sunrise.extras.auto_reconnect": "Awtomatikong kumonekta muli",
-  "sunrise.extras.auto_reconnect.tooltip": "Sumali muli sa isang server pagkatapos ng isang nawalang koneksyon o isang pag-restart, hindi kailanman pagkatapos ng isang sipa o pagbabawal.",
   "sunrise.extras.chat_animation": "Makinis na chat",
   "sunrise.extras.chat_animation.tooltip": "Ang isang bagong linya ng chat ay dumudulas mula sa kaliwa habang ito ay nawawala, sa halip na lumabas nang buo.",
   "sunrise.extras.chat_indicator": "Tagapagpahiwatig ng mensahe",

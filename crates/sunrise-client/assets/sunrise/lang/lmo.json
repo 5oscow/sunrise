@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Cuntrol del agent",
   "sunrise.extras.agent_control.tooltip": "El to agent de IA al pœl jogar a qest joc a travers sunrise-ctl o un client MCP, domà su qell computer qì.",
-  "sunrise.extras.auto_reconnect": "Riconnession automatich",
-  "sunrise.extras.auto_reconnect.tooltip": "Reuniss a un server dopu una cunnesiun perduda o un riavvio, mai dopu un calcio o un ban.",
   "sunrise.extras.chat_animation": "Chat liscia",
   "sunrise.extras.chat_animation.tooltip": "Una nœuva linea de chat scivola denter de sinistra menter la sbiadiss, inveci de cumparir intera.",
   "sunrise.extras.chat_indicator": "Indicatur del messagg",

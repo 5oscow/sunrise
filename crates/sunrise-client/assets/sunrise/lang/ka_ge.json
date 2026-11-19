@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "აგენტის კონტროლი",
   "sunrise.extras.agent_control.tooltip": "თქვენს საკუთარ AI აგენტს შეუძლია ამ თამაშის თამაში sunrise-ctl ან MCP კლიენტის მეშვეობით, მხოლოდ ამ კომპიუტერზე.",
-  "sunrise.extras.auto_reconnect": "ავტომატური ხელახლა დაკავშირება",
-  "sunrise.extras.auto_reconnect.tooltip": "უერთდება სერვერს კავშირის დაკარგვის ან გადატვირთვის შემდეგ, არასოდეს დარტყმის ან აკრძალვის შემდეგ.",
   "sunrise.extras.chat_animation": "მშვიდი ჩატი",
   "sunrise.extras.chat_animation.tooltip": "ჩეთის ახალი ხაზი შემოდის მარცხნიდან, სანამ ის ქრება, ნაცვლად იმისა, რომ მთლიანად გამოჩნდეს.",
   "sunrise.extras.chat_indicator": "შეტყობინების ინდიკატორი",

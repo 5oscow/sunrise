@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Agendi kontroll",
   "sunrise.extras.agent_control.tooltip": "Teie enda tehisintellekti agent saab seda mängu mängida sunrise-ctl-i või MCP-kliendi kaudu ainult selles arvutis.",
-  "sunrise.extras.auto_reconnect": "Automaatne taasühendamine",
-  "sunrise.extras.auto_reconnect.tooltip": "Liitub serveriga uuesti pärast ühenduse katkemist või taaskäivitamist, mitte kunagi pärast lööki või keelamist.",
   "sunrise.extras.chat_animation": "Sujuv vestlus",
   "sunrise.extras.chat_animation.tooltip": "Uus vestlusliin libiseb vasakult sisse, kui see sumbub, selle asemel, et paista tervena.",
   "sunrise.extras.chat_indicator": "Sõnumi indikaator",

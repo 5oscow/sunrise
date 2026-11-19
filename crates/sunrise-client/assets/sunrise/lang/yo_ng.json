@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Iṣakoso Aṣoju",
   "sunrise.extras.agent_control.tooltip": "Aṣoju AI tirẹ le ṣe ere yii nipasẹ sunrise-ctl tabi alabara MCP kan, lori kọnputa yii nikan.",
-  "sunrise.extras.auto_reconnect": "Atunsopọ aifọwọyi",
-  "sunrise.extras.auto_reconnect.tooltip": "Darapọ mọ olupin lẹhin asopọ ti o sọnu tabi tun bẹrẹ, kii ṣe lẹhin tapa tabi wiwọle.",
   "sunrise.extras.chat_animation": "Iwiregbe didan",
   "sunrise.extras.chat_animation.tooltip": "Laini iwiregbe tuntun kan wa lati apa osi lakoko ti o rọ sinu, dipo ti o farahan ni odindi.",
   "sunrise.extras.chat_indicator": "Atọka ifiranṣẹ",

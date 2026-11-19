@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Управление агентом",
   "sunrise.extras.agent_control.tooltip": "Ваш ИИ-агент может играть в эту игру через sunrise-ctl или MCP-клиент, только на этом компьютере.",
-  "sunrise.extras.auto_reconnect": "Автоподключение",
-  "sunrise.extras.auto_reconnect.tooltip": "Подключается к серверу заново после потери связи или перезапуска, но никогда после кика или бана.",
   "sunrise.extras.chat_animation": "Плавный чат",
   "sunrise.extras.chat_animation.tooltip": "Новая строка чата выезжает слева, пока проявляется, а не появляется целиком.",
   "sunrise.extras.chat_indicator": "Индикатор сообщения",

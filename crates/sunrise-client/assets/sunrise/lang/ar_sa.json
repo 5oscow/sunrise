@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "مراقبة الوكيل",
   "sunrise.extras.agent_control.tooltip": "يمكن لوكيل الذكاء الاصطناعي الخاص بك لعب هذه اللعبة من خلال Sunrise-ctl أو عميل MCP، على هذا الكمبيوتر فقط.",
-  "sunrise.extras.auto_reconnect": "إعادة الاتصال التلقائي",
-  "sunrise.extras.auto_reconnect.tooltip": "إعادة الانضمام إلى الخادم بعد انقطاع الاتصال أو إعادة التشغيل، وليس بعد ركلة أو حظر أبدًا.",
   "sunrise.extras.chat_animation": "دردشة سلسة",
   "sunrise.extras.chat_animation.tooltip": "ينزلق خط الدردشة الجديد من اليسار بينما يتلاشى للداخل، بدلاً من أن يظهر كاملاً.",
   "sunrise.extras.chat_indicator": "مؤشر الرسالة",

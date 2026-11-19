@@ -419,8 +419,7 @@ pub fn rows() -> Vec<Result<Item, &'static str>> {
     use Item::*;
     // Fullbright, Dynamic lights and Hide block-break particles change the picture: they
     // are on the graphics screen's Quality page (`graphics_ui::rows`), not here. A section a crate
-    // adds joins the group its title names (`sunrise_hooks::pages::Place::Extras`): Auto-reconnect
-    // and Discord fill Multiplayer.
+    // adds joins the group its title names (`sunrise_hooks::pages::Place::Extras`).
     vec![
         Err("sunrise.extras.header.third_person"),
         Ok(OwnNameTag),

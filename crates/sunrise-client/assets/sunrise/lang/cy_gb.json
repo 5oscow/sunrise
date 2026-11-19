@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Rheoli Asiant",
   "sunrise.extras.agent_control.tooltip": "Gall eich asiant AI eich hun chwarae'r gêm hon trwy sunrise-ctl neu gleient MCP, ar y cyfrifiadur hwn yn unig.",
-  "sunrise.extras.auto_reconnect": "Ailgysylltu'n awtomatig",
-  "sunrise.extras.auto_reconnect.tooltip": "Yn ailymuno â gweinydd ar ôl colli cysylltiad neu ailgychwyn, byth ar ôl cic neu waharddiad.",
   "sunrise.extras.chat_animation": "Sgwrs esmwyth",
   "sunrise.extras.chat_animation.tooltip": "Mae llinell sgwrsio newydd yn llithro i mewn o'r chwith tra mae'n pylu i mewn, yn lle ymddangos yn gyfan.",
   "sunrise.extras.chat_indicator": "Dangosydd neges",

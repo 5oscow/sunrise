@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Kontroll an ajañs",
   "sunrise.extras.agent_control.tooltip": "Hoc'h ajañs IA a c'hall c'hoari ar c'hoari-mañ dre sunrise-ctl pe dre ur c'hlient MCP, war an urzhiataer-mañ hepken.",
-  "sunrise.extras.auto_reconnect": "Adkevreañ emgefre",
-  "sunrise.extras.auto_reconnect.tooltip": "Adkemer perzh en ur servijer goude ur c'hennask kollet pe un adloc'hañ, biskoazh goude ur c'hrogad pe ur bann.",
   "sunrise.extras.chat_animation": "Flapañ eeun",
   "sunrise.extras.chat_animation.tooltip": "Ur linenn flapañ nevez a zeu eus an tu kleiz e-keit ma vez o vont da get, e-lec'h dont war wel a-bezh.",
   "sunrise.extras.chat_indicator": "Merk kemennadenn",

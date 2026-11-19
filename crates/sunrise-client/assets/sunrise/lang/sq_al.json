@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Kontrolli i Agjentit",
   "sunrise.extras.agent_control.tooltip": "Agjenti juaj i AI mund ta luajë këtë lojë përmes sunrise-ctl ose një klienti MCP, vetëm në këtë kompjuter.",
-  "sunrise.extras.auto_reconnect": "Rilidheni automatikisht",
-  "sunrise.extras.auto_reconnect.tooltip": "Ribashkohet me një server pas një lidhjeje të humbur ose një rinisjeje, kurrë pas një goditjeje ose ndalimi.",
   "sunrise.extras.chat_animation": "Bisedë e qetë",
   "sunrise.extras.chat_animation.tooltip": "Një linjë e re bisede rrëshqet nga e majta ndërsa zbehet, në vend që të shfaqet e plotë.",
   "sunrise.extras.chat_indicator": "Treguesi i mesazhit",

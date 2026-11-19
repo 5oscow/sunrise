@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Umboðsmannsstýring",
   "sunrise.extras.agent_control.tooltip": "Tín egni AI umboðsmaður kann spæla hetta spælið gjøgnum sunrise-ctl ella ein MCP klient, á hesi telduni bert.",
-  "sunrise.extras.auto_reconnect": "Sjálvvirkandi endursamband",
-  "sunrise.extras.auto_reconnect.tooltip": "Meldar seg aftur til ein ambætara eftir mist samband ella endurbyrjan, ongantíð eftir spark ella bann.",
   "sunrise.extras.chat_animation": "Slætt prát",
   "sunrise.extras.chat_animation.tooltip": "Ein nýggj kjaklinja rennur inn frá vinstru, meðan hon doyvir inn, í staðin fyri at síggja heil út.",
   "sunrise.extras.chat_indicator": "Boðvísari",

@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Agentensteuerung",
   "sunrise.extras.agent_control.tooltip": "Dein eigener KI-Agent kann dieses Spiel über sunrise-ctl oder einen MCP-Client spielen, nur auf diesem Computer.",
-  "sunrise.extras.auto_reconnect": "Neu verbinden",
-  "sunrise.extras.auto_reconnect.tooltip": "Verbindet nach einem Verbindungsabbruch oder Neustart erneut mit dem Server, nie nach einem Rauswurf oder Bann.",
   "sunrise.extras.chat_animation": "Weicher Chat",
   "sunrise.extras.chat_animation.tooltip": "Eine neue Chatzeile gleitet von links herein und blendet dabei ein, statt sofort ganz zu erscheinen.",
   "sunrise.extras.chat_indicator": "Nachrichtenmarkierung",

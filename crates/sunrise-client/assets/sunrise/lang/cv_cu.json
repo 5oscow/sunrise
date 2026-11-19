@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Агент контролӗ",
   "sunrise.extras.agent_control.tooltip": "Сирӗн хӑвӑрӑн ИИ агенчӗ ҫак вӑййа sunrise-ctl е MCP клиент урлӑ ҫак компьютер ҫинче кӑна выляма пултарать.",
-  "sunrise.extras.auto_reconnect": "Авто-ҫыхӑну",
-  "sunrise.extras.auto_reconnect.tooltip": "Ҫыхӑну ҫухалнӑ е ҫӗнӗрен пуҫланӑ хыҫҫӑн сервера каялла кӗрет, нихӑҫан та тапӑннӑ е чарнӑ хыҫҫӑн мар.",
   "sunrise.extras.chat_animation": "Ҫемҫе калаҫу",
   "sunrise.extras.chat_animation.tooltip": "Ҫӗнӗ чат йӗрки сулахай енчен шуса кӗрет, вӑл вара пӗтӗмӗшпех курӑнмасть.",
   "sunrise.extras.chat_indicator": "Хыпар кӑтартӑвӗ",

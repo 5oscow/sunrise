@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Aģentu kontrole",
   "sunrise.extras.agent_control.tooltip": "Jūsu AI aģents var spēlēt šo spēli, izmantojot sunrise-ctl vai MCP klientu, tikai šajā datorā.",
-  "sunrise.extras.auto_reconnect": "Automātiski atjaunot savienojumu",
-  "sunrise.extras.auto_reconnect.tooltip": "Atkārtoti pievienojas serverim pēc zaudēta savienojuma vai restartēšanas, nekad pēc sitiena vai aizlieguma.",
   "sunrise.extras.chat_animation": "Vienmērīga tērzēšana",
   "sunrise.extras.chat_animation.tooltip": "Jauna tērzēšanas līnija ieslīd no kreisās puses, kamēr tā pazūd, nevis tiek rādīta vesela.",
   "sunrise.extras.chat_indicator": "Ziņojuma indikators",

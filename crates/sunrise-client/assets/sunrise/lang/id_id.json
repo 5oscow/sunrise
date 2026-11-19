@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Kontrol Agen",
   "sunrise.extras.agent_control.tooltip": "Agen AI Anda sendiri dapat memainkan game ini melalui sunrise-ctl atau klien MCP, khusus di komputer ini.",
-  "sunrise.extras.auto_reconnect": "Sambung ulang otomatis",
-  "sunrise.extras.auto_reconnect.tooltip": "Bergabung kembali ke server setelah kehilangan koneksi atau muat ulang, tidak pernah setelah dikeluarkan (kick) atau diblokir (ban).",
   "sunrise.extras.chat_animation": "Obrolan mulus",
   "sunrise.extras.chat_animation.tooltip": "Baris obrolan baru meluncur dari kiri sambil memudar, alih-alih langsung muncul seutuhnya.",
   "sunrise.extras.chat_indicator": "Indikator pesan",

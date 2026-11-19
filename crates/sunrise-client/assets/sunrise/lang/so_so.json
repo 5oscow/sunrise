@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Xakamaynta wakiilka",
   "sunrise.extras.agent_control.tooltip": "Wakiilkaaga AI wuxuu ku ciyaari karaa ciyaartan sunrise-ctl ama macmiilka MCP, kumbuyuutarkan kaliya.",
-  "sunrise.extras.auto_reconnect": "Si toos ah dib ugu xidh",
-  "sunrise.extras.auto_reconnect.tooltip": "Dib ugu biira serferka ka dib markii uu lumay ama dib u bilaabo, waligiis ka dib laad ama mamnuuc.",
   "sunrise.extras.chat_animation": "Sheeko macaan",
   "sunrise.extras.chat_animation.tooltip": "Khadka sheekeysiga cusub ayaa bidixda ka soo galaya inta uu ku sii dhacayo, halkii uu ka muuqan lahaa isagoo dhan.",
   "sunrise.extras.chat_indicator": "Tilmaamaha fariinta",

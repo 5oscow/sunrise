@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Agentkontrolo",
   "sunrise.extras.agent_control.tooltip": "Via propra AI-agento povas ludi ĉi tiun ludon per sunrise-ctl aŭ MCP-kliento, nur en ĉi tiu komputilo.",
-  "sunrise.extras.auto_reconnect": "Aŭtomata rekonekto",
-  "sunrise.extras.auto_reconnect.tooltip": "Reeniĝas al servilo post perdita konekto aŭ rekomenco, neniam post piedbato aŭ malpermeso.",
   "sunrise.extras.chat_animation": "Glata babilado",
   "sunrise.extras.chat_animation.tooltip": "Nova babillinio glitas enen de maldekstre dum ĝi fadas, anstataŭ aperi tute.",
   "sunrise.extras.chat_indicator": "Mesaĝa indikilo",

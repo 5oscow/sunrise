@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Controlo de l’agente",
   "sunrise.extras.agent_control.tooltip": "El vostro agente IA el pol zogar a sto xogo co sunrise-ctl o un cliente MCP, soło su sto computer.",
-  "sunrise.extras.auto_reconnect": "Auto-ricołegasion",
-  "sunrise.extras.auto_reconnect.tooltip": "El se unise da novo a un server dopo na conesion persa o un riavvio, mai dopo un kick o un ban.",
   "sunrise.extras.chat_animation": "Na ciacołada sensa problemi",
   "sunrise.extras.chat_animation.tooltip": "Na nova riga de ciacołada ła vien da sinistra fin che ła se sbasa, invese de aparir intiera.",
   "sunrise.extras.chat_indicator": "Indicator de mesajo",

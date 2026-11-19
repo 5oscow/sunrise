@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Smachd àidseant",
   "sunrise.extras.agent_control.tooltip": "Faodaidh an neach-ionaid AI agad fhèin an geama seo a chluich tro sunrise-ctl no teachdaiche MCP, air a’ choimpiutair seo a-mhàin.",
-  "sunrise.extras.auto_reconnect": "Dèan ath-cheangal gu fèin-ghluasadach",
-  "sunrise.extras.auto_reconnect.tooltip": "Thig còmhla ri frithealaiche às deidh ceangal caillte no ath-thòiseachadh, gun a bhith às deidh breab no casg.",
   "sunrise.extras.chat_animation": "Còmhradh rèidh",
   "sunrise.extras.chat_animation.tooltip": "Bidh loidhne cabadaich ùr a’ sleamhnachadh a-steach bhon taobh chlì fhad ‘s a tha e a’ seargadh a-steach, an àite a bhith a ’nochdadh slàn.",
   "sunrise.extras.chat_indicator": "Comharra teachdaireachd",

@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Kiểm soát đại lý",
   "sunrise.extras.agent_control.tooltip": "Tác nhân AI của riêng bạn chỉ có thể chơi trò chơi này thông qua Sunrise-ctl hoặc ứng dụng khách MCP, trên máy tính này.",
-  "sunrise.extras.auto_reconnect": "Tự động kết nối lại",
-  "sunrise.extras.auto_reconnect.tooltip": "Tham gia lại máy chủ sau khi mất kết nối hoặc khởi động lại, không bao giờ sau khi bị kick hoặc ban.",
   "sunrise.extras.chat_animation": "Trò chuyện mượt mà",
   "sunrise.extras.chat_animation.tooltip": "Một dòng trò chuyện mới trượt vào từ bên trái trong khi nó mờ dần thay vì xuất hiện nguyên vẹn.",
   "sunrise.extras.chat_indicator": "Chỉ báo tin nhắn",

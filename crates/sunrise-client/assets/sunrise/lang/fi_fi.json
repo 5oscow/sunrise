@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Agentin hallinta",
   "sunrise.extras.agent_control.tooltip": "Oma tekoälyagentti voi pelata tätä peliä sunrise-ctl- tai MCP-asiakassovelluksen kautta vain tällä tietokoneella.",
-  "sunrise.extras.auto_reconnect": "Yhdistä automaattisesti",
-  "sunrise.extras.auto_reconnect.tooltip": "Liittyy uudelleen palvelimeen yhteyden katkeamisen tai uudelleenkäynnistyksen jälkeen, ei koskaan potkaisun tai kiellon jälkeen.",
   "sunrise.extras.chat_animation": "Sujuva chat",
   "sunrise.extras.chat_animation.tooltip": "Uusi chat-linja liukuu sisään vasemmalta sen häipyessä sen sijaan, että se näyttäisi kokonaisena.",
   "sunrise.extras.chat_indicator": "Viestin ilmaisin",

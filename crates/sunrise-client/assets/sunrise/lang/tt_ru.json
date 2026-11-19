@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Агент контроле",
   "sunrise.extras.agent_control.tooltip": "Сезнең AI агенты бу уенны горизонт-ctl яки MCP клиенты аша бу компьютерда гына уйный ала.",
-  "sunrise.extras.auto_reconnect": "Авто-яңадан тоташу",
-  "sunrise.extras.auto_reconnect.tooltip": "Lostгалтылган тоташудан яки яңадан башланганнан соң, беркайчан да тибү яки тыюдан соң серверга кушыла.",
   "sunrise.extras.chat_animation": "Ямьле чат",
   "sunrise.extras.chat_animation.tooltip": "Яңа чат сызыгы сулдан кереп китә, ул бөтенләй күренми.",
   "sunrise.extras.chat_indicator": "Хәбәр күрсәткече",

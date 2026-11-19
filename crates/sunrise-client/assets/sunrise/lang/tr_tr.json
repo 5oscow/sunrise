@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Asistan Denetimi",
   "sunrise.extras.agent_control.tooltip": "Kendi yapay zekâ asistanınız bu oyunu sunrise-ctl veya bir MCP istemcisi üzerinden, yalnızca bu bilgisayarda oynayabilir.",
-  "sunrise.extras.auto_reconnect": "Otomatik yeniden bağlan",
-  "sunrise.extras.auto_reconnect.tooltip": "Bağlantı koptuktan veya yeniden başlatmadan sonra sunucuya yeniden bağlanır; atılma veya yasaklamadan sonra asla.",
   "sunrise.extras.chat_animation": "Akıcı sohbet",
   "sunrise.extras.chat_animation.tooltip": "Yeni bir sohbet satırı, bir bütün hâlinde belirmek yerine soldan kayar ve yavaş yavaş belirir.",
   "sunrise.extras.chat_indicator": "Mesaj göstergesi",

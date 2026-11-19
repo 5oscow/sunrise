@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Agent kontrôle",
   "sunrise.extras.agent_control.tooltip": "Jo eigen AI-agint kin dit spultsje spielje fia sunrise-ctl as in MCP-kliïnt, allinich op dizze kompjûter.",
-  "sunrise.extras.auto_reconnect": "Automatysk opnij ferbine",
-  "sunrise.extras.auto_reconnect.tooltip": "Komt wer by in tsjinner nei in ferlern ferbining of in trochstart, nea nei in traap of ferbod.",
   "sunrise.extras.chat_animation": "Smooth petear",
   "sunrise.extras.chat_animation.tooltip": "In nije petearrigel glydt fan links yn, wylst it yn ferdwynt, ynstee fan folslein te ferskinen.",
   "sunrise.extras.chat_indicator": "Berjocht yndikator",

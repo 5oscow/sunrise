@@ -392,8 +392,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "การควบคุมตัวแทน",
   "sunrise.extras.agent_control.tooltip": "เจ้าหน้าที่ AI ของคุณสามารถเล่นเกมนี้ได้ผ่าน Sunrise-ctl หรือไคลเอนต์ MCP บนคอมพิวเตอร์เครื่องนี้เท่านั้น",
-  "sunrise.extras.auto_reconnect": "เชื่อมต่อใหม่อัตโนมัติ",
-  "sunrise.extras.auto_reconnect.tooltip": "เข้าร่วมเซิร์ฟเวอร์อีกครั้งหลังจากการเชื่อมต่อขาดหายไปหรือการรีสตาร์ท ไม่เคยหลังจากการเตะหรือแบน",
   "sunrise.extras.chat_animation": "แชทได้อย่างราบรื่น",
   "sunrise.extras.chat_animation.tooltip": "บรรทัดแชทใหม่เลื่อนเข้ามาจากด้านซ้ายในขณะที่ค่อยๆ จางหายไป แทนที่จะปรากฏทั้งหมด",
   "sunrise.extras.chat_indicator": "ตัวบ่งชี้ข้อความ",

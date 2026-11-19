@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Агентті басқару",
   "sunrise.extras.agent_control.tooltip": "Жеке AI агенті бұл ойынды тек осы компьютерде sunrise-ctl немесе MCP клиенті арқылы ойнай алады.",
-  "sunrise.extras.auto_reconnect": "Автоматты қайта қосу",
-  "sunrise.extras.auto_reconnect.tooltip": "Жоғалған қосылымнан немесе қайта іске қосылғаннан кейін серверге қайта қосылады, соққыдан немесе тыйым салудан кейін ешқашан.",
   "sunrise.extras.chat_animation": "Тегіс чат",
   "sunrise.extras.chat_animation.tooltip": "Жаңа сөйлесу сызығы тұтас болып көрінудің орнына, өшіп жатқанда, сол жақтан сырғытады.",
   "sunrise.extras.chat_indicator": "Хабарлама көрсеткіші",

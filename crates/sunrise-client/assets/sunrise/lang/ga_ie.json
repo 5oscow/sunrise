@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Rialú Gníomhaire",
   "sunrise.extras.agent_control.tooltip": "Is féidir le do ghníomhaire AI féin an cluiche seo a imirt trí sunrise-ctl nó cliant MCP, ar an ríomhaire seo amháin.",
-  "sunrise.extras.auto_reconnect": "Auto-athcheangail",
-  "sunrise.extras.auto_reconnect.tooltip": "Athníonn sé le freastalaí tar éis nasc caillte nó atosaithe, riamh tar éis ciceáil nó cosc.",
   "sunrise.extras.chat_animation": "Comhrá réidh",
   "sunrise.extras.chat_animation.tooltip": "Sleamhnaíonn líne comhrá nua isteach ón taobh clé agus í ag dul i léig, in ionad a bheith ina hiomláine.",
   "sunrise.extras.chat_indicator": "Táscaire teachtaireachta",

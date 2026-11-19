@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Գործակալի վերահսկում",
   "sunrise.extras.agent_control.tooltip": "Ձեր սեփական AI գործակալը կարող է խաղալ այս խաղը sunrise-ctl կամ MCP հաճախորդի միջոցով, միայն այս համակարգչով:",
-  "sunrise.extras.auto_reconnect": "Ավտոմատ վերամիացում",
-  "sunrise.extras.auto_reconnect.tooltip": "Կրկին միանում է սերվերին կորցրած կապից կամ վերագործարկումից հետո, երբեք հարվածից կամ արգելքից հետո:",
   "sunrise.extras.chat_animation": "Հարթ զրույց",
   "sunrise.extras.chat_animation.tooltip": "Նոր զրույցի գիծը սահում է ձախից, մինչդեռ այն խամրում է, այլ ոչ թե ամբողջությամբ երևալու:",
   "sunrise.extras.chat_indicator": "Հաղորդագրության ցուցիչ",

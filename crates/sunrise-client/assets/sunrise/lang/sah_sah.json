@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Агент хонтуруола",
   "sunrise.extras.agent_control.tooltip": "Бэйэҥ ИИ-агент бу оонньууну sunrise-ctl эбэтэр MCP клиен нөҥүө бу көмпүүтэргэ эрэ оонньуон сөп.",
-  "sunrise.extras.auto_reconnect": "Автоматически холбуу",
-  "sunrise.extras.auto_reconnect.tooltip": "Сибээс сүппүтүн эбэтэр хаттаан саҕаламмытын кэннэ серверга төннөр, хаһан даҕаны охсуу эбэтэр бобуу кэнниттэн буолбатах.",
   "sunrise.extras.chat_animation": "Сымнаҕас кэпсэтии",
   "sunrise.extras.chat_animation.tooltip": "Саҥа чат строката бүтүннүү көстүбэккэ, умуллан турдаҕына, хаҥас өттүттэн киирэр.",
   "sunrise.extras.chat_indicator": "Сурук көрдөрүүтэ",

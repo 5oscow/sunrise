@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Агент Цонтрол",
   "sunrise.extras.agent_control.tooltip": "Ваш сопствени АИ агент може да игра ову игру преко хоризон-цтл или МЦП клијента, само на овом рачунару.",
-  "sunrise.extras.auto_reconnect": "Аутоматско поновно повезивање",
-  "sunrise.extras.auto_reconnect.tooltip": "Поново се придружује серверу након изгубљене везе или поновног покретања, никада након избацивања или забране.",
   "sunrise.extras.chat_animation": "Глатко ћаскање",
   "sunrise.extras.chat_animation.tooltip": "Нова линија за ћаскање клизи са леве стране док бледи, уместо да изгледа цела.",
   "sunrise.extras.chat_indicator": "Индикатор поруке",

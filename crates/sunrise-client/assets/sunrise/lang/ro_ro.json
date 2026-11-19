@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Controlul agentului",
   "sunrise.extras.agent_control.tooltip": "Propriul tău agent AI poate juca acest joc prin sunrise-ctl sau un client MCP, numai pe acest computer.",
-  "sunrise.extras.auto_reconnect": "Reconectare automată",
-  "sunrise.extras.auto_reconnect.tooltip": "Se reunește pe un server după o conexiune pierdută sau o repornire, niciodată după o lovitură sau ban.",
   "sunrise.extras.chat_animation": "Chat lin",
   "sunrise.extras.chat_animation.tooltip": "O nouă linie de chat glisează din stânga în timp ce dispare, în loc să pară întreg.",
   "sunrise.extras.chat_indicator": "Indicator de mesaj",

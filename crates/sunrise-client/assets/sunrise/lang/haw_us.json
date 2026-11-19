@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Mana Agena",
   "sunrise.extras.agent_control.tooltip": "Hiki i kāu ʻelele AI ke pāʻani i kēia pāʻani ma o ka sunrise-ctl a i ʻole ka mea kūʻai aku MCP, ma kēia kamepiula wale nō.",
-  "sunrise.extras.auto_reconnect": "Hoʻohui hou ʻakomi",
-  "sunrise.extras.auto_reconnect.tooltip": "Hoʻopili hou i kahi kikowaena ma hope o ka nalowale ʻana a i ʻole ka hoʻomaka hou ʻana, ʻaʻole ma hope o ke kīki a pāpā ʻole.",
   "sunrise.extras.chat_animation": "Kamaʻilio maʻalahi",
   "sunrise.extras.chat_animation.tooltip": "He laina kamaʻilio hou e paheʻe mai ka hema i ka nalo ʻana, ma kahi o ka ʻike ʻia ʻana.",
   "sunrise.extras.chat_indicator": "Hōʻailona memo",

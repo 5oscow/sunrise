@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Agent beheer",
   "sunrise.extras.agent_control.tooltip": "Jou eie KI-agent kan hierdie speletjie deur sunrise-ctl of 'n MCP-kliënt speel, slegs op hierdie rekenaar.",
-  "sunrise.extras.auto_reconnect": "Herkoppel outomaties",
-  "sunrise.extras.auto_reconnect.tooltip": "Sluit weer by 'n bediener aan na 'n verlore verbinding of 'n herbegin, nooit na 'n skop of verbod nie.",
   "sunrise.extras.chat_animation": "Glad gesels",
   "sunrise.extras.chat_animation.tooltip": "'n Nuwe kletslyn gly van links af terwyl dit vervaag, in plaas daarvan om heel te lyk.",
   "sunrise.extras.chat_indicator": "Boodskap aanwyser",

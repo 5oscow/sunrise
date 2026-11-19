@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "ການຄວບຄຸມຕົວແທນ",
   "sunrise.extras.agent_control.tooltip": "ຕົວແທນ AI ຂອງທ່ານເອງສາມາດຫຼິ້ນເກມນີ້ຜ່ານ sunrise-ctl ຫຼືລູກຄ້າ MCP, ໃນຄອມພິວເຕີເຄື່ອງນີ້ເທົ່ານັ້ນ.",
-  "sunrise.extras.auto_reconnect": "ເຊື່ອມຕໍ່ຄືນໃໝ່ອັດຕະໂນມັດ",
-  "sunrise.extras.auto_reconnect.tooltip": "ເຂົ້າຮ່ວມເຊີບເວີຄືນໃໝ່ຫຼັງຈາກການເຊື່ອມຕໍ່ທີ່ສູນເສຍ ຫຼື ຣີສະຕາດ, ບໍ່ເຄີຍມີການເຕະ ຫຼື ຫ້າມ.",
   "sunrise.extras.chat_animation": "ການສົນທະນາທີ່ລຽບງ່າຍ",
   "sunrise.extras.chat_animation.tooltip": "ແຖວສົນທະນາໃໝ່ເລື່ອນເຂົ້າມາຈາກຊ້າຍໃນຂະນະທີ່ມັນຈາງລົງ, ແທນທີ່ຈະປາກົດທັງໝົດ.",
   "sunrise.extras.chat_indicator": "ຕົວຊີ້ບອກຂໍ້ຄວາມ",

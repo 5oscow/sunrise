@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Upravljanje agentom",
   "sunrise.extras.agent_control.tooltip": "Vaš vlastiti AI agent može igrati ovu igru putem sunrise-ctl ili MCP klijenta, samo na ovom računalu.",
-  "sunrise.extras.auto_reconnect": "Automatsko ponovno povezivanje",
-  "sunrise.extras.auto_reconnect.tooltip": "Ponovno se pridružuje poslužitelju nakon izgubljene veze ili ponovnog pokretanja, nikada nakon izbacivanja ili zabrane.",
   "sunrise.extras.chat_animation": "Glatki chat",
   "sunrise.extras.chat_animation.tooltip": "Nova linija chata klizi s lijeve strane dok blijedi, umjesto da se pojavi cijela odjednom.",
   "sunrise.extras.chat_indicator": "Indikator poruke",

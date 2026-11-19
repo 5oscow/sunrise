@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "בקרת סוכן",
   "sunrise.extras.agent_control.tooltip": "סוכן AI משלך יכול לשחק במשחק הזה דרך sunrise-ctl או לקוח MCP, במחשב זה בלבד.",
-  "sunrise.extras.auto_reconnect": "חיבור אוטומטי",
-  "sunrise.extras.auto_reconnect.tooltip": "מצטרף מחדש לשרת לאחר איבוד חיבור או הפעלה מחדש, לעולם לא לאחר בעיטה או איסור.",
   "sunrise.extras.chat_animation": "צ'אט חלק",
   "sunrise.extras.chat_animation.tooltip": "קו צ'אט חדש גולש פנימה משמאל בזמן שהוא נמוג פנימה, במקום להיראות שלם.",
   "sunrise.extras.chat_indicator": "מחוון הודעה",

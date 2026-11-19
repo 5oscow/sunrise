@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Control dai agjents",
   "sunrise.extras.agent_control.tooltip": "Il to agjent AI al pues zuiâ a chest zûc midiant di sunrise-ctl o di un client MCP, dome su chest ordenadôr.",
-  "sunrise.extras.auto_reconnect": "Riconetisi automatic",
-  "sunrise.extras.auto_reconnect.tooltip": "Tornâ a jentrâ intun servidôr dopo une conession pierdude o un riavviâ, mai dopo un colp o un ban.",
   "sunrise.extras.chat_animation": "Cjacarade regolâr",
   "sunrise.extras.chat_animation.tooltip": "Une gnove linie di chat e slungje dentri di çampe intant che e svanìs, invezit di comparî interie.",
   "sunrise.extras.chat_indicator": "Indicadôr di messaç",

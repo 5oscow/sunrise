@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Controle de Agente",
   "sunrise.extras.agent_control.tooltip": "Seu próprio agente de IA pode jogar este jogo por meio do sunrisete-ctl ou de um cliente MCP, apenas neste computador.",
-  "sunrise.extras.auto_reconnect": "Reconectar automaticamente",
-  "sunrise.extras.auto_reconnect.tooltip": "Volta a um servidor após uma perda de conexão ou reinicialização, nunca após um kick ou ban.",
   "sunrise.extras.chat_animation": "Bate-papo tranquilo",
   "sunrise.extras.chat_animation.tooltip": "Uma nova linha de bate-papo aparece da esquerda enquanto desaparece, em vez de aparecer inteira.",
   "sunrise.extras.chat_indicator": "Indicador de mensagem",

@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Ügynökvezérlés",
   "sunrise.extras.agent_control.tooltip": "Saját AI-ügynöke csak ezen a számítógépen tudja játszani ezt a játékot a sunrise-ctl-n vagy egy MCP-kliensen keresztül.",
-  "sunrise.extras.auto_reconnect": "Automatikus újracsatlakozás",
-  "sunrise.extras.auto_reconnect.tooltip": "Megszakadt kapcsolat vagy újraindítás után csatlakozik újra a szerverhez, soha nem rúgás vagy kitiltás után.",
   "sunrise.extras.chat_animation": "Sima chat",
   "sunrise.extras.chat_animation.tooltip": "Egy új csevegősor balról csúszik be, miközben elhalványul, ahelyett, hogy egészben jelenne meg.",
   "sunrise.extras.chat_indicator": "Üzenetjelző",

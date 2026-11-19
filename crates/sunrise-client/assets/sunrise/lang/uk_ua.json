@@ -392,8 +392,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Керування агентом",
   "sunrise.extras.agent_control.tooltip": "Ваш власний ШІ-агент може грати в цю гру через sunrise-ctl або MCP-клієнт, лише на цьому комп’ютері.",
-  "sunrise.extras.auto_reconnect": "Перепідключення",
-  "sunrise.extras.auto_reconnect.tooltip": "Знову приєднується до сервера після втрати з’єднання чи перезапуску, але ніколи після вигнання чи блокування.",
   "sunrise.extras.chat_animation": "Плавний чат",
   "sunrise.extras.chat_animation.tooltip": "Новий рядок чату виїжджає зліва, поступово з’являючись, замість того щоб з’явитися одразу.",
   "sunrise.extras.chat_indicator": "Позначка повідомлення",

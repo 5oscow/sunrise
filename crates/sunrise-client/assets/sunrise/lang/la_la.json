@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Agens Imperium",
   "sunrise.extras.agent_control.tooltip": "Pro- prium agens AI agens hunc ludum per sunrisetem-ctl vel MCP clientem ludere potest, in hoc computatorio tantum.",
-  "sunrise.extras.auto_reconnect": "Reconiuctio automatica",
-  "sunrise.extras.auto_reconnect.tooltip": "Servo post perditum nexum aut sileo, numquam post calcitrare aut bannum petit.",
   "sunrise.extras.chat_animation": "Chat lene",
   "sunrise.extras.chat_animation.tooltip": "Novum chat linea labitur in a sinistra, dum recedit in, non apparere totum.",
   "sunrise.extras.chat_indicator": "Nuntius indicator",

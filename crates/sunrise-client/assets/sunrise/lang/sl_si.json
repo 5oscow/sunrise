@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Agentski nadzor",
   "sunrise.extras.agent_control.tooltip": "Vaš agent z umetno inteligenco lahko igra to igro prek sunrise-ctl ali odjemalca MCP samo na tem računalniku.",
-  "sunrise.extras.auto_reconnect": "Samodejna ponovna povezava",
-  "sunrise.extras.auto_reconnect.tooltip": "Ponovno se pridruži strežniku po izgubi povezave ali ponovnem zagonu, nikoli po udarcu ali prepovedi.",
   "sunrise.extras.chat_animation": "Gladek klepet",
   "sunrise.extras.chat_animation.tooltip": "Nova vrstica za klepet zdrsne z leve, medtem ko zbledi, namesto da bi bila videti cela.",
   "sunrise.extras.chat_indicator": "Indikator sporočila",

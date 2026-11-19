@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Agentcontrole",
   "sunrise.extras.agent_control.tooltip": "Uw eige AI-agent kin dit spel speule via sunrise-ctl of un MCP-cliënt, allein op dees computer.",
-  "sunrise.extras.auto_reconnect": "Automatisch herverbinde",
-  "sunrise.extras.auto_reconnect.tooltip": "Sluit zich weer bij ‘n server nao ‘n verlore verbinding of ‘n herstart, noets nao ‘n kick of ban.",
   "sunrise.extras.chat_animation": "Vloeiende gesprek",
   "sunrise.extras.chat_animation.tooltip": "‘n Nuie chatlijn glijdt vaanaaf links in onderwieles dat ‘t in vervaag, in plaats vaan gans te versjiene.",
   "sunrise.extras.chat_indicator": "Boodsjapsindicator",

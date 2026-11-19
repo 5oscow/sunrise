@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Umboðsmannaeftirlit",
   "sunrise.extras.agent_control.tooltip": "Þinn eigin gervigreind umboðsmaður getur spilað þennan leik í gegnum sunrise-ctl eða MCP biðlara, eingöngu á þessari tölvu.",
-  "sunrise.extras.auto_reconnect": "Sjálfvirk endurtenging",
-  "sunrise.extras.auto_reconnect.tooltip": "Gengur aftur inn á netþjón eftir að tengingin hefur rofnað eða endurræst, aldrei eftir spark eða bann.",
   "sunrise.extras.chat_animation": "Létt spjall",
   "sunrise.extras.chat_animation.tooltip": "Ný spjalllína rennur inn frá vinstri á meðan hún dofnar inn, í stað þess að virðast heil.",
   "sunrise.extras.chat_indicator": "Skilaboðavísir",

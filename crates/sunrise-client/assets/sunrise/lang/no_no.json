@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Agentkontroll",
   "sunrise.extras.agent_control.tooltip": "Din egen AI-agent kan spille dette spillet gjennom sunrise-ctl eller en MCP-klient, kun på denne datamaskinen.",
-  "sunrise.extras.auto_reconnect": "Koble til automatisk",
-  "sunrise.extras.auto_reconnect.tooltip": "Blir med på en server igjen etter en tapt forbindelse eller en omstart, aldri etter et kick eller utestengelse.",
   "sunrise.extras.chat_animation": "Jevn chat",
   "sunrise.extras.chat_animation.tooltip": "En ny chat-linje glir inn fra venstre mens den toner inn, i stedet for å virke hel.",
   "sunrise.extras.chat_indicator": "Meldingsindikator",

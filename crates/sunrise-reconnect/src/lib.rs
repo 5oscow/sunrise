@@ -19,6 +19,9 @@ use sunrise_platform::hooks::{self, Hooks};
 use sunrise_platform::pages::{Act, Label, Page, Place, Row};
 use sunrise_platform::settings::Store;
 
+/// The setting's localized label and tooltip, registered only with the crate.
+pub static LANG: &sunrise_platform::lang::Files = include!(concat!(env!("OUT_DIR"), "/locales.rs"));
+
 /// Its hooks, for `sunrise_platform::hooks::register`.
 pub static HOOKS: Reconnect = Reconnect;
 

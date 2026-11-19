@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Kontrola agentů",
   "sunrise.extras.agent_control.tooltip": "Váš vlastní AI agent může hrát tuto hru prostřednictvím sunrise-ctl nebo klienta MCP pouze na tomto počítači.",
-  "sunrise.extras.auto_reconnect": "Automatické opětovné připojení",
-  "sunrise.extras.auto_reconnect.tooltip": "Znovu se připojí k serveru po ztrátě připojení nebo restartu, nikdy po kopu nebo banu.",
   "sunrise.extras.chat_animation": "Hladký chat",
   "sunrise.extras.chat_animation.tooltip": "Nová čára chatu se vsune zleva, zatímco se mizí, místo aby vypadala celá.",
   "sunrise.extras.chat_indicator": "Indikátor zprávy",

@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "エージェント制御",
   "sunrise.extras.agent_control.tooltip": "独自の AI エージェントは、このコンピューター上でのみ、sunrise-ctl または MCP クライアントを通じてこのゲームをプレイできます。",
-  "sunrise.extras.auto_reconnect": "自動再接続",
-  "sunrise.extras.auto_reconnect.tooltip": "キックや禁止の後ではなく、接続の喪失または再起動後にサーバーに再参加します。",
   "sunrise.extras.chat_animation": "スムーズなチャット",
   "sunrise.extras.chat_animation.tooltip": "新しいチャット ラインは全体として表示されるのではなく、フェードインしながら左側からスライドして表示されます。",
   "sunrise.extras.chat_indicator": "メッセージインジケーター",

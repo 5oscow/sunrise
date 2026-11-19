@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Контрола на агенти",
   "sunrise.extras.agent_control.tooltip": "Вашиот ВИ агент може да ја игра оваа игра преку sunrise-ctl или MCP клиент, само на овој компјутер.",
-  "sunrise.extras.auto_reconnect": "Автоматско повторно поврзување",
-  "sunrise.extras.auto_reconnect.tooltip": "Повторно се приклучува на серверот по изгубена врска или рестартирање, никогаш по удар или забрана.",
   "sunrise.extras.chat_animation": "Мазен разговор",
   "sunrise.extras.chat_animation.tooltip": "Новата линија за разговор се лизга од лево додека бледне, наместо да се појавува целина.",
   "sunrise.extras.chat_indicator": "Индикатор за порака",

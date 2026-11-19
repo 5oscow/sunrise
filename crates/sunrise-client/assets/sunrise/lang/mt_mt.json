@@ -387,8 +387,6 @@
   "sunrise.developer_offline.single_player": "Offline developer session: single-player only.",
   "sunrise.extras.agent_control": "Kontroll tal-Aġent",
   "sunrise.extras.agent_control.tooltip": "L-aġent AI tiegħek stess jista' jilgħab din il-logħba permezz ta' sunrise-ctl jew klijent MCP, fuq dan il-kompjuter biss.",
-  "sunrise.extras.auto_reconnect": "Ikkonnettja mill-ġdid awtomatikament",
-  "sunrise.extras.auto_reconnect.tooltip": "Terġa' jingħaqad ma' server wara konnessjoni mitlufa jew bidu mill-ġdid, qatt wara kick jew projbizzjoni.",
   "sunrise.extras.chat_animation": "Chat bla xkiel",
   "sunrise.extras.chat_animation.tooltip": "Linja ta' chat ġdida tiżżerżaq 'il ġewwa mix-xellug waqt li tgħib, minflok tidher sħiħa.",
   "sunrise.extras.chat_indicator": "Indikatur tal-messaġġ",
