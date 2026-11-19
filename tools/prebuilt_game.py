@@ -542,8 +542,8 @@ def _build_locked(out: Path, server: bool, target_dir: Path) -> None:
     # their dependencies beside themselves. macOS's @rpath install names use the executable's rpath.
     if sys.platform == "linux":
         rustflags += " -C link-arg=-Wl,-rpath,$ORIGIN"
-    # No official layer in a dedicated server (or a staged source without the package).
-    official = not server and (staged / "crates" / OFFICIAL / "Cargo.toml").is_file()
+    # No official layer in a dedicated server.
+    official = not server
     packages = ["-p", GAME, "-p", OFFICIAL] if official else ["-p", GAME]
     # Encoded flags take precedence over RUSTFLAGS in Cargo.
     environment = {key: value for key, value in os.environ.items() if key != "CARGO_ENCODED_RUSTFLAGS"}
