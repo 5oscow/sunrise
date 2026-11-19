@@ -240,6 +240,10 @@ impl DynamicTextures {
         sprites.remove(&id.to_string());
         Ok(())
     }
+    /// The dimensions of a live image, if this id names one.
+    pub fn size(&self, id: &Identifier) -> Option<[u32; 2]> {
+        self.images.get(id).map(|image| image.size)
+    }
     /// What mod `owner` may still create.
     pub fn budget(
         &self,
