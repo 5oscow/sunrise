@@ -1,12 +1,18 @@
 use super::*;
 use crate::game::native_entity_refs::tests::{fixture_root, with_client_game, with_game_role};
-use crate::game::{execution_role::ExecutionRole, world_loading::WorldRequest};
+use crate::game::{execution_role::ExecutionRole, lan::LanHost};
 use mod_api::__private::PhaseOwner;
 use mod_api::prelude::ItemsHost;
 use mod_api::{BuildCreativeModeTabContentsEvent, Hooks, HostSide, ModEntry};
-use std::path::Path;
 use std::sync::Mutex;
+use sunrise_client::lan::{
+    Lan, NetConfig,
+    chunks::ChunkEncoder,
+    data::SyncData,
+    hub::{Hub, HubConfig},
+};
 use sunrise_core::nbt::{Compound, Tag};
+use sunrise_world::loot::PackOverlay;
 
 #[derive(Default)]
 struct Seen {
@@ -191,38 +197,56 @@ fn definition(max_level: i32) -> serde_json::Value {
     })
 }
 
-fn open_dedicated_world(game: &mut Game<'_>, root: &Path, max_level: i32) {
-    let pack = root.join("datapacks/holders");
-    let entries = pack.join("data/test/enchantment");
-    std::fs::create_dir_all(&entries).unwrap();
-    std::fs::write(
-        entries.join("levels.json"),
-        definition(max_level).to_string(),
-    )
-    .unwrap();
-    std::fs::write(
-        pack.join("pack.mcmeta"),
-        r#"{"pack":{"description":"holders","min_format":94,"max_format":94}}"#,
-    )
-    .unwrap();
-    std::fs::write(
-        root.join("datapacks.json"),
-        r#"{"enabled":["vanilla","file/holders"],"disabled":[]}"#,
-    )
-    .unwrap();
-    let mut request = WorldRequest::new(
-        "creative",
-        Some("Creative registry fixture"),
-        Some(1),
-        true,
-        None,
-        Arc::new(sunrise_client::gamerules::RuleRegistry::vanilla()),
-    )
-    .unwrap();
-    request.save_root = root.to_owned();
+fn install_dedicated_holders(game: &mut Game<'_>, max_level: i32) {
+    let files = vec![(
+        "enchantment/test:levels".into(),
+        vec![definition(max_level).to_string().into_bytes()],
+    )];
+    let sync = Arc::new(
+        SyncData::load(
+            &game.options.resources,
+            &PackOverlay::new(&files),
+            game.res.item_defaults(),
+            &sunrise_client::crafting::ResolvedSources::default(),
+        )
+        .unwrap(),
+    );
+    let net = NetConfig {
+        listen: false,
+        ..NetConfig::loopback(0, String::new(), 2)
+    };
+    let lan = Lan::start_with(sync.clone(), net).unwrap();
+    let encoder = ChunkEncoder::new(
+        [] as [(Arc<str>, bool); 0],
+        &sync.builtin,
+        &[],
+        &[],
+        Default::default(),
+    );
+    let config = HubConfig {
+        default_game_mode: 0,
+        guest_commands: false,
+        force_game_mode: false,
+        hardcore: false,
+        view_distance: 2,
+        simulation_distance: 2,
+        dimension: game.dim.id().to_owned(),
+        allow_flight: false,
+        seed: 0,
+        max_players: 2,
+        integrated: false,
+        levels: game.level_shapes,
+        level_seeds: game.levels.runtime.seeds(),
+    };
+    game.lan = Some(LanHost::for_test(Hub::new(
+        lan,
+        sync,
+        encoder,
+        config,
+        game.loop_context.clone(),
+    )));
     game.native_lifecycle_open_started();
-    game.load_world(request).unwrap();
-    game.native_lifecycle_world_ready();
+    game.native_lifecycle.world_open_ready();
 }
 
 fn replace_client_definition(game: &mut Game<'_>, max_level: i32) {
@@ -294,9 +318,9 @@ fn creative_catalog_builds_lazily_and_edits_before_filtering_on_both_sides() {
     let check = |game: &mut Game<'_>, side| {
         game.creative_screen = Creative::from_json(&catalog).unwrap();
         assert!(!game.creative_screen.has_contents());
-        {
+        for phase in [ModPhase::Setup, ModPhase::Reloading] {
             // Enter through the generated native forwarding methods, not Game's impls.
-            let _setup = PhaseOwner::scope(ModPhase::Setup);
+            let _phase = PhaseOwner::scope(phase);
             if side == LogicalSide::Client {
                 let host: &mut dyn mod_api::ClientHost = game;
                 assert!(host.creative_search_items().is_empty());
@@ -361,8 +385,8 @@ fn creative_catalog_builds_lazily_and_edits_before_filtering_on_both_sides() {
         let cached = host.creative_tabs(CreativeTabPermissions::Normal).unwrap();
         assert!(Arc::ptr_eq(&normal, &cached));
         let old = seen.lock().unwrap().token.unwrap();
-        {
-            let _setup = PhaseOwner::scope(ModPhase::Setup);
+        for phase in [ModPhase::Setup, ModPhase::Reloading] {
+            let _phase = PhaseOwner::scope(phase);
             assert_eq!(
                 old.entries(host, CreativeTabList::Search),
                 Err(CreativeTabEditError::Stale)
@@ -415,26 +439,26 @@ fn creative_catalog_builds_lazily_and_edits_before_filtering_on_both_sides() {
         assert_eq!(book_level(&normal), 2);
         normal
     };
-    let check_replacement = |game: &mut Game<'_>, old: Arc<CreativeModeTabs>| {
+    let check_replacement = |game: &mut Game<'_>, old: &CreativeModeTabs| {
         // Registry installation must not dispatch; the next demand uses the changed definition.
         assert!(seen.lock().unwrap().events.is_empty());
         let fresh = ItemsHost::creative_tabs(game, CreativeTabPermissions::Normal).unwrap();
         assert_eq!(book_level(&fresh), 4);
-        assert_eq!(book_level(&old), 2);
+        assert_eq!(book_level(old), 2);
         assert_eq!(seen.lock().unwrap().events.len(), 6);
         seen.lock().unwrap().events.clear();
     };
     mod_platform::testing::with_mods(setups, || {
         let _world = PhaseOwner::scope(ModPhase::World);
+        let mut dedicated = None;
         with_game_role(fixture_root(), ExecutionRole::DedicatedServer, |game| {
-            let _publication = sunrise_client::datapack_net::isolate_server_publication();
-            let worlds = tempfile::tempdir().unwrap();
-            open_dedicated_world(game, &worlds.path().join("old"), 2);
-            let old = check(game, LogicalSide::Server);
-            game.finish_close_world().unwrap();
-            open_dedicated_world(game, &worlds.path().join("new"), 4);
-            check_replacement(game, old);
-            game.finish_close_world().unwrap();
+            install_dedicated_holders(game, 2);
+            dedicated = Some(check(game, LogicalSide::Server));
+        });
+        with_game_role(fixture_root(), ExecutionRole::DedicatedServer, |game| {
+            install_dedicated_holders(game, 4);
+            game.creative_screen = Creative::from_json(&catalog).unwrap();
+            check_replacement(game, dedicated.as_deref().unwrap());
         });
         with_client_game(|game| {
             let _server = logged_client(game);
@@ -443,7 +467,7 @@ fn creative_catalog_builds_lazily_and_edits_before_filtering_on_both_sides() {
             replace_client_definition(game, 2);
             let old = check(game, LogicalSide::Client);
             replace_client_definition(game, 4);
-            check_replacement(game, old);
+            check_replacement(game, &old);
         });
     });
 }

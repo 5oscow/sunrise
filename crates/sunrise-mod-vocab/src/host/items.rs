@@ -68,8 +68,8 @@ pub trait ItemsHost {
     /// A same-parameter read from a listener sees tabs already built and the previous
     /// contents of tabs not yet built. Reentering with different parameters is refused.
     /// Published snapshots stay immutable. Permission is a build parameter, not a grant.
-    /// During setup or without a live world, returns [`CreativeTabReadError::Unavailable`].
-    #[access(ClientSetup)]
+    /// During setup, reload, or without a live world, returns [`CreativeTabReadError::Unavailable`].
+    #[access(Metadata)]
     fn creative_tabs(
         &mut self,
         permissions: CreativeTabPermissions,
@@ -165,8 +165,8 @@ pub trait ItemsClientHost {
     /// The creative search tab's final display order, for ranking stacks in inventory sorters.
     /// This requests the same catalog as the creative screen (using the player's permission and
     /// Operator Items Tab option). On a miss it dispatches the creative build hook. During setup,
-    /// without a live catalog, or during a different build, this returns an empty list.
-    #[access(ClientSetup)]
+    /// reload, a different build, or without a live catalog, this returns an empty list.
+    #[access(Metadata)]
     fn creative_search_items(&mut self) -> Vec<ItemStack>;
     /// Side: client.
     /// Registered enchantments, in registry order.
@@ -197,16 +197,16 @@ pub trait ItemsBackend {
     #[access(Metadata)]
     fn creative_stack_key(&self, stack: &ItemStack) -> Option<ItemStack>;
 
-    // The editor checks the active callback on both sides; setup can only return Stale.
+    // The editor checks the active callback on both sides; setup and reload can only return Stale.
     /// Side: both. Read the current entries through the active creative tab editor.
-    #[access(ClientSetup)]
+    #[access(Metadata)]
     fn creative_tab_entries(
         &self,
         edit: CreativeTabEdit,
         list: CreativeTabList,
     ) -> Result<Vec<ItemStack>, CreativeTabEditError>;
     /// Side: both. Apply a change to the active creative tab editor.
-    #[access(ClientSetup)]
+    #[access(Metadata)]
     fn creative_tab_change(
         &self,
         edit: CreativeTabEdit,

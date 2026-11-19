@@ -732,13 +732,15 @@ You can also insert first, before or after a matching stack, read the current
 entries, remove a stack, or remove matching entries with a mod-side predicate.
 Matching ignores counts and uses exact item and components. Edits to both lists
 change parent first; a search error does not undo the parent edit. Feature
-filtering happens after listeners finish.
+filtering happens after listeners finish. An editor retained outside its active
+callback returns `CreativeTabEditError::Stale`, including during setup and reload.
 
 From either side of an open world, call
 `host.creative_tabs(CreativeTabPermissions::Normal)` to read the catalog for
 ordinary players, or request `Operator` explicitly to include operator
-generator output. The choice does not grant permission. The returned
-snapshot includes every registered tab, even empty or special tabs. Use
+generator output. The choice does not grant permission. During setup and reload,
+the read returns `CreativeTabReadError::Unavailable`. The returned snapshot includes
+every registered tab, even empty or special tabs. Use
 `tab.contains(host, &stack)` for exact membership in that tab's search list and
 `snapshot.tabs_showing(host, &stack)` for category tabs that display it. Use the
 originating world's Host so redundant component patches compare against its
