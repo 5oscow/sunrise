@@ -8,6 +8,7 @@ use std::{
     sync::{Arc, Mutex, OnceLock},
     time::{Duration, SystemTime},
 };
+use sunrise_java_properties::now_millis;
 
 /// MinecraftServicesEnvironment.PROD.
 pub const DEFAULT_DISCOVERY: &str = "https://discovery.minecraftservices.com/minecraft/client";
@@ -352,13 +353,6 @@ impl ChatKeyPair {
     pub fn due_refresh(&self, now: i64) -> bool {
         self.refreshed_after < now
     }
-}
-
-/// Epoch milliseconds now.
-pub fn now_millis() -> i64 {
-    SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map_or(0, |d| d.as_millis() as i64)
 }
 
 /// Instant.parse for the services' UTC times
