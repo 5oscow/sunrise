@@ -15,6 +15,32 @@ Once it is published, its page and its card in the launcher show its rating: pla
 page give it 1 to 5 stars, one rating per account, which they can change. Its owners can't rate it, and nobody sees
 who rated.
 
+## A collection
+
+Add `collections/<id>.toml` and a square PNG at `icons/<id>.png` in one pull request to
+[sunrise-org/sunrise-mods](https://github.com/sunrise-org/sunrise-mods). A collection is not a package: there's no file
+upload or version to publish.
+
+```toml
+id = "sunrise_creatures"
+name = "Sunrise Creatures"
+summary = "Fireflies, butterflies and their shared library."
+owners = ["octocat"]
+icon = "icons/sunrise_creatures.png"
+members = [
+  { id = "creature" },
+  { id = "fireflies" },
+  { id = "butterflies", default = false },
+]
+```
+
+Members are selected by default unless you set `default = false`. You can add a Markdown `description` and record
+numeric `owner_ids` in the same order as `owners`. `cargo sunrise-mod registry check <base> <head> --files <dir>`
+checks the proposed registry, including the collection; see the [full rules](../reference/registry-index.md#collections).
+
+To add a new mod, list it in the registry, then add its id to `members` in one collection pull request. If you own both
+the collection and the mod, this is a routine membership edit; changes to the page, defaults or owners wait for review.
+
 ## Integrity and signing
 
 - **Integrity.** Every download is checked against the SHA-256 the index lists before the file reaches the game

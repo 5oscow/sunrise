@@ -94,7 +94,7 @@ date = "2026-10-24"
 "#;
 
 /// The header of a PNG of `w`×`h` pixels: what the registry reads of an image.
-fn png(w: u32, h: u32) -> Vec<u8> {
+pub(super) fn png(w: u32, h: u32) -> Vec<u8> {
     let mut b = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
     b.extend(w.to_be_bytes());
     b.extend(h.to_be_bytes());
@@ -103,10 +103,10 @@ fn png(w: u32, h: u32) -> Vec<u8> {
 }
 
 /// A registry checkout and its downloaded files, in a scratch folder.
-struct Scratch(PathBuf);
+pub(super) struct Scratch(pub(super) PathBuf);
 
 impl Scratch {
-    fn new(name: &str) -> Scratch {
+    pub(super) fn new(name: &str) -> Scratch {
         let dir =
             std::env::temp_dir().join(format!("sunrise-registry-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -131,17 +131,17 @@ impl Scratch {
         s
     }
 
-    fn write(&self, path: &str, text: &str) {
+    pub(super) fn write(&self, path: &str, text: &str) {
         std::fs::write(self.0.join("repo").join(path), text).unwrap();
     }
 
-    fn write_bytes(&self, path: &str, bytes: &[u8]) {
+    pub(super) fn write_bytes(&self, path: &str, bytes: &[u8]) {
         let path = self.0.join("repo").join(path);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, bytes).unwrap();
     }
 
-    fn build(&self) -> Result<Index, Vec<String>> {
+    pub(super) fn build(&self) -> Result<Index, Vec<String>> {
         let (repo, files) = (self.0.join("repo"), self.0.join("files"));
         build(&Sources {
             registry: &repo,
@@ -693,6 +693,50 @@ fn a_project_listed_by_its_repository_takes_its_versions_from_releases() {
             .iter()
             .any(|e| e.contains("owner/name"))
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn screenshots_and_caches_refuse_linked_ancestor_directories() {
+    use std::{fs, os::unix::fs::symlink};
+    let s = Scratch::new("linked-screenshot-ancestor");
+    let root = s.0.join("repo");
+    let with_screenshot = hud_entry().replace(
+        "[[versions]]",
+        "screenshots = ['screenshots/coords_hud/view.png']\n\n[[versions]]",
+    );
+    s.write("mods/coords_hud.toml", &with_screenshot);
+    s.write_bytes("screenshots/coords_hud/view.png", &png(640, 360));
+    let index = s.build().unwrap();
+    assert_eq!(index.project("coords_hud").unwrap().screenshots.len(), 1);
+    let outside = s.0.join("outside-screenshots");
+    fs::rename(root.join("screenshots"), &outside).unwrap();
+    symlink(outside, root.join("screenshots")).unwrap();
+    let errors = s.build().unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("coords_hud") && e.contains("view.png")),
+        "{errors:?}"
+    );
+    fs::remove_file(root.join("screenshots")).unwrap();
+    s.write("mods/coords_hud.toml", &hud_entry());
+
+    s.write(
+        "mods/cozy.toml",
+        &format!("{COZY_REPO}name='Cozy'\nsummary='Calm.'\nlicense='MIT'\n"),
+    );
+    let cache = Cache {
+        versions: index.project("cozy").unwrap().versions.clone(),
+        ..Cache::default()
+    };
+    s.write_bytes("versions/cozy.json", &serde_json::to_vec(&cache).unwrap());
+    assert!(s.build().unwrap().project("cozy").is_some());
+    let outside = s.0.join("outside-versions");
+    fs::rename(root.join("versions"), &outside).unwrap();
+    symlink(outside, root.join("versions")).unwrap();
+    let errors = s.build().unwrap_err();
+    assert!(errors.iter().any(|e| e.contains("cozy.json")), "{errors:?}");
 }
 
 #[test]

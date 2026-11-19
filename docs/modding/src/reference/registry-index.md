@@ -39,7 +39,8 @@ entry leaves out.
 | Field | Meaning |
 | --- | --- |
 | `schema` | 1. A reader refuses a higher number with "update Sunrise" rather than misread it. |
-| `projects[].id` | `[a-z0-9_]{1,64}`, unique; a mod's is its manifest's `id`. Not a page of the mod site (`RESERVED_IDS` in `crates/sunrise-mod-package/src/manifest.rs`, `submit` and `mine` among them): a project's page is `/mods/<id>`. |
+| `projects[].id` | `[a-z0-9_]{1,64}`, unique among projects and collections; a mod's is its manifest's `id`. Not a page of the mod site (`RESERVED_IDS` in `crates/sunrise-mod-package/src/manifest.rs`, `submit` and `mine` among them): a project's page is `/mods/<id>`. |
+| `collections` | Optional top-level list of [collections](#collections). Each is a page and a list of already listed mod ids, with no file or version of its own. |
 | `kind` | `mod` (content), `native-mod`, `modpack`, `resourcepack`, `shader` (Sunrise `.sshader`), `shaderpack` (a `shaders/`-folder zip), `datapack` (a data-pack zip). Other kinds (worlds, themes) may come without a new schema: a reader keeps a kind it doesn't know and doesn't offer it. |
 | `summary`, `description` | Required summary of at most 160 characters for lists; Markdown for the project's page, required for a listed project and 50–10,000 characters after trimming. |
 | `owners` | GitHub logins allowed to publish updates. |
@@ -152,6 +153,32 @@ per-version native fit decisions, and an expected plan or refusal details.
 
 An absent `dependencies` field makes no claim about the package's dependencies: an older schema 1 index may omit
 it. The hash still pins the file; the game loader checks the manifest.
+
+## Collections
+
+A collection is a named selection of existing `mod` and `native-mod` projects. It has no file or version of its own.
+Unlike a `.spack`, it pins nothing: each selected mod is installed, updated and removed on its own. A collection and
+project may display the same name, but they cannot share an id, and the registry's reserved ids aren't available.
+
+The generated `collections` list takes each page from `collections/<id>.toml`: `id`, `name`, `summary`, optional
+Markdown `description`, GitHub `owners`, `icon` as the published HTTPS address, and ordered `members`. Each member
+has `id` and may set `default = false` to start unticked. The registry uses the same title, summary and PNG icon
+rules as a project. It requires at least two distinct listed mods and at least one selected by default; the upper
+bound is `sunrise_mod_package::index::MAX_COLLECTION_MEMBERS`. A collection cannot name another collection as a
+member. Checkout member rows reject unknown keys, so a typo in `default` does not change the selection silently.
+An older index without `collections` has no collections. Index readers ignore unknown fields and skip malformed
+collection rows with a reason, without discarding the other collections or projects.
+
+An installer submits all selected members to [install planning](#planning-installs-and-removals) together. Required
+dependencies are selected even if not on the collection's list; a member needed by another selected mod stays
+selected and identifies the mod that requires it. An unfit member is shown with its reason. A collection does not
+record where a mod was installed from.
+
+`registry check`, `registry build` and `registry review` refuse unlisted members, including the removal of a project
+that remains a member. Review reports which collections list a project with a new takedown. An edit to membership
+alone is routine when the pull request's author owns the collection and every added or removed project. Review
+matches the author's GitHub login against the base checkout's `owners`, as it does for project updates. See
+[publishing a collection](../how-to/publish.md#a-collection).
 
 ## `.spack`
 
