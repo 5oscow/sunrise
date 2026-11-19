@@ -5,9 +5,7 @@
 //! changed since (`getAttributesToSync`), to the trackers and the player itself.
 use sunrise_protocol::packets::play::{AttributeModifier, AttributeSnapshot};
 use sunrise_world::attributes::{
-    Instance, Modifier, Operation,
-    entity::AttributeId,
-    live::LiveAttributes,
+    Instance, Modifier, Operation, entity::AttributeId, live::LiveAttributes,
 };
 
 /// `AttributeModifier.Operation.id`.

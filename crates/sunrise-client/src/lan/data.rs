@@ -816,7 +816,6 @@ impl SyncData {
         Ok(sync)
     }
 
-
     /// The creative builder's server view: the same ordered entries and current tags a
     /// joining client receives. The network's name-only index omits the decoded payloads.
     pub fn creative_holders(&self) -> sunrise_items::creative_catalog::Holders {
