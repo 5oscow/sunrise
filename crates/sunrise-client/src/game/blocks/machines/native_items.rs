@@ -2,7 +2,7 @@
 //! container slots and the composter's state-backed input/output, by the rules hoppers follow.
 //! Side-local slots are numbered from zero. It acts where the world is simulated, never on
 //! a client's copy, and only on the level in place.
-use super::{Game, Kind, Pos, Slots, View};
+use super::{Game, Kind, PlacementAttempt, Pos, Slots, View};
 use crate::game::transactions::After;
 use mod_api::__private::game::CapabilityChecked;
 use mod_api::{BlockSide, LevelRef, Transaction};
@@ -265,11 +265,11 @@ impl Game<'_> {
         let Some(slot) = view.capability_slots(at.side).nth(slot) else {
             return Some(stack);
         };
+        let fits = self
+            .containers()
+            .fits(&view, slot, &stack, &mut PlacementAttempt::default());
         if matches!(view.kind, Kind::Composter(_)) {
-            if amount == 0
-                || self.containers().fits(&view, slot, &stack) == 0
-                || !self.composter_capability_insert(at.pos, &stack)
-            {
+            if fits == 0 || !self.composter_capability_insert(at.pos, &stack) {
                 return Some(stack);
             }
             return (amount > 1).then(|| ItemStack {
@@ -277,7 +277,6 @@ impl Game<'_> {
                 ..stack
             });
         }
-        let fits = self.containers().fits(&view, slot, &stack);
         if fits > 0 {
             let some = ItemStack {
                 count: fits,
@@ -327,9 +326,10 @@ impl Game<'_> {
             ..resource.clone()
         };
         let c = self.containers();
+        let mut attempt = PlacementAttempt::default();
         view.capability_slots(at.side)
             .try_fold(0u64, |total, slot| {
-                total.checked_add(u64::from(c.fits(&view, slot, &probe)))
+                total.checked_add(u64::from(c.fits(&view, slot, &probe, &mut attempt)))
             })
     }
     /// What the slots `at`'s side reaches hold, from its `from`th to before its
@@ -375,6 +375,7 @@ impl Game<'_> {
             );
         }
         let (mut left, mut told) = (amount, false);
+        let mut attempt = PlacementAttempt::default();
         for holding in [true, false] {
             for slot in view.capability_slots(at.side) {
                 if left == 0 {
@@ -391,7 +392,7 @@ impl Game<'_> {
                     count: left.min(u64::from(u32::MAX)) as u32,
                     ..resource.clone()
                 };
-                let fits = self.containers().fits(&view, slot, &stack);
+                let fits = self.containers().fits(&view, slot, &stack, &mut attempt);
                 if fits == 0 {
                     continue;
                 }

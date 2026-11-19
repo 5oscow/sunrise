@@ -1,0 +1,6 @@
+sunrise-client game::machines::can_place_item_tests::default_items_insert_checks_admission_and_overrides_the_declared_rule lib daily resources
+sunrise-client game::machines::can_place_item_tests::dropper_skips_a_refused_slot lib daily resources
+sunrise-client game::machines::can_place_item_tests::hopper_skips_a_refused_slot_and_preserves_the_stack_if_all_refuse lib daily resources
+sunrise-client game::machines::can_place_item_tests::loot_replace_block_uses_the_container_rule_for_each_slot lib daily resources
+sunrise-client game::machines::can_place_item_tests::no_answer_falls_back_to_the_declared_insert_rule lib daily resources
+sunrise-client game::machines::can_place_item_tests::storage_rechecks_the_entity_after_an_accepted_write_in_the_same_attempt lib daily resources
