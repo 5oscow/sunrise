@@ -180,6 +180,18 @@ fn refusals_and_unavailable_inputs_return_no_state() {
                 .map(|state| super::api_values::TryIntoApi::try_into_api(&state).unwrap())
         );
 
+        for (hit_y, yaw, pitch) in [
+            (f64::NAN, 0.0, 0.0),
+            (70.0, f32::INFINITY, 0.0),
+            (70.0, 0.0, f32::NEG_INFINITY),
+        ] {
+            let mut invalid = context.clone();
+            invalid.hit[1] = hit_y;
+            invalid.yaw = yaw;
+            invalid.pitch = pitch;
+            assert_eq!(level.state_for_placement(game, mod_block, &invalid), None);
+        }
+
         let stone = game.block_key("minecraft:stone").unwrap();
         let stale = LevelRef::new(WorldEpoch::new(level.epoch().get() + 1), level.dimension());
         let closed = LevelRef::new(level.epoch(), mod_api::DimensionKey::NETHER);
@@ -265,6 +277,24 @@ fn another_blocks_state_is_returned_only_from_the_level_in_play() {
             );
             assert_eq!(level.state_for_placement(game, mod_block, &context), None);
             assert_eq!(game.dim, Dim::Nether, "the query never swaps the level in");
+
+            // The column layout has padding above the Nether's last buildable Y = 255.
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let nether = game.level(Dim::Nether.id()).unwrap();
+            let log = game.block_key("minecraft:oak_log").unwrap();
+            let almost_top = PlacementContext::new(BlockPos::new(8, 254, 8), Direction::Up, None);
+            let top = PlacementContext::new(BlockPos::new(8, 255, 8), Direction::Up, None);
+            let above_top = PlacementContext::new(BlockPos::new(8, 256, 8), Direction::Up, None);
+            assert!(
+                nether
+                    .state_for_placement(game, door, &almost_top)
+                    .is_some()
+            );
+            assert_eq!(nether.state_for_placement(game, door, &top), None);
+            assert!(nether.state_for_placement(game, log, &top).is_some());
+            assert_eq!(nether.state_for_placement(game, log, &above_top), None);
         },
     );
 }

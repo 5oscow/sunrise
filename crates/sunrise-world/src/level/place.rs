@@ -2030,28 +2030,6 @@ impl Behaviours {
         }
         sim.state_for_placement(block, &ctx)
     }
-
-    /// Ask `Block.getStateForPlacement` without resolving the click again or placing
-    /// the result. Supply a scratch level so any random draws can be discarded. The
-    /// simulation can see the real signal inputs but cannot enqueue ticks into the level.
-    pub fn state_for_resolved_placement<L: LevelAccess + ?Sized>(
-        &self,
-        level: &mut L,
-        ticks: &Ticks,
-        block: BlockId,
-        context: &PlacementContext,
-    ) -> Option<BlockStateId> {
-        let mut scratch = Ticks::default();
-        scratch
-            .comparator_outputs
-            .clone_from(&ticks.comparator_outputs);
-        scratch.moving_pistons.clone_from(&ticks.moving_pistons);
-        scratch
-            .moving_piston_ids
-            .clone_from(&ticks.moving_piston_ids);
-        self.sim(level, &mut scratch)
-            .state_for_placement(block, context)
-    }
 }
 
 #[cfg(test)]

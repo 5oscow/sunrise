@@ -92,7 +92,10 @@ impl Game<'_> {
         context: &mod_api::PlacementContext,
     ) -> Option<BlockStateId> {
         let BlockPos { x, y, z } = context.pos;
-        if !self.level_in_place(level)
+        if !context.hit.iter().all(|n| n.is_finite())
+            || !context.yaw.is_finite()
+            || !context.pitch.is_finite()
+            || !self.level_in_place(level)
             || !(-30_000_000..30_000_000).contains(&x)
             || !(-30_000_000..30_000_000).contains(&z)
             || !self.world.is_loaded_at(x, y, z)

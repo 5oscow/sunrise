@@ -97,7 +97,8 @@ pub trait LevelBlocksBackendMut {
     /// from `BlockItem.place` runs.
     /// Only the level in play is queried. `None` for vanilla's `null`, a part's
     /// `Some(None)`, an unknown block, a stale, closed or parked level, an unloaded
-    /// or out-of-bounds destination, or an unrepresentable state.
+    /// or out-of-bounds destination, a non-finite hit or rotation, or an
+    /// unrepresentable state.
     #[access(WorldOnly)]
     fn level_state_for_placement(
         &mut self,

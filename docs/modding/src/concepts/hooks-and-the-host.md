@@ -316,7 +316,9 @@ survival hooks.
 
 `level.state_for_placement(host, block, &context)` takes `&mut dyn ServerHost` and queries only
 the level in play. It runs the block's `Block.getStateForPlacement`, including its
-`state_for_placement` parts, without resolving the click again or placing anything. It returns the
+`state_for_placement` parts, without resolving the click again or placing anything. The caller
+owns the `ServerHost`; the Part still sees only its restricted `LevelHost` through `LevelSide`.
+The context's item is a registry key, not a stack or its components. The method returns the
 candidate before item placement's additional survival, obstruction and permission checks. A
 camouflage block can use this read to store a held block's placement state, such as a stair's
 facing or a log's axis.
