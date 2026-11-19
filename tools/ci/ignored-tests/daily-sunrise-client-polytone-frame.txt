@@ -1,0 +1,1 @@
+sunrise-client game::polytone_frame_tests::a_frame_of_gpu_records_only_draws_their_quads lib daily resources

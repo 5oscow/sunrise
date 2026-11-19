@@ -173,6 +173,8 @@ mod celestial;
 mod census;
 pub mod compositor;
 pub(crate) mod core_lines;
+mod core_particles;
+pub use core_particles::HEIGHTMAP_SIZE as POLYTONE_HEIGHTMAP_SIZE;
 pub(crate) mod core_sky;
 pub(crate) mod core_text;
 mod cull;
@@ -425,6 +427,8 @@ pub struct Renderer {
     core_text: Option<core_text::CoreText>,
     /// The packs' `core/sky` and `core/stars`, drawn in place of the native sky and stars.
     core_sky: Option<core_sky::CoreSky>,
+    /// Polytone GPU particle types with their own shader, and this frame's batches of them.
+    core_particles: core_particles::CoreParticles,
     /// Gizmo lines: opaque ones (`RenderTypes.lines`, which writes depth),
     /// translucent ones (`RenderTypes.linesTranslucentNoDepthWrite`) and the
     /// always-on-top ones.

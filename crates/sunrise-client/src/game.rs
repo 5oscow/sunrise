@@ -6100,7 +6100,9 @@ impl Game<'_> {
         out: &mut Vec<Vertex>,
     ) {
         self.apply_mod_particle_clear();
-        if self.client_particle_count() == 0 {
+        // The packs' GPU particle records draw here too (a type without a shader the
+        // renderer draws), and aren't in the native count.
+        if self.client_particle_count() == 0 && self.particles.polytone_gpu_records() == 0 {
             return;
         }
         let first = out.len();
@@ -8687,7 +8689,11 @@ impl Game<'_> {
         // boundary, not while constructing Frame after geometry has been extracted.
         let fog = self.frame_fog(camera, &sky, biome, water_fog);
         if !title {
+            // The renderer decides on the packs' GPU particle shaders before the quads are
+            // built, and takes the records of the types it draws after.
+            self.polytone_gpu_decide(camera);
             self.client_particle_geometry(camera, alpha, fov_degrees, &mut entities);
+            self.polytone_gpu_particles(camera, alpha);
         }
         let mut world_geometry = self.world_geometry.take().expect("view storage");
         self.fill_world_geometry(

@@ -2181,6 +2181,8 @@ impl Renderer {
             world_primitives::DEFAULT_CAPACITY,
             world_primitives::DEFAULT_CAPACITY,
         );
+        let core_particles =
+            core_particles::CoreParticles::new(&device, &queue, (frame_format, linear_light));
         let views = world_views::Kept::new(flipped, translucent_flipped, entity_pipeline_with);
         Ok(Self {
             display: None,
@@ -2239,6 +2241,7 @@ impl Renderer {
             core_lines: None,
             core_text: None,
             core_sky: None,
+            core_particles,
             debug_lines_opaque,
             debug_lines,
             debug_lines_on_top,
