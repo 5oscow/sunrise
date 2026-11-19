@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 #[test]
 #[ignore = "daily"]
 fn enchantment_registry_returns_records_and_unknown_cost() {

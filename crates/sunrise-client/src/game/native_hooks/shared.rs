@@ -17,9 +17,6 @@ mod audio_math_tests;
 #[path = "shared/block_property_tests.rs"]
 mod block_property_tests;
 #[cfg(test)]
-#[path = "shared/enchantment_and_lang_tests.rs"]
-mod enchantment_and_lang_tests;
-#[cfg(test)]
 #[path = "shared/gameplay_hook_tests.rs"]
 mod gameplay_hook_tests;
 #[path = "shared/item_fallthrough.rs"]
