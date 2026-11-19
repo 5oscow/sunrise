@@ -65,12 +65,19 @@ def check_thrown(host, guest, out):
         # The server throws along the rotation it has: let it arrive first.
         guest.raw('look-at', f'{x + 40:.2f}', f'{y + 1.62:.2f}', f'{z + 0.5:.2f}')
         guest.wait(5)
+        # A quarter of the tick rate while it flies (the client follows ClientboundTickingStatePacket): on a
+        # loaded runner a status reply took ~12 ticks at 20 per second, and the egg landed after two samples.
+        # Tracker packets still come every 10 of its ticks, so the client still has to tick the item itself.
+        host('command', command='tick rate 5')
+        guest.wait(5)
         guest.raw('use-item')
         samples = []
-        for _ in range(6):
-            shots = [p for p in guest('status')['projectiles'] if p['kind'] == kind]
+        # One ctl process for the samples, as the fireball's.
+        replies = guest.script(['status', 'wait 2'] * 8, every=True)
+        host('command', command='tick rate 20')
+        for status in (reply for reply in replies if 'projectiles' in reply):
+            shots = [p for p in status['projectiles'] if p['kind'] == kind]
             samples.append(shots[0]['position'][0] if shots else None)
-            guest.wait(2)
         seen = [p for p in samples if p is not None]
         moves = sum(b != a for a, b in zip(seen, seen[1:]))
         results[item] = {'positions': samples, 'moves': moves}
