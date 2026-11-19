@@ -141,9 +141,9 @@ pub struct Sprites {
     /// Textures [`Sprites::prefetch`] decoded ahead of their insert, by sprite name or
     /// resource path.
     ready: std::collections::HashMap<String, crate::sprite_cache::Decoded>,
-    /// The sprites only an atlas definition makes (`unstitch`, `paletted_permutations`, a mod's
-    /// pixels), listed once on the first id with no texture file ([`Sprites::generated`]).
-    generated: std::sync::OnceLock<BTreeMap<String, crate::atlas_sources::SpriteOrigin>>,
+    /// What the merged blocks and items definitions list, once per load, on the first decode
+    /// ([`Sprites::listing`]).
+    listing: std::sync::OnceLock<BTreeMap<String, crate::atlas_sources::SpriteOrigin>>,
 }
 /// Edge length of vanilla's block textures: the smallest array layer.
 pub const SPRITE_SIZE: u32 = 16;
@@ -251,17 +251,16 @@ impl Sprites {
             disk.save();
         }
     }
-    /// The generated sprites of the merged `minecraft:blocks` and `minecraft:items`
-    /// definitions. A model's material names no atlas: the baker looks in the items atlas first,
+    /// The sprites of the merged `minecraft:blocks` and `minecraft:items` definitions with their
+    /// final origins (a later source replaces an earlier id, so a file may lose to a cut). A model's material names no atlas: the baker looks in the items atlas first,
     /// then the blocks atlas, so an id in both is the items atlas's.
-    fn generated(&self) -> &BTreeMap<String, crate::atlas_sources::SpriteOrigin> {
-        self.generated.get_or_init(|| {
+    fn listing(&self) -> &BTreeMap<String, crate::atlas_sources::SpriteOrigin> {
+        self.listing.get_or_init(|| {
             let mut atlases: BTreeMap<_, _> = crate::atlas_sources::listed(&self.source)
                 .into_iter()
                 .collect();
             let mut ids = atlases.remove("minecraft:blocks").unwrap_or_default();
             ids.extend(atlases.remove("minecraft:items").unwrap_or_default());
-            ids.retain(|_, origin| !matches!(origin, crate::atlas_sources::SpriteOrigin::File(_)));
             ids
         })
     }
@@ -649,16 +648,17 @@ impl Sprites {
             self.animations.push(animation);
         }
     }
-    /// Read and decode one texture and its `.mcmeta`; an id with no file is cut or recoloured
-    /// by the atlas definition that lists it, and has no `.mcmeta`, as in vanilla.
+    /// Read and decode one texture and its `.mcmeta`; an id the definitions end on a cut or
+    /// recoloured sprite is generated, with no `.mcmeta` as in vanilla, whether or not a file
+    /// of that id exists.
     fn decode(&self, name: &str) -> Result<crate::sprite_cache::Decoded> {
         if !name.contains(':') {
             return Err("invalid sprite identifier".into());
         }
         // `texture_resource`, so Custom Item Textures' `sunrise_cit:` sprites find their file.
         let path = crate::atlas_sources::texture_resource(name, "textures");
-        if !self.source.contains(&path)
-            && let Some(origin) = self.generated().get(name)
+        if let Some(origin) = self.listing().get(name)
+            && !matches!(origin, crate::atlas_sources::SpriteOrigin::File(_))
         {
             let image = crate::atlas_sources::generate(origin, &|texture, directory| {
                 let file = crate::atlas_sources::texture_resource(texture, directory);
@@ -1789,6 +1789,24 @@ mod tests {
         let frame = &sprites.native[layer as usize].1[0];
         assert_eq!(sprites.native[layer as usize].0, 16);
         assert!(frame.chunks(4).all(|p| p == [0, 255, 0, 255]));
+        fs::remove_dir_all(&root).unwrap();
+    }
+    #[test]
+    fn a_later_unstitch_replaces_a_texture_file_of_the_same_id() {
+        let blocks = r#"{"sources":[{"type":"minecraft:directory","source":"block","prefix":"block/"},
+            {"type":"minecraft:unstitch","resource":"demo:block/sheet","divisor_x":2,"divisor_y":2,
+             "regions":[{"sprite":"demo:block/dup","x":1,"y":1,"width":1,"height":1}]}]}"#;
+        let root = atlas_root("replace", blocks, None);
+        let textures = root.join("assets/demo/textures/block");
+        fs::copy(textures.join("sheet.png"), textures.join("dup.png")).unwrap();
+        let mut sprites = Sprites::new(ResourceSource::directory(root.clone()));
+        let layer = sprites.insert("demo:block/dup").unwrap();
+        assert_eq!(sprites.native[layer as usize].0, 16);
+        assert!(
+            sprites.native[layer as usize].1[0]
+                .chunks(4)
+                .all(|p| p == [255; 4])
+        );
         fs::remove_dir_all(&root).unwrap();
     }
     #[test]
