@@ -64,20 +64,12 @@ impl Game<'_> {
     }
 
     /// The id of the entity `t` rides, if it rides one.
-    fn native_vehicle_id(&self, t: Target) -> Option<u32> {
+    pub(super) fn native_vehicle_id(&self, t: Target) -> Option<u32> {
         match t {
             Target::Player => self.riding,
             Target::Guest(conn) => self.command_guest(conn)?.vehicle,
             Target::Mob(id) => self.mob_object(id).filter(|m| !m.removed)?.extra.mount,
-            // A general row rides the row its tree loaded with; a row queued
-            // for removal rides nothing, as a removed mob does not.
-            Target::General(id) => self
-                .resident_entities
-                .general
-                .rows
-                .iter()
-                .find(|row| row.id == id && !self.persist.removals.contains(&Target::General(id)))
-                .and_then(|row| row.mount),
+            Target::General(id) => self.general_row(id)?.mount,
             _ => None,
         }
     }
@@ -120,27 +112,42 @@ impl Game<'_> {
         }
     }
 
-    /// Follow full object links, returning no root for a cycle. Only mobs can
-    /// be intermediate vehicles. Their object count plus the non-Mob endpoints
-    /// bounds the walk without truncating valid trees or allocating a visited set.
+    /// Follow full object links, returning no root for a cycle without allocating a visited set.
     pub(super) fn native_root_vehicle_id(&self, id: u32, target: Target) -> Option<u32> {
         let mut root = id;
         let mut next = self.native_vehicle_id(target);
-        for _ in 0..=self.mobs.len() + self.persist.off_level.len() + 1 {
+        for _ in 0..=self.riding_link_limit() {
             let Some(vehicle) = next else {
                 return Some(root);
             };
             root = vehicle;
-            next = self.native_vehicle_id(Target::Mob(vehicle));
+            next = self.vehicle_of_any(vehicle);
         }
         None
     }
+    /// The number of objects that could themselves have a mount, bounding a
+    /// walk of valid links. Only mobs, general rows and players can be riders.
+    pub(super) fn riding_link_limit(&self) -> usize {
+        self.mobs.len()
+            + self.persist.off_level.len()
+            + self.resident_entities.general.rows.len()
+            + self.lan.as_ref().map_or(0, |host| host.hub.guests.len())
+            + 1
+    }
+
     /// A live portal root carries a direct or indirect mount through complete objects.
     pub(super) fn vehicle_tree_contains_mount(&self, root: u32, mount: u32) -> bool {
+        // A retained mob has no handle: its own object is its target.
+        let target = self
+            .entity(mount)
+            .and_then(|entity| self.native_entity_target(entity))
+            .or_else(|| {
+                self.mob_object(mount)
+                    .filter(|mob| !mob.removed)
+                    .map(|_| Target::Mob(mount))
+            });
         self.entity(root).is_some()
-            && (self.mob_object(mount).is_some_and(|mob| !mob.removed)
-                || self.entity(mount).is_some())
-            && self.native_root_vehicle_id(mount, Target::Mob(mount)) == Some(root)
+            && target.is_some_and(|target| self.native_root_vehicle_id(mount, target) == Some(root))
     }
 
     /// The entities riding this one (`Entity.getPassengers`), in `addPassenger`'s order.
@@ -476,7 +483,7 @@ impl Game<'_> {
         let previous_vehicle = self.native_vehicle_id(rider);
         let allowed = match rider {
             Target::Player => self.native_may_board(vehicle_id),
-            Target::Mob(id) => self.native_mob_may_ride(id, vehicle_id, true),
+            Target::Mob(id) | Target::General(id) => self.native_mob_may_ride(id, vehicle_id, true),
             _ => false,
         };
         if !allowed || self.native_vehicle_id(rider) != previous_vehicle {
@@ -500,6 +507,7 @@ impl Game<'_> {
                         self.dismount_mob(id);
                     }
                 }
+                Target::General(id) => self.dismount_general(id, previous_vehicle.unwrap()),
                 _ => return Err(StartRidingRefusal::UnsupportedRider),
             }
             if self.native_vehicle_id(rider).is_some() {
@@ -522,7 +530,7 @@ impl Game<'_> {
                         self.mount.jump_ticks = 0;
                         self.mount.jump_scale = 0.0;
                     }
-                    Target::Stand(id) | Target::Other(id) => {
+                    Target::Stand(id) | Target::Other(id) | Target::General(id) => {
                         let Some(seat) = self.seat(id) else {
                             return Err(StartRidingRefusal::UnsupportedVehicle);
                         };
@@ -539,6 +547,13 @@ impl Game<'_> {
                 sunrise_client::mobs::riders::link(&mut self.mobs, id, vehicle_id);
                 self.seat_mob(id);
                 self.break_leash(id, true, false);
+            }
+            Target::General(id) => {
+                let order = self.boarding_order(vehicle_id, id, false);
+                if !self.set_general_mount(id, Some((vehicle_id, order))) {
+                    return Err(StartRidingRefusal::NoEntity);
+                }
+                self.note_started_riding(vehicle_id);
             }
             _ => return Err(StartRidingRefusal::UnsupportedRider),
         }
@@ -570,6 +585,7 @@ impl Game<'_> {
             | Target::Boat(id)
             | Target::Cart(id)
             | Target::Stand(id)
+            | Target::General(id)
             | Target::Other(id) => id,
             // Only `ride_player` seats a mob on a player (`native_ride_player.rs`), at each
             // re-check too: the plain call refuses a player vehicle.
@@ -582,10 +598,11 @@ impl Game<'_> {
         };
         if self.entity(vehicle_id).is_none()
             || matches!(rider, Target::Mob(id) if self.mobs.iter().all(|m| m.id != id || m.removed))
+            || matches!(rider, Target::General(id) if self.general_row(id).is_none())
         {
             return Err(R::NoEntity);
         }
-        if !matches!(rider, Target::Player | Target::Mob(_)) {
+        if !matches!(rider, Target::Player | Target::Mob(_) | Target::General(_)) {
             return Err(R::UnsupportedRider);
         }
         if rider == vehicle {
@@ -594,18 +611,25 @@ impl Game<'_> {
         if self.native_vehicle_id(rider) == Some(vehicle_id) {
             return Err(R::AlreadyRiding);
         }
+        if let Target::General(id) = vehicle {
+            let slot = self.general_row(id).ok_or(R::NoEntity)?.type_slot;
+            if super::general::general_type_catalog().save_policy(slot)
+                == mod_api::GeneralSavePolicy::NoSave
+            {
+                return Err(R::UnsupportedVehicle);
+            }
+        }
         // Intermediate vehicles can be retained objects, not ordinary handles.
         let mut current = Some(vehicle_id);
-        for _ in 0..=self.mobs.len() + self.persist.off_level.len() + 1 {
+        for _ in 0..=self.riding_link_limit() {
             let Some(id) = current else { break };
-            if rider == Target::Mob(id) {
+            if rider == Target::Mob(id)
+                || rider == Target::General(id)
+                || (rider == Target::Player && self.player_vehicle_id(rider) == Some(id))
+            {
                 return Err(R::Cycle);
             }
-            current = if matches!(vehicle, Target::Player | Target::Guest(_)) {
-                self.vehicle_of_any(id)
-            } else {
-                self.native_vehicle_id(Target::Mob(id))
-            };
+            current = self.vehicle_of_any(id);
         }
         if current.is_some() {
             return Err(R::Cycle);
@@ -624,6 +648,13 @@ impl Game<'_> {
                                     | sunrise_client::mobs::Species::Wither
                             )
                     }) =>
+                {
+                    return Err(R::CannotRide);
+                }
+                Target::General(id)
+                    if self
+                        .general_row(id)
+                        .is_some_and(|row| row.boarding_cooldown > 0) =>
                 {
                     return Err(R::CannotRide);
                 }
@@ -671,7 +702,7 @@ impl Game<'_> {
                     return Err(R::Full);
                 }
             }
-            Target::Stand(id) | Target::Other(id) => {
+            Target::Stand(id) | Target::Other(id) | Target::General(id) => {
                 if self.seat(id).is_none() {
                     return Err(R::UnsupportedVehicle);
                 }
@@ -692,16 +723,9 @@ impl Game<'_> {
 
     /// Attempts to board a vehicle through the shared server mount path.
     ///
-    /// Players and mobs can ride a mob, boat, minecart or generic seat entity; a player vehicle is
-    /// refused, forced or not (only `entity_ride_player` seats a mob on one); a refusal names
-    /// its cause (`StartRidingRefusal`). Normal mob capacity
-    /// follows its species and is bypassed by force; minecarts store one passenger and boats store one
-    /// mob and up to two passengers in total. Generic seats admit one passenger unless forced.
-    /// `force` bypasses normal admission checks, not these storage limits.
-    /// Player boarding cooldown and the strider's
-    /// eye-in-lava admission check are not yet represented by the game.
-    /// A player vehicle is refused before `force` is read, as vanilla refuses a vehicle type it
-    /// does not save; `entity_mount` fires after every other refusal.
+    /// General rows use the same admission and cancellable mount notifications
+    /// as players and mobs. Only the explicit `entity_ride_player` route lets a
+    /// mob ride a player; force does not make unsaved vehicles eligible.
     pub(super) fn entity_start_riding(
         &mut self,
         entity: EntityRef,
@@ -732,24 +756,7 @@ impl Game<'_> {
             Target::Player | Target::Guest(_) => {
                 self.for_player(t, |g| g.stop_riding());
             }
-            // A general row gets off by its mount link: the row keeps its
-            // identity and place, and the level's next walk sees it as a
-            // root (`Entity.stopRiding` clears the mount and nothing else).
-            // The mount rewrite also retires the rows' rider index, which
-            // the list's own write stamp does not see.
-            Target::General(id) => {
-                let Some(row) = self
-                    .resident_entities
-                    .general
-                    .rows
-                    .iter_mut()
-                    .find(|row| row.id == id)
-                else {
-                    return false;
-                };
-                row.mount = None;
-                self.resident_entities.general.mount_writes += 1;
-            }
+            Target::General(id) => self.dismount_general(id, vehicle),
             _ => return false,
         }
         let stopped = self.native_vehicle_id(t).is_none();
@@ -758,6 +765,28 @@ impl Game<'_> {
         }
         stopped
     }
+    pub(super) fn dismount_general(&mut self, id: u32, vehicle: u32) {
+        if self.native_mob_may_ride(id, vehicle, false)
+            && self.native_vehicle_id(Target::General(id)) == Some(vehicle)
+        {
+            self.set_general_mount(id, None);
+            self.release_removed_vehicle(vehicle);
+        }
+    }
+
+    pub(super) fn dismount_general_passengers(&mut self, vehicle: u32) {
+        let mut passengers: Vec<_> = self
+            .general_passengers(vehicle)
+            .map(|row| (row.vehicle_order, row.id))
+            .collect();
+        passengers.sort_unstable();
+        for (_, rider) in passengers.into_iter().rev() {
+            if self.native_vehicle_id(Target::General(rider)) == Some(vehicle) {
+                self.dismount_general(rider, vehicle);
+            }
+        }
+    }
+
     /// Gets every passenger off the entity (`Entity.ejectPassengers`), last
     /// first as vanilla walks the list, so `mob_ride` hears them in its
     /// order. False when nothing rode it, or for a stale handle.

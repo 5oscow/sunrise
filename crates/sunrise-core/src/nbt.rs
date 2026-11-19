@@ -501,6 +501,12 @@ pub struct NamedTag {
     pub tag: Tag,
 }
 
+/// How deep the disk writer nests containers before it refuses, as a guard on its own
+/// recursion and nothing else. Vanilla's `NbtIo.write` has no nesting limit: it writes a tree
+/// deeper than `NbtAccounter.MAX_STACK_DEPTH` (512) and the later read fails with "depth > 512",
+/// so a region write uses this bound where a read uses [`Limits::max_depth`].
+pub const DISK_WRITE_NESTING_GUARD: usize = 2048;
+
 #[derive(Clone, Copy, Debug)]
 pub struct Limits {
     pub max_bytes: usize,

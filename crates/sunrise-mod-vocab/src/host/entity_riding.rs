@@ -101,13 +101,12 @@ pub trait EntityRidingBackendMut {
     /// Attempts to board a vehicle through the shared server mount path, and names the cause of
     /// a refusal (`StartRidingRefusal`).
     ///
-    /// Players and mobs can ride a mob, boat, minecart or generic seat entity
-    /// (an armor stand, display, marker or interaction). A successful mob mount drops its
-    /// lead as an item without a sound and emits `entity_unleash`; a refused mount leaves the
-    /// leash alone. Mob vehicle capacity
-    /// follows its species; minecarts store one passenger and boats store one
-    /// mob and up to two passengers in total. Generic seats admit one passenger unless forced.
-    /// `force` bypasses normal admission checks, not these storage limits.
+    /// Players, mobs and declared general entities can ride a mob, boat, minecart, declared
+    /// general vehicle or generic seat (such as an armor stand or display). A general type with
+    /// `NoSave` can ride but cannot carry a passenger, even when forced. A successful mob mount
+    /// drops its lead as an item without a sound and emits `entity_unleash`; a refused mount
+    /// leaves the lead alone. Mob capacity follows its species. Boats and minecarts keep their
+    /// vehicle limits even when forced; other seats admit one passenger unless forced.
     /// Player boarding cooldown and the strider's
     /// eye-in-lava admission check are not represented by the game.
     /// A player vehicle is refused as `StartRidingRefusal::PlayerVehicle`, forced or not:
@@ -148,7 +147,7 @@ pub trait EntityRidingBackendMut {
     /// Side: server.
     /// Gets the entity off its vehicle (`Entity.stopRiding`), where the
     /// vehicle lets it out, as `/ride ... dismount` does. False when it rode
-    /// nothing, a mod's `mob_ride` hook kept it on, or for a stale handle.
+    /// nothing, an `entity_mount` listener kept it on, or for a stale handle.
     #[access(WorldOnly)]
     fn entity_stop_riding(&mut self, entity: EntityRef) -> bool;
     /// Side: server.

@@ -419,6 +419,11 @@ fn cart_seat(cart: Vec3, seat_offset: f64) -> Vec3 {
     Vec3::new(cart.x, cart.y + seat_offset, cart.z)
 }
 
+/// A general rider's seat on a cart: the cart's passenger attachment with no vehicle attachment of its own.
+pub(super) fn cart_general_seat(cart: Vec3) -> Vec3 {
+    cart_seat(cart, PASSENGER_Y)
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Shape {
     NorthSouth,

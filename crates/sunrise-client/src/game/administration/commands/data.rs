@@ -183,7 +183,7 @@ impl Game<'_> {
                 let b = &self.boats[i];
                 let mut tag = b.to_nbt(uuid, self.persist.raw.get(&id), self.res.items());
                 // Entity.saveWithoutId: the actual runtime passenger tree.
-                self.put_mob_passengers(&mut tag, id);
+                self.put_passengers(&mut tag, id);
                 // AbstractBoat.addAdditionalSaveData: the live or pending leash.
                 self.write_boat_leash(&mut tag, i);
                 self.save_portal_cooldown(id, &mut tag);
@@ -193,7 +193,7 @@ impl Game<'_> {
                 let uuid = self.uuid_for(id);
                 let c = self.carts.iter().find(|c| c.id == id)?;
                 let mut tag = c.to_nbt(uuid, self.persist.raw.get(&id), self.res.items());
-                self.put_mob_passengers(&mut tag, id);
+                self.put_passengers(&mut tag, id);
                 self.save_portal_cooldown(id, &mut tag);
                 tag
             }

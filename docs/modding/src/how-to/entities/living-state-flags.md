@@ -186,6 +186,17 @@ Unknown passengers and links that would form a cycle do not board.
 `passengers` returns client handles in the order they boarded from the list.
 The other riding reads and all riding writes are server-only.
 
+A declared general entity can ride a supported vehicle, and players, mobs and
+other general entities can ride a general vehicle. The vehicle type's optional
+`passenger_attachment` is a local offset in blocks: it rotates with the vehicle's
+yaw and defaults to the top center of the declared box. A rider sits at that point
+minus its own vehicle attachment. A general rider has no offset of its own.
+The client uses the same placement from the server's passenger lists.
+
+Saved passengers of either family go under the root's ordinary NBT `Passengers`
+list and leave with the root's chunk. A general type declared `NoSave` can ride
+but isn't written to disk and cannot carry a passenger, even when forced.
+
 During boat or cart destruction, mob dismount notifications run, but remaining
 riding relationships are unlinked even when a listener cancels. Each mob keeps its
 resident or off-level classification, and descendant state remains frozen.

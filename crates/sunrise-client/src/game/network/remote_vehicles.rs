@@ -292,9 +292,10 @@ impl Game<'_> {
             return;
         }
         // Forced client startRiding still respects Entity.couldAcceptPassenger.
-        if remote.tracked(vehicle).is_some_and(|(kind, _)| {
-            matches!(kind, "minecraft:marker" | "minecraft:ominous_item_spawner")
-        }) {
+        if remote
+            .tracked(vehicle)
+            .is_some_and(|(kind, _)| !super::seats::could_accept_passenger(kind))
+        {
             return;
         }
         let vehicle_id = vehicle as u32;

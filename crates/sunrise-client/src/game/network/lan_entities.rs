@@ -253,6 +253,25 @@ impl Game<'_> {
                 pass.insert(0, d);
             }
         }
+        let mut mixed = sunrise_client::fast_hash::FxHashSet::default();
+        for row in &self.resident_entities.general.rows {
+            if let Some(vehicle) = row.mount
+                && !self
+                    .persist
+                    .removals
+                    .contains(&super::commands::Target::General(row.id))
+            {
+                riding.add(vehicle as i32, row.id as i32);
+                mixed.insert(vehicle);
+            }
+        }
+        for vehicle in mixed {
+            let seats = self.seated_passengers(vehicle);
+            if let Some(passengers) = riding.passengers.get_mut(&(vehicle as i32)) {
+                passengers
+                    .sort_by_key(|&id| seats.iter().position(|&(_, rider, _)| rider == id as u32));
+            }
+        }
         // Players carry passengers only when a mod seated a mob on one.
         self.tell_vehicle_players(riding);
     }
