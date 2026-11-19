@@ -27,9 +27,6 @@ mod label_tests;
 #[path = "shared/loot.rs"]
 mod loot;
 #[cfg(test)]
-#[path = "shared/mod_block_entity_payload_tests.rs"]
-mod mod_block_entity_payload_tests;
-#[cfg(test)]
 #[path = "shared/packet_tests.rs"]
 mod packet_tests;
 #[cfg(test)]

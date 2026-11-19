@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 #[test]
 #[ignore = "daily"]
 fn replacing_mod_block_entity_payload_keeps_its_type_and_saved_identity() {
