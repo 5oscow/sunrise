@@ -3,7 +3,7 @@
 //! capability handlers), through one shared-memory boundary and the glue on both sides of it.
 mod append;
 mod borrowed;
-mod calls;
+pub(crate) mod calls;
 mod descriptors;
 mod host;
 mod prepared;
