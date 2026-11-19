@@ -24,6 +24,7 @@ exit 9
 
 ```sh
 test -f ../one.txt
+echo here > here.txt
 false
 ```
 
@@ -37,18 +38,27 @@ class BookQuickstart(unittest.TestCase):
     def test_sh_blocks_are_found_with_their_line_and_skip_reason(self):
         self.assertEqual(
             [(line, skip) for line, _, skip in book_quickstart.blocks(PAGE)],
-            [(3, None), (13, "needs the game"), (17, None), (22, None)])
+            [(3, None), (13, "needs the game"), (17, None), (23, None)])
 
     def test_blocks_share_one_shell_and_the_first_failing_block_is_named(self):
         with tempfile.TemporaryDirectory() as folder:
             page = Path(folder, "page.md")
             page.write_text(PAGE)
-            log = open(Path(folder, "log"), "w+")
-            # The third block sees the first's `cd`, fails on its own second line, and the fourth never runs.
-            self.assertEqual(book_quickstart.run_page(page, folder, dict(os.environ), log), 17)
+            with open(Path(folder, "log"), "w") as log:
+                problem = book_quickstart.run_page(page, folder, dict(os.environ), log)
+            # The third block runs in the folder the first moved to, fails on its last line, and the fourth never runs.
+            self.assertTrue(problem.startswith(f"{page}:17: this block failed"), problem)
+            self.assertEqual([path.parent.parent for path in Path(folder).rglob("here.txt")], [Path(folder)])
             self.assertTrue(Path(folder, "one.txt").exists())
             self.assertEqual(list(Path(folder).rglob("never.txt")), [])
-            log.close()
+
+    def test_a_shell_that_ends_early_with_success_names_the_block_it_skipped(self):
+        with tempfile.TemporaryDirectory() as folder:
+            page = Path(folder, "page.md")
+            page.write_text("```sh\nexit 0\n```\n\n```sh\ntrue\n```\n")
+            with open(Path(folder, "log"), "w") as log:
+                problem = book_quickstart.run_page(page, folder, dict(os.environ), log)
+            self.assertTrue(problem.startswith(f"{page}:5: this block never started"), problem)
 
 
 if __name__ == "__main__":

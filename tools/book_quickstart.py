@@ -16,7 +16,7 @@ its page and line.
 
 `--tool` stands for the install page's "run the block again" with a newer tool: the page's own blocks still run first.
 The pages download the tool, the SDK and a Rust toolchain, so this needs the network; it is a daily check
-(book-quickstart.yml), never a pull request's. It refuses to start where a launcher is installed: the mod tools must
+(book-quickstart.yml), never a pull request's. It refuses to start when a launcher is on PATH: the mod tools must
 work without one.
 """
 import argparse
@@ -53,16 +53,15 @@ def blocks(text):
 
 
 def run_page(page, folder, env, log=sys.stdout):
-    """Runs the page's blocks in one shell started in `folder`. Returns the failing block's line, or None."""
+    """Runs the page's blocks in one shell started in `folder`. Returns what went wrong, or None."""
     found = blocks(page.read_text())
-    if not found:
-        return None
     read, write = os.pipe()
-    script = ["set -e"]
+    script, runnable = ["set -e"], []
     for line, code, skip in found:
         if skip:
             print(f"{page.name}:{line}: not run ({skip})", file=log, flush=True)
             continue
+        runnable.append(line)
         # The marker goes to the descriptor Python reads, so the failing block is known whatever the block prints.
         script += [f"echo {line} >&{write}", code]
     process = subprocess.Popen(["bash", "-c", "\n".join(script)], cwd=folder, env=env, pass_fds=(write,),
@@ -70,10 +69,15 @@ def run_page(page, folder, env, log=sys.stdout):
     os.close(write)
     with os.fdopen(read) as markers:
         started = [int(line) for line in markers.read().split()]
-    if process.wait() == 0:
+    if process.wait() != 0:
+        return f"{page}:{started[-1] if started else 0}: this block failed; its output is above"
+    # A block that ends the shell with success (`exit 0`) must not pass for the blocks after it.
+    missed = [line for line in runnable if line not in started]
+    if missed:
+        return f"{page}:{missed[0]}: this block never started: the shell ended before it, with success"
+    if runnable:
         print(f"{page.name}: every block ran", file=log, flush=True)
-        return None
-    return started[-1] if started else 0
+    return None
 
 
 def main():
@@ -82,28 +86,33 @@ def main():
     parser.add_argument("--pages", type=Path, default=START, help=argparse.SUPPRESS)
     args = parser.parse_args()
     if shutil.which(LAUNCHER):
-        raise SystemExit(f"{LAUNCHER} is on PATH: this check runs only where no launcher is installed")
-    cargo = shutil.which("cargo")
-    if not cargo:
+        raise SystemExit(f"{LAUNCHER} is on PATH: this check runs only where PATH holds no launcher")
+    if not shutil.which("cargo"):
         raise SystemExit("cargo is not on PATH: the pages ask for Rust first")
+    if not (args.pages / INSTALL).is_file():
+        raise SystemExit(f"{args.pages / INSTALL}: the install page is missing")
     pages = sorted(args.pages.glob("*.md"), key=lambda page: (page.name != INSTALL, page.name))
     with tempfile.TemporaryDirectory(prefix="book-quickstart-") as scratch:
         home = Path(scratch, "home")
+        Path(scratch, "tmp").mkdir()
         home.mkdir()
-        # A fresh home, keeping only the Rust the reader was asked to install first.
+        # A fresh home, Cargo home and temporary folder. Only the reader's Rust is kept: rustup's toolchains
+        # (RUSTUP_HOME) and the `cargo` on PATH. An inherited Cargo home could hold an older `cargo-sunrise-mod`,
+        # which cargo prefers to PATH's.
         env = {name: value for name, value in os.environ.items()
-               if not name.startswith(("SUNRISE_LAUNCHER", "XDG_")) and name != "SUNRISE_MOD_CACHE"}
+               if not name.startswith(("SUNRISE_LAUNCHER", "XDG_")) and name not in ("SUNRISE_MOD_CACHE", "BASH_ENV")}
         env["RUSTUP_HOME"] = os.environ.get("RUSTUP_HOME") or str(Path.home() / ".rustup")
-        env["CARGO_HOME"] = os.environ.get("CARGO_HOME") or str(Path.home() / ".cargo")
+        env["CARGO_HOME"] = str(Path(scratch, "cargo"))
+        env["TMPDIR"] = str(Path(scratch, "tmp"))
         env["HOME"] = str(home)
         # Where the install page puts the tool; its `export` lasts for that page's shell only.
         env["PATH"] = f"{home / '.local/bin'}{os.pathsep}{env['PATH']}"
         for page in pages:
             folder = Path(scratch, page.stem)
             folder.mkdir()
-            failed = run_page(page, folder, env)
-            if failed is not None:
-                raise SystemExit(f"{page}:{failed}: this block failed; its output is above")
+            problem = run_page(page, folder, env)
+            if problem:
+                raise SystemExit(problem)
             if page.name == INSTALL and args.tool:
                 shutil.copy2(args.tool, home / ".local/bin/cargo-sunrise-mod")
                 print(f"the mod pages run with {args.tool}", flush=True)
