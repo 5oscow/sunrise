@@ -1056,15 +1056,7 @@ impl Game<'_> {
                 });
             }
             After::InventoryTrigger(uuid) => {
-                // A player in another level has their criteria and rewards judged in their
-                // own level, from their own tick (`tick_advancements`, which sees the changed
-                // inventory as `broadcastChanges` does): the check here would drop a reward in
-                // this level.
-                self.native_as_player(uuid, |g| {
-                    if g.acting_in_level_in_place() {
-                        g.check_inventory_trigger();
-                    }
-                });
+                self.native_as_player(uuid, |g| g.check_inventory_trigger());
             }
             After::GiveRest(uuid, stack, owner, dim) => {
                 self.native_as_player(uuid, |g| {

@@ -1279,6 +1279,13 @@ impl Game<'_> {
     /// `InventoryChangeTrigger`, checked when the inventory changes.
     pub(super) fn check_inventory_trigger(&mut self) {
         use std::hash::{Hash, Hasher};
+        // A player in another level than the one in place has their criteria and rewards
+        // judged in their own level, from their own tick (`tick_advancements`, which sees the
+        // changed inventory as `broadcastChanges` does): judging here would drop a reward in
+        // this level.
+        if !self.acting_in_level_in_place() {
+            return;
+        }
         let mut h = std::collections::hash_map::DefaultHasher::new();
         for s in self
             .inventory

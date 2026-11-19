@@ -357,6 +357,14 @@ fn an_inventory_reward_for_a_player_in_another_level_waits_for_their_own_tick() 
             assert_eq!(diamonds(game, conn), 1, "{case}");
             assert!(!done(game, conn), "{case}: not judged in the hook's level");
             assert_eq!(dropped(game), before, "{case}: nothing dropped yet");
+            // Another command run in the borrowed turn leaves the judgment to their tick too.
+            game.as_guest(conn, |game| {
+                assert!(game.native_run_command("time query gametime"));
+            })
+            .unwrap();
+            assert!(!done(game, conn), "{case}: not judged by another command");
+            assert_eq!(dropped(game), before, "{case}: nothing dropped by it");
+
             game.enter_level(Dim::Nether).unwrap();
             game.as_guest(conn, |game| game.tick_advancements())
                 .unwrap();
