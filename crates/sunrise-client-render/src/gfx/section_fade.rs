@@ -14,6 +14,17 @@ pub(super) fn section_visibility(uploaded: Option<&Instant>, fade_ms: u64, now: 
         chunk_visibility(elapsed, fade_ms)
     })
 }
+/// `LevelRenderer.isSectionCompiledAndVisible` for one section: it has its mesh
+/// (`compiled`), and `getVisibility` from its first upload `uploaded` (none: whole, or
+/// fading in over far terrain) has reached `CHUNK_VISIBILITY_THRESHOLD`.
+pub(super) fn compiled_and_visible(
+    compiled: bool,
+    uploaded: Option<&Instant>,
+    fade_ms: u64,
+    now: Instant,
+) -> bool {
+    compiled && section_visibility(uploaded, fade_ms, now) >= CHUNK_VISIBILITY_THRESHOLD
+}
 /// What a section's fade depends on besides the section itself
 /// (`SectionGpu::drawn_faded`): the time, the chunk fade-in time, the sections'
 /// first uploads (`Renderer::section_uploaded`) and those held while far
