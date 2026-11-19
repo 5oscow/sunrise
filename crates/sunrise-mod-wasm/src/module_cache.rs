@@ -147,8 +147,8 @@ impl ModuleCache {
         engine: &Engine,
         bytes: &[u8],
     ) -> wasmtime::Result<(Module, Source)> {
-        // Without a compiler executable the compile runs in-process, as on Windows, into the
-        // same cache and with no time budget.
+        // Without a compiler executable, compile in-process without a time budget.
+        // The result is cached when caching is enabled.
         #[cfg(unix)]
         let child = (!cfg!(test) && crate::compile_child::compiler_executable()).then_some((
             production_command as fn(&Path, &str) -> std::process::Command,
