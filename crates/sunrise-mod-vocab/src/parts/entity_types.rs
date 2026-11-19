@@ -12,8 +12,7 @@ pub mod limits {
     /// entity.
     pub const PAYLOAD_LIMIT: usize = 65_536;
     /// The deepest nesting of a general entity's decoded data. The
-    /// payload decode checks it; the record tree itself has the stricter
-    /// passenger-depth bound.
+    /// payload decode checks it.
     pub const MAX_NESTING: u32 = 32;
     /// The largest record a missing mod's quarantined general entity may
     /// occupy, as its encoded NBT size. A larger record is skipped with a
