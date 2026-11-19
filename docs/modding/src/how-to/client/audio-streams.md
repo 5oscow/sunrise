@@ -80,7 +80,7 @@ A simulation of that pacing runs in the game's tests (`tick_paced_underruns` in 
 | 100 | 0 |
 | 150 | 0 |
 
-These figures come from the mixer fed on a virtual clock, not from a wasm instance: they say what the pacing costs the mixer, not what a guest's own run time adds. Take 100 ms as the least for a wasm voice mod.
+The same pacing with a compiled wasm guest (`audio_stream_wasm_tests`, run by the daily run with the wasm fixture: the fixture mod pushes 50 ms per client tick into three streams through the real API, the game's own mixer plays them, ticks up to 50 ms late) gives the same counts, 2, 0 and 0 for 50, 100 and 150 ms. Take 100 ms as the least for a wasm voice mod.
 
 ## Limits
 
