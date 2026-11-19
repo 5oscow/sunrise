@@ -26,10 +26,12 @@ class NightlyRoutingTests(unittest.TestCase):
         workflow_jobs = dict(jobs(text))
         guard = workflow_jobs["runner-configuration"]
         guard_if = re.search(r"^\s*if:\s*(.*)$", guard, re.M).group(1)
-        self.assertEqual(runs_on(guard), "ubuntu-latest")
+        # The guard runs no build: Dyna's small runner for the events it takes, else GitHub's.
+        self.assertEqual(runs_on(guard), "${{ vars.DYNA_CI_SELF_HOSTED == 'true' && (github.event_name == 'push' || "
+                                         "github.event_name == 'workflow_dispatch') && 'dyna-small' || 'ubuntu-latest' }}")
         self.assertIn("needs: runner-configuration", workflow_jobs["exporters"])
         self.assertIn("needs: [runner-configuration, exporters]", workflow_jobs["build"])
-        expressions = re.findall(r"^\s*runs-on:\s*\$\{\{(.*?)\}\}\s*$", text, re.M)
+        expressions = re.findall(r"^\s*runs-on:\s*\$\{\{(.*?)\}\}\s*$", text, re.M)[1:]
         self.assertEqual(len(expressions), 3)
         smoke = workflow_jobs["linux-smoke"]
         smoke_if = re.search(r"^\s*if:\s*\$\{\{(.*?)\}\}\s*$", smoke, re.M).group(1)
@@ -49,20 +51,23 @@ class NightlyRoutingTests(unittest.TestCase):
         linux = next(row for row in rows if row["name"] == "linux")
         self.assertIn(f"name: {linux['asset']}", smoke, "smoke must download the hosted producer's archive")
         self.assertIn(f"/hosted-linux/{linux['dir']}", smoke)
-        self.assertIn("needs: [runner-configuration, build]", smoke)
+        self.assertIn("needs: [runner-configuration, legs]", smoke)
         script = """const fs = require('fs');
 const state = JSON.parse(fs.readFileSync(0, 'utf8'));
 // Actions returns an empty string for absent context properties, not undefined.
 const context = values => new Proxy(values, {get: (values, key) => values[key] ?? ''});
 const matrix = context(state.matrix), vars = context(state.vars), inputs = state.inputs, github = context(state.github);
 const expression = state.expression, fromJSON = JSON.parse, toJSON = JSON.stringify;
+const cancelled = () => false, needs = {legs: {result: 'success'}};
 console.log(JSON.stringify(eval(expression)));
 """
-        def evaluate(expression, matrix, trusted, repository="arismoko/horizon"):
+        def evaluate(expression, matrix, trusted, repository="sunrise-org/sunrise"):
             result = subprocess.run(["node", "-e", script], input=json.dumps({"expression": expression, "matrix": matrix, "inputs": {"trusted": trusted}, "vars": variables, "github": {"repository": repository}}), text=True, capture_output=True, check=True)
             return json.loads(result.stdout)
-        default_mac = ["self-hosted", "macOS", "horizon-nightly"]
-        bookkeeping = re.search(r"^\s*runs-on:\s*\$\{\{(.*?)\}\}\s*$", NIGHTLY.read_text(), re.M).group(1)
+        default_mac = ["self-hosted", "macOS", "sunrise-nightly"]
+        bookkeeping = next(expression for expression in re.findall(r"^\s*runs-on:\s*\$\{\{(.*?)\}\}\s*$",
+                                                                  NIGHTLY.read_text(), re.M)
+                           if "NIGHTLY_BOOKKEEPING_RUNNER" in expression)
         for configured, release_runner, disabled, trusted, dyna in itertools.product(
             [False, True], [False, True], [False, True], [False, True], [None, "false", "true"]
         ):
@@ -80,7 +85,7 @@ console.log(JSON.stringify(eval(expression)));
             with self.subTest(configured=configured, release_runner=release_runner, disabled=disabled, trusted=trusted, dyna=dyna):
                 self.assertEqual(evaluate(guard_if, {}, trusted), trusted and not release_runner)
                 self.assertEqual(evaluate(expressions[0], {}, trusted), expected_exporter)
-                expected_bookkeeping = "dyna-small" if override else ("ubuntu-latest" if disabled else ["self-hosted", "linux", "horizon-light"])
+                expected_bookkeeping = "dyna-small" if override else ("ubuntu-latest" if disabled else ["self-hosted", "linux", "sunrise-light"])
                 self.assertEqual(evaluate(bookkeeping, {}, trusted), expected_bookkeeping)
                 self.assertEqual(evaluate(smoke_if, {}, trusted), not trusted and override)
                 if not trusted and override:
@@ -96,19 +101,51 @@ console.log(JSON.stringify(eval(expression)));
                         self.assertEqual(evaluate(expressions[1], row, trusted), expected)
 
         timeout = re.search(r"^\s*timeout-minutes:\s*\$\{\{(.*?)\}\}", workflow_jobs["build"], re.M).group(1)
-        for repository, trusted, row in itertools.product(["arismoko/horizon", "horizon-rust/horizon"], [False, True], rows):
+        for repository, trusted, row in itertools.product(["sunrise-org/sunrise", "horizon-rust/horizon"], [False, True], rows):
             with self.subTest(repository=repository, trusted=trusted, entry=row["name"]):
-                expected = 60 if repository == "arismoko/horizon" or row.get("mac") else 40
+                if repository == "sunrise-org/sunrise":
+                    expected = 100 if row.get("mac") or row.get("musl") else 60
+                else:
+                    expected = 60 if row.get("mac") else 40
                 self.assertEqual(evaluate(timeout, row, trusted, repository), expected)
+
+    @unittest.skipUnless(shutil.which("node"), "Node evaluates GitHub's JavaScript-style expressions")
+    def test_a_missing_leg_holds_the_build_only_when_it_is_required(self):
+        workflow_jobs = dict(jobs(GAME.read_text()))
+        optional = re.search(r"^\s*continue-on-error:\s*\$\{\{(.*?)\}\}", workflow_jobs["build"], re.M).group(1)
+        decide = workflow_jobs["legs"].split("        run: |\n", 1)[1].split("\n      # ", 1)[0].split("\n      - ", 1)[0]
+        decide = textwrap.dedent(decide)
+        script = """const s = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+const matrix = s.matrix, inputs = s.inputs, github = s.github;
+console.log(JSON.stringify(Boolean(eval(s.expression))));
+"""
+        legs = {"linux": {}, "linux-musl": {}, "windows": {}, "windows-arm64": {}, "macos": {"mac": True}, "macos-x64": {"mac": True}}
+        for repository, kind in itertools.product(["sunrise-org/sunrise", "horizon-rust/horizon"], ["nightly", "snapshot", "release"]):
+            for absent in [None, *legs]:
+                if absent is None:
+                    expected = True
+                else:
+                    state = {"expression": optional, "matrix": {"name": absent, **legs[absent]}, "inputs": {"kind": kind}, "github": {"repository": repository}}
+                    expected = json.loads(subprocess.run(["node", "-e", script], input=json.dumps(state), text=True, capture_output=True, check=True).stdout)
+                with self.subTest(repository=repository, kind=kind, absent=absent), tempfile.TemporaryDirectory() as folder:
+                    for leg in legs:
+                        if leg != absent:
+                            os.makedirs(f"{folder}/legs/leg-{leg}")
+                    output = Path(folder, "output")
+                    ran = subprocess.run(["bash", "-c", decide], cwd=folder, capture_output=True, text=True,
+                                         env={**os.environ, "REPOSITORY": repository, "KIND": kind, "GITHUB_OUTPUT": str(output)})
+                    self.assertEqual(ran.returncode == 0, expected, ran.stdout)
+                    self.assertEqual(output.exists() and output.read_text() == "complete=true\n", expected)
 
     def test_every_shipped_glibc_program_is_checked_by_workflow_owned_tools(self):
         text = GAME.read_text()
         commands = re.findall(r"check_glibc.py ([^\n]+)", text.replace("\\\n", " "))
         checked = [{Path(argument).name for argument in shlex.split(command)} for command in commands]
-        self.assertEqual(checked, [
-            {"horizon-client", "horizon-ctl", "horizon-prepare", "horizon-server"},
-            {"horizon-engine", "horizon-server", "horizon-prepare"},
-        ])
+        # Every program each release folder takes (the SDK's input list), and the game program itself.
+        routes = json.loads((ROOT / "crates/sunrise-mod-package/src/sdk/inputs.json").read_text())["routes"]
+        programs = {route: {name for name in routes[route]["program"] if "." not in name} for route in ["package", "package-server"]}
+        self.assertEqual(checked, [programs["package"] | {"sunrise-client"},
+                                   programs["package-server"] | {"sunrise-engine"}])
         tools = [step for step in text.split("\n      - ") if "path: .workflow-tools" in step]
         self.assertTrue(tools)
         for checkout in tools:
@@ -134,7 +171,7 @@ console.log(JSON.stringify(eval(expression)));
             python.write_text("#!/bin/sh\necho 'no green dyna-checks main base'\nexit 23\n")
             python.chmod(0o755)
             summary = root / "summary"
-            result = subprocess.run(["bash", "-c", shell], cwd=root, env={**os.environ, "FORCE": "", "GITHUB_STEP_SUMMARY": str(summary), "PATH": str(root) + os.pathsep + os.environ["PATH"]}, text=True, capture_output=True)
+            result = subprocess.run(["bash", "-c", shell], cwd=root, env={**os.environ, "FORCE": "", "KIND": "nightly", "GITHUB_STEP_SUMMARY": str(summary), "PATH": str(root) + os.pathsep + os.environ["PATH"]}, text=True, capture_output=True)
             self.assertEqual(result.returncode, 23)
             self.assertIn("no green dyna-checks main base", summary.read_text())
             self.assertNotIn("nightly-notes.md", result.stderr)
@@ -155,7 +192,7 @@ console.log(JSON.stringify(eval(expression)));
             root = Path(folder)
             binary_dir = root / "target tree/release"
             binary_dir.mkdir(parents=True)
-            binary = binary_dir / "horizon-client"
+            binary = binary_dir / "sunrise-client"
             binary.write_text("#!/bin/sh\nprintf 'smoke ran'\n")
             binary.chmod(0o755)
             for directory in [str(binary_dir), str(binary_dir.relative_to(root))]:
@@ -168,7 +205,7 @@ console.log(JSON.stringify(eval(expression)));
     def test_linux_smoke_gets_a_ready_display(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
-            binary = root / "horizon-client"
+            binary = root / "sunrise-client"
             # A controlled game fixture isolates the real smoke orchestration and Xvfb.
             binary.write_text(textwrap.dedent('''\
                 #!/usr/bin/env python3
@@ -199,7 +236,7 @@ console.log(JSON.stringify(eval(expression)));
             stub = root / "gh"
             stub.write_text("#!/bin/sh\nprintf '[]'\n")
             stub.chmod(0o755)
-            result = subprocess.run(["bash", "-c", shell], cwd=root, env={**os.environ, "DRY_RUN": "true", "GITHUB_REPOSITORY": "arismoko/horizon", "PATH": str(root) + os.pathsep + os.environ["PATH"]}, text=True, capture_output=True)
+            result = subprocess.run(["bash", "-c", shell], cwd=root, env={**os.environ, "DRY_RUN": "true", "GITHUB_REPOSITORY": "sunrise-org/sunrise", "PATH": str(root) + os.pathsep + os.environ["PATH"]}, text=True, capture_output=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("smoke", result.stdout.lower())
 

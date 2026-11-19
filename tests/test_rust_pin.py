@@ -8,14 +8,19 @@ A workflow names no floating channel (`stable`, `beta`, `nightly`) and no releas
 - `"$(cat …tools/ci/rust-version)"` (or a shell variable holding it) wherever a command needs the release spelled out.
 """
 
+import os
 import re
+import shutil
+import subprocess
+import tempfile
+import time
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github/workflows"
 # Upstream's workflows, disabled on this fork and kept as upstream writes them for syncs: nothing runs them.
-DISABLED = {"ci.yml", "launcher.yml", "mod-registry.yml", "nightly.yml", "pack-bench.yml", "parity-main.yml"}
+DISABLED = {"ci.yml", "launcher.yml", "mod-registry.yml", "pack-bench.yml"}
 RELEASE = r"(?:stable|beta|nightly|\d+\.\d+(?:\.\d+)?)\b"
 FORBIDDEN = [
     (re.compile(rf"rustup_install\.sh\s+{RELEASE}"), "rustup_install.sh takes the pin itself"),
@@ -47,9 +52,8 @@ class RustPinTests(unittest.TestCase):
     def test_the_pin_is_one_exact_release(self):
         self.assertRegex((ROOT / "tools/ci/rust-version").read_text(), r"^\d+\.\d+\.\d+\n?$")
 
-    def test_the_launcher_and_wasm_toolchains_read_the_pin(self):
-        for path, include in (("launcher/src/rust_toolchain.rs", '"../../tools/ci/rust-version"'),
-                              ("crates/cargo-horizon-mod/src/wasm.rs", '"../../../tools/ci/rust-version"')):
+    def test_the_wasm_toolchain_reads_the_pin(self):
+        for path, include in (("crates/cargo-sunrise-mod/src/wasm.rs", '"../../../tools/ci/rust-version"'),):
             with self.subTest(path=path):
                 self.assertIn(f"include_str!({include}).trim_ascii()", (ROOT / path).read_text())
 
@@ -73,6 +77,21 @@ class RustPinTests(unittest.TestCase):
                    '# cargo +stable in a comment\n')
         self.assertEqual(violations("x.yml", allowed), [])
 
+
+
+class RustupInstallTests(unittest.TestCase):
+    def test_a_missing_rustup_fails_at_once_without_retrying(self):
+        with tempfile.TemporaryDirectory() as directory:
+            # Only what the script needs besides rustup.
+            for tool in ("tr", "dirname", "sleep"):
+                os.symlink(shutil.which(tool), Path(directory, tool))
+            started = time.monotonic()
+            result = subprocess.run([shutil.which("bash"), str(ROOT / "tools/ci/rustup_install.sh"), "--profile", "minimal"],
+                                    env={"PATH": directory}, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 127)
+            self.assertIn("rustup is not installed on this runner", result.stderr)
+            self.assertNotIn("retrying", result.stderr)
+            self.assertLess(time.monotonic() - started, 5)
 
 if __name__ == "__main__":
     unittest.main()
