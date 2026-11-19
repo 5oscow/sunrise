@@ -98,7 +98,14 @@ pub(crate) fn stage_for_run(
                 path.display()
             ));
         }
-        if !wanted.contains(&path) {
+        let cache_name = entry
+            .file_name()
+            .to_str()
+            .and_then(|name| name.strip_suffix(".jar"))
+            .is_some_and(|hash| {
+                hash.len() == 128 && hash.bytes().all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f'))
+            });
+        if cache_name && !wanted.contains(&path) {
             stale.push(path);
         }
     }
@@ -154,7 +161,7 @@ pub(crate) fn stage_for_run(
         }
     }
     // All originals have passed. Publish their verified bytes without linking to the source and
-    // prune old entries non-recursively; an input failure above leaves the old snapshot set intact.
+    // prune old cache files non-recursively; an input failure above leaves the old snapshot set intact.
     for (copy, staged) in pending {
         copy.persist(&staged)
             .map_err(|e| format!("{}: {e}", staged.display()))?;
@@ -267,9 +274,19 @@ mod tests {
         let (manifest, source, original) = fixture(root.path());
         let home = root.path().join(crate::RUN_DIR).join("home");
         let jars = home.join("jars");
-        fs::write(source.join("unrelated.jar"), b"do not stage").unwrap();
+        let unrelated_name = format!("{}.jar", "0".repeat(128));
+        fs::write(source.join(&unrelated_name), b"do not stage").unwrap();
         fs::create_dir_all(&jars).unwrap();
-        fs::write(jars.join("stale.jar"), b"previous run").unwrap();
+        let stale = jars.join(format!("{}.jar", "f".repeat(128)));
+        fs::write(&stale, b"previous run").unwrap();
+        let sentinels = [
+            jars.join("keep.jar"),
+            jars.join(format!("{}.jar", "A".repeat(128))),
+            jars.join(format!("{}.jar", "g".repeat(128))),
+        ];
+        for sentinel in &sentinels {
+            fs::write(sentinel, b"unrelated file").unwrap();
+        }
 
         assert_eq!(
             stage_for_run(&manifest, root.path(), Some(&source), &[]).unwrap(),
@@ -277,7 +294,11 @@ mod tests {
         );
         let staged = manifest.jar[0].cache_path(&jars);
         assert_eq!(fs::read(&staged).unwrap(), b"abc");
-        assert_eq!(fs::read_dir(&jars).unwrap().count(), 1);
+        assert!(!stale.exists());
+        assert!(!jars.join(unrelated_name).exists());
+        for sentinel in &sentinels {
+            assert_eq!(fs::read(sentinel).unwrap(), b"unrelated file");
+        }
         assert_eq!(fs::read(&original).unwrap(), b"abc");
         assert_eq!(fs::read_dir(&source).unwrap().count(), 2);
 
@@ -293,7 +314,7 @@ mod tests {
             assert!(error.contains(expected), "{error}");
         }
         assert_eq!(fs::read(&staged).unwrap(), b"abc");
-        assert_eq!(fs::read_dir(&jars).unwrap().count(), 1);
+        assert_eq!(fs::read_dir(&jars).unwrap().count(), 1 + sentinels.len());
     }
 
     #[test]
