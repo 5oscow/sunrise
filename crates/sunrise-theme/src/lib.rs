@@ -258,8 +258,7 @@ pub const ROW_WEB: f32 = 86.;
 /// The index column of a list (where `01` sits) and how far the hover plate reaches past a row.
 pub const INDEX: f32 = 40.;
 pub const PLATE_BLEED: f32 = 16.;
-/// A pressed primary button's opacity, and disabled controls'.
-pub const PRESSED: f32 = 0.85;
+/// The opacity of disabled controls.
 pub const DISABLED: f32 = 0.4;
 
 /// A duration and its easing curve (CSS `cubic-bezier` control points).
