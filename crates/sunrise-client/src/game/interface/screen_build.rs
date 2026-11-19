@@ -71,10 +71,6 @@ pub(super) struct ScreenBuild {
     pub(super) layout: BuildLayout,
     /// Panels drawn outside `rect`.
     pub(super) exclusion: Vec<[f32; 4]>,
-    /// `screen_init_pre` cancelled the screen's own widgets. Always false
-    /// until that hook lands (step 7).
-    #[allow(dead_code, reason = "step 7 of #903 reads the cancel")]
-    pub(super) cancelled: bool,
 }
 
 /// A container screen's layout: the panel it draws in, the panels beside it,
@@ -254,7 +250,6 @@ impl ScreenBuild {
             origin,
             layout,
             exclusion,
-            cancelled: false,
         }
     }
 
