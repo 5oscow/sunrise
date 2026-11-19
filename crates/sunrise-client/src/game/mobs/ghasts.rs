@@ -113,7 +113,7 @@ impl Game<'_> {
             Some("west") => 90.0,
             _ => 0.0,
         };
-        if let Some(id) = self.spawn_mob_raw("minecraft:happy_ghast", at, true)
+        if let Some(id) = self.spawn_mob_raw("minecraft:happy_ghast", at, false)
             && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
         {
             // DriedGhastBlock.spawnGhastling sets the baby age before
@@ -132,6 +132,43 @@ impl Game<'_> {
                 .in_source(SoundSource::Blocks);
             self.play_bound_sound(sound, id, None);
         }
+    }
+}
+
+#[cfg(test)]
+mod hatch_tests {
+    use crate::game::{LevelEvent, native_entity_refs::tests::with_game};
+    use sunrise_core::{nbt::Tag, position::BlockPos};
+
+    #[test]
+    #[ignore = "daily"]
+    fn ghastling_and_tadpole_hatches_match_vanilla_persistence() {
+        with_game(|game| {
+            for (block, kind) in [
+                ("minecraft:dried_ghast", "spawn_ghastling"),
+                ("minecraft:frogspawn", "hatch"),
+            ] {
+                game.level_events.push(LevelEvent::BlockEvent {
+                    pos: BlockPos::new(4, 64, 4),
+                    state: game.pack.assets.registry.default_state(block).unwrap(),
+                    kind,
+                });
+            }
+            game.process_level_events().unwrap();
+
+            let (ghastling, tadpoles) = game.mobs.split_first().unwrap();
+            assert_eq!(ghastling.kind.id, "minecraft:happy_ghast");
+            assert!(ghastling.is_baby());
+            assert!(!ghastling.persistent);
+            assert!((2..=5).contains(&tadpoles.len()));
+            for tadpole in tadpoles {
+                assert_eq!(tadpole.kind.id, "minecraft:tadpole");
+                assert!(tadpole.persistent);
+            }
+            let (_, saved) = game.save_mob(0, &[(0, 0)].into()).unwrap();
+            assert_eq!(saved.get("Age"), Some(&Tag::Int(-24000)));
+            assert_eq!(saved.get("PersistenceRequired"), Some(&Tag::Byte(0)));
+        });
     }
 }
 

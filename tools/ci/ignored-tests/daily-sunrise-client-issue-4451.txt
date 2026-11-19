@@ -719,6 +719,7 @@ sunrise-client game::general::tick_tests::parent_ticks_before_its_depth_first_ri
 sunrise-client game::general::tick_tests::quarantine_then_reinstall_restores_the_counter lib daily resources
 sunrise-client game::general::tick_tests::summon_answers_a_target_with_a_network_id lib daily resources
 sunrise-client game::general::tick_tests::two_rows_share_the_part_but_not_their_counters lib daily resources
+sunrise-client game::ghasts::hatch_tests::ghastling_and_tadpole_hatches_match_vanilla_persistence lib daily resources
 sunrise-client game::ghasts::item_collision_tests::a_dropped_item_rests_on_a_boat_but_falls_through_a_minecart lib daily resources
 sunrise-client game::glide_wear_tests::a_glider_without_a_damage_component_glides_but_never_wears lib daily resources
 sunrise-client game::glide_wear_tests::chest_glide_wear lib daily resources
