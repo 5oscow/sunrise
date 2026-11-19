@@ -447,6 +447,9 @@ impl Transfer {
     }
 }
 
+/// Accepted values for `backups.keep` in the file and the configuration command.
+pub const BACKUP_KEEP_RANGE: std::ops::RangeInclusive<i64> = 1..=1000;
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Backups {
@@ -645,8 +648,12 @@ impl Config {
         }
         self.backups.interval()?;
         let keep = self.backups.keep;
-        if !(1..=1000).contains(&keep) {
-            return Err(format!("backups.keep is {keep}: use 1 to 1000"));
+        if !BACKUP_KEEP_RANGE.contains(&i64::from(keep)) {
+            return Err(format!(
+                "backups.keep is {keep}: use {} to {}",
+                BACKUP_KEEP_RANGE.start(),
+                BACKUP_KEEP_RANGE.end()
+            ));
         }
         self.panel.address()?;
         self.api.check()?;
