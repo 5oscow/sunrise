@@ -6229,7 +6229,6 @@ impl Game<'_> {
         if let Some(r) = &self.remote {
             r.session.send_far_terrain();
         }
-        self.tick_chat_session();
         // Minecraft.tick sends this even when the player cannot tick yet,
         // including while waiting for chunks. Keep it outside early returns.
         if self.remote.as_ref().is_some_and(Remote::has_level) {
@@ -8977,10 +8976,6 @@ impl Game<'_> {
             && self.screen == Screen::Playing
             && self.sleeping.is_none()
             && !self.screen_over_playing();
-        // MultiPlayerGameMode.tick, first in Minecraft.tick, screen or not: the slot
-        // chosen since the last tick (the wheel, the last tick's number keys, the
-        // server's SetHeldSlot) goes out before anything else of this tick.
-        self.remote_send_carried();
         self.refresh_client_pick(1.0);
         if stop || !ready {
             self.stop_remote_mining();

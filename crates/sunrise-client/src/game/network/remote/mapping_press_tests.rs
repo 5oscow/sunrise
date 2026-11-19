@@ -68,6 +68,8 @@ fn with_callback_game(
             game.title = None;
             game.screen = Screen::Playing;
             game.remote.as_mut().unwrap().loaded_sent = true;
+            // The tick's first packet, the held slot (`MultiPlayerGameMode.tick`), then its keys.
+            game.remote_send_carried();
             game.remote_handle_input();
             packets.lock().unwrap().clear();
             test(game, &packets, &triggered);
@@ -241,7 +243,7 @@ fn the_host_presses_by_name_and_refuses_the_others() {
         assert_eq!(game.selected, 2);
         assert_eq!(sent(packets), Vec::<String>::new());
         // `MultiPlayerGameMode.tick` tells the server first thing in the next tick.
-        game.remote_handle_input();
+        game.remote_send_carried();
         assert_eq!(sent(packets), ["minecraft:set_carried_item"]);
         assert_eq!(
             ClientInputClientHost::click_mapping(game, "key.screenshot"),
@@ -410,6 +412,28 @@ fn a_toolbar_load_goes_out_before_a_drop_in_its_tick() {
                 .as_ref()
                 .map(|s| (s.item.as_ref(), s.count)),
             Some(("minecraft:dirt", 15))
+        );
+    });
+}
+
+/// `MultiPlayerGameMode.tick` comes first in `Minecraft.tick`, before the GUI ticks its
+/// screens: a slot chosen since the last tick goes out ahead of what a screen sends as it
+/// closes in that tick (a sign editor whose sign is gone, `AbstractSignEditScreen.removed`).
+#[test]
+#[ignore = "daily"]
+fn the_held_slot_goes_out_before_a_closing_screens_packet() {
+    with_pressing_game(|game, packets, _| {
+        game.open_sign_editor((0, 64, 40), true);
+        sent(packets);
+        game.selected = (game.selected + 1) % 9;
+        game.tick_remote_level().unwrap();
+        let sent = sent(packets);
+        let at = |id: &str| sent.iter().position(|p| p == id);
+        assert!(at("minecraft:sign_update").is_some(), "{sent:?}");
+        assert!(at("minecraft:set_carried_item").is_some(), "{sent:?}");
+        assert!(
+            at("minecraft:set_carried_item") < at("minecraft:sign_update"),
+            "{sent:?}"
         );
     });
 }
