@@ -142,11 +142,12 @@ with the caller's transaction. A stack not held in a menu slot or cursor is refu
 
 ## Keeping a mod menu open
 
-The server asks the open mod menu's `MenuPart` for `menu_still_valid` each tick and before each click, as a
-Java menu overrides `AbstractContainerMenu.stillValid`. `event.menu` is the menu type. For menus opened
-without a backing block, `event.valid` starts true and `event.pos` is `None`, even if
-`player_open_mod_menu` was given a position for the client's screen. Set `valid` to false to close the menu
-and return the cursor stack as on a normal close.
+The server asks the open mod menu's `MenuPart` for `menu_still_valid` each tick and before processing a
+matching non-spectator container click, as a Java menu overrides `AbstractContainerMenu.stillValid`. A click
+for a different window is dropped; a matching spectator click resends the menu without asking the part.
+`event.menu` is the menu type. For menus opened without a backing block, `event.valid` starts true and
+`event.pos` is `None`, even if `player_open_mod_menu` was given a position for the client's screen. Set
+`valid` to false to close the menu and return the cursor stack as on a normal close.
 
 For a block menu, `event.pos` is the backing block and `valid` starts as the reach check: the player's
 eyes must be within their block interaction range plus 4 of each backing block. A large machine with a
