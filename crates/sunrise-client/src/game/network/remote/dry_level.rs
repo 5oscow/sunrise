@@ -40,6 +40,8 @@ pub(super) struct DryLevel<'w> {
     random: sunrise_core::random::LegacyRandom,
     /// The sounds the use plays (a door's creak).
     pub(super) sounds: Vec<DrySound>,
+    /// The server owns liquid-container writes, including a part's replacement.
+    pub(super) filled_container: bool,
     /// The live level's ticks a mod's placement and survival hooks read, where the guess
     /// schedules into scratch ones; `None` where it runs on the live ticks.
     pub(super) reads: Option<&'w sunrise_world::level::Ticks>,
@@ -57,6 +59,7 @@ impl<'w> DryLevel<'w> {
             notice_order: None,
             random: sunrise_core::random::LegacyRandom::new(0),
             sounds: Vec::new(),
+            filled_container: false,
             reads: None,
             asks_mods: true,
         }
@@ -91,6 +94,25 @@ impl PredictedLevel for DryLevel<'_> {
 }
 
 impl sunrise_world::level::LevelAccess for DryLevel<'_> {
+    fn can_place_liquid(
+        &self,
+        pos: sunrise_core::position::BlockPos,
+        state: BlockStateId,
+        fluid: sunrise_world::fluid::FluidKind,
+        user: sunrise_world::level::LiquidUser,
+    ) -> Option<bool> {
+        self.base.can_place_liquid(pos, state, fluid, user)
+    }
+    fn place_liquid(
+        &mut self,
+        _: &mut sunrise_world::level::Ticks,
+        _: sunrise_core::position::BlockPos,
+        _: BlockStateId,
+        _: sunrise_world::fluid::FluidState,
+    ) -> Option<bool> {
+        self.filled_container = true;
+        None
+    }
     fn before_smoke_source(&self, state: BlockStateId, smoke: &mut Option<bool>) {
         self.base.before_smoke_source(state, smoke);
     }
@@ -112,11 +134,18 @@ impl sunrise_world::level::LevelAccess for DryLevel<'_> {
         if let sunrise_world::level::LevelEvent::Sound {
             pos,
             sound,
+            source,
             volume,
             pitch,
         } = event
         {
-            self.sounds.push((pos, sound, volume, pitch));
+            let source = match source {
+                // Block-use prediction already plays uncategorized sounds on Blocks.
+                None | Some(sunrise_world::level::LevelSoundSource::Blocks) => {
+                    mod_api::SoundSource::Blocks
+                }
+            };
+            self.sounds.push((pos, sound, source, volume, pitch));
         }
     }
     fn block_state(&self, pos: sunrise_core::position::BlockPos) -> BlockStateId {

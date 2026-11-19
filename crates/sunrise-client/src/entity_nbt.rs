@@ -1868,6 +1868,17 @@ fn mob_from_nbt_at(
                         v,
                     )
                 }
+                // The attributes an effect's modifier changes (#1988).
+                "minecraft:safe_fall_distance"
+                | "minecraft:max_absorption"
+                | "minecraft:waypoint_transmit_range" => {
+                    use crate::mobs::finalize;
+                    if let Some(a) = finalize::command_attr(id.trim_start_matches("minecraft:"))
+                        && finalize::default_value(&m, a) != Some(v)
+                    {
+                        finalize::set_base(&mut m, a, v);
+                    }
+                }
                 _ => {}
             }
         }

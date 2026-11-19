@@ -725,9 +725,9 @@ impl Game<'_> {
         Some(self.state_shape_boxes(world, anims, state, pos, kind))
     }
 
-    /// Gameplay's face support in the current or a parked server level, including
-    /// live block entities for dynamic shapes. None for stale or closed levels,
-    /// unloaded blocks, unsupported states or a shape query error.
+    /// The local face support in an open server level or the current client level,
+    /// including shapes published by local block entities. None for unavailable
+    /// levels, unloaded or out-of-height blocks, or a shape query error.
     pub(super) fn level_block_face_sturdy(
         &self,
         level: LevelRef,
@@ -736,7 +736,7 @@ impl Game<'_> {
         support: mod_api::SupportType,
     ) -> Option<bool> {
         super::native_world_read::block_face_sturdy(
-            self.native_level_world(level)?,
+            self.native_level_read_world(level)?,
             self.res.behaviours(),
             self.res.collision(),
             pos,

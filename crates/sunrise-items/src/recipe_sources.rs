@@ -32,8 +32,7 @@ pub fn sources(root: &Path, overlay: &PackOverlay) -> Result<Vec<(String, Value)
     let inventory = sunrise_mod_package::enabled::EnabledMods::read(root)?;
     let conditions = overlay
         .conditions
-        .with_mod_inventory(inventory.server_ids())
-        .with_diagnostics();
+        .with_mod_inventory(inventory.server_ids());
     for file in &sunrise_world::json_folder::read(&root.join("data/minecraft/recipe"))?.files {
         sources.push((file.name.clone(), file.bytes()?.to_vec()));
     }
@@ -65,23 +64,33 @@ pub fn sources(root: &Path, overlay: &PackOverlay) -> Result<Vec<(String, Value)
     }
     let filters = crate::recipe_filters::RecipeFilters::load(root, overlay);
     let mut parsed = Vec::with_capacity(sources.len());
+    let mut errors = Vec::new();
     for (name, bytes) in sources {
-        let mut v: Value = serde_json::from_slice(&bytes).map_err(|error| {
-            let id = qualified(&name);
-            let (namespace, path) = id.split_once(':').unwrap();
-            format!("recipes: data/{namespace}/recipe/{path}.json refused: {error}")
-        })?;
-        // A file whose load conditions don't hold is silently absent.
-        if !conditions.allows_id(&v, "recipe", &qualified(&name)) {
-            continue;
+        let id = qualified(&name);
+        let (namespace, path) = id.split_once(':').expect("qualified recipe ID");
+        let path = format!("data/{namespace}/recipe/{path}.json");
+        let mut v: Value = match serde_json::from_slice(&bytes) {
+            Ok(value) => value,
+            Err(error) => {
+                errors.push(format!("recipes: {path} refused: {error}"));
+                continue;
+            }
+        };
+        match conditions.allows_file_isolated(&v, &path) {
+            Ok(true) => {}
+            Ok(false) => continue,
+            Err(error) => {
+                errors.push(format!("{path}: {error}"));
+                continue;
+            }
         }
-        // The data's recipe filters, over the final set.
-        if !filters.apply(&qualified(&name), &mut v) {
-            continue;
+        if filters.apply(&id, &mut v) {
+            parsed.push((name, v));
         }
-        parsed.push((name, v));
     }
-    conditions.check_resource_errors("recipe")?;
+    if !errors.is_empty() {
+        return Err(errors.join("; ").into());
+    }
     Ok(parsed)
 }
 

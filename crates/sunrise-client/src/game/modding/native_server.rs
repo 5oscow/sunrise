@@ -1903,7 +1903,26 @@ impl Game<'_> {
     /// guest's through `as_guest`, including within another guest's turn.
     /// False when it didn't run: no such player here, or dead.
     pub(super) fn native_as_player(&mut self, uuid: u128, f: impl FnOnce(&mut Self)) -> bool {
-        if uuid == self.native_acting_id() {
+        // With no guest's turn running, `native_acting_id` is the world's owner: on a server
+        // thread that owner is a guest too, whose state is theirs, not the `Game`'s own. Only
+        // the owner is refused when living in another level: the call would otherwise fall to
+        // the acting-player branch below and run on the `Game`'s own player, who is not theirs.
+        // Any other guest keeps `as_guest`'s path, as before the owner's fallback.
+        let here = self.dim.id();
+        let owner = self.lan_acting_uuid.is_none() && uuid == self.native_acting_id();
+        let owner_guest = owner
+            .then(|| {
+                self.lan
+                    .as_ref()
+                    .and_then(|host| host.hub.holder_guest(uuid, here))
+                    .filter(|g| !g.dead)
+                    .map(|g| g.dimension == here)
+            })
+            .flatten();
+        if owner_guest == Some(false) {
+            return false;
+        }
+        if owner_guest.is_none() && uuid == self.native_acting_id() {
             if self
                 .player
                 .as_ref()

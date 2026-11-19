@@ -18,8 +18,6 @@ use std::path::{Path, PathBuf};
 pub const ENTRIES: &str = "mods";
 /// The list of files taken down.
 pub const REVOKED: &str = "revoked.toml";
-/// Ids the site uses for its own pages (`/mods/submit`).
-const RESERVED: [&str; 1] = ["submit"];
 /// The biggest icon, a PNG in `icons/`.
 const MAX_ICON: u64 = crate::icon::MAX_ICON as u64;
 
@@ -172,7 +170,7 @@ impl Entry {
         if !valid_id(id) {
             errors.push(format!("{id:?} is not [a-z0-9_]{{1,64}}"));
         }
-        if RESERVED.contains(&id.as_str()) {
+        if crate::manifest::RESERVED_IDS.contains(&id.as_str()) {
             errors.push(format!("{id:?} is reserved: pick another id"));
         }
         if let Err(e) = open(&self.kind) {
@@ -357,7 +355,7 @@ pub fn project(entry: &Entry, src: &Sources) -> Result<Project, Vec<String>> {
     let entry = &entry.resolved(&cache.page);
     let mut errors = entry.check_fields();
     let id = &entry.id;
-    if !valid_id(id) || RESERVED.contains(&id.as_str()) {
+    if !valid_id(id) || crate::manifest::RESERVED_IDS.contains(&id.as_str()) {
         return Err(errors);
     }
     let icon = entry

@@ -257,7 +257,7 @@ fn run(wasm: bool) {
     mod_platform::__private::install_packages(&inventory, &[]);
     let root = std::path::PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap());
     // Freeze the real bootstrap snapshot before with_mods runs registration hooks.
-    mods::install_registration_data(&root).unwrap();
+    mods::install_registration_data(&root, Default::default()).unwrap();
     mod_platform::testing::with_mods(entries.into(), || {
         let role = if dedicated {
             ExecutionRole::DedicatedServer

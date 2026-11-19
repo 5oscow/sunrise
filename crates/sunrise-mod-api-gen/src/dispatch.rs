@@ -352,6 +352,16 @@ pub(super) fn emit<'a>(
                         .collect::<String>()
                         == "Option<BlockEntityRef>"
             });
+        // A menu hook told the mod block whose menu it is reaches only the part
+        // that owns that open screen (`HookParts::menu_screen`).
+        let screen_routed = hook
+            .scope
+            .as_ref()
+            .is_some_and(|scope| scope.kind == PartKind::Menu)
+            && args.iter().any(|(arg, ty)| {
+                arg == "block"
+                    && ty.to_token_stream().to_string().replace(' ', "") == "Option<&str>"
+            });
         // A scoped hook's parts: the trait its method goes on, and the lookup
         // of the parts attached to the thing its `key` argument names.
         let scoped = match &hook.scope {
@@ -406,6 +416,7 @@ pub(super) fn emit<'a>(
                     "BlockEntityTypeKey" if table == "block_entity" => format!(
                         "block_entity_kind(|| super::content::registry_keys::block_entity_type_name({key}))"
                     ),
+                    "& str" if screen_routed => format!("menu_screen({key}, block)"),
                     "& str" => format!("{table}(|| Some({key}))"),
                     "EntityRef" if table == "entity" => {
                         let host = &host.as_ref().ok_or("entity handle needs a Host")?.0;
@@ -661,18 +672,20 @@ pub(super) fn emit<'a>(
                     "{name}: NativeHookHost requires a read-only host and receiver"
                 ));
             }
-            let passed = host
-                .as_ref()
-                .map(|(_, param)| {
-                    if scoped_read_host {
-                        "self.host".to_owned()
-                    } else if param.call == "&*self" && receiver_mut == Some(false) {
-                        "self".to_owned()
-                    } else {
-                        param.call.to_owned()
-                    }
-                })
-                .into_iter()
+            let native_host = host.as_ref().map(|(_, param)| {
+                if scoped_read_host {
+                    "self.host".to_owned()
+                } else if name == "place_liquid" {
+                    format!("{}.without_container_loot()", param.call)
+                } else if param.call == "&*self" && receiver_mut == Some(false) {
+                    "self".to_owned()
+                } else {
+                    param.call.to_owned()
+                }
+            });
+            let passed = native_host
+                .iter()
+                .cloned()
                 .chain(if declared.is_empty() {
                     args.iter()
                         .chain(output.as_ref())
@@ -776,18 +789,9 @@ pub(super) fn emit<'a>(
                 None
             };
             let body = if let Some(crossing) = crossing {
-                let passed = host
-                    .as_ref()
-                    .map(|(_, param)| {
-                        if scoped_read_host {
-                            "self.host".to_owned()
-                        } else if param.call == "&*self" && receiver_mut == Some(false) {
-                            "self".to_owned()
-                        } else {
-                            param.call.to_owned()
-                        }
-                    })
-                    .into_iter()
+                let passed = native_host
+                    .iter()
+                    .cloned()
                     .chain(crossing.arguments.iter().cloned().map(|argument| {
                         surface_calls
                             .get(argument.as_str())
@@ -854,9 +858,18 @@ pub(super) fn emit<'a>(
                 });
             }
         }
+        // Keep part lookup and first-Some selection here even when the engine
+        // lends a fresh (e.g. transactional) write host to each invocation.
+        let scoped_write_replace = contract == Contract::Replace
+            && scoped.is_some()
+            && !observer_routed
+            && host
+                .as_ref()
+                .is_some_and(|(_, param)| param.ty == "&mut dyn LevelWriteHost");
+        let invoke_part = fresh_name("invoke_part", &mut used);
         let invoke = call_args.join(", ");
         let trait_params = trait_params.join(", ");
-        let dispatch_params = dispatch_params.join(", ");
+        let dispatch_signature = dispatch_params.join(", ");
         let trait_name = "Hooks";
         let mut method_source = String::new();
         for line in hook.doc.trim().lines() {
@@ -944,6 +957,11 @@ pub(super) fn emit<'a>(
         let call = |callee: &str, exit: &str| {
             // Early exits must validate while the listener still owns the scope.
             let exit = format!("{stack_after} {exit}");
+            let answer_call = if scoped_write_replace {
+                format!("{invoke_part}({callee}, &mut {event})")
+            } else {
+                format!("{callee}.{name}({invoke})")
+            };
             let invocation = match contract {
                 _ if name == "block_entity_tick" => format!(
                     "*{event}.reply = BlockEntityTickReply::Changed; {event}.entity.__begin_tick_listener(); {callee}.{name}({invoke}); let listener_reply = *{event}.reply; {event}.entity.__finish_tick_listener(listener_reply); tick_changed |= listener_reply == BlockEntityTickReply::Changed;"
@@ -953,11 +971,11 @@ pub(super) fn emit<'a>(
                     o = out.unwrap()
                 ),
                 Contract::Replace if answered => format!(
-                    "if let Some({replacement}) = {callee}.{name}({invoke}) {{ *{o} = Some(Answered {{ answer: {replacement}, mod_id }}); {exit}; }}",
+                    "if let Some({replacement}) = {answer_call} {{ *{o} = Some(Answered {{ answer: {replacement}, mod_id }}); {exit}; }}",
                     o = out.unwrap()
                 ),
                 Contract::Replace => format!(
-                    "if let Some({replacement}) = {callee}.{name}({invoke}) {{ *{o} = Some({replacement}); {exit}; }}",
+                    "if let Some({replacement}) = {answer_call} {{ *{o} = Some({replacement}); {exit}; }}",
                     o = out.unwrap()
                 ),
                 Contract::Collect if answered => format!(
@@ -1037,6 +1055,15 @@ pub(super) fn emit<'a>(
                 format!(
                     "for (mod_id, {mod_item}) in super::entered_with_id(HookId::{hook_id}, \"{name}\") {{ if {event}.data.failure().is_some() {{ break; }} let result = super::chunk_disk::invoke(mod_id, || {{ {} }}); result.unwrap_or_else(|error| {event}.data.refuse(error)); if let Some(error) = {event}.data.failure().cloned() {{ let mut error = error; if error.mod_id.is_empty() {{ error.mod_id = mod_id.into(); }} {event}.data.attribute_failure(error); break; }} }}",
                     call(&mod_item, "break"),
+                ),
+            ),
+            None if name == "consume_effect" => (
+                format!(
+                    "let Some(owner) = super::runtime::listening_kind_owner(HookId::{hook_id}, kind) else {{ return; }};"
+                ),
+                format!(
+                    "let mut {entered} = super::runtime::ListenerScope::new(); let {mod_item} = {entered}.enter(owner, \"{name}\"); {}",
+                    call(&mod_item, ""),
                 ),
             ),
             None if hook.owner.is_some() => (
@@ -1142,9 +1169,24 @@ pub(super) fn emit<'a>(
             let names: Vec<_> = carried.iter().map(|(arg, _)| arg.as_str()).collect();
             format!("let calls::{carrier} {{ {} }} = call;\n", names.join(", "))
         };
-        dispatch.push_str(&format!(
-            "#[doc(hidden)] pub fn dispatch_{name}({dispatch_params}) {{ {unpack}{early_return}\n{body} }}\n"
-        ));
+        if scoped_write_replace {
+            let (part_trait, _) = scoped.as_ref().unwrap();
+            let args = dispatch_params[1..]
+                .iter()
+                .map(|param| param.split_once(':').unwrap().0)
+                .collect::<Vec<_>>()
+                .join(", ");
+            let params = dispatch_params[1..].join(", ");
+            let (host, _) = host.as_ref().unwrap();
+            dispatch.push_str(&format!(
+                "#[doc(hidden)] pub fn dispatch_{name}({dispatch_signature}) {{ dispatch_{name}_with({args}, |part, event| part.{name}(&mut *{host}, event)); }}\n\
+                 #[doc(hidden)] pub fn dispatch_{name}_with({params}, mut {invoke_part}: impl FnMut(&dyn {part_trait}, &mut {event_type}{elided}){result}) {{ {unpack}{early_return}\n{body} }}\n"
+            ));
+        } else {
+            dispatch.push_str(&format!(
+                "#[doc(hidden)] pub fn dispatch_{name}({dispatch_signature}) {{ {unpack}{early_return}\n{body} }}\n"
+            ));
+        }
     }
     if !calls.is_empty() {
         dispatch.push_str(&format!(

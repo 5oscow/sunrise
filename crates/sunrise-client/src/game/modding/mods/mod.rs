@@ -7,6 +7,7 @@ use super::{
     registration_capability_coverage as coverage,
 };
 mod menu_books;
+pub(in crate::game) mod runtime_files;
 mod standalone;
 use mod_api::__private::game::*;
 use mod_api::RegistrationContext;
@@ -227,19 +228,14 @@ fn builtin_registry_names(root: &Path) -> sunrise_client::Result<BTreeMap<String
 }
 
 /// Capture registration's stable registries, settings and stock capability type owners.
-pub(super) fn install_registration_data(root: &Path) -> sunrise_client::Result<()> {
+pub(super) fn install_registration_data(
+    root: &Path,
+    runtime_files: BTreeMap<String, Arc<dyn mod_api::RuntimeFileSource>>,
+) -> sunrise_client::Result<()> {
     let packages = mod_api::__private::loaded_mods();
     let directory = Game::game_dir();
-    #[cfg(unix)]
-    let directory = {
-        use std::os::unix::ffi::OsStrExt;
-        mod_api::InstanceDirectory::Unix(directory.as_os_str().as_bytes().to_vec())
-    };
-    #[cfg(windows)]
-    let directory = {
-        use std::os::windows::ffi::OsStrExt;
-        mod_api::InstanceDirectory::Windows(directory.as_os_str().encode_wide().collect())
-    };
+    let directory = mod_api::InstanceDirectory::from_path(&directory)
+        .expect("the host's paths have an encoding the mod API carries");
     (sunrise_engine_slots::platform()?.install_registration_data)(
         mod_api::__private::RegistrationData::new(
             builtin_registry_names(root)?,
@@ -250,7 +246,8 @@ pub(super) fn install_registration_data(root: &Path) -> sunrise_client::Result<(
             directory,
             crate::entry::runtime_environment::get().clone(),
         )
-        .with_capability_coverage(coverage::builtin, coverage::block_entity),
+        .with_capability_coverage(coverage::builtin, coverage::block_entity)
+        .with_runtime_files(runtime_files),
     );
     Ok(())
 }
@@ -711,7 +708,7 @@ fn refuse_primary_namespace_claims(
             .find(|ns| primary.contains(ns.as_str()))
         {
             return Err(format!(
-                "mod {} claims namespace {namespace}, which is the primary namespace of mod {namespace}",
+                "mod {} claims namespace {namespace}, which is the primary namespace of mod {namespace}; turn one of them off",
                 manifest.id,
             ).into());
         }
@@ -760,7 +757,15 @@ pub(super) fn content_overlay(
             .native
             .built()
             .iter()
-            .map(|m| announced_entry(m.id, m.version, m.side))
+            .map(|m| {
+                let runtime = sources
+                    .native
+                    .packages()
+                    .iter()
+                    .find(|p| p.manifest.id == m.id)
+                    .and_then(|p| p.manifest.runtime.as_ref());
+                announced_entry(m.id, m.version, m.side, runtime)
+            })
             .collect()
     } else {
         Vec::new()
@@ -851,7 +856,12 @@ pub(super) fn content_overlay(
                     version: m.version.clone(),
                 });
                 if announce {
-                    announced.push(announced_entry(&m.id, &m.version, m.side));
+                    announced.push(announced_entry(
+                        &m.id,
+                        &m.version,
+                        m.side,
+                        m.runtime.as_ref(),
+                    ));
                 }
             }
             Ok(_) => {}
@@ -1258,6 +1268,7 @@ fn announced_entry(
     id: &str,
     version: &str,
     side: mod_api::Side,
+    runtime: Option<&sunrise_mod_package::manifest::RuntimeTable>,
 ) -> sunrise_protocol::mod_list::Entry {
     use mod_api::Side;
     use sunrise_protocol::mod_list;
@@ -1270,6 +1281,7 @@ fn announced_entry(
             // `Side` is open to new kinds; until the list carries one, such a mod stays local.
             _ => mod_list::Side::Client,
         },
+        runtime: runtime.map(sunrise_mod_package::manifest::RuntimeTable::digest),
     }
 }
 
@@ -2094,7 +2106,7 @@ mod tests {
                 refuse_primary_namespace_claims(&layers)
                     .unwrap_err()
                     .to_string(),
-                "mod claimant claims namespace owner, which is the primary namespace of mod owner"
+                "mod claimant claims namespace owner, which is the primary namespace of mod owner; turn one of them off"
             );
         }
     }

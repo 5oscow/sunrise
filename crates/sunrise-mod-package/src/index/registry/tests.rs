@@ -529,7 +529,6 @@ fn only_open_kinds_are_taken() {
     assert!(open(&Kind::DataPack).is_ok());
     assert!(open(&Kind::Other("world".into())).is_err());
     let mut submit: Entry = toml::from_str(COZY).unwrap();
-    submit.id = "submit".into();
     let dir = std::env::temp_dir();
     let src = Sources {
         registry: &dir,
@@ -538,7 +537,10 @@ fn only_open_kinds_are_taken() {
         site: "https://x.test/",
         generated: String::new(),
     };
-    assert!(project(&submit, &src).unwrap_err()[0].contains("reserved"));
+    for page in ["submit", "mine", "account", "policy"] {
+        submit.id = page.into();
+        assert!(project(&submit, &src).unwrap_err()[0].contains("reserved"));
+    }
     assert!(plain_version("1.0.0-beta.2") && !plain_version("../1") && !plain_version("1 0"));
     assert!(plain_date("2026-10-24") && !plain_date("24/10/2026"));
 }

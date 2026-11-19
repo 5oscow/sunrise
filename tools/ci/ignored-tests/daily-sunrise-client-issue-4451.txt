@@ -118,6 +118,7 @@ sunrise-client game::boats::lifetime_tests::a_bound_boat_commits_the_driven_clie
 sunrise-client game::boats::lifetime_tests::a_bound_boat_keeps_its_registration_through_ticks_until_discard lib daily resources
 sunrise-client game::boats::lifetime_tests::a_bound_ridden_boat_commits_the_server_leash_tick lib daily resources
 sunrise-client game::boats::paddle_tests::a_paddled_boat_accelerates_by_the_sine_table_at_its_turned_yaw lib daily resources
+sunrise-client game::boats::tests::a_boat_taken_over_mid_way_goes_on_easing lib daily resources
 sunrise-client game::boats::tests::a_driven_boat_eases_to_a_teleport_and_reports_where_it_is_going lib daily resources
 sunrise-client game::boats::tests::destruction_and_underwater_ejection_snap_rejected_passenger_descendants lib daily resources
 sunrise-client game::books::book_escape_tests::enter_signs_a_title_of_spaces_but_not_an_empty_one lib daily resources
@@ -1537,11 +1538,11 @@ sunrise-client game::native_hooks::render_frame_pre::tests::frame_interpolation_
 sunrise-client game::native_hooks::render_gui_pre::local_sound_tests::a_screen_hooks_sound_reaches_audio_at_the_next_update lib daily resources
 sunrise-client game::native_hooks::render_tooltip_texture::render_tooltip_texture_tests::a_mod_gives_a_tooltip_its_own_texture_or_colours lib daily resources
 sunrise-client game::native_hooks::runtime_environment::tests::native_process_environment_in_registration_and_game_hosts lib daily child-process
+sunrise-client game::native_hooks::runtime_environment_tests::client_host_reads_current_pause_state lib daily resources
+sunrise-client game::native_hooks::runtime_environment_tests::client_host_reads_playing_and_key_mappings lib daily resources
 sunrise-client game::native_hooks::server_tick_rate_changed::server_tick_rate_changed_tests::a_listener_runs_before_the_autosave_wait_is_adjusted lib daily resources
 sunrise-client game::native_hooks::server_tick_rate_changed::server_tick_rate_changed_tests::a_mod_hears_every_route_of_on_tick_rate_changed_once lib daily resources
 sunrise-client game::native_hooks::tests::a_trait_mod_measures_text_through_its_draw_context lib daily resources
-sunrise-client game::native_hooks::tests::client_host_reads_current_pause_state lib daily resources
-sunrise-client game::native_hooks::tests::client_host_reads_playing_and_key_mappings lib daily resources
 sunrise-client game::native_hooks::tests::declared_types_create_tick_and_reload_through_game lib daily resources
 sunrise-client game::native_hooks::tests::enchantment_registry_returns_records_and_unknown_cost lib daily resources
 sunrise-client game::native_hooks::tests::generated_fire_matches_dispatch lib daily resources

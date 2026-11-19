@@ -407,6 +407,88 @@ fn place_interpolated(m: &mut Mob, at: PosRot) {
     m.head_pitch = (at.pitch % 360.0).clamp(-90.0, 90.0);
 }
 
+/// Where a mob is, as its `SteppedInterpolationHandler` sees it.
+fn mob_pos_rot(m: &Mob) -> PosRot {
+    PosRot {
+        position: [m.position.x, m.position.y, m.position.z],
+        yaw: m.yaw,
+        pitch: m.head_pitch,
+    }
+}
+
+impl Game<'_> {
+    /// `Entity.commonTick` for the mount this client drives, `mobs[i]`: an
+    /// interpolation it had going when the client took it over runs on, its
+    /// target carried along by the mount's own moves (where the mount fits).
+    /// The mount's pose before the step: its tick saves the old pose
+    /// (setOldPosAndRot) before the step in vanilla, so `drive_mount` puts this one
+    /// back as the old pose once the tick has run.
+    pub(super) fn interpolate_driven_mount(&mut self, i: usize) -> Option<(Vec3, f32, f32)> {
+        let id = self.mobs[i].id as i32;
+        let handler = self.remote.as_mut().and_then(|r| r.stepped.get_mut(&id))?;
+        let m = &mut self.mobs[i];
+        let mut scene = sunrise_client::collisions::SceneCollisions {
+            world: &self.world,
+            binding: self.collision,
+            subject: None,
+        };
+        handler.follow(mob_pos_rot(m), |to| {
+            let bounds = m.bounds_at(Vec3::new(to[0], to[1], to[2]));
+            scene.unobstructed(bounds).unwrap_or(false)
+        });
+        let before = (m.position, m.yaw, m.head_pitch);
+        let at = handler.interpolate()?;
+        place_interpolated(m, at);
+        // A step that crosses a section is filed where it happens.
+        let to = m.position;
+        if to != before.0 {
+            let from = before.0;
+            self.entity_section_step(id as u32, [from.x, from.y, from.z], [to.x, to.y, to.z]);
+        }
+        Some(before)
+    }
+    /// `Entity.getClientPositionAndRotation` of the mount this client drives:
+    /// while an interpolation runs, where it is going.
+    pub(super) fn driven_mount_heading(&self, m: &Mob) -> PosRot {
+        let at = mob_pos_rot(m);
+        self.remote
+            .as_ref()
+            .and_then(|r| r.stepped.get(&(m.id as i32)))
+            .map_or(at, |h| h.heading(at))
+    }
+    /// The mount this client drives teleported to `at` (`moveOrInterpolateTo`):
+    /// it eases there over its type's update interval.
+    pub(super) fn interpolate_driven_mount_to(&mut self, i: usize, at: PosRot) {
+        let m = &mut self.mobs[i];
+        let Some(r) = self.remote.as_mut() else {
+            return;
+        };
+        let handler = r.stepped.entry(m.id as i32).or_insert_with(|| {
+            let interval = sunrise_client::lan::tracking::settings(&m.kind.id).1;
+            SteppedInterpolation::new(interval as i32)
+        });
+        let entity = mob_pos_rot(m);
+        if let Start::Snap(to) = handler.interpolate_to(
+            entity,
+            Some(Path::Linear(at.position)),
+            Some((at.yaw, at.pitch)),
+        ) {
+            place_interpolated(m, to);
+        }
+    }
+    /// `handleMoveVehicle`'s `getInterpolation().cancel()` for the mount this
+    /// client drives.
+    pub(super) fn cancel_driven_mount_interpolation(&mut self, id: u32) {
+        if let Some(h) = self
+            .remote
+            .as_mut()
+            .and_then(|r| r.stepped.get_mut(&(id as i32)))
+        {
+            h.cancel();
+        }
+    }
+}
+
 /// The packet a living entity's move came in.
 #[derive(Clone, Copy, PartialEq)]
 enum MovePacket {
@@ -2764,7 +2846,9 @@ impl Game<'_> {
         // copy in the mob list draws nothing: given the move, it kept the
         // dragon where it spawned (#2083).
         let dragon = self.dragon.as_ref().is_some_and(|d| d.id as i32 == id);
-        let driven = self.driven_mount().is_some_and(|m| m.id as i32 == id);
+        let driven = self.driven_mount().is_some_and(|m| m.id as i32 == id)
+            || u32::try_from(id)
+                .is_ok_and(|id| self.controls_boat(id) && self.boats.iter().any(|b| b.id == id));
         let mob = self
             .mob_index
             .get_mut(&mut self.mobs, id as u32)
@@ -2788,10 +2872,10 @@ impl Game<'_> {
                 t.position = position;
             }
             if driven {
-                // handleMoveEntity, handleEntityPositionSync: the mount this
-                // client moves (isLocalInstanceAuthoritative) keeps its own
-                // position, and no steps pile up for after the ride.
-                r.stepped.remove(&id);
+                // handleMoveEntity, handleEntityPositionSync: the mount or boat
+                // this client moves (isLocalInstanceAuthoritative) keeps its own
+                // position. An interpolation it had going runs on
+                // (`interpolate_driven_mount`, the boat's own), with no new steps.
                 return;
             }
             if let Some(m) = mob {
@@ -5811,6 +5895,10 @@ impl Game<'_> {
             o.velocity = v;
         } else if let Some(i) = self.carts.iter().position(|c| c.id == id as u32) {
             self.carts.update(i, |c| c.velocity = v);
+        } else if let Some(i) = self.boats.iter().position(|b| b.id == id as u32) {
+            // Entity.lerpMotion: the boat the player drives floats on from the server's motion
+            // (`tick_remote_boat_bubbles` drops it again on a boat nobody here drives).
+            self.boats.update(i, |b| b.velocity = v);
         } else if let Some(i) = self
             .creatures
             .projectiles
@@ -6137,21 +6225,6 @@ impl Game<'_> {
             self.tick_breeze_effects();
         }
         self.tick_remote_guardian_eyes(running);
-        // Level.tickBlockEntities: a frozen level ticks no block entities.
-        // A step advances the moving pistons created by the block event once,
-        // rather than finishing them during the frozen ticks between steps.
-        if running {
-            self.tick_block_entity_anims();
-            self.tick_remote_spawners();
-            self.client_tick_beacons();
-            self.tick_remote_potent_sulfur();
-            self.with_level(|b, level, ticks| {
-                b.client_tick_block_entities(level, ticks);
-            });
-            let pushes = std::mem::take(&mut self.block_ticks.piston_pushes);
-            self.push_piston_entities(pushes);
-            self.sync_moving_pistons();
-        }
         self.tick_hand();
         if running {
             self.tick_particles();
@@ -6175,18 +6248,53 @@ impl Game<'_> {
         }
         self.tick_subtitles();
         self.tick_client_load();
+        // Minecraft.tick: Level.tickEntities (this player among them), then
+        // Level.tickBlockEntities, then LocalPlayer.sendChanges. A piston's push
+        // lands after the player's own move, and the packet carries what it left:
+        // the position and the ground and collision flags `Entity.move(PISTON, ...)`
+        // set. A frozen level ticks no block entities; a step advances the
+        // moving pistons created by the block event once, rather than finishing
+        // them during the frozen ticks between steps.
+        let sent = self.tick_remote_own_player();
+        if running {
+            self.tick_remote_block_entities();
+        }
+        if let Some(input) = sent? {
+            self.remote_send_state(input);
+        }
+        Ok(())
+    }
+
+    /// `Level.tickBlockEntities` on a client: the block entities' animations
+    /// and client ticks, and the moving pistons' pushes.
+    fn tick_remote_block_entities(&mut self) {
+        self.tick_block_entity_anims();
+        self.tick_remote_spawners();
+        self.client_tick_beacons();
+        self.tick_remote_potent_sulfur();
+        self.with_level(|b, level, ticks| {
+            b.client_tick_block_entities(level, ticks);
+        });
+        let pushes = std::mem::take(&mut self.block_ticks.piston_pushes);
+        self.push_piston_entities(pushes);
+        self.sync_moving_pistons();
+    }
+
+    /// The local player's `LocalPlayer.tick`, once the client has loaded. The
+    /// input `sendChanges` sends after the block entities ticked, if it runs.
+    fn tick_remote_own_player(&mut self) -> Result<Option<u8>> {
         let entity_collisions = self.entity_collisions(Mover::Player);
         // Those added before it tick before it: their pushes reach this move.
         let pushed = self.remote_pushes(true);
         let sprint_window = self.settings.sprint_window;
         if self.player.is_none() {
-            return Ok(());
+            return Ok(None);
         }
         // LocalPlayer.tick and sendChanges run once the client has loaded (hasClientLoaded),
         // wherever the player is: a chunk that hasn't come yet has no blocks here, as vanilla's
         // empty chunk has none, so the player falls through it until the chunk comes.
         if !self.remote.as_ref().is_some_and(|r| r.loaded_sent) {
-            return Ok(());
+            return Ok(None);
         }
         // LocalPlayer.tick reaches Player.tick only once the client has loaded; its
         // endpoints bracket that work alone, also on the death screen, not the level
@@ -6232,13 +6340,13 @@ impl Game<'_> {
         }
     }
 
-    /// `LocalPlayer.tick`'s `Player.tick` work: input, riding, motion, sleep
-    /// and the state the server hears.
+    /// `LocalPlayer.tick`'s `Player.tick` work: input, riding, motion and
+    /// sleep, and the input `sendChanges` sends for it (`None`: nothing ticked).
     fn tick_local_player(
         &mut self,
         entity_collisions: Vec<sunrise_core::geometry::Aabb>,
         sprint_window: i32,
-    ) -> Result<()> {
+    ) -> Result<Option<u8>> {
         // Player.tick's ItemCooldowns.tick, after Pre and after
         // handleKeybinds: this path replaces `tick_world`'s for a server's
         // client (multiplayer and the default single player), so the entries
@@ -6251,7 +6359,7 @@ impl Game<'_> {
         self.sleep_timer = super::tick_sleep_timer(self.sleep_timer, self.sleeping.is_some());
         let stick = self.pad_move();
         if self.player.is_none() {
-            return Ok(());
+            return Ok(None);
         }
         // The LevelLoadingScreen takes the input until the level is ready.
         let loading = self
@@ -6326,7 +6434,7 @@ impl Game<'_> {
                 max_y: b.bounds().max_position().y,
             });
         let Some(player) = self.player.as_mut() else {
-            return Ok(());
+            return Ok(None);
         };
         player.fluids.boat = boat;
         if !riding && !self.replay.playing() {
@@ -6347,7 +6455,7 @@ impl Game<'_> {
         let sleeping = self.sleeping;
         let sleep_position = sleeping.and_then(|head| self.sleeping_position(head));
         let Some(player) = self.player.as_mut() else {
-            return Ok(());
+            return Ok(None);
         };
         let was_gliding = player.fall_flying;
         let dead = self.screen == Screen::Dead;
@@ -6559,8 +6667,7 @@ impl Game<'_> {
         // jump for this tick: the server's prediction plays the jump from it. Sent as held, the jump
         // was the client's alone, and the server saw a jump its keys didn't allow.
         let auto_jumped = self.player.as_ref().is_some_and(|p| p.was_auto_jump);
-        self.remote_send_state(input | u8::from(auto_jumped) << 4);
-        Ok(())
+        Ok(Some(input | u8::from(auto_jumped) << 4))
     }
 
     /// The last `ClientboundPlayerAbilities` the server sent, on a client.
@@ -8051,7 +8158,11 @@ impl Game<'_> {
         self.predict_blocks(changes, seq);
         // `level.playSound(player, ...)`: the clicker hears it from its own use; the
         // server sends it to the others only.
-        for (pos, sound, volume, pitch) in sounds {
+        self.play_predicted_sounds(sounds);
+    }
+
+    fn play_predicted_sounds(&mut self, sounds: &[DrySound]) {
+        for (pos, sound, source, volume, pitch) in sounds {
             let at = [
                 f64::from(pos.x) + 0.5,
                 f64::from(pos.y) + 0.5,
@@ -8063,7 +8174,7 @@ impl Game<'_> {
                 format!("minecraft:{sound}")
             };
             self.play_client_local_sound(
-                LevelSound::new(&name, at, *volume, *pitch).in_source(mod_api::SoundSource::Blocks),
+                LevelSound::new(&name, at, *volume, *pitch).in_source(*source),
             );
         }
     }
@@ -8316,22 +8427,15 @@ impl Game<'_> {
         let [x, y, z] = hit.beside();
         let beside = Some(sunrise_core::position::BlockPos::new(x, y, z));
         let sneaking = self.remote_shift_down();
-        let creative = self.creative;
+        let user = self.bucket_liquid_user();
         self.with_level(|b, level, ticks| {
             let mut level = DryLevel::new(level);
-            let emptied = b.bucket_empty(
-                &mut level, ticks, pos, beside, content, sound, sneaking, creative,
+            let emptied = b.bucket_empty_as(
+                &mut level, ticks, pos, beside, content, sound, sneaking, user,
             );
-            // Water poured into a liquid container (where it went, which may
-            // be the block beside a refusing one) fills it server-side only.
-            let client_change = !(content.is_water()
-                && emptied.is_some_and(|at| {
-                    use sunrise_world::level::LevelAccess as _;
-                    b.is_liquid_container(level.block_state(at))
-                }));
             (
                 emptied.is_some(),
-                client_change.then(|| level.changed.into_iter().collect()),
+                (!level.filled_container).then(|| level.changed.into_iter().collect()),
                 std::mem::take(&mut level.sounds),
             )
         })
@@ -9632,6 +9736,7 @@ use dry_level::DryLevel;
 type DrySound = (
     sunrise_core::position::BlockPos,
     std::sync::Arc<str>,
+    mod_api::SoundSource,
     f32,
     f32,
 );
@@ -9939,6 +10044,16 @@ impl ClientMenu {
 }
 
 impl Remote {
+    /// The interpolation a boat or other object `id` had toward the server's
+    /// position, taken out: its target, rotation and steps to go.
+    pub(super) fn take_object_lerp(
+        &mut self,
+        id: u32,
+    ) -> Option<([f64; 3], Option<(f32, f32)>, u32)> {
+        self.lerps
+            .remove(&(id as i32))
+            .map(|l| (l.target, l.rotation, l.steps))
+    }
     pub(super) fn set_menu_title(&mut self, title: Option<sunrise_client::text::Text>) {
         self.menu_title_snapshot = title.try_into_api().ok().flatten().map(Arc::new);
         self.menu_title = title;
@@ -13300,6 +13415,7 @@ pub(crate) mod tests {
             lan::{Out, PlayerSender},
             mod_content::{ContentMod, resource_root},
         };
+        use sunrise_core::position::BlockPos;
         use sunrise_mod_package::{
             content::{Block, Content, GateSound},
             enabled::EnabledMods,
@@ -13313,13 +13429,18 @@ pub(crate) mod tests {
         let mut content = Content::declared("gates");
         let use_sound = "gates:use.open";
         let blast_sound = "gates:blast.close";
+        let wire_sound = "minecraft:entity.zombie.ambient";
         content
             .declare(
                 &[Block {
                     id: "gates:sites".into(),
                     template: "minecraft:oak_fence_gate".into(),
                     item: false,
-                    open_sound: Some(GateSound::All(use_sound.into())),
+                    open_sound: Some(GateSound::Sites {
+                        on_use: Some(use_sound.into()),
+                        on_explosion: None,
+                        on_redstone: Some(wire_sound.into()),
+                    }),
                     close_sound: Some(GateSound::Sites {
                         on_use: None,
                         on_explosion: Some(blast_sound.into()),
@@ -13365,19 +13486,6 @@ pub(crate) mod tests {
                 let b = game.res.behaviours();
                 b.table.bool(game.world.block(x, y, z), b.props.open)
             };
-            game.world.set(x, y, z, gate).unwrap();
-            game.audio.capture = Some(Vec::new());
-            let (answer, dry) = game.remote_block_reacts(&hit, None, true);
-            assert!(answer.consumes_action());
-            game.predict_use(&dry, 1);
-            assert!(
-                open(game),
-                "the declared gate opens without a server round trip"
-            );
-            let predicted = game.audio.capture.as_mut().unwrap().pop().unwrap();
-            assert_eq!(predicted.event, use_sound);
-            assert_eq!(predicted.source, mod_api::SoundSource::Blocks.index());
-            assert!(game.audio.capture.as_ref().unwrap().is_empty());
 
             let [actor, other] = [12, 13].map(|conn| {
                 let (tx, rx) = std::sync::mpsc::channel();
@@ -13391,16 +13499,8 @@ pub(crate) mod tests {
                     .unwrap();
                 rx
             });
-            game.options.dedicated = Some(Vec::new());
-            game.world.set(x, y, z, gate).unwrap();
-            game.world.block_log = Some(Vec::new());
-            assert!(
-                game.guest_use_item_on(12, game.guest_index(12).unwrap(), hit, super::Hand::Main)
-                    .unwrap()
-            );
-            assert!(open(game));
-            game.lan_broadcast_effects();
-            let sounds = |rx: std::sync::mpsc::Receiver<Out>| {
+            let sounds = |game: &crate::game::Game<'_>, rx: &std::sync::mpsc::Receiver<Out>| {
+                let sync = game.lan.as_ref().unwrap().hub.sync_data();
                 rx.try_iter()
                     .flat_map(|out| match out {
                         Out::Packet(body) => vec![body],
@@ -13411,23 +13511,90 @@ pub(crate) mod tests {
                         let mut reader = Reader::new(&body);
                         let id = reader.varint().unwrap();
                         match Clientbound::decode(id, reader.rest()).unwrap() {
-                            Clientbound::Sound(packet) => packet.sound.1.map(|(id, _)| id),
+                            Clientbound::Sound(packet) => {
+                                let name = packet.sound.1.map(|(id, _)| id).unwrap_or_else(|| {
+                                    sync.builtin
+                                        .get("minecraft:sound_event")
+                                        .unwrap()
+                                        .name(packet.sound.0)
+                                        .unwrap()
+                                        .to_owned()
+                                });
+                                Some((name, packet.source, packet.volume))
+                            }
                             _ => None,
                         }
                     })
                     .collect::<Vec<_>>()
             };
-            assert!(!sounds(actor).iter().any(|name| name == use_sound));
-            assert_eq!(
-                sounds(other)
-                    .iter()
-                    .filter(|name| *name == use_sound)
-                    .count(),
-                1
-            );
+            let blocks = mod_api::SoundSource::Blocks.index();
+            let vanilla_gate = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:oak_fence_gate")
+                .unwrap();
+            game.options.dedicated = Some(Vec::new());
+            for (state, name) in [
+                (vanilla_gate, "minecraft:block.fence_gate.open"),
+                (gate, use_sound),
+            ] {
+                game.world.set(x, y, z, state).unwrap();
+                game.audio.capture = Some(Vec::new());
+                let (answer, dry) = game.remote_block_reacts(&hit, None, true);
+                assert!(answer.consumes_action());
+                game.predict_use(&dry, 1);
+                assert!(open(game), "the gate opens without a server round trip");
+                let capture = game.audio.capture.as_mut().unwrap();
+                assert_eq!(capture.len(), 1);
+                let predicted = capture.pop().unwrap();
+                assert_eq!((predicted.event.as_str(), predicted.source), (name, blocks));
+
+                game.world.set(x, y, z, state).unwrap();
+                game.world.block_log = Some(Vec::new());
+                assert!(
+                    game.guest_use_item_on(
+                        12,
+                        game.guest_index(12).unwrap(),
+                        hit,
+                        super::Hand::Main
+                    )
+                    .unwrap()
+                );
+                assert!(open(game));
+                game.lan_broadcast_effects();
+                assert!(sounds(game, &actor).is_empty(), "no echo to the clicker");
+                assert_eq!(sounds(game, &other), [(name.into(), blocks as i32, 1.0)]);
+            }
 
             game.explosion_trigger_blocks(&mut [pos]).unwrap();
             assert!(!open(game));
+            game.lan_broadcast_effects();
+            for listener in [&actor, &other] {
+                assert_eq!(
+                    sounds(game, listener),
+                    [(blast_sound.into(), blocks as i32, 1.0)]
+                );
+            }
+
+            let power = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:redstone_block")
+                .unwrap();
+            assert!(game.with_level(|b, level, ticks| {
+                b.set_block(level, ticks, BlockPos::new(x + 1, y, z), power, 3)
+            }));
+            game.process_level_events().unwrap();
+            assert!(open(game));
+            game.lan_broadcast_effects();
+            for listener in [&actor, &other] {
+                assert_eq!(
+                    sounds(game, listener),
+                    [(wire_sound.into(), blocks as i32, 1.0)]
+                );
+            }
             assert_eq!(game.audio.heard.get(blast_sound), Some(&1));
             let powered = game
                 .with_props(gate, &[("open", "true"), ("powered", "true")])

@@ -1745,6 +1745,11 @@ fn mod_mismatch(difference: &sunrise_protocol::mod_list::Difference) -> crate::t
                 .append(translated(key, &[Text::literal(names.join("\n"))]));
         }
     }
+    for id in &difference.runtime {
+        text = text
+            .append("\n")
+            .append(translated("sunrise.mods.runtime", &[Text::literal(id)]));
+    }
     for changed in &difference.changed {
         text = text.append("\n").append(translated(
             "sunrise.mods.version",
@@ -2599,6 +2604,7 @@ mod tests {
                 server: "3.0".into(),
                 client: "2.9".into(),
             }],
+            runtime: vec!["baked".into()],
         };
         let reason = crate::lan::data::component_nbt(&mod_mismatch(&difference).component());
         let french = crate::lang::Language::load(&[], "fr_fr");
@@ -2608,6 +2614,7 @@ mod tests {
         assert!(text.contains("extra 2.0"));
         let vanilla = sunrise_protocol::text::plain(&reason, &Default::default());
         assert!(vanilla.starts_with("Your mods don't match"));
+        assert!(vanilla.contains("baked") && vanilla.contains("runtime files"));
         for name in &difference.missing {
             assert!(text.contains(name));
             assert!(vanilla.contains(name));
@@ -2791,6 +2798,7 @@ mod tests {
                     id: "shared_extra".into(),
                     version: "2.0".into(),
                     side: Side::Both,
+                    runtime: None,
                 }]),
             })
             .encode(),
@@ -3125,7 +3133,8 @@ mod tests {
         )
         .unwrap();
         let mut malformed = mod_list::encode(&[]);
-        malformed.push(0); // Trailing bytes: the list is refused whole, not read as empty.
+        // The extra byte encodes an empty runtime-digest section, which is refused.
+        malformed.push(0);
         c.send(
             &cfg::Serverbound::CustomPayload(cfg::CustomPayload {
                 channel: mod_list::CHANNEL.into(),
@@ -3145,7 +3154,7 @@ mod tests {
                 cfg::Clientbound::Disconnect(d) => {
                     let text = sunrise_protocol::text::plain(&d.reason, &Default::default());
                     assert!(text.contains("couldn't be read"));
-                    assert!(text.contains("trailing bytes"));
+                    assert!(text.contains("runtime digests"));
                     break;
                 }
                 cfg::Clientbound::FinishConfiguration(_) => panic!("malformed list was accepted"),

@@ -982,35 +982,38 @@ impl Game<'_> {
         // trigger, with the stack as drunk (before it shrinks).
         self.award_stat("used", &stack.item, 1);
         self.trigger_item("minecraft:consume_item", stack);
-        self.post_entity_event("minecraft:drink", sunrise_client::mobs::Who::Player);
         if ominous {
-            self.drink_ominous_bottle(slot, stack);
-            return true;
+            self.drink_ominous_bottle(stack);
+        } else {
+            // PotionContents.onConsume: the potion's and the custom effects,
+            // at the stack's POTION_DURATION_SCALE.
+            let (lasting, now) = PlayerEffects::contents_effects(
+                &brewing::contents_effects(stack),
+                stack.potion_duration_scale(),
+            );
+            for e in lasting {
+                self.add_player_effect(e);
+            }
+            for a in now {
+                self.apply_effect_action(a);
+            }
         }
-        // PotionContents.onConsume: the potion's and the custom effects, at the
-        // stack's POTION_DURATION_SCALE.
-        let (lasting, now) = PlayerEffects::contents_effects(
-            &brewing::contents_effects(stack),
-            stack.potion_duration_scale(),
-        );
-        for e in lasting {
-            self.add_player_effect(e);
-        }
-        for a in now {
-            self.apply_effect_action(a);
-        }
-        if !self.creative {
+        self.apply_drink_effects(stack);
+        self.post_entity_event("minecraft:drink", sunrise_client::mobs::Who::Player);
+        if !self.creative && self.stack_in(slot) == Some(stack) {
             if let Some(s) = self.stack_in_mut(slot).as_mut() {
                 s.count -= 1;
                 if s.count == 0 {
                     *self.stack_in_mut(slot) = None;
                 }
             }
-            let bottle = ItemStack::new("minecraft:glass_bottle", 1);
-            if self.stack_in(slot).is_none() {
-                *self.stack_in_mut(slot) = Some(bottle);
-            } else if let Some(rest) = self.add_stack_to_inventory(bottle) {
-                self.spawn_item(rest, eye, [0.0, 0.1, 0.0], 40);
+            if !ominous {
+                let bottle = ItemStack::new("minecraft:glass_bottle", 1);
+                if self.stack_in(slot).is_none() {
+                    *self.stack_in_mut(slot) = Some(bottle);
+                } else if let Some(rest) = self.add_stack_to_inventory(bottle) {
+                    self.spawn_item(rest, eye, [0.0, 0.1, 0.0], 40);
+                }
             }
         }
         true

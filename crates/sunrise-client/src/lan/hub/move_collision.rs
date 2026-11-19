@@ -42,14 +42,13 @@ impl Hub {
         binding: &BlockCollisionRegistry<'_>,
         entities: &[Aabb],
     ) -> Option<[f64; 3]> {
-        self.settle_in(
-            self.guests.connection_index(conn)?,
-            from,
-            to,
-            world,
-            binding,
-            entities,
-        )
+        let i = self.guests.connection_index(conn)?;
+        // The guest's move, as the entity a moving collider is asked about: the player is never
+        // stopped by a collider of its own vehicle stack. `settle`, the carried check's, names
+        // the collider that carries the guest instead, so `settle_in` names no one.
+        sunrise_client_render::moving_colliders::as_mover(self.guests[i].entity_id as u32, || {
+            self.settle_in(i, from, to, world, binding, entities)
+        })
     }
 
     /// [`Self::settle`] through `world` and its collision data, `None` when the level cannot

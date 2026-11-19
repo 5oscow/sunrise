@@ -648,6 +648,29 @@ class ParityWorkflowTests(unittest.TestCase):
         self.assertEqual((self.slot / "loot_a.first-run.log").read_text(), "private retry reason")
         self.assertEqual((self.root / "parity-private-summary").read_text(), "private retry reason")
 
+    def test_vanilla_derived_scratch_is_deleted_when_the_job_ends(self):
+        self.initialise()
+        build = self.root
+        target = build / "target/parity"
+        target.mkdir(parents=True)
+        (target / "probe").write_text("binary")
+        for path in ("parity-out/parity-runner/oracle-cache/a.stdout", "parity-tmp/world/level.dat",
+                     "vanilla/job/sunrise-client/x", "vanilla/prepared/key/sunrise-client/x"):
+            (build / path).parent.mkdir(parents=True, exist_ok=True)
+            (build / path).write_text("vanilla")
+        (build / "parity-out/parity-target").symlink_to(target)
+        (self.slot / "loot_b.log").write_text("private mismatch")
+        step = self.steps["Delete this job's vanilla-derived scratch"]
+        self.assertEqual(step["if"], "always()")
+        result = self.step("Delete this job's vanilla-derived scratch")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for gone in ("parity-out", "parity-tmp", "vanilla/job"):
+            self.assertFalse((build / gone).exists(), gone)
+        # The probes' build, the prepared cache other workflows read and the kept triage logs stay.
+        self.assertEqual((target / "probe").read_text(), "binary")
+        self.assertTrue((build / "vanilla/prepared/key/sunrise-client/x").exists())
+        self.assertTrue((self.slot / "loot_b.log").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -618,7 +618,16 @@ impl Containers<'_> {
             || slot != 1
             || matches!(&*stack.item, "minecraft:water_bucket" | "minecraft:bucket")
     }
-    /// `HopperBlockEntity.isFullContainer`.
+    fn comparator_view(&self, pos: Pos) -> Option<View> {
+        self.view(pos, true)
+            .filter(|v| !matches!(v.kind, Kind::Composter(_)))
+            .or_else(|| self.saved_pot_view(pos))
+    }
+    /// Comparator signal of stored slots, without materializing deferred loot.
+    pub(in crate::game) fn stored_container_signal(&self, pos: Pos) -> i32 {
+        self.comparator_view(pos)
+            .map_or(0, |view| self.signal(&view))
+    }
     /// `AbstractContainerMenu.getRedstoneSignalFromContainer`.
     fn signal(&self, view: &View) -> i32 {
         if view.kind == Kind::Crafter {
@@ -767,11 +776,7 @@ pub(super) fn cat_sitting_above(mobs: &[Mob], key: Pos) -> bool {
 /// `ChestBlock.getContainer(.., false)`, whose blocked check sees the level's
 /// cats (`isCatSittingOnChest`).
 pub(super) fn container_signal(level: &mut super::GameLevel<'_>, pos: BlockPos) -> i32 {
-    let c = level.containers();
-    let view = c
-        .view((pos.x, pos.y, pos.z), true)
-        .filter(|v| !matches!(v.kind, Kind::Composter(_)))
-        .or_else(|| c.saved_pot_view((pos.x, pos.y, pos.z)));
+    let view = level.containers().comparator_view((pos.x, pos.y, pos.z));
     if let Some(view) = &view {
         for &(key, _) in &view.parts {
             level.unpack_loot(super::container_loot::LootTarget::Block(key), None);
@@ -845,6 +850,14 @@ impl Game<'_> {
             brewing: Some(&self.stations().brewing),
             mobs: &self.mobs,
         }
+    }
+    pub(super) fn stored_container_signal(&self, pos: Pos) -> i32 {
+        // Match a GameLevel view; the level's block entities own the slots.
+        Containers {
+            brewing: None,
+            ..self.containers()
+        }
+        .stored_container_signal(pos)
     }
     pub(super) fn block_can_place(&self, pos: [i32; 3], slot: usize, stack: &ItemStack) -> bool {
         let containers = self.containers();

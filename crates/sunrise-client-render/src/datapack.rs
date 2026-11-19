@@ -728,8 +728,8 @@ pub struct DataStore {
 /// `<kind-dir>/<ns>:<path>` for a pack file the content tables read:
 /// `recipe/`, `recipe_filter/`, `loot_table/`, `advancement/`, `trade_set/`,
 /// `villager_trade/`, `dialog/`, `damage_type/`, `dimension_type/`, `data_maps/`, enchantments, songs,
-/// instruments, predicates, item modifiers or `tags/<sub>/`, where the id keeps the sub
-/// path so a nested tag kind stays addressable.
+/// instruments, predicates, item modifiers, `worldgen/biome/` or `tags/<sub>/`,
+/// where the id keeps the subpath so a nested tag kind stays addressable.
 fn content_id(file: &str) -> Option<String> {
     let rest = file.strip_prefix("data/")?;
     let (ns, rest) = rest.split_once('/')?;
@@ -738,6 +738,10 @@ fn content_id(file: &str) -> Option<String> {
         "recipe" | "recipe_filter" | "loot_table" | "advancement" | "trade_set"
         | "villager_trade" | "dialog" | "damage_type" | "dimension_type" | "data_maps"
         | "enchantment" | "jukebox_song" | "instrument" | "predicate" | "item_modifier" => kind,
+        "worldgen" => {
+            return resource_id(file, "worldgen/biome", ".json")
+                .map(|id| format!("worldgen/biome/{id}"));
+        }
         // A tag id is `{ns}:{path-under-tags}` (`tags/worldgen/biome/
         // test:sub/mytag`), the whole path after the namespace, so nested
         // registries keep their directory (`TagLoader`'s id shape).
@@ -768,13 +772,12 @@ fn resource_id(file: &str, kind: &str, ext: &str) -> Option<String> {
 pub fn registry_files(
     packs: &[&DataPack],
     registries: &[(&str, &str)],
-    fallback: bool,
-    mut accepts: impl FnMut(&str, &str, &[u8]) -> bool,
+    mut accepts: impl FnMut(&str, &[u8]) -> bool,
 ) -> Result<BTreeMap<String, Vec<(String, Vec<u8>)>>, Box<mod_api::DatapackLoadError>> {
     let mut kinds: Vec<&str> = registries.iter().map(|(namespace, _)| *namespace).collect();
     kinds.sort_unstable();
     kinds.dedup();
-    let mut sources: BTreeMap<String, Vec<&DataPack>> = BTreeMap::new();
+    let mut sources = BTreeMap::new();
     for pack in packs {
         for file in pack.list_kinds(&kinds) {
             let in_registry = file
@@ -790,74 +793,55 @@ pub fn registry_files(
                         })
                 });
             if in_registry {
-                sources.entry(file).or_default().push(pack);
+                sources.insert(file, pack);
             }
         }
     }
     let mut files = BTreeMap::new();
     let mut total = 0;
-    for (file, packs) in sources {
-        for pack in packs.into_iter().rev() {
-            // Read at most the custom-registry limit plus a refusal byte, including
-            // decompressed output. No losing payload remains resident.
-            let bytes = pack
-                .source
-                .read_head(&file, mod_api::MAX_DATAPACK_ENTRY_BYTES as u64 + 1)
-                .unwrap_or_default();
-            let oversized = bytes.len() > mod_api::MAX_DATAPACK_ENTRY_BYTES;
-            if oversized || accepts(&file, &pack.id, &bytes) {
-                total += bytes.len();
-                if !oversized && total > mod_api::MAX_SNAPSHOT_BYTES {
-                    let (namespace, path) = registries
-                        .iter()
-                        .find(|(namespace, path)| {
-                            file.splitn(3, '/').nth(2).is_some_and(|rest| {
-                                rest.starts_with(&format!("{namespace}/{path}/"))
-                            })
-                        })
-                        .expect("listed custom registry file");
-                    let rest = file.strip_prefix("data/").unwrap();
-                    let (entry_namespace, rest) = rest.split_once('/').unwrap();
-                    let entry = rest
-                        .strip_prefix(&format!("{namespace}/{path}/"))
-                        .unwrap()
-                        .strip_suffix(".json")
-                        .unwrap();
-                    return Err(Box::new(mod_api::DatapackLoadError {
-                        registry: format!("{namespace}:{path}"),
-                        entry: format!("{entry_namespace}:{entry}"),
-                        file,
-                        pack: pack.id.clone(),
-                        reason: mod_api::DatapackLoadReason::CandidateTooLarge,
-                    }));
-                }
-                files.insert(file.clone(), vec![(pack.id.clone(), bytes)]);
-                break;
-            }
-            if !fallback {
-                break;
-            }
+    for (file, pack) in sources {
+        // Read at most the custom-registry limit plus a refusal byte, including
+        // decompressed output. A rejected winner never reveals a lower file.
+        let bytes = pack
+            .source
+            .read_head(&file, mod_api::MAX_DATAPACK_ENTRY_BYTES as u64 + 1)
+            .unwrap_or_default();
+        let oversized = bytes.len() > mod_api::MAX_DATAPACK_ENTRY_BYTES;
+        if !oversized && !accepts(&file, &bytes) {
+            continue;
         }
+        total += bytes.len();
+        if !oversized && total > mod_api::MAX_SNAPSHOT_BYTES {
+            let (namespace, path) = registries
+                .iter()
+                .find(|(namespace, path)| {
+                    file.splitn(3, '/')
+                        .nth(2)
+                        .is_some_and(|rest| rest.starts_with(&format!("{namespace}/{path}/")))
+                })
+                .expect("listed custom registry file");
+            let rest = file.strip_prefix("data/").unwrap();
+            let (entry_namespace, rest) = rest.split_once('/').unwrap();
+            let entry = rest
+                .strip_prefix(&format!("{namespace}/{path}/"))
+                .unwrap()
+                .strip_suffix(".json")
+                .unwrap();
+            return Err(Box::new(mod_api::DatapackLoadError {
+                registry: format!("{namespace}:{path}"),
+                entry: format!("{entry_namespace}:{entry}"),
+                file,
+                pack: pack.id.clone(),
+                reason: mod_api::DatapackLoadReason::CandidateTooLarge,
+            }));
+        }
+        files.insert(file, vec![(pack.id.clone(), bytes)]);
     }
     Ok(files)
 }
 
 impl DataStore {
     pub fn load(packs: &[&DataPack]) -> Self {
-        Self::load_impl(packs, None)
-    }
-    /// Command resources and function tags share the owning server load's
-    /// conditions; raw JSON stacks remain intact for world-table readers.
-    pub fn load_with_conditions(
-        packs: &[&DataPack],
-        conditions: &sunrise_world::conditions::LoadConditions,
-    ) -> Self {
-        Self::load_impl(packs, Some(conditions))
-    }
-    fn load_impl(
-        packs: &[&DataPack],
-        conditions: Option<&sunrise_world::conditions::LoadConditions>,
-    ) -> Self {
         let mut s = Self::default();
         for pack in packs {
             // `tags` walks the whole tags tree, so a `tags/function` file is
@@ -883,6 +867,7 @@ impl DataStore {
                 "tags",
                 "trade_set",
                 "villager_trade",
+                "worldgen/biome",
             ]) {
                 if !seen.insert(f.clone()) {
                     continue;
@@ -956,12 +941,6 @@ impl DataStore {
                     s.slot_sources.insert(id, v);
                 }
             }
-        }
-        if let Some(conditions) = conditions {
-            s.predicates
-                .retain(|id, value| conditions.allows_id(value, "predicate", id));
-            s.item_modifiers
-                .retain(|id, value| conditions.allows_id(value, "item_modifier", id));
         }
         s
     }
@@ -1996,13 +1975,6 @@ mod tests {
         }
         assert!(store.predicates.contains_key("demo:nested/entry"));
         assert!(store.item_modifiers.contains_key("demo:nested/entry"));
-        let filtered = DataStore::load_with_conditions(
-            &packs.iter().collect::<Vec<_>>(),
-            &sunrise_world::conditions::LoadConditions::vanilla(),
-        );
-        assert!(filtered.predicates.is_empty());
-        assert!(filtered.item_modifiers.is_empty());
-        assert_eq!(filtered.files, store.files);
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -2024,19 +1996,14 @@ mod tests {
             std::fs::write(file, value.to_string()).unwrap();
         }
         let pack = DataPack::from_source("pack".into(), ResourceSource::directory(root.clone()));
-        let conditions = sunrise_world::conditions::LoadConditions::new([])
-            .with_diagnostics()
-            .with_lookup(std::collections::BTreeMap::new(), |_, _| None);
-        let store = DataStore::load_with_conditions(&[&pack], &conditions);
+        let store = DataStore::load(&[&pack]);
         std::fs::remove_dir_all(&root).unwrap();
         assert_eq!(store.predicates.get("demo:entry"), Some(&predicate));
         assert_eq!(store.item_modifiers.get("demo:entry"), Some(&modifier));
-        assert_eq!(conditions.check_resource_errors("predicate"), Ok(()));
-        assert_eq!(conditions.check_resource_errors("item_modifier"), Ok(()));
     }
 
     #[test]
-    fn command_json_selects_before_conditions_and_function_tags_gate_each_layer() {
+    fn function_tags_ignore_top_level_load_conditions() {
         let root =
             std::env::temp_dir().join(format!("sunrise-command-conditions-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -2048,15 +2015,6 @@ mod tests {
             } else {
                 serde_json::json!([])
             };
-            for kind in ["predicate", "item_modifier"] {
-                let file = folder.join(format!("data/demo/{kind}/entry.json"));
-                std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-                std::fs::write(
-                    file,
-                    serde_json::json!({"layer":name,"neoforge:conditions":conditions}).to_string(),
-                )
-                .unwrap();
-            }
             let dir = folder.join("data/demo/tags/function");
             std::fs::create_dir_all(&dir).unwrap();
             std::fs::write(dir.join("load.json"), serde_json::json!({"replace":true,"values":[format!("demo:{name}")],"neoforge:conditions":conditions}).to_string()).unwrap();
@@ -2070,27 +2028,12 @@ mod tests {
                 ResourceSource::directory(folder),
             ));
         }
-        let refs = packs.iter().collect::<Vec<_>>();
-        let off = DataStore::load_with_conditions(
-            &refs,
-            &sunrise_world::conditions::LoadConditions::vanilla(),
-        );
-        assert!(off.predicates.is_empty());
-        assert!(off.item_modifiers.is_empty());
+        let store = DataStore::load(&packs.iter().collect::<Vec<_>>());
         assert_eq!(
-            off.function_tags["demo:load"],
+            store.function_tags["demo:load"],
             [("demo:high".into(), true, false)]
         );
-        assert!(off.function_tags["demo:unknown"].is_empty());
-        let enabled = sunrise_world::conditions::LoadConditions::new(["provider"]);
-        let on = DataStore::load_with_conditions(&refs, &enabled);
-        assert_eq!(on.predicates["demo:entry"]["layer"], "high");
-        assert_eq!(on.item_modifiers["demo:entry"]["layer"], "high");
-        assert_eq!(
-            on.function_tags["demo:load"],
-            [("demo:high".into(), true, false)]
-        );
-        assert_eq!(on.files, off.files);
+        assert!(store.function_tags["demo:unknown"].is_empty());
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -2216,7 +2159,7 @@ mod tests {
             ));
         }
         let refs = packs.iter().collect::<Vec<_>>();
-        let files = registry_files(&refs, &[("example", "spell")], true, |_, _, _| true).unwrap();
+        let files = registry_files(&refs, &[("example", "spell")], |_, _| true).unwrap();
         assert_eq!(
             files.keys().map(String::as_str).collect::<Vec<_>>(),
             [
@@ -2228,19 +2171,21 @@ mod tests {
             files["data/example/example/spell/fire.json"],
             vec![("high".to_owned(), b"high".to_vec())]
         );
+        assert!(registry_files(&refs, &[], |_, _| true).unwrap().is_empty());
         assert!(
-            registry_files(&refs, &[], true, |_, _, _| true)
+            registry_files(&refs, &[("example", "spell")], |_, bytes| bytes == b"low")
                 .unwrap()
-                .is_empty()
+                .is_empty(),
+            "a rejected winning resource does not reveal the lower version"
         );
         // Oversized losing files are never read; an oversized winner is retained
         // only as the bounded refusal prefix, not as its full payload.
         let path = "data/example/example/spell/fire.json";
         std::fs::write(root.join("low").join(path), vec![b' '; 1_048_577]).unwrap();
-        let files = registry_files(&refs, &[("example", "spell")], true, |_, _, _| true).unwrap();
+        let files = registry_files(&refs, &[("example", "spell")], |_, _| true).unwrap();
         assert_eq!(files[path], vec![("high".to_owned(), b"high".to_vec())]);
         std::fs::write(root.join("high").join(path), vec![b' '; 1_048_578]).unwrap();
-        let files = registry_files(&refs, &[("example", "spell")], true, |_, _, _| true).unwrap();
+        let files = registry_files(&refs, &[("example", "spell")], |_, _| true).unwrap();
         assert_eq!(files[path].len(), 1);
         assert_eq!(files[path][0].1.len(), 1_048_577);
         let _ = std::fs::remove_dir_all(&root);

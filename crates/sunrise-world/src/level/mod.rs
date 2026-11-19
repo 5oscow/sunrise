@@ -168,7 +168,7 @@ mod tests;
 
 pub use bonemeal::{BonemealCheck, TemplateSettings};
 pub use buckets::{
-    BucketContent, Douse, Drain, FluidChange, FluidWrite, PlacedLiquid, fluid_bucket,
+    BucketContent, Douse, Drain, FluidChange, FluidWrite, LiquidUser, PlacedLiquid, fluid_bucket,
     fluid_empty_sound, fluid_pickup_sound,
 };
 pub use data::{BlockData, ItemBinding, ItemKind, Named, Props, PushReaction, StateFacts, Tags};
@@ -332,6 +332,12 @@ pub enum EntityQuery {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LevelEventPlayer(pub u128);
 
+/// A sound category selected at its level call site, independently of the event ID.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LevelSoundSource {
+    Blocks,
+}
+
 /// Side effects reported to the caller, in vanilla call order.
 #[derive(Clone, Debug, PartialEq)]
 pub enum LevelEvent {
@@ -345,10 +351,12 @@ pub enum LevelEvent {
         data: i32,
         source: Option<LevelEventPlayer>,
     },
-    /// `Level.playSound(null, pos, sound, BLOCKS, volume, pitch)`.
+    /// `Level.playSound` at a block position.
     Sound {
         pos: BlockPos,
         sound: Arc<str>,
+        /// None keeps the caller's existing category inference.
+        source: Option<LevelSoundSource>,
         volume: f32,
         pitch: f32,
     },
@@ -469,6 +477,35 @@ pub trait LevelAccess: BlockEntityNeighbors {
     /// its random draws, which a refusal doesn't change. The default allows.
     fn allow_spread(&self, _kind: Spread, _from: BlockPos, _to: BlockPos) -> bool {
         true
+    }
+    /// Whether the block has a part that can answer the liquid-container predicate.
+    fn has_liquid_container_part(&self, _state: BlockStateId) -> bool {
+        false
+    }
+    /// The block part's read-only liquid-container answer, if it provides one.
+    fn can_place_liquid(
+        &self,
+        _pos: BlockPos,
+        _state: BlockStateId,
+        _fluid: FluidKind,
+        _user: LiquidUser,
+    ) -> Option<bool> {
+        None
+    }
+    /// Whether a block has a placement part even without vanilla waterlogging.
+    fn has_place_liquid_part(&self, _state: BlockStateId) -> bool {
+        false
+    }
+    /// Replace the template's container write. Player bucket transactions call the
+    /// part with their own journalled host before applying the planned write.
+    fn place_liquid(
+        &mut self,
+        _ticks: &mut Ticks,
+        _pos: BlockPos,
+        _state: BlockStateId,
+        _fluid: FluidState,
+    ) -> Option<bool> {
+        None
     }
     /// Returns the state to place for a liquid conversion, or None to cancel.
     fn fluid_place_block(
@@ -2172,6 +2209,173 @@ mod dimension_key_tests {
         assert_eq!(Dimension::of_level(custom), Dimension::Custom(custom));
         assert_eq!(Dimension::Custom(custom).key(), custom);
         assert_eq!(vanilla_sea_level(custom), 63);
+    }
+}
+
+#[cfg(test)]
+mod liquid_container_tests {
+    use super::{tests::TestLevel, *};
+
+    struct ContainerLevel {
+        base: TestLevel,
+        container: BlockStateId,
+        accepts: Option<FluidKind>,
+        filled: BlockStateId,
+        replace_on_fill: Option<(BlockPos, BlockStateId)>,
+    }
+
+    impl BlockEntityNeighbors for ContainerLevel {}
+
+    impl LevelAccess for ContainerLevel {
+        fn block_state(&self, pos: BlockPos) -> BlockStateId {
+            self.base.block_state(pos)
+        }
+        fn set_raw(&mut self, pos: BlockPos, state: BlockStateId) -> Option<BlockStateId> {
+            self.base.set_raw(pos, state)
+        }
+        fn is_loaded(&self, pos: BlockPos) -> bool {
+            self.base.is_loaded(pos)
+        }
+        fn random(&mut self) -> &mut LegacyRandom {
+            self.base.random()
+        }
+        fn game_time(&self) -> i64 {
+            self.base.game_time()
+        }
+        fn has_liquid_container_part(&self, state: BlockStateId) -> bool {
+            state == self.container && self.accepts.is_some()
+        }
+        fn can_place_liquid(
+            &self,
+            _: BlockPos,
+            state: BlockStateId,
+            fluid: FluidKind,
+            _: LiquidUser,
+        ) -> Option<bool> {
+            if state != self.container {
+                return None;
+            }
+            self.accepts.map(|kind| kind == fluid)
+        }
+        fn place_liquid(
+            &mut self,
+            _: &mut Ticks,
+            pos: BlockPos,
+            state: BlockStateId,
+            fluid: FluidState,
+        ) -> Option<bool> {
+            if state != self.container
+                || !self
+                    .accepts
+                    .is_some_and(|kind| kind.same_family(fluid.kind()))
+            {
+                return None;
+            }
+            if let Some((neighbour, replacement)) = self.replace_on_fill {
+                self.set_raw(neighbour, replacement);
+            }
+            Some(self.set_raw(pos, self.filled).is_some())
+        }
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn lava_bucket_fills_a_solid_non_template_container() {
+        let fixture = tests::fixture().expect("prepared block facts for daily fixture");
+        let b = &fixture.behaviours;
+        let stone = fixture.registry.default_state("minecraft:stone").unwrap();
+        let emerald = fixture
+            .registry
+            .default_state("minecraft:emerald_block")
+            .unwrap();
+        let at = BlockPos::new(0, 64, 0);
+        let mut level = ContainerLevel {
+            base: TestLevel::new(b),
+            container: stone,
+            accepts: Some(FluidKind::Lava),
+            filled: emerald,
+            replace_on_fill: None,
+        };
+        level.set_raw(at, stone);
+        assert!(b.bucket_can_fill(&level, at, stone, FluidKind::Lava, LiquidUser::default()));
+        assert_eq!(
+            b.bucket_empty_as(
+                &mut level,
+                &mut Ticks::default(),
+                at,
+                None,
+                BucketContent::Fluid(FluidKind::Lava),
+                "minecraft:item.bucket.empty_lava",
+                false,
+                LiquidUser::default(),
+            ),
+            Some(at),
+        );
+        assert_eq!(level.block_state(at), emerald);
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn refusing_container_stays_where_water_would_wash_it_away() {
+        let fixture = tests::fixture().expect("prepared block facts for daily fixture");
+        let b = &fixture.behaviours;
+        let plant = fixture
+            .registry
+            .default_state("minecraft:dandelion")
+            .unwrap();
+        let water = fixture.registry.default_state("minecraft:water").unwrap();
+        let source = BlockPos::new(0, 65, 0);
+        let at = BlockPos::new(0, 64, 0);
+        for accepts in [Some(FluidKind::Lava), None] {
+            let mut level = ContainerLevel {
+                base: TestLevel::new(b),
+                container: plant,
+                accepts,
+                filled: plant,
+                replace_on_fill: None,
+            };
+            level.set_raw(source, water);
+            level.set_raw(at, plant);
+            b.scheduled_fluid_tick(&mut level, &mut Ticks::default(), source);
+            if accepts.is_some() {
+                assert_eq!(level.block_state(at), plant);
+            } else {
+                assert!(
+                    b.fluid(level.block_state(at))
+                        .kind()
+                        .same_family(FluidKind::Water)
+                );
+            }
+        }
+    }
+    #[test]
+    #[ignore = "daily"]
+    fn lateral_flow_does_not_destroy_a_target_changed_by_an_earlier_container() {
+        let fixture = tests::fixture().expect("prepared block facts for daily fixture");
+        let b = &fixture.behaviours;
+        let state = |name| fixture.registry.default_state(name).unwrap();
+        let source = BlockPos::new(0, 65, 0);
+        let north = source.offset(0, 0, -1);
+        let south = source.offset(0, 0, 1);
+        let container = state("minecraft:dandelion");
+        let stone = state("minecraft:stone");
+        let filled = state("minecraft:emerald_block");
+        let mut level = ContainerLevel {
+            base: TestLevel::new(b),
+            container,
+            accepts: Some(FluidKind::FlowingWater),
+            filled,
+            replace_on_fill: Some((south, stone)),
+        };
+        level.set_raw(source, state("minecraft:water"));
+        level.set_raw(source.offset(0, -1, 0), stone);
+        level.set_raw(source.offset(-1, 0, 0), stone);
+        level.set_raw(source.offset(1, 0, 0), stone);
+        level.set_raw(north, container);
+        // The other open side is equally close to a hole, but is applied second.
+        b.scheduled_fluid_tick(&mut level, &mut Ticks::default(), source);
+        assert_eq!(level.block_state(north), filled);
+        assert_eq!(level.block_state(south), stone);
     }
 }
 

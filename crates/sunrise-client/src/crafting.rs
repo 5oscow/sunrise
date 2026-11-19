@@ -2450,10 +2450,7 @@ mod tests {
         }
         let items = Items::for_tests(HashMap::new());
         let load = crate::test_resources::server_load();
-        let conditions = sunrise_world::conditions::LoadConditions::new([]).with_lookup(
-            std::collections::BTreeMap::from([("unregistered".into(), "unregistered".into())]),
-            |_, _| None,
-        );
+        let conditions = sunrise_world::conditions::LoadConditions::new([]);
         let overlay = PackOverlay {
             files: &[],
             conditions: &conditions,

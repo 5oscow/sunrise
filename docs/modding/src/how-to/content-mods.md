@@ -276,6 +276,17 @@ block-local; the position is applied at query time. The occlusion cache uses the
 its column offset at `(0, 0, 0)`, as vanilla's state cache does.
 This works on both sides and does not require a hook.
 
+`instrument` takes any vanilla `NoteBlockInstrument` constant name (for example `HARP` or `FLUTE`);
+native and wasm declarations use `NoteInstrument`. A note block reads ordinary instruments from the block
+below it and head instruments (`ZOMBIE` through `CUSTOM_HEAD`) from the block above it. `CUSTOM_HEAD`
+is silent without a skull block entity above the note block with a `note_block_sound`.
+`ignited_by_lava` sets lava's ignition flag; a subscribed per-position `ignited_by_lava` hook still answers
+first. `replaceable` controls replacement by block placement and by features that check replaceability;
+the usual refusal when the hand holds the block's own item still applies. `skip_same_block_faces: true`
+hides model faces against any state of this same block, as glass does; `false` disables the template's render
+definition skip rule. Leaf and ice graphics options can still hide faces based on the template class.
+Unset values inherit the template. These are load-time properties on both sides, with no new hook.
+
 `destroy_overlay: false` hides the breaking crack (`destroy_stage_0` to `9`) on the block, for one broken by use
 (a feast or a cake taken apart bite by bite). It is read once at load into the block's facts, and only the overlay
 is skipped: the mining progress, the server's progress and the destroy-progress packets other players see stay
@@ -799,13 +810,16 @@ baby age scaling and the template's extra baby factors; cube sizes, pufferfish a
 their renderer rules. The usual visibility, 32-block radius cap and distance fade still apply.
 
 A living type copies a mob, the way NeoForge's `EntityType.Builder.of(Zombie::new, ...)` makes a type of a vanilla
-class: `minecraft:zombie`, `minecraft:villager`, `minecraft:wandering_trader`, or one of the tameable mobs
+class: `minecraft:zombie`, `minecraft:skeleton`, `minecraft:drowned`, `minecraft:villager`,
+`minecraft:wandering_trader`, or one of the tameable mobs
 (`TamableAnimal`), `minecraft:wolf`, `minecraft:cat` and `minecraft:parrot`. A tameable type tames with its template's
 item, then sits, follows and teleports to its owner, and fights for it, as its template does. Its owner, sitting state
 and its template's own fields (a wolf's collar, a cat's or a parrot's variant) save and load under the type's id. A
 tamed wolf type's hits are its owner's, as a wolf's are. A parrot type rides a player's shoulder and comes back off
 as itself; drawing it there is its mod's (an [entity layer](client/entity-layers.md)), as vanilla draws only its own
-parrot there. Every living type is tracked to clients as far, and as often, as its template. It has no `item` or
+parrot there. A skeleton type draws and shoots the bow it holds, keeps out of the sun and flees wolves, and one that holds none
+fights in melee; a drowned type goes to water, swims, and throws a trident it holds or fights in melee, as a drowned
+does. Every living type is tracked to clients as far, and as often, as its template. It has no `item` or
 `damage`. `attributes`
 sets default attribute values that differ from its template's (`EntityAttributeCreationEvent`), by attribute id, and
 only for attributes the template has; one it lacks stops the content root's build:
@@ -1022,12 +1036,14 @@ recipes, names and loot. Blocks, items, creative tabs, mob effects, entity types
 For example, a package with ID `ported_farmersdelight` and
 `namespaces = ["farmersdelight"]` can declare `farmersdelight:cooking_pot`
 and its `farmersdelight:` block entity type without changing saved-world IDs.
-The namespace collision fence applies. `minecraft`, `c` and
-`sunrise` cannot be listed. Two mods that are on may not own the same namespace (one's id or listed namespace being
-the other's): the game keeps the first in load order and leaves the other's content out, with "mods A and B both use
-the namespace N; turn one of them off" in the log. Paths use vanilla's resource characters, at most 65,536 files, 16
-MiB each and 512 MiB in all. A mod whose content is refused is left out, with the reason in the log. The game reads
-this content into its block and item tables (`sunrise_client::mod_content`, [modpacks.md](https://github.com/sunrise-org/sunrise/blob/main/docs/modpacks.md)). A tag entry
+`minecraft`, `c` and `sunrise` cannot be listed. When two packages list the same extra namespace, the first
+admitted package owns it; the game leaves the later package's content out and logs the conflict. A package's
+primary namespace is its ID. Listing another package's ID as an extra namespace is a load error, regardless of
+load order.
+
+Paths use vanilla's resource characters, at most 65,536 files, 16 MiB each and 512 MiB in all. A mod whose
+content is refused is left out, with the reason in the log. The game reads this content into its block and item
+tables (`sunrise_client::mod_content`, [modpacks.md](https://github.com/sunrise-org/sunrise/blob/main/docs/modpacks.md)). A tag entry
 naming an id nobody registers (a block a port left out, another mod's item) is dropped, so the rest of the tag
 loads; vanilla would drop the whole tag.
 

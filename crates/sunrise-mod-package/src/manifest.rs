@@ -36,6 +36,19 @@ pub const API: &str = "0.2";
 /// Namespaces no mod may claim: vanilla's, the convention tags' (mods add
 /// to those, docs/modding/src/how-to/content-mods.md) and the game's own.
 const RESERVED_NAMESPACES: [&str; 3] = ["minecraft", "c", "sunrise"];
+/// Ids no mod or pack may take: the mod site's own pages under `/mods/` (a project's page is
+/// `/mods/<id>`), and the names of the pages below an id. The site's routes are checked against
+/// this list on its side.
+pub const RESERVED_IDS: [&str; 7] = [
+    "account",
+    "edit",
+    "index",
+    "mine",
+    "policy",
+    "registry-page",
+    "submit",
+];
+
 /// A mod's saved settings, shared by native mods and modpack overrides.
 pub const STORAGE_DIR: &str = ".sunrise-mod-data";
 /// wasm32's whole address space in MiB (4 GiB): the most a mod may declare in `wasm_memory_mib`,
@@ -45,6 +58,12 @@ pub const MAX_WASM_MEMORY_MIB: u32 = 4096;
 /// The largest manifest this build reads.
 /// Maximum manifest bytes accepted by package readers and developer tools.
 pub const MAX_MANIFEST: u64 = 32 << 20;
+
+/// The most source files (`Cargo.toml`, `Cargo.lock`, `build.rs`, `src/**`, the root notices) a
+/// package selects: as many as its content files, so a port laid out one file per class fits.
+pub const MAX_SOURCE_FILES: usize = crate::content::MAX_FILES;
+/// The most bytes those source files take, unpacked.
+pub const MAX_SOURCE_BYTES: u64 = 64 << 20;
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -446,6 +465,12 @@ impl Manifest {
         if m.runtime.is_some() && m.native.is_none() && m.wasm.is_none() {
             return Err(format!(
                 "{MANIFEST}: a content mod has no code, so no [runtime]"
+            ));
+        }
+        if RESERVED_IDS.contains(&m.id.as_str()) {
+            return Err(format!(
+                "{MANIFEST}: id {:?} is a page of the mod site, so no mod can be published under it: pick another id",
+                m.id
             ));
         }
         if reserved_mod_id(&m.id) {
@@ -1032,7 +1057,7 @@ impl Package {
                     }
                 }
             }
-            if source_count > 511 || source_bytes > 64 << 20 {
+            if source_count > MAX_SOURCE_FILES || source_bytes > MAX_SOURCE_BYTES {
                 return Err("native package exceeds its entry or size limit".into());
             }
             if resource_count > crate::content::MAX_FILES
@@ -1207,7 +1232,7 @@ impl Package {
                             .checked_add(size)
                             .ok_or("native package too large")?;
                         *source_count += 1;
-                        if *source_bytes > 64 << 20 || *source_count > 511 {
+                        if *source_bytes > MAX_SOURCE_BYTES || *source_count > MAX_SOURCE_FILES {
                             return Err("native package exceeds its entry or size limit".into());
                         }
                         files.insert(name, std::fs::read(path).map_err(|e| e.to_string())?);
@@ -1919,6 +1944,31 @@ capabilities = ["registries"]
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    /// A port written one file per class keeps more than 511 source files, far under the byte cap.
+    #[test]
+    fn a_native_project_of_many_source_files_packs_and_reads() {
+        let root =
+            std::env::temp_dir().join(format!("sunrise-many-sources-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("src/classes")).unwrap();
+        let manifest = format!(
+            "{EXAMPLE}[native]\ngame = '26.3'\nsunrise = '{}'\nmixins = '{}'\n",
+            "a".repeat(40),
+            "b".repeat(40)
+        );
+        std::fs::write(root.join(MANIFEST), manifest).unwrap();
+        std::fs::write(root.join("Cargo.toml"), "[package]\nname = 'ruby'\n").unwrap();
+        std::fs::write(root.join("src/lib.rs"), "mod classes;\n").unwrap();
+        for i in 0..700 {
+            std::fs::write(root.join(format!("src/classes/c{i}.rs")), "pub struct C;\n").unwrap();
+        }
+        let bytes = Package::pack_directory(&root).unwrap();
+        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        assert_eq!(Package::read_zip(&mut zip).unwrap().manifest.id, "ruby");
+        assert!(zip.by_name("src/classes/c699.rs").is_ok());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn package_kind_requires_matching_source_and_native_declaration() {
         let root =
@@ -1970,6 +2020,18 @@ capabilities = ["registries"]
                 error.contains(MANIFEST)
                     && error.contains(id)
                     && error.contains("reserved namespace"),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_page_of_the_mod_site_cannot_be_the_mod_id() {
+        for id in ["mine", "account", "policy", "submit", "index", "edit"] {
+            let manifest = EXAMPLE.replace("id = \"ruby\"", &format!("id = {id:?}"));
+            let error = Manifest::parse(&manifest).unwrap_err();
+            assert!(
+                error.contains(MANIFEST) && error.contains(id) && error.contains("mod site"),
                 "{error}"
             );
         }

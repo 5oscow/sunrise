@@ -1823,7 +1823,10 @@ fn fence_gate_sites_play_distinct_sounds() {
             .events
             .iter()
             .filter_map(|event| match event {
-                LevelEvent::Sound { sound, .. } => Some(sound.to_string()),
+                LevelEvent::Sound { sound, source, .. } => {
+                    assert_eq!(*source, Some(LevelSoundSource::Blocks), "{sound}");
+                    Some(sound.to_string())
+                }
                 _ => None,
             })
             .collect::<Vec<_>>()
