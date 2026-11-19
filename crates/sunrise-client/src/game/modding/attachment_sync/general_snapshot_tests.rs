@@ -55,6 +55,7 @@ fn robot(game: &mut super::super::Game<'_>) -> u32 {
         velocity: [0.0; 3],
         rotation: [0.0, 0.0],
         uuid: [1, 2, 3, 4],
+        owner: None,
         envelope: GeneralTypeEnvelope {
             type_key: "sync_route:robot".into(),
             payload_version: 1,
