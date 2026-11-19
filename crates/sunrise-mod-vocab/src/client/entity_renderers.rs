@@ -124,8 +124,11 @@ pub struct ItemFrameRenderState {
 /// type it is registered for. Entities of a type share one renderer, so what differs between them
 /// comes from [`EntityRenderState`].
 ///
-/// A frame has no `Host`: drawing reads nothing of the world but what the state and `draw` give.
-/// A renderer that needs more reads it in a hook and keeps what it read.
+/// [`submit`](Self::submit) has no `Host`: it draws from what the state and `draw` give. A
+/// renderer that needs more reads it in a hook and keeps what it read. A general entity type's
+/// renderer (`declare_general_entity`) is asked through
+/// [`submit_with_host`](Self::submit_with_host) instead, with a host to read the row's synced
+/// attachments from, since its state carries nothing of the type's own.
 pub trait EntityRenderer: Send + Sync + 'static {
     /// `EntityRenderer.submit`: draw `entity` with `draw`'s helpers (`quad`, `cube`, `block`,
     /// `item`, `model_part`) under its pose stack, which starts at the entity's position, not
@@ -143,6 +146,27 @@ pub trait EntityRenderer: Send + Sync + 'static {
         entity: &EntityRenderState,
         draw: &mut dyn BlockEntityDrawContext,
     ) -> Result<(), String>;
+
+    /// [`submit`](Self::submit) with the client's `host`, as a general entity type's renderer is
+    /// asked (`declare_general_entity`): a general row's state has only its identity and pose,
+    /// and the row's declared fields are its synced attachments, read through `host`.
+    /// `host.entity(entity.id)` names the row, and
+    /// `host.attachment_query(namespace, name)?.query(&TYPE)?.get(AttachmentHolder::Entity(row))`
+    /// reads one of its fields as the server last synced it (`None` until it was). Only reads:
+    /// a frame changes nothing. The default draws with `submit`, so a renderer that reads no
+    /// field implements only that. Every other family is asked through `submit` alone.
+    ///
+    /// Diverges: NeoForge's renderer reads its entity's synced data in `extractRenderState`; a
+    /// Sunrise renderer reads the same through `host` here.
+    fn submit_with_host(
+        &self,
+        host: &dyn crate::Host,
+        entity: &EntityRenderState,
+        draw: &mut dyn BlockEntityDrawContext,
+    ) -> Result<(), String> {
+        let _ = host;
+        self.submit(entity, draw)
+    }
 }
 
 crate::wire::wire_handlers::handler!(dyn EntityRenderer, "EntityRenderer");

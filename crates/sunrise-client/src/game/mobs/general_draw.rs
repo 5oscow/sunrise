@@ -1,0 +1,100 @@
+//! A mod's general entity rows on the window (#792, stage 5): each row the server shows, with its
+//! first synced fields here (`game/network/remote/general.rs`), drawn by the renderer a mod
+//! registered for its type (`register_entity_renderers`), through `submit_with_host` so it reads
+//! the row's synced attachments. A general type has no look of its own: without a renderer, or
+//! with one that failed until the next resource load, its rows draw nothing.
+use super::Game;
+use sunrise_client::mesher::Vertex;
+
+/// `EntityRenderState` for a general row: its identity, age and pose at the frame's `partial`
+/// tick, interpolated from the tick before as `Entity.getYRot(partial)` does, with no family's
+/// fields.
+fn render_state(
+    id: u32,
+    age: u32,
+    previous_rotation: [f32; 2],
+    rotation: [f32; 2],
+    partial: f32,
+) -> mod_api::EntityRenderState {
+    let lerp = |from: f32, to: f32| from + partial * (to - from);
+    mod_api::__private::built::EntityRenderState {
+        id,
+        partial,
+        age: age as f32 + partial,
+        yaw: lerp(previous_rotation[0], rotation[0]),
+        pitch: lerp(previous_rotation[1], rotation[1]),
+        living: None,
+        tnt_fuse: None,
+        orb_value: None,
+        painting: None,
+        item_frame: None,
+    }
+    .into()
+}
+
+impl Game<'_> {
+    /// Draws the general rows shown on the window at the frame's `alpha`, `camera` the eye: each
+    /// from `lerp(previous, position, alpha)`, lit as the entity pass lights an entity, by its
+    /// eye (`EntityRenderer.getPackedLightCoords`, at vanilla's default eye height of 0.85 of
+    /// the declared height). With no renderer registered for any general type, one flag check.
+    pub(super) fn general_entity_geometry(
+        &self,
+        camera: glam::DVec3,
+        alpha: f64,
+        out: &mut Vec<Vertex>,
+    ) {
+        let Some(remote) = self.remote.as_ref() else {
+            return;
+        };
+        let catalog = super::general::general_type_catalog();
+        let partial = alpha as f32;
+        for (&id, row) in remote.general.rows.iter().filter(|(_, row)| row.shown) {
+            let Some(resolved) = super::native_entity_renderers::general_renderer(row.type_slot)
+            else {
+                continue;
+            };
+            let at: [f64; 3] = std::array::from_fn(|k| {
+                row.previous[k] + (row.position[k] - row.previous[k]) * alpha
+            });
+            let entity = render_state(
+                id as u32,
+                row.age,
+                row.previous_rotation,
+                row.rotation,
+                partial,
+            );
+            let (_, height) = catalog.dimensions(row.type_slot);
+            let eye = (at[1] + height * 0.85).floor() as i32;
+            let light = self
+                .world
+                .light(at[0].floor() as i32, eye, at[2].floor() as i32);
+            let packed = (u32::from(light >> 4) * 16) | ((u32::from(light & 15) * 16) << 8);
+            let block = at.map(|x| x.floor() as i32);
+            self.mod_general_renderer_geometry(
+                &resolved,
+                &entity,
+                catalog.key(row.type_slot),
+                glam::DVec3::from_array(at) - camera,
+                block,
+                packed,
+                out,
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::render_state;
+
+    /// The frame between two ticks: a quarter of the way, in age, yaw and pitch alike, with no
+    /// family's fields.
+    #[test]
+    fn a_rows_state_is_interpolated_to_the_frame() {
+        let state = render_state(9, 40, [0.0, -20.0], [90.0, 20.0], 0.25);
+        assert_eq!(state.id, 9);
+        assert_eq!(state.age, 40.25);
+        assert_eq!((state.yaw, state.pitch), (22.5, -10.0));
+        assert!(state.living.is_none() && state.tnt_fuse.is_none() && state.painting.is_none());
+    }
+}

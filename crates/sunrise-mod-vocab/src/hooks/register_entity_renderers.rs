@@ -56,7 +56,10 @@ and pitch, and `draw.light()` the entity's light. A living entity's state also h
 reference's names. What it draws replaces the type's own drawing (a thrown type's flying item; a living
 type's model and its vanilla layers, held items and worn blocks included); the glowing outline still
 draws around it. Entities of a type share the one
-renderer, which has no `Host` and no level: a renderer that needs the world reads it in a hook. The same
+renderer, whose `submit` has no `Host` and no level: a renderer that needs the world reads it in a
+hook. A mod's general entity type (`declare_general_entity`) is drawn by its renderer alone, asked
+through `submit_with_host` with the client's `Host`, from which it reads the row's synced
+attachments; a general type with no renderer draws nothing. The same
 for native and wasm mods: a wasm renderer is one call a frame for each entity, the state copied in and
 the drawing through the shared draw boundary.
 

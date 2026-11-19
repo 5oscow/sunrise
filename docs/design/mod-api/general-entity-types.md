@@ -89,7 +89,7 @@ Persistence does not imply synchronization: only declared fields cross the netwo
 
 The [moving-structures carrier](moving-structures.md) remains a game-owned specialized type and does not depend on general registration. Share identity, residency, tracking and save boundaries; its cell ownership, swept collision and assembly journal remain specialized. Never create two carrier tickers or serialize its cells twice.
 
-### Implemented: tracking and the client table (stage 5, first part)
+### Implemented: tracking, the client table and the renderer handoff (stage 5)
 
 - **The tracker.** General rows join the level's one tracker (`lan_general_states` in `game/network/lan_entities.rs`). A row's range and interval are its declaration's (`tracking::general` in `lan/tracking.rs`): the range in chunks is capped by the view distance, and an interval of `i32::MAX` or below 1 never updates. Deltas are on. A quarantined record never becomes a row, so it is never tracked.
 - **Pairing.** A general key is in no client registry, so pairing sends a `sunrise:general_entity` spawn (`crates/sunrise-protocol/src/general_entity.rs`) in place of `AddEntity`. Only a client that negotiated that engine channel is paired (`Viewer::general_entity`, `Guest::negotiated_general_entity`). After the spawn:
@@ -97,7 +97,8 @@ The [moving-structures carrier](moving-structures.md) remains a game-owned speci
   - the row's declared fields are its synced attachments, whose snapshot tracking start queues as for any entity.
 - **Vanilla clients.** A vanilla client is never paired with a row: no packet names it. Refusing such a client when required general types exist is still the open question below.
 - **The client.** A Sunrise client keeps the rows it was shown in `game/network/remote/general.rs`. Each row's type is resolved in the client's frozen catalog. It moves with the non-living interpolation (3 steps), keeps the position and rotation of the tick before for a frame's partial tick, and is dropped on removal or a world change. An unknown key or a duplicate id is ignored with one warning. No mod code runs on the client.
-- **Still to come.** The renderer handoff follows in the next part: renderer slots for general types, and drawing a row from its synced attachments.
+- **Shown with its fields.** The server sends every row its first attachment snapshot at tracking start, empty or not, and the client shows a row only once the spawn and that snapshot are both there.
+- **The renderer handoff.** `resolve_entity_renderers` resolves a renderer registered for a general key into a slot per catalog slot (`EntityRendererTable`, `game/modding/native_entity_renderers.rs`), so a frame does no lookup by name. Each frame, each shown row goes to its type's renderer (`game/mobs/general_draw.rs`) through the guard every route shares, at `lerp(previous, position, partial)`, with `EntityRenderState`'s identity, age and angles interpolated the same way and no family field. The renderer is asked through `EntityRenderer::submit_with_host`, whose `&dyn Host` reads the row's synced attachments; every other family keeps `submit`. A type with no renderer draws nothing and is named once a resource load; a failed renderer draws nothing until the next load, and a reload re-resolves the slots without touching the rows.
 
 ## Lifecycle route owners and migration obligations
 
