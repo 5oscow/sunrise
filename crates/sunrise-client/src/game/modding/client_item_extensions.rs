@@ -351,87 +351,99 @@ fn dispatch_equipment<'a>(
         part: Some("ClientItemExtensions"),
     });
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let dye = provider.default_dye_color(host, stack);
-        let layer_type = match piece.kind {
-            "humanoid_baby" => EquipmentLayerType::HumanoidBaby,
-            "humanoid_leggings" => EquipmentLayerType::HumanoidLeggings,
-            _ => EquipmentLayerType::Humanoid,
-        };
-        piece.resolved_materials(
-            trim,
-            |index, layer| {
-                let original_ref = state
-                    .texture_keys
-                    .get(&layer.texture)
-                    .map_or(ArmorTextureRef::__new(0, 0), |&index| {
-                        ArmorTextureRef::__new(state.generation, index)
-                    });
-                let snapshot = EquipmentLayer::__new(
-                    original_ref,
-                    layer.dyeable,
-                    layer.color_when_undyed,
-                    layer.use_player_texture,
-                );
-                let color =
-                    provider.armor_layer_tint_color(host, stack, &snapshot, index as u32, dye);
-                if color == 0 {
-                    return None;
-                }
-                let default = texture(&layer.texture);
-                let default_ref = default
-                    .and_then(|b| state.texture_keys.get(b.name))
-                    .map_or(ArmorTextureRef::__new(0, 0), |&index| {
-                        ArmorTextureRef::__new(state.generation, index)
-                    });
-                let selected =
-                    provider.armor_texture(host, stack, layer_type, &snapshot, default_ref);
-                let mut selected_texture_final = selected != default_ref;
-                let binding = if selected == default_ref {
-                    default
-                } else {
-                    let (generation, index) = selected.__parts();
-                    let name = (generation == state.generation)
-                        .then(|| state.textures.get(index as usize))
-                        .flatten();
-                    if let Some(name) = name {
-                        bind(name)
-                    } else {
-                        report_stale();
-                        selected_texture_final = false;
+        mod_api::__private::contain_refusal(part.attached.mod_id(), || {
+            let dye = provider.default_dye_color(host, stack);
+            let layer_type = match piece.kind {
+                "humanoid_baby" => EquipmentLayerType::HumanoidBaby,
+                "humanoid_leggings" => EquipmentLayerType::HumanoidLeggings,
+                _ => EquipmentLayerType::Humanoid,
+            };
+            piece.resolved_materials(
+                trim,
+                |index, layer| {
+                    let original_ref = state
+                        .texture_keys
+                        .get(&layer.texture)
+                        .map_or(ArmorTextureRef::__new(0, 0), |&index| {
+                            ArmorTextureRef::__new(state.generation, index)
+                        });
+                    let snapshot = EquipmentLayer::__new(
+                        original_ref,
+                        layer.dyeable,
+                        layer.color_when_undyed,
+                        layer.use_player_texture,
+                    );
+                    let color =
+                        provider.armor_layer_tint_color(host, stack, &snapshot, index as u32, dye);
+                    if color == 0 {
+                        return None;
+                    }
+                    let default = texture(&layer.texture);
+                    let default_ref = default
+                        .and_then(|b| state.texture_keys.get(b.name))
+                        .map_or(ArmorTextureRef::__new(0, 0), |&index| {
+                            ArmorTextureRef::__new(state.generation, index)
+                        });
+                    let selected =
+                        provider.armor_texture(host, stack, layer_type, &snapshot, default_ref);
+                    let mut selected_texture_final = selected != default_ref;
+                    let binding = if selected == default_ref {
                         default
-                    }
-                }?;
-                let selected =
-                    provider.armor_layer_model(host, stack, layer_type, &snapshot, index as u32);
-                let model = if selected == ArmorModelRef::VANILLA {
-                    None
-                } else {
-                    let (generation, index) = selected.__parts();
-                    let model = (generation == state.generation)
-                        .then(|| state.models.get(index as usize))
-                        .flatten();
-                    if let Some(model) = model {
-                        Some(&model.slots[piece.slot.index()])
                     } else {
-                        report_stale();
+                        let (generation, index) = selected.__parts();
+                        let name = (generation == state.generation)
+                            .then(|| state.textures.get(index as usize))
+                            .flatten();
+                        if let Some(name) = name {
+                            bind(name)
+                        } else {
+                            report_stale();
+                            selected_texture_final = false;
+                            default
+                        }
+                    }?;
+                    let selected = provider.armor_layer_model(
+                        host,
+                        stack,
+                        layer_type,
+                        &snapshot,
+                        index as u32,
+                    );
+                    let model = if selected == ArmorModelRef::VANILLA {
                         None
-                    }
-                };
-                let color = (color & 0xFF00_FF00)
-                    | ((color & 0x00FF_0000) >> 16)
-                    | ((color & 0x0000_00FF) << 16);
-                Some(ResolvedEquipmentLayer {
-                    binding,
-                    color,
-                    model,
-                    final_texture: selected_texture_final,
-                })
-            },
-            emissive,
-        )
+                    } else {
+                        let (generation, index) = selected.__parts();
+                        let model = (generation == state.generation)
+                            .then(|| state.models.get(index as usize))
+                            .flatten();
+                        if let Some(model) = model {
+                            Some(&model.slots[piece.slot.index()])
+                        } else {
+                            report_stale();
+                            None
+                        }
+                    };
+                    let color = (color & 0xFF00_FF00)
+                        | ((color & 0x00FF_0000) >> 16)
+                        | ((color & 0x0000_00FF) << 16);
+                    Some(ResolvedEquipmentLayer {
+                        binding,
+                        color,
+                        model,
+                        final_texture: selected_texture_final,
+                    })
+                },
+                emissive,
+            )
+        })
     }));
     match result {
-        Ok(materials) => materials,
+        Ok(Ok(materials)) => materials,
+        Ok(Err(refusal)) => {
+            refusal.report();
+            refused(&format!("callback refused: {refusal}"));
+            Vec::new()
+        }
         Err(_) => {
             refused("callback failed");
             Vec::new()

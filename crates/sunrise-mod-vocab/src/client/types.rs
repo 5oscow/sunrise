@@ -321,6 +321,7 @@ pub struct HumanoidRenderState<'a> {
 /// Translation is in blocks and rotation is in degrees (pitch, yaw, roll).
 /// The renderer applies the transform before the ordinary hand and item poses.
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(Clone)]
 pub struct HandRender<'a> {
     /// The UUID of the player whose hand is drawn.
     pub player: u128,

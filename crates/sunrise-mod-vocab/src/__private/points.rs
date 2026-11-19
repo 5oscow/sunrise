@@ -64,7 +64,12 @@ impl Table {
             let listener = &sealed.listeners[entry.listener as usize];
             if listener.active() {
                 let _guard = super::enter(listener.id, entry.injection);
-                call(entry.kind);
+                // Outside `World` a Host call the phase gate refuses skips this listener for the call.
+                if let Err(refusal) =
+                    crate::runtime::refusable(crate::runtime::outside_world(), || call(entry.kind))
+                {
+                    refusal.report();
+                }
             }
         }
     }
