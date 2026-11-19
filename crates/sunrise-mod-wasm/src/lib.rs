@@ -1310,7 +1310,9 @@ mod tests {
                 .map(|(_, why)| why.to_string())
                 .unwrap_or_default();
             assert!(
-                why.contains("stale") && why.contains("rebuild it"),
+                why.contains("stale")
+                    && why.contains("rebuild it")
+                    && why.contains("subscriptions cannot be read"),
                 "{:?}",
                 loaded.refused
             );

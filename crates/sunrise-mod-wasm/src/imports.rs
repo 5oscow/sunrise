@@ -23,7 +23,7 @@ pub fn set_game_build(id: &str) {
 }
 
 /// The SDK a mod is rebuilt with, as a refusal names it: `rebuild with SDK sdk-<build id>`, or
-/// plain `rebuild` before the game has recorded its build.
+/// plain `rebuild it` before the game has recorded its build.
 pub(crate) fn rebuild_advice() -> String {
     GAME_BUILD.get().map_or("rebuild it".to_owned(), |build| {
         format!("rebuild it with SDK sdk-{build}")
