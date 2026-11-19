@@ -2395,10 +2395,8 @@ fn png_size(bytes: &[u8]) -> Option<(u32, u32)> {
     Some((w, h))
 }
 
-/// The level a console command runs in when `active` is in place: always
-/// the overworld (`MinecraftServer.createCommandSourceStack` uses
-/// `overworld()`), so None when it already is.
-/// The level a console line runs in, when it is not the one in place: the world spawn's.
+/// The level a console line runs in, when it is not `active`, the one in place: the world
+/// spawn's (`MinecraftServer.createCommandSourceStack` uses `findRespawnDimension`).
 fn console_level(active: super::Dim, spawn: super::Dim) -> Option<super::Dim> {
     (active != spawn).then_some(spawn)
 }
