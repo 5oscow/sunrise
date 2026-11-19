@@ -942,10 +942,14 @@ impl Game<'_> {
             false
         };
         if after == before && !rolled && !lock_changed && !name_changed && !cooldown_changed {
+            // BlockInput.place calls loadWithComponents even when its before/after
+            // saves are equal. DataCommands instead rejects a no-op before setData.
+            self.notify_block_entity_load_additional(key);
             return false;
         }
         self.world.block_entities.insert(key, new);
         self.world.set_block_lock(key, &tag);
+        self.notify_block_entity_load_additional(key);
         self.update_spawner_display(key);
         self.command_block_loaded(key, was_auto);
         self.world.modified.insert((pos[0] >> 4, pos[2] >> 4));
@@ -1229,8 +1233,10 @@ impl Game<'_> {
         let key = (p[0], p[1], p[2]);
         let name = self.data_block_name(p);
         let e = self.world.block_entities.get(&key)?;
-        let mut tag =
-            save::block_entity_data(key, e, &name, self.world.block_lock(key), self.items());
+        let mut tag = save::command_block_entity_data(
+            self.encode_live_block_entity(key, e, &name, self.items()),
+            self.world.block_lock(key),
+        );
         if name == "minecraft:hopper" {
             set_key(
                 &mut tag,
@@ -1284,6 +1290,7 @@ impl Game<'_> {
                         self.world.block_entities.insert(key, new);
                     }
                     self.world.set_block_lock(key, &tag);
+                    self.notify_block_entity_load_additional(key);
                     self.update_spawner_display(key);
                     self.command_block_loaded(key, was_auto);
                     // BlockDataAccessor.setData: setChanged and sendBlockUpdated(3),

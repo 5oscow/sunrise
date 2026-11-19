@@ -32,6 +32,14 @@ level upkeep and outgoing state updates still run. The server resolves whether
 the body runs before the pre hook; a listener changing the player's position
 does not change that decision for the current tick.
 
+## Entity tick hooks
+
+`entity_tick_pre` and `entity_tick_post` version 3 observe additional entity families, including
+server players, named projectiles, displays and other entities the server keeps without simulation.
+Whether a call represents one entity or a family depends on the tick route and the types named in
+registration. Keep cancellations within the current Pre call. The player connection body remains
+separate from the server-side entity tick, and the local client avatar is not observed by these hooks.
+
 ## Explosion membership
 
 `explosion_detonate` version 2 exposes mutable `blocks` and `entities` lists
@@ -166,6 +174,38 @@ the same mod: for example, `LevelRef::set_block` fires `block_changed`. Mods kee
 state with interior mutability so these calls can share the instance safely. Data-load
 hooks can run on any loading thread; item default changes must be identical on every side.
 
+## Which thread runs a hook
+
+Most hooks run on the thread that ticks their side: the server thread for a server hook, the window's thread for a
+client hook. Single player has both in one process, so one mod instance is called from two threads. Some hooks and
+Part methods run elsewhere, and each one's own documentation says where:
+
+- **Worldgen workers.** While chunks generate, the methods of a structure type, feature type, biome source or chunk
+  generator that place or sample the world, and the hooks fired while a feature generates, run on the worldgen
+  worker threads, several chunks at once. Feature placement also runs on the server thread when the game places a
+  feature there: a sapling growing, a command, `LevelRef::place_feature`. A query asked once at start, such as
+  `BiomeSource::possible_biomes`, is not a worker call. They get a `WorldgenHost` or no host at all, never a `Host`.
+- **Meshing workers.** `add_section_geometry` itself runs once at client start, to register renderers; each
+  renderer's `SectionGeometry::add` then runs on the renderer's meshing workers every time a section is meshed. A
+  block tint source is asked there too, and also outside meshing, for example for terrain particles and blocks a
+  piston moves. Both get no host.
+- **Chunk workers.** `chunk_data_load` and `chunk_data_save` run where a chunk's record is decoded or encoded, with a
+  restricted host.
+- **Loading threads.** Data-load hooks run on whichever thread loads the data.
+
+What follows for a mod's state:
+
+- A `thread_local!` holds one value per thread, not per game or per world. A value written on the server thread is
+  not there on a worldgen worker, and the window's thread has its own. Keep shared state in the mod's own fields
+  behind a lock or an atomic, or on the object it belongs to as an [attachment](attachments.md).
+- Do not hold a lock across a host call. A write through the host can fire another hook of the same mod on the same
+  thread (`LevelRef::set_block` fires `block_changed`), and that hook then waits for the lock its caller holds.
+  Copy what you need out, release the lock, then call the host.
+- A worker's call can run at the same moment as a tick hook. Data a worker reads belongs in an immutable value
+  swapped as a whole, or behind a read-write lock. A lock makes the access safe, not the result right: worldgen
+  must give the same chunk for the same seed whatever the order of calls, and a section geometry renderer or tint
+  source must answer from its arguments and immutable data fixed at registration, as their own documentation requires. Mutable state does not belong in them.
+
 `Hooks` contains global hooks. Scoped hooks belong to `BlockPart`, `BlockEntityPart`,
 `ItemPart`, `MenuPart` or `FluidPart` and run for the registered object.
 
@@ -254,15 +294,23 @@ Before a block's placement state is selected, `ItemPart::placement_context` repl
 `BlockItem.updatePlacementContext` rewrite: `Some(Some(context))` rewrites the target and click,
 `Some(None)` refuses, and `None` runs vanilla (including scaffolding's column walk). The placing
 item cannot change, click and view values must be finite, and the target must be within bounds.
-Replaceability is checked before the rewrite, not again on its answer. At the final `BlockItem.canPlace`
+Replaceability is checked before the rewrite, not again on its answer. `BlockPart::state_for_placement`
+then selects the candidate, which may be a registered state of another block. The game uses that
+candidate for survival, obstruction, and the written-block check that gates item data and placed-by
+callbacks. The held item does not change, and its double-height pre-clear still runs if applicable.
+Selecting a different block does not run that block's `getStateForPlacement`. If that block places a
+companion, the mod must check its footprint: `setPlacedBy` can overwrite the companion cell without
+rechecking it, and failing to write the companion does not refund the item. Sunrise additionally
+requires creative-operator permission when a mod selects a game-master block. At the final `BlockItem.canPlace`
 check, `ItemPart::must_survive` decides whether placement must pass `can_survive`: `Some(false)`
 skips it, `Some(true)` requires it, and `None` keeps vanilla (scaffolding false, other block items
 true). Standing/wall items retain their own unconditional candidate-survival checks. Entity
 obstruction is still checked. Both hooks run on both sides with
 a read-only `LevelSide`, dispatched by item id. These events have no stack yet: they decide from
 the item and level, not held components. Player and dispenser placement offer the resolved decision
-once to `entity_place`; if a listener changes its inputs, the placement is refused rather than
-retargeted. The veto's placement neighbour and the post-placement notice use the resolved face,
+once to `entity_place`; a veto stops all writes, including a double-height item's pre-clear, and
+keeps the stack. If a listener changes the placement inputs, it is refused rather than retargeted.
+The veto's placement neighbour and the post-placement notice use the resolved face,
 and the notice uses the resolved click location. Neither changes the sides of the block placement or
 survival hooks.
 

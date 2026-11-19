@@ -413,7 +413,11 @@ impl Game<'_> {
         }
     }
     pub(super) fn save_advancements(&self) {
-        if !self.adv.loaded || self.remote.is_some() || self.no_player_here() {
+        if !self.adv.loaded
+            || self.remote.is_some()
+            || self.no_player_here()
+            || self.crash_save.holds_interrupted(self.lan_acting)
+        {
             return;
         }
         let Some(path) = self.adv_path() else {
@@ -423,11 +427,8 @@ impl Game<'_> {
             .adv
             .progress
             .to_json(&self.adv.tree, sunrise_world::DATA_VERSION);
-        if let Some(dir) = path.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
         if let Ok(text) = serde_json::to_string_pretty(&json) {
-            let _ = std::fs::write(path, text);
+            let _ = sunrise_client::save::write_durable(&path, text.as_bytes());
         }
     }
     /// The player as predicates see it.
@@ -641,8 +642,7 @@ impl Game<'_> {
         EntityView {
             kind: "minecraft:player".into(),
             position: [p.position.x, p.position.y, p.position.z],
-            // Entity.isOnFire on a server: remainingFireTicks (players aren't fire immune).
-            on_fire: p.fire_ticks > 0,
+            on_fire: p.is_on_fire(),
             sneaking: p.pose == sunrise_client::pose::Pose::Crouching,
             // Input.shift: the held key, as `BlockItem.place`'s sneaking reads it.
             input_sneak: self.keys.held(Action::Sneak),
@@ -782,7 +782,7 @@ impl Game<'_> {
             movement,
             kind: m.kind.id.clone(),
             position: [m.position.x, m.position.y, m.position.z],
-            on_fire: m.fire_ticks > 0,
+            on_fire: m.fire_ticks > 0 && !m.mod_fire_immune,
             baby: m.is_baby(),
             on_ground: m.on_ground,
             equipment,
@@ -1233,6 +1233,13 @@ impl Game<'_> {
     /// `InventoryChangeTrigger`, checked when the inventory changes.
     pub(super) fn check_inventory_trigger(&mut self) {
         use std::hash::{Hash, Hasher};
+        // A player in another level than the one in place has their criteria and rewards
+        // judged in their own level, from their own tick (`tick_advancements`, which sees the
+        // changed inventory as `broadcastChanges` does): judging here would drop a reward in
+        // this level.
+        if !self.acting_in_level_in_place() {
+            return;
+        }
         let mut h = std::collections::hash_map::DefaultHasher::new();
         for s in self
             .inventory
@@ -2300,7 +2307,7 @@ impl Game<'_> {
     /// `RecipeToast`s: up to five stack in 32-pixel slots, the rest queue. `hidden` (F1)
     /// keeps them timing out without drawing them.
     pub(super) fn draw_toasts(&mut self, batch: &mut HudBatch, hidden: bool) {
-        let multiplier = f64::from(self.settings.notification_display_time);
+        let multiplier = self.settings.notification_display_time;
         let mut sound_played = false;
         let mut i = 0;
         while i < self.adv.toasts.len() {

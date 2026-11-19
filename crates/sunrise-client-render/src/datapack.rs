@@ -585,16 +585,10 @@ fn stringify(tag: &Tag) -> String {
 }
 /// `DecimalFormat("#")` with up to 15 fraction digits.
 fn decimal(v: f64) -> String {
-    if v.is_nan() {
-        return "NaN".into();
-    }
-    let s = format!("{v:.15}");
-    let s = s.trim_end_matches('0').trim_end_matches('.');
-    if s == "-0" || s.is_empty() {
-        "0".into()
-    } else {
-        s.to_owned()
-    }
+    use sunrise_core::java_number::{DecimalPattern, format_decimal};
+    // FloatTag.valueOf and DoubleTag.valueOf collapse signed zero. A negative
+    // nonzero argument that later rounds to zero must still come out as -0.
+    format_decimal(if v == 0.0 { 0.0 } else { v }, DecimalPattern::Macro)
 }
 fn substitute(template: &str, values: &BTreeMap<&str, String>) -> String {
     let mut out = String::new();
@@ -718,7 +712,7 @@ pub struct DataStore {
     pub slot_source_tags: BTreeMap<String, Vec<TagEntryOf>>,
     /// The content tables' raw files from the packs after the built-in one:
     /// Server JSON resources (recipes, loot, enchantments, songs, instruments,
-    /// predicates, modifiers, advancements, registries, data maps and tags), by
+    /// predicates, modifiers, advancements, registries, world clocks, data maps and tags), by
     /// `<kind-dir>/<ns>:<path>`, each id's files in pack order. The tables
     /// merge them over what they read from the resource root.
     pub files: BTreeMap<String, Vec<Vec<u8>>>,
@@ -728,7 +722,7 @@ pub struct DataStore {
 /// `<kind-dir>/<ns>:<path>` for a pack file the content tables read:
 /// `recipe/`, `recipe_filter/`, `loot_table/`, `advancement/`, `trade_set/`,
 /// `villager_trade/`, `dialog/`, `damage_type/`, `dimension_type/`, `data_maps/`, enchantments, songs,
-/// instruments, predicates, item modifiers, `worldgen/biome/` or `tags/<sub>/`,
+/// instruments, predicates, item modifiers, `world_clock/`, `worldgen/biome/` or `tags/<sub>/`,
 /// where the id keeps the subpath so a nested tag kind stays addressable.
 fn content_id(file: &str) -> Option<String> {
     let rest = file.strip_prefix("data/")?;
@@ -737,7 +731,8 @@ fn content_id(file: &str) -> Option<String> {
     let kind = match kind {
         "recipe" | "recipe_filter" | "loot_table" | "advancement" | "trade_set"
         | "villager_trade" | "dialog" | "damage_type" | "dimension_type" | "data_maps"
-        | "enchantment" | "jukebox_song" | "instrument" | "predicate" | "item_modifier" => kind,
+        | "enchantment" | "jukebox_song" | "instrument" | "predicate" | "item_modifier"
+        | "world_clock" => kind,
         "worldgen" => {
             return resource_id(file, "worldgen/biome", ".json")
                 .map(|id| format!("worldgen/biome/{id}"));
@@ -867,6 +862,7 @@ impl DataStore {
                 "tags",
                 "trade_set",
                 "villager_trade",
+                "world_clock",
                 "worldgen/biome",
             ]) {
                 if !seen.insert(f.clone()) {
@@ -1743,6 +1739,21 @@ mod tests {
         // A plain function needs no arguments.
         let plain = parse_function("a:p", "say 1").unwrap();
         assert_eq!(plain.instantiate(None).unwrap(), ["say 1"]);
+    }
+
+    #[test]
+    fn macro_arguments_use_decimal_format_not_fixed_precision() {
+        // Temurin 25 DecimalFormat("#") with 15 fractional places.
+        for (tag, expected) in [
+            (Tag::Float(0.1_f32.to_bits()), ".100000001490116"),
+            (Tag::Double(0.5_f64.to_bits()), ".5"),
+            (Tag::Double((-0.0_f64).to_bits()), "0"),
+            (Tag::Double((-1e-16_f64).to_bits()), "-0"),
+            (Tag::Double(f64::INFINITY.to_bits()), "∞"),
+            (Tag::Double(1e23_f64.to_bits()), "99999999999999990000000"),
+        ] {
+            assert_eq!(stringify(&tag), expected);
+        }
     }
 
     /// `StringTemplate.fromString` throws "No variables in macro" for a `$`

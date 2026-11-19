@@ -210,7 +210,8 @@ pub enum LandingWrite {
 pub use interact::{InteractionResult, PlayerContext, PlayerEffect, UseBranch, hit_slot};
 pub use pistons::{BlockEventData, MovingPiston};
 pub use place::{
-    PlaceContext, PlaceOutcome, PlacementContext, PlacementPreview, ResolvedPlacement,
+    AppliedPlacement, PlaceContext, PlaceOutcome, PlacementContext, PlacementPreview,
+    ResolvedPlacement,
 };
 pub use portal::PortalShape;
 pub use states::{BlockId, PropKey, StateTable};
@@ -688,8 +689,15 @@ pub trait LevelAccess: BlockEntityNeighbors {
         _fluid: FluidState,
     ) {
     }
-    /// Observe a committed `Level.setBlock` state change, before its side effects.
-    fn observe_block_changed(&self, _pos: BlockPos, _old: BlockStateId, _new: BlockStateId) {}
+    /// Observe a committed `Level.setBlock` state change and its applied flags, before side effects.
+    fn observe_block_changed(
+        &self,
+        _pos: BlockPos,
+        _old: BlockStateId,
+        _new: BlockStateId,
+        _flags: i32,
+    ) {
+    }
     /// NeoForge's `IBlockExtension.onBlockStateChange`: a `Level.setBlock` that held changed
     /// the block at `pos` from `old` to `new`, observed at the end of the write
     /// (`updatePOIOnBlockStateChange`), after the client update, the neighbour updates and the
@@ -819,8 +827,8 @@ pub trait LevelAccess: BlockEntityNeighbors {
     /// faces the player, sits on the clicked face, or comes waterlogged).
     /// `context` is vanilla's `BlockPlaceContext`, `fluid` the fluid in the
     /// position the block would go in. `answer` starts empty: `Some(Some(s))`
-    /// places `s`, a state of the block's own, `Some(None)` refuses the
-    /// placement (vanilla's `null` return: the block goes nowhere and nothing
+    /// selects the valid state `s`, which may be from another block. `Some(None)`
+    /// refuses placement (vanilla's `null` return: the block goes nowhere and nothing
     /// is consumed), and `None` leaves the block's own `getStateForPlacement`
     /// to run. `ticks` is the simulation's own, which a signal read of the level needs
     /// (comparator outputs, moving pistons). `preview` is set when a preview standing in for
@@ -1141,6 +1149,14 @@ pub trait LevelAccess: BlockEntityNeighbors {
     }
     /// Whether a signal query needs the weak-power block hook.
     fn has_weak_power_hook(&self) -> bool {
+        false
+    }
+    /// Whether a block's signal can come from a mod part
+    /// (`BlockSignal` or `IsSignalSource`) rather than from its state alone.
+    /// Such a part can read the wire's own state, so a wire's neighbour signal
+    /// is not fixed while a run is propagating and must not be cached across
+    /// it. The default is vanilla-only.
+    fn has_signal_hook(&self) -> bool {
         false
     }
     /// Override `SignalGetter.getSignal`'s conductor check for a block.
@@ -1569,6 +1585,16 @@ impl Behaviours {
     /// position.
     pub fn is_redstone_conductor(&self, state: BlockStateId) -> bool {
         self.has_flag(state, data::state_flags::CONDUCTOR)
+    }
+    /// The vanilla conductor predicate for a state alone. Shulker boxes use the live
+    /// block entity's bounds; the empty-level export only sees their closed shape.
+    pub fn state_redstone_conductor(&self, state: BlockStateId) -> Option<bool> {
+        if self.data(state).is(classes::Class::ShulkerBox)
+            || self.has_flag(state, data::state_flags::CONDUCTOR_ERROR)
+        {
+            return None;
+        }
+        Some(self.is_redstone_conductor(state))
     }
     pub fn is_replaceable(&self, state: BlockStateId) -> bool {
         self.has_flag(state, data::state_flags::REPLACEABLE)
@@ -2090,18 +2116,33 @@ pub struct Signals<'a, L: signal_access::SignalAccess + ?Sized> {
     /// `RedstoneWireBlock.shouldSignal` is false while a wire samples its
     /// neighbours (`getBlockSignal`).
     pub(crate) wire_signal_off: bool,
+    /// This view's wire-shape cache id; see [`redstone::WireConnections`].
+    pub(crate) view: u64,
     /// Set when a read needed a comparator output `ticks` doesn't hold.
     pub(crate) unknown_output: std::cell::Cell<bool>,
 }
 impl<'a, L: LevelAccess + ?Sized> Sim<'a, L> {
-    /// This simulation's level, read-only.
+    /// This simulation's level, read-only. The view caches nothing: single
+    /// reads do not repeat, and the shape paths pass states that are not the
+    /// one at `pos` (a cross for a wire, a default state for a placement).
+    /// Signal trees, which ask a wire's shape from every direction they probe,
+    /// start at [`Self::query_signals`].
     pub(crate) fn signals(&self) -> Signals<'_, L> {
         Signals {
             b: self.b,
             level: &*self.level,
             ticks: &*self.ticks,
             wire_signal_off: self.wire_signal_off.get(),
+            view: 0,
             unknown_output: std::cell::Cell::new(false),
+        }
+    }
+    /// A view for one signal tree: the wire shapes it computes are memoized for
+    /// as long as it lives. See [`redstone::WireConnections`].
+    pub(crate) fn query_signals(&self) -> Signals<'_, L> {
+        Signals {
+            view: self.ticks.wire_connections.next_view(),
+            ..self.signals()
         }
     }
 }
@@ -2117,6 +2158,7 @@ impl Behaviours {
             level,
             ticks,
             wire_signal_off: false,
+            view: ticks.wire_connections.next_view(),
             unknown_output: std::cell::Cell::new(false),
         }
     }

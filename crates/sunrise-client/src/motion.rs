@@ -385,6 +385,8 @@ pub struct PlayerMotion {
     /// swimming is not left in the swimming box in the seat (#4427).
     pub is_passenger: bool,
     pub fire_ticks: i32,
+    /// Unsaved fire immunity granted on this logical side.
+    pub mod_fire_immune: bool,
     pub air: i32,
     pub respiration: i32,
 
@@ -538,7 +540,7 @@ pub struct PlayerMotion {
     /// it travels on the server: `isLocalInstanceAuthoritative` is false, so
     /// its moves check no fall damage.
     pub server_copy: bool,
-    /// A speculative anticheat replay, whose native callbacks must not escape.
+    /// A tick played again (`replayed_tick`), whose native callbacks must not escape.
     pub(crate) replaying: bool,
     /// The span of `events` a wall hit on the server's copy pushed (sound and
     /// damage): `server_travel` keeps them while it drops the simulated moves.
@@ -631,7 +633,13 @@ impl PlayerMotion {
             ticks
         };
     }
+    pub fn is_on_fire(&self) -> bool {
+        !self.mod_fire_immune && self.fire_ticks > 0
+    }
     pub fn ignite_for_ticks(&mut self, ticks: i32) -> Result<()> {
+        if self.mod_fire_immune {
+            return Ok(());
+        }
         let scaled = (f64::from(ticks) * self.attribute("minecraft:burning_time")?).ceil() as i32;
         self.set_remaining_fire_ticks(self.fire_ticks.max(scaled));
         self.ticks_frozen = 0;
@@ -1266,9 +1274,8 @@ impl MotionWorld<'_, '_, '_> {
             player.sprint_input_tick_with_window(keys, sprint_window)
         })
     }
-    /// A client's tick played again by the server's movement prediction: the
-    /// client's own keys, and the sprinting it said it had (its
-    /// ServerboundPlayerCommandPacket comes before the tick's move).
+    /// A client's tick played again: the client's own keys, and the sprinting it said it had
+    /// (its ServerboundPlayerCommandPacket comes before the tick's move). Mods' callbacks don't fire.
     pub fn replayed_tick(&mut self, keys: crate::sprint::Keys, sprinting: bool) -> Result<()> {
         self.player.replaying = true;
         let result = self.local_tick(keys, |player, _| {
@@ -1869,15 +1876,14 @@ impl MotionWorld<'_, '_, '_> {
     /// 4), as ordinary lava does to the player.
     fn lava_cauldron_inside(&mut self) -> Result<()> {
         self.player.ticks_frozen = 0;
-        self.player.ignite_for_ticks(300)?;
-        self.environment_hurt("minecraft:lava", 4.0)
+        self.lava_ignite_and_hurt()
     }
     /// `LayeredCauldronBlock.entityInside`: on a server, a burning player
     /// asks for the cauldron's `handleEntityOnFireInside` (runBefore
     /// EXTINGUISH, so while still burning), then EXTINGUISH
     /// (`Entity.clearFire`) puts the fire out.
     fn layered_cauldron_inside(&mut self, pos: BlockPos) {
-        if self.player.fire_ticks > 0 && !self.player.spectator {
+        if self.player.is_on_fire() && !self.player.spectator {
             self.player
                 .events
                 .push(MotionEvent::CauldronExtinguish { pos });
@@ -3114,7 +3120,7 @@ impl crate::block_contact::InsideWalk for PlayerInside<'_, '_, '_, '_> {
                 // The burning player melts the snow it is told about, at the
                 // contact, as vanilla destroys it there; the collector's
                 // extinguish applies at the flush, after every contact.
-                if self.m.player.fire_ticks > 0 && self.melt_step.is_none_or(|s| s == step) {
+                if self.m.player.is_on_fire() && self.melt_step.is_none_or(|s| s == step) {
                     self.melt_step.get_or_insert(step);
                     self.m
                         .player

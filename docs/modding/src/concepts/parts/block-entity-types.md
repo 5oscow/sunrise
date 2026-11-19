@@ -147,11 +147,38 @@ let done = Press::edit_state(host, entity, |_, progress| {
 
 ## Saved data
 
+Implement `BlockEntityPart::block_entity_save_additional` to serialize live mod state when the server
+captures this type's data. `event.tag` starts with the stored payload. Change that copy to write the
+value that goes into a chunk, a command read, or a copy into an item, loot or a structure. This does
+not update the live entity, change the stored inventory, or affect the separate client update tag.
+Malformed payloads, including names or strings too long for NBT, are refused before any copy uses
+that output. If the region writer cannot encode or admit the complete chunk
+record, it retries with the stored block-entity payloads from the same snapshot. Other changes in
+the snapshot are kept. The read-only level host cannot write to the world or request another save.
+During unload or a removed block's loot roll, the entity
+may no longer be readable through the host; the event still carries its payload and identity.
+`block_drops` and `player_destroyed_block` read the stored data, not the loot copy.
+Changing output does not mark a chunk dirty: mark the entity changed when the live state changes.
+
+`block_entity_on_load` is the separate once-per-instance attachment notice. It runs after the entity
+has its initial data and before its first tick; it does not run on serialization.
+
 `block_entity.replace_data(host, data)` replaces its saved payload, clearing omitted fields while retaining
 identity and position. Like `merge_data`, it loads transactionally and synchronizes the change; it returns
 `Err(BlockEntityError::Stale)` for an invalidated handle, or `Ok(false)` for data the entity cannot
 load or an unchanged result.
 
+
+### Reading data loaded by the server
+
+Implement `BlockEntityPart::block_entity_load_additional` to refresh mod-owned state after the server
+applies a saved payload, including `/data merge` and `/data modify`, cloning, structure and item
+placement, falling-block landing, and chunk load. `event.tag` is the applied mod payload and the
+read-only level host already sees the updated instance. `block_entity_on_load` follows when that
+instance is new; it also fires for a fresh placement that had no saved data.
+
+Direct Mod API `merge_data` and `replace_data` writes and transaction restores do not fire the
+notice. Client sync instead uses `block_entity_data_received`.
 
 ## Transform saved data with a structure
 

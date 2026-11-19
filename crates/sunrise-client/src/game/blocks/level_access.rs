@@ -50,9 +50,21 @@ impl LevelAccess for GameLevel<'_> {
             self.world.block_entities.insert(key, entity);
         }
     }
-    fn observe_block_changed(&self, pos: BlockPos, old: BlockStateId, new: BlockStateId) {
+    fn observe_block_changed(
+        &self,
+        pos: BlockPos,
+        old: BlockStateId,
+        new: BlockStateId,
+        flags: i32,
+    ) {
         if self.native_authoritative {
-            self.native_block_changed(self.dimension, pos, old, new);
+            self.native_block_changed(
+                self.dimension,
+                pos,
+                old,
+                new,
+                mod_api::BlockUpdateFlags::from_bits_retain(flags),
+            );
         }
     }
     fn observes_block_state_change(&self, old: BlockStateId, new: BlockStateId) -> bool {
@@ -452,6 +464,11 @@ impl LevelAccess for GameLevel<'_> {
     fn has_weak_power_hook(&self) -> bool {
         self.native_authoritative
             && mod_api::__private::has_scoped_hook(mod_api::HookId::ShouldCheckWeakPower)
+    }
+    fn has_signal_hook(&self) -> bool {
+        self.native_authoritative
+            && (mod_api::__private::has_scoped_hook(mod_api::HookId::BlockSignal)
+                || mod_api::__private::has_scoped_hook(mod_api::HookId::IsSignalSource))
     }
     fn adjust_should_check_weak_power(
         &self,
@@ -1296,6 +1313,7 @@ impl LevelAccess for GameLevel<'_> {
         if let Some((key, entity)) = sunrise_client::save::decode_block_entity_for_block(&tag, name)
         {
             self.world.block_entities.insert(key, entity);
+            self.notify_block_entity_load_additional(key);
             if tag.get("LootTable").is_some() {
                 self.emit(LevelEvent::ContainerLootTable { pos, tag });
             }

@@ -1,7 +1,6 @@
 use super::*;
 use sunrise_core::{geometry::Direction, position::BlockPos};
 use sunrise_world::level::LevelAccess;
-#[cfg(test)]
 use sunrise_world::level::Ticks;
 
 use crate::game::mod_api_host::{FireOddsLevel, PredictedLevel};
@@ -63,6 +62,35 @@ impl<'w> DryLevel<'w> {
             reads: None,
             asks_mods: true,
         }
+    }
+}
+
+impl crate::game::Game<'_> {
+    /// Trace the optional initial write and state-level callback off the live world.
+    /// Both steps use the same scratch level so the callback sees the write's shape updates.
+    pub(in crate::game) fn preview_set_placed_by(
+        &mut self,
+        pos: BlockPos,
+        state: BlockStateId,
+        write_flags: Option<i32>,
+    ) -> sunrise_world::level::PreviewBlocks {
+        self.with_level(|behaviours, level, _| {
+            let random = level.random().clone();
+            let mut dry = DryLevel::new(level);
+            dry.random = random;
+            dry.asks_mods = false;
+            let mut ticks = Ticks::default();
+            if let Some(flags) = write_flags
+                && !behaviours.set_block(&mut dry, &mut ticks, pos, state, flags)
+            {
+                return dry.changed;
+            }
+            let placed = dry.block_state(pos);
+            if behaviours.block(placed) == behaviours.block(state) {
+                behaviours.set_placed_by_state(&mut dry, &mut ticks, pos, placed);
+            }
+            dry.changed
+        })
     }
 }
 
@@ -240,6 +268,9 @@ impl sunrise_world::level::LevelAccess for DryLevel<'_> {
     }
     fn is_unobstructed(&self, pos: sunrise_core::position::BlockPos, state: BlockStateId) -> bool {
         self.base.is_unobstructed(pos, state)
+    }
+    fn within_world_border(&self, pos: BlockPos) -> bool {
+        self.base.within_world_border(pos)
     }
     fn random(&mut self) -> &mut sunrise_core::random::LegacyRandom {
         &mut self.random
