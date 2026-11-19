@@ -441,6 +441,12 @@ def changed_entries(base, head):
     return [("?", UNKNOWN_CHANGE)]
 
 
+def listed_entries(path):
+    """The (status, path) pairs of a `git diff --name-status -z` listing saved in a file (tools/ci/pr_files.py)."""
+    fields = Path(path).read_bytes().decode("utf-8").split("\0")[:-1]
+    return list(zip(fields[::2], fields[1::2]))
+
+
 def changed_paths(base, head):
     return [path for _, path in changed_entries(base, head)]
 
@@ -450,8 +456,10 @@ if __name__ == "__main__":
     parser.add_argument("base")
     parser.add_argument("head")
     parser.add_argument("--all", action="store_true", help="emit centralized dyna-checks selections")
+    parser.add_argument("--files", metavar="LIST", help="read base...head's changes from this listing (pr_files.py) "
+                        "instead of git")
     args = parser.parse_args()
-    changes = changed_entries(args.base, args.head)
+    changes = listed_entries(args.files) if args.files else changed_entries(args.base, args.head)
     paths = [path for _, path in changes]
     if args.all:
         for name, required in selections(changes).items():
