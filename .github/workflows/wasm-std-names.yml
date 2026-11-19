@@ -1,7 +1,7 @@
 name: wasm-std-names
-# The wasm std member built on Linux and on Windows must export the same names: a wasm mod imports std's symbols by
-# name, so a mod built on one host loads with the std member built on another only if the two lists agree
-# (cargo-sunrise-mod gives std units a host-free symbol disambiguator). The daily run (daily.yml) calls this, and a
+# The wasm std member built on Linux and on Windows must have the same import and export name lists: a wasm mod
+# imports std's symbols by name, and cargo-sunrise-mod gives std units a host-free symbol disambiguator, so the two
+# lists are expected to be identical. The daily run (daily.yml) calls this, and a
 # hand dispatch on a branch can: never a push or pull request, since Windows needs GitHub's runners (platform legs run
 # daily, owner 2026-11-13). Nothing is published.
 on:
@@ -55,7 +55,8 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: wasm-std-names
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          # Only a run of main's own head: a daily of an older commit (inputs.commit) must not fill main's cache.
+          save-if: ${{ github.ref == 'refs/heads/main' && (!inputs.commit || inputs.commit == github.sha) }}
       - run: cargo build --locked -p cargo-sunrise-mod
       # Outside the checkout, so the std member's project never sits inside the game's workspace.
       - name: Build the std member
@@ -86,7 +87,7 @@ jobs:
           pattern: wasm-std-*
           path: ${{ runner.temp }}/members
           merge-multiple: true
-      - name: Linux's and Windows' std members export the same names
+      - name: Linux's and Windows' std members have the same import and export names
         run: |
           cd "$RUNNER_TEMP/members"
           python3 "$GITHUB_WORKSPACE/tools/wasm_names.py" std-linux.wasm > linux.txt
@@ -94,7 +95,7 @@ jobs:
           echo "linux $(wc -l < linux.txt) names, windows $(wc -l < windows.txt) names"
           if cmp -s std-linux.wasm std-windows.wasm; then echo 'The two members are byte-identical.'; fi
           if ! diff -u linux.txt windows.txt > names.diff; then
-            echo "::error::the std member built on Windows names $(grep -c '^[-+][^-+]' names.diff) symbols differently from Linux's: a wasm mod built on one host would not load with the other's std"
+            echo "::error::the std member's import and export name lists differ between Linux and Windows: $(grep -c '^[-+][^-+]' names.diff) lines of the exact comparison"
             head -n 60 names.diff
             exit 1
           fi
