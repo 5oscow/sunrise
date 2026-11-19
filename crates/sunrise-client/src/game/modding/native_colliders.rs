@@ -5,7 +5,11 @@
 //! The server keeps a [`ColliderEntry`] by entity id beside the entity's attachments, and a
 //! client keeps what its tracking server sent in `Remote::colliders`. A level with no colliders
 //! holds empty maps, so nothing else in the game pays for them.
-use super::{Dim, Game, commands::Target};
+use super::{
+    Dim, Game,
+    commands::Target,
+    remote_vehicles::{PassengerSeat, passenger_root},
+};
 use mod_api::{Collider, ColliderError, EntityRef};
 use std::collections::{HashMap, HashSet};
 use sunrise_client::{
@@ -124,16 +128,8 @@ struct PlacementKey {
 /// The vehicle stack of `id` in a riding graph (passenger to vehicle): the root and everything
 /// whose way up reaches it, `id` included. The walks are bounded by the graph's size, so a
 /// cycle in what a server sent ends them.
-fn stack_in_graph(vehicles: &HashMap<u32, u32>, id: u32) -> Vec<u32> {
-    let root_of = |mut at: u32| {
-        for _ in 0..=vehicles.len() {
-            match vehicles.get(&at) {
-                Some(&vehicle) => at = vehicle,
-                None => break,
-            }
-        }
-        at
-    };
+fn stack_in_graph(vehicles: &HashMap<u32, PassengerSeat>, id: u32) -> Vec<u32> {
+    let root_of = |at| passenger_root(vehicles, at).unwrap_or_else(|last| last);
     let root = root_of(id);
     let mut stack = vec![root];
     stack.extend(
@@ -370,10 +366,9 @@ impl Game<'_> {
             self.entity_is_passenger(entity) == Some(false)
                 && self.entity_is_vehicle(entity) == Some(false)
         } else {
-            self.remote.as_ref().is_none_or(|r| {
-                !r.passenger_vehicles.contains_key(&id)
-                    && !r.passenger_vehicles.values().any(|&vehicle| vehicle == id)
-            })
+            self.remote
+                .as_ref()
+                .is_none_or(|r| r.passenger_vehicle(id).is_none() && !r.has_passengers(id))
         }
     }
 
@@ -627,8 +622,9 @@ mod tests {
     #[test]
     fn a_stack_in_a_riding_graph_holds_root_and_every_rider() {
         // 1 rides 2 rides 3; 10 and 11 ride 12; 20 and 21 ride each other (a cycle).
-        let graph: HashMap<u32, u32> = [(1, 2), (2, 3), (10, 12), (11, 12), (20, 21), (21, 20)]
+        let graph = [(1, 2), (2, 3), (10, 12), (11, 12), (20, 21), (21, 20)]
             .into_iter()
+            .map(|(id, vehicle)| (id, PassengerSeat { vehicle, index: 0 }))
             .collect();
         let sorted = |id| {
             let mut stack = stack_in_graph(&graph, id);
@@ -663,7 +659,11 @@ mod tests {
         };
         use sunrise_world::entity_obstruction::EntityIdentity;
         // 10 and 11 ride 12, and 10 carries the collider; 30 is a stranger.
-        let graph: HashMap<u32, u32> = [(10, 12), (11, 12)].into_iter().collect();
+        let graph = [(10, 12), (11, 12)]
+            .into_iter()
+            .enumerate()
+            .map(|(index, (id, vehicle))| (id, PassengerSeat { vehicle, index }))
+            .collect();
         let boxes = ColliderBoxes::new(vec![Aabb::new(
             Vec3::new(0.0, 0.0, 0.0),
             Vec3::new(2.0, 1.0, 2.0),

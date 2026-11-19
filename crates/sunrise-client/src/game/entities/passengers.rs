@@ -627,7 +627,7 @@ impl Game<'_> {
         // its feet for exactly that.
         let remote = self.remote.as_ref()?;
         let (kind, position) = remote.tracked(vehicle as i32)?;
-        let position = if let Some(&parent) = remote.passenger_vehicles.get(&vehicle) {
+        let position = if let Some(parent) = remote.passenger_vehicle(vehicle) {
             let at = self.passenger_riding_position_inner(parent, me, own_seat, index, path)?;
             [at.x, at.y, at.z]
         } else {

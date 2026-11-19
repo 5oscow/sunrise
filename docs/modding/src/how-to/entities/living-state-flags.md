@@ -154,8 +154,8 @@ runs, so a mod's own write in that hook is what stays.
 
 ## Riding topology and resident handles
 
-`EntityRef` names only an entity resident in the current level. A rejected Mob
-passenger can remain a full object in a riding tree without becoming resident;
+On the server, `EntityRef` names only an entity resident in the current level.
+A rejected Mob passenger can remain a full object in a riding tree without becoming resident;
 its saved UUID does not make another object's handle refer to it.
 
 `is_passenger` and `is_vehicle` describe the actual relationships, including
@@ -176,6 +176,15 @@ obtain its handle. Cyclic relationships have no root and return `None`.
 its handle can be returned. An off-level first passenger means `None`, not a later
 resident rider. All these reads refuse stale input handles; none loads a retained
 object into the level or exposes a handle for it.
+
+On a client, `vehicle`, `is_passenger`, `passengers`, `root_vehicle` and
+`is_vehicle` read the riding relationships sent in the server's passenger
+packets. They work for every tracked entity and the local player. A stale or
+untracked input returns `None`. Passenger lists for unknown vehicles and entities
+that cannot carry passengers (markers and ominous item spawners) are ignored.
+Unknown passengers and links that would form a cycle do not board.
+`passengers` returns client handles in the order they boarded from the list.
+The other riding reads and all riding writes are server-only.
 
 During boat or cart destruction, mob dismount notifications run, but remaining
 riding relationships are unlinked even when a listener cancels. Each mob keeps its

@@ -286,6 +286,177 @@ mod tests {
         game.remote.as_ref().unwrap().general.rows.clone()
     }
 
+    #[test]
+    #[ignore = "daily"]
+    fn riding_reads_follow_the_server_passenger_lists() {
+        use crate::game::native_entity_refs::tests::run_fresh_cases;
+        use mod_api::{ClientHost, EntityRef, WorldEpoch};
+
+        if run_fresh_cases(
+            "game::remote::general::tests::riding_reads_follow_the_server_passenger_lists",
+            "SUNRISE_CLIENT_RIDING_TEST_CHILD",
+            &["riding"],
+        ) {
+            return;
+        }
+        mod_platform::__private::initialize().unwrap();
+        let _phase =
+            mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::Registration);
+        let declare = || vec![mod_api::ModEntry::new("mymod", Box::new(Declare))];
+        mod_platform::testing::with_mods(declare().into(), || {
+            mod_platform::__private::part_tests::install_parts_fixture(&declare()).unwrap();
+            crate::game::item_entities::thrown_items_tests::with_remote_game(|game| {
+                let level = || play::SpawnInfo {
+                    dimension_type: 0,
+                    dimension: "minecraft:overworld".into(),
+                    seed: 1,
+                    game_type: 0,
+                    previous_game_type: None,
+                    debug: false,
+                    flat: false,
+                    last_death: None,
+                    portal_cooldown: 0,
+                    sea_level: 63,
+                };
+                let position = |teleport| {
+                    C::PlayerPosition(play::PlayerPosition {
+                        teleport,
+                        position: [0.5, 70.0, 0.5],
+                        delta: [0.0; 3],
+                        yaw: 0.0,
+                        pitch: 0.0,
+                        relatives: 0,
+                    })
+                };
+                game.handle_packet(C::Login(play::Login {
+                    player_id: 7,
+                    hardcore: false,
+                    levels: vec!["minecraft:overworld".into()],
+                    max_players: 20,
+                    chunk_radius: 8,
+                    simulation_distance: 8,
+                    reduced_debug_info: false,
+                    show_death_screen: true,
+                    limited_crafting: false,
+                    spawn: level(),
+                    online_mode: false,
+                    enforces_secure_chat: false,
+                }))
+                .unwrap();
+                game.handle_packet(position(1)).unwrap();
+                let _world =
+                    mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+                for id in [9, 12] {
+                    game.handle_packet(spawn(id, "mymod:missile", [0.5, 70.0, 0.5]))
+                        .unwrap();
+                    game.handle_packet(snapshot(id as u32, None)).unwrap();
+                }
+                game.spawn_entity(4, "minecraft:area_effect_cloud", [0.5, 70.0, 0.5], [0.0; 3]);
+                game.spawn_entity(5, "minecraft:marker", [0.5, 70.0, 0.5], [0.0; 3]);
+                game.spawn_entity(
+                    6,
+                    "minecraft:ominous_item_spawner",
+                    [0.5, 70.0, 0.5],
+                    [0.0; 3],
+                );
+                let set = |vehicle, passengers| {
+                    C::SetPassengers(play::SetPassengers {
+                        vehicle,
+                        passengers,
+                    })
+                };
+                let vehicle = game.entity(9).unwrap();
+                let row = game.entity(12).unwrap();
+                let cloud = game.entity(4).unwrap();
+                let me = game.entity(7).unwrap();
+                let unknown = EntityRef::new(vehicle.epoch(), 99);
+                let stale = EntityRef::new(
+                    WorldEpoch::new(vehicle.epoch().get().wrapping_add(1)),
+                    vehicle.id(),
+                );
+                game.handle_packet(set(9, vec![99])).unwrap();
+                let host: &dyn ClientHost = game;
+                assert_eq!(vehicle.passengers(host), Some(vec![]));
+                assert_eq!(vehicle.is_vehicle(host), Some(false));
+
+                game.handle_packet(set(9, vec![12, 99, 7])).unwrap();
+                game.handle_packet(set(12, vec![4])).unwrap();
+                let host: &dyn ClientHost = game;
+                assert_eq!(vehicle.passengers(host), Some(vec![row, me]));
+                assert_eq!(vehicle.is_vehicle(host), Some(true));
+                assert_eq!(row.vehicle(host), Some(vehicle));
+                assert_eq!(me.vehicle(host), Some(vehicle));
+                assert_eq!(cloud.is_passenger(host), Some(true));
+                assert_eq!(cloud.root_vehicle(host), Some(vehicle));
+                assert_eq!(unknown.vehicle(host), None);
+                assert_eq!(unknown.passengers(host), None);
+                assert_eq!(stale.passengers(host), None);
+                assert_eq!(stale.is_vehicle(host), None);
+
+                // An unknown vehicle can't displace a real relationship. Later tracking
+                // doesn't apply either of its old packets or its mention as a passenger.
+                game.handle_packet(set(99, vec![12])).unwrap();
+                assert_eq!(row.vehicle(game), Some(vehicle));
+                game.spawn_entity(99, "minecraft:marker", [0.5, 70.0, 0.5], [0.0; 3]);
+                let late = game.entity(99).unwrap();
+                assert_eq!(late.is_passenger(game), Some(false));
+                assert_eq!(late.is_vehicle(game), Some(false));
+                assert_eq!(vehicle.passengers(game), Some(vec![row, me]));
+
+                game.handle_packet(set(4, vec![9])).unwrap();
+                assert_eq!(vehicle.vehicle(game), None);
+                assert_eq!(cloud.is_vehicle(game), Some(false));
+                assert_eq!(cloud.root_vehicle(game), Some(vehicle));
+
+                // Known entities that cannot accept a passenger do not displace
+                // an existing ride either, even on a forced client mount.
+                for refused in [5, 6] {
+                    let cannot_carry = game.entity(refused).unwrap();
+                    game.handle_packet(set(refused as i32, vec![12])).unwrap();
+                    assert_eq!(cannot_carry.passengers(game), Some(vec![]));
+                    assert_eq!(row.vehicle(game), Some(vehicle));
+                }
+
+                game.spawn_entity(20, "minecraft:happy_ghast", [2.5, 70.0, 0.5], [0.0; 3]);
+                let ghast = game.entity(20).unwrap();
+                game.handle_packet(set(20, vec![7])).unwrap();
+                assert_eq!(me.vehicle(game), Some(ghast));
+                game.handle_packet(set(7, vec![99])).unwrap();
+                assert_eq!(late.vehicle(game), Some(me));
+                // Replace the local player in the same level while it is both a rider and
+                // a vehicle. A death never plays the ghast's voluntary dismount.
+                game.handle_packet(C::Respawn(play::Respawn {
+                    spawn: level(),
+                    keep: 0,
+                }))
+                .unwrap();
+                assert_eq!(game.remote.as_ref().unwrap().ghast_dismount, None);
+                game.handle_packet(position(2)).unwrap();
+                assert_eq!(game.entity(7), Some(me));
+                assert_eq!(ghast.position(game), Some([2.5, 70.0, 0.5]));
+                assert_eq!(
+                    game.mobs
+                        .iter()
+                        .find(|mob| mob.id == 20)
+                        .unwrap()
+                        .extra
+                        .counter,
+                    0
+                );
+                let host: &dyn ClientHost = game;
+                assert_eq!(me.is_passenger(host), Some(false));
+                assert_eq!(me.passengers(host), Some(vec![]));
+                assert_eq!(late.is_passenger(host), Some(false));
+                assert_eq!(vehicle.passengers(host), Some(vec![row]));
+                assert_eq!(cloud.root_vehicle(host), Some(vehicle));
+
+                game.handle_packet(set(9, vec![])).unwrap();
+                assert_eq!(vehicle.passengers(game), Some(vec![]));
+                assert_eq!(cloud.root_vehicle(game), Some(row));
+            })
+        });
+    }
+
     /// The window's side of a general row: a spawn adds it in the client's catalog slot, an
     /// unknown key and a second spawn of one id change nothing; it is shown only once its first
     /// snapshot is here too, whichever comes first, with that snapshot's value; a position sync

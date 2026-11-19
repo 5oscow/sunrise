@@ -27,6 +27,7 @@ mod block_entity_data;
 mod block_entity_data_tests;
 use super::raw_backlog::Received;
 use super::remote_chunks::{ChunkDecoder, ChunkFormat, Next};
+use super::remote_vehicles::PassengerSeat;
 use super::render_tick::{mob_tracking_body, player_tracking_body};
 use super::{Dim, Game, Mining, Screen, item_use::ticks_left, level_sounds::LevelSound};
 use crate::game::api_values::TryIntoApi;
@@ -712,7 +713,7 @@ pub(super) struct Remote {
     tick_standings: Vec<Option<String>>,
     tick_water_fx: Vec<sunrise_client::mobs::MobEvent>,
     /// Complete network riding graph, including invisible plugin seat entities.
-    pub(super) passenger_vehicles: HashMap<u32, u32>,
+    pub(super) passenger_vehicles: HashMap<u32, PassengerSeat>,
     pub(super) lerps: HashMap<i32, Lerp>,
     /// A native mod's general rows the server shows the window (`general.rs`).
     pub(super) general: general::RemoteGenerals,
@@ -3490,7 +3491,7 @@ impl Game<'_> {
                     r.respawn_velocity = kept_velocity;
                 }
                 if p.keep & 2 == 0 {
-                    self.riding = None;
+                    self.reset_remote_player_riding();
                     // KEEP_ENTITY_DATA copies the old player's synched data
                     // (its shared flags) to the new one; without it they reset.
                     if let Some(r) = self.remote.as_mut() {
@@ -3865,7 +3866,7 @@ impl Game<'_> {
                 );
                 self.entity_section_moved_id(p.id as u32);
             }
-            C::SetPassengers(p) => self.remote_set_passengers(p.vehicle, &p.passengers),
+            C::SetPassengers(p) => self.remote_set_passengers(p.vehicle, p.passengers),
             // ClientPacketListener.handleEntityLinkPacket: who holds a mob's
             // lead (this player, another player, a mob or a fence knot), for
             // the rope.
@@ -6733,10 +6734,11 @@ impl Game<'_> {
         self.seat_own_stands();
         // Other players on this player (possibly through a plugin seat) follow this tick too;
         // the full pass only when something rides this player.
-        if self.remote.as_ref().is_some_and(|r| {
-            let me = r.entity_id as u32;
-            r.passenger_vehicles.values().any(|&v| v == me)
-        }) {
+        if self
+            .remote
+            .as_ref()
+            .is_some_and(|r| r.has_passengers(r.entity_id as u32))
+        {
             self.position_riders();
         }
         // The server owns health and hunger.
