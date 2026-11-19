@@ -1775,6 +1775,7 @@ impl Game<'_> {
         self.find_wither_pattern(
             sunrise_client::block_pattern::WITHER_BASE,
             [head.0, head.1, head.2],
+            self.world.block(head.0, head.1, head.2),
         )
         .is_some()
     }
@@ -1854,6 +1855,7 @@ impl Game<'_> {
         if self.world.block_entities.get(&target).is_some() {
             self.apply_placed_item([target.0, target.1, target.2], &stack, false);
         }
+        self.set_placed_by([target.0, target.1, target.2], None, Some(&stack))?;
         self.block_item_placed(&stack, None, &resolved);
         self.process_level_events()?;
         Ok((shrink(stack), CLICK))
