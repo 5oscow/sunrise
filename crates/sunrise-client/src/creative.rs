@@ -2413,13 +2413,11 @@ mod tests {
     /// shares a slot with one on the page shown (#2646).
     #[test]
     fn only_the_shown_pages_tabs_are_hovered() {
-        let stack = |id: &str| format!("{{count:1,id:\"minecraft:{id}\"}}");
         let tab = |id: &str, column: u32, page: u32| {
             serde_json::json!({"id": format!("minecraft:{id}"), "type": "CATEGORY", "row": "TOP",
-                "column": column, "page": page, "title": id, "icon": stack("stone"),
-                "visible": true, "items": [stack("stone")]})
+                "column": column, "page": page, "title": id, "build": []})
         };
-        let raw = serde_json::json!({"schema": 3, "tabs": [
+        let raw = serde_json::json!({"schema": 4, "item_features": {}, "potion_features": {}, "tabs": [
             tab("first", 0, 0), tab("second", 1, 0), tab("modded", 0, 1), tab("everywhere", 6, 0)
         ]});
         let mut c = Creative::from_json(&raw).unwrap();
