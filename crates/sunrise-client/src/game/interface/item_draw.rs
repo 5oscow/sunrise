@@ -13,6 +13,7 @@ use sunrise_assets::item_model::{
 };
 use sunrise_client::{
     block_entity_render::{diffuse_lights, vertex_light},
+    camera::joml,
     cit::{Hand as CitHand, Kind as CitKind},
     graphics::EntityCullingMode,
     hud::{HudBatch, Rect},
@@ -367,6 +368,31 @@ impl SpecialHost for Host<'_> {
             |location| self.sprites.contains_key(location),
         ))
     }
+}
+
+/// One item a block entity renderer hands to the item renderer
+/// (`ItemStackRenderState.submit`): the stack it resolved, as
+/// `ItemModelResolver.updateForTopItem` was asked for it, under `pose`
+/// (camera-relative) at `light` (packed lightmap coordinates).
+pub(super) struct BlockItemDraw<'a> {
+    pub(super) stack: &'a ItemStack,
+    pub(super) display: DisplayContext,
+    pub(super) seed: i32,
+    pub(super) state: &'a ItemRenderState,
+    pub(super) pose: glam::Mat4,
+    pub(super) light: u32,
+}
+
+/// The pose `LevelRenderer` gives a block entity's renderer: a `PoseStack`
+/// translated to the block from the camera (`translate(double...)`, narrowed).
+pub(super) fn block_entity_pose(key: (i32, i32, i32), camera: glam::DVec3) -> joml::Mat4 {
+    let mut pose = joml::Mat4::IDENTITY;
+    pose.translate(
+        (f64::from(key.0) - camera.x) as f32,
+        (f64::from(key.1) - camera.y) as f32,
+        (f64::from(key.2) - camera.z) as f32,
+    );
+    pose
 }
 
 /// `ItemOwner` of an entity holding or showing an item.
