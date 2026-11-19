@@ -184,8 +184,8 @@ jobs:
           name: boat-base-1
           path: boat-base.json
           retention-days: 2
-      # The pool's switch and lease (tools/ci/dyna_ci_route.sh): live when readable, else the run's snapshot judged
-      # at the run's creation and for an hour after it. Fork pull requests remain on GitHub's runners.
+      # The pool's switch and lease (tools/ci/dyna_ci_route.sh): live when readable, else the attempt's snapshot judged
+      # at the attempt's creation or start and for an hour after it. Fork pull requests remain on GitHub's runners.
       - id: runner
         env:
           GH_TOKEN: ${{ github.token }}
