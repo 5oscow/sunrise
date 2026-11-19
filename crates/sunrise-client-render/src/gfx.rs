@@ -1746,6 +1746,24 @@ struct PackLoading {
 /// Sets its flag when dropped: `PackLoading`'s cancel, which `PackPost::new` checks per program.
 struct CancelOnDrop(std::sync::Arc<std::sync::atomic::AtomicBool>);
 
+impl Drop for Renderer {
+    /// Once the device is lost, the window's surfaces are left alive: wgpu refuses to present
+    /// or discard a frame on a lost device and keeps that frame acquired, and destroying the
+    /// swapchain under an acquired frame panics (while a panic unwinds, an abort).
+    fn drop(&mut self) {
+        if !self.device_lost() {
+            return;
+        }
+        std::mem::forget(self.surface.take());
+        std::mem::forget(
+            self.spare_surface
+                .get_mut()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take(),
+        );
+    }
+}
+
 impl Drop for CancelOnDrop {
     fn drop(&mut self) {
         self.0.store(true, std::sync::atomic::Ordering::Relaxed);

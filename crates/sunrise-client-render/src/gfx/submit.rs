@@ -31,6 +31,9 @@ pub struct Job {
     pub encoder: wgpu::CommandEncoder,
     pub surface: Option<wgpu::SurfaceTexture>,
     pub after: Option<AfterSubmit>,
+    /// The renderer's device-loss flag: once it is set after the submission, the frame's
+    /// `after` and present are dropped, not run on the lost device.
+    pub lost: Option<std::sync::Arc<AtomicBool>>,
 }
 
 struct Thread {
@@ -78,11 +81,15 @@ impl Queue {
                 for job in job_rx {
                     let commands = job.encoder.finish();
                     let submission = queue.submit([commands]);
-                    if let Some(after) = job.after {
-                        after();
-                    }
-                    if let Some(surface) = job.surface {
-                        queue.present(surface);
+                    // A loss this submission found (the callback has run by now): the surface
+                    // texture goes back unpresented, and the next frame's poll reports it.
+                    if !job.lost.is_some_and(|lost| lost.load(Ordering::Relaxed)) {
+                        if let Some(after) = job.after {
+                            after();
+                        }
+                        if let Some(surface) = job.surface {
+                            queue.present(surface);
+                        }
                     }
                     if done_tx.send(submission).is_err() {
                         break;
@@ -221,6 +228,7 @@ mod tests {
                 encoder,
                 surface: None,
                 after: None,
+                lost: None,
             };
             assert!(queue.submit_later(job).is_ok());
             queue.write_buffer(&source, 0, &[frame + 10; 4]);

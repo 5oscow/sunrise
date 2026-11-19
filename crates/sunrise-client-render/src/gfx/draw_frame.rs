@@ -29,6 +29,21 @@ impl Renderer {
         let mut laps = crate::spans::laps();
         let landing = Instant::now();
         self.land_frame();
+        // The frame's one poll takes in what earlier frames read back (GPU times, GPU
+        // culling's statistics, occlusion results, a shader pack's centre depth); their
+        // collectors don't poll. It, or the previous frame's submission, is often where a
+        // device loss shows: this frame then touches the device no more and holds no surface
+        // texture, and `render` leaves recovery to its caller.
+        let polled =
+            super::in_flight::poll_live(&self.device, &self.device_lost, wgpu::PollType::Poll);
+        if self.device_lost() {
+            return Err(super::in_flight::LOST.into());
+        }
+        if polled.is_ok()
+            && let Some(timer) = &mut self.gpu_timer
+        {
+            timer.collect(&mut self.gpu_times);
+        }
         // Waiting for the previous frame (offscreen: at most two on the GPU), not work.
         let landed = landing.elapsed();
         self.queue.take_waited();
@@ -94,7 +109,10 @@ impl Renderer {
             t.gap = self.pass_timing_gap;
             t.keep_frames(self.keep_timed_frames);
             t.set_detail(self.pass_detail);
-            t.begin(&self.device, &self.queue);
+            // The calibration draw's wait is the one that can find a loss here; the acquired
+            // surface texture goes back undrawn and unpresented (`render` leaves recovery to
+            // its caller).
+            t.begin(&self.device, &self.queue, &self.device_lost)?;
         }
         if self.animated_textures {
             self.hud.animate(
@@ -453,7 +471,7 @@ impl Renderer {
         let serial = self.frame_serial;
         // GPU frames' statistics come back a frame or a few later (`GpuCulling::collect`).
         if let Some(gpu) = &mut self.gpu_culling
-            && let Some((frame, stats)) = gpu.collect(&self.device)
+            && let Some((frame, stats)) = gpu.collect()
         {
             self.show_stats(frame, stats);
         }
@@ -751,7 +769,7 @@ impl Renderer {
                     && !gpu_frame
                     && visible.len() >= c.min_sections
             })
-            .and_then(|cull| cull.begin(&self.device).then_some(cull));
+            .and_then(|cull| cull.begin().then_some(cull));
         self.phase2_draws.clear();
         self.phase2_pages.clear();
         self.solid_runs.clear();
@@ -2146,7 +2164,7 @@ impl Renderer {
                 self.light_revision,
             );
             if let Some(t) = &mut native.timing {
-                t.begin(&self.device, &self.queue);
+                t.begin(&self.device, &self.queue, &self.device_lost)?;
                 native_sky_pass =
                     native.sky.is_some() && t.recording() && sky_visible && frame.skybox;
             }
@@ -3469,8 +3487,12 @@ impl Renderer {
                 cpu,
                 lifts_world,
             },
-        );
+        )?;
         laps.lap("r_passes");
+        // A loss the passes' waits found (a shader pack's timing, its image dump): no submit.
+        if self.device_lost() {
+            return Err(super::in_flight::LOST.into());
+        }
         self.submit_and_present_frame(
             encoder,
             SubmitFrameArgs {
