@@ -2631,12 +2631,27 @@ impl<'a> Plan<'a> {
             row.set("title", J::Str(tab.title.clone()));
             row.set("icon", stack(&tab.icon));
             row.set("visible", J::Bool(true));
-            let items = tab
+            let items: Vec<_> = tab
                 .items
                 .iter()
                 .filter(|id| known(id))
                 .map(|id| stack(id))
                 .collect();
+            row.set(
+                "build",
+                J::Arr(
+                    items
+                        .iter()
+                        .map(|snbt| {
+                            J::Obj(vec![
+                                ("kind".into(), J::Str("stack".into())),
+                                ("visibility".into(), J::Str("PARENT_AND_SEARCH_TABS".into())),
+                                ("snbt".into(), snbt.clone()),
+                            ])
+                        })
+                        .collect(),
+                ),
+            );
             row.set("items", J::Arr(items));
             tabs.push(row);
         }

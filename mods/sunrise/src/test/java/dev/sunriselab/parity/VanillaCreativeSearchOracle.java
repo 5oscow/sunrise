@@ -6,7 +6,9 @@ import java.nio.file.*;
 import java.util.*;
 import net.minecraft.client.multiplayer.SessionSearchTrees;
 import net.minecraft.client.resources.language.ClientLanguage;
+import net.minecraft.core.HolderLookup;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.locale.Language;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.packs.PackLocationInfo;
@@ -14,6 +16,8 @@ import net.minecraft.server.packs.PackType;
 import net.minecraft.server.packs.PathPackResources;
 import net.minecraft.server.packs.repository.PackSource;
 import net.minecraft.server.packs.resources.MultiPackResourceManager;
+import net.minecraft.tags.InstrumentTags;
+import net.minecraft.tags.PaintingVariantTags;
 import net.minecraft.world.flag.FeatureFlags;
 import net.minecraft.world.item.CreativeModeTab;
 import net.minecraft.world.item.CreativeModeTabs;
@@ -66,9 +70,16 @@ public final class VanillaCreativeSearchOracle {
             var items = new JsonArray();
             for (ItemStack stack : tab.getDisplayItems()) items.add(ParityData.canon(stack));
             o.add("items", items);
+            var search = new JsonArray();
+            for (ItemStack stack : tab.getSearchTabDisplayItems()) search.add(ParityData.canon(stack));
+            o.add("search_items", search);
             tabs.add(o);
         }
         out.add("tabs", tabs);
+        out.add("holders", holderFacts(lookup));
+        var features = new JsonArray();
+        FeatureFlags.REGISTRY.toNames(FeatureFlags.DEFAULT_FLAGS).forEach(flag -> features.add(flag.toString()));
+        out.add("features", features);
 
         var querySets = JsonParser.parseString(Files.readString(Path.of(args[0]))).getAsJsonObject();
         var queries = new LinkedHashSet<String>();
@@ -104,6 +115,40 @@ public final class VanillaCreativeSearchOracle {
             out.add("frenchSearches", queryResults(trees, index, french));
         }
         Files.writeString(Path.of(args[2]), out.toString(), StandardCharsets.UTF_8);
+    }
+
+    /** Generator inputs in holder and tag order, separate from the expected lists above. */
+    private static JsonObject holderFacts(HolderLookup.Provider lookup) {
+        var holders = new JsonObject();
+        var potions = new JsonArray();
+        lookup.lookupOrThrow(Registries.POTION).listElements().forEach(h -> potions.add(h.key().identifier().toString()));
+        holders.add("potions", potions);
+        var enchantments = new JsonArray();
+        lookup.lookupOrThrow(Registries.ENCHANTMENT).listElements().forEach(h -> {
+            var row = new JsonObject();
+            row.addProperty("id", h.key().identifier().toString());
+            row.addProperty("max_level", h.value().getMaxLevel());
+            enchantments.add(row);
+        });
+        holders.add("enchantments", enchantments);
+        var paintings = new JsonArray();
+        lookup.lookupOrThrow(Registries.PAINTING_VARIANT).listElements().forEach(h -> {
+            var row = new JsonObject();
+            row.addProperty("id", h.key().identifier().toString());
+            row.addProperty("width", h.value().width());
+            row.addProperty("height", h.value().height());
+            row.addProperty("placeable", h.is(PaintingVariantTags.PLACEABLE));
+            paintings.add(row);
+        });
+        holders.add("paintings", paintings);
+        var horns = new JsonArray();
+        lookup.lookupOrThrow(Registries.INSTRUMENT).get(InstrumentTags.GOAT_HORNS).orElseThrow()
+            .forEach(h -> horns.add(h.unwrapKey().orElseThrow().identifier().toString()));
+        holders.add("horns", horns);
+        var patterns = new JsonArray();
+        lookup.lookupOrThrow(Registries.BANNER_PATTERN).listElements().forEach(h -> patterns.add(h.key().identifier().toString()));
+        holders.add("banner_patterns", patterns);
+        return holders;
     }
 
     private static JsonArray queryResults(SessionSearchTrees trees, Map<ItemStack, Integer> index,

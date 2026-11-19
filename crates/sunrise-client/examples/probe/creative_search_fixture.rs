@@ -13,6 +13,7 @@ use sunrise_client::{
     items::Items,
     lang::{self, Language},
 };
+use sunrise_items::creative_catalog::{Catalog, Holders, Parameters};
 
 pub fn main() -> sunrise_client::Result<()> {
     let args: Vec<String> = crate::args().collect();
@@ -21,9 +22,8 @@ pub fn main() -> sunrise_client::Result<()> {
     let resources = PathBuf::from(args.get(1).ok_or(usage)?);
     let source = sunrise_assets::resource_source::ResourceSource::directory(resources.clone());
     let names = Names::load(&source);
-    let mut creative = Creative::from_json(&serde_json::from_slice(&fs::read(
-        args.get(2).ok_or(usage)?,
-    )?)?)?;
+    let catalog_json = fs::read(args.get(2).ok_or(usage)?)?;
+    let mut creative = Creative::from_json(&serde_json::from_slice(&catalog_json)?)?;
     let defaults = sunrise_world::item_defaults::read(&resources)?;
     let items = Items::catalog(
         &resources,
@@ -60,7 +60,27 @@ pub fn main() -> sunrise_client::Result<()> {
         .iter()
         .map(|s| canon_stack(Some(s), &items))
         .collect();
+    let catalog = Catalog::parse(&catalog_json)?;
+    let holders: Holders = serde_json::from_value(vanilla["holders"].clone())?;
+    let features: Vec<String> = serde_json::from_value(vanilla["features"].clone())?;
+    let built = catalog.build(
+        Parameters {
+            features: &features,
+            operator: permissions,
+            holders: &holders,
+            items: &items,
+        },
+        None,
+        |_, _, _| {},
+    );
+    let built_tabs: Vec<_> = catalog.tabs().iter().zip(built.iter())
+        .map(|(tab, contents)| {
+            let canon = |stacks: &[sunrise_client::items::ItemStack]| stacks.iter()
+                .map(|stack| canon_stack(Some(stack), &items)).collect::<Vec<_>>();
+            json!({"id": tab.id, "items": canon(&contents.display), "search_items": canon(&contents.search)})
+        }).collect();
     let out = json!({
+        "built_tabs": built_tabs,
         "tabs": tabs,
         "search": search,
         "searches": searches,
