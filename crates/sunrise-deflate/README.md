@@ -18,8 +18,8 @@ deflater.gzip(&nbt, &mut out); // level.dat, player data, structures: GZIPOutput
 
 Each call compresses one whole input, the same as `setInput(all)`, `finish()` and draining the output. Vanilla's
 streams produce these same bytes; see the clean-room spec on compressed NBT bytes. A `Deflater` keeps zlib's
-state, `Deflater::STATE_BYTES` (about 250 KiB). Each call reserves zlib's worst-case bound for its input
-(about the input's size) before it starts, so a call allocates nothing only once the vector's spare capacity covers
+state, `Deflater::STATE_BYTES` (about 250 KiB). Each call reserves zlib's worst-case raw deflate size for its
+input (about the input's size) plus the stream wrapper, if any, before it starts, so a call allocates nothing only once the vector's spare capacity covers
 that bound, however small the result. The crate has no `unsafe` code.
 
 ## What was ported

@@ -17,7 +17,8 @@
 //! spare capacity covers that bound, however well the input compresses.
 //!
 //! "The JDK's bytes" below means a JDK that bundles zlib 1.3.2, as Temurin
-//! 25.0.5 does; a JDK built against another zlib writes other bytes.
+//! 25.0.5 does; a JDK built against a different zlib may produce different
+//! bytes.
 //!
 //! zlib's notice is in this crate's LICENSE; the ported files say what was
 //! altered.
