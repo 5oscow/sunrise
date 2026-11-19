@@ -483,30 +483,22 @@ impl Game<'_> {
         this: Option<&EntityView>,
         origin: [f64; 3],
     ) -> bool {
-        self.conditions_hold_among(v, this, None, None, origin)
-    }
-    /// [`Self::conditions_hold`] with the `target_entity` and
-    /// `interacting_entity` a loot context may also carry.
-    pub(in crate::game) fn conditions_hold_among(
-        &self,
-        v: &Value,
-        this: Option<&EntityView>,
-        target: Option<&EntityView>,
-        interacting: Option<&EntityView>,
-        origin: [f64; 3],
-    ) -> bool {
-        adv::conditions(
+        self.conditions_hold_in(
             v,
             &adv::Entities {
                 this,
                 origin,
                 tool: None,
                 block_pos: None,
-                target,
-                interacting,
+                target: None,
+                interacting: None,
             },
-            &View(self),
         )
+    }
+    /// A `ContextAwarePredicate` in a loot context that may also carry
+    /// `target_entity` and `interacting_entity`.
+    pub(in crate::game) fn conditions_hold_in(&self, v: &Value, entities: &adv::Entities) -> bool {
+        adv::conditions(v, entities, &View(self))
     }
     /// `ExecuteCommand.checkCustomPredicate`: no seed/sequence override;
     /// reached literal chance leaves use this active level's random source.

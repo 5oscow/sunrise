@@ -1,0 +1,1 @@
+sunrise-client game::composter::capability_tests::a_composter_click_supplies_its_interacting_player_and_no_this lib daily resources

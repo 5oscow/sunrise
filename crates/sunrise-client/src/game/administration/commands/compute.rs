@@ -3,7 +3,11 @@
 //! context of the source, optionally with a block or a target entity.
 use super::{Arg, Context, Game, R, Target, err};
 use serde_json::Value;
-use sunrise_client::{command::CommandError, text::Text};
+use sunrise_client::{
+    advancements::{self as adv, EntityView},
+    command::CommandError,
+    text::Text,
+};
 use sunrise_core::java_number::float_to_string;
 use sunrise_core::random::RandomSource;
 
@@ -16,6 +20,28 @@ pub(in crate::game) struct ComputeContext {
     pub target: Option<Target>,
     /// `INTERACTING_ENTITY` (the player a composter's `addLayer` names).
     pub interacting: Option<Target>,
+    /// A context with no `THIS_ENTITY` (`LootContextParamSets.BLOCK_INTERACT`)
+    /// and this `ORIGIN`, instead of the command source's entity and position.
+    pub without_this: Option<[f64; 3]>,
+}
+
+/// The entities and origin of a compute context's conditions: `this` and the
+/// origin come from the command source unless the context has no `this`.
+fn context_entities<'a>(
+    c: &ComputeContext,
+    source_this: Option<&'a EntityView>,
+    source_pos: [f64; 3],
+    target: Option<&'a EntityView>,
+    interacting: Option<&'a EntityView>,
+) -> adv::Entities<'a> {
+    adv::Entities {
+        this: source_this.filter(|_| c.without_this.is_none()),
+        origin: c.without_this.unwrap_or(source_pos),
+        tool: None,
+        block_pos: None,
+        target,
+        interacting,
+    }
 }
 
 /// An ArithmeticException's message.
@@ -528,16 +554,20 @@ impl Game<'_> {
                     }
                     _ => {
                         let source = self.command_source.unwrap_or_else(|| self.player_source());
-                        let this = source.entity.map(|t| self.entity_view_asked(t, cond));
+                        let this = source
+                            .entity
+                            .filter(|_| c.without_this.is_none())
+                            .map(|t| self.entity_view_asked(t, cond));
                         let target = c.target.map(|t| self.entity_view_asked(t, cond));
                         let interacting = c.interacting.map(|t| self.entity_view_asked(t, cond));
-                        self.conditions_hold_among(
-                            cond,
+                        let entities = context_entities(
+                            c,
                             this.as_ref(),
+                            source.pos,
                             target.as_ref(),
                             interacting.as_ref(),
-                            source.pos,
-                        )
+                        );
+                        self.conditions_hold_in(cond, &entities)
                     }
                 }
             }
@@ -549,6 +579,123 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+    use std::collections::BTreeMap;
+
+    /// A world with nothing in it: the entity conditions under test read none of it.
+    struct Void;
+    impl adv::World for Void {
+        fn dimension(&self) -> &str {
+            "minecraft:overworld"
+        }
+        fn weather(&self) -> (bool, bool) {
+            (false, false)
+        }
+        fn biome(&self, _: [i32; 3]) -> String {
+            String::new()
+        }
+        fn structures(&self, _: [i32; 3]) -> Vec<String> {
+            Vec::new()
+        }
+        fn block(&self, _: [i32; 3]) -> (String, BTreeMap<String, String>) {
+            ("minecraft:air".into(), BTreeMap::new())
+        }
+        fn fluid(&self, _: [i32; 3]) -> Option<String> {
+            None
+        }
+        fn can_see_sky(&self, _: [i32; 3]) -> bool {
+            false
+        }
+        fn light(&self, _: [i32; 3]) -> i32 {
+            0
+        }
+        fn smokey(&self, _: [i32; 3]) -> bool {
+            false
+        }
+        fn in_tag(&self, _: &str, _: &str, _: &str) -> bool {
+            false
+        }
+    }
+
+    fn view(kind: &str, position: [f64; 3]) -> EntityView {
+        EntityView {
+            kind: kind.into(),
+            position,
+            ..Default::default()
+        }
+    }
+
+    fn holds(cond: &Value, entities: &adv::Entities) -> bool {
+        adv::conditions(cond, entities, &Void)
+    }
+
+    fn of_type(who: &str, kind: &str) -> Value {
+        json!({"condition": "minecraft:entity_properties", "entity": who,
+            "predicate": {"minecraft:entity_type": kind}})
+    }
+
+    /// A command context's `this` and origin are the source's; `target_entity`
+    /// and `interacting_entity` are the ones the context carries.
+    #[test]
+    fn a_compute_context_selects_the_entities_it_carries() {
+        let (source, target, actor) = (
+            view("minecraft:player", [0.0; 3]),
+            view("minecraft:cow", [0.0; 3]),
+            view("minecraft:zombie", [0.0; 3]),
+        );
+        let c = ComputeContext::default();
+        let e = context_entities(
+            &c,
+            Some(&source),
+            [1.0, 2.0, 3.0],
+            Some(&target),
+            Some(&actor),
+        );
+        assert_eq!(e.origin, [1.0, 2.0, 3.0]);
+        assert!(holds(&of_type("this", "minecraft:player"), &e));
+        assert!(holds(&of_type("target_entity", "minecraft:cow"), &e));
+        assert!(!holds(&of_type("target_entity", "minecraft:zombie"), &e));
+        assert!(holds(
+            &of_type("interacting_entity", "minecraft:zombie"),
+            &e
+        ));
+        let bare = context_entities(&c, Some(&source), [0.0; 3], None, None);
+        assert!(!holds(&of_type("target_entity", "minecraft:cow"), &bare));
+        assert!(!holds(
+            &of_type("interacting_entity", "minecraft:zombie"),
+            &bare
+        ));
+    }
+
+    /// `BLOCK_INTERACT` (the composter) has no `THIS_ENTITY` and measures from
+    /// the block's centre, whoever ran the command or whatever the source is.
+    #[test]
+    fn a_context_without_this_measures_from_its_own_origin() {
+        let source = view("minecraft:player", [0.5, 64.0, 0.5]);
+        let actor = view("minecraft:player", [10.5, 64.0, 0.5]);
+        let c = ComputeContext {
+            without_this: Some([10.5, 64.0, 0.5]),
+            ..ComputeContext::default()
+        };
+        let e = context_entities(&c, Some(&source), source.position, None, Some(&actor));
+        assert!(!holds(&of_type("this", "minecraft:player"), &e));
+        assert!(holds(
+            &of_type("interacting_entity", "minecraft:player"),
+            &e
+        ));
+        // The interacting player stands on the origin, ten blocks from the source.
+        let near = json!({"condition": "minecraft:entity_properties", "entity": "interacting_entity",
+            "predicate": {"minecraft:distance": {"absolute": {"max": 1.0}}}});
+        assert!(holds(&near, &e));
+        let from_source = context_entities(
+            &ComputeContext::default(),
+            Some(&source),
+            source.position,
+            None,
+            Some(&actor),
+        );
+        assert!(!holds(&near, &from_source));
+    }
 
     #[test]
     #[ignore = "daily"]
