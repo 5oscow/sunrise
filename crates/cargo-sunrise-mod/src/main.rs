@@ -768,6 +768,18 @@ mod tests {
         })
     }
 
+    /// An empty list of what a mod uses, made for `made_for`.
+    fn uses_list(made_for: &str) -> Vec<u8> {
+        use sunrise_mod_package::mod_surface::uses::{USES_SCHEMA, UsesTable};
+        UsesTable {
+            schema: USES_SCHEMA,
+            made_for: made_for.to_owned(),
+            entries: Vec::new(),
+        }
+        .to_json()
+        .into_bytes()
+    }
+
     #[test]
     fn new_rejects_unknown_flags_without_creating_a_mod() {
         let dir = tempfile::tempdir().unwrap();
@@ -995,7 +1007,15 @@ mod tests {
         // Only selected content ships, not the Git project's executable hooks.
         std::fs::create_dir_all(path.join(".git/hooks")).unwrap();
         std::fs::write(path.join(".git/hooks/pre-commit"), b"#!/bin/sh\nexit 0\n").unwrap();
-        let smod = build_in(&path).unwrap();
+        let smod = pack_into(
+            &path,
+            &PackageOutput::in_project(&path).unwrap(),
+            &Package::read(&path).unwrap().manifest,
+            Some(&uses_list("0123456789abcdef0123456789abcdef01234567")),
+            None,
+            None,
+        )
+        .unwrap();
         let kind = check::kind_of(&smod).unwrap();
         assert!(check::check(&smod, kind.clone(), None, None).is_ok());
 
@@ -1140,7 +1160,26 @@ mod tests {
             Some(sunrise_mod_package::index::Kind::NativeMod)
         );
         assert_eq!(check::kind_of(&dir.join("machine_mod.hnmod")), None);
-        let report = check::check(&smod, check::kind_of(&smod).unwrap(), None, None).unwrap();
+        // Without the list of what it uses, the mod would work on its pinned build only.
+        let refused = check::check(&smod, check::kind_of(&smod).unwrap(), None, None)
+            .err()
+            .unwrap();
+        assert!(refused.contains("uses.json"), "{refused}");
+        let mut pack = |made_for: &str| {
+            let smod = pack_into(
+                &path,
+                &PackageOutput::in_project(&path).unwrap(),
+                &written,
+                Some(&uses_list(made_for)),
+                None,
+                Some(rev),
+            )
+            .unwrap();
+            check::check(&smod, check::kind_of(&smod).unwrap(), None, None)
+        };
+        // A list made for another build says nothing about the pinned one.
+        assert!(pack(&"f".repeat(40)).is_err());
+        let report = pack(&commit).unwrap();
         assert!(report.text().contains("machine_mod"), "{}", report.text());
         assert!(
             new(
