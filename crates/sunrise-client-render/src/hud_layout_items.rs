@@ -85,7 +85,7 @@ fn refusal(atlas: &HudAtlas, draw: &GuiDraw) -> Option<Undrawable> {
             }
             // As `paint` looks it up, by GUI id. A sprite the GUI atlas lists as missing, or does
             // not own, is refused, not drawn as the missing texture.
-            let known = matches!(atlas.gui_lookup(sprite), Some(GuiSprite::Rect(_)));
+            let known = matches!(atlas.gui_lookup(sprite), Some(GuiSprite::Present { .. }));
             (!known).then(|| Undrawable::Sprite(sprite.to_string()))
         }
         GuiDraw::AtlasSprite { sprite, .. } => {

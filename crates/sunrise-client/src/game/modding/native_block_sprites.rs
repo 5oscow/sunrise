@@ -100,7 +100,7 @@ impl Game<'_> {
         } else {
             self.gui.atlas.gui_lookup(&sprite.to_string())
         };
-        let Some(sunrise_client::hud::GuiSprite::Rect(r)) = found else {
+        let Some(sunrise_client::hud::GuiSprite::Present { rect: r, .. }) = found else {
             return None;
         };
         Some(AtlasRegion::new([r.u0, r.v0, r.u1, r.v1], [r.w, r.h]))
@@ -200,6 +200,15 @@ mod texture_atlas_stitched_tests {
                         height: 3,
                         rgba: [64, 96, 32, 255].repeat((width * 3) as usize),
                     });
+                    // A sprite the first load publishes and the reload no longer does.
+                    if marker.gui_asks == 1 {
+                        event.output.push(mod_api::SpriteSourceOutput::Pixels {
+                            sprite: id("marker:first_only"),
+                            width: 2,
+                            height: 2,
+                            rgba: [9, 9, 9, 255].repeat(4),
+                        });
+                    }
                     // The replacement of a walked vanilla sprite, of another size.
                     event.output.push(mod_api::SpriteSourceOutput::Pixels {
                         sprite: id("container/slot"),
@@ -279,7 +288,7 @@ mod texture_atlas_stitched_tests {
     /// A registered sprite source's output is published by atlas and id through the real host,
     /// at startup and after a reload: a block sprite no model names, a GUI sprite of another size
     /// each time, and a walked vanilla GUI sprite replaced by the source's pixels, all found by
-    /// their ids; what the source never made stays none.
+    /// their ids; what the source never made, or made only before the reload, is none.
     #[test]
     #[cfg(unix)]
     #[ignore = "daily"]
@@ -312,6 +321,10 @@ mod texture_atlas_stitched_tests {
                         Some([5, 5])
                     );
                     assert_eq!(game.gui_sprite(&id("marker:no_such_sprite")), None);
+                    assert_eq!(
+                        game.gui_sprite(&id("marker:first_only")).map(|s| s.size),
+                        Some([2, 2])
+                    );
                     game.spawn_pack_reload(super::super::packs::ReloadKind::Selection)
                         .unwrap();
                     let started = std::time::Instant::now();
@@ -325,6 +338,11 @@ mod texture_atlas_stitched_tests {
                     }
                     let marker = marker.lock().unwrap();
                     assert!(marker.block.is_some(), "published again after the reload");
+                    assert_eq!(
+                        game.gui_sprite(&id("marker:first_only")),
+                        None,
+                        "a sprite the reload no longer makes is gone"
+                    );
                     assert_eq!(
                         marker.gui.map(|s| s.size),
                         Some([4, 3]),

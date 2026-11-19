@@ -7922,8 +7922,7 @@ impl Screen {
                                 );
                                 // `RealmsWorldSlotButton.extractContents`: the hardcore
                                 // heart 9x8 at x + 3, y + 4.
-                                if hardcore && atlas.sprites.contains_key("hud/heart/hardcore_full")
-                                {
+                                if hardcore && atlas.gui_rect("hud/heart/hardcore_full").is_some() {
                                     crate::ui::nine_slice(
                                         batch,
                                         atlas,
@@ -8430,7 +8429,7 @@ impl Screen {
                             4 => "icon/ping_2",
                             _ => "icon/ping_unknown",
                         };
-                        if atlas.sprites.contains_key(icon) {
+                        if atlas.gui_rect(icon).is_some() {
                             crate::ui::nine_slice(
                                 batch,
                                 atlas,
@@ -10078,7 +10077,7 @@ impl Screen {
                         }
                         if server.is_hardcore
                             && let Some(mode_x) = mode_x
-                            && atlas.sprites.contains_key("hud/heart/hardcore_full")
+                            && atlas.gui_rect("hud/heart/hardcore_full").is_some()
                         {
                             crate::ui::nine_slice(
                                 batch,

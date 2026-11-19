@@ -2,27 +2,23 @@
 //! metadata), buttons, sliders, tiled menu backgrounds, separators and the
 //! EditBox text field with vanilla cursor, selection and scrolling.
 use crate::{
-    hud::{HudAtlas, HudBatch, Rect, rgba},
+    hud::{GuiSprite, HudAtlas, HudBatch, Rect, rgba},
     text::Text,
 };
-use std::{collections::HashMap, sync::RwLock, time::Instant};
-use sunrise_assets::resource_source::ResourceSource;
+use std::time::Instant;
 
 /// `GuiSpriteScaling.NineSlice`: the sprite's size in GUI pixels, whatever
 /// its texture's resolution, its borders (left, top, right, bottom) in the
 /// same units, and whether the edges and centre stretch rather than tile.
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct NineSlice {
+pub struct NineSlice {
     width: u32,
     height: u32,
     border: [u32; 4],
     stretch_inner: bool,
 }
-/// Nine-slice scaling from `.png.mcmeta` files.
-static NINE_SLICE: RwLock<Option<HashMap<String, NineSlice>>> = RwLock::new(None);
-
 /// A `gui.scaling` section of type `nine_slice`.
-fn parse_nine_slice(v: &serde_json::Value) -> Option<NineSlice> {
+pub(crate) fn parse_nine_slice(v: &serde_json::Value) -> Option<NineSlice> {
     let s = &v["gui"]["scaling"];
     if s["type"] != "nine_slice" {
         return None;
@@ -48,87 +44,6 @@ fn parse_nine_slice(v: &serde_json::Value) -> Option<NineSlice> {
         border,
         stretch_inner: s["stretch_inner"].as_bool().unwrap_or(false),
     })
-}
-/// Read `gui.scaling` metadata for every GUI sprite under `root`.
-pub fn load_metadata(root: &ResourceSource) {
-    set_metadata(read_metadata(root));
-}
-/// The GUI sprites' nine-slice metadata of a resource root, read off the
-/// render thread by a pack reload ([`read_metadata`]) and put in use with
-/// [`set_metadata`].
-pub struct UiMetadata(HashMap<String, NineSlice>);
-/// Puts read metadata in use ([`load_metadata`] in two halves).
-pub fn set_metadata(metadata: UiMetadata) {
-    *NINE_SLICE.write().unwrap_or_else(|e| e.into_inner()) = Some(metadata.0);
-}
-/// Reads the metadata [`load_metadata`] puts in use, without putting it in use: each GUI atlas
-/// sprite's, by its id (`container/slot`, a mod's `mymod:panel`), from the `.png.mcmeta` of the
-/// file its winning origin is. A sprite that is generated (mod pixels, an unstitch region, a
-/// palette) has none: it carries no file's metadata, and a replaced file's is not its own.
-pub fn read_metadata(root: &ResourceSource) -> UiMetadata {
-    let listing = crate::atlas_sources::listing(root);
-    // The files whose metadata each id has: its winning origin's, or where the tree has no GUI
-    // definition (no atlases loaded), the files the GUI folder holds, by the id the definition
-    // would give them.
-    let files: Vec<(String, String)> = if listing.defines("minecraft:gui") {
-        listing
-            .sprites("minecraft:gui")
-            .iter()
-            .filter_map(|(id, origin)| match origin {
-                crate::atlas_sources::SpriteOrigin::File(texture) => Some((
-                    id.strip_prefix("minecraft:").unwrap_or(id).to_owned(),
-                    crate::atlas_sources::texture_resource(texture, "textures"),
-                )),
-                _ => None,
-            })
-            .collect()
-    } else {
-        root.namespaces("assets")
-            .iter()
-            .flat_map(|namespace| {
-                let base = format!("assets/{namespace}/textures/gui/sprites/");
-                let prefix = if namespace == "minecraft" {
-                    String::new()
-                } else {
-                    format!("{namespace}:")
-                };
-                root.list(&base)
-                    .into_iter()
-                    .filter_map(|name| {
-                        let id = name
-                            .strip_suffix(".png.mcmeta")?
-                            .strip_prefix(base.as_str())?;
-                        Some((
-                            format!("{prefix}{id}"),
-                            name.strip_suffix(".mcmeta")?.to_owned(),
-                        ))
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .collect()
-    };
-    let mut map = HashMap::new();
-    for (id, file) in files {
-        let Ok(text) = root.read_to_string(&format!("{file}.mcmeta")) else {
-            continue;
-        };
-        if let Some(nine_slice) = crate::packs::first_json(text.as_bytes())
-            .ok()
-            .as_ref()
-            .and_then(parse_nine_slice)
-        {
-            map.insert(id, nine_slice);
-        }
-    }
-    UiMetadata(map)
-}
-/// The sprite's nine-slice metadata, when its `.png.mcmeta` has any.
-fn nine_slice_metadata(sprite: &str) -> Option<NineSlice> {
-    NINE_SLICE
-        .read()
-        .unwrap_or_else(|e| e.into_inner())
-        .as_ref()
-        .and_then(|m| m.get(sprite).copied())
 }
 /// The region `[x, y, w, h]` of a sprite `size` GUI pixels large, in its
 /// own units (`TextureAtlasSprite.getU(x / width)`).
@@ -182,11 +97,11 @@ pub fn nine_slice(
     let Some(r) = atlas.gui_rect(sprite) else {
         return;
     };
-    let published = !matches!(
-        atlas.gui_lookup(sprite),
-        Some(crate::hud::GuiSprite::Missing)
-    );
-    let scaling = |key: &str| nine_slice_metadata(key).filter(|_| published);
+    // Each effective draw's own scaling: what the entry the key resolves to published.
+    let scaling = |key: &str| match atlas.gui_lookup(key) {
+        Some(GuiSprite::Present { scaling, .. }) => scaling,
+        _ => None,
+    };
     match crate::hud::sprite_modifiers::draws(atlas, sprite, *r, [x, y, w, h], color) {
         Some(draws) => {
             for d in draws {
@@ -1910,9 +1825,9 @@ mod tests {
              \"border\": {\"left\": 34, \"top\": 8, \"right\": 34, \"bottom\": 8}}}}\n\n// 0  10\n// 1  8\n",
         )
         .unwrap();
-        let metadata = read_metadata(&ResourceSource::directory(root.clone()));
+        let text = std::fs::read(widget.join("button_highlighted.png.mcmeta")).unwrap();
         std::fs::remove_dir_all(&root).unwrap();
-        let slice = metadata.0["widget/button_highlighted"];
+        let slice = parse_nine_slice(&crate::packs::first_json(&text).unwrap()).unwrap();
         assert_eq!(
             (slice.width, slice.height, slice.border),
             (80, 20, [34, 8, 34, 8])
@@ -2385,9 +2300,10 @@ mod tests {
                 {"type":"minecraft:single","resource":"demo:gui/bad","sprite":"demo:failed"}]}"#,
         )
         .unwrap();
-        let source = ResourceSource::directory(root.clone());
-        let atlas = HudAtlas::build(&source).unwrap();
-        set_metadata(read_metadata(&source));
+        let atlas = HudAtlas::build(&sunrise_assets::resource_source::ResourceSource::directory(
+            root.clone(),
+        ))
+        .unwrap();
         std::fs::remove_dir_all(&root).unwrap();
         let drawn = |id: &str| {
             let mut batch = HudBatch::scratch([640, 480]);
@@ -2729,28 +2645,6 @@ mod tests {
             menu_tooltip_position(screen, (100, 200), [100, 200, 150, 20], size),
             (112, 180)
         );
-    }
-    #[test]
-    fn nine_slice_metadata_reads_resolved_resource_names_without_files() {
-        use sunrise_assets::resource_source::Resource;
-        let source = ResourceSource::indexed(std::collections::BTreeMap::from([
-            ("assets/minecraft/textures/gui/sprites/widget/button.png.mcmeta".to_owned(),
-             Resource::bytes(br#"{"gui":{"scaling":{"type":"nine_slice","width":20,"height":12,"border":3}}}"#.to_vec())),
-            ("assets/minecraft/textures/gui/sprites/broken.png.mcmeta".to_owned(), Resource::bytes(b"invalid".to_vec())),
-            ("assets/minecraft/textures/block/stone.png.mcmeta".to_owned(), Resource::bytes(b"{}".to_vec())),
-            ("assets/lobby/textures/gui/sprites/tooltip/gold_frame.png.mcmeta".to_owned(),
-             Resource::bytes(br#"{"gui":{"scaling":{"type":"nine_slice","width":40,"height":40,"border":6}}}"#.to_vec())),
-        ]));
-        let metadata = read_metadata(&source);
-        assert_eq!(metadata.0.len(), 2);
-        let button = metadata.0.get("widget/button").unwrap();
-        assert_eq!(
-            (button.width, button.height, button.border),
-            (20, 12, [3; 4])
-        );
-        // Another namespace's sprite is named with it, as the GUI atlas packs it.
-        let frame = metadata.0.get("lobby:tooltip/gold_frame").unwrap();
-        assert_eq!((frame.width, frame.border), (40, [6; 4]));
     }
     /// A tooltip style names its sprites as `TooltipRenderUtil` does, by GUI id;
     /// the box draws the background, then the frame, 12 pixels out from the contents, each

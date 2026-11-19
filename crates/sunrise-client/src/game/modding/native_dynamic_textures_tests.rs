@@ -89,11 +89,11 @@ fn a_mods_dynamic_texture_draws_under_its_id_until_it_is_freed() {
     });
 }
 
-/// The game's GUI atlas lists vanilla's `container/slot`: a mod's live texture is refused at that
-/// id (the list holds it first), and still made at an id the list has no sprite for.
+/// A mod's live texture at an id of another namespace is `NotOwned`, even where the GUI atlas
+/// lists the id (vanilla's `container/slot`): the owner check comes first.
 #[test]
 #[ignore = "daily"]
-fn a_dynamic_texture_is_refused_at_an_id_the_gui_atlas_owns() {
+fn a_foreign_id_is_not_owned_before_the_gui_atlas_is_asked() {
     let mods = vec![ModEntry::new("api-only", Box::new(ApiOnly))];
     with_mods(mods.into(), || {
         crate::game::native_entity_refs::tests::with_client_game(|game| {
@@ -106,7 +106,7 @@ fn a_dynamic_texture_is_refused_at_an_id_the_gui_atlas_owns() {
             };
             assert_eq!(
                 make(game, "minecraft:container/slot"),
-                Err(DynamicTextureError::NameTaken)
+                Err(DynamicTextureError::NotOwned)
             );
             assert_eq!(make(game, "api-only:dynamic/free"), Ok(()));
         });
