@@ -165,7 +165,9 @@ Markdown `description`, GitHub `owners`, `icon` as the published HTTPS address, 
 has `id` and may set `default = false` to start unticked. The registry uses the same title, summary and PNG icon
 rules as a project. It requires at least two distinct listed mods and at least one selected by default; the upper
 bound is `sunrise_mod_package::index::MAX_COLLECTION_MEMBERS`. A collection cannot name another collection as a
-member. An older index without `collections` has no collections.
+member. Checkout member rows reject unknown keys, so a typo in `default` does not change the selection silently.
+An older index without `collections` has no collections. Index readers ignore unknown fields and skip malformed
+collection rows with a reason, without discarding the other collections or projects.
 
 An installer submits all selected members to [install planning](#planning-installs-and-removals) together. Required
 dependencies are selected even if not on the collection's list; a member needed by another selected mod stays
@@ -173,7 +175,7 @@ selected and identifies the mod that requires it. An unfit member is shown with 
 record where a mod was installed from.
 
 `registry check`, `registry build` and `registry review` refuse unlisted members, including the removal of a project
-that remains a member. Review reports which collections list a project affected by a takedown. An edit to membership
+that remains a member. Review reports which collections list a project with a new takedown. An edit to membership
 alone is routine when the pull request's author owns the collection and every added or removed project. Review
 matches the author's GitHub login against the base checkout's `owners`, as it does for project updates. See
 [publishing a collection](../how-to/publish.md#a-collection).
