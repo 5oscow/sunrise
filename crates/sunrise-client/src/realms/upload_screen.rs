@@ -9,7 +9,8 @@
 use super::client::{RealmServer, RealmSetting, RealmSlot, RealmWorldOptions};
 use super::{
     Outcome, REALMS_UPLOAD_SEARCH, RED, ROW_HEIGHT, ResetKind, Screen, SubScreen, centered, client,
-    human_readable, icon_sprite, rgba, spawn, take, upload, upload_matches,
+    human_readable, icon_sprite, percent_label, rgba, spawn, take, transfer_bar_width, upload,
+    upload_limit_size, upload_matches,
 };
 use crate::hud::{HudAtlas, HudBatch};
 use std::sync::Arc;
@@ -624,7 +625,7 @@ impl Screen {
                 if progress.started() && !progress.is_cancelled() {
                     let percentage = progress.percentage();
                     let left = (w - 200.0) / 2.0;
-                    let right = left + (200.0 * percentage as f32).round();
+                    let right = left + transfer_bar_width(percentage);
                     batch.fill(atlas, left - 1.0, 79.0, right - left + 2.0, 17.0, u32::MAX);
                     batch.fill(
                         atlas,
@@ -634,7 +635,7 @@ impl Screen {
                         15.0,
                         0xFF80_8080,
                     );
-                    let percent = format!("{:.1}", percentage * 100.0);
+                    let percent = percent_label(percentage);
                     centered(
                         batch,
                         atlas,
@@ -674,7 +675,7 @@ impl Screen {
                         110.0,
                         RED,
                     );
-                    let size = human_readable(upload::SIZE_LIMIT);
+                    let size = upload_limit_size(upload::SIZE_LIMIT);
                     centered(
                         batch,
                         atlas,

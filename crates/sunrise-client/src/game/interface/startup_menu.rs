@@ -492,7 +492,7 @@ impl Loading {
     }
     pub(super) fn apply_menu_settings(&mut self) {
         if let Some(renderer) = &mut self.renderer {
-            renderer.gamma = self.settings.gamma;
+            renderer.gamma = self.settings.gamma as f32;
             renderer.set_present_mode(self.settings.vsync, self.settings.sunrise.present_mode);
         }
 
@@ -1310,7 +1310,7 @@ impl Loading {
                     sunrise_client::mouse::java_signum(f64::from(raw)) as f32
                 } else {
                     raw
-                } * self.settings.mouse_wheel_sensitivity;
+                } * self.settings.mouse_wheel_sensitivity as f32;
                 let size = self.menu_size();
                 let batch = HudBatch::new(size, self.settings.gui_scale_inputs());
                 if self.menu.options_open {

@@ -588,6 +588,35 @@ impl Game<'_> {
         // entity_join_level).
         self.spawn_mob(kind, at, false, site)
     }
+    /// [`spawn_mob_spawned`](Self::spawn_mob_spawned) for a mob that starts
+    /// moving or turned: `velocity` (`Entity.setDeltaMovement`) and, when
+    /// given, `[yaw, pitch]` in place of the level random's yaw, set before
+    /// it joins. The kind resolves as `spawn_mob_spawned`'s (`cow` is
+    /// `minecraft:cow`), and the ender dragon takes its own creation, facing
+    /// the given yaw; it has no momentum or pitch of its own here, so a
+    /// dragon given a velocity or a pitch is refused.
+    pub(in crate::game) fn spawn_mob_spawned_moving(
+        &mut self,
+        kind: &str,
+        at: [f64; 3],
+        site: SpawnSite,
+        velocity: Vec3,
+        rotation: Option<[f32; 2]>,
+    ) -> Option<u32> {
+        if matches!(kind, "ender_dragon" | "minecraft:ender_dragon") {
+            if velocity != Vec3::ZERO || rotation.is_some_and(|[_, pitch]| pitch != 0.0) {
+                return None;
+            }
+            return self.spawn_dragon_facing(at, site, rotation.map(|[yaw, _]| yaw));
+        }
+        // Not persistent, as `spawn_mob_spawned`'s mob.
+        let mut mob = self.create_mob_reason(kind, at, false, site, rotation.map(|r| r[0]))?;
+        mob.velocity = velocity;
+        if let Some([_, pitch]) = rotation {
+            (mob.head_pitch, mob.previous_head_pitch) = (pitch, pitch);
+        }
+        self.insert_spawned_mob(mob)
+    }
     fn create_mob_reason(
         &mut self,
         kind: &str,

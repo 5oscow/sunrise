@@ -13,6 +13,7 @@ mod attack_target;
 mod break_prediction;
 use break_prediction::Prediction;
 mod fall_sound;
+mod general;
 mod interaction_actions;
 mod interaction_prediction;
 mod level_format;
@@ -665,6 +666,10 @@ pub(super) struct Remote {
     /// holds its abilities from the login on; here the player is made at
     /// the first teleport, which takes them then.
     abilities: Option<play::PlayerAbilities>,
+    /// The old player's motion, from a Respawn with KEEP_ENTITY_DATA
+    /// (`handleRespawn`: `newPlayer.setDeltaMovement(oldPlayer.getDeltaMovement())`),
+    /// for the player made at the next teleport: a portal's teleport adds to it.
+    respawn_velocity: Option<Vec3>,
     loaded_sent: bool,
     /// The dimension of the client level the mods heard made
     /// (`native_client_level_load`), to be told dropped once.
@@ -707,6 +712,8 @@ pub(super) struct Remote {
     /// Complete network riding graph, including invisible plugin seat entities.
     pub(super) passenger_vehicles: HashMap<u32, u32>,
     pub(super) lerps: HashMap<i32, Lerp>,
+    /// A native mod's general rows the server shows the window (`general.rs`).
+    pub(super) general: general::RemoteGenerals,
     /// The minecarts the server moves with `ClientboundMoveMinecartPacket`
     /// (`NewMinecartBehavior`), which have no interpolation handler.
     pub(super) cart_lerps: HashMap<i32, CartLerp>,
@@ -1263,6 +1270,7 @@ impl Game<'_> {
             was_living_flags: 0,
             last_recorded_pose: None,
             abilities: None,
+            respawn_velocity: None,
             loaded_sent: false,
             heard_level: None,
             level_load: sunrise_client::level_loading::LevelLoadTracker::new(0),
@@ -1283,6 +1291,7 @@ impl Game<'_> {
             tick_water_fx: Vec::new(),
             passenger_vehicles: HashMap::new(),
             lerps: HashMap::new(),
+            general: Default::default(),
             cart_lerps: HashMap::new(),
             stepped: HashMap::new(),
             head_lerps: HashMap::new(),
@@ -1509,6 +1518,7 @@ impl Game<'_> {
             last_recorded_pose: None,
             carried: std::cell::Cell::new(None),
             abilities: None,
+            respawn_velocity: None,
             loaded_sent: false,
             heard_level: None,
             level_load: sunrise_client::level_loading::LevelLoadTracker::new(0),
@@ -1529,6 +1539,7 @@ impl Game<'_> {
             tick_water_fx: Vec::new(),
             passenger_vehicles: HashMap::new(),
             lerps: HashMap::new(),
+            general: Default::default(),
             cart_lerps: HashMap::new(),
             stepped: HashMap::new(),
             head_lerps: HashMap::new(),
@@ -2475,6 +2486,7 @@ impl Game<'_> {
                 r.entities.clear();
                 r.passenger_vehicles.clear();
                 r.lerps.clear();
+                r.general.clear();
                 r.cart_lerps.clear();
                 r.stepped.clear();
                 r.head_lerps.clear();
@@ -3268,6 +3280,10 @@ impl Game<'_> {
             C::CustomPayload(p) if p.channel == sunrise_protocol::attachment_sync::CHANNEL => {
                 self.remote_attachment_sync(&p.data);
             }
+            // A native mod's general row the server starts showing the window.
+            C::CustomPayload(p) if p.channel == sunrise_protocol::general_entity::CHANNEL => {
+                self.remote_general_entity(&p.data);
+            }
             // The collider boxes of an entity the server shows the window.
             C::CustomPayload(p) if p.channel == sunrise_protocol::collider_sync::CHANNEL => {
                 self.remote_collider_sync(&p.data);
@@ -3396,6 +3412,16 @@ impl Game<'_> {
                 // After a death (no KEEP_ENTITY_DATA) the new LocalPlayer
                 // rides nothing: the server pairs a vehicle again with its
                 // passengers. A dimension change keeps the vehicle it travels in.
+                // handleRespawn: KEEP_ENTITY_DATA gives the new player the old
+                // one's motion, `resetPos` none.
+                let kept_velocity = if p.keep & 2 != 0 {
+                    self.player.as_ref().map(|pl| pl.velocity)
+                } else {
+                    None
+                };
+                if let Some(r) = self.remote.as_mut() {
+                    r.respawn_velocity = kept_velocity;
+                }
                 if p.keep & 2 == 0 {
                     self.riding = None;
                     // KEEP_ENTITY_DATA copies the old player's synched data
@@ -3645,6 +3671,7 @@ impl Game<'_> {
                         r.level_player_names.remove(&id);
                         r.level_player_textures.remove(&id);
                         r.attachments.remove(&Holder::Entity(id as u32));
+                        Self::forget_remote_general(r, id);
                     }
                 }
                 self.remove_entities(&p.ids);
@@ -6008,10 +6035,12 @@ impl Game<'_> {
             .as_ref()
             .map(|pl| (true, pl.position))
             .unwrap_or((false, Vec3::ZERO));
+        let respawn_velocity = self.remote.as_mut().and_then(|r| r.respawn_velocity.take());
         let velocity = self
             .player
             .as_ref()
             .map(|pl| pl.velocity)
+            .or(respawn_velocity)
             .unwrap_or(Vec3::ZERO);
         let pick = |bit: i32, base: f64, v: f64| if p.relatives & bit != 0 { base + v } else { v };
         let position = Vec3::new(
@@ -6120,7 +6149,9 @@ impl Game<'_> {
     }
 
     /// `ClientPacketListener.tick`'s `LevelLoadTracker.tickClientLoad`: the
-    /// player's section is shown once its column is lit; when the level is
+    /// player's section is shown once the renderer has its mesh and it is 30%
+    /// faded in (without a renderer: once its column and the 8 around it are
+    /// lit, then the same fade); when the level is
     /// ready the loading screen closes and the server hears `PlayerLoaded`
     /// (`notifyPlayerLoaded`).
     fn tick_client_load(&mut self) {
@@ -6134,14 +6165,27 @@ impl Game<'_> {
         {
             return;
         }
-        // `LevelRenderer`'s playerCompiledSectionCallback: the section holding
-        // the camera is there (the column is lit, as meshing needs).
-        let (cx, cz) = (
-            (player.position.x.floor() as i32) >> 4,
-            (player.position.z.floor() as i32) >> 4,
-        );
-        let section_ready = self.streaming.is_lit(cx, cz);
         let camera_y = (player.position.y + f64::from(self.eye)).floor() as i32;
+        let camera = [
+            player.position.x.floor() as i32,
+            camera_y,
+            player.position.z.floor() as i32,
+        ];
+        // `Util.toMillis(chunkSectionFadeInTime)`.
+        let fade_ms = sunrise_client::gfx::fade_millis(self.settings.chunk_fade as f32);
+        // `LevelRenderer`'s playerCompiledSectionCallback, run once
+        // `isSectionCompiledAndVisible(camera)`: the renderer's own mesh and fade
+        // for the camera's section. Without a renderer, the section counts as
+        // compiled once `LevelExtractor` would compile it
+        // (`SectionUpdateTracker.hasAllNeighbors`: its column and the 8 around
+        // it lit, as meshing waits for here).
+        let shown = self
+            .renderer
+            .as_ref()
+            .map(|renderer| renderer.section_compiled_and_visible(camera, fade_ms));
+        let (cx, cz) = (camera[0] >> 4, camera[2] >> 4);
+        let neighbours_lit = shown.is_none()
+            && (-1..=1).all(|dx| (-1..=1).all(|dz| self.streaming.is_lit(cx + dx, cz + dz)));
         let shape = self.world.shape;
         let check = sunrise_client::level_loading::PlayerCheck {
             outside_build_height: camera_y < shape.min_y || camera_y >= shape.min_y + shape.height,
@@ -6154,8 +6198,17 @@ impl Game<'_> {
         let Some(r) = self.remote.as_mut() else {
             return;
         };
-        if section_ready && r.level_load.wants_player_section() {
-            r.level_load.player_section_ready();
+        if r.level_load.wants_player_section() {
+            match shown {
+                Some(true) => r.level_load.player_section_ready(),
+                Some(false) => {}
+                None => r.level_load.player_section_compiled(
+                    [cx, camera_y >> 4, cz],
+                    neighbours_lit,
+                    now,
+                    fade_ms,
+                ),
+            }
         }
         r.level_load.tick_client_load(now, check);
         if !r.level_load.is_level_ready(now) {
@@ -7392,6 +7445,10 @@ impl Game<'_> {
                     (l.target, l.rotation.map(|r| r.0), steps)
                 });
             self.tick_remote_dragon(dragon_lerp);
+            // A mod's general rows: the non-living interpolation, and no mod code.
+            if let Some(r) = self.remote.as_mut() {
+                general::tick_remote_general(&mut r.general.rows, &mut lerps);
+            }
             // Armor stands: ClientLevel.tickNonPassenger's setOldPosAndRot,
             // then their SteppedInterpolationHandler's step, as the mobs'.
             if let Some(r) = self.remote.as_mut() {
@@ -10391,6 +10448,8 @@ mod level_sound_tests;
 mod attachment_query_tests;
 #[cfg(test)]
 mod passage_cross_tests;
+#[cfg(test)]
+mod respawn_motion_tests;
 #[cfg(test)]
 pub(crate) mod tests {
     use super::super::api_values::TryIntoApi;

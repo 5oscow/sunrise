@@ -2307,7 +2307,7 @@ impl Game<'_> {
     /// `RecipeToast`s: up to five stack in 32-pixel slots, the rest queue. `hidden` (F1)
     /// keeps them timing out without drawing them.
     pub(super) fn draw_toasts(&mut self, batch: &mut HudBatch, hidden: bool) {
-        let multiplier = f64::from(self.settings.notification_display_time);
+        let multiplier = self.settings.notification_display_time;
         let mut sound_played = false;
         let mut i = 0;
         while i < self.adv.toasts.len() {

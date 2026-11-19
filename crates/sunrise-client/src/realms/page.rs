@@ -4,6 +4,7 @@ use super::LayoutState;
 use super::client::Backup;
 use crate::hud::{HudAtlas, HudBatch};
 use std::time::{SystemTime, UNIX_EPOCH};
+use sunrise_core::{java_number::format_fixed, jmath};
 
 /// `RealmsSlotOptionsScreen.DIFFICULTIES` and `GAME_MODES`, in menu order (the index
 /// is what the service stores).
@@ -328,23 +329,48 @@ pub(super) fn reset_tile(cx: f32, top: f32, i: usize) -> (f32, f32) {
     (cx - 122.0 + column * 92.0, top + row * 85.0)
 }
 
-/// `Unit.humanReadable`: binary units, a tenth at GB (`mco.upload.failed.too_big`).
-pub(super) fn human_readable(bytes: u64) -> String {
-    const UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
+/// `Unit.humanReadable`: binary units without carrying a rounded 1024.0 to
+/// the next unit. Also used by the server resource-pack download toast.
+pub fn human_readable(bytes: u64) -> String {
     if bytes < 1024 {
         return format!("{bytes} B");
     }
-    let mut value = bytes as f64;
-    let mut unit = 0;
-    while value >= 1024.0 && unit + 1 < UNITS.len() {
-        value /= 1024.0;
-        unit += 1;
-    }
-    if unit == UNITS.len() - 1 {
-        format!("{value:.1} {}", UNITS[unit])
+    byte_size(bytes, unit_exponent(bytes), 1)
+}
+
+/// `Unit.getLargest` has no units above GB, and the size limit uses a decimal
+/// place only for GB (normal transfer rates always use one).
+pub(super) fn upload_limit_size(bytes: u64) -> String {
+    let exp = unit_exponent(bytes).min(3);
+    byte_size(bytes, exp, usize::from(exp == 3))
+}
+
+fn unit_exponent(bytes: u64) -> u32 {
+    if bytes < 1024 {
+        0
     } else {
-        format!("{value:.0} {}", UNITS[unit])
+        (jmath::log(bytes as f64) / jmath::log(1024.0)) as u32
     }
+}
+
+fn byte_size(bytes: u64, exp: u32, decimals: usize) -> String {
+    let unit = ["B", "KB", "MB", "GB", "TB", "PB", "EB"][exp as usize];
+    let value = bytes as f64 / ((1u64 << (10 * exp)) as f64);
+    format!("{} {unit}", format_fixed(value, decimals))
+}
+
+pub(super) fn transfer_percentage(written: u64, total: u64) -> f64 {
+    let ratio = written as f64 / total as f64;
+    // Java's Math.min retains NaN for an empty transfer (0 / 0).
+    if ratio > 1.0 { 1.0 } else { ratio }
+}
+
+pub(super) fn transfer_bar_width(percentage: f64) -> f32 {
+    jmath::round(200.0 * percentage) as f32
+}
+
+pub(super) fn percent_label(percentage: f64) -> String {
+    format_fixed(percentage * 100.0, 1)
 }
 
 pub(super) fn loading_dots() -> &'static str {

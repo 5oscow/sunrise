@@ -1121,7 +1121,8 @@ impl Projectile {
         stack.count = 1;
         self.item = Some(stack);
     }
-    fn update_rotation(&mut self) {
+    /// Faces the projectile along its velocity, as `Projectile.shoot` ends.
+    pub fn update_rotation(&mut self) {
         let v = self.velocity;
         use sunrise_core::geometry::trig::atan2_degrees;
         // `Projectile.shoot`: `(float)(Mth.atan2(..) * 57.2957763671875D)`,

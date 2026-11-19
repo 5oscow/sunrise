@@ -366,7 +366,7 @@ impl Game<'_> {
     }
     /// Puts back what a merge hook may have written to the orb `join`: a refused merge
     /// leaves both orbs as they were.
-    fn restore_orb(&mut self, join: crate::join_seq::JoinSeq, value: i32, count: u32, age: u32) {
+    fn restore_orb(&mut self, join: crate::join_seq::JoinSeq, value: i32, count: u32, age: i32) {
         if let Some(i) = self.orbs.locate(join) {
             let orb = &mut self.orbs[i];
             (orb.value, orb.count, orb.age) = (value, count, age);
@@ -1025,7 +1025,7 @@ mod escape_tests {
 
 #[cfg(test)]
 #[path = "tests/thrown_items_tests.rs"]
-mod thrown_items_tests;
+pub(in crate::game) mod thrown_items_tests;
 
 #[cfg(test)]
 mod bob_tests {

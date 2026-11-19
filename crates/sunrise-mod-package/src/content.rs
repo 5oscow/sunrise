@@ -940,6 +940,12 @@ mod entity_type;
 pub use entity_type::EntityType;
 pub mod fluid_interaction;
 pub use fluid_interaction::FluidInteraction;
+mod lenient;
+pub use lenient::without_comments;
+#[cfg(feature = "references")]
+mod references;
+#[cfg(feature = "references")]
+pub use references::{Findings, check_references};
 
 /// A block entity type declared in code, with the blocks it supports.
 #[derive(Clone, Debug, PartialEq, Eq)]

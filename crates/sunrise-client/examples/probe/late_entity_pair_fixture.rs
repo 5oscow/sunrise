@@ -49,6 +49,7 @@ pub fn main() -> Result<()> {
                 let mut viewers = [Viewer {
                     entity_id: 1,
                     sunrise: true,
+                    general_entity: false,
                     spectator: false,
                     permission: 0,
                     moved: false,

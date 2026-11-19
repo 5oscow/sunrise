@@ -16,6 +16,7 @@ pub mod crypto;
 pub mod custom_book;
 pub mod entity_data;
 pub mod frame;
+pub mod general_entity;
 pub mod hash_ops;
 pub mod ids;
 pub mod item;

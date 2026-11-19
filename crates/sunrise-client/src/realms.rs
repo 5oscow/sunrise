@@ -54,7 +54,7 @@ use page::centered;
 use page::clamp_text;
 use page::closest_expiration;
 use page::days_left_text;
-use page::human_readable;
+pub use page::human_readable;
 use page::loading_dots;
 use page::main_footer_h;
 use page::pdp_entries;
@@ -68,6 +68,7 @@ use page::subscription_label;
 use page::task_stack_top;
 use page::wrap_lines;
 use page::{DIFFICULTIES, DIFFICULTY_DEFAULT, EXPIRATIONS, GAME_MODE_DEFAULT, GAME_MODES};
+use page::{percent_label, transfer_bar_width, transfer_percentage, upload_limit_size};
 
 use picture::{face_from_skin, realm_name_valid, resample_icon, slot_name, template_none_lines};
 pub use settings::{ConfigureTab, SettingsDraft};
@@ -2512,7 +2513,7 @@ impl Screen {
                     {
                         let left = (w / 2.0).floor() - 154.0;
                         let value = crate::ui::slider_value(left, 308.0, cursor.0);
-                        *expiration = (value * (EXPIRATIONS.len() - 1) as f32).round() as usize;
+                        *expiration = (value * (EXPIRATIONS.len() - 1) as f64).round() as usize;
                     }
                 }
                 _ => {}
@@ -2542,7 +2543,7 @@ impl Screen {
             return;
         };
         let left = (w / 2.0).floor() - 106.0;
-        let value = range.from_slider(crate::ui::slider_value(left, 212.0, cursor.0));
+        let value = range.from_slider(crate::ui::slider_value(left, 212.0, cursor.0) as f32);
         if which == 0 {
             draft.render_distance = Some(value);
         } else {
@@ -5072,8 +5073,8 @@ impl Screen {
                             if (slider_y..slider_y + 20.0).contains(&y)
                                 && (left..left + 212.0).contains(&x)
                             {
-                                *picked =
-                                    range.from_slider(crate::ui::slider_value(left, 212.0, x));
+                                *picked = range
+                                    .from_slider(crate::ui::slider_value(left, 212.0, x) as f32);
                                 self.settings_slider = Some(which);
                                 return Outcome::None;
                             }
@@ -5151,7 +5152,7 @@ impl Screen {
                     let left = (w / 2.0).floor() - 154.0;
                     if (93.0..113.0).contains(&y) && (left..left + 308.0).contains(&x) {
                         let value = crate::ui::slider_value(left, 308.0, x);
-                        *expiration = (value * (EXPIRATIONS.len() - 1) as f32).round() as usize;
+                        *expiration = (value * (EXPIRATIONS.len() - 1) as f64).round() as usize;
                         self.other_slider = Some(2);
                         return Outcome::None;
                     }
@@ -7468,7 +7469,7 @@ impl Screen {
                 if progress.written() != 0 && !progress.is_cancelled() {
                     let percentage = progress.percentage();
                     let left = (w - 200.0) / 2.0;
-                    let right = left + (200.0 * percentage as f32).round();
+                    let right = left + transfer_bar_width(percentage);
                     batch.fill(atlas, left - 1.0, 79.0, right - left + 2.0, 17.0, u32::MAX);
                     batch.fill(
                         atlas,
@@ -7478,7 +7479,7 @@ impl Screen {
                         15.0,
                         0xFF80_8080,
                     );
-                    let percent = format!("{:.1}", percentage * 100.0);
+                    let percent = percent_label(percentage);
                     centered(
                         batch,
                         atlas,

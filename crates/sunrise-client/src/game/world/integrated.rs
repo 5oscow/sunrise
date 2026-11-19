@@ -22,7 +22,7 @@ use std::{
     net::TcpListener,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicI32, AtomicU16, AtomicU32, Ordering},
+        atomic::{AtomicBool, AtomicI32, AtomicU16, AtomicU32, AtomicU64, Ordering},
         mpsc::{Receiver, RecvTimeoutError, Sender, channel, sync_channel},
     },
     thread::JoinHandle,
@@ -95,9 +95,9 @@ struct Flags {
     /// server follows while it runs (IntegratedServer.tickServer).
     render_distance: AtomicI32,
     simulation_distance: AtomicI32,
-    /// `options.entityDistanceScaling` (an `f32`'s bits), which
+    /// `options.entityDistanceScaling` (an `f64`'s bits), which
     /// `IntegratedServer.getScaledTrackingDistance` reads on every call.
-    entity_distance: AtomicU32,
+    entity_distance: AtomicU64,
     /// `MinecraftServer.isCurrentlySaving`: the server is autosaving.
     saving: AtomicBool,
     /// The generators of the levels the server has run, by dimension: what
@@ -206,7 +206,7 @@ impl Integrated {
     }
     /// The window's render and simulation distances and its Entity Distance
     /// option, for the server to follow.
-    pub fn set_distances(&self, render: i32, simulation: i32, entity: f32) {
+    pub fn set_distances(&self, render: i32, simulation: i32, entity: f64) {
         self.flags.render_distance.store(render, Ordering::Relaxed);
         self.flags
             .simulation_distance
@@ -1204,7 +1204,7 @@ impl Game<'_> {
     fn follow_distances(&mut self, flags: &Flags) {
         // IntegratedServer.getScaledTrackingDistance reads the option each time.
         self.settings.entity_distance =
-            f32::from_bits(flags.entity_distance.load(Ordering::Relaxed));
+            f64::from_bits(flags.entity_distance.load(Ordering::Relaxed));
         let Some(host) = self.lan.as_mut() else {
             return;
         };
