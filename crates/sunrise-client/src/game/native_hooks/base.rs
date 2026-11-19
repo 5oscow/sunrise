@@ -36,8 +36,9 @@ impl GameLevel<'_> {
         pos: BlockPos,
         old: BlockStateId,
         new: BlockStateId,
+        flags: BlockUpdateFlags,
     ) {
-        self.fire_block_changed(dimension, pos, old, new);
+        self.fire_block_changed(dimension, pos, old, new, flags);
     }
     /// A flowing fluid at `pos` is about to change level. `fluid` is `water`
     /// or `lava`; the levels are 0 through 8. Set `cancel` to keep the old

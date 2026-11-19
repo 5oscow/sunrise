@@ -688,8 +688,15 @@ pub trait LevelAccess: BlockEntityNeighbors {
         _fluid: FluidState,
     ) {
     }
-    /// Observe a committed `Level.setBlock` state change, before its side effects.
-    fn observe_block_changed(&self, _pos: BlockPos, _old: BlockStateId, _new: BlockStateId) {}
+    /// Observe a committed `Level.setBlock` state change and its applied flags, before side effects.
+    fn observe_block_changed(
+        &self,
+        _pos: BlockPos,
+        _old: BlockStateId,
+        _new: BlockStateId,
+        _flags: i32,
+    ) {
+    }
     /// NeoForge's `IBlockExtension.onBlockStateChange`: a `Level.setBlock` that held changed
     /// the block at `pos` from `old` to `new`, observed at the end of the write
     /// (`updatePOIOnBlockStateChange`), after the client update, the neighbour updates and the

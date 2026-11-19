@@ -22,3 +22,12 @@ level.place_block(host, pos, fitted, true)?;
 else of `BlockItem.place` runs: no survival or obstruction check, no sound, no game event, no
 advancement. Both refuse with `LevelWriteError`: `Stale` for a dead handle, `Unavailable` on a client or
 for a level that is not the one in place, and `InvalidState` for a state the world lacks.
+
+## Observe the update flags
+
+The server's `block_changed` hook hears a successful state change before its block side effects
+and neighbour updates. `event.flags` gives the flags applied to that write. For example,
+`event.flags.contains(BlockUpdateFlags::KNOWN_SHAPE)` tells you that this write skips the
+neighbour shape passes, even though the state change itself is still reported. If a transaction
+staged changes, the notice describes the write applied at commit, not each intermediate change.
+Rebuild listeners against the version 2 hook.

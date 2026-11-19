@@ -950,17 +950,25 @@ pub(super) fn emit<'a>(
             },
             inits.join(", "),
         );
-        // A scoped listener with a writable borrowed payload can still share its
-        // pointee, but every Part gets a fresh event with the original inputs.
+        let write_back = if name == "block_entity_tick" {
+            format!(
+                "*{event}.reply = if tick_changed {{ BlockEntityTickReply::Changed }} else {{ BlockEntityTickReply::Unchanged }}; {write_back}"
+            )
+        } else {
+            write_back
+        };
+        // Each listener gets a fresh event with the original inputs. Writable borrowed
+        // payloads can still share their pointee. Write-back, the owner filter and chunk
+        // I/O checks use the outer event and cannot use a listener-local one.
         let (build, local_event) = if hook.event_per_listener {
             if contract != Contract::Listen
-                || scoped.is_none()
                 || !write_back.is_empty()
                 || !stack_outputs.is_empty()
-                || name == "block_entity_tick"
+                || hook.owner.is_some()
+                || hook.context == Some(PhaseContext::ChunkDisk)
             {
                 return Err(format!(
-                    "{name}: event_per_listener requires a scoped listener without scalar or stack writeback"
+                    "{name}: event_per_listener requires a listener without scalar or stack writeback or shared event state"
                 ));
             }
             (String::new(), build)
@@ -1162,13 +1170,6 @@ pub(super) fn emit<'a>(
                     )
                 },
             ),
-        };
-        let write_back = if name == "block_entity_tick" {
-            format!(
-                "*{event}.reply = if tick_changed {{ BlockEntityTickReply::Changed }} else {{ BlockEntityTickReply::Unchanged }}; {write_back}"
-            )
-        } else {
-            write_back
         };
         let body = match contract {
             _ if mod_cancel => format!(

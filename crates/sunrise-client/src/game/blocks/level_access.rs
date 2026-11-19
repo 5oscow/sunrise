@@ -50,9 +50,21 @@ impl LevelAccess for GameLevel<'_> {
             self.world.block_entities.insert(key, entity);
         }
     }
-    fn observe_block_changed(&self, pos: BlockPos, old: BlockStateId, new: BlockStateId) {
+    fn observe_block_changed(
+        &self,
+        pos: BlockPos,
+        old: BlockStateId,
+        new: BlockStateId,
+        flags: i32,
+    ) {
         if self.native_authoritative {
-            self.native_block_changed(self.dimension, pos, old, new);
+            self.native_block_changed(
+                self.dimension,
+                pos,
+                old,
+                new,
+                mod_api::BlockUpdateFlags::from_bits_retain(flags),
+            );
         }
     }
     fn observes_block_state_change(&self, old: BlockStateId, new: BlockStateId) -> bool {
