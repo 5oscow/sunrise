@@ -34,6 +34,9 @@ pub struct Index {
     pub generated: String,
     #[serde(default)]
     pub projects: Vec<Project>,
+    /// Curated lists of existing mods. Collections have no file or version of their own.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub collections: Vec<Collection>,
     #[serde(default)]
     pub revoked: Vec<Revoked>,
     /// What [`Index::parse`] left out because it breaks a rule, with the reasons: the rest of
@@ -424,6 +427,22 @@ impl Index {
         for r in &self.revoked {
             check_revoked(r)?;
         }
+        let mut seen_collections = std::collections::HashSet::new();
+        for collection in &self.collections {
+            if !seen_collections.insert(&collection.id) {
+                return Err(format!(
+                    "collection {}: listed twice; pick distinct ids",
+                    collection.id
+                ));
+            }
+            if let Some(error) = collection
+                .check(|id| self.project(id).map(|p| &p.kind))
+                .into_iter()
+                .next()
+            {
+                return Err(error);
+            }
+        }
         Ok(())
     }
 
@@ -490,6 +509,33 @@ impl Index {
             }
             !p.versions.is_empty()
         });
+        let mut collection_counts = std::collections::HashMap::new();
+        for collection in &self.collections {
+            *collection_counts.entry(collection.id.clone()).or_insert(0) += 1;
+        }
+        self.collections.retain(|collection| {
+            let reason = if collection_counts[&collection.id] > 1 {
+                Some(format!(
+                    "collection {}: listed twice; pick distinct ids",
+                    collection.id
+                ))
+            } else {
+                collection
+                    .check(|id| self.projects.iter().find(|p| p.id == id).map(|p| &p.kind))
+                    .into_iter()
+                    .next()
+            };
+            if let Some(reason) = reason {
+                left_out.push(LeftOut {
+                    id: collection.id.clone(),
+                    version: None,
+                    reason,
+                });
+                false
+            } else {
+                true
+            }
+        });
         self.revoked.retain(|r| match check_revoked(r) {
             Ok(()) => true,
             Err(reason) => {
@@ -540,6 +586,10 @@ impl Index {
     }
     pub fn project(&self, id: &str) -> Option<&Project> {
         self.projects.iter().find(|p| p.id == id)
+    }
+
+    pub fn collection(&self, id: &str) -> Option<&Collection> {
+        self.collections.iter().find(|c| c.id == id)
     }
 
     /// Why the file of `id` with this hash was taken down, if it was.
@@ -1083,6 +1133,8 @@ fn names(caps: &[Capability]) -> String {
     format!("[{}]", names.join(", "))
 }
 
+mod collections;
+pub use collections::{Collection, MAX_COLLECTION_MEMBERS, Member};
 mod dependencies;
 pub mod native;
 pub mod page;

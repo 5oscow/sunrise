@@ -10,16 +10,27 @@ pub use super::open;
 use super::{
     File, Index, Kind, Project, Revoked, SCHEMA, Version, hex64, inspect, page as rules, valid_id,
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::collections::BTreeMap;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
+
+mod collections;
+pub use collections::{
+    COLLECTIONS, CollectionEntry, CollectionReview, CollectionReviewStatus, review_collections,
+};
 
 /// The folder of entries in the registry repository.
 pub const ENTRIES: &str = "mods";
 /// The list of files taken down.
 pub const REVOKED: &str = "revoked.toml";
 /// Ids the site uses for its own pages (`/mods/submit`).
-const RESERVED: [&str; 1] = ["submit"];
+pub(super) const RESERVED: [&str; 1] = ["submit"];
+/// A project's submission or cache can contain its full release history.
+const MAX_PROJECT_BYTES: u64 = 16 << 20;
+/// A collection only holds a page and member ids, not a release history.
+const MAX_COLLECTION_BYTES: u64 = 128 << 10;
+const MAX_REVOKED_BYTES: u64 = 16 << 20;
 /// The biggest icon, a PNG in `icons/`.
 const MAX_ICON: u64 = crate::icon::MAX_ICON as u64;
 
@@ -119,8 +130,10 @@ impl Cache {
     /// `<registry>/versions/<id>.json`; empty when there is none.
     pub fn read(registry: &Path, id: &str) -> Result<Cache, String> {
         let path = registry.join(CACHE).join(format!("{id}.json"));
-        match std::fs::read_to_string(&path) {
-            Ok(text) => serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display())),
+        match read_regular(&path, MAX_PROJECT_BYTES) {
+            Ok(bytes) => {
+                serde_json::from_slice(&bytes).map_err(|e| format!("{}: {e}", path.display()))
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Cache::default()),
             Err(e) => Err(format!("{}: {e}", path.display())),
         }
@@ -184,31 +197,21 @@ impl Entry {
         if self.owners.is_empty() {
             errors.push(format!("{id}: needs at least one owner (a GitHub login)"));
         }
-        // Once an entry records IDs, only they make an owner: a login added to `owners` alone would
-        // silently not be one (and be refused while listed). Both lists name the same accounts.
-        if !self.owner_ids.is_empty() && self.owner_ids.len() != self.owners.len() {
-            errors.push(format!(
-                "{id}: owners lists {} login(s) but owner_ids {} ID(s): give each owner's numeric GitHub \
-                 ID in owner_ids, in the same order (`gh api users/<login> --jq .id`)",
-                self.owners.len(),
-                self.owner_ids.len()
-            ));
+        if let Some(error) = owner_ids_error(&self.owners, &self.owner_ids) {
+            errors.push(format!("{id}: {error}"));
         }
-        for (field, value) in [
-            ("name", &self.name),
-            ("summary", &self.summary),
-            ("license", &self.license),
-            ("source", &self.source),
-        ] {
+        for (field, value) in [("license", &self.license), ("source", &self.source)] {
             if value.trim().is_empty() {
                 errors.push(format!(
                     "{id}: has no {field} (in the entry, or in {PAGE_FILE} of its repo)"
                 ));
             }
         }
-        if self.summary.chars().count() > 160 {
-            errors.push(format!("{id}: the summary is over 160 characters"));
-        }
+        errors.extend(
+            rules::check_title(&self.name, &self.summary)
+                .into_iter()
+                .map(|e| format!("{id}: {e}")),
+        );
         for e in rules::check(&self.kind, &self.description, &self.categories, &self.tags) {
             errors.push(format!("{id}: {e}"));
         }
@@ -221,6 +224,14 @@ impl Entry {
         }
         errors
     }
+}
+
+fn owner_ids_error(owners: &[String], ids: &[u64]) -> Option<String> {
+    // Once IDs are present, names and IDs must describe the same accounts.
+    (!ids.is_empty() && ids.len() != owners.len()).then(|| format!(
+        "owners lists {} login(s) but owner_ids {} ID(s): give each owner's numeric GitHub ID in owner_ids, in the same order (`gh api users/<login> --jq .id`)",
+        owners.len(), ids.len()
+    ))
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -271,36 +282,35 @@ pub fn tag(id: &str, version: &str) -> String {
     format!("{id}-{version}")
 }
 
-/// Reads `mods/*.toml` and `revoked.toml`: every problem found, not only the
-/// first, so a pull request's check lists them all.
-pub fn load(registry: &Path) -> Result<(Vec<Entry>, Vec<Revoked>), Vec<String>> {
+/// The registry checkout's declarations, before reading package files.
+#[derive(Debug)]
+pub struct Checkout {
+    directory: PathBuf,
+    pub entries: Vec<Entry>,
+    pub collections: Vec<CollectionEntry>,
+    pub revoked: Vec<Revoked>,
+}
+
+/// Reads `mods/*.toml`, `collections/*.toml` and `revoked.toml`, reporting all input errors.
+pub fn load(registry: &Path) -> Result<Checkout, Vec<String>> {
     let mut errors = Vec::new();
-    let mut entries = Vec::new();
-    let dir = registry.join(ENTRIES);
-    let mut paths: Vec<PathBuf> = match std::fs::read_dir(&dir) {
-        Ok(read) => read.filter_map(|e| e.ok().map(|e| e.path())).collect(),
-        Err(e) => return Err(vec![format!("{}: {e}", dir.display())]),
-    };
-    paths.sort();
-    for path in paths {
-        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        let Some(stem) = name.strip_suffix(".toml") else {
-            errors.push(format!("{ENTRIES}/{name}: only <id>.toml files go here"));
-            continue;
-        };
-        let parsed = std::fs::read_to_string(&path)
-            .map_err(|e| e.to_string())
-            .and_then(|text| toml::from_str::<Entry>(&text).map_err(|e| e.to_string()));
-        match parsed {
-            Ok(entry) if entry.id == stem => entries.push(entry),
-            Ok(entry) => errors.push(format!(
-                "{ENTRIES}/{name}: its id is {:?}; the file must be {ENTRIES}/{}.toml",
-                entry.id, entry.id
-            )),
-            Err(e) => errors.push(format!("{ENTRIES}/{name}: {e}")),
-        }
-    }
-    let revoked = match std::fs::read_to_string(registry.join(REVOKED)) {
+    let entries = load_entries(
+        registry,
+        ENTRIES,
+        false,
+        MAX_PROJECT_BYTES,
+        |e: &Entry| &e.id,
+        &mut errors,
+    );
+    let collections = load_entries(
+        registry,
+        COLLECTIONS,
+        true,
+        MAX_COLLECTION_BYTES,
+        |c: &CollectionEntry| &c.id,
+        &mut errors,
+    );
+    let revoked = match read_regular(&registry.join(REVOKED), MAX_REVOKED_BYTES).and_then(utf8) {
         Ok(text) => match toml::from_str::<RevokedFile>(&text) {
             Ok(file) => file.revoked,
             Err(e) => {
@@ -315,10 +325,104 @@ pub fn load(registry: &Path) -> Result<(Vec<Entry>, Vec<Revoked>), Vec<String>> 
         }
     };
     if errors.is_empty() {
-        Ok((entries, revoked))
+        Ok(Checkout {
+            directory: registry.to_owned(),
+            entries,
+            collections,
+            revoked,
+        })
     } else {
         Err(errors)
     }
+}
+
+fn load_entries<T: DeserializeOwned>(
+    registry: &Path,
+    folder: &str,
+    optional: bool,
+    max_bytes: u64,
+    id: impl Fn(&T) -> &str,
+    errors: &mut Vec<String>,
+) -> Vec<T> {
+    let dir = registry.join(folder);
+    let read = std::fs::symlink_metadata(&dir).and_then(|meta| {
+        if !meta.is_dir() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "not a regular directory",
+            ));
+        }
+        std::fs::read_dir(&dir)
+    });
+    let read = match read {
+        Ok(read) => read,
+        Err(error) if optional && error.kind() == io::ErrorKind::NotFound => return Vec::new(),
+        Err(error) => {
+            errors.push(format!("{}: {error}", dir.display()));
+            return Vec::new();
+        }
+    };
+    let mut paths = Vec::new();
+    for row in read {
+        match row {
+            Ok(row) => paths.push(row.path()),
+            Err(error) => errors.push(format!("{}: {error}", dir.display())),
+        }
+    }
+    paths.sort();
+    let mut entries = Vec::new();
+    for path in paths {
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        let Some(stem) = name.strip_suffix(".toml") else {
+            errors.push(format!("{folder}/{name}: only <id>.toml files go here"));
+            continue;
+        };
+        let parsed = read_regular(&path, max_bytes)
+            .and_then(utf8)
+            .map_err(|e| e.to_string())
+            .and_then(|text| toml::from_str::<T>(&text).map_err(|e| e.to_string()));
+        match parsed {
+            Ok(entry) if id(&entry) == stem => entries.push(entry),
+            Ok(entry) => errors.push(format!(
+                "{folder}/{name}: its id is {:?}; the file must be {folder}/{}.toml",
+                id(&entry),
+                id(&entry)
+            )),
+            Err(e) => errors.push(format!("{folder}/{name}: {e}")),
+        }
+    }
+    entries
+}
+
+fn read_regular(path: &Path, max: u64) -> io::Result<Vec<u8>> {
+    let not_regular = || io::Error::new(io::ErrorKind::InvalidData, "not a regular file");
+    if !std::fs::symlink_metadata(path)?.is_file() {
+        return Err(not_regular());
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW);
+    }
+    let file = options.open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(not_regular());
+    }
+    let mut bytes = Vec::new();
+    file.take(max + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > max {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("exceeds {max} byte limit"),
+        ));
+    }
+    Ok(bytes)
+}
+
+fn utf8(bytes: Vec<u8>) -> io::Result<String> {
+    String::from_utf8(bytes).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
 }
 
 /// A version string that is also a plain release tag and file name part.
@@ -435,14 +539,9 @@ fn image(
     } else {
         rules::MAX_SCREENSHOT
     };
-    let checked = std::fs::metadata(src.registry.join(path))
+    let checked = image_bytes(src.registry, path, folder, max)
         .map_err(|e| format!("{path}: {e}"))
-        .and_then(|m| {
-            if m.len() > max {
-                return Err(format!("{path} is over {} KiB", max >> 10));
-            }
-            let bytes =
-                std::fs::read(src.registry.join(path)).map_err(|e| format!("{path}: {e}"))?;
+        .and_then(|bytes| {
             if icon {
                 rules::check_icon(&bytes).map_err(|e| format!("{path}: {e}"))?;
                 Ok(format!("?v={}", &super::sha256(&bytes)[..12]))
@@ -457,6 +556,17 @@ fn image(
             None
         }
     }
+}
+
+fn image_bytes(registry: &Path, path: &str, folder: &str, max: u64) -> io::Result<Vec<u8>> {
+    let dir = std::fs::symlink_metadata(registry.join(folder.trim_end_matches('/')))?;
+    if !dir.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "image folder is not a regular directory",
+        ));
+    }
+    read_regular(&registry.join(path), max)
 }
 
 fn version(entry: &Entry, v: &EntryVersion, src: &Sources) -> Result<Version, String> {
@@ -635,9 +745,9 @@ impl Entry {
 /// The index of the whole registry: every entry and file checked, then the
 /// index's own rules ([`Index::check`]: names, a modpack's mods present).
 pub fn build(src: &Sources) -> Result<Index, Vec<String>> {
-    let (entries, revoked) = load(src.registry)?;
+    let checkout = load(src.registry)?;
     let mut errors = Vec::new();
-    for entry in entries.iter().filter(|e| listed(e, src)) {
+    for entry in checkout.entries.iter().filter(|e| listed(e, src)) {
         // A listed project's page is complete (registry v2's rollout, step 4).
         let page = match &entry.repo {
             Some(_) => Cache::read(src.registry, &entry.id)
@@ -658,7 +768,7 @@ pub fn build(src: &Sources) -> Result<Index, Vec<String>> {
             .map(|problem| format!("{}: {problem}", e.id)),
         );
     }
-    let index = match candidate(&entries, revoked, src) {
+    let index = match candidate(&checkout, src) {
         Ok(index) if errors.is_empty() => index,
         Ok(_) => return Err(errors),
         Err(e) => {
@@ -673,14 +783,10 @@ pub fn build(src: &Sources) -> Result<Index, Vec<String>> {
 
 /// Assemble the entries from their package files, before checking links between projects.
 /// Review can still report the impact of a takedown on a candidate that fails [`Index::check`].
-pub fn candidate(
-    entries: &[Entry],
-    revoked: Vec<Revoked>,
-    src: &Sources,
-) -> Result<Index, Vec<String>> {
+pub fn candidate(checkout: &Checkout, src: &Sources) -> Result<Index, Vec<String>> {
     let mut projects = Vec::new();
-    let mut errors = Vec::new();
-    for entry in entries.iter().filter(|e| listed(e, src)) {
+    let (collections, mut errors) = checkout.collection_pages(src);
+    for entry in checkout.entries.iter().filter(|e| listed(e, src)) {
         match project(entry, src) {
             Ok(p) => projects.push(p),
             Err(e) => errors.extend(e),
@@ -694,7 +800,8 @@ pub fn candidate(
         schema: SCHEMA,
         generated: src.generated.clone(),
         projects,
-        revoked,
+        collections,
+        revoked: checkout.revoked.clone(),
         left_out: Vec::new(),
     })
 }
@@ -740,6 +847,13 @@ fn github_repo(source: &str) -> Option<String> {
     let (owner, repo) = (parts.next()?, parts.next()?);
     let repo = repo.strip_suffix(".git").unwrap_or(repo);
     (!owner.is_empty() && !repo.is_empty()).then(|| format!("{owner}/{repo}"))
+}
+
+/// Projects and collections use the same ownership test in registry review.
+fn owned_by(owners: &[String], author: &str) -> bool {
+    owners
+        .iter()
+        .any(|owner| owner.eq_ignore_ascii_case(author))
 }
 
 /// What a pull request changes, for its reviewers.
@@ -790,7 +904,7 @@ pub fn review_with_revoked(
         if new == old {
             continue;
         }
-        if !old.owners.iter().any(|o| o.eq_ignore_ascii_case(author)) {
+        if !owned_by(&old.owners, author) {
             r.notes.push(format!(
                 "{}: changed by {author}, who isn't one of its owners ({})",
                 old.id,
@@ -906,6 +1020,14 @@ pub fn new_takedowns<'a>(
 pub fn takedown_notes(base: &[Entry], previous: &[Revoked], head: &Index) -> Vec<String> {
     let mut notes = std::collections::BTreeSet::new();
     for r in new_takedowns(previous, &head.revoked) {
+        for collection in &head.collections {
+            if collection.members.iter().any(|member| member.id == r.id) {
+                notes.insert(format!(
+                    "collection {} lists {}: this takedown affects that member's available versions",
+                    collection.id, r.id
+                ));
+            }
+        }
         let old = base
             .iter()
             .filter(|p| p.id == r.id)

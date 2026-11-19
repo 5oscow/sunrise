@@ -94,7 +94,7 @@ date = "2026-10-24"
 "#;
 
 /// The header of a PNG of `w`×`h` pixels: what the registry reads of an image.
-fn png(w: u32, h: u32) -> Vec<u8> {
+pub(super) fn png(w: u32, h: u32) -> Vec<u8> {
     let mut b = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
     b.extend(w.to_be_bytes());
     b.extend(h.to_be_bytes());
@@ -103,10 +103,10 @@ fn png(w: u32, h: u32) -> Vec<u8> {
 }
 
 /// A registry checkout and its downloaded files, in a scratch folder.
-struct Scratch(PathBuf);
+pub(super) struct Scratch(pub(super) PathBuf);
 
 impl Scratch {
-    fn new(name: &str) -> Scratch {
+    pub(super) fn new(name: &str) -> Scratch {
         let dir =
             std::env::temp_dir().join(format!("sunrise-registry-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -131,17 +131,17 @@ impl Scratch {
         s
     }
 
-    fn write(&self, path: &str, text: &str) {
+    pub(super) fn write(&self, path: &str, text: &str) {
         std::fs::write(self.0.join("repo").join(path), text).unwrap();
     }
 
-    fn write_bytes(&self, path: &str, bytes: &[u8]) {
+    pub(super) fn write_bytes(&self, path: &str, bytes: &[u8]) {
         let path = self.0.join("repo").join(path);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, bytes).unwrap();
     }
 
-    fn build(&self) -> Result<Index, Vec<String>> {
+    pub(super) fn build(&self) -> Result<Index, Vec<String>> {
         let (repo, files) = (self.0.join("repo"), self.0.join("files"));
         build(&Sources {
             registry: &repo,
