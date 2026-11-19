@@ -180,13 +180,6 @@ pub struct Step {
     pub mono: bool,
 }
 
-impl Step {
-    /// The line height in pixels at the app size.
-    pub fn line_px(&self) -> f32 {
-        (self.px * self.line).round()
-    }
-}
-
 const fn step(
     name: &'static str,
     px: f32,
