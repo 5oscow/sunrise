@@ -22,6 +22,7 @@ sunrise-addresses = { path = "../sunrise-addresses" }
 sunrise-discord = { path = "../sunrise-discord" }
 sunrise-perf-share = { path = "../sunrise-perf-share" }
 sunrise-reconnect = { path = "../sunrise-reconnect" }
+sunrise-perf-overlay = { path = "../sunrise-perf-overlay" }
 log = "0.4"
 
 [build-dependencies]

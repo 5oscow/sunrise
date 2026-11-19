@@ -1,6 +1,6 @@
 //! HUD drawing (docs/layers.md, "Platform registries"): a crate above the engine draws on the HUD
-//! where the extras do, in the corners they share, without an engine file naming it. With no layer
-//! registered the engine builds no canvas.
+//! where the extras do, in the corners they share, or over everything, without an engine file
+//! naming it. With no layer registered the engine builds no canvas.
 use crate::TooLate;
 use crate::registry::Registry;
 
@@ -32,10 +32,26 @@ pub trait Canvas {
     fn place(&mut self, corner: Corner, w: f32, h: f32) -> Option<(f32, f32)>;
 }
 
-/// Something a crate draws on the HUD, every frame the HUD is drawn (not with F1, nor under a
-/// screen that hides it). It reads its own state and must return quickly.
+/// When a [`Layer`] draws.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Stage {
+    /// With the HUD, every frame it is drawn (not with F1, nor under a screen that hides it),
+    /// stacked in the corners with the extras.
+    #[default]
+    Hud,
+    /// Last, over everything: after the debug screen, over menus, toasts and the title screen,
+    /// F1 included (vanilla's `Gui` draws the debug screen last). Nothing is stacked there:
+    /// [`Canvas::place`] is `None`.
+    Top,
+}
+
+/// Something a crate draws on the HUD. It reads its own state and must return quickly.
 pub trait Layer: Sync {
     fn draw(&self, canvas: &mut dyn Canvas);
+    /// When it draws: with the HUD unless it says otherwise.
+    fn stage(&self) -> Stage {
+        Stage::Hud
+    }
 }
 
 static LAYERS: Registry<dyn Layer> = Registry::new();

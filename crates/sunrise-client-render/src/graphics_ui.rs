@@ -8,7 +8,7 @@ use crate::{
     gfx::EffectiveOutput,
     graphics::{
         EntityCullingMode, FarDetail, FrameGeneration, GpuCullingMode, GraphicsApi, HdrMode,
-        HdrSetup as Setup, LeafCullingMode, Overlay, Pacing, ParallelTickMode, ParticleCullingMode,
+        HdrSetup as Setup, LeafCullingMode, Pacing, ParallelTickMode, ParticleCullingMode,
         PresentMode, Preset, Upscaling,
     },
     graphics_style::Cost,
@@ -99,7 +99,6 @@ pub enum H {
     Pacing,
     Workers,
     ParallelTick,
-    Overlay,
     ResolutionScale,
     DynamicResolution,
     TargetFps,
@@ -551,41 +550,31 @@ pub fn rows() -> Vec<(Page, Vec<(&'static str, Vec<Setting>)>)> {
         ),
         (
             Page::Advanced,
-            vec![
-                (
-                    "Frames",
-                    vec![
-                        h(
-                            H::PresentMode,
-                            None,
-                            "How frames reach the screen while VSync is off.",
-                        ),
-                        h(
-                            H::Pacing,
-                            None,
-                            "Efficient sleeps until the next frame; Precise spins, like vanilla.",
-                        ),
-                        h(
-                            H::GraphicsApi,
-                            None,
-                            "Vulkan, then DirectX 12 (Windows) or OpenGL (Linux) where it fails. Next start.",
-                        ),
-                        h(
-                            H::TranslucentBatching,
-                            Saves,
-                            "Water and glass in one buffer: fewer draw calls, a bit more VRAM. Next start.",
-                        ),
-                    ],
-                ),
-                (
-                    "Overlay",
-                    vec![h(
-                        H::Overlay,
+            vec![(
+                "Frames",
+                vec![
+                    h(
+                        H::PresentMode,
                         None,
-                        "Frame rate and frame times over the game, with a graph.",
-                    )],
-                ),
-            ],
+                        "How frames reach the screen while VSync is off.",
+                    ),
+                    h(
+                        H::Pacing,
+                        None,
+                        "Efficient sleeps until the next frame; Precise spins, like vanilla.",
+                    ),
+                    h(
+                        H::GraphicsApi,
+                        None,
+                        "Vulkan, then DirectX 12 (Windows) or OpenGL (Linux) where it fails. Next start.",
+                    ),
+                    h(
+                        H::TranslucentBatching,
+                        Saves,
+                        "Water and glass in one buffer: fewer draw calls, a bit more VRAM. Next start.",
+                    ),
+                ],
+            )],
         ),
         (
             Page::Hdr,
@@ -986,14 +975,6 @@ impl H {
                 "Smooth Gradients",
                 on_off(g.hdr_smooth_gradients && out.wide_frame_supported),
             ),
-            H::Overlay => labelled(
-                "Performance Overlay",
-                match g.overlay {
-                    Overlay::Off => "Off",
-                    Overlay::Fps => "FPS",
-                    Overlay::Graph => "FPS and Graph",
-                },
-            ),
         }
     }
     fn set_slider(self, s: &mut Settings, v: f32) {
@@ -1121,13 +1102,6 @@ impl H {
                     Pacing::Efficient => Pacing::Precise,
                     Pacing::Precise => Pacing::Efficient,
                 }
-            }
-            H::Overlay => {
-                g.overlay = step(
-                    &[Overlay::Off, Overlay::Fps, Overlay::Graph],
-                    g.overlay,
-                    back,
-                )
             }
             _ => {}
         }
@@ -1304,7 +1278,6 @@ impl Item {
                     H::Preset
                         | H::BlueMapAutoDetect
                         | H::BlueMapRadius
-                        | H::Overlay
                         | H::ScreenshotQuality
                         | H::Pacing
                         | H::PresentMode

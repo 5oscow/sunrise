@@ -4,15 +4,15 @@
 //! (`game-build.yml`); sunrise-client keeps its own plain executable.
 //!
 //! Each Sunrise crate that runs in the game gives a `&'static` value implementing
-//! `sunrise_platform::hooks::Hooks`, and its settings store and pages if it has any, and
-//! [`register`] adds them. Nothing here depends on an engine crate.
+//! `sunrise_platform::hooks::Hooks`, and its settings store, pages and HUD layers if it has any,
+//! and [`register`] adds them. Nothing here depends on an engine crate.
 #![forbid(unsafe_code)]
 
 use sunrise_platform::hooks::{self, ClientIdentity, GetTheGame, Hooks};
-use sunrise_platform::{lang, mod_rows, pages, release, settings};
+use sunrise_platform::{hud, lang, mod_rows, pages, release, settings};
 
 /// Every Sunrise part in the game, in the order its hooks run.
-const PARTS: [&dyn Hooks; 7] = [
+const PARTS: [&dyn Hooks; 8] = [
     // The anonymous "I'm playing" ping.
     &sunrise_heartbeat::HOOKS,
     // Play with Friends: `friend:` addresses join through its tunnel.
@@ -27,6 +27,8 @@ const PARTS: [&dyn Hooks; 7] = [
     &HORIZON_IDENTITY,
     // Auto-reconnect: the Disconnected screen connects again.
     &sunrise_reconnect::HOOKS,
+    // Frames per second and frame times over the game.
+    &sunrise_perf_overlay::HOOKS,
 ];
 /// The game started by hand without its prepared files: start it from the launcher, downloaded
 /// from Sunrise's website.
@@ -97,9 +99,19 @@ static SUNRISE_ROW: mod_rows::Row = mod_rows::Row {
 };
 
 /// Their settings, in the player's settings files.
-const STORES: [&dyn settings::Store; 2] = [&sunrise_reconnect::SETTING, &sunrise_discord::SETTING];
+const STORES: [&dyn settings::Store; 3] = [
+    &sunrise_reconnect::SETTING,
+    &sunrise_discord::SETTING,
+    &sunrise_perf_overlay::SETTING,
+];
 /// Their rows and pages in the options screens, in order: auto-reconnect's row above Discord's.
-const PAGES: [&dyn pages::Page; 2] = [&sunrise_reconnect::SECTION, &sunrise_discord::SECTION];
+const PAGES: [&dyn pages::Page; 3] = [
+    &sunrise_reconnect::SECTION,
+    &sunrise_discord::SECTION,
+    &sunrise_perf_overlay::SECTION,
+];
+/// What they draw on the HUD.
+const LAYERS: [&dyn hud::Layer; 1] = [&sunrise_perf_overlay::LAYER];
 
 /// The text of Sunrise's own rows, loaded with the game's.
 static LANG: &lang::Files = &[("en_us", include_str!("../assets/lang/en_us.json"))];
@@ -111,7 +123,8 @@ pub fn register() {
     let late = late.chain(STORES.into_iter().map(settings::register));
     let late = late.chain(std::iter::once(mod_rows::register(&SUNRISE_ROW)));
     let late = late.chain(std::iter::once(lang::register(LANG)));
-    for result in late.chain(PAGES.into_iter().map(pages::register)) {
+    let late = late.chain(PAGES.into_iter().map(pages::register));
+    for result in late.chain(LAYERS.into_iter().map(hud::register)) {
         if let Err(e) = result {
             // The executable registered after starting the game: a bug, not a player's problem.
             log::warn!("Sunrise: an in-game part did not register: {e}");
