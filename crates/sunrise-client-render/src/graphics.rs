@@ -1165,6 +1165,8 @@ impl Graphics {
                 "hdrSmoothGradients" => g.hdr_smooth_gradients = flag(g.hdr_smooth_gradients),
                 "graphicsApi" => g.api = GraphicsApi::from_name(value).unwrap_or_default(),
                 "pickedShaderPack" => g.shader_pack = value.to_owned(),
+                // Keys older versions saved that no setting or store reads: dropped on the next save.
+                "level" | "shaderPack" | "hdrKey" | "cullLeaves" | "translucentBatching" => {}
                 key => g.unclaimed.push((key.to_owned(), value.to_owned())),
             }
         }
