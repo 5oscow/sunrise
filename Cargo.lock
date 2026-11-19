@@ -5147,7 +5147,6 @@ dependencies = [
  "sunrise-mod-runtime",
  "sunrise-threads",
  "sunrise-wasmtime",
- "sunrise-world",
  "syn 2.0.119",
  "tempfile",
  "wasmparser 0.261.0",
