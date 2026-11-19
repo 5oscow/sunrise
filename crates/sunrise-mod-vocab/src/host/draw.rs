@@ -546,7 +546,8 @@ pub trait WorldDrawContext {
     /// [`NameTagOptions::see_through`] it is drawn once, as a sneaking name: depth tested and
     /// translucent, the faded text on the backdrop, in [`NameTagOptions::light`] as given. With
     /// it, twice, as an unsneaking name: opaque in the world (sky and block light each at least
-    /// 2), and faded on the backdrop over everything, walls included, unlit. Labels draw with
+    /// 2, or exactly [`NameTagOptions::light`] with [`NameTagOptions::exact_light`]), and
+    /// faded on the backdrop over everything, walls included, unlit. Labels draw with
     /// the world's name tags, far to near, whatever the stage. Each glyph and backdrop quad, both copies counted, takes one of
     /// the view's 4,096 quads shared with [`quads`](Self::quads) ([`usage`](Self::usage)).
     /// Refuses a non-finite `at` ([`DrawError::NonFinite`]), text deeper than 512 component
