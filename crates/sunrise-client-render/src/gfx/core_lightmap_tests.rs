@@ -16,15 +16,15 @@ const STATES: [LightmapInfo; 2] = [
         night_vision_color: [0.6; 3],
     },
     LightmapInfo {
-        sky_factor: 0.7,
-        block_factor: 1.45,
-        night_vision: 0.3,
-        darkness: 0.1,
-        boss_darkening: 0.5,
-        brightness: 0.5,
-        block_light_tint: [1.0, 0.6, 0.3],
-        sky_light_color: [0.8, 0.8, 1.0],
-        ambient_color: [0.04; 3],
+        sky_factor: 0.701,
+        block_factor: 1.448,
+        night_vision: 0.325,
+        darkness: 0.091,
+        boss_darkening: 0.499,
+        brightness: 0.473,
+        block_light_tint: [1.0, 0.598, 0.319],
+        sky_light_color: [0.805, 0.815, 1.0],
+        ambient_color: [0.03, 0.023, 0.036],
         night_vision_color: [0.6; 3],
     },
 ];
@@ -48,10 +48,10 @@ fn the_lightmap_info_block_is_laid_out_as_std140() {
         .map(|b| f32::from_le_bytes(*b))
         .collect();
     assert_eq!(f.len(), 24);
-    assert_eq!(f[..6], [0.7, 1.45, 0.3, 0.1, 0.5, 0.5]);
-    assert_eq!(f[8..11], [1.0, 0.6, 0.3]);
-    assert_eq!(f[12..15], [0.8, 0.8, 1.0]);
-    assert_eq!(f[16..19], [0.04; 3]);
+    assert_eq!(f[..6], [0.701, 1.448, 0.325, 0.091, 0.499, 0.473]);
+    assert_eq!(f[8..11], [1.0, 0.598, 0.319]);
+    assert_eq!(f[12..15], [0.805, 0.815, 1.0]);
+    assert_eq!(f[16..19], [0.03, 0.023, 0.036]);
     assert_eq!(f[20..23], [0.6; 3]);
     assert_eq!([f[6], f[7], f[11], f[15], f[19], f[23]], [0.0; 6]);
 }
@@ -190,12 +190,41 @@ fn resources() -> std::path::PathBuf {
         })
 }
 
+/// The light textures vanilla's `lightmap.fsh` draws for [`STATES`], every texel
+/// (`core_lightmap_vanilla.hex`): not Sunrise's, but `lightmap.fsh`'s math run line by line in
+/// float32 by an independent script (numpy, written for this test), rounded to the nearest byte
+/// as a unorm target stores it. The states are picked so that every channel of every texel is
+/// at least 0.005 of a byte from a rounding tie, far past float32's error, so a driver that
+/// stores a unorm byte as the nearest one (lavapipe, which the daily GPU lane runs) stores these
+/// bytes. Vulkan lets a driver's float-to-unorm conversion stray a little from the nearest byte:
+/// this machine's RADV stores 196 for state 0's texel at sky 0, block 3 (196.574 here), so the
+/// test is exact under lavapipe (`VK_ICD_FILENAMES=.../lvp_icd.json`).
+fn vanilla_textures() -> [[u8; 16 * 16 * 4]; 2] {
+    let mut out = [[0u8; 16 * 16 * 4]; 2];
+    let mut state = 0;
+    let mut at = 0;
+    for line in include_str!("core_lightmap_vanilla.hex").lines() {
+        if let Some(n) = line.strip_prefix("# state ") {
+            state = n.parse().expect("a state");
+            at = 0;
+            continue;
+        }
+        if line.starts_with('#') {
+            continue;
+        }
+        for texel in line.split(' ') {
+            for byte in 0..4 {
+                out[state][at] = u8::from_str_radix(&texel[byte * 2..byte * 2 + 2], 16).unwrap();
+                at += 1;
+            }
+        }
+    }
+    out
+}
+
 /// Vanilla's own `screenquad` and `lightmap` through the pack path draw vanilla's light texture
-/// in two lighting states. The expected bytes are not Sunrise's: they come from
-/// `lightmap.fsh`'s math run line by line in float32 by an independent script (numpy, written
-/// for this test; rounded to the nearest byte as a unorm target stores them), at texels whose
-/// every channel is at least a tenth of a byte from a rounding tie, row by sky level and column
-/// by block level.
+/// exactly, all 256 texels, in two lighting states ([`vanilla_textures`]), row by sky level and
+/// column by block level.
 #[test]
 #[ignore = "daily"]
 fn vanillas_lightmap_shaders_draw_vanillas_light_texture() {
@@ -224,31 +253,14 @@ fn vanillas_lightmap_shaders_draw_vanillas_light_texture() {
     };
     let mut core = CoreLightmap::new(&device, &program).expect("the lightmap pipeline");
     core.set_readback(&device, true);
-    // (sky level, block level, RGBA) per state.
-    let expected: [&[(usize, usize, [u8; 4])]; 2] = [
-        &[
-            (0, 0, [165, 186, 165, 255]),
-            (0, 15, [255, 255, 255, 255]),
-            (15, 0, [165, 186, 165, 255]),
-            (15, 15, [255, 255, 255, 255]),
-            (7, 7, [239, 235, 185, 255]),
-            (8, 1, [175, 194, 173, 255]),
-            (1, 8, [245, 238, 184, 255]),
-        ],
-        &[
-            (0, 0, [32, 26, 26, 255]),
-            (0, 15, [255, 255, 255, 255]),
-            (15, 0, [176, 164, 201, 255]),
-            (15, 15, [255, 255, 255, 255]),
-            (1, 8, [145, 90, 57, 255]),
-            (10, 10, [204, 145, 123, 255]),
-        ],
-    ];
-    for (info, texels) in STATES.iter().zip(expected) {
+    let expected = vanilla_textures();
+    for (info, want) in STATES.iter().zip(expected) {
         let gpu = draw(&device, &queue, &mut core, info);
-        for &(sky, block, want) in texels {
-            let i = (sky * 16 + block) * 4;
-            assert_eq!(gpu[i..i + 4], want, "sky {sky} block {block}");
+        for sky in 0..16 {
+            for block in 0..16 {
+                let i = (sky * 16 + block) * 4;
+                assert_eq!(gpu[i..i + 4], want[i..i + 4], "sky {sky} block {block}");
+            }
         }
     }
 }
