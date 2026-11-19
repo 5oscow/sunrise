@@ -3133,7 +3133,8 @@ mod tests {
         )
         .unwrap();
         let mut malformed = mod_list::encode(&[]);
-        malformed.push(0); // Trailing bytes: the list is refused whole, not read as empty.
+        // The extra byte encodes an empty runtime-digest section, which is refused.
+        malformed.push(0);
         c.send(
             &cfg::Serverbound::CustomPayload(cfg::CustomPayload {
                 channel: mod_list::CHANNEL.into(),
@@ -3153,7 +3154,7 @@ mod tests {
                 cfg::Clientbound::Disconnect(d) => {
                     let text = sunrise_protocol::text::plain(&d.reason, &Default::default());
                     assert!(text.contains("couldn't be read"));
-                    assert!(text.contains("trailing bytes"));
+                    assert!(text.contains("runtime digests"));
                     break;
                 }
                 cfg::Clientbound::FinishConfiguration(_) => panic!("malformed list was accepted"),
