@@ -1,7 +1,8 @@
 //! Placement-state reads, placement writes and the `Block.setPlacedBy` step.
 use super::{Game, native_server::PlayerRead};
 use mod_api::{
-    BlockKey, BlockUpdateFlags, LevelRef, LevelWriteError, PlayerRef, PlayerWorldRefusal as Refusal,
+    BlockKey, BlockUpdateFlags, LevelReadError, LevelRef, LevelWriteError, PlayerRef,
+    PlayerWorldRefusal as Refusal,
 };
 use sunrise_client::{containers::BlockEntity, items::ItemStack};
 use sunrise_core::{geometry::Vec3, position::BlockPos};
@@ -90,24 +91,34 @@ impl Game<'_> {
         level: LevelRef,
         block: BlockKey,
         context: &mod_api::PlacementContext,
-    ) -> Option<BlockStateId> {
+    ) -> Result<Option<BlockStateId>, LevelReadError> {
+        let world = self.native_level_world_result(level)?;
+        if level.dimension() != self.dim.key() {
+            return Err(LevelReadError::Unavailable);
+        }
         let BlockPos { x, y, z } = context.pos;
         if !context.hit.iter().all(|n| n.is_finite())
             || !context.yaw.is_finite()
             || !context.pitch.is_finite()
-            || !self.level_in_place(level)
             || !(-30_000_000..30_000_000).contains(&x)
             || !(-30_000_000..30_000_000).contains(&z)
-            || !self.world.is_loaded_at(x, y, z)
+            || !world.is_loaded_at(x, y, z)
         {
-            return None;
+            return Ok(None);
         }
-        let block = super::api_values::behavior_block(block, self.res.behaviours())?;
+        let Some(block) = super::api_values::behavior_block(block, self.res.behaviours()) else {
+            return Ok(None);
+        };
         let item = match context.item {
-            Some(key) => mod_api::__private::item_key_id(key)?,
+            Some(key) => {
+                let Some(item) = mod_api::__private::item_key_id(key) else {
+                    return Ok(None);
+                };
+                item
+            }
             None => "",
         };
-        self.preview_state_for_placement(
+        Ok(self.preview_state_for_placement(
             block,
             &PlacementContext {
                 pos: context.pos,
@@ -121,7 +132,7 @@ impl Game<'_> {
                 item: item.to_owned(),
                 replace_clicked: context.replace_clicked,
             },
-        )
+        ))
     }
 
     /// A chosen state written as a placement writes it, then `Block.setPlacedBy`, with no

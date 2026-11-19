@@ -318,10 +318,13 @@ survival hooks.
 the level in play. It runs the block's `Block.getStateForPlacement`, including its
 `state_for_placement` parts, without resolving the click again or placing anything. The caller
 owns the `ServerHost`; the Part still sees only its restricted `LevelHost` through `LevelSide`.
-The context's item is a registry key, not a stack or its components. The method returns the
-candidate before item placement's additional survival, obstruction and permission checks. A
-camouflage block can use this read to store a held block's placement state, such as a stair's
-facing or a log's axis.
+The context's item is a registry key, not a stack or its components. The method returns
+`Result<Option<BlockState>, LevelReadError>`. `Ok(Some(state))` gives the candidate before item
+placement's additional survival, obstruction and permission checks. `Ok(None)` means there is no
+candidate or a placement input was refused. A stale handle or closed level returns `Err(LevelReadError::Stale)`; a parked level,
+an unavailable host or load phase, or a state the API cannot represent returns
+`Err(LevelReadError::Unavailable)`. A camouflage block can use this read to store a held block's
+placement state, such as a stair's facing or a log's axis.
 
 A neighbour's `BlockPart::fence_gate_in_wall` answers whether a fence gate sits at wall height
 beside that state. It runs on both sides at placement and shape updates, with a read-only `LevelSide`:

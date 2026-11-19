@@ -95,18 +95,20 @@ pub trait LevelBlocksBackendMut {
     /// The context is taken as written, with no target or click re-resolution. Nothing is
     /// written, notified or loaded. No additional survival, obstruction or permission check
     /// from `BlockItem.place` runs.
-    /// Only the level in play is queried. `None` for vanilla's `null`, a part's
-    /// `Some(None)`, an unknown block, an unknown item key in `context.item`, a stale,
-    /// closed or parked level, an unloaded or out-of-bounds destination, a non-finite
-    /// hit or rotation, or an unrepresentable state. `None` in `context.item` means an
-    /// empty hand.
+    /// Only the level in play is queried. Returns `Err(LevelReadError::Stale)` for a
+    /// stale handle or closed level, and `Err(LevelReadError::Unavailable)` for a parked
+    /// level, an unavailable host or load phase, or a state that the API cannot represent.
+    ///
+    /// Returns `Ok(None)` for vanilla's `null`, a part's `Some(None)`, an unknown block
+    /// or item key, an unloaded or out-of-bounds destination, or a non-finite hit or
+    /// rotation. `None` in `context.item` means an empty hand.
     #[access(WorldOnly)]
     fn level_state_for_placement(
         &mut self,
         level: LevelRef,
         block: BlockKey,
         context: &PlacementContext,
-    ) -> Option<BlockState>;
+    ) -> Result<Option<BlockState>, LevelReadError>;
     /// Side: server.
     /// Write `state` at `pos` as a placement does and run `Block.setPlacedBy` for it, with no
     /// player: a bed places its head, a door its upper half, a tall plant its top. The write
