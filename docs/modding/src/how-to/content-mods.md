@@ -276,6 +276,17 @@ block-local; the position is applied at query time. The occlusion cache uses the
 its column offset at `(0, 0, 0)`, as vanilla's state cache does.
 This works on both sides and does not require a hook.
 
+`instrument` takes any vanilla `NoteBlockInstrument` constant name (for example `HARP` or `FLUTE`);
+native and wasm declarations use `NoteInstrument`. A note block reads ordinary instruments from the block
+below it and head instruments (`ZOMBIE` through `CUSTOM_HEAD`) from the block above it. `CUSTOM_HEAD`
+is silent without a skull block entity above the note block with a `note_block_sound`.
+`ignited_by_lava` sets lava's ignition flag; a subscribed per-position `ignited_by_lava` hook still answers
+first. `replaceable` controls replacement by block placement and by features that check replaceability;
+the usual refusal when the hand holds the block's own item still applies. `skip_same_block_faces: true`
+hides model faces against any state of this same block, as glass does; `false` disables the template's render
+definition skip rule. Leaf and ice graphics options can still hide faces based on the template class.
+Unset values inherit the template. These are load-time properties on both sides, with no new hook.
+
 `destroy_overlay: false` hides the breaking crack (`destroy_stage_0` to `9`) on the block, for one broken by use
 (a feast or a cake taken apart bite by bite). It is read once at load into the block's facts, and only the overlay
 is skipped: the mining progress, the server's progress and the destroy-progress packets other players see stay

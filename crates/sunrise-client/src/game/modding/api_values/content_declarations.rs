@@ -78,6 +78,10 @@ impl TryIntoEngine<()> for mod_api::BlockProperties {
             }),
             max_horizontal_offset: self.max_horizontal_offset,
             max_vertical_offset: self.max_vertical_offset,
+            instrument: self.instrument,
+            ignited_by_lava: self.ignited_by_lava,
+            replaceable: self.replaceable,
+            skip_same_block_faces: self.skip_same_block_faces,
             vegetation: self.vegetation,
         })
     }
