@@ -477,14 +477,17 @@ make a login link, and no one else can. Never put it on the open internet.
 
 Everything the panel does goes through the control API ([api/server.md](api/server.md)), which a moderation bot
 (a Discord `!ban`), a monitoring tool or a script can call too. It listens on a free port of `127.0.0.1` and
-writes the address and a fresh token to `.sunrise/api.json` at every start. For a program that runs elsewhere
-or keeps its settings, fix both in `server.toml`:
+writes the address and a fresh token to `.sunrise/api.json` at every start. For a program that needs a fixed
+address, set `bind` in `server.toml`:
 
 ```toml
 [api]
 bind = "127.0.0.1:8131"      # or your tailnet address, 100.x.y.z:8131
-token = "a long random string only the bot knows"
+token = ""                   # empty: generate a fresh token at every start
 ```
+
+If the program needs a fixed token too, set `token` to a private random string of at least 16 printable ASCII
+characters without spaces.
 
 The same rules as the panel's hold: a tailnet or loopback address, unless `allow_public = true` (the token is then
 all that guards the server, and it warns at every start). The API can't change `[engine]`, `[panel]`, `[api]` or

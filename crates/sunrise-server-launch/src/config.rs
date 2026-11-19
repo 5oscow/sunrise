@@ -7,12 +7,12 @@
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, path::Path};
 use sunrise_platform::java_properties::{Properties, date_string, now_millis};
-use sunrise_platform::server_files::biome_regions::BiomeRegions;
 #[cfg(test)]
 use sunrise_platform::server_files::biome_regions::MissingRegions;
 use sunrise_platform::server_files::properties::{
     DIFFICULTIES, GAME_MODES, ServerProperties, SystemEntropy,
 };
+use sunrise_platform::server_files::{biome_regions::BiomeRegions, missing_mods::MissingMods};
 
 pub const FILE: &str = "server.toml";
 pub const PROPERTIES: &str = "server.properties";
@@ -214,6 +214,9 @@ pub struct Config {
     /// isn't the default.
     #[serde(default, skip_serializing_if = "BiomeRegions::is_default")]
     pub biome_regions: BiomeRegions,
+    /// The game reads this opt-in itself before opening a world with missing mods (docs/hosting.md).
+    #[serde(default, skip_serializing_if = "MissingMods::is_default")]
+    pub missing_mods: MissingMods,
     /// `[entities]` (docs/server.md): mob settings passed to the game; written only when it isn't the default.
     #[serde(default, skip_serializing_if = "Entities::is_default")]
     pub entities: Entities,
@@ -863,6 +866,7 @@ pub fn render(config: &Config) -> String {
         "chat_filter",
         "prune_chunks",
         "biome_regions",
+        "missing_mods",
         "entities",
     ] {
         if let Some(settings) = table.get(section) {
@@ -1138,6 +1142,147 @@ mod tests {
         assert_eq!(Config::parse(&render(&c)).unwrap(), c);
         assert!(Config::parse("[anticheat]\nenable = true\n").is_err());
         assert!(Config::parse("[anticheat.timer]\nalert = -1\n").is_err());
+    }
+
+    #[test]
+    fn missing_mods_opt_in_survives_rendering() {
+        let on = Config::parse("[missing_mods]\nallow = true\n").unwrap();
+        let rendered = render(&on);
+        assert_eq!(Config::parse(&rendered).unwrap(), on);
+        let table: toml::Table = rendered.parse().unwrap();
+        assert_eq!(table["missing_mods"]["allow"].as_bool(), Some(true));
+
+        for text in ["", "[missing_mods]\n", "[missing_mods]\nallow = false\n"] {
+            let config = Config::parse(text).unwrap();
+            assert_eq!(config, Config::default());
+            let table: toml::Table = render(&config).parse().unwrap();
+            assert!(!table.contains_key("missing_mods"));
+        }
+        let typo = Config::parse("[missing_mods]\nalow = true\n").unwrap_err();
+        assert!(typo.contains("unknown field `alow`"), "{typo}");
+    }
+
+    #[test]
+    fn hosting_guide_server_toml_examples_pass_config_check() {
+        // The TOML examples in docs/hosting.md, without the explanatory comments.
+        let examples = [
+            (
+                "server setup",
+                r#"[server]
+motd = "A Minecraft Server"
+port = 25565
+bind = ""
+max_players = 20
+online_mode = true
+whitelist = true
+enforce_whitelist = false
+view_distance = 10
+simulation_distance = 10
+max_view_distance = 0
+max_viewed_loaded_chunks = 2048
+max_viewed_ticking_chunks = 441
+max_viewed_loaded_chunks_per_level = 16384
+max_viewed_ticking_chunks_per_level = 3528
+admin_feedback_to_ops = true
+accept_older_clients = false
+
+[world]
+name = "world"
+seed = ""
+game_mode = "survival"
+difficulty = "easy"
+hardcore = false
+
+[properties]
+
+[engine]
+path = ""
+resources = ""
+restart_on_crash = true
+low_memory = false
+parallel_tick = false
+
+[backups]
+every = "6h"
+keep = 12
+
+[updates]
+keep = 1
+
+[panel]
+bind = "127.0.0.1:8130"
+allow_public = false
+
+[api]
+bind = ""
+token = ""
+allow_public = false
+"#,
+            ),
+            (
+                "runtime levels",
+                "[properties]\nsunrise-max-runtime-levels = 128\n",
+            ),
+            (
+                "control API",
+                r#"[api]
+bind = "127.0.0.1:8131"
+token = ""
+"#,
+            ),
+            (
+                "Discord",
+                r#"[discord]
+webhook = "https://discord.com/api/webhooks/..."
+events = ["chat", "join", "leave", "death"]
+enabled = true
+"#,
+            ),
+            (
+                "management protocol",
+                "[properties]\nmanagement-server-enabled = true\nmanagement-server-port = 8132\n",
+            ),
+            (
+                "RCON",
+                r#"[properties]
+enable-rcon = true
+"rcon.port" = 25575
+"rcon.password" = "a long random string"
+"#,
+            ),
+            (
+                "query",
+                "[properties]\nenable-query = true\n\"query.port\" = 25565\n",
+            ),
+            (
+                "prune chunks",
+                r#"[prune_chunks]
+mode = "dry-run"
+min_inhabited_ticks = 1200
+spawn_radius = 32
+ring = 1
+keep_files = ["sunrise-smp/claims.json", "sunrise-smp/places.json"]
+"#,
+            ),
+            (
+                "biome regions",
+                "[biome_regions]\nmissing = \"vanilla\"\nadopt_installed = false\n",
+            ),
+            ("missing mods", "[missing_mods]\nallow = true\n"),
+            (
+                "entities",
+                "[entities]\ndab = true\ndab_start_distance = 12\ndab_max_tick_freq = 20\ndab_activation_dist_mod = 8\n",
+            ),
+        ];
+        let errors: Vec<_> = examples
+            .into_iter()
+            .filter_map(|(name, example)| {
+                Config::parse(example)
+                    .err()
+                    .map(|error| format!("{name}: {error}"))
+            })
+            .collect();
+        assert!(errors.is_empty(), "{}", errors.join("\n"));
     }
 
     #[test]
