@@ -9,6 +9,8 @@ use wgpu::util::DeviceExt;
 const FACE_ORDER: [u8; 6] = [1, 3, 5, 4, 0, 2];
 /// Where the cube's faces live in a resource root.
 const BACKGROUND: &str = "assets/minecraft/textures/gui/title/background";
+/// The grey placeholder cube's colour.
+const PLACEHOLDER: [u8; 4] = [96, 110, 111, 255];
 
 /// The title screen's six faces. The cube is on the GPU only while the title
 /// screen shows, and its texels are decoded from the faces' files each time it
@@ -37,7 +39,7 @@ impl Faces {
                 "Sunrise: no title panorama ({error}); prepare the game again in the launcher \
                  (or run sunrise-prepare panorama)"
             );
-            Self::colour([96, 110, 111, 255])
+            Self::colour(PLACEHOLDER)
         })
     }
 
@@ -313,13 +315,28 @@ impl Panorama {
     }
 
     fn cube(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> wgpu::BindGroup {
+        // The decode ceiling is not this device's: faces no texture of it holds make the
+        // placeholder cube, before their texels are made.
+        let placeholder;
+        let max = device.limits().max_texture_dimension_2d;
+        let faces = if self.faces.size > max {
+            log::warn!(
+                "Sunrise: the {}-pixel title panorama is larger than this device's {max}-pixel \
+                 textures",
+                self.faces.size
+            );
+            placeholder = Faces::colour(PLACEHOLDER);
+            &placeholder
+        } else {
+            &*self.faces
+        };
         let texture = device.create_texture_with_data(
             queue,
             &wgpu::TextureDescriptor {
                 label: Some("Title panorama cube"),
                 size: wgpu::Extent3d {
-                    width: self.faces.size,
-                    height: self.faces.size,
+                    width: faces.size,
+                    height: faces.size,
                     depth_or_array_layers: 6,
                 },
                 mip_level_count: 1,
@@ -330,7 +347,7 @@ impl Panorama {
                 view_formats: &[],
             },
             wgpu::util::TextureDataOrder::LayerMajor,
-            &self.faces.texels(),
+            &faces.texels(),
         );
         let view = texture.create_view(&wgpu::TextureViewDescriptor {
             dimension: Some(wgpu::TextureViewDimension::Cube),
