@@ -55,12 +55,11 @@ fn adopt_in_entity(entity: &mut Tag) {
     }
 }
 
-/// `horizon:attachments` on `holder` becomes [`ATTACHMENTS_KEY`], unless that is there already.
+/// Removes `horizon:attachments` from `holder`, keeping [`ATTACHMENTS_KEY`] if it is already present.
 fn adopt(holder: &mut Tag) {
     if let Tag::Compound(map) = holder
-        && !map.contains_key(&ATTACHMENTS_KEY.into())
         && let Some(saved) = map.remove(&HORIZON_ATTACHMENTS_KEY.into())
     {
-        map.insert(ATTACHMENTS_KEY.into(), saved);
+        map.entry(ATTACHMENTS_KEY.into()).or_insert(saved);
     }
 }

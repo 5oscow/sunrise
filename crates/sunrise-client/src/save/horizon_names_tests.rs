@@ -44,6 +44,25 @@ fn a_horizon_chunk_and_its_block_entities_keep_their_attachments() {
     };
     assert_eq!(block_entities[0].get(ATTACHMENTS_KEY), Some(&saved(2)));
     assert_eq!(block_entities[1].get(ATTACHMENTS_KEY), Some(&saved(4)));
+    assert_eq!(block_entities[1].get("horizon:attachments"), None);
+}
+
+#[test]
+fn clearing_the_sunrise_key_does_not_restore_the_horizon_value() {
+    let mut player = Tag::compound([
+        ("horizon:attachments", saved(10)),
+        (ATTACHMENTS_KEY, saved(11)),
+    ]);
+    horizon_names::adopt_in_player(&mut player);
+    assert_eq!(player.get(ATTACHMENTS_KEY), Some(&saved(11)));
+
+    let Tag::Compound(data) = &mut player else {
+        panic!("expected a player compound");
+    };
+    data.remove(&ATTACHMENTS_KEY.into());
+    horizon_names::adopt_in_player(&mut player);
+    assert_eq!(player.get(ATTACHMENTS_KEY), None);
+    assert_eq!(player.get("horizon:attachments"), None);
 }
 
 #[test]
