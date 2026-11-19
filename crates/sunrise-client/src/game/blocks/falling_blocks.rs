@@ -291,10 +291,7 @@ impl Game<'_> {
         // lavaHurt runs on the server alone; `isInvulnerableToBase` reads the
         // saved `Invulnerable`.
         if in_lava && self.remote.is_none() {
-            let vanilla = f
-                .saved
-                .as_ref()
-                .is_some_and(|saved| sunrise_client::entity_nbt::flag(&saved.1, "Invulnerable"));
+            let vanilla = self.saved_refuses_damage(f.id, "minecraft:lava", false);
             if !self.refuses_lava_hurt(f.id, "minecraft:falling_block", vanilla) {
                 f.sync_velocity = true;
             }
