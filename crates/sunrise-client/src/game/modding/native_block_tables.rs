@@ -281,6 +281,28 @@ impl<'a> BlockTables<'a> {
     ) -> Option<bool> {
         self.res.behaviours().state_redstone_conductor(state)
     }
+    /// `instanceof` for the vanilla classes of [`mod_api::BlockClass`], from the block's exported
+    /// class chain: a class and its subclasses, an interface by what the block implements. None
+    /// for an unknown state.
+    pub(in crate::game) fn block_state_class(
+        &self,
+        state: BlockStateId,
+        class: mod_api::BlockClass,
+    ) -> Result<Option<bool>, mod_api::LevelReadError> {
+        use mod_api::BlockClass;
+        use sunrise_world::level::classes::{Class, Interface};
+        if self.pack.assets.registry.state(state).is_none() {
+            return Ok(None);
+        }
+        let data = self.res.behaviours().data(state);
+        Ok(Some(match class {
+            BlockClass::Stair => data.is(Class::Stair),
+            BlockClass::Entity => data.implements(Interface::Entity),
+            BlockClass::IronBars => data.is(Class::IronBars),
+            BlockClass::StainedGlassPane => data.is(Class::StainedGlassPane),
+            BlockClass::TrapDoor => data.is(Class::TrapDoor),
+        }))
+    }
     /// The immutable local ordinals of `block`, independent of current world ID order.
     pub(in crate::game) fn block_states_of(&self, block: BlockKey) -> Option<BlockStateRange> {
         mod_api::__private::block_state_range(block).ok()

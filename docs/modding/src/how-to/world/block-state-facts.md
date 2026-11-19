@@ -15,6 +15,7 @@ A `BlockState` is an API-owned value pairing a `BlockKey` with a block-local can
 | `is_redstone_conductor(state) -> Option<bool>` | `BlockState.isRedstoneConductor` when it depends only on the block state; `None` when a position is needed |
 | `map_color(state) -> Option<u8>` | `BlockState.getMapColor`: the `MapColor.id` a map item colours a column by, 0 for none |
 | `map_color_rgba(packed) -> Option<[u8; 4]>` | `MapColor.getColorFromPackedId`: decode a map pixel to `[red, green, blue, alpha]`; ID 0 and undefined IDs decode to transparent RGBA; `None` means no game backend |
+| `block_class(state, class: BlockClass) -> Result<Option<bool>, LevelReadError>` | Java `instanceof` on the block's vanilla class, subclasses included: `Stair`, `Entity` (`EntityBlock`), `IronBars`, `StainedGlassPane`, `TrapDoor`. See below |
 | `states_of(block) -> Option<BlockStateRange>` | `StateDefinition.getPossibleStates`, as owned values in canonical local-ordinal order |
 | `definition(block)` | Property names and legal serialized values |
 | `matches(state, block, constraints)` | Partial property match with typed invalid-property and invalid-value errors |
@@ -47,6 +48,17 @@ synchronized state on both sides. For a block that takes its material's friction
 material to `view.friction(pos, material, event.entity)` at the **same position** and keep the
 original coefficient if the query returns `None`. Use the same rule on both sides, including
 client prediction and replay.
+
+## Block classes
+
+`block_class(state, class)` answers what a mod would ask with `instanceof StairBlock`, `EntityBlock`,
+`IronBarsBlock`, `StainedGlassPaneBlock` or `TrapDoorBlock`. It reads the engine's own class of the
+block, so a subclass counts (a waxed copper stair is a `Stair`) and a mod block declared on a vanilla
+behaviour template belongs to that template's classes. It never reads tags: a pack that adds a block
+to `minecraft:stairs` does not make it a `Stair`. An unknown state answers `Ok(None)`; a host with no game
+behind it answers `Err(Unavailable)`. Plain glass panes are `IronBars` and not
+`StainedGlassPane`; vanilla 26.3 has no separate glass-pane class, so tell a plain pane from other bars by its
+block key. Classes are added when a consumer needs one.
 
 ## Copper weathering and wax
 
