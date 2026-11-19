@@ -228,7 +228,7 @@ impl Game<'_> {
         // handle open has no earlier `startOpen`; only it starts the block's lid.
         let counts_openers =
             !opener_started && matches!(slots, Slots::Block(_) | Slots::Double(_, _));
-        let hidden = self.native_hidden_slots(pos, items.len());
+        let hidden = self.native_hidden_slots(menu, Some(pos), items.len());
         // A mod menu type's block tells the client where it is, with what its
         // mod writes (`openMenu` with an extra-data writer); a stock menu
         // sends nothing more.

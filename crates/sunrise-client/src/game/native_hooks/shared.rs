@@ -542,7 +542,7 @@ fn shake_pose(shake: Shake) -> glam::Mat4 {
         * glam::Mat4::from_rotation_y(shake.yaw.to_radians())
 }
 
-/// The mod screen open on this client: the block it is for, the key its
+/// The mod screen open on this client: its menu type and block, the key its
 /// slots are under, the window id of its menu, the menu's data slots as
 /// the server sent them, and what the server sent before the menu opened
 /// (`sunrise:menu_extra`), when it did.
@@ -551,7 +551,10 @@ pub(super) struct OpenNativeScreen {
     slot_moves: SlotMoves,
     key: Pos,
     window: i32,
-    block: String,
+    /// The menu's type, which its screen hooks are keyed by.
+    menu: String,
+    /// The mod block whose menu it is; none for a menu opened without one.
+    block: Option<String>,
     screen: mod_api::Screen,
     data: Vec<i32>,
     extra: Option<sunrise_protocol::menu_extra::Message>,
@@ -2532,25 +2535,33 @@ impl Game<'_> {
             .no_item_icon
             .as_deref()
     }
-    /// Where the open mod screen of `block` puts container slot `slot` from
-    /// the next frame: the mod's last move, else the screen's declaration;
-    /// None for a hidden slot, another block's screen or none.
-    pub(in crate::game) fn screen_slot(&self, block: &str, slot: usize) -> Option<[f32; 2]> {
-        let s = self.shown_native_screen().filter(|s| s.block == block)?;
+    /// Where the open screen of mod menu type `menu` puts container slot
+    /// `slot` from the next frame: the mod's last move, else the screen's
+    /// declaration; None for a hidden slot, another menu type's screen or none.
+    pub(in crate::game) fn screen_slot(&self, menu: &str, slot: usize) -> Option<[f32; 2]> {
+        let s = self.owned_native_screen(menu)?;
         s.slot_moves.latest(&s.screen.slots, slot)
     }
-    /// Moves container slot `slot` of the open mod screen of `block` to `pos`
+    /// The open screen of menu type `menu`, when the mod calling (if one is)
+    /// owns it: another mod's part on a shared vanilla type moves no slot of it.
+    fn owned_native_screen(&self, menu: &str) -> Option<&OpenNativeScreen> {
+        let s = self.shown_native_screen().filter(|s| s.menu == menu)?;
+        let owner = || mod_api::__private::menu_screen_owner(&s.menu, s.block.as_deref());
+        mod_api::content::crash::current_native_mod()
+            .is_none_or(|calling| owner() == Some(calling))
+            .then_some(s)
+    }
+    /// Moves container slot `slot` of the open screen of menu type `menu` to `pos`
     /// (relative to the screen's origin), or hides it with None, from the
     /// next frame (`SlotMoves::set`).
     pub(in crate::game) fn set_screen_slot(
         &self,
-        block: &str,
+        menu: &str,
         slot: usize,
         pos: Option<[f32; 2]>,
     ) -> Result<(), mod_api::ScreenSlotRefusal> {
         let s = self
-            .shown_native_screen()
-            .filter(|s| s.block == block)
+            .owned_native_screen(menu)
             .ok_or(mod_api::ScreenSlotRefusal::NoScreen)?;
         s.slot_moves.set(&s.screen.slots, slot, pos)
     }
@@ -2640,7 +2651,8 @@ impl Game<'_> {
             let gui_size = [batch.width as i32, batch.height as i32];
             let mut draw = crate::game::host::draw::GameDrawContext::new(self, batch);
             self.native_screen_draw(mod_api::__private::ScreenDrawCall {
-                block: &s.block,
+                menu: &s.menu,
+                block: s.block.as_deref(),
                 pos: s.pos(),
                 data: &s.data,
                 origin: [ox, oy],
@@ -2711,30 +2723,30 @@ impl Game<'_> {
         self.api_menu_button(&context, &mut taken, carried);
         self.put_back_mod_block_entity(pos, taken, &items);
     }
-    /// The cursor from the open mod screen's top left, with its block and
-    /// data, for its press and tooltip hooks.
-    fn native_screen_at(&self) -> Option<(String, Vec<i32>, [f32; 2])> {
-        let s = self.shown_native_screen()?;
-        let r = self.renderer.as_ref()?;
-        let batch = HudBatch::new(
-            [r.config.width, r.config.height],
-            self.settings.gui_scale_inputs(),
-        );
-        let (ox, oy) = self.inventory_origin(&batch);
-        let at = [self.cursor.0 - ox, self.cursor.1 - oy];
-        Some((s.block.clone(), s.data.clone(), at))
-    }
     /// A press on the open mod screen's own button (`native_screen_click`)
     /// goes to the server as a menu button click (true).
     pub(super) fn native_screen_press(&mut self, right: bool) -> bool {
         if self.inventory_target().0.is_some() {
             return false;
         }
-        let Some((block, data, at)) = self.native_screen_at() else {
+        let (Some(screen), Some(r)) = (self.shown_native_screen(), self.renderer.as_ref()) else {
             return false;
         };
+        let batch = HudBatch::new(
+            [r.config.width, r.config.height],
+            self.settings.gui_scale_inputs(),
+        );
+        let (ox, oy) = self.inventory_origin(&batch);
+        let at = [self.cursor.0 - ox, self.cursor.1 - oy];
         let mut button = None;
-        self.native_screen_click(&block, &data, at, right, &mut button);
+        self.native_screen_click(
+            &screen.menu,
+            screen.block.as_deref(),
+            &screen.data,
+            at,
+            right,
+            &mut button,
+        );
         let Some(button) = button else {
             return false;
         };
@@ -2783,7 +2795,8 @@ impl Game<'_> {
             return;
         };
         self.native_screen_tooltip(mod_api::__private::ScreenTooltipCall {
-            block: &screen.block,
+            menu: &screen.menu,
+            block: screen.block.as_deref(),
             data: &screen.data,
             at,
             slot: menu_slot,
@@ -4034,7 +4047,8 @@ mod tests {
             layout_revision: 0,
             key: (0, 0, 0),
             window: 4,
-            block: "gtmod:machine".into(),
+            menu: "gtmod:menu".into(),
+            block: Some("gtmod:machine".into()),
             screen: mod_api::Screen::default(),
             data: Vec::new(),
             extra: None,
