@@ -644,6 +644,10 @@ impl Config {
             ));
         }
         self.backups.interval()?;
+        let keep = self.backups.keep;
+        if !(1..=1000).contains(&keep) {
+            return Err(format!("backups.keep is {keep}: use 1 to 1000"));
+        }
         self.panel.address()?;
         self.api.check()?;
         self.transfer.check()?;
@@ -1044,6 +1048,21 @@ mod tests {
         assert!(interval("6é").is_err());
         assert!(interval("é").is_err());
         assert!(interval(&format!("{}d", u64::MAX)).is_err());
+    }
+
+    #[test]
+    fn backup_retention_must_be_between_1_and_1000() {
+        for keep in [0, 1001] {
+            let error = Config::parse(&format!("[backups]\nkeep = {keep}\n")).unwrap_err();
+            assert!(error.contains("backups.keep"), "{error}");
+            assert!(error.contains("1 to 1000"), "{error}");
+        }
+        for keep in [1, 1000] {
+            let config = Config::parse(&format!("[backups]\nkeep = {keep}\n")).unwrap();
+            assert_eq!(config.backups.keep, keep);
+        }
+        let config = Config::parse("[backups]\nevery = \"0\"\n").unwrap();
+        assert_eq!(config.backups.interval().unwrap(), None);
     }
 
     #[test]
