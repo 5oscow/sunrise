@@ -562,6 +562,69 @@ const ADJACENCY: [u32; 24] = [
     3166214, 2138120, 6373424, 4358208, 12910976, 9044480, 9706496, 15216640, 13688832, 11763712,
     8257536,
 ];
+/// A* over the dragon's 24 fixed nodes, in Minecraft's open-set order.
+fn search_dragon_path(
+    nodes: &[[i32; 3]; 24],
+    from: usize,
+    to: usize,
+    min: usize,
+    last: Option<[i32; 3]>,
+) -> Option<Path> {
+    use sunrise_client::mobs::path::heap::{Key, OpenSet};
+    let dist = |a: [i32; 3], b: [i32; 3]| {
+        (((a[0] - b[0]).pow(2) + (a[1] - b[1]).pow(2) + (a[2] - b[2]).pow(2)) as f32).sqrt()
+    };
+    let mut g = [f32::MAX; 24];
+    let mut came = [usize::MAX; 24];
+    let mut closed = [false; 24];
+    let mut keys = [Key::default(); 24];
+    let mut open = OpenSet::with_capacity(keys.len());
+    open.insert(&mut keys, from as u32, dist(nodes[from], nodes[to]));
+    g[from] = 0.0;
+    let mut closest = from;
+    while let Some(cur) = open.pop(&mut keys) {
+        let cur = cur as usize;
+        if cur == to {
+            closest = to;
+            break;
+        }
+        if dist(nodes[cur], nodes[to]) < dist(nodes[closest], nodes[to]) {
+            closest = cur;
+        }
+        closed[cur] = true;
+        for i in min..24 {
+            if ADJACENCY[cur] & (1 << i) != 0 && !closed[i] {
+                let tentative = g[cur] + dist(nodes[cur], nodes[i]);
+                if tentative < g[i] {
+                    g[i] = tentative;
+                    came[i] = cur;
+                    let f = tentative + dist(nodes[i], nodes[to]);
+                    if keys[i].is_open() {
+                        open.change_cost(&mut keys, i as u32, f);
+                    } else {
+                        open.insert(&mut keys, i as u32, f);
+                    }
+                }
+            }
+        }
+    }
+    if closest == from && from != to {
+        return None;
+    }
+    let mut list = vec![nodes[closest]];
+    let mut n = closest;
+    while came[n] != usize::MAX {
+        n = came[n];
+        list.insert(0, nodes[n]);
+    }
+    if let Some(l) = last {
+        list.push(l);
+    }
+    Some(Path {
+        nodes: list,
+        next: 0,
+    })
+}
 impl Dragon {
     /// `Entity.teleportSetPosition` with the command's relative motion flags.
     pub(super) fn teleport_motion(&mut self, relative: [bool; 3]) {
@@ -2085,67 +2148,12 @@ impl Game<'_> {
     /// `findPath` (A* over the adjacency masks), optionally ending at `last`.
     fn dragon_path(&mut self, from: usize, to: usize, last: Option<[i32; 3]>) -> Option<Path> {
         let nodes = self.dragon_nodes();
-        let dist = |a: [i32; 3], b: [i32; 3]| {
-            (((a[0] - b[0]).pow(2) + (a[1] - b[1]).pow(2) + (a[2] - b[2]).pow(2)) as f32).sqrt()
-        };
         let min = if self.fight.alive_crystals == 0 {
             12
         } else {
             0
         };
-        let mut g = [f32::MAX; 24];
-        let mut came = [usize::MAX; 24];
-        let mut closed = [false; 24];
-        let mut open = vec![from];
-        g[from] = 0.0;
-        let mut closest = from;
-        while !open.is_empty() {
-            let (k, &cur) = open
-                .iter()
-                .enumerate()
-                .min_by(|a, b| {
-                    (g[*a.1] + dist(nodes[*a.1], nodes[to]))
-                        .total_cmp(&(g[*b.1] + dist(nodes[*b.1], nodes[to])))
-                })
-                .expect("open set");
-            open.swap_remove(k);
-            if cur == to {
-                closest = to;
-                break;
-            }
-            if dist(nodes[cur], nodes[to]) < dist(nodes[closest], nodes[to]) {
-                closest = cur;
-            }
-            closed[cur] = true;
-            for i in min..24 {
-                if ADJACENCY[cur] & (1 << i) != 0 && !closed[i] {
-                    let tentative = g[cur] + dist(nodes[cur], nodes[i]);
-                    if tentative < g[i] {
-                        g[i] = tentative;
-                        came[i] = cur;
-                        if !open.contains(&i) {
-                            open.push(i);
-                        }
-                    }
-                }
-            }
-        }
-        if closest == from && from != to {
-            return None;
-        }
-        let mut list = vec![nodes[closest]];
-        let mut n = closest;
-        while came[n] != usize::MAX {
-            n = came[n];
-            list.insert(0, nodes[n]);
-        }
-        if let Some(l) = last {
-            list.push(l);
-        }
-        Some(Path {
-            nodes: list,
-            next: 0,
-        })
+        search_dragon_path(&nodes, from, to, min, last)
     }
     fn next_target(&mut self, path: &mut Option<PathBox>) -> Option<Vec3> {
         let p = path.as_mut()?;
@@ -5089,6 +5097,44 @@ use death_render::{dissolve_color, dissolve_mask};
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dragon_search_preserves_equal_cost_heap_order() {
+        let xz = [
+            [60, -1],
+            [51, 29],
+            [29, 51],
+            [0, 60],
+            [-30, 51],
+            [-52, 30],
+            [-60, 0],
+            [-52, -31],
+            [-31, -52],
+            [-1, -60],
+            [29, -52],
+            [51, -30],
+            [40, -1],
+            [28, 28],
+            [0, 40],
+            [-29, 28],
+            [-40, 0],
+            [-29, -29],
+            [-1, -40],
+            [28, -29],
+            [20, -1],
+            [0, 20],
+            [-20, 0],
+            [-1, -20],
+        ];
+        let heights = [
+            83, 88, 75, 82, 86, 82, 87, 88, 83, 75, 78, 74, 80, 77, 79, 73, 74, 82, 74, 73, 85, 75,
+            75, 77,
+        ];
+        let nodes = std::array::from_fn(|i| [xz[i][0], heights[i], xz[i][1]]);
+        let path = search_dragon_path(&nodes, 18, 6, 0, None).unwrap();
+        // With crystals alive, the ruled array heap visits node 16 before 7 at a tie.
+        assert_eq!(path.nodes, [nodes[18], nodes[17], nodes[16], nodes[6]]);
+    }
 
     #[test]
     #[ignore = "daily"]
