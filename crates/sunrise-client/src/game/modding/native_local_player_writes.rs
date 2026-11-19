@@ -39,19 +39,11 @@ impl Game<'_> {
             return Ok(None);
         }
         let [x, y, z] = delta;
-        let move_player =
-            |game: &mut Self| game.move_local_player(MoverType::SelfMovement, Vec3::new(x, y, z));
-        // Ticks already scope their collision data. A writable client hook can
-        // also run between ticks (for example input_key), so install it there.
-        let moved = if sunrise_client_render::moving_colliders::Scope::is_active() {
-            move_player(self)
-        } else {
-            let _parts = self.collision_parts();
-            self.in_this_levels_colliders(move_player)
-        };
-        moved
-            .map(|moved| moved.map(Vec3::components))
-            .map_err(|_| LevelWriteError::Unavailable)
+        self.in_this_levels_colliders(|game| {
+            game.move_local_player(MoverType::SelfMovement, Vec3::new(x, y, z))
+        })
+        .map(|moved| moved.map(Vec3::components))
+        .map_err(|_| LevelWriteError::Unavailable)
     }
 }
 

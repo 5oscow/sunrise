@@ -140,15 +140,9 @@ impl Game<'_> {
                 Target::Guest(conn) => conn,
                 _ => return None,
             };
-            // The level the player is in, as a teleport is made in it, with that level's moving
-            // colliders when it is not the one ticking.
-            let elsewhere = self.resident_target_dimension(t)? != self.dim;
+            // A teleport is made in the player's level, with that level's moving colliders.
             return self.in_target_level(t, |game| {
-                if elsewhere {
-                    game.in_this_levels_colliders(|game| game.move_player_by(t, conn, mover, delta))
-                } else {
-                    game.move_player_by(t, conn, mover, delta)
-                }
+                game.in_this_levels_colliders(|game| game.move_player_by(t, conn, mover, delta))
             })?;
         }
         let handle = self.native_walk_entity(entity.id())?;

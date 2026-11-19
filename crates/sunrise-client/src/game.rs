@@ -4764,9 +4764,12 @@ impl Game<'_> {
         // A client's tick of the level it shows holds the colliders as it began, then carries
         // its own player with the one it stands on; a server's level tick holds its own scope.
         let start = (!self.is_logical_server()).then(|| self.placed_moving_colliders());
-        let scope = start
-            .clone()
-            .map(sunrise_client_render::moving_colliders::Scope::enter);
+        let scope = start.clone().map(|placed| {
+            sunrise_client_render::moving_colliders::Scope::enter_level(
+                self.collider_level(),
+                placed,
+            )
+        });
         let result = self.tick_body();
         drop(scope);
         if let (Some(start), Ok(())) = (&start, &result) {

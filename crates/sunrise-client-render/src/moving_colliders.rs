@@ -133,8 +133,16 @@ impl Prepared {
     }
 }
 
+struct ScopedColliders {
+    level: Option<mod_api::LevelRef>,
+    index: Arc<Index>,
+}
+
 thread_local! {
-    static PLACED: RefCell<Option<Arc<Index>>> = const { RefCell::new(None) };
+    static PLACED: RefCell<ScopedColliders> = RefCell::new(ScopedColliders {
+        level: None,
+        index: Prepared::empty().0,
+    });
     /// The entity whose move is being resolved, for the moves that do not say who they are.
     static MOVER: Cell<u64> = const { Cell::new(0) };
     static SCRATCH: RefCell<Vec<u32>> = const { RefCell::new(Vec::new()) };
@@ -147,25 +155,38 @@ thread_local! {
 /// outlives its tick. The level's tick holds one (like `block_contact::in_level`), and so
 /// does a client's tick of the level it shows.
 pub struct Scope {
-    before: Option<Arc<Index>>,
+    before: ScopedColliders,
 }
 
 impl Scope {
-    /// A level already installed its colliders, even if there were none to place.
-    pub fn is_active() -> bool {
-        PLACED.with_borrow(Option::is_some)
+    pub fn enter(placed: Prepared) -> Self {
+        Self::enter_level(None, placed)
     }
 
-    pub fn enter(placed: Prepared) -> Self {
+    /// Installs a new snapshot for the named level (e.g. at its tick or carry pass).
+    pub fn enter_level(level: Option<mod_api::LevelRef>, placed: Prepared) -> Self {
         Self {
-            before: PLACED.with_borrow_mut(|current| current.replace(placed.0)),
+            before: PLACED.with_borrow_mut(|current| {
+                std::mem::replace(
+                    current,
+                    ScopedColliders {
+                        level,
+                        index: placed.0,
+                    },
+                )
+            }),
         }
+    }
+
+    /// Whether the named level already has a snapshot in scope.
+    pub fn covers(level: mod_api::LevelRef) -> bool {
+        PLACED.with_borrow(|current| current.level == Some(level))
     }
 }
 
 impl Drop for Scope {
     fn drop(&mut self) {
-        PLACED.with_borrow_mut(|current| *current = self.before.take());
+        PLACED.with_borrow_mut(|current| std::mem::swap(current, &mut self.before));
     }
 }
 
@@ -256,11 +277,7 @@ fn visit_scene(area: Aabb, mover: u64, mut f: impl FnMut(&OrientedCollider) -> b
         }
         return;
     }
-    PLACED.with_borrow(|current| {
-        if let Some(index) = current {
-            visit(index, area, mover, |p| f(&p.collider));
-        }
-    });
+    PLACED.with_borrow(|current| visit(&current.index, area, mover, |p| f(&p.collider)));
 }
 
 /// The entity whose move [`as_mover`] names, or 0 outside one.

@@ -468,21 +468,40 @@ impl Game<'_> {
         self.collider_histories.0.get(&self.dim).cloned()
     }
 
-    /// Runs `f` with this level's moving colliders and history in scope, for a call into a level
-    /// other than the one ticking (a hook of one level moving a player of another): the scopes
-    /// are otherwise installed per level tick, and a query would read the caller's. The
-    /// history is the level's own, as its tick recorded it, and nothing is recorded now.
+    /// The level in place, including the world lifetime and runtime level generation.
+    pub(in crate::game) fn collider_level(&self) -> Option<mod_api::LevelRef> {
+        if self.is_logical_server() {
+            Some(self.level_ref(self.native_lifecycle.epoch()?, self.dim.key()))
+        } else {
+            self.native_client_level()
+        }
+    }
+
+    /// Runs `f` with this level's moving colliders and history. If the level already
+    /// has a snapshot, keep it. Otherwise use its own shapes and history, not those
+    /// of a caller ticking another level; a client calling between ticks scopes its
+    /// collision parts too. Nothing is recorded in the history here.
     pub(in crate::game) fn in_this_levels_colliders<R>(
         &mut self,
         f: impl FnOnce(&mut Self) -> R,
     ) -> R {
+        use sunrise_client_render::moving_colliders::{HistoryScope, Scope};
+
+        let level = self.collider_level();
+        if level.is_some_and(Scope::covers) {
+            return f(self);
+        }
         let placed = self.placed_moving_colliders();
         let history = self
             .is_logical_server()
             .then(|| self.collider_histories.0.get(&self.dim).cloned())
             .flatten();
-        let _history = sunrise_client_render::moving_colliders::HistoryScope::replace(history);
-        sunrise_client_render::moving_colliders::in_level(placed, || f(self))
+        let _parts = (!self.is_logical_server())
+            .then(|| self.collision_parts())
+            .flatten();
+        let _history = HistoryScope::replace(history);
+        let _scope = Scope::enter_level(level, placed);
+        f(self)
     }
 
     /// Records the level's colliders as its tick begins into the level's history and answers it,
