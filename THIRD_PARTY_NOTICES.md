@@ -364,6 +364,19 @@ LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+## zlib
+
+`crates/sunrise-deflate` is a Rust port of parts of [zlib](https://zlib.net/) 1.3.2 (`deflate.c` and
+`trees.c`, from the official `zlib-1.3.2.tar.gz`, SHA-256
+`bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16`), altered to cover only level 6 with
+the default strategy, so that saves carry the bytes the JDK's bundled zlib writes. It is under the zlib
+license; its notice and what was altered are in `crates/sunrise-deflate/LICENSE` and the header of each
+ported file:
+
+```
+(C) 1995-2026 Jean-loup Gailly and Mark Adler
+```
+
 ## fdlibm
 
 `crates/sunrise-core/src/jmath/fdlibm.rs` and the `fdlibm_asin`, `fdlibm_atan` and
