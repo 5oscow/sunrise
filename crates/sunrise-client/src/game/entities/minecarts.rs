@@ -2028,14 +2028,8 @@ impl Game<'_> {
             }
             let p = self.carts[i].position;
             let kind = self.carts[i].kind.id();
-            let source = sunrise_client::health::HurtSource {
-                damage_type: "minecraft:lava",
-                causing: 0,
-                direct: 0,
-                position: None,
-            };
             let vanilla = self.saved_refuses_damage(id, "minecraft:lava", false);
-            if !self.native_nonliving_invulnerable(id, kind, source, vanilla) {
+            if !self.refuses_lava_hurt(id, kind, vanilla) {
                 self.hurt_cart(i, 4.0, false, true, CartHit::default());
             }
             self.lava_hurt_sound([p.x, p.y, p.z]);

@@ -1672,15 +1672,9 @@ impl Game<'_> {
             let p = self.boats[i].position;
             let id = self.boats[i].id;
             let kind = self.boats[i].entity_type();
-            let source = sunrise_client::health::HurtSource {
-                damage_type: "minecraft:lava",
-                causing: 0,
-                direct: 0,
-                position: None,
-            };
             let vanilla = self.saved_refuses_damage(id, "minecraft:lava", false);
-            let broke = !self.native_nonliving_invulnerable(id, &kind, source, vanilla)
-                && self.hurt_boat(i, 4.0, false);
+            let broke =
+                !self.refuses_lava_hurt(id, &kind, vanilla) && self.hurt_boat(i, 4.0, false);
             self.lava_hurt_sound([p.x, p.y, p.z]);
             if broke {
                 return true;

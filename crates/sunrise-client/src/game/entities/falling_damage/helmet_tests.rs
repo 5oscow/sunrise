@@ -56,6 +56,7 @@ fn falling_impacts_wear_the_helmet_before_normal_armor_and_reduction() {
         velocity: Vec3::ZERO,
         on_ground: false,
         fire_ticks: 0,
+        sync_velocity: false,
         attachment_lifetime: Default::default(),
         rotation: [0.0; 2],
         join: Default::default(),

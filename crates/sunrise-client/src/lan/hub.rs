@@ -3375,6 +3375,7 @@ impl Hub {
             horizontal_collision: false,
             needs_sync: false,
             sync_position: false,
+            sync_velocity: false,
             stepped: false,
             idle: false,
             bare: false,

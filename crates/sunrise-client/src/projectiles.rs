@@ -356,6 +356,10 @@ pub struct Projectile {
     /// A shulker bullet lava hurt this tick (`ShulkerBullet.hurtServer` from
     /// `Entity.lavaHurt`): gone, its hurt and burn left for the game to play.
     lava_hurt: bool,
+    /// Lava's `lavaHurt` reached `Projectile.hurtServer` this tick, which marks
+    /// the projectile hurt unless it is invulnerable to lava: the game decides
+    /// (`Game::lava_mark_hurt`).
+    lava_marked: bool,
     /// The shooter's bow enchantments (Power, Punch, Flame, Piercing).
     pub bonus: crate::mobs::gear::ArrowBonus,
     /// Arrows' `AbstractArrow` state (ticked by `arrows::tick`).
@@ -365,6 +369,9 @@ pub struct Projectile {
     /// `Entity.needsSync`: a server tells its clients about the change this
     /// tick instead of at the next update interval.
     pub needs_sync: bool,
+    /// `Entity.syncVelocity`, set by `markHurt`: a server sends its motion to
+    /// the clients tracking it after its next update, due or not.
+    pub sync_velocity: bool,
     /// `WindCharge.noDeflectTicks`: a player's wind charge turns for nothing
     /// (`deflect` refuses) until it has ticked 5 times. Not saved, so a
     /// loaded one starts again at 5.
@@ -677,9 +684,11 @@ impl Projectile {
             has_been_shot: false,
             shoot_event: None,
             lava_hurt: false,
+            lava_marked: false,
             bonus: Default::default(),
             acceleration,
             needs_sync: false,
+            sync_velocity: false,
             no_deflect_ticks,
             bubble_surfaces: Vec::new(),
             touching_water: false,
@@ -889,9 +898,14 @@ impl Projectile {
             }
         }
         // LavaFluid.entityInside: Entity.lavaIgnite (none of these is fireImmune),
-        // then lavaHurt, which hurts no projectile. Llama spit takes no block effects.
+        // then lavaHurt. Its hurtServer harms no projectile: `Projectile.hurtServer`
+        // marks a thrown one hurt (`markHurt`), `AbstractHurtingProjectile`'s
+        // (fireballs, skulls, wind charges) does nothing. Llama spit takes no
+        // block effects.
         if self.kind != ProjectileKind::LlamaSpit && self.in_lava(w, from) {
             self.ignite_for_ticks(300);
+            self.lava_marked =
+                !client_side && (self.is_thrown() || self.kind == ProjectileKind::ExperienceBottle);
         }
         if w.in_water(self.bounds()) {
             self.clear_fire();
@@ -1744,6 +1758,10 @@ impl Projectile {
     pub fn take_lava_hurt(&mut self) -> bool {
         std::mem::take(&mut self.lava_hurt)
     }
+    /// Whether lava's hurt reached `Projectile.hurtServer` in its last tick, once.
+    pub fn take_lava_marked(&mut self) -> bool {
+        std::mem::take(&mut self.lava_marked)
+    }
     /// Drain the first-tick event for dispatch in the owner's game context.
     pub fn take_shoot_event(&mut self) -> Option<Vec3> {
         self.shoot_event.take()
@@ -2339,8 +2357,10 @@ mod tests {
         }
     }
     /// `LavaFluid.entityInside` sets every entity it touches alight for 300
-    /// ticks (`Entity.lavaIgnite`), a snowball too; above the fluid's box it
-    /// stays out (#2689).
+    /// ticks (`Entity.lavaIgnite`), a snowball too, and its `lavaHurt` reaches
+    /// `Projectile.hurtServer` (`markHurt`); above the fluid's box it stays
+    /// out (#2689). A fireball's `AbstractHurtingProjectile.hurtServer` marks
+    /// nothing.
     #[test]
     fn a_snowball_in_lava_burns_for_lava_ignites_three_hundred_ticks() {
         let mut p = Projectile::new(ProjectileKind::Snowball, Vec3::new(0.5, 99.2, 0.5), None);
@@ -2348,12 +2368,24 @@ mod tests {
         p.tick(&Lava);
         // Ignited for 300, then `Entity.baseTick`'s countdown.
         assert_eq!(p.fire_ticks, 299);
+        assert!(p.take_lava_marked(), "lava's hurt marks it hurt");
         p.tick(&Lava);
         assert_eq!(p.fire_ticks, 299, "lava renews it every tick it is inside");
+        assert!(p.take_lava_marked(), "every tick it is inside");
         let mut above = Projectile::new(ProjectileKind::Snowball, Vec3::new(0.5, 99.95, 0.5), None);
         above.velocity = Vec3::ZERO;
         above.tick(&Lava);
         assert_eq!(above.fire_ticks, 0, "over the fluid's 8/9 box, not in it");
+        assert!(!above.take_lava_marked());
+        let mut ball = Projectile::new(
+            ProjectileKind::SmallFireball,
+            Vec3::new(0.5, 99.2, 0.5),
+            None,
+        );
+        (ball.velocity, ball.acceleration) = (Vec3::ZERO, 0.0);
+        ball.tick(&Lava);
+        assert!(ball.fire_ticks > 0, "lit");
+        assert!(!ball.take_lava_marked(), "but not marked hurt");
     }
     /// Lava's `lavaHurt` reaches `ShulkerBullet.hurtServer`, which destroys
     /// the bullet on the server (#2689).

@@ -5018,6 +5018,7 @@ impl Game<'_> {
             });
             let _ = swept;
             projectiles.update(i, |p| self.sweep_projectile_inside(p));
+            projectiles.update(i, |p| self.lava_mark_hurt(p));
         }
         self.creatures.projectiles.restore(
             projectiles,

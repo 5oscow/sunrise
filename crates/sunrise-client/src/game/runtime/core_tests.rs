@@ -696,6 +696,7 @@ fn a_falling_block_keeps_its_model_offset() {
     let falling = FallingBlock {
         on_ground: false,
         fire_ticks: 0,
+        sync_velocity: false,
         attachment_lifetime: Default::default(),
         rotation: [0.0, 0.0],
         join: Default::default(),

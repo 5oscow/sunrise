@@ -260,8 +260,9 @@ impl Game<'_> {
         if let Some(multiplier) = stuck {
             f.stuck = multiplier;
         }
-        // The same walk's fluids: LavaFluid.entityInside's LAVA_IGNITE (its
-        // lavaHurt only marks the block hurt), then WaterFluid's EXTINGUISH
+        // The same walk's fluids: LavaFluid.entityInside's LAVA_IGNITE, then
+        // its lavaHurt, whose `FallingBlockEntity.hurtServer` harms nothing but
+        // marks the block hurt (`markHurt`, below); then WaterFluid's EXTINGUISH
         // (`clearFire`). A block not on fire that nothing ignited is put at
         // `-getFireImmuneTicks()`, 0.
         let fluids = &self.res.motion().fluids;
@@ -276,7 +277,8 @@ impl Game<'_> {
         };
         let previous_fire = f.fire_ticks;
         let mut fire = previous_fire;
-        if touches(sunrise_world::fluid::FluidKind::Lava) {
+        let in_lava = touches(sunrise_world::fluid::FluidKind::Lava);
+        if in_lava {
             fire = fire.max(300);
         }
         if fire > 0 && touches(sunrise_world::fluid::FluidKind::Water) {
@@ -286,6 +288,17 @@ impl Game<'_> {
             fire = 0;
         }
         f.fire_ticks = fire;
+        // lavaHurt runs on the server alone; `isInvulnerableToBase` reads the
+        // saved `Invulnerable`.
+        if in_lava && self.remote.is_none() {
+            let vanilla = f
+                .saved
+                .as_ref()
+                .is_some_and(|saved| sunrise_client::entity_nbt::flag(&saved.1, "Invulnerable"));
+            if !self.refuses_lava_hurt(f.id, "minecraft:falling_block", vanilla) {
+                f.sync_velocity = true;
+            }
+        }
         for pos in tops {
             self.bubble_column_particles(pos);
         }
