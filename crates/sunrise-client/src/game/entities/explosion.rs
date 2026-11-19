@@ -1000,6 +1000,13 @@ impl Game<'_> {
         // end crystal) the player is that guest. The blast's source is the
         // same for all of them (`onExplosionHit(this.source)`).
         let attacker = self.blast_attacker();
+        // The live mob cause's UUID, made now if it has none yet (a built
+        // wither), before any victim records the cause for its kill credit.
+        let cause_uuid = attacker
+            .as_ref()
+            .map(|&(id, _)| id)
+            .filter(|&id| self.mobs.iter().any(|m| m.id == id && !m.removed))
+            .map(|id| (id, self.uuid_for(id)));
         let blast_source = self.combat.explosion_cause.clone();
         let context = ExplosionHookContext {
             center,
@@ -1107,15 +1114,10 @@ impl Game<'_> {
         // `DamageSource.getEntity`, which for a blast is its indirect source.
         let blast_by = self.explosion_kill_credit();
         // The mob victims' hits land in the enclosing attack, which need not
-        // name the blast's cause: it carries the live cause's UUID for their
-        // kill credit, made now if the cause has none yet (a built wither).
+        // name the blast's cause: it carries the cause's UUID for their credit.
         let mut mob_attack = self.combat.attack().clone();
-        if let Some(id) = attacker
-            .as_ref()
-            .map(|&(id, _)| id)
-            .filter(|&id| self.mobs.iter().any(|m| m.id == id && !m.removed))
-        {
-            mob_attack.attacker_uuid = Some((id, self.uuid_for(id)));
+        if cause_uuid.is_some() {
+            mob_attack.attacker_uuid = cause_uuid;
         }
         let mut destroyed_contents = Vec::new();
         macro_rules! blocked_damage {
