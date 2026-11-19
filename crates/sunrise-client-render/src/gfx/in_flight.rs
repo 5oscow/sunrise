@@ -38,15 +38,23 @@ impl Renderer {
         self.frame_serial - self.stats_frame
     }
     /// Take in the frame the submit thread submitted: start its readbacks and, offscreen,
-    /// keep at most two frames ahead of the GPU, as a frame submitted in place does.
+    /// keep at most two frames ahead of the GPU, as a frame submitted in place does. Nothing
+    /// more once the device is lost: that submission is often where the loss shows.
     pub(super) fn land_frame(&mut self) {
         let Some(offscreen) = self.deferred.take() else {
             return;
         };
         let submission = self.queue.landed();
+        if self.device_lost() {
+            return;
+        }
         if let Some(timer) = &mut self.gpu_timer {
             timer.submitted(&self.queue);
-            timer.collect(&self.device, &mut self.gpu_times);
+        }
+        if self.poll_live(wgpu::PollType::Poll)
+            && let Some(timer) = &mut self.gpu_timer
+        {
+            timer.collect(&mut self.gpu_times);
         }
         if let Some(Some(timer)) = Self::pass_timer(&mut self.pack_post, &mut self.native) {
             timer.submitted(&self.queue);
@@ -72,10 +80,23 @@ impl Renderer {
     pub(super) fn wait_frames(&mut self) {
         while self.in_flight.len() > 2 {
             let index = self.in_flight.pop_front();
-            let _ = self.device.poll(wgpu::PollType::Wait {
+            self.poll_live(wgpu::PollType::Wait {
                 submission_index: index,
                 timeout: Some(std::time::Duration::from_secs(5)),
             });
+        }
+    }
+    /// `Device::poll`, unless the device is lost: whether it succeeded. wgpu has no error
+    /// result for a poll that finds the device lost (it panics), so that panic is contained;
+    /// the loss callback has set `device_lost` by then, and the frame is dropped.
+    pub(super) fn poll_live(&self, poll: wgpu::PollType) -> bool {
+        if self.device_lost() {
+            return false;
+        }
+        match crate::crash::contain(|| self.device.poll(poll)) {
+            Ok(polled) => polled.is_ok(),
+            Err(_) if self.device_lost() => false,
+            Err(message) => panic!("{message}"),
         }
     }
     /// Take a screenshot request: queue the frame's copy, or report why the

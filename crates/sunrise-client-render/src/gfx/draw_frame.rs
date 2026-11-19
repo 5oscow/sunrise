@@ -29,6 +29,11 @@ impl Renderer {
         let mut laps = crate::spans::laps();
         let landing = Instant::now();
         self.land_frame();
+        // The previous frame's submission found the device lost: this frame touches the
+        // device no more and holds no surface texture; `render` leaves recovery to its caller.
+        if self.device_lost() {
+            return Err("the graphics device was lost".into());
+        }
         // Waiting for the previous frame (offscreen: at most two on the GPU), not work.
         let landed = landing.elapsed();
         self.queue.take_waited();
