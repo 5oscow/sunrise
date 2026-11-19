@@ -60,8 +60,11 @@ every surface item whose name occurs as an identifier in the mod's source or tha
 item those items' signatures reference, transitively. A member counts only when its owner is reached. A mixin's or
 a loop's helper file is not scanned: it is compiled inside the game's code, where a name is the game's own. The
 game code the manifest declares is listed as `game:fn:<path>` (a mixin's target),
-`game:internal:<kind>:<path>` and `game:loop:<name>`, each with its hash at the pinned build, read from that
-build's build data. A misfit can also name `game:tool:horizon-mixins`.
+`game:internal:<kind>:<path>` (the kind the manifest names, or `any` when it names none) and `game:loop:<name>`,
+each with its hash at the pinned build, read from that build's build data. A misfit can also name `game:tool:horizon-mixins`.
+
+A helper that the mod's own source also loads (an `include!`, a `#[path]`, or a `mod` declaration that may name
+its file) is both game code and mod code: the scan says it cannot judge the mod, and no list is packed.
 
 A helper can call game code its row does not declare. The compile catches a changed signature there; nothing
 catches a changed body in a function the mod did not declare. How the scan

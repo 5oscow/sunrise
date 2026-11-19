@@ -404,7 +404,7 @@ fn a_target_that_is_also_a_declared_internal_is_two_entries_of_one_readable_list
             ),
             (
                 format!("game:internal:fn:{PATH}"),
-                game_uses::Now::Is("isig:sig:body".into())
+                game_uses::Now::Is("fn:isig:sig:body".into())
             ),
         ]
     );
@@ -447,6 +447,88 @@ fn a_target_that_is_also_a_declared_internal_is_two_entries_of_one_readable_list
         }
     );
     for folder in [dir, data, unindexed] {
+        std::fs::remove_dir_all(folder).unwrap();
+    }
+}
+
+#[test]
+fn an_internal_declared_without_a_kind_is_named_when_it_becomes_another_kind() {
+    const PATH: &str = "sunrise_client::game::Limit";
+    let dir = project_dir("fit-kind", None, None);
+    let manifest = dir.join(crate::NATIVE_MANIFEST);
+    let text = std::fs::read_to_string(&manifest).unwrap()
+        + &format!("[[internals]]\npath = \"{PATH}\"\n");
+    std::fs::write(&manifest, text).unwrap();
+    let data = |name: &str, kind: &str| {
+        build_data(
+            name,
+            OTHER_BUILD,
+            serde_json::json!({}),
+            serde_json::json!([{"path": PATH, "kind": kind, "signature": "s", "hash": "h"}]),
+        )
+    };
+    let (as_const, as_static) = (
+        data("fit-kind-const", "const"),
+        data("fit-kind-static", "static"),
+    );
+    let id = format!("game:internal:any:{PATH}");
+    let table = serde_json::json!({
+        "schema": uses::USES_SCHEMA, "made_for": pin(&dir),
+        "entries": [{"id": id, "hash": "const:h"}],
+    });
+    std::fs::write(dir.join(uses::USES_FILE), table.to_string()).unwrap();
+    let judged = |data: &Path| judged_with(&dir, OTHER_BUILD, &surface(&[]), Some(data));
+    assert_eq!(
+        judged(&as_const),
+        Verdict::Fits {
+            made_for: pin(&dir)
+        }
+    );
+    assert_eq!(
+        judged(&as_static),
+        Verdict::DoesNotFit {
+            made_for: pin(&dir),
+            misfits: vec![Misfit {
+                id,
+                change: Change::Changed
+            }],
+        }
+    );
+    for folder in [dir, as_const, as_static] {
+        std::fs::remove_dir_all(folder).unwrap();
+    }
+}
+
+#[test]
+fn a_loop_whose_entry_is_no_path_is_refused_by_name() {
+    let dir = project_dir("fit-loop-entry", None, None);
+    let manifest = dir.join(crate::NATIVE_MANIFEST);
+    let text = std::fs::read_to_string(&manifest).unwrap()
+        + "[[native.loop]]\nid = \"l\"\nloop = \"ticks\"\nhelper = \"src/l.rs\"\nwith = \"Slot\"\n";
+    std::fs::write(&manifest, text).unwrap();
+    std::fs::write(dir.join("src/l.rs"), "pub struct Slot;").unwrap();
+    let data = build_data(
+        "fit-loop-entry-data",
+        OTHER_BUILD,
+        serde_json::json!({}),
+        serde_json::json!([]),
+    );
+    std::fs::write(
+        data.join("loops.json"),
+        serde_json::json!({
+            "schema": 1, "build": {"commit": OTHER_BUILD},
+            "loops": [{"name": "ticks", "entry": "tick", "generic": "tick_with", "slot": "Slot", "side": "server"}],
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let bundle = crate::bundle_in(&dir).unwrap().unwrap();
+    let error = game_uses::entries(&bundle.manifest, &data, OTHER_BUILD).unwrap_err();
+    assert!(
+        error.contains("`ticks`") && error.contains("`tick`"),
+        "{error}"
+    );
+    for folder in [dir, data] {
         std::fs::remove_dir_all(folder).unwrap();
     }
 }

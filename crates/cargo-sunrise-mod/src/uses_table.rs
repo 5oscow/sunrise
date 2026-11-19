@@ -249,6 +249,15 @@ mod tests {
             read(dir.path()),
             Ok(Err(Scanned::Unread(why))) if why.contains("src/mixins/m.rs")
         ));
+        // And so is one a plain `mod` declaration may load.
+        std::fs::write(dir.path().join("src/lib.rs"), "mod mixins;").unwrap();
+        std::fs::write(dir.path().join("src/mixins.rs"), "mod m;").unwrap();
+        assert!(matches!(
+            read(dir.path()),
+            Ok(Err(Scanned::Unread(why))) if why.contains("src/mixins/m.rs")
+        ));
+        std::fs::remove_file(dir.path().join("src/mixins.rs")).unwrap();
+        std::fs::write(dir.path().join("src/lib.rs"), "fn a() {}").unwrap();
         std::fs::write(
             dir.path().join("sunrise-mod.toml"),
             manifest.clone()

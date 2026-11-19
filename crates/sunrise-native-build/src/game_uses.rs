@@ -104,6 +104,15 @@ pub fn entries(manifest: &Manifest, dir: &Path, build: &str) -> Result<Vec<(Stri
     }
     if !loops.is_empty() {
         let published = document::<Loops>(dir, api_gen::loops::FILE, build)?.loops;
+        // The data is the caller's: an entry that is no path is named, never unwrapped.
+        if let Some(l) = published.iter().find(|l| !l.entry.contains("::")) {
+            return Err(format!(
+                "{}: the loop `{}` has the entry `{}`, which is not a function's path",
+                dir.join(api_gen::loops::FILE).display(),
+                l.name,
+                l.entry
+            ));
+        }
         for row in loops {
             let now = match published.iter().find(|l| l.name == row.name) {
                 None => Now::Gone,
@@ -136,25 +145,23 @@ pub fn entries(manifest: &Manifest, dir: &Path, build: &str) -> Result<Vec<(Stri
             &declared.path,
             declared.kind.as_deref(),
         );
-        entries.push(match found {
-            Err(_) => (
-                format!(
-                    "{PREFIX}internal:{}:{}",
-                    declared.kind.as_deref().unwrap_or("item"),
-                    declared.path
-                ),
-                Now::Gone,
-            ),
-            Ok(internal) => (
-                format!("{PREFIX}internal:{}:{}", internal.kind, internal.path),
-                match internal.kind.as_str() {
-                    "fn" | "method" => code(&internal.path).map_or(Now::Unjudged, |code| {
-                        Now::Is(format!("{}:{code}", internal.hash))
-                    }),
-                    _ => Now::Is(internal.hash.clone()),
-                },
-            ),
-        });
+        // The id is what the mod declares, so a record is found again whatever the item became;
+        // the kind it resolved to is part of the fingerprint.
+        let id = format!(
+            "{PREFIX}internal:{}:{}",
+            declared.kind.as_deref().unwrap_or("any"),
+            declared.path
+        );
+        let now = match found {
+            Err(_) => Now::Gone,
+            Ok(internal) => match internal.kind.as_str() {
+                "fn" | "method" => code(&internal.path).map_or(Now::Unjudged, |code| {
+                    Now::Is(format!("{}:{}:{code}", internal.kind, internal.hash))
+                }),
+                kind => Now::Is(format!("{kind}:{}", internal.hash)),
+            },
+        };
+        entries.push((id, now));
     }
     entries.sort();
     entries.dedup();

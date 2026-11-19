@@ -234,6 +234,33 @@ fn references(text: &str, folder: &[String]) -> Result<Vec<String>, String> {
     Ok(found)
 }
 
+/// The first of `skip` that a `mod name;` in `text`, a file in `folder`, may load as the mod's
+/// own source: a file below that folder named for the module (`name.rs`, `name/mod.rs`). Where
+/// the module's file lies is not resolved, so one of that name anywhere below counts.
+fn declares_skipped<'s>(text: &str, folder: &[String], skip: &[&'s str]) -> Option<&'s str> {
+    let list: Vec<Token<'_>> = tokens(text).map(|(t, _)| t).collect();
+    let below = folder
+        .iter()
+        .map(|part| format!("{part}/"))
+        .collect::<String>();
+    list.windows(3).find_map(|window| {
+        let [Token::Ident("mod"), Token::Ident(name), Token::Punct(b';')] = window else {
+            return None;
+        };
+        skip.iter().copied().find(|path| {
+            let Some(rest) = path.strip_prefix(below.as_str()) else {
+                return false;
+            };
+            let mut parts = rest.rsplit('/');
+            let module = match parts.next() {
+                Some("mod.rs") => parts.next(),
+                file => file.and_then(|file| file.strip_suffix(".rs")),
+            };
+            module == Some(*name)
+        })
+    })
+}
+
 /// Reads at most `most` bytes of `path`, refusing a larger file by its size.
 fn read_bounded(path: &Path, shown: &str, most: u64) -> Result<String, ReadError> {
     use std::io::Read;
@@ -257,7 +284,8 @@ fn read_bounded(path: &Path, shown: &str, most: u64) -> Result<String, ReadError
 /// Reads `dir`: every `.rs` file outside the mod's `target/` and hidden folders, and
 /// `sunrise-mod.toml` when there is one, but not the files `skip` names (relative and
 /// `/`-separated), which are not the mod's own source. A `#[path]` or `include!` of a file the
-/// scan does not read, a skipped one included, is refused.
+/// scan does not read, a skipped one included, is refused, and so is a `mod` declaration that
+/// may load a skipped file.
 pub fn read(dir: &Path, skip: &[&str]) -> Result<ModInput, ReadError> {
     let mut input = ModInput::default();
     let mut total = 0u64;
@@ -296,6 +324,13 @@ pub fn read(dir: &Path, skip: &[&str]) -> Result<ModInput, ReadError> {
                         what: format!("the mod's source ({} files)", input.sources.len() + 1),
                         size: total,
                         most: MAX_TOTAL_BYTES,
+                    });
+                }
+                if let Some(target) = declares_skipped(&text, &relative[..relative.len() - 1], skip)
+                {
+                    return Err(ReadError::NotScanned {
+                        file: shown,
+                        target: target.to_owned(),
                     });
                 }
                 match references(&text, &relative[..relative.len() - 1]) {
