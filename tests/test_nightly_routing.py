@@ -12,11 +12,23 @@ import textwrap
 import unittest
 
 from tests.test_ci_runners import jobs, runs_on
+from tests.test_ci_concurrency import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 GAME = ROOT / ".github/workflows/game-build.yml"
 NIGHTLY = ROOT / ".github/workflows/nightly-build.yml"
 SMOKE = ROOT / "tools/ci/game_smoke.sh"
+
+
+# Each build leg's runner: (Blacksmith's, GitHub's with BLACKSMITH=off).
+RUNNERS = {
+    "linux": ("blacksmith-16vcpu-ubuntu-2204", "ubuntu-22.04"),
+    "linux-musl": ("blacksmith-16vcpu-ubuntu-2204", "ubuntu-22.04"),
+    "windows": ("blacksmith-16vcpu-windows-2025", "windows-latest"),
+    "windows-arm64": ("blacksmith-16vcpu-windows-2025", "windows-11-vs2026-arm"),
+    "macos": ("blacksmith-12vcpu-macos-15", "macos-15"),
+    "macos-x64": ("blacksmith-12vcpu-macos-15", "macos-15"),
+}
 
 
 class NightlyRoutingTests(unittest.TestCase):
@@ -83,21 +95,27 @@ console.log(JSON.stringify(eval(expression)));
                 for row in rows:
                     if row["name"] in {"linux", "linux-musl"}:
                         self.assertEqual(row["os"], "ubuntu-22.04", "shipped Linux binaries keep the documented libc baseline")
-                    # Every leg on Blacksmith's machine when it has one, else (or with BLACKSMITH=off) on GitHub's.
-                    expected = row["os"] if blacksmith == "off" else row.get("blacksmith", row["os"])
+                    # Every leg on its Blacksmith machine, or with BLACKSMITH=off on GitHub's.
+                    expected = RUNNERS[row["name"]][blacksmith == "off"]
                     with self.subTest(entry=row["name"]):
                         self.assertEqual(evaluate(expressions[1], row, trusted), expected)
-        self.assertEqual({row["name"] for row in rows if row.get("blacksmith")},
-                         {"linux", "linux-musl", "windows", "windows-arm64", "macos", "macos-x64"})
-        # A leg built for another CPU is started there, by a job that downloads its untested archive.
+        # A leg built for another CPU is started there, by a job on that CPU's runner that downloads its untested
+        # archive and uploads it under its own name with the leg's marker; legs waits for that job.
+        game = yaml.load(text, Loader=yaml.BaseLoader)["jobs"]
+        started = {"macos-x64": ("macos-x64-intel", "macos-15-intel"),
+                   "windows-arm64": ("windows-arm64-native", "windows-11-vs2026-arm")}
+        self.assertEqual({row["name"] for row in rows if row.get("started_elsewhere")}, set(started))
         for row in rows:
-            if row.get("started_elsewhere"):
+            if row["name"] in started:
+                job, runner = started[row["name"]]
                 with self.subTest(started_elsewhere=row["name"]):
-                    job, native = next((name, block) for name, block in workflow_jobs.items()
-                                       if name != "build" and f"name: untested-{row['asset']}" in block)
-                    self.assertIn(f"name: {row['asset']}", native)
-                    self.assertIn(f"leg-{row['name']}", native)
-                    self.assertIn(job, re.search(r"^    needs: \[(.*)\]", workflow_jobs["legs"], re.M).group(1))
+                    self.assertEqual(game[job]["runs-on"], runner)
+                    self.assertIn(job, game["legs"]["needs"])
+                    steps = game[job]["steps"]
+                    downloads = {s["with"]["name"] for s in steps if s.get("uses", "").startswith("actions/download-artifact@")}
+                    uploads = {s["with"]["name"] for s in steps if s.get("uses", "").startswith("actions/upload-artifact@")}
+                    self.assertEqual(downloads, {f"untested-{row['asset']}"})
+                    self.assertEqual(uploads, {row["asset"], f"leg-{row['name']}"})
         self.assertEqual({row["name"] for row in rows if row.get("started_elsewhere")}, {"macos-x64", "windows-arm64"})
 
         timeout = re.search(r"^\s*timeout-minutes:\s*\$\{\{(.*?)\}\}", workflow_jobs["build"], re.M).group(1)
