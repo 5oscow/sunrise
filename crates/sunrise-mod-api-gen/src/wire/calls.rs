@@ -623,7 +623,8 @@ fn reborrow(types: &Types<'_>, ty: &Ty, place: &str) -> Option<String> {
         Ty::Named(d) if types.defs[*d].lifetimes != 0 => {
             let fields = types.defs[*d].borrowed.fields()?;
             format!(
-                "mod_api::__wire_record_{d}({})",
+                "{}::__wire_from_record({})",
+                types.defs[*d].rust,
                 fields
                     .iter()
                     .enumerate()
@@ -993,7 +994,8 @@ fn borrowed_prepared(
             .collect::<Vec<_>>()
             .join(", ");
         read.push_str(&format!(
-            "let {m}{name} = crate::__wire_record_{def}({args});"
+            "let {m}{name} = {}::__wire_from_record({args});",
+            d.rust
         ));
     }
     Some((read, name.to_string(), back))
