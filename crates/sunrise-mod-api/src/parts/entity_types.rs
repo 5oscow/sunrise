@@ -208,6 +208,7 @@ mod tests {
                 Some([1.0, f64::NAN, 0.0]),
                 GeneralSavePolicy::Save,
                 true,
+                false,
                 8,
                 3,
                 1,
