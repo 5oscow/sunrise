@@ -109,7 +109,7 @@ impl Control {
         for (cell, v) in self.position.iter().zip(view.at) {
             cell.store(v.to_bits(), Relaxed);
         }
-        let flags = u8::from(view.positional) * POSITIONAL | u8::from(view.placed) * PLACED;
+        let flags = (u8::from(view.positional) * POSITIONAL) | (u8::from(view.placed) * PLACED);
         self.flags.store(flags, Relaxed);
         self.sequence.store(start + 2, Release);
     }

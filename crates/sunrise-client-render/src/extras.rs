@@ -203,7 +203,10 @@ impl Extras {
         push("dynamicLights", &bool_text(self.dynamic_lights));
         push("lodZoomDetail", &bool_text(self.lod_zoom_detail));
         push("uiSoundReserve", &bool_text(self.ui_sound_reserve));
-        push("modAudioStreams", &bool_text(self.mod_audio_streams));
+        // Written only when off, so a file with the default keeps the format it always had.
+        if !self.mod_audio_streams {
+            push("modAudioStreams", &bool_text(false));
+        }
         push("ownNameTag", &bool_text(self.own_name_tag));
         push(
             "skipModdedSplashesIfVanillaModified",
