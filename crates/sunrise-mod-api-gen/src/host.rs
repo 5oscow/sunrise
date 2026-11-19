@@ -505,6 +505,9 @@ pub(super) fn game_forwarders(root: &Path) -> Result<String, String> {
                         Some(error) if outer_type(error, "LevelReadError") => format!(
                             "{call}.try_into_api().unwrap_or(Err(mod_api::LevelReadError::Unavailable))"
                         ),
+                        Some(error) if outer_type(error, "AudioRefusal") => format!(
+                            "{call}.try_into_api().unwrap_or(Err(mod_api::AudioRefusal::Unavailable))"
+                        ),
                         Some(error) if outer_type(error, "GameRuleReadError") => format!(
                             "{call}.try_into_api().expect(\"game rule values convert infallibly\")"
                         ),
@@ -517,7 +520,9 @@ pub(super) fn game_forwarders(root: &Path) -> Result<String, String> {
                     call
                 };
                 let typed_access_error = result_error(&entry.sig.output).filter(|error| {
-                    outer_type(error, "LevelReadError") || outer_type(error, "LevelWriteError")
+                    outer_type(error, "LevelReadError")
+                        || outer_type(error, "LevelWriteError")
+                        || outer_type(error, "AudioRefusal")
                 });
                 if typed_access_error.is_none() {
                     unwinding.insert(format!("{}::{name}", area.stem));
@@ -604,8 +609,8 @@ pub(super) fn game_forwarders(root: &Path) -> Result<String, String> {
 /// only shrinks: `tools/ci/check_unwinding_methods.py` refuses a line added since the base.
 const UNWINDING_METHODS: &str = "crates/sunrise-mod-api-gen/unwinding-methods.txt";
 
-/// A gated method that returns no `Result` with a refusal error (`LevelReadError` or
-/// `LevelWriteError`, whose `Unavailable` the forwarder returns) can only refuse a wrong-phase
+/// A gated method that returns no `Result` with a refusal error (`LevelReadError`,
+/// `LevelWriteError` or `AudioRefusal`, whose `Unavailable` the forwarder returns) can only refuse a wrong-phase
 /// call by unwinding. A new one is refused unless it is listed; a listed one that has gained a
 /// refusal, or is gone, must leave the list.
 fn check_unwinding(

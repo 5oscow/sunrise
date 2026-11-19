@@ -8265,6 +8265,7 @@ impl Game<'_> {
         pr.lap("pr_camera");
         self.audio
             .set_listener([camera.x, camera.y, camera.z], view_yaw, view_pitch);
+        self.follow_audio_stream_entities();
         pr.lap("pr_listener");
         let block = [
             camera.x.floor() as i32,
