@@ -6,6 +6,7 @@ use super::{
     json::{self, Json},
     seed_text::parse_seed,
 };
+pub use sunrise_core::text::parse_java_uuid as parse_uuid;
 use sunrise_core::text::{parse_java_integer, parse_java_long};
 use sunrise_java_properties::{Properties, date_string, now_millis};
 
@@ -178,24 +179,6 @@ pub fn generate_secret_key(entropy: &mut dyn Entropy) -> String {
     (0..40)
         .map(|_| char::from(ALPHABET[entropy.next_int(ALPHABET.len() as u32) as usize]))
         .collect()
-}
-
-/// UUID.fromString (the lenient JDK parser: five dash-separated hex groups).
-pub fn parse_uuid(s: &str) -> Option<u128> {
-    let parts: Vec<&str> = s.split('-').collect();
-    if parts.len() != 5 || s.len() > 36 {
-        return None;
-    }
-    let mut v = [0u64; 5];
-    for (i, p) in parts.iter().enumerate() {
-        if p.is_empty() || p.len() > 16 {
-            return None;
-        }
-        v[i] = u64::from_str_radix(p, 16).ok()?;
-    }
-    let msb = (v[0] & 0xffff_ffff) << 32 | (v[1] & 0xffff) << 16 | (v[2] & 0xffff);
-    let lsb = (v[3] & 0xffff) << 48 | (v[4] & 0xffff_ffff_ffff);
-    Some(u128::from(msb) << 64 | u128::from(lsb))
 }
 
 /// Boolean.valueOf.
@@ -742,6 +725,16 @@ mod tests {
         assert!(p.random_seed);
         assert_eq!(p.seed, 7);
     }
+    #[test]
+    fn uuid_parsing_accepts_java_digits_but_rejects_signed_long_overflow() {
+        // Temurin 25 UUID.fromString, including the non-canonical fallback.
+        assert_eq!(
+            parse_uuid("d2Acd4F-０ａ-adB1-ED8-fB5"),
+            Some(0x0d2acd4f000aadb10ed8000000000fb5)
+        );
+        assert_eq!(parse_uuid("ffffffffffffffff-0-0-0-0"), None);
+    }
+
     #[test]
     fn parses_like_vanilla() {
         let mut raw = Properties::default();
