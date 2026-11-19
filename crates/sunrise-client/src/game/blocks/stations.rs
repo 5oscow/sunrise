@@ -2614,9 +2614,12 @@ mod tests {
             AddAttributeTooltipsEvent, ClientHost, Hooks, ItemResource, ItemTooltipEvent, ModEntry,
             Mods, TooltipElement,
         };
+        use std::sync::atomic::{AtomicBool, Ordering};
         use sunrise_core::nbt::Tag;
 
-        struct Listener;
+        const BASE_NAME: &str = "base item line";
+        const REENTERED: &str = "reentered tooltip listener";
+        struct Listener(AtomicBool);
         #[mod_api::__subscriptions]
         impl Hooks for Listener {
             fn add_attribute_tooltips(
@@ -2630,28 +2633,42 @@ mod tests {
             }
 
             fn item_tooltip(&self, host: &dyn ClientHost, event: &mut ItemTooltipEvent<'_>) {
+                if self.0.swap(true, Ordering::Relaxed) {
+                    event
+                        .lines
+                        .push((mod_api::Text::literal(REENTERED), u32::MAX));
+                    return;
+                }
                 // Asking for the same stack must return base lines, not enter another listener.
                 let nested = ItemResource::of(event.stack)
                     .tooltip(host, event.advanced, event.creative)
                     .unwrap();
-                assert!(
-                    nested
-                        .iter()
-                        .any(|line| matches!(line, TooltipElement::Text(_, _)))
-                );
+                self.0.store(false, Ordering::Relaxed);
+                assert!(matches!(
+                    nested.first(),
+                    Some(TooltipElement::Text(text, _)) if *text == mod_api::Text::literal(BASE_NAME)
+                ));
                 assert!(!nested.contains(&TooltipElement::Text(
-                    mod_api::Text::literal("listener"),
-                    u32::MAX
+                    mod_api::Text::literal(REENTERED),
+                    u32::MAX,
                 )));
                 event
                     .lines
                     .push((mod_api::Text::literal("listener"), u32::MAX));
             }
         }
-        let mods: Mods = vec![ModEntry::new("listener", Box::new(Listener))].into();
+        let mods: Mods = vec![ModEntry::new(
+            "listener",
+            Box::new(Listener(AtomicBool::new(false))),
+        )]
+        .into();
         mod_platform::testing::with_mods(mods, || {
             crate::game::native_entity_refs::tests::with_client_game(|game| {
-                let stack = super::ItemStack::new("minecraft:iron_sword", 1);
+                let name = Tag::compound([("text", Tag::String(BASE_NAME.into()))]);
+                let mut stack = super::ItemStack::new("minecraft:iron_sword", 1);
+                stack
+                    .data_mut()
+                    .set_other("minecraft:item_name", Some(name.clone()));
                 let resource = ItemResource::of(&crate::game::api_values::test_snapshot(&stack));
                 let inventory: Vec<_> = game
                     .stack_tooltip_lines(&stack, false, false)
@@ -2693,6 +2710,9 @@ mod tests {
                 )));
 
                 let mut crossbow = super::ItemStack::new("minecraft:crossbow", 1);
+                crossbow
+                    .data_mut()
+                    .set_other("minecraft:item_name", Some(name));
                 crossbow
                     .data_mut()
                     .charged
