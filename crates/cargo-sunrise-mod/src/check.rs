@@ -4,7 +4,9 @@
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::Path;
+use sunrise_mod_package::Package;
 use sunrise_mod_package::index::{self, Facts, Kind};
+use sunrise_mod_package::manifest::{MANIFEST, MAX_MANIFEST, MAX_USES};
 use sunrise_shader_api::mod_pipeline;
 
 pub struct Report {
@@ -127,6 +129,9 @@ pub fn check(
     }
     index::open(&kind)?;
     let facts = index::inspect(&kind, path)?;
+    if kind == Kind::NativeMod {
+        uses_list(path)?;
+    }
     let signed = match (key, signature) {
         (Some(key), Some(sig)) => {
             index::verify_signature(key, sig, path)?;
@@ -142,6 +147,38 @@ pub fn check(
         size,
         signed,
     })
+}
+
+/// A native mod that no `[native.*]` table or internals list ties to one build carries the list
+/// of what it uses, made for the build it pins: without it the mod works on that one build only.
+fn uses_list(path: &Path) -> Result<(), String> {
+    use sunrise_mod_package::mod_surface::uses::{USES_FILE, UsesTable};
+    let manifest =
+        Package::entry(path, MANIFEST, MAX_MANIFEST)?.ok_or_else(|| format!("no {MANIFEST}"))?;
+    let manifest = String::from_utf8(manifest).map_err(|e| format!("{MANIFEST}: {e}"))?;
+    let table: toml::Table = toml::from_str(&manifest).map_err(|e| format!("{MANIFEST}: {e}"))?;
+    if mod_source::mod_uses::exact(&table).is_some() {
+        return Ok(());
+    }
+    let pin = Package::read(path)?
+        .manifest
+        .native
+        .map(|native| native.sunrise)
+        .unwrap_or_default();
+    let repack = "Pack the mod with `cargo sunrise-mod build`, which writes the list; if it says it cannot read the mod's code, fix what it names first.";
+    let Some(bytes) = Package::entry(path, USES_FILE, MAX_USES)? else {
+        return Err(format!(
+            "no {USES_FILE}: the package does not list what the mod uses, so it would work on game build {pin} only and stop at the next one. {repack}"
+        ));
+    };
+    let list = UsesTable::read(&bytes).map_err(|e| format!("{USES_FILE}: {e}. {repack}"))?;
+    if list.made_for != pin {
+        return Err(format!(
+            "{USES_FILE} was made for game build {}, and the mod pins {pin}, so the list says nothing about the pinned build. {repack}",
+            list.made_for
+        ));
+    }
+    Ok(())
 }
 
 /// The references among a project's content files ([`sunrise_mod_package::content::check_references`]):
