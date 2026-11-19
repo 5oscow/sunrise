@@ -249,6 +249,16 @@ impl Names {
         }
         Self { map }
     }
+    /// The translation key of an item's name, as the pinned English map has it: `item.*` or,
+    /// for a block item, `block.*`. The choice does not depend on the selected language.
+    pub fn description_key(&self, id: &str) -> String {
+        let (namespace, path) = id.split_once(':').unwrap_or(("minecraft", id));
+        ["item", "block"]
+            .map(|prefix| format!("{prefix}.{namespace}.{path}"))
+            .into_iter()
+            .find(|key| self.map.contains_key(key))
+            .unwrap_or_else(|| format!("item.{namespace}.{path}"))
+    }
     pub fn item(&self, id: &str) -> String {
         let (namespace, path) = id.split_once(':').unwrap_or(("minecraft", id));
         self.map

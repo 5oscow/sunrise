@@ -288,17 +288,21 @@ fn can_store_enchantments(stack: &ItemStack) -> bool {
 pub fn increased_repair_cost(cost: u32) -> u32 {
     (u64::from(cost) * 2 + 1).min(i32::MAX as u64) as u32
 }
-/// `ItemStack.getHoverName`: the custom name, a potion's or tipped arrow's
-/// contents, a written book's title, the `item_name` component, else the
-/// item's or head owner's name.
-pub fn hover_name(names: &crate::creative::Names, stack: &ItemStack) -> String {
-    if let Some(name) = stack.custom_name() {
-        return name;
+/// `ItemStack.getHoverName` as a component: the custom name as written, a potion's or tipped
+/// arrow's contents, a written book's title, the `item_name` component, else the item's or head
+/// owner's name, translatable so each viewer renders it in their own language.
+pub fn hover_name_text(names: &crate::creative::Names, stack: &ItemStack) -> crate::text::Text {
+    use crate::text::Text;
+    if stack.custom_name().is_some()
+        && let Some(component) = stack.data().and_then(|d| d.custom_name.as_ref())
+    {
+        return crate::entity_nbt::name_text(component);
     }
     if let Some(key) = crate::brewing::contents_name_key(stack) {
-        return names
-            .display_get(&key)
-            .unwrap_or_else(|| names.display_item(&stack.item));
+        let fallback = names
+            .get(&key)
+            .map_or_else(|| names.item(&stack.item), str::to_owned);
+        return Text::translate_with_fallback(&key, &fallback, &[]);
     }
     if let Some(title) = stack
         .data()
@@ -306,28 +310,38 @@ pub fn hover_name(names: &crate::creative::Names, stack: &ItemStack) -> String {
         .map(|w| w.title.as_str())
         .filter(|t| !t.trim().is_empty())
     {
-        return title.to_owned();
+        return Text::literal(title);
     }
     if let Some(head) = crate::item_tooltip::player_head_name(stack) {
         // `PlayerHeadItem.getName`: a profile's name, else the item name.
-        return head.title(&|key| names.display_get(key));
+        return head.text();
     }
-    if let Some(name) = stack.item_name() {
-        return name;
+    if stack.item_name().is_some()
+        && let Some(component) = stack.data().and_then(|d| d.other("minecraft:item_name"))
+    {
+        return crate::entity_nbt::name_text(component);
     }
     if stack
         .data()
         .is_some_and(|d| d.other("!minecraft:item_name").is_some())
     {
         // `Item.getName` is `getOrDefault(ITEM_NAME, EMPTY)`.
-        return String::new();
+        return Text::literal("");
     }
     if stack.data().is_some_and(|d| d.ominous_banner) {
-        return names
-            .display_get("block.minecraft.ominous_banner")
-            .unwrap_or_else(|| "Ominous Banner".to_owned());
+        let key = "block.minecraft.ominous_banner";
+        return Text::translate_with_fallback(key, names.get(key).unwrap_or("Ominous Banner"), &[]);
     }
-    names.display_item(&stack.item)
+    Text::translate_with_fallback(
+        &names.description_key(&stack.item),
+        &names.item(&stack.item),
+        &[],
+    )
+}
+/// `ItemStack.getHoverName` as plain text in the current language: the component of
+/// [`hover_name_text`], rendered.
+pub fn hover_name(names: &crate::creative::Names, stack: &ItemStack) -> String {
+    hover_name_text(names, stack).plain()
 }
 /// `AnvilMenu.createResult`. `name` is the rename box text (None = untouched).
 pub fn anvil_result(
