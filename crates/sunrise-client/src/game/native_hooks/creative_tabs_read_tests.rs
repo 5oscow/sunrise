@@ -8,20 +8,13 @@ fn creative() -> Creative {
     let stack = |id: &str| format!("{{count:1,id:\"minecraft:{id}\"}}");
     let named =
         "{count:1,id:\"minecraft:stone\",components:{\"minecraft:custom_name\":\"Plinth\"}}";
-    Creative::from_json(&serde_json::json!({"schema": 3, "tabs": [
-        {"id": "minecraft:building_blocks", "type": "CATEGORY", "row": "TOP", "column": 0, "title": "Building Blocks",
-         "icon": stack("bricks"), "visible": true, "items": [stack("stone"), named]},
-        {"id": "minecraft:op_blocks", "type": "CATEGORY", "row": "BOTTOM", "column": 5, "title": "Operator Utilities",
-         "icon": stack("command_block"), "visible": false,
-         "items": [stack("command_block")], "permissions_only": [0]},
-        {"id": "minecraft:search", "type": "SEARCH", "row": "TOP", "column": 6, "title": "Search Items",
-         "icon": stack("compass"), "visible": true,
-         "items": [stack("stone"), stack("command_block")],
-         "lines": [["Stone"], ["Command Block"]], "tags": [[], []], "permissions_only": [1]},
-        {"id": "minecraft:inventory", "type": "INVENTORY", "row": "BOTTOM", "column": 6, "title": "Survival Inventory",
-         "icon": stack("chest"), "visible": true, "items": []}
-    ]}))
-    .unwrap()
+    let row = |snbt: &str| serde_json::json!({"kind":"stack","visibility":"PARENT_AND_SEARCH_TABS","snbt":snbt});
+    Creative::from_json(&serde_json::json!({"schema":4,"item_features":{},"potion_features":{},"tabs":[
+        {"id":"minecraft:building_blocks","type":"CATEGORY","build":[row(&stack("stone")),row(named)]},
+        {"id":"minecraft:op_blocks","type":"CATEGORY","build":[],"operator_build":[row(&stack("command_block"))]},
+        {"id":"minecraft:search","type":"SEARCH","build":[]},
+        {"id":"minecraft:inventory","type":"INVENTORY","build":[]}
+    ]})).unwrap()
 }
 
 /// Only item tabs, in order, with components kept, mod stacks after the tab's own, and the
@@ -31,7 +24,15 @@ fn item_tabs_with_their_stacks_and_the_builds_permissions() {
     let mut c = creative();
     let mod_stack = sunrise_client::items::ItemStack::new("minecraft:diamond", 1);
     let added = vec![("minecraft:building_blocks".to_owned(), vec![mod_stack])];
-    c.build(false, added.clone(), &Names::default());
+    let items = sunrise_items::items::Items::empty();
+    let holders = sunrise_items::creative_catalog::Holders::default();
+    let params = sunrise_items::creative_catalog::Parameters {
+        operator: false,
+        features: &[],
+        holders: &holders,
+        items: &items,
+    };
+    c.build(params, added.clone(), &Names::default());
     assert!(!c.permissions());
     let tabs: Vec<_> = item_tabs(&c).collect();
     let ids: Vec<&str> = tabs.iter().map(|t| t.id.as_str()).collect();
@@ -45,7 +46,14 @@ fn item_tabs_with_their_stacks_and_the_builds_permissions() {
     assert!(shown[0].extra.is_none());
     assert!(shown[1].extra.is_some());
 
-    c.build(true, added, &Names::default());
+    c.build(
+        sunrise_items::creative_catalog::Parameters {
+            operator: true,
+            ..params
+        },
+        added,
+        &Names::default(),
+    );
     assert!(c.permissions());
     let ids: Vec<&str> = item_tabs(&c).map(|t| t.id.as_str()).collect();
     assert_eq!(ids, ["minecraft:building_blocks", "minecraft:op_blocks"]);

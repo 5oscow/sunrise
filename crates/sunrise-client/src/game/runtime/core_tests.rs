@@ -950,10 +950,10 @@ fn shared_resources_can_cross_threads() {
 #[test]
 fn selecting_creative_tabs_does_not_drop_the_carried_stack_on_release() {
     let mut creative = Creative::from_json(&serde_json::json!({
-        "schema": 2,
+        "schema": 4, "item_features": {}, "potion_features": {},
         "tabs": [
-            {"type": "CATEGORY", "items": ["{count:1,id:\"minecraft:stone\"}"]},
-            {"type": "INVENTORY"}
+            {"id":"minecraft:building_blocks","type":"CATEGORY","build":[]},
+            {"id":"minecraft:inventory","type":"INVENTORY","build":[]}
         ]
     }))
     .unwrap();

@@ -9,6 +9,10 @@ use std::{
     path::Path,
     sync::{Arc, Mutex, OnceLock},
 };
+use sunrise_items::{
+    creative_catalog::{Catalog, Kind, Parameters, TabContents},
+    item_data::component_snapshot,
+};
 
 #[derive(Clone, Debug)]
 pub struct Tab {
@@ -48,15 +52,6 @@ impl Tab {
         }
     }
 }
-/// A tab as exported, built with permissions: `operator` marks the stacks a
-/// build without them leaves out (the export's `permissions_only`).
-#[derive(Clone, Debug)]
-struct Exported {
-    tab: Tab,
-    /// `CreativeModeTab.Type.CATEGORY`: shown only with a stack (`shouldDisplay`).
-    category: bool,
-    operator: Vec<bool>,
-}
 /// What the client's creative search trees (SessionSearchTrees) index for one
 /// stack of the search tab: its creative tooltip lines and its item tags.
 #[derive(Clone, Debug, Default)]
@@ -87,18 +82,20 @@ pub struct Creative {
     search_index: Vec<SearchEntry>,
     /// The session's enchantment registry, shared with the hover tooltips.
     enchantments: Arc<Enchantments>,
-    /// Every exported tab, and the search tab's stacks with their entries and
-    /// whether only permissions list them: `rebuild` keeps what is shown.
-    exported: Vec<Exported>,
-    exported_search: Vec<(ItemStack, SearchEntry, bool)>,
-    /// The `hasPermissions` the tabs were last built with
-    /// (`CreativeModeTabs.tryRebuildTabContents`).
+    catalog: Catalog,
+    headers: Vec<Tab>,
+    /// Prepared search presentation only, keyed by item and exact components.
+    metadata: HashMap<(Arc<str>, Option<sunrise_core::nbt::Tag>), SearchEntry>,
+    /// Non-tabbed content items still live at the search UI's tail.
+    ungrouped: Vec<ItemStack>,
+    /// World item tags, inverted for search and Polytone presentation.
+    item_tags: Option<HashMap<String, Vec<(String, String)>>>,
+    contents: Option<Arc<[Arc<TabContents>]>>,
+    /// `hasPermissions` the tabs were last built with.
     permissions: bool,
-    /// Whether the game built the tabs since they loaded (`build`), which
-    /// asks the mods for their stacks: until then only the exported ones.
+    features: Arc<[String]>,
     built: bool,
-    /// The stacks mods added to item tabs in the last build
-    /// (`BuildCreativeModeTabContentsEvent`), by tab id, in the order asked.
+    /// The append-only v1 contributions, in their original dispatch order.
     added: Vec<(String, Vec<ItemStack>)>,
     /// ItemPickerMenu.items: what the grid shows, filled when the tab or the
     /// search changes (selectTab, refreshSearchResults), not on every frame.
@@ -110,6 +107,84 @@ pub struct Creative {
     /// The packs' Polytone creative tab modifiers, applied by `rebuild`.
     pack: Vec<crate::polytone_creative_tabs::TabModifier>,
 }
+/// The same registries a vanilla client finishes configuring, in network ID order.
+/// Known-pack entries have already been filled from local resources by configuration.
+pub fn live_holders(
+    builtin: &sunrise_protocol::registry::Builtin,
+    dynamic: &sunrise_protocol::registry::Dynamic,
+) -> sunrise_items::creative_catalog::Holders {
+    use std::num::NonZeroU8;
+    use sunrise_core::nbt::Tag;
+    use sunrise_items::creative_catalog::{Enchantment, Holders, Painting};
+    let size = |value: &Tag| {
+        let n = match *value {
+            Tag::Byte(n) => i64::from(n),
+            Tag::Short(n) => i64::from(n),
+            Tag::Int(n) => i64::from(n),
+            Tag::Long(n) => n,
+            _ => return None,
+        };
+        NonZeroU8::new(u8::try_from(n).ok()?)
+    };
+    let entries = |kind: &str| dynamic.registries.get(kind).into_iter().flatten();
+    let enchantments = entries("minecraft:enchantment")
+        .filter_map(|(id, data)| {
+            let max_level = size(data.as_ref()?.get("max_level")?)?;
+            Some(Enchantment {
+                id: id.clone(),
+                max_level,
+            })
+        })
+        .collect();
+    let placeable = dynamic
+        .tag("minecraft:painting_variant", "minecraft:placeable")
+        .unwrap_or_default();
+    let paintings = entries("minecraft:painting_variant")
+        .enumerate()
+        .filter_map(|(i, (id, data))| {
+            let data = data.as_ref()?;
+            Some(Painting {
+                id: id.clone(),
+                width: size(data.get("width")?)?,
+                height: size(data.get("height")?)?,
+                placeable: placeable.contains(&(i as i32)),
+            })
+        })
+        .collect();
+    let horns = dynamic
+        .tag("minecraft:instrument", "minecraft:goat_horns")
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|&id| dynamic.name("minecraft:instrument", id).map(str::to_owned))
+        .collect();
+    let banner_patterns = entries("minecraft:banner_pattern")
+        .map(|(id, _)| id.clone())
+        .collect();
+    let potions = builtin
+        .get("minecraft:potion")
+        .map_or_else(Vec::new, |registry| registry.names.clone());
+    Holders {
+        potions,
+        enchantments,
+        paintings,
+        horns,
+        banner_patterns,
+    }
+}
+
+fn append_unique(items: &mut Vec<ItemStack>, added: &[ItemStack]) {
+    for stack in added {
+        if stack.count > 0
+            && stack.item.as_ref() != "minecraft:air"
+            && !items
+                .iter()
+                .any(|item| item.same_item_same_components(stack))
+        {
+            items.push(stack.clone());
+        }
+    }
+}
+
 /// A text component's text, its colour (a name, or `#rrggbb`) and whether the
 /// text is a `translate` key, to be resolved when drawn.
 fn component_text(json: &Value) -> (String, Option<u32>, bool) {
@@ -275,134 +350,71 @@ impl Creative {
     pub const SCROLL_Y: f32 = 18.0;
     pub const SCROLL_WIDTH: f32 = 14.0;
     pub const SCROLL_HEIGHT: f32 = 112.0;
-    /// `creative-inventory.json` (VanillaCreativeTabsExporter); resources
-    /// prepared before it fall back to `creative-tabs.json`'s item ids.
+    /// Load the prepared recipes and the UI-only search metadata.
     pub fn load(root: &Path) -> Result<Self> {
-        let path = root.join("creative-inventory.json");
-        if path.exists() {
-            Self::from_json(&serde_json::from_slice(&fs::read(path)?)?)
-        } else {
-            Self::from_legacy(&serde_json::from_slice(&fs::read(
-                root.join("creative-tabs.json"),
-            )?)?)
-        }
+        Self::from_json(&serde_json::from_slice(&fs::read(
+            root.join("creative-inventory.json"),
+        )?)?)
     }
+
     pub fn from_json(raw: &Value) -> Result<Self> {
-        let mut tabs = Vec::new();
-        let mut search = Vec::new();
-        for t in raw["tabs"].as_array().into_iter().flatten() {
-            // The stacks only a build with permissions lists, by index.
-            let only: Vec<u64> = t["permissions_only"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(Value::as_u64)
-                .collect();
-            let mut items = Vec::new();
-            let mut operator = Vec::new();
-            for (i, v) in t["items"].as_array().into_iter().flatten().enumerate() {
-                let snbt = v.as_str().unwrap_or("-");
-                if let Some(stack) = crate::item_data::parse_stack(snbt)? {
-                    items.push(stack);
-                    operator.push(only.contains(&(i as u64)));
-                }
-            }
-            let kind = t["type"].as_str().unwrap_or("");
-            if kind == "SEARCH" {
-                let strings = |v: &Value| -> Vec<String> {
-                    v.as_array()
-                        .into_iter()
-                        .flatten()
-                        .filter_map(|s| s.as_str().map(java_lower))
-                        .collect()
-                };
-                for (i, stack) in items.iter().enumerate() {
-                    let (namespace, path) = split_id(&java_lower(&stack.item));
-                    let entry = SearchEntry {
-                        namespace,
-                        path,
-                        lines: strings(&t["lines"][i]),
-                        tags: strings(&t["tags"][i]).iter().map(|t| split_id(t)).collect(),
+        let catalog = Catalog::parse(raw)?;
+        let mut headers = Vec::new();
+        let mut metadata = HashMap::new();
+        let mut ungrouped = Vec::new();
+        for (tab, recipe) in raw["tabs"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .zip(catalog.tabs())
+        {
+            if recipe.kind == Kind::Search {
+                for row in tab["search_metadata"].as_array().into_iter().flatten() {
+                    let snbt = row["stack"]
+                        .as_str()
+                        .ok_or("missing search metadata stack")?;
+                    let stack = crate::item_data::parse_stack(snbt)?
+                        .ok_or("empty search metadata stack")?;
+                    let strings = |key: &str| {
+                        row[key]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter_map(Value::as_str)
+                            .map(java_lower)
                     };
-                    search.push((stack.clone(), entry, operator[i]));
+                    let (namespace, path) = split_id(&java_lower(&stack.item));
+                    metadata.insert(
+                        (stack.item.clone(), component_snapshot(&stack)),
+                        SearchEntry {
+                            namespace,
+                            path,
+                            lines: strings("lines").collect(),
+                            tags: strings("tags").map(|tag| split_id(&tag)).collect(),
+                        },
+                    );
+                    if row["ungrouped"] == true {
+                        ungrouped.push(stack);
+                    }
                 }
             }
-            let icon = t["icon"]
+            let icon = tab["icon"]
                 .as_str()
                 .and_then(|s| crate::item_data::parse_stack(s).ok().flatten());
-            tabs.push(Exported {
-                tab: Tab {
-                    id: t["id"].as_str().unwrap_or("").to_owned(),
-                    title: t["title"].as_str().unwrap_or("").to_owned(),
-                    icon: icon.map_or_else(|| "minecraft:stone".to_owned(), |s| s.item.to_string()),
-                    items,
-                    top: t["row"] == "TOP",
-                    column: t["column"].as_u64().unwrap_or(0) as u32,
-                    search: kind == "SEARCH",
-                    inventory: kind == "INVENTORY",
-                    hotbar: kind == "HOTBAR",
-                    page: t["page"].as_u64().unwrap_or(0) as u32,
-                    name: None,
-                },
-                category: kind == "CATEGORY",
-                operator,
+            headers.push(Tab {
+                id: recipe.id.clone(),
+                title: tab["title"].as_str().unwrap_or("").to_owned(),
+                icon: icon.map_or_else(|| "minecraft:stone".to_owned(), |s| s.item.to_string()),
+                items: Vec::new(),
+                top: tab["row"] == "TOP",
+                column: tab["column"].as_u64().unwrap_or(0) as u32,
+                search: recipe.kind == Kind::Search,
+                inventory: recipe.kind == Kind::Inventory,
+                hotbar: recipe.kind == Kind::Hotbar,
+                page: tab["page"].as_u64().unwrap_or(0) as u32,
+                name: None,
             });
         }
-        Ok(Self::new(tabs, search))
-    }
-    /// The old export: item ids per tab, no components, tooltips or tags.
-    fn from_legacy(raw: &Value) -> Result<Self> {
-        let mut tabs = Vec::new();
-        let mut search_items: Vec<ItemStack> = Vec::new();
-        for t in raw.as_array().into_iter().flatten() {
-            let items: Vec<ItemStack> = t["items"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|v| v.as_str().map(|id| ItemStack::new(id, 1)))
-                .collect();
-            if t["id"] == "minecraft:hotbar" || t["id"] == "minecraft:op_blocks" {
-                continue;
-            }
-            for i in &items {
-                if !search_items.iter().any(|s| s.item == i.item) {
-                    search_items.push(i.clone());
-                }
-            }
-            let kind = t["type"].as_str().unwrap_or("");
-            tabs.push(Exported {
-                operator: vec![false; items.len()],
-                tab: Tab {
-                    id: t["id"].as_str().unwrap_or("").to_owned(),
-                    title: t["title"].as_str().unwrap_or("").to_owned(),
-                    icon: t["icon"].as_str().unwrap_or("minecraft:stone").to_owned(),
-                    items,
-                    top: t["row"] == "TOP",
-                    column: t["column"].as_u64().unwrap_or(0) as u32,
-                    search: kind == "SEARCH",
-                    inventory: kind == "INVENTORY",
-                    hotbar: false,
-                    page: 0,
-                    name: None,
-                },
-                category: false,
-            });
-        }
-        let search = search_items
-            .into_iter()
-            .map(|s| {
-                let (namespace, path) = split_id(&java_lower(&s.item));
-                let entry = SearchEntry {
-                    namespace,
-                    path,
-                    ..Default::default()
-                };
-                (s, entry, false)
-            })
-            .collect();
-        Ok(Self::new(tabs, search))
-    }
-    fn new(exported: Vec<Exported>, exported_search: Vec<(ItemStack, SearchEntry, bool)>) -> Self {
         let mut creative = Self {
             tabs: Vec::new(),
             selected: 0,
@@ -419,83 +431,138 @@ impl Creative {
             search_items: Vec::new(),
             search_index: Vec::new(),
             enchantments: Arc::default(),
-            exported,
-            exported_search,
+            catalog,
+            headers,
+            metadata,
+            ungrouped,
+            item_tags: None,
+            contents: None,
             permissions: false,
+            features: Arc::from([]),
             built: false,
             added: Vec::new(),
             shown: Mutex::new(None),
             lines_cache: Mutex::new(None),
             pack: Vec::new(),
         };
-        creative.rebuild();
-        creative
+        creative.project();
+        Ok(creative)
     }
-    /// `CreativeModeTabs.buildAllTabContents` with `permissions`: the operator
-    /// tab's display items generator lists its stacks only with them
-    /// (`hasPermissions`), and the search tab with it; a category tab is
-    /// shown with a stack (`CreativeModeTab.shouldDisplay`). The stacks mods
-    /// added (`added`) follow each tab's own, then join the end of the search
-    /// tab; a stack already listed there (same item and components) and an
-    /// empty one are left out.
-    fn rebuild(&mut self) {
-        let permissions = self.permissions;
-        let keep = |operator: bool| permissions || !operator;
-        let usable = |s: &&ItemStack| s.count > 0 && s.item.as_ref() != "minecraft:air";
-        let added = &self.added;
-        self.tabs = self
-            .exported
-            .iter()
-            .filter_map(|e| {
-                let mut items: Vec<ItemStack> = (e.tab.items.iter().zip(&e.operator))
-                    .filter(|(_, o)| keep(**o))
-                    .map(|(s, _)| s.clone())
-                    .collect();
-                for (_, stacks) in added.iter().filter(|(tab, _)| *tab == e.tab.id) {
-                    for stack in stacks.iter().filter(usable) {
-                        if !items.iter().any(|s| s.same_item_same_components(stack)) {
-                            items.push(stack.clone());
-                        }
-                    }
+
+    pub fn catalog(&self) -> &Catalog {
+        &self.catalog
+    }
+
+    /// Project the catalog and the v1 append-only hook onto the client UI.
+    /// The v1 hook adds stacks to each requested tab and, in dispatch order,
+    /// at the end of global search. It does not edit the catalog's lists.
+    fn project(&mut self) {
+        (self.tabs, self.search_items) = self.project_from(self.contents.as_deref(), &self.added);
+        self.index_search();
+    }
+
+    fn project_from(
+        &self,
+        contents: Option<&[Arc<TabContents>]>,
+        added: &[(String, Vec<ItemStack>)],
+    ) -> (Vec<Tab>, Vec<ItemStack>) {
+        let mut search = Vec::new();
+        let mut tabs = Vec::new();
+        for (i, recipe) in self.catalog.tabs().iter().enumerate() {
+            let mut tab = self.headers[i].header();
+            if let Some(contents) = contents {
+                tab.items.clone_from(&contents[i].display);
+            }
+            if let Some((_, stacks)) = added.iter().find(|(tab, _)| *tab == recipe.id) {
+                append_unique(&mut tab.items, stacks);
+            }
+            if tab.search {
+                search.clone_from(&tab.items);
+                append_unique(&mut search, &self.ungrouped);
+                for (_, stacks) in added {
+                    append_unique(&mut search, stacks);
                 }
-                let mut tab = Tab {
-                    items,
-                    ..e.tab.header()
-                };
-                self.apply_pack(&mut tab);
-                (!e.category || !tab.items.is_empty()).then_some(tab)
-            })
-            .collect();
-        *self.lines_cache.lock().unwrap_or_else(|e| e.into_inner()) = None;
-        (self.search_items, self.search_index) = self
-            .exported_search
-            .iter()
-            .filter(|(_, _, o)| keep(*o))
-            .map(|(s, e, _)| (s.clone(), e.clone()))
-            .unzip();
-        for stack in added.iter().flat_map(|(_, stacks)| stacks).filter(usable) {
-            if !self
-                .search_items
-                .iter()
-                .any(|s| s.same_item_same_components(stack))
-            {
-                // No exported tooltip lines or tags: searched by its name.
-                let (namespace, path) = split_id(&java_lower(&stack.item));
-                self.search_index.push(SearchEntry {
-                    namespace,
-                    path,
-                    ..Default::default()
-                });
-                self.search_items.push(stack.clone());
+            }
+            self.apply_pack(&mut tab);
+            if contents.is_none() || recipe.kind != Kind::Category || !tab.items.is_empty() {
+                tabs.push(tab);
             }
         }
+        (tabs, search)
+    }
+
+    /// The listener-free projection for old explicit readers before the first screen build.
+    pub fn preview(&self, params: Parameters<'_>) -> (Vec<Tab>, Vec<ItemStack>) {
+        let contents = self.catalog.build(params, None, |_, _, _| {});
+        self.project_from(Some(&contents), &[])
+    }
+
+    pub fn built_contents(&self) -> Option<&[Arc<TabContents>]> {
+        self.contents.as_deref()
+    }
+
+    pub fn has_contents(&self) -> bool {
+        self.contents.is_some()
+    }
+
+    /// Registries were replaced (including another world joining). Never carry its suffix
+    /// or the client hook's additions over to the next holder provider.
+    pub fn reset_contents(&mut self) {
+        self.contents = None;
+        self.added.clear();
+        self.built = false;
+        self.permissions = false;
+        self.project();
+    }
+
+    fn index_search(&mut self) {
+        *self
+            .lines_cache
+            .get_mut()
+            .unwrap_or_else(|e| e.into_inner()) = None;
+        self.search_index = self
+            .search_items
+            .iter()
+            .map(|stack| {
+                let key = (stack.item.clone(), component_snapshot(stack));
+                let mut entry = self.metadata.get(&key).cloned().unwrap_or_else(|| {
+                    let (namespace, path) = split_id(&java_lower(&stack.item));
+                    SearchEntry {
+                        namespace,
+                        path,
+                        ..Default::default()
+                    }
+                });
+                if let Some(tags) = &self.item_tags {
+                    entry.tags = tags.get(stack.item.as_ref()).cloned().unwrap_or_default();
+                }
+                entry
+            })
+            .collect();
         self.forget_items();
     }
-    /// The packs' Polytone creative tab modifiers (wiki "Creative Tab Modifiers"): the tabs are
-    /// built again with them.
+
+    /// Tag reload changes the search UI, not the cached catalog membership.
+    pub fn set_item_tags(&mut self, tags: Option<&HashMap<String, Vec<String>>>) {
+        self.item_tags = tags.map(|tags| {
+            let mut by_item = HashMap::<String, Vec<_>>::new();
+            let mut tags: Vec<_> = tags.iter().collect();
+            tags.sort_unstable_by_key(|(tag, _)| *tag);
+            for (tag, items) in tags {
+                let tag = split_id(&java_lower(tag));
+                for item in items {
+                    by_item.entry(item.clone()).or_default().push(tag.clone());
+                }
+            }
+            by_item
+        });
+        self.index_search();
+    }
+
+    /// Apply Polytone's stack, icon and name overlays without rebuilding the catalog.
     pub fn set_pack_modifiers(&mut self, pack: Vec<crate::polytone_creative_tabs::TabModifier>) {
         self.pack = pack;
-        self.rebuild();
+        self.project();
         self.selected = self.selected.min(self.tabs.len().saturating_sub(1));
     }
     /// A tab after the modifiers aimed at it: its items, icon and name.
@@ -507,9 +574,16 @@ impl Creative {
         for m in aimed {
             let in_tag = |item: &str, tag: &str| {
                 let (namespace, path) = split_id(tag);
-                self.exported_search.iter().any(|(s, e, _)| {
-                    *s.item == *item && e.tags.iter().any(|t| t.0 == namespace && t.1 == path)
-                })
+                let in_tag = |tags: &[(String, String)]| {
+                    tags.iter().any(|t| t.0 == namespace && t.1 == path)
+                };
+                match &self.item_tags {
+                    Some(tags) => tags.get(item).is_some_and(|tags| in_tag(tags)),
+                    None => self
+                        .metadata
+                        .iter()
+                        .any(|((id, _), entry)| id.as_ref() == item && in_tag(&entry.tags)),
+                }
             };
             let mut ids: Vec<String> = tab.items.iter().map(|s| s.item.to_string()).collect();
             m.apply(&mut ids, &in_tag);
@@ -536,15 +610,16 @@ impl Creative {
     /// time since they loaded and whenever `permissions` changed; None when
     /// they are current. The game asks the mods for each tab's stacks
     /// (`BuildCreativeModeTabContentsEvent`) and hands them to `build`.
-    pub fn tabs_to_build(&self, permissions: bool) -> Option<Vec<String>> {
-        if self.built && permissions == self.permissions {
+    pub fn tabs_to_build(&self, permissions: bool, features: &[String]) -> Option<Vec<String>> {
+        if self.built && permissions == self.permissions && features == &*self.features {
             return None;
         }
         Some(
-            self.exported
+            self.catalog
+                .tabs()
                 .iter()
-                .filter(|e| !e.tab.search && !e.tab.inventory && !e.tab.hotbar)
-                .map(|e| e.tab.id.clone())
+                .filter(|tab| tab.kind == Kind::Category)
+                .map(|tab| tab.id.clone())
                 .collect(),
         )
     }
@@ -565,16 +640,21 @@ impl Creative {
     /// (`refreshCurrentTabContents`).
     pub fn build(
         &mut self,
-        permissions: bool,
+        params: Parameters<'_>,
         added: Vec<(String, Vec<ItemStack>)>,
         names: &Names,
     ) {
         let selected = self.tab().id.clone();
         let row = self.first_row(names);
-        self.permissions = permissions;
+        self.permissions = params.operator;
+        self.features = Arc::from(params.features);
         self.built = true;
         self.added = added;
-        self.rebuild();
+        self.contents = Some(
+            self.catalog
+                .build(params, self.contents.as_deref(), |_, _, _| {}),
+        );
+        self.project();
         match self.tabs.iter().position(|t| t.id == selected) {
             Some(tab) => {
                 self.selected = tab;
@@ -599,8 +679,7 @@ impl Creative {
     /// Where a stack comes in the creative tabs (the search tab lists them
     /// all, in tab order): the same stack's place, else its item's first.
     /// None for items the tabs don't show.
-    pub fn order_of(&self, stack: &ItemStack) -> Option<usize> {
-        let items = &self.search_items;
+    pub fn order_of(items: &[ItemStack], stack: &ItemStack) -> Option<usize> {
         items
             .iter()
             .position(|s| s.same_item_same_components(stack))
@@ -941,22 +1020,33 @@ impl Creative {
     }
     /// The tabs whose `CreativeModeTab.contains(stack)` holds, in
     /// `CreativeModeTabs.tabs()` order, the search tab left out: the stack is
-    /// among the tab's search-tab items, by item and components. The export
-    /// lists each tab's own items; the search tab's stacks that no tab shows
-    /// (the enchanted books below their top level, `SEARCH_TAB_ONLY`) belong
-    /// to the tabs that show their item.
+    /// among the tab's search-tab items, by item and exact components. The visible display
+    /// also includes any v1/Polytone additions, which have no separate search visibility.
     pub fn tabs_containing(&self, stack: &ItemStack) -> Vec<usize> {
-        let category = |t: &Tab| !t.search && !t.inventory;
-        let tabs_where = |shows: &dyn Fn(&ItemStack) -> bool| -> Vec<usize> {
-            (0..self.tabs.len())
-                .filter(|&i| category(&self.tabs[i]) && self.tabs[i].items.iter().any(shows))
-                .collect()
-        };
-        let found = tabs_where(&|s| same_components(s, stack));
-        if found.is_empty() && self.search_items.iter().any(|s| same_components(s, stack)) {
-            return tabs_where(&|s| s.item == stack.item);
-        }
-        found
+        self.tabs
+            .iter()
+            .enumerate()
+            .filter_map(|(i, tab)| {
+                if tab.search || tab.hotbar || tab.inventory {
+                    return None;
+                }
+                let contains =
+                    |items: &[ItemStack]| items.iter().any(|shown| same_components(shown, stack));
+                let in_search = self
+                    .contents
+                    .as_ref()
+                    .and_then(|contents| {
+                        let index = self
+                            .catalog
+                            .tabs()
+                            .iter()
+                            .position(|recipe| recipe.id == tab.id)?;
+                        Some(contains(&contents[index].search))
+                    })
+                    .unwrap_or(false);
+                (in_search || contains(&tab.items)).then_some(i)
+            })
+            .collect()
     }
     /// The `#namespace:path` lines `getTooltipFromContainerItem` adds for a
     /// search tab stack while the search is a `#` query: the item tags
@@ -1199,6 +1289,35 @@ mod tests {
         (carried, effect)
     }
 
+    fn row(stack: impl AsRef<str>) -> Value {
+        serde_json::json!({"kind":"stack", "snbt":stack.as_ref(), "visibility":"PARENT_AND_SEARCH_TABS"})
+    }
+
+    fn search_only(stack: impl AsRef<str>) -> Value {
+        let mut row = row(stack);
+        row["visibility"] = serde_json::json!("SEARCH_TAB_ONLY");
+        row
+    }
+
+    fn fixture(tabs: Value) -> Creative {
+        let mut c = Creative::from_json(&serde_json::json!({
+            "schema":4, "item_features":{}, "potion_features":{}, "tabs":tabs,
+        }))
+        .unwrap();
+        c.contents = Some(c.catalog.build(
+            Parameters {
+                operator: false,
+                features: &[],
+                holders: &Default::default(),
+                items: &crate::items::Items::empty(),
+            },
+            None,
+            |_, _, _| {},
+        ));
+        c.project();
+        c
+    }
+
     /// Tabs as the export lists them: two block tabs sharing the oak log,
     /// ingredients with the top-level book only, the search tab with every
     /// stack (a level 1 book only there) and its tags, the inventory.
@@ -1210,32 +1329,132 @@ mod tests {
         };
         let log = r#"{count:1,id:"minecraft:oak_log"}"#;
         let dirt = r#"{count:1,id:"minecraft:dirt"}"#;
-        let tab = |id: &str, kind: &str, items: Vec<String>| serde_json::json!({"id": id, "type": kind, "title": id, "icon": log, "items": items});
-        let mut search = tab(
-            "minecraft:search",
-            "SEARCH",
-            vec![log.into(), dirt.into(), book(1), book(5)],
-        );
-        search["lines"] = serde_json::json!([[], [], [], []]);
-        search["tags"] = serde_json::json!([
-            [
-                "minecraft:logs",
-                "minecraft:oak_logs",
-                "minecraft:logs_that_burn"
-            ],
-            ["minecraft:dirt"],
-            [],
-            []
+        let tab = |id: &str, kind: &str, build: Vec<Value>| serde_json::json!({"id":id,"type":kind,"title":id,"icon":log,"build":build});
+        let mut search = tab("minecraft:search", "SEARCH", vec![]);
+        search["search_metadata"] = serde_json::json!([
+            {"stack":log,"tags":["minecraft:logs","minecraft:oak_logs","minecraft:logs_that_burn"]},
+            {"stack":dirt,"tags":["minecraft:dirt"]},
         ]);
-        Creative::from_json(&serde_json::json!({"tabs": [
-            tab("minecraft:building_blocks", "CATEGORY", vec![log.into()]),
-            tab("minecraft:natural_blocks", "CATEGORY", vec![log.into(), dirt.into()]),
+        fixture(serde_json::json!([
+            tab("minecraft:building_blocks", "CATEGORY", vec![row(log)]),
+            tab(
+                "minecraft:natural_blocks",
+                "CATEGORY",
+                vec![row(log), row(dirt)]
+            ),
             tab("minecraft:hotbar", "HOTBAR", vec![]),
             search,
-            tab("minecraft:ingredients", "CATEGORY", vec![book(5)]),
+            tab(
+                "minecraft:ingredients",
+                "CATEGORY",
+                vec![search_only(book(1)), row(book(5))]
+            ),
             tab("minecraft:inventory", "INVENTORY", vec![]),
-        ]}))
-        .unwrap()
+        ]))
+    }
+
+    #[test]
+    fn holder_projection_uses_registry_and_tag_order() {
+        use sunrise_core::nbt::Tag;
+        use sunrise_protocol::{
+            packets::configuration::{RegistryTags, TagEntry, UpdateTags},
+            registry::{Builtin, Dynamic, Ids},
+        };
+        let builtin = Builtin {
+            registries: HashMap::from([(
+                "minecraft:potion".into(),
+                Ids::from_names(vec!["minecraft:water".into(), "minecraft:awkward".into()]),
+            )]),
+        };
+        let mut dynamic = Dynamic {
+            registries: HashMap::from([
+                (
+                    "minecraft:enchantment".into(),
+                    vec![
+                        (
+                            "test:z".into(),
+                            Some(Tag::compound([("max_level", Tag::Int(3))])),
+                        ),
+                        (
+                            "test:a".into(),
+                            Some(Tag::compound([("max_level", Tag::Int(7))])),
+                        ),
+                    ],
+                ),
+                (
+                    "minecraft:painting_variant".into(),
+                    vec![(
+                        "test:mural".into(),
+                        Some(Tag::compound([
+                            ("width", Tag::Int(3)),
+                            ("height", Tag::Int(4)),
+                        ])),
+                    )],
+                ),
+                (
+                    "minecraft:instrument".into(),
+                    vec![("test:first".into(), None), ("test:second".into(), None)],
+                ),
+                (
+                    "minecraft:banner_pattern".into(),
+                    vec![("test:pattern".into(), None)],
+                ),
+            ]),
+            ..Default::default()
+        };
+        dynamic.add_tags(&UpdateTags {
+            registries: vec![
+                RegistryTags {
+                    registry: "minecraft:painting_variant".into(),
+                    tags: vec![TagEntry {
+                        name: "minecraft:placeable".into(),
+                        ids: vec![0],
+                    }],
+                },
+                RegistryTags {
+                    registry: "minecraft:instrument".into(),
+                    tags: vec![TagEntry {
+                        name: "minecraft:goat_horns".into(),
+                        ids: vec![1, 0],
+                    }],
+                },
+            ],
+        });
+        let holders = live_holders(&builtin, &dynamic);
+        assert_eq!(holders.potions, ["minecraft:water", "minecraft:awkward"]);
+        let enchantments: Vec<_> = holders
+            .enchantments
+            .iter()
+            .map(|e| (e.id.as_str(), e.max_level.get()))
+            .collect();
+        assert_eq!(enchantments, [("test:z", 3), ("test:a", 7)]);
+        let mural = &holders.paintings[0];
+        assert_eq!(
+            (
+                mural.id.as_str(),
+                mural.width.get(),
+                mural.height.get(),
+                mural.placeable
+            ),
+            ("test:mural", 3, 4, true)
+        );
+        assert_eq!(holders.horns, ["test:second", "test:first"]);
+        assert!(holders.banner_patterns.contains("test:pattern"));
+    }
+
+    #[test]
+    fn tag_reload_updates_search_without_asking_for_new_tab_contents() {
+        let mut c = tooltip_tabs();
+        let names = Names::default();
+        assert!(refresh(&mut c, false, &names));
+        assert_eq!(c.search_results("#oak_logs", &names), [0]);
+        c.set_item_tags(Some(&HashMap::from([(
+            "test:replacement".into(),
+            vec!["minecraft:oak_log".into()],
+        )])));
+        assert_eq!(c.search_results("#replacement", &names), [0]);
+        assert!(c.search_results("#oak_logs", &names).is_empty());
+        assert!(!refresh(&mut c, false, &names));
     }
 
     #[test]
@@ -1402,19 +1621,30 @@ mod tests {
             vec!["minecraft:hoes", "minecraft:enchantable/mining"],
         ];
         tags.extend(vec![vec![]; items]);
-        let raw = serde_json::json!({"schema": 2, "tabs": [
+        let build: Vec<_> = stacks
+            .iter()
+            .enumerate()
+            .map(|(i, stack)| {
+                if i < 2 {
+                    row(stack)
+                } else {
+                    search_only(stack)
+                }
+            })
+            .collect();
+        let metadata: Vec<_> = stacks.iter().zip(lines).zip(tags).map(|((stack,lines),tags)| {
+            serde_json::json!({"stack":stack,"lines":lines,"tags":tags})
+        }).collect();
+        fixture(serde_json::json!([
             {"id": "minecraft:functional_blocks", "type": "CATEGORY", "row": "TOP", "column": 3, "title": "Functional Blocks",
-             "icon": "{count:1,id:\"minecraft:oak_sign\"}", "visible": true,
-             "items": ["{count:1,id:\"minecraft:anvil\"}", "{count:1,id:\"minecraft:crafting_table\"}"]},
+             "icon": "{count:1,id:\"minecraft:oak_sign\"}", "build":build},
             {"id": "minecraft:op_blocks", "type": "CATEGORY", "row": "BOTTOM", "column": 5, "title": "Operator Utilities",
-             "icon": "{count:1,id:\"minecraft:command_block\"}", "visible": false, "items": []},
+             "icon": "{count:1,id:\"minecraft:command_block\"}", "build":[]},
             {"id": "minecraft:search", "type": "SEARCH", "row": "TOP", "column": 6, "title": "Search Items",
-             "icon": "{count:1,id:\"minecraft:compass\"}", "visible": true,
-             "items": stacks, "lines": lines, "tags": tags},
+             "icon": "{count:1,id:\"minecraft:compass\"}", "build":[], "search_metadata":metadata},
             {"id": "minecraft:inventory", "type": "INVENTORY", "row": "BOTTOM", "column": 6, "title": "Survival Inventory",
-             "icon": "{count:1,id:\"minecraft:chest\"}", "visible": true, "items": []}
-        ]});
-        Creative::from_json(&raw).unwrap()
+             "icon": "{count:1,id:\"minecraft:chest\"}", "build":[]}
+        ]))
     }
 
     #[test]
@@ -1492,13 +1722,15 @@ mod tests {
         let tab = |id: &str, column: u32, page: u32| {
             serde_json::json!({"id": format!("minecraft:{id}"), "type": "CATEGORY", "row": "TOP",
                 "column": column, "page": page, "title": id, "icon": stack("stone"),
-                "visible": true, "items": [stack("stone")]})
+                "build": [row(stack("stone"))]})
         };
-        let raw = serde_json::json!({"schema": 3, "tabs": [
-            tab("first", 0, 0), tab("second", 1, 0), tab("modded", 0, 1), tab("more", 1, 2),
+        let mut c = fixture(serde_json::json!([
+            tab("first", 0, 0),
+            tab("second", 1, 0),
+            tab("modded", 0, 1),
+            tab("more", 1, 2),
             tab("everywhere", 6, 0)
-        ]});
-        let mut c = Creative::from_json(&raw).unwrap();
+        ]));
         assert_eq!(c.pages(), 3);
         let count = c.tabs.len();
         let mut pages = Vec::new();
@@ -1525,21 +1757,20 @@ mod tests {
     /// place at the end of the search tab, only with them.
     fn with_operator_tab() -> Creative {
         let stack = |id: &str| format!("{{count:1,id:\"minecraft:{id}\"}}");
-        let raw = serde_json::json!({"schema": 3, "tabs": [
+        fixture(serde_json::json!([
             {"id": "minecraft:building_blocks", "type": "CATEGORY", "row": "TOP", "column": 0, "title": "Building Blocks",
-             "icon": stack("bricks"), "visible": true, "items": [stack("stone")]},
+             "icon": stack("bricks"), "build": [row(stack("stone"))]},
             {"id": "minecraft:op_blocks", "type": "CATEGORY", "row": "BOTTOM", "column": 5, "title": "Operator Utilities",
-             "icon": stack("command_block"), "visible": false,
-             "items": [stack("command_block"), stack("barrier")], "permissions_only": [0, 1]},
+             "icon": stack("command_block"), "build": [], "operator_build": [row(stack("command_block")),row(stack("barrier"))]},
             {"id": "minecraft:search", "type": "SEARCH", "row": "TOP", "column": 6, "title": "Search Items",
-             "icon": stack("compass"), "visible": true,
-             "items": [stack("stone"), stack("command_block"), stack("barrier")],
-             "lines": [["Stone"], ["Command Block"], ["Barrier"]], "tags": [[], [], []],
-             "permissions_only": [1, 2]},
+             "icon": stack("compass"), "build": [], "search_metadata": [
+                 {"stack":stack("stone"), "lines":["Stone"]},
+                 {"stack":stack("command_block"), "lines":["Command Block"]},
+                 {"stack":stack("barrier"), "lines":["Barrier"]}
+             ]},
             {"id": "minecraft:inventory", "type": "INVENTORY", "row": "BOTTOM", "column": 6, "title": "Survival Inventory",
-             "icon": stack("chest"), "visible": true, "items": []}
-        ]});
-        Creative::from_json(&raw).unwrap()
+             "icon": stack("chest"), "build": []}
+        ]))
     }
 
     fn tab_ids(c: &Creative) -> Vec<&str> {
@@ -1554,7 +1785,7 @@ mod tests {
         names: &Names,
         mods: &dyn Fn(&str, bool) -> Vec<ItemStack>,
     ) -> bool {
-        let Some(tabs) = c.tabs_to_build(permissions) else {
+        let Some(tabs) = c.tabs_to_build(permissions, &[]) else {
             return false;
         };
         let added = tabs
@@ -1564,7 +1795,16 @@ mod tests {
                 (tab, items)
             })
             .collect();
-        c.build(permissions, added, names);
+        c.build(
+            Parameters {
+                operator: permissions,
+                features: &[],
+                holders: &Default::default(),
+                items: &crate::items::Items::empty(),
+            },
+            added,
+            names,
+        );
         true
     }
 
@@ -1694,13 +1934,13 @@ mod tests {
         refresh_with(&mut c, false, &names, &|_, _| {
             vec![ItemStack::new("example:old", 1)]
         });
-        assert!(c.tabs_to_build(false).is_none());
+        assert!(c.tabs_to_build(false, &[]).is_none());
         c.invalidate_build();
         refresh_with(&mut c, false, &names, &|_, _| {
             vec![ItemStack::new("example:new", 1)]
         });
         assert_eq!(ids(c.search_items()), ["minecraft:stone", "example:new"]);
-        assert!(c.tabs_to_build(false).is_none());
+        assert!(c.tabs_to_build(false, &[]).is_none());
     }
 
     #[test]
@@ -1765,13 +2005,12 @@ mod tests {
 
     #[test]
     fn saved_hotbars_tab_shows_its_rows_and_locks_the_hint() {
-        let mut c = Creative::from_json(&serde_json::json!({"schema": 2, "tabs": [
+        let mut c = fixture(serde_json::json!([
             {"id": "minecraft:hotbar", "type": "HOTBAR", "row": "TOP", "column": 5, "title": "Saved Hotbars",
-             "icon": "{count:1,id:\"minecraft:bookshelf\"}", "visible": true, "items": []},
+             "icon": "{count:1,id:\"minecraft:bookshelf\"}", "build": []},
             {"id": "minecraft:inventory", "type": "INVENTORY", "row": "BOTTOM", "column": 6, "title": "Survival Inventory",
-             "icon": "{count:1,id:\"minecraft:chest\"}", "visible": true, "items": []}
-        ]}))
-        .unwrap();
+             "icon": "{count:1,id:\"minecraft:chest\"}", "build": []}
+        ]));
         assert!(c.tab().hotbar);
         assert!(!c.tab_headers()[1].hotbar);
         let mut hint = stack("paper", 1);
@@ -2039,7 +2278,7 @@ mod tests {
     /// both now handle the empty case.
     #[test]
     fn empty_creative_tabs_do_not_panic_on_tab_or_items() {
-        let c = Creative::from_json(&serde_json::json!({"tabs": []})).unwrap();
+        let c = fixture(serde_json::json!([]));
         assert!(c.tabs.is_empty());
         // Fallback tab: no panic, empty id, not search.
         assert_eq!(c.tab().id, "");

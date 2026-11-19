@@ -136,8 +136,8 @@ fn enabled(required: Option<&Vec<String>>, features: &[String]) -> bool {
 }
 
 impl Catalog {
-    pub fn parse(json: &[u8]) -> Result<Self, String> {
-        let catalog: Self = serde_json::from_slice(json).map_err(|e| e.to_string())?;
+    pub fn parse(json: &serde_json::Value) -> Result<Self, String> {
+        let catalog = Self::deserialize(json).map_err(|e| e.to_string())?;
         if catalog.schema != 4 {
             return Err(format!(
                 "unsupported creative inventory schema {}",
@@ -354,7 +354,7 @@ mod tests {
             "item_features": {"test:behind_flag":["test:experimental"]},
             "potion_features": {"test:future":["test:experimental"]},
         });
-        let catalog = Catalog::parse(data.to_string().as_bytes()).unwrap();
+        let catalog = Catalog::parse(&data).unwrap();
         let holders = serde_json::from_value(json!({
             "paintings": [
                 {"id":"test:wide","width":2,"height":1,"placeable":true},
@@ -410,16 +410,14 @@ mod tests {
 
     #[test]
     fn search_reads_the_current_prefix_and_previous_suffix_in_registry_order() {
-        let catalog = Catalog::parse(
-            br#"{
+        let catalog = Catalog::parse(&json!({
             "schema":4,"item_features":{},"potion_features":{},"tabs":[
                 {"id":"test:hotbar","type":"HOTBAR","build":[]},
                 {"id":"test:search","type":"SEARCH","build":[]},
                 {"id":"test:category","type":"CATEGORY","build":[]},
                 {"id":"test:inventory","type":"INVENTORY","build":[]}
             ]
-        }"#,
-        )
+        }))
         .unwrap();
         let stack = |id| ItemStack::new(id, 1);
         let prior = [

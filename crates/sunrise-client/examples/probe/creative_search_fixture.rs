@@ -13,7 +13,7 @@ use sunrise_client::{
     items::Items,
     lang::{self, Language},
 };
-use sunrise_items::creative_catalog::{Catalog, Holders, Parameters};
+use sunrise_items::creative_catalog::{Holders, Parameters};
 
 pub fn main() -> sunrise_client::Result<()> {
     let args: Vec<String> = crate::args().collect();
@@ -32,10 +32,19 @@ pub fn main() -> sunrise_client::Result<()> {
     )?;
     creative.set_enchantments(items.enchantments.clone());
     let permissions = args.get(5).is_some_and(|a| a == "permissions");
-    if creative.tabs_to_build(permissions).is_some() {
-        creative.build(permissions, Vec::new(), &names);
-    }
     let vanilla: Value = serde_json::from_slice(&fs::read(args.get(3).ok_or(usage)?)?)?;
+    let holders: Holders = serde_json::from_value(vanilla["holders"].clone())?;
+    let features: Vec<String> = serde_json::from_value(vanilla["features"].clone())?;
+    creative.build(
+        Parameters {
+            features: &features,
+            operator: permissions,
+            holders: &holders,
+            items: &items,
+        },
+        Vec::new(),
+        &names,
+    );
     let tabs: Vec<Value> = creative
         .tabs
         .iter()
@@ -60,20 +69,10 @@ pub fn main() -> sunrise_client::Result<()> {
         .iter()
         .map(|s| canon_stack(Some(s), &items))
         .collect();
-    let catalog = Catalog::parse(&catalog_json)?;
-    let holders: Holders = serde_json::from_value(vanilla["holders"].clone())?;
-    let features: Vec<String> = serde_json::from_value(vanilla["features"].clone())?;
-    let built = catalog.build(
-        Parameters {
-            features: &features,
-            operator: permissions,
-            holders: &holders,
-            items: &items,
-        },
-        None,
-        |_, _, _| {},
-    );
-    let built_tabs: Vec<_> = catalog.tabs().iter().zip(built.iter())
+    let built = creative
+        .built_contents()
+        .ok_or("screen did not build its catalog")?;
+    let built_tabs: Vec<_> = creative.catalog().tabs().iter().zip(built.iter())
         .map(|(tab, contents)| {
             let canon = |stacks: &[sunrise_client::items::ItemStack]| stacks.iter()
                 .map(|stack| canon_stack(Some(stack), &items)).collect::<Vec<_>>();

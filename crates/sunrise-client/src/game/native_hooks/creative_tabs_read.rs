@@ -8,7 +8,13 @@ impl Game<'_> {
     /// The creative inventory's item tabs with their stacks, and the `hasPermissions` they were
     /// last built with.
     pub(in crate::game) fn creative_tabs(&self) -> mod_api::CreativeModeTabs {
-        creative_tabs_of(&self.creative_screen)
+        match self.preview_creative() {
+            Some((tabs, _)) => creative_tabs_of_tabs(&tabs, false),
+            None => creative_tabs_of_tabs(
+                &self.creative_screen.tabs,
+                self.creative_screen.permissions(),
+            ),
+        }
     }
     /// `ItemStackRenderState.usesBlockLight` of `stack` resolved for `context`.
     pub(in crate::game) fn item_uses_block_light(
@@ -26,18 +32,25 @@ impl Game<'_> {
 
 /// The tabs `creative_tabs` lists: the item tabs, not the search, saved toolbars or survival
 /// inventory tabs, in `CreativeModeTabs.tabs()` order.
+#[cfg(test)]
 pub(super) fn item_tabs(
     creative: &sunrise_client::creative::Creative,
 ) -> impl Iterator<Item = &sunrise_client::creative::Tab> {
-    creative
-        .tabs
-        .iter()
+    category_tabs(&creative.tabs)
+}
+
+fn category_tabs(
+    tabs: &[sunrise_client::creative::Tab],
+) -> impl Iterator<Item = &sunrise_client::creative::Tab> {
+    tabs.iter()
         .filter(|tab| !tab.search && !tab.inventory && !tab.hotbar)
 }
 
-/// The item tabs of `creative` with their stacks, and its `hasPermissions`.
-fn creative_tabs_of(creative: &sunrise_client::creative::Creative) -> mod_api::CreativeModeTabs {
-    let tabs = item_tabs(creative)
+fn creative_tabs_of_tabs(
+    tabs: &[sunrise_client::creative::Tab],
+    permissions: bool,
+) -> mod_api::CreativeModeTabs {
+    let tabs = category_tabs(tabs)
         .map(|tab| {
             let items = tab
                 .items
@@ -47,5 +60,5 @@ fn creative_tabs_of(creative: &sunrise_client::creative::Creative) -> mod_api::C
             mod_api::CreativeModeTabInfo::new(tab.id.clone(), items)
         })
         .collect();
-    mod_api::CreativeModeTabs::new(creative.permissions(), tabs)
+    mod_api::CreativeModeTabs::new(permissions, tabs)
 }

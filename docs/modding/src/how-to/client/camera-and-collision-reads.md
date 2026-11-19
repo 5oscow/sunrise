@@ -208,9 +208,9 @@ These read the local player as the client sees it. They take no mod-controlled n
   registry id and `display_items` (`CreativeModeTab.getDisplayItems`, components kept), and the build's
   `has_permissions`. Mod stacks from `build_creative_mode_tab_contents` follow a tab's own, so this is
   the read for "which tab shows this stack": `tabs_showing(&stack)` matches by item and components. The
-  operator tab is listed only when the last build had permissions. The contents come from the game's
-  tab export, built with vanilla's default feature flags: a world's feature set does not change them,
-  so there is no feature field. Empty before resources load; the same on native and wasm.
+  operator tab is listed only when the last build had permissions. The builder uses the world's
+  registry holders and enabled feature flags. Before the first screen build, the read builds a normal
+  catalog without firing the hook. Empty before resources load; the same on native and wasm.
 - `ClientHost::item_uses_block_light(&stack, context)` is `ItemStackRenderState.usesBlockLight` of the
   stack's model resolved for an `ItemDisplayContext` (no owner or level): true for a model lit like a
   block from the side (`gui_light: side`), false for a flat item lit from the front. It is what

@@ -32,7 +32,10 @@ impl Game<'_> {
     }
     /// The creative search tab's stacks in order (`getSearchTabDisplayItems`).
     pub(in crate::game) fn creative_search_items(&self) -> Vec<ItemStack> {
-        self.creative_screen.search_items().to_vec()
+        self.preview_creative().map_or_else(
+            || self.creative_screen.search_items().to_vec(),
+            |(_, search)| search,
+        )
     }
     /// Whether enchantment `id` can go on `item` (`Enchantment.isSupportedItem`).
     pub(in crate::game) fn enchantment_supports(&self, id: &str, item: mod_api::ItemKey) -> bool {

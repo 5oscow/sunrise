@@ -1220,9 +1220,8 @@ fn steps(
             }
         }
 
-        // The creative inventory (creative-inventory.json): every tab built by vanilla's
-        // CreativeModeTabs over the vanilla data pack's registries, with the search
-        // tab's tooltip lines and tags.
+        // The creative inventory recipes (creative-inventory.json): ordered generator
+        // rows and live-holder placeholders, plus search tooltip and tag metadata.
         run.stage();
         let creative = single(
             "the creative inventory",
