@@ -35,10 +35,7 @@ fn wire_loopback_container_loot_filled() {
             entity: None,
             opener: Some(7),
         });
-    let mut event = mod_api::ContainerLootFilledEvent {
-        context: &context,
-        drops: &mut drops,
-    };
+    let mut event = mod_api::ContainerLootFilledEvent::__wire_from_record(&context, &mut drops);
     WasmMod {
         subscribed: &[],
         listeners: &[],

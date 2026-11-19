@@ -157,12 +157,12 @@ fn generated_guest_item_dispatch_preserves_hands_sides_and_results() {
                     } else {
                         mod_api::HostSide::Server(&mut world)
                     },
-                    &mut mod_api::EntityInteractEvent {
+                    &mut mod_api::EntityInteractEvent::__wire_from_record(
                         hand,
-                        entity: 42,
-                        kind: "minecraft:zombie",
-                        stack: Some(&stack),
-                    },
+                        /* entity */ 42,
+                        /* kind */ "minecraft:zombie",
+                        /* stack */ Some(&stack),
+                    ),
                 );
                 assert!(SEEN.get());
                 assert_eq!(result, Some(answer));

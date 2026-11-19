@@ -302,11 +302,11 @@ fn wire_loopback_machine_tick_uses_checked_snapshot_writeback() {
     };
     proxy.block_entity_tick(
         &mut guest::Guest,
-        &mut mod_api::BlockEntityTickEvent {
-            pos: [1, 2, 3],
-            reply: &mut mod_api::BlockEntityTickReply::Changed,
-            entity: mod_api::ModBlockEntityView::new(&mut entity),
-        },
+        &mut mod_api::BlockEntityTickEvent::__wire_from_record(
+            /* reply */ &mut mod_api::BlockEntityTickReply::Changed,
+            /* pos */ [1, 2, 3],
+            /* entity */ mod_api::ModBlockEntityView::new(&mut entity),
+        ),
     );
     assert_eq!(entity.data, vec![8]);
     assert_eq!(entity.id(), identity);
@@ -323,11 +323,11 @@ fn wire_loopback_machine_tick_uses_checked_snapshot_writeback() {
     };
     bad.block_entity_tick(
         &mut guest::Guest,
-        &mut mod_api::BlockEntityTickEvent {
-            pos: [1, 2, 3],
-            reply: &mut mod_api::BlockEntityTickReply::Changed,
-            entity: mod_api::ModBlockEntityView::new(&mut entity),
-        },
+        &mut mod_api::BlockEntityTickEvent::__wire_from_record(
+            /* reply */ &mut mod_api::BlockEntityTickReply::Changed,
+            /* pos */ [1, 2, 3],
+            /* entity */ mod_api::ModBlockEntityView::new(&mut entity),
+        ),
     );
     assert_eq!(entity.data, vec![8]);
     assert_eq!(entity.revision().changes(), before);
@@ -336,11 +336,11 @@ fn wire_loopback_machine_tick_uses_checked_snapshot_writeback() {
     let mut reply = mod_api::BlockEntityTickReply::Changed;
     proxy.block_entity_tick(
         &mut guest::Guest,
-        &mut mod_api::BlockEntityTickEvent {
-            pos: [1, 2, 3],
-            reply: &mut reply,
-            entity: mod_api::ModBlockEntityView::new(&mut entity),
-        },
+        &mut mod_api::BlockEntityTickEvent::__wire_from_record(
+            &mut reply,
+            /* pos */ [1, 2, 3],
+            /* entity */ mod_api::ModBlockEntityView::new(&mut entity),
+        ),
     );
     assert_eq!(reply, mod_api::BlockEntityTickReply::Unchanged);
     assert_eq!(entity.data, [-1]);
@@ -624,15 +624,10 @@ fn wire_loopback_readonly_private_projection() {
         let mut lines = vec![(mod_api::Text::literal("prefix"), 99)];
         module.item_tooltip(
             &Client,
-            &mut mod_api::ItemTooltipEvent {
-                player: 1,
-                player_entity_id: 2,
-                stack: &stack,
-                display: &display,
-                advanced: false,
-                creative: false,
-                lines: &mut lines,
-            },
+            &mut mod_api::ItemTooltipEvent::__wire_from_record(
+                /* player */ 1, /* player_entity_id */ 2, &stack, &display,
+                /* advanced */ false, /* creative */ false, &mut lines,
+            ),
         );
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[0].1, 99);
@@ -872,23 +867,18 @@ fn wire_loopback_optional_borrowed_render_record() {
         let mut draw = Draw(0);
         module.render_living_post(
             &Client,
-            &mut mod_api::RenderLivingPostEvent {
-                entity: &mob,
-                parts,
-                draw: &mut draw,
-            },
+            &mut mod_api::RenderLivingPostEvent::__wire_from_record(
+                /* entity */ &mob, parts, &mut draw,
+            ),
         );
         assert_eq!(draw.0, light);
     }
     let mut draw = Draw(0);
     module.render_player_post(
         &Client,
-        &mut mod_api::RenderPlayerPostEvent {
-            player: &mob,
-            who: &player,
-            parts: None,
-            draw: &mut draw,
-        },
+        &mut mod_api::RenderPlayerPostEvent::__wire_from_record(
+            /* player */ &mob, /* who */ &player, /* parts */ None, &mut draw,
+        ),
     );
     assert_eq!(draw.0, 42);
 }
@@ -914,11 +904,11 @@ fn wire_loopback_optional_borrowed_record() {
         name: "test:actor",
     };
     for actor in [None, Some(&actor)] {
-        let mut event = mod_api::GameRuleChangedEvent {
-            rule: "test:rule",
-            value: mod_api::GameRuleValue::Bool(!actor.is_some()),
+        let mut event = mod_api::GameRuleChangedEvent::__wire_from_record(
+            /* rule */ "test:rule",
+            /* value */ mod_api::GameRuleValue::Bool(!actor.is_some()),
             actor,
-        };
+        );
         module.game_rule_changed(&mut World, &mut event);
         assert_eq!(event.value, mod_api::GameRuleValue::Bool(actor.is_some()));
     }
@@ -942,12 +932,12 @@ fn wire_loopback_item_picked_up_post_carries_the_original_and_writes_back_the_re
     let original = mod_api::ItemStack::new(REGISTERED_ITEM.get().unwrap(), 5).unwrap();
     let mut remaining = None;
     let item = mod_api::ItemEntityRef::new(mod_api::EntityRef::new(mod_api::WorldEpoch::new(1), 9));
-    let mut event = mod_api::ItemPickedUpPostEvent {
-        player: 0x1234_5678_9abc_def0_1234_5678_9abc_def0,
+    let mut event = mod_api::ItemPickedUpPostEvent::__wire_from_record(
+        /* player */ 0x1234_5678_9abc_def0_1234_5678_9abc_def0,
         item,
-        original: &original,
-        remaining: &mut remaining,
-    };
+        &original,
+        &mut remaining,
+    );
     module.item_picked_up_post(&mut World, &mut event);
     assert_eq!(
         PICKED_UP_POST.get(),
@@ -977,11 +967,11 @@ fn wire_loopback_item_toss_carries_the_item_entity_and_its_cancel() {
     };
     let item =
         mod_api::ItemEntityRef::new(mod_api::EntityRef::new(mod_api::WorldEpoch::new(1), 11));
-    let mut event = mod_api::ItemTossEvent {
-        player: 0x42,
-        item,
-        cancelled: false,
-    };
+    let mut input = Writer::new();
+    input.put(&0x42u128);
+    input.put(&item);
+    input.put(&false); // Not cancelled on entry.
+    let mut event = Reader::new(input.bytes()).take().unwrap();
     let flow = module.item_toss(&mut World, &mut event);
     assert_eq!(TOSSED.get(), Some((0x42, 11)));
     assert!(
@@ -1115,10 +1105,7 @@ fn wire_loopback_borrowed_tuple_inside_optional_context() {
     }
     .loot_drops(
         &mut World,
-        &mut mod_api::LootDropsEvent {
-            context: &context,
-            drops: &mut drops,
-        },
+        &mut mod_api::LootDropsEvent::__wire_from_record(&context, &mut drops),
     );
     assert!(drops.is_empty());
 }
@@ -1138,14 +1125,10 @@ fn wire_loopback_item_fished_edits_catch() {
         hook: 19,
         position: [1.0, 64.0, 2.0],
     });
-    let mut event = mod_api::ItemFishedEvent {
-        player: 7,
-        player_entity_id: 3,
-        fished: &fished,
-        drops: &mut drops,
-        rod_damage: 1,
-        cancelled: false,
-    };
+    let mut event = mod_api::ItemFishedEvent::__wire_from_record(
+        /* player */ 7, /* player_entity_id */ 3, &fished, /* rod_damage */ 1,
+        &mut drops, /* cancelled */ false,
+    );
     let flow = WasmMod {
         subscribed: &[],
         listeners: &[],
@@ -1217,10 +1200,11 @@ fn wire_loopback_tagged_frame_enum_preserves_side() {
             corrupt: false,
         },
     };
-    let mut event = mod_api::BlockEntityEvent {
-        block: "test:machine",
-        state: mod_api::BlockStateRecord::new(REGISTERED_BLOCK.get().unwrap(), 0).into(),
-    };
+    let mut event = mod_api::BlockEntityEvent::__wire_from_record(
+        /* block */ "test:machine",
+        /* state */
+        mod_api::BlockStateRecord::new(REGISTERED_BLOCK.get().unwrap(), 0).into(),
+    );
     assert!(
         proxy
             .block_entity(mod_api::LevelSide::Server(&guest::Guest), &mut event)
@@ -1828,11 +1812,9 @@ fn wire_loopback_roundtrip_and_atomic_writeback() {
         group: 0,
         corrupt: false,
     };
-    let mut event = mod_api::LivingJumpPowerEvent {
-        entity: 42,
-        kind: "original",
-        power: 1.5,
-    };
+    let mut event = mod_api::LivingJumpPowerEvent::__wire_from_record(
+        /* entity */ 42, /* kind */ "original", /* power */ 1.5,
+    );
     module.living_jump_power(&Context, &mut event);
     assert_eq!(event.power, 7.25);
     assert_eq!(event.kind, "original");
@@ -2058,12 +2040,12 @@ fn wire_loopback_render_living_pre_hidden_parts_write_back() {
     let mut hidden = mod_api::HiddenParts::default();
     hidden.hide_named("nose").unwrap();
     let mut draw = Draw(0);
-    let mut event = mod_api::RenderLivingPreEvent {
-        entity: &mob,
-        draw: &mut draw,
-        hidden: &mut hidden,
-        cancelled: false,
-    };
+    let mut event = mod_api::RenderLivingPreEvent::__wire_from_record(
+        /* entity */ &mob,
+        &mut draw,
+        &mut hidden,
+        /* cancelled */ false,
+    );
     module.render_living_pre(&Client, &mut event);
     assert!(!event.cancelled);
     assert!(hidden.contains_named("nose"));
@@ -2081,13 +2063,13 @@ fn wire_loopback_render_living_pre_hidden_parts_write_back() {
         };
         let mut hidden = mod_api::HiddenParts::default();
         let mut draw = Draw(0);
-        let mut event = mod_api::RenderPlayerPreEvent {
-            player: &player,
-            who: &who,
-            draw: &mut draw,
-            hidden: &mut hidden,
-            cancelled: false,
-        };
+        let mut event = mod_api::RenderPlayerPreEvent::__wire_from_record(
+            &player,
+            &who,
+            &mut draw,
+            &mut hidden,
+            /* cancelled */ false,
+        );
         module.render_player_pre(&Client, &mut event);
         assert_eq!(event.cancelled, cancelled);
         assert_eq!(draw.0, who.name.len() as u32);
@@ -2230,11 +2212,11 @@ fn wire_loopback_block_entity_data_received_preserves_tag_and_handle() {
     let tag = [("count".into(), Tag::Int(3))].into();
     proxy.block_entity_data_received(
         &Client,
-        &mut mod_api::BlockEntityDataReceivedEvent {
-            entity: notice_handle(),
-            source: mod_api::BlockEntityDataSource::Chunk,
-            tag: &tag,
-        },
+        &mut mod_api::BlockEntityDataReceivedEvent::__wire_from_record(
+            /* entity */ notice_handle(),
+            /* source */ mod_api::BlockEntityDataSource::Chunk,
+            &tag,
+        ),
     );
     assert_eq!(CALLS.get(), 1);
 }
@@ -2263,10 +2245,9 @@ fn datapack_sync_recipient_and_answer_cross_the_wire() {
         let mut types = Vec::new();
         module.datapack_sync(
             &mut World,
-            &mut mod_api::DatapackSyncEvent {
-                player,
-                recipe_types: &mut types,
-            },
+            &mut mod_api::DatapackSyncEvent::__wire_from_record(
+                player, /* recipe_types */ &mut types,
+            ),
         );
         assert_eq!(
             types,

@@ -44,16 +44,17 @@ fn menu_slot_pickup_answers_and_asks_match_native_through_the_wire() {
                 [(true, true, 64), (false, true, 1), (true, false, 2)]
             {
                 let ask = |part: &dyn MenuPart| {
-                    let mut event = MenuSlotRulesEvent {
+                    let context = MenuSlotContext::default();
+                    let mut event = MenuSlotRulesEvent::__wire_from_record(
                         menu,
                         slot,
-                        container: MenuContainer::Main,
-                        stack: &stack,
-                        context: &MenuSlotContext::default(),
+                        /* container */ MenuContainer::Main,
+                        &stack,
+                        &context,
                         may_place,
                         may_pickup,
                         max_stack,
-                    };
+                    );
                     part.menu_slot_rules(&World, &mut event);
                     (event.may_place, event.may_pickup, event.max_stack)
                 };

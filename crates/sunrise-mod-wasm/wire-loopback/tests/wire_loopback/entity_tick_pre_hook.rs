@@ -57,12 +57,12 @@ fn wire_loopback_entity_tick_pre_returns_the_familys_cancels() {
     let mut canceled = vec![1];
     module().entity_tick_pre(
         mod_api::HostSide::Server(&mut World),
-        &mut mod_api::EntityTickPreEvent {
-            dimension: "minecraft:the_nether",
-            entities: &[5, 6, 7],
-            kinds: &["minecraft:item", "minecraft:zombie", "minecraft:item"],
-            canceled: &mut canceled,
-        },
+        &mut mod_api::EntityTickPreEvent::__wire_from_record(
+            /* dimension */ "minecraft:the_nether",
+            /* entities */ &[5, 6, 7],
+            /* kinds */ &["minecraft:item", "minecraft:zombie", "minecraft:item"],
+            &mut canceled,
+        ),
     );
     assert_eq!(canceled, [1, 5, 7]);
 }
@@ -75,11 +75,11 @@ fn wire_loopback_entity_tick_post_lends_the_family_on_a_client() {
     let before = POSTS.load(std::sync::atomic::Ordering::Relaxed);
     module().entity_tick_post(
         mod_api::HostSide::Client(&mut World),
-        &mut mod_api::EntityTickPostEvent {
-            dimension: "minecraft:the_end",
-            entities: &[8, 9],
-            kinds: &["minecraft:cow", "minecraft:zombie"],
-        },
+        &mut mod_api::EntityTickPostEvent::__wire_from_record(
+            /* dimension */ "minecraft:the_end",
+            /* entities */ &[8, 9],
+            /* kinds */ &["minecraft:cow", "minecraft:zombie"],
+        ),
     );
     assert_eq!(POSTS.load(std::sync::atomic::Ordering::Relaxed), before + 1);
 }

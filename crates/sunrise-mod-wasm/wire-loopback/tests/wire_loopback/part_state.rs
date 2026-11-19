@@ -216,11 +216,11 @@ fn wire_loopback_part_state_edits_cross_and_keep_their_revision() {
     for _ in 0..3 {
         proxy.block_entity_tick(
             &mut world,
-            &mut BlockEntityTickEvent {
-                pos: [1, 64, 1],
-                reply: &mut mod_api::BlockEntityTickReply::Changed,
-                entity: mod_api::ModBlockEntityView::new(&mut data),
-            },
+            &mut BlockEntityTickEvent::__wire_from_record(
+                /* reply */ &mut mod_api::BlockEntityTickReply::Changed,
+                /* pos */ [1, 64, 1],
+                /* entity */ mod_api::ModBlockEntityView::new(&mut data),
+            ),
         );
     }
     // Each edit found the value it stored last time under the same revision: the erased value

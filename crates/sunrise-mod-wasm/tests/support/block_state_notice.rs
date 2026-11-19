@@ -52,14 +52,14 @@ impl World {
         }
     }
     pub fn event(&self, predicted: bool) -> OnBlockStateChangeEvent {
-        OnBlockStateChangeEvent {
-            dimension: mod_api::LevelDimension::Overworld,
-            pos: mod_api::BlockPos::new(1, 64, 1),
-            state: self.stone,
-            old: self.stone,
-            new: self.air,
-            predicted,
-        }
+        let mut input = mod_api::wire::Writer::new();
+        input.put(&mod_api::LevelDimension::Overworld);
+        input.put(&mod_api::BlockPos::new(1, 64, 1));
+        input.put(&self.stone); // State.
+        input.put(&self.stone); // Old state.
+        input.put(&self.air); // New state.
+        input.put(&predicted);
+        mod_api::wire::Reader::new(input.bytes()).take().unwrap()
     }
     pub fn check(&self, part: &dyn mod_api::BlockPart) {
         self.read.borrow_mut().clear();

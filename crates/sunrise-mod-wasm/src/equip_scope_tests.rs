@@ -74,16 +74,17 @@ fn equip_scope_copies_once_per_instance_for_eight_candidates_and_two_parts() {
                 for n in 0..8 {
                     let slot = ["head", "chest", "legs", "feet"][n % 4];
                     for index in [n % 2, 2] {
-                        let mut event = mod_api::CanEquipEvent {
+                        let mut event = mod_api::CanEquipEvent::__wire_from_record(
                             stack,
                             slot,
-                            entity: mod_api::LivingRef::new(mod_api::EntityRef::new(
+                            /* entity */
+                            mod_api::LivingRef::new(mod_api::EntityRef::new(
                                 mod_api::WorldEpoch::new(1),
                                 21,
                             )),
-                            kind: "minecraft:zombie",
-                            can_equip: false,
-                        };
+                            /* kind */ "minecraft:zombie",
+                            /* can_equip */ false,
+                        );
                         parts[index].can_equip(&ReadHost, &mut event);
                         assert_eq!(event.can_equip, slot == "feet");
                     }

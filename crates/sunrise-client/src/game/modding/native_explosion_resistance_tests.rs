@@ -248,12 +248,13 @@ pub(in crate::game) fn wasm_answer<T: Wire>(
     context.put(&level.epoch());
     context.put(&mod_api::TickId::new(1));
     let context: mod_api::LifecycleContext = Reader::new(context.bytes()).take().unwrap();
-    let mut tick = mod_api::ServerTickEvent {
-        context: &context,
-        phase: mod_api::ServerTickPhase::ServerTickStart {
+    let mut tick = mod_api::ServerTickEvent::__wire_from_record(
+        &context,
+        /* phase */
+        mod_api::ServerTickPhase::ServerTickStart {
             world_running: true,
         },
-    };
+    );
     mod_api::Hooks::server_tick(&module, game, &mut tick);
     assert!(
         matches!(

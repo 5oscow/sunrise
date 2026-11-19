@@ -50,12 +50,13 @@ fn wire_loopback_collision_shape_carries_the_query_in_and_the_boxes_back() {
     ] {
         ANSWER.set(answer.clone());
         let mut shape = None;
-        let mut event = mod_api::CollisionShapeEvent {
-            pos: mod_api::BlockPos::new(5, 64, 4),
-            state: mod_api::BlockStateRecord::new(REGISTERED_BLOCK.get().unwrap(), 0).into(),
-            query: &query,
-            shape: &mut shape,
-        };
+        let mut event = mod_api::CollisionShapeEvent::__wire_from_record(
+            /* pos */ mod_api::BlockPos::new(5, 64, 4),
+            /* state */
+            mod_api::BlockStateRecord::new(REGISTERED_BLOCK.get().unwrap(), 0).into(),
+            &query,
+            &mut shape,
+        );
         mod_api::BlockPart::collision_shape(&proxy, &Context, &mut event);
         assert_eq!(shape, answer);
     }

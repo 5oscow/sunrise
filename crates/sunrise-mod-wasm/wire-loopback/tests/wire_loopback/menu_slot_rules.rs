@@ -41,16 +41,17 @@ fn menu_slot_rules_answers_and_asks_match_native_through_the_wire() {
         for slot in 0..3 {
             for (may_place, max_stack) in [(true, 64), (false, 1), (true, 2)] {
                 let ask = |part: &dyn MenuPart| {
-                    let mut event = MenuSlotRulesEvent {
+                    let context = MenuSlotContext::default();
+                    let mut event = MenuSlotRulesEvent::__wire_from_record(
                         menu,
                         slot,
-                        container: MenuContainer::Main,
-                        stack: &stack,
-                        context: &MenuSlotContext::default(),
+                        /* container */ MenuContainer::Main,
+                        &stack,
+                        &context,
                         may_place,
-                        may_pickup: true,
+                        /* may_pickup */ true,
                         max_stack,
-                    };
+                    );
                     part.menu_slot_rules(&World, &mut event);
                     (event.may_place, event.max_stack)
                 };

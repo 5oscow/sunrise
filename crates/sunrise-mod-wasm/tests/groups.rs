@@ -121,15 +121,15 @@ fn capability_is_answered_only_within_its_group() {
                 .map(|entry| {
                     let mut message = Text::literal("");
                     let mut replies = Vec::new();
-                    let mut event = ServerChatEvent {
-                        cancelled: false,
-                        player_id: 1,
-                        player: 1,
-                        username: "tester",
-                        raw_text: "",
-                        message: &mut message,
-                        replies: &mut replies,
-                    };
+                    let mut event = ServerChatEvent::__wire_from_record(
+                        /* player_id */ 1,
+                        /* player */ 1,
+                        /* username */ "tester",
+                        /* raw_text */ "",
+                        &mut message,
+                        &mut replies,
+                        /* cancelled */ false,
+                    );
                     entry.fields().hooks.server_chat(&mut World, &mut event);
                     let mod_api::text::TextContent::Literal(answer) = message.content else {
                         panic!("expected literal reply")
@@ -173,15 +173,15 @@ fn capability_is_answered_only_within_its_group() {
                 for entry in mod_api::__private::mods().iter() {
                     let mut message = Text::literal("");
                     let mut replies = Vec::new();
-                    let mut event = ServerChatEvent {
-                        cancelled: false,
-                        player_id: 1,
-                        player: 1,
-                        username: "tester",
-                        raw_text: text,
-                        message: &mut message,
-                        replies: &mut replies,
-                    };
+                    let mut event = ServerChatEvent::__wire_from_record(
+                        /* player_id */ 1,
+                        /* player */ 1,
+                        /* username */ "tester",
+                        /* raw_text */ text,
+                        &mut message,
+                        &mut replies,
+                        /* cancelled */ false,
+                    );
                     entry.fields().hooks.server_chat(&mut World, &mut event);
                     if let mod_api::text::TextContent::Literal(answer) = message.content
                         && answer.starts_with("hog:")

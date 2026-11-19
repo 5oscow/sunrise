@@ -88,13 +88,10 @@ fn chat_recipient_hides_one_receiver_through_the_wire() {
         corrupt: false,
     };
     let ask = |message: &str, recipient: u128| {
-        let mut event = ChatRecipientEvent {
-            sender: 12,
-            sender_name: "guest12",
-            message,
-            recipient,
-            cancelled: false,
-        };
+        let mut event = ChatRecipientEvent::__wire_from_record(
+            /* sender */ 12, /* sender_name */ "guest12", message, recipient,
+            /* cancelled */ false,
+        );
         module.chat_recipient(&mut World::default(), &mut event)
     };
     assert!(matches!(ask("a secret", 13), Flow::Cancel));

@@ -44,15 +44,17 @@ fn wire_loopback_orb_merge_delivers_signed_values_and_counts_and_honours_cancel(
         group: 0,
         corrupt: false,
     };
-    let event = |dimension: &'static str| mod_api::ExperienceOrbMergeEvent {
-        dimension,
-        into: 1,
-        from: 41,
-        into_value: -32768,
-        into_count: i32::MAX as u32,
-        from_value: 5,
-        from_count: 1,
-        cancelled: false,
+    let event = |dimension: &'static str| {
+        mod_api::ExperienceOrbMergeEvent::__wire_from_record(
+            dimension,
+            /* into */ 1,
+            /* from */ 41,
+            /* into_value */ -32768,
+            /* into_count */ i32::MAX as u32,
+            /* from_value */ 5,
+            /* from_count */ 1,
+            /* cancelled */ false,
+        )
     };
     assert_eq!(
         module.experience_orb_merge(&mut World, &mut event("test:orb_merge")),

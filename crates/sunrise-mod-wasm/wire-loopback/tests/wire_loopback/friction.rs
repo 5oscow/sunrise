@@ -35,13 +35,14 @@ fn wire_loopback_friction_preserves_context_inputs_and_float_writeback() {
     };
     for answer in [0.98, f32::NAN, f32::INFINITY, -0.5, 3.0] {
         ANSWER.set(answer);
-        let mut event = mod_api::FrictionEvent {
-            entity: 7,
-            kind: "minecraft:oak_boat",
-            pos: mod_api::BlockPos::new(5, 64, 4),
-            state: mod_api::BlockStateRecord::new(REGISTERED_BLOCK.get().unwrap(), 0).into(),
-            friction: 0.6,
-        };
+        let mut event = mod_api::FrictionEvent::__wire_from_record(
+            /* entity */ 7,
+            /* kind */ "minecraft:oak_boat",
+            /* pos */ mod_api::BlockPos::new(5, 64, 4),
+            /* state */
+            mod_api::BlockStateRecord::new(REGISTERED_BLOCK.get().unwrap(), 0).into(),
+            /* friction */ 0.6,
+        );
         mod_api::BlockPart::friction(&proxy, &Context, &mut event);
         assert_eq!(event.friction.to_bits(), answer.to_bits());
     }

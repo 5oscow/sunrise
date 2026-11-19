@@ -74,16 +74,16 @@ fn menu_slot_context_reads_the_same_through_the_wire() {
     let mut answers = Vec::new();
     for (container, context) in &contexts {
         let ask = |part: &dyn MenuPart| {
-            let mut event = MenuSlotRulesEvent {
-                menu: "test:menu",
-                slot: 1,
-                container: *container,
-                stack: &stack,
+            let mut event = MenuSlotRulesEvent::__wire_from_record(
+                /* menu */ "test:menu",
+                /* slot */ 1,
+                /* container */ *container,
+                &stack,
                 context,
-                may_place: true,
-                may_pickup: true,
-                max_stack: 64,
-            };
+                /* may_place */ true,
+                /* may_pickup */ true,
+                /* max_stack */ 64,
+            );
             part.menu_slot_rules(&World, &mut event);
             (event.may_place, event.max_stack)
         };

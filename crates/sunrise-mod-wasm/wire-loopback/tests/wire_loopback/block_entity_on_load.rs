@@ -71,13 +71,11 @@ fn wire_loopback_block_entity_on_load_reads_saved_seven() {
             );
             let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
             let mut world = World(reads.clone());
-            proxy.block_entity_on_load(
-                HostSide::Server(&mut world),
-                &mut BlockEntityOnLoadEvent {
-                    id: mod_api::__private::block_entity_type_key("test:holder").unwrap(),
-                    entity,
-                },
-            );
+            let mut input = Writer::new();
+            input.put(&mod_api::__private::block_entity_type_key("test:holder").unwrap());
+            input.put(&entity);
+            let mut event = Reader::new(input.bytes()).take().unwrap();
+            proxy.block_entity_on_load(HostSide::Server(&mut world), &mut event);
             assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 1);
         },
     );

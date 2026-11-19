@@ -1979,11 +1979,11 @@ fn generated_client_and_server_hooks_complete_sixty_thousand_frames() {
         reply.put(&0.25f32);
         reply.put(&0.5f32);
         let client = recursive_hook(&reply);
-        let mut render = mod_api::RenderFramePreEvent {
-            elapsed: Duration::from_secs(1),
-            world_partial_tick: 0.25,
-            partial_tick: 0.5,
-        };
+        let mut input = Writer::new();
+        input.put(&Duration::from_secs(1));
+        input.put(&0.25f32);
+        input.put(&0.5f32);
+        let mut render = Reader::new(input.bytes()).take().unwrap();
         client.render_frame_pre(&mut host, &mut render);
         assert_eq!(render.elapsed, Duration::from_secs(60000));
         assert_eq!(
@@ -2002,12 +2002,13 @@ fn generated_client_and_server_hooks_complete_sixty_thousand_frames() {
         context_bytes.put(&mod_api::WorldEpoch::new(1));
         context_bytes.put(&mod_api::TickId::new(1));
         let context: mod_api::LifecycleContext = Reader::new(context_bytes.bytes()).take().unwrap();
-        let mut tick = mod_api::ServerTickEvent {
-            context: &context,
-            phase: mod_api::ServerTickPhase::ServerTickStart {
+        let mut tick = mod_api::ServerTickEvent::__wire_from_record(
+            &context,
+            /* phase */
+            mod_api::ServerTickPhase::ServerTickStart {
                 world_running: true,
             },
-        };
+        );
         server.server_tick(&mut host, &mut tick);
         assert!(matches!(
             tick.phase,

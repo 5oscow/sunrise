@@ -43,7 +43,9 @@ fn wire_loopback_piston_push_reaction_and_unknown_keeps_properties() {
                 corrupt: false,
             },
         };
-        let mut event = PistonPushReactionEvent { state };
+        let mut input = Writer::new();
+        input.put(&state);
+        let mut event = Reader::new(input.bytes()).take().unwrap();
         assert_eq!(
             proxy.piston_push_reaction(&mut event),
             Some(PushReaction::Push)

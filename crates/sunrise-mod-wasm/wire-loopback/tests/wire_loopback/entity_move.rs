@@ -112,13 +112,14 @@ fn wire_loopback_entity_move_carries_the_guests_decision() {
         (GuestAnswer::Cancel, mod_api::Flow::Cancel, [1.0, 0.0, 0.0]),
     ] {
         set_answer(answer);
-        let mut event = mod_api::EntityMoveEvent {
-            entity: 7,
+        let mut delta = [1.0, 0.0, 0.0];
+        let mut event = mod_api::EntityMoveEvent::__wire_from_record(
+            /* entity */ 7,
             kind,
-            cause: mod_api::MoveCause::Piston,
-            delta: &mut [1.0, 0.0, 0.0],
-            cancelled: false,
-        };
+            /* cause */ mod_api::MoveCause::Piston,
+            &mut delta,
+            /* cancelled */ false,
+        );
         let (flow, delta) = call_guest(&module, &mut event);
         assert_eq!(flow, expected_flow);
         assert_eq!(delta, expected_delta);

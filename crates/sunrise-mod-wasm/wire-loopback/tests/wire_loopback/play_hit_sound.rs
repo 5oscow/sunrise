@@ -45,11 +45,14 @@ fn wire_loopback_play_hit_sound_handled_and_default() {
         (false, mod_api::Flow::Continue),
     ] {
         HANDLED.set(handled);
-        let mut event = mod_api::PlayHitSoundEvent {
-            state: mod_api::BlockStateRecord::new(REGISTERED_BLOCK.get().unwrap(), 0).into(),
-            pos: mod_api::BlockPos::new(5, 63, 4),
-            face: mod_api::Direction::West,
-        };
+        let mut input = Writer::new();
+        input.put(&mod_api::BlockState::from(mod_api::BlockStateRecord::new(
+            REGISTERED_BLOCK.get().unwrap(),
+            0,
+        )));
+        input.put(&mod_api::BlockPos::new(5, 63, 4));
+        input.put(&mod_api::Direction::West);
+        let mut event = Reader::new(input.bytes()).take().unwrap();
         assert_eq!(
             mod_api::BlockPart::play_hit_sound(&proxy, &mut Client, &mut event),
             expected

@@ -38,16 +38,16 @@ fn wire_loopback_viewed_level_sound_places_the_sound() {
     );
     let sound = mod_api::Identifier::parse("minecraft:block.anvil.land").unwrap();
     let mut play_at = None;
-    let mut event = mod_api::ViewedLevelSoundEvent {
+    let mut event = mod_api::ViewedLevelSoundEvent::__wire_from_record(
         level,
-        sound: &sound,
-        source: mod_api::SoundSource::Blocks,
-        position: [56.5, 64.0, 8.25],
-        volume: 2.0,
-        pitch: 0.5,
-        seed: 42,
-        play_at: &mut play_at,
-    };
+        &sound,
+        /* source */ mod_api::SoundSource::Blocks,
+        /* position */ [56.5, 64.0, 8.25],
+        /* volume */ 2.0,
+        /* pitch */ 0.5,
+        /* seed */ 42,
+        &mut play_at,
+    );
     module.viewed_level_sound(&mut Client, &mut event);
     assert_eq!((event.volume, event.pitch), (0.5, 1.5));
     assert_eq!(play_at, Some([7.0, 64.0, 1.0]));

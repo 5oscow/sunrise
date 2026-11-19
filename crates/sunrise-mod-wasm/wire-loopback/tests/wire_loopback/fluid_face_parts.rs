@@ -100,12 +100,12 @@ fn water(source: bool) -> mod_api::FluidState {
 fn wire_loopback_should_hide_adjacent_fluid_face_carries_direction_and_fluid() {
     with_proxy(|state, proxy| {
         let ask = |direction, fluid| {
-            let mut event = ShouldHideAdjacentFluidFaceEvent {
-                state,
-                direction,
-                fluid,
-                hidden: false,
-            };
+            let mut input = Writer::new();
+            input.put(&state);
+            input.put(&direction);
+            input.put(&fluid);
+            input.put(&false); // Not hidden by default.
+            let mut event = Reader::new(input.bytes()).take().unwrap();
             proxy.should_hide_adjacent_fluid_face(&Client, &mut event);
             assert_eq!(
                 (event.state, event.direction, event.fluid),
@@ -123,11 +123,11 @@ fn wire_loopback_should_hide_adjacent_fluid_face_carries_direction_and_fluid() {
 fn wire_loopback_should_display_fluid_overlay_starts_from_the_games_answer() {
     with_proxy(|state, proxy| {
         let ask = |fluid, overlay| {
-            let mut event = ShouldDisplayFluidOverlayEvent {
-                state,
-                fluid,
-                overlay,
-            };
+            let mut input = Writer::new();
+            input.put(&state);
+            input.put(&fluid);
+            input.put(&overlay);
+            let mut event = Reader::new(input.bytes()).take().unwrap();
             proxy.should_display_fluid_overlay(&Client, &mut event);
             assert_eq!((event.state, event.fluid), (state, fluid));
             event.overlay

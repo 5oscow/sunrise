@@ -49,14 +49,14 @@ fn humanoid_setup_anim_native_and_wire_keep_context_and_refused_components() {
         mod_api::HumanoidParts::new([Some([[1.0, 2.0, 3.0], [0.1, 0.2, 0.3]]); 7]).unwrap();
     let mut wire = native;
     for (parts, remote) in [(&mut native, false), (&mut wire, true)] {
-        let mut event = mod_api::HumanoidSetupAnimEvent {
-            entity_id: 73,
-            entity_type: "minecraft:player",
-            humanoid: &humanoid,
-            partial_tick: 0.25,
-            game_time: Some(123),
+        let mut event = mod_api::HumanoidSetupAnimEvent::__wire_from_record(
+            /* entity_id */ 73,
+            /* entity_type */ "minecraft:player",
+            &humanoid,
+            /* partial_tick */ 0.25,
+            /* game_time */ Some(123),
             parts,
-        };
+        );
         if remote {
             WasmMod {
                 group: 0,

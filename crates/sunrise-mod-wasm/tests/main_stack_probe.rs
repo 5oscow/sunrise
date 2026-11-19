@@ -103,11 +103,11 @@ fn proof() {
     reply.put(&0.5f32);
     let client = module(&reply, 60000);
     memory("one module loaded");
-    let mut render = mod_api::RenderFramePreEvent {
-        elapsed: Duration::from_secs(1),
-        world_partial_tick: 0.25,
-        partial_tick: 0.5,
-    };
+    let mut input = Writer::new();
+    input.put(&Duration::from_secs(1));
+    input.put(&0.25f32);
+    input.put(&0.5f32);
+    let mut render = Reader::new(input.bytes()).take().unwrap();
     // Depth, not time, is under test: a busy runner can take past a hook's 100 ms epoch deadline
     // over 60000 frames, which trapped as "other fault" instead of answering (2026-11-16).
     sunrise_mod_wasm::copy_probe::with_load_budget(|| {
@@ -130,12 +130,13 @@ fn proof() {
     let context = Reader::new(context.bytes())
         .take::<mod_api::LifecycleContext>()
         .unwrap();
-    let mut tick = mod_api::ServerTickEvent {
-        context: &context,
-        phase: mod_api::ServerTickPhase::ServerTickStart {
+    let mut tick = mod_api::ServerTickEvent::__wire_from_record(
+        &context,
+        /* phase */
+        mod_api::ServerTickPhase::ServerTickStart {
             world_running: true,
         },
-    };
+    );
     sunrise_mod_wasm::copy_probe::with_load_budget(|| server.server_tick(&mut host, &mut tick));
     assert!(matches!(
         tick.phase,

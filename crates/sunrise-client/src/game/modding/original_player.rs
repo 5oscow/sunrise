@@ -508,12 +508,10 @@ mod tests {
                 let replacement = game.player(12).unwrap();
                 assert!(game.player_set_experience_levels(replacement, 0));
                 // Re-enter the same guest after dispatch; it retained the actual event token.
-                let mut expired = PlayerCloneEvent {
-                    player: 12,
-                    name: "expired",
-                    was_death: death,
+                let mut expired = PlayerCloneEvent::__wire_from_record(
+                    /* player */ 12, /* name */ "expired", /* was_death */ death,
                     original,
-                };
+                );
                 wasm.player_clone(game, &mut expired);
                 assert_eq!(replacement.experience(game).unwrap().level, 42);
                 assert_eq!(original.position(game), None);

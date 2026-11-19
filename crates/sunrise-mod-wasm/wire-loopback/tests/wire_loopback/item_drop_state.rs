@@ -51,15 +51,15 @@ fn wire_loopback_living_drops_carries_the_item_entity_state_both_ways() {
     }
     .living_drops(
         &mut World,
-        &mut mod_api::LivingDropsEvent {
-            entity: 7,
-            kind: "test:state_drops",
-            player: None,
-            source: &source,
-            recently_hit: false,
-            drops: &mut drops,
-            cancelled: false,
-        },
+        &mut mod_api::LivingDropsEvent::__wire_from_record(
+            /* entity */ 7,
+            /* kind */ "test:state_drops",
+            /* player */ None,
+            &source,
+            /* recently_hit */ false,
+            &mut drops,
+            /* cancelled */ false,
+        ),
     );
     assert_eq!(
         drops,

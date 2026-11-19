@@ -37,11 +37,11 @@ fn wire_loopback_nested_tuple_reference_writes_back() {
     let stone = mod_api::ItemStack::new(REGISTERED_ITEM.get().unwrap(), 3).unwrap();
     let event = StackedOnOther::new(Some(7), Some(9), 2, 0, 2, true, Some(stone.clone()), None);
     let mut result = StackedOnOtherResult::default();
-    let mut event = mod_api::ItemStackedOnOtherEvent {
-        event: &event,
-        result: &mut result,
-        cancelled: false,
-    };
+    let mut event = mod_api::ItemStackedOnOtherEvent::__wire_from_record(
+        &event,
+        &mut result,
+        /* cancelled */ false,
+    );
     // The typed answer crosses the boundary both ways: the frozen stacks in, the stacks out.
     let flow = module.item_stacked_on_other(mod_api::HostSide::Client(&mut Client), &mut event);
     assert!(matches!(flow, mod_api::Flow::Continue));
@@ -67,11 +67,11 @@ fn wire_loopback_nested_tuple_reference_writes_back() {
     }
     let frozen = StackedOnOther::new(Some(7), Some(9), 2, 0, 2, true, Some(stone), None);
     let mut direct = StackedOnOtherResult::default();
-    let mut native_event = mod_api::ItemStackedOnOtherEvent {
-        event: &frozen,
-        result: &mut direct,
-        cancelled: false,
-    };
+    let mut native_event = mod_api::ItemStackedOnOtherEvent::__wire_from_record(
+        /* event */ &frozen,
+        /* result */ &mut direct,
+        /* cancelled */ false,
+    );
     let native_flow =
         Native.item_stacked_on_other(mod_api::HostSide::Client(&mut Client), &mut native_event);
     assert!(matches!(native_flow, mod_api::Flow::Continue));

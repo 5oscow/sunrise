@@ -59,14 +59,9 @@ fn menu_transfer_answers_match_native_through_the_wire() {
         for recipe in ["test:press/gear", "minecraft:stick"] {
             for (max, dry_run) in [(false, false), (true, false), (false, true)] {
                 let ask = |part: &dyn MenuPart| {
-                    let mut event = MenuTransferEvent {
-                        player,
-                        menu,
-                        pos,
-                        recipe,
-                        max,
-                        dry_run,
-                    };
+                    let mut event = MenuTransferEvent::__wire_from_record(
+                        player, menu, pos, recipe, max, dry_run,
+                    );
                     part.menu_transfer(&mut World, &mut event)
                 };
                 let (wasm, direct) = (ask(&proxy), ask(&Press));

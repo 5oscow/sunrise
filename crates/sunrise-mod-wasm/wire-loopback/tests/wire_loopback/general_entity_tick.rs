@@ -62,10 +62,10 @@ fn wire_loopback_general_entity_tick_tells_each_row_its_kind_and_id() {
     for id in [7, 8] {
         proxy.general_entity_tick(
             &mut world,
-            &mut GeneralEntityTickEvent {
-                kind: "wasm_fixture:robot",
-                entity: row(id),
-            },
+            &mut GeneralEntityTickEvent::__wire_from_record(
+                /* kind */ "wasm_fixture:robot",
+                /* entity */ row(id),
+            ),
         );
     }
     assert_eq!(COUNTS.with_borrow(Clone::clone), [7, 8]);

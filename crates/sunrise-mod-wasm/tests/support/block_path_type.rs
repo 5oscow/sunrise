@@ -1,4 +1,5 @@
-use mod_api::{BlockEntityRef, BlockPathTypeEvent, BlockState, Compound, LevelHost, PathType, Tag};
+use mod_api::wire::{Reader, Writer};
+use mod_api::{BlockEntityRef, BlockState, Compound, LevelHost, PathType, Tag};
 use std::cell::RefCell;
 
 pub struct World {
@@ -45,10 +46,10 @@ impl World {
 
     pub fn check(&self, part: &dyn mod_api::BlockPart) {
         self.asked.borrow_mut().clear();
-        let mut event = BlockPathTypeEvent {
-            pos: mod_api::BlockPos::new(1, 64, 1),
-            state: self.state,
-        };
+        let mut input = Writer::new();
+        input.put(&mod_api::BlockPos::new(1, 64, 1));
+        input.put(&self.state);
+        let mut event = Reader::new(input.bytes()).take().unwrap();
         assert_eq!(
             part.block_path_type(self, &mut event),
             Some(PathType::Damaging)

@@ -366,10 +366,10 @@ fn wasm_weapon_dispatch(
     let mut drops = vec![sentinel];
     module.loot_drops(
         host,
-        &mut mod_api::LootDropsEvent {
-            context: event.context,
-            drops: &mut drops,
-        },
+        &mut mod_api::LootDropsEvent::__wire_from_record(
+            /* context */ event.context,
+            &mut drops,
+        ),
     );
     assert!(
         drops.is_empty(),

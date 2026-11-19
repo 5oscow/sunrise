@@ -112,13 +112,14 @@ impl mod_api::ItemPart for FeetOnly {
     }
 }
 fn event<'a>(stack: &'a mod_api::ItemStack, slot: &'a str) -> mod_api::CanEquipEvent<'a> {
-    mod_api::CanEquipEvent {
+    mod_api::CanEquipEvent::__wire_from_record(
         stack,
         slot,
-        entity: mod_api::LivingRef::new(mod_api::EntityRef::new(mod_api::WorldEpoch::new(1), 21)),
-        kind: "minecraft:zombie",
-        can_equip: true,
-    }
+        /* entity */
+        mod_api::LivingRef::new(mod_api::EntityRef::new(mod_api::WorldEpoch::new(1), 21)),
+        /* kind */ "minecraft:zombie",
+        /* can_equip */ true,
+    )
 }
 fn proxy(count: Arc<AtomicUsize>, group: u8) -> WasmHandler {
     WasmHandler {

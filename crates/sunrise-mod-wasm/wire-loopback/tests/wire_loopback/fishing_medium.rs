@@ -60,13 +60,13 @@ fn wire_loopback_fishing_medium_round_trips_the_answer() {
     );
     let caster = mod_api::__private::game::player_ref(mod_api::EntityRef::new(epoch, 20), 7);
     for server in [true, false] {
-        let mut event = mod_api::FishingMediumEvent {
-            level,
-            bobber: mod_api::EntityRef::new(epoch, 41),
-            position: [5.5, 59.25, -0.5],
-            owner: server.then_some(caster),
-            owner_position: Some([0.5, 64.0, 0.5]),
-        };
+        let mut input = Writer::new();
+        input.put(&level);
+        input.put(&mod_api::EntityRef::new(epoch, 41));
+        input.put(&[5.5f64, 59.25, -0.5]);
+        input.put(&server.then_some(caster));
+        input.put(&Some([0.5f64, 64.0, 0.5]));
+        let mut event = Reader::new(input.bytes()).take().unwrap();
         assert_eq!(
             module.fishing_medium(side(server, &mut World), &mut event),
             Some(mod_api::FishingMedium {
