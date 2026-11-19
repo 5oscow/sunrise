@@ -5015,6 +5015,7 @@ dependencies = [
  "sha2",
  "socket2 0.6.5",
  "subtle",
+ "sunrise-assets",
  "sunrise-core",
  "sunrise-mod-api",
  "sunrise-mod-api-macros",

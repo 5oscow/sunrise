@@ -33,12 +33,34 @@ cargo sunrise-mod check target/sunrise-mod/my_mod.smod   # the registry's checks
   `#[mod_api::sunrise_mod]`. Compile it with `sunrise-launcher native-build <path> --trust-native-code`
   ([writing hooks](../start/writing-hooks.md)). Any other `--template` is refused.
 - `build` packs the checked project into `target/sunrise-mod/<id>.smod`: `sunrise-mod.toml`, `assets/`,
-  `data/`, optional `icon.png` and, for code, the root Cargo project. It validates content with the same
-  checks as the game; without `--wasm`, it does not compile code. Native code requires both `Cargo.toml` and `[native]`; inconsistent
-  declarations and a manifest without capability `registries` are refused.
+  `data/`, optional `icon.png` and, for code, the root Cargo project. It reads content with the game's own package
+  rules and runs the reference checks of `check` below. Once the build reaches output cleanup, it removes the
+  previous `<id>.smod` before running the reference checks. Earlier failures, such as a manifest or SDK error,
+  can leave the previous package in place. Without `--wasm`, the build does not compile code. Native code requires
+  both `Cargo.toml` and `[native]`; inconsistent declarations and a manifest without capability `registries` are refused.
 - `run` builds, then starts `sunrise-client` (on `PATH`, or `--game PATH`, or `SUNRISE_CLIENT`) with
   `--dev-mod target/sunrise-mod/<id>.smod`, always on. Arguments after `--` go to the game. The game reads content once
   at start, so rebuild and run again after an edit.
+- `check` in a project folder runs the package rules, the render pipeline shader checks and offline reference checks.
+  It checks references to IDs in namespaces the manifest owns, not to vanilla or other mods. It checks these forms:
+  - Models in blockstate `variants` and `multipart`, model `parent` and `textures` fields, and model references in
+    item definitions. The game's model decoder reads one model and ignores trailing input.
+  - Ingredients and results in built-in shaped, shapeless, cooking, stonecutting, smithing and transmute recipes.
+    Recipe `#tag` ingredients, custom recipe types, components and other opaque data are not checked.
+  - Tag `values` are checked for direct IDs under `tags/block`, `tags/item`, `tags/fluid` (including
+    `flowing_` forms) and `tags/entity_type`. Required nested `#tag` references are checked in those folders
+    plus `tags/worldgen/biome` and `tags/worldgen/structure`. Tag files can be in any namespace, including
+    `minecraft`; other tag folders, optional entries and removals are not checked.
+  - Loot item entries' `name` and block-state conditions' `block` fields. Recipes, tags, loot tables and loot pools
+    that `neoforge:conditions` may disable are left alone.
+
+  A missing reference is an **error** (exit 1) only when the tool has enough information to confirm it. Otherwise,
+  it can **warn** without failing: a `[[jar]]` layer, dependency or atlas source may supply the resource, an inline
+  composite child may override a texture, or a local recipe filter may remove the recipe or swap the reference.
+  The tool does not fetch dependencies or check registry entries declared in code.
+  It also checks for blockstates on blocks with `render_shape` set to `MODEL` and warns about missing local loot
+  tables, item definitions or English names, or registry content on a client-only package. Reference diagnostics name
+  the source file, the relevant field or member index, and the ID.
 - `check <file>` runs what the registry runs: the file's size and SHA-256, its manifest and content, and a signature
   with `--key <public key> --signature <file>.minisig`. It reads `.smod`, `.spack`, resource pack `.zip`
   and `.sshader` files.
