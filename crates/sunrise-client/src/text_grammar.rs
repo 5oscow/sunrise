@@ -1,9 +1,9 @@
 //! The component grammar of `ComponentSerialization.CODEC`, as `text_from_json` reads it: a
 //! component is checked and rebuilt in one pass, so what the text capture sees is exactly
 //! the value the codec would have decoded, never a partial or ambiguous one.
+use crate::command::Registries;
+use crate::component;
 use serde_json::{Map, Value};
-use sunrise_client::command::Registries;
-use sunrise_client::component;
 
 /// Content kinds in the order the codec tries them without a `type`.
 const KINDS: [&str; 7] = [
@@ -27,7 +27,7 @@ const STYLE_FLAGS: [&str; 5] = [
 /// one content (the one its `type` names, else the first kind its keys satisfy) plus
 /// well-formed style fields and `extra`, holding only the keys that decode. None when it
 /// does not decode.
-pub(super) fn build(value: &Value, reg: &Registries, snbt: bool) -> Option<Value> {
+pub fn build(value: &Value, reg: &Registries, snbt: bool) -> Option<Value> {
     match value {
         Value::String(_) => Some(value.clone()),
         Value::Array(items) if !items.is_empty() => items
@@ -72,7 +72,7 @@ fn build_object(
         out.insert("shadow_color".into(), v.clone());
     }
     if let Some(v) = present(fields, "font") {
-        sunrise_client::text::font_id(v)?;
+        crate::text::font_id(v)?;
         out.insert("font".into(), v.clone());
     }
     if let Some(v) = present(fields, "insertion") {
@@ -118,7 +118,7 @@ fn hover(event: &Map<String, Value>, reg: &Registries, snbt: bool) -> Option<Val
             event.get("id")?.as_str()?;
         }
         "show_entity" => {
-            mod_api::Identifier::parse(event.get("id")?.as_str()?).ok()?;
+            sunrise_core::identifier::Identifier::parse(event.get("id")?.as_str()?).ok()?;
             match event.get("uuid")? {
                 Value::String(id) => {
                     sunrise_client_core::uuid::uuid_from_text(id)?;
@@ -252,18 +252,20 @@ fn data_source(
     match source {
         "entity" => selector_parses(value, reg).then_some("entity"),
         "block" => Some("block"),
-        "storage" => mod_api::Identifier::parse(value).ok().map(|_| "storage"),
+        "storage" => sunrise_core::identifier::Identifier::parse(value)
+            .ok()
+            .map(|_| "storage"),
         _ => None,
     }
 }
 
 /// `EntitySelectorParser.parse` on all of `source`.
 fn selector_parses(source: &str, reg: &Registries) -> bool {
-    let mut reader = sunrise_client::command::Reader::new(source);
-    sunrise_client::command::selector::parse(&mut reader, reg, true).is_ok() && !reader.can_read()
+    let mut reader = crate::command::Reader::new(source);
+    crate::command::selector::parse(&mut reader, reg, true).is_ok() && !reader.can_read()
 }
 
 /// `NbtPathArgument.parse` on all of `path`.
 fn path_parses(path: &str) -> bool {
-    sunrise_client::nbt_path::NbtPath::parse_prefix(path).is_ok_and(|(_, used)| used == path.len())
+    crate::nbt_path::NbtPath::parse_prefix(path).is_ok_and(|(_, used)| used == path.len())
 }

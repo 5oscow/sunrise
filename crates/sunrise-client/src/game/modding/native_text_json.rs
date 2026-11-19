@@ -1,9 +1,9 @@
 //! `text_from_json`: a text component read as `/tellraw` takes it.
 use super::Game;
-use super::native_text_grammar::build;
 use mod_api::text::TextFormError;
 use sunrise_client::command::Registries;
 use sunrise_client::text::Text;
+use sunrise_client::text_grammar::build;
 
 impl Game<'_> {
     /// A component read as `/tellraw` takes it; None when it isn't one (an object with no
