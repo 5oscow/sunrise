@@ -673,32 +673,26 @@ class ParityWorkflowTests(unittest.TestCase):
 
 
 class ScheduledDynaJobTests(unittest.TestCase):
-    def test_no_job_on_a_dyna_runner_runs_for_a_scheduled_event(self):
+    def test_hot_paths_schedule_only_dispatches_and_its_dyna_job_runs_from_the_dispatch(self):
         # Dyna's runners refuse a scheduled event at "Set up runner" (hot-paths' scheduled runs, 2026-11-16 to 18):
-        # a scheduled workflow dispatches itself, and its Dyna jobs run from the dispatch.
+        # the schedule starts only a GitHub-hosted job that dispatches the workflow on main, and the chain that
+        # reaches the Dyna runner (route, measure, record) runs from that dispatch alone.
         from test_ci_concurrency import yaml
-        def off_schedule(job):
-            condition = " ".join(str(job.get("if", "")).split())
-            return ("github.event_name == 'workflow_dispatch'" in condition
-                    or "github.event_name != 'schedule'" in condition)
-        checked = 0
-        for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
-            workflow = yaml.load(path.read_text(), Loader=yaml.BaseLoader)
-            if "schedule" not in workflow.get("on", {}):
-                continue
-            jobs = workflow["jobs"]
-            def guarded(name, seen=()):
-                job = jobs[name]
-                needs = job.get("needs", [])
-                needs = [needs] if isinstance(needs, str) else needs
-                return off_schedule(job) or any(guarded(other, seen + (name,)) for other in needs if other not in seen)
-            for name, job in jobs.items():
-                # A literal Dyna label; a routed one (wasm-coverage's) sends a scheduled event to GitHub's runners.
-                if str(job.get("runs-on", "")).startswith("dyna-"):
-                    checked += 1
-                    with self.subTest(workflow=path.name, job=name):
-                        self.assertTrue(guarded(name))
-        self.assertGreater(checked, 0)
+        workflow = yaml.load((ROOT / ".github/workflows/hot-paths.yml").read_text(), Loader=yaml.BaseLoader)
+        self.assertEqual(set(workflow["on"]), {"schedule", "workflow_dispatch"})
+        jobs = workflow["jobs"]
+        self.assertEqual(set(jobs), {"schedule-dispatch", "route", "measure", "record"})
+        dispatcher = jobs["schedule-dispatch"]
+        self.assertEqual(dispatcher["if"], "github.repository == 'sunrise-org/sunrise' && github.event_name == 'schedule'")
+        self.assertEqual(dispatcher["runs-on"], "ubuntu-latest")
+        self.assertEqual(dispatcher["permissions"], {"actions": "write"})
+        self.assertEqual([step["run"] for step in dispatcher["steps"]],
+                         ['gh workflow run hot-paths.yml --repo "$GITHUB_REPOSITORY" --ref main'])
+        self.assertEqual(jobs["route"]["if"], "github.event_name == 'workflow_dispatch'")
+        self.assertNotIn("needs", jobs["route"])
+        self.assertEqual(jobs["measure"]["needs"], "route")
+        self.assertEqual(jobs["measure"]["runs-on"], "dyna-medium")
+        self.assertEqual(jobs["record"]["needs"], "measure")
 
 
 if __name__ == "__main__":
