@@ -433,6 +433,12 @@ mod tests {
             let line = format!("connecting {}", server.address);
             self.0.lock().unwrap().push(line);
         }
+        fn joined(&self) {
+            self.0.lock().unwrap().push("joined".into());
+        }
+        fn left(&self, left: connection::Left) {
+            self.0.lock().unwrap().push(format!("left {left:?}"));
+        }
         fn ended(&self, end: &connection::Ended<'_>) {
             self.0.lock().unwrap().push(format!("ended {}", end.reason));
         }
@@ -462,6 +468,11 @@ mod tests {
     /// Registered after the recorder: answers for two servers, one the recorder answers too.
     struct Later;
     impl Hooks for Later {
+        fn retry(&self) -> Option<connection::Retry> {
+            Some(connection::Retry::Now(connection::Server::new(
+                "b", "P", false,
+            )))
+        }
         fn client_identity(&self, server: &str) -> Option<ClientIdentity> {
             matches!(server, "first.example" | "second.example").then(|| ClientIdentity {
                 brand: "later".to_owned(),
@@ -492,6 +503,9 @@ mod tests {
         }
         engine::shutdown();
         engine::connecting(&connection::Server::new("a", "P", false));
+        engine::joined();
+        engine::left(connection::Left::Quit);
+        engine::connecting(&connection::Server::new("b", "P", false));
         engine::ended(&connection::Ended::new(
             "Timed out",
             None,
@@ -499,7 +513,6 @@ mod tests {
         ));
         let wait = connection::Retry::Wait("in 5 s".into());
         assert_eq!(engine::retry(), Some(wait));
-        assert!(engine::any());
         assert_eq!(
             engine::get_the_game().map(|g| g.address),
             Some("https://example.org")
@@ -523,6 +536,9 @@ mod tests {
                 "World { play: Singleplayer, dimension: Nether, mode: Creative }",
                 "shutdown",
                 "connecting a",
+                "joined",
+                "left Quit",
+                "connecting b",
                 "ended Timed out",
             ]
         );

@@ -1742,6 +1742,7 @@ impl Game<'_> {
             None => sunrise_client::multiplayer::Screen::list(&saves),
         });
         self.show_title(title);
+        self.offer_retry();
         self.capture(false);
         Ok(())
     }

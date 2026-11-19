@@ -123,7 +123,7 @@ impl Game<'_> {
             }
         };
         *slot = None;
-        let realm = self.realm_session;
+        let realm = self.realm_session && self.server_address() == Some(server.address.as_str());
         self.connect_server_with_options(&server.address, &server.name, None, server.lan, realm)
     }
 }

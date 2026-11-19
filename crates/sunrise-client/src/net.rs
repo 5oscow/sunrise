@@ -391,8 +391,13 @@ impl Session {
             });
             thread_payloads.close();
             thread_far.cancel();
-            let from_server = result.is_ok();
-            let why = result.unwrap_or_else(|e| e);
+            let (why, from_server) = match result {
+                Ok(why) => (why, true),
+                Err(why) => {
+                    let from_server = why.from_server;
+                    (why, from_server)
+                }
+            };
             if let Some(w) = thread_writer.lock().unwrap().take() {
                 w.shutdown();
             }
@@ -757,12 +762,14 @@ fn tr(lang: &Language, key: &str) -> String {
 pub struct Reason {
     pub text: String,
     pub key: Option<String>,
+    from_server: bool,
 }
 impl Reason {
     fn plain(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
             key: None,
+            from_server: false,
         }
     }
     /// A vanilla key's text in the session's language, with the key.
@@ -770,6 +777,7 @@ impl Reason {
         Self {
             text: tr(lang, key),
             key: Some(key.to_owned()),
+            from_server: false,
         }
     }
     /// A Sunrise key's text with a `%s` argument filled.
@@ -786,6 +794,7 @@ impl Reason {
             Ok(v) => Self {
                 text: json_text(&v, lang),
                 key: v["translate"].as_str().map(str::to_owned),
+                from_server: true,
             },
             Err(_) => Self::plain(reason_json),
         }
@@ -805,6 +814,7 @@ impl Reason {
         Self {
             text: plain(tag, lang),
             key,
+            from_server: true,
         }
     }
 }
@@ -991,6 +1001,7 @@ fn run(
                                         lang,
                                     ),
                                     key,
+                                    from_server: false,
                                 }
                             })
                         });

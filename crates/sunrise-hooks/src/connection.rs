@@ -43,7 +43,8 @@ pub enum Left {
     Transferred,
 }
 
-/// What ended a connection the player didn't leave ([`Ended::by`]).
+/// What ended a connection the player didn't leave ([`Ended::by`]). The category
+/// alone does not say whether to retry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum By {

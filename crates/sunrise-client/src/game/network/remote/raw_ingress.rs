@@ -261,7 +261,6 @@ impl Game<'_> {
                     };
                     self.connection_ended(&reason, key.as_deref(), by);
                     self.leave_server(Some(Text::literal(reason)))?;
-                    self.offer_retry();
                     return Ok(());
                 }
                 Event::RawPayload(mut incoming) => {
