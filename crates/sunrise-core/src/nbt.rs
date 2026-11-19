@@ -65,6 +65,12 @@ impl<'a> Iterator for CompoundIter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         self.inner.as_mut()?.next()
     }
+    fn fold<B, F: FnMut(B, Self::Item) -> B>(self, acc: B, f: F) -> B {
+        match self.inner {
+            Some(iter) => iter.fold(acc, f),
+            None => acc,
+        }
+    }
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.inner
             .as_ref()

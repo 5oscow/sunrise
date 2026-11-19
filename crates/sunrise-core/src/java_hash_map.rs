@@ -103,6 +103,7 @@ pub struct JavaHashMap<K, V> {
 /// Borrowed Java bucket/list traversal, without a cursor or allocation.
 pub struct Iter<'a, K, V> {
     map: &'a JavaHashMap<K, V>,
+    buckets: std::slice::Iter<'a, Bucket>,
     next: u32,
     remaining: usize,
 }
@@ -111,13 +112,26 @@ impl<'a, K: JavaKey, V> Iterator for Iter<'a, K, V> {
     type Item = (&'a K, &'a V);
     fn next(&mut self) -> Option<Self::Item> {
         if self.next == NIL {
-            return None;
+            self.next = self.buckets.find(|bucket| bucket.head != NIL)?.head;
         }
-        let index = self.next;
-        let node = self.map.node(index);
-        self.next = self.map.successor(index);
+        let node = self.map.node(self.next);
+        self.next = node.next;
         self.remaining -= 1;
         Some((&node.key, &node.value))
+    }
+    fn fold<B, F: FnMut(B, Self::Item) -> B>(self, mut acc: B, mut f: F) -> B {
+        let mut visit_bin = |mut acc: B, mut i| {
+            while let Some(node) = self.map.nodes.get(i as usize).and_then(Option::as_ref) {
+                acc = f(acc, (&node.key, &node.value));
+                i = node.next;
+            }
+            acc
+        };
+        acc = visit_bin(acc, self.next);
+        for bucket in self.buckets {
+            acc = visit_bin(acc, bucket.head);
+        }
+        acc
     }
     fn size_hint(&self) -> (usize, Option<usize>) {
         (self.remaining, Some(self.remaining))
@@ -308,7 +322,8 @@ impl<K: JavaKey, V> JavaHashMap<K, V> {
     pub fn entries(&self) -> Iter<'_, K, V> {
         Iter {
             map: self,
-            next: self.first_node_from(0),
+            buckets: self.buckets.iter(),
+            next: NIL,
             remaining: self.len,
         }
     }
@@ -1061,6 +1076,20 @@ mod tests {
         assert_eq!(order(&map), [5, 4, 1, 0, 3, 2, 7, 6, 8, 10, 9, 12]);
         map.put(key(11, 4), 11);
         assert_eq!(order(&map), [4, 0, 2, 6, 8, 10, 9, 11, 5, 1, 3, 7, 12]);
+    }
+
+    #[test]
+    fn fold_resumes_inside_a_collision_bin() {
+        let map = colliders();
+        let mut iter = map.entries();
+        assert_eq!(iter.next().map(|(k, _)| k.id), Some(6));
+        assert_eq!(iter.next().map(|(k, _)| k.id), Some(3));
+        assert_eq!(iter.len(), 12);
+        let rest = iter.fold(Vec::new(), |mut ids, (key, _)| {
+            ids.push(key.id);
+            ids
+        });
+        assert_eq!(rest, [4, 5, 7, 8, 9, 10, 11, 12, 13, 1, 0, 2]);
     }
 
     /// Java: the steps of `colliders`, printing the order after each put of ids 10..=13.
