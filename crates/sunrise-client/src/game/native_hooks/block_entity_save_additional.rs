@@ -26,11 +26,8 @@ fn save_additional(
     // The raw attachment field stays available for the disk overlay (including
     // opaque or malformed rows), but is never part of the Part's payload.
     let key = ATTACHMENTS_KEY.into();
-    let mut output: Compound = tag
-        .iter()
-        .filter(|(name, _)| **name != key)
-        .map(|(name, value)| (name.clone(), value.clone()))
-        .collect();
+    let mut output = tag.clone();
+    output.remove(&key);
     fire(id, entity, &mut output);
     // Admit the listener's output once, before any consumer sees it. Disk
     // encoding still owns the size limit for its complete record.

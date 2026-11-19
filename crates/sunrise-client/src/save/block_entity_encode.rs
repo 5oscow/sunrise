@@ -27,7 +27,7 @@ pub fn encode_with(
     save_additional: impl FnOnce(&str, &Compound) -> Option<Compound>,
 ) -> Tag {
     let mut map = fields(e, block, extra, items, save_additional);
-    metadata(&mut map, p, e, block);
+    crate::block_entity_nbt::write_metadata(&mut map, block_entity_id(e, block), [p.0, p.1, p.2]);
     if !matches!(e, BlockEntity::Mod(_)) {
         map.insert("keepPacked".into(), Tag::Byte(0));
     }
@@ -68,7 +68,7 @@ pub fn data_with(
     if matches!(e, BlockEntity::Mod(_)) {
         map.remove(&"keepPacked".into());
     }
-    metadata(&mut map, p, e, block);
+    crate::block_entity_nbt::write_metadata(&mut map, block_entity_id(e, block), [p.0, p.1, p.2]);
     Tag::Compound(map)
 }
 
@@ -330,18 +330,6 @@ fn fields(
     }
     map.insert("components".into(), Tag::Compound(components));
     map
-}
-
-fn metadata(
-    map: &mut Compound,
-    p: (i32, i32, i32),
-    e: &crate::containers::BlockEntity,
-    block: &str,
-) {
-    map.insert("id".into(), string(block_entity_id(e, block)));
-    for (key, value) in [("x", p.0), ("y", p.1), ("z", p.2)] {
-        map.insert(key.into(), Tag::Int(value));
-    }
 }
 
 #[cfg(test)]
