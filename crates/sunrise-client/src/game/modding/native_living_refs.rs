@@ -1000,7 +1000,12 @@ impl Game<'_> {
             }
             // The stack's attribute modifiers go on the live map at once, so
             // the next read — a hit's armor, a `LivingRef`'s — sees them (#941).
-            self.collect_mob_equipment_attributes(id);
+            let before = if defer {
+                self.snapshot_mob_modifiers(id)
+            } else {
+                None
+            };
+            self.collect_mob_equipment_attributes(id, before);
             return true;
         }
         // `LivingEntity.onEquipItem` for the entities that keep no equip state

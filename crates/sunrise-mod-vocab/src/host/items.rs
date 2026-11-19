@@ -485,6 +485,17 @@ pub trait ItemsBackendMut {
     /// (`ItemPlace::stack` reads those), and on a client.
     #[access(WorldOnly)]
     fn game_stack(&mut self, place: &ItemPlace) -> Option<ItemStack>;
+    /// Side: server. Writes the changed components on a stack in a player slot, hand or mob or
+    /// armor stand equipment, without running any equipment effects. The stack must already be
+    /// there. Journaled in `tx`.
+    #[access(WorldOnly)]
+    fn game_edit_stack(
+        &mut self,
+        place: &ItemPlace,
+        stack: ItemStack,
+        changed: &[String],
+        tx: &Transaction,
+    ) -> Result<(), ItemPlaceEditError>;
     /// Side: server. Runs `ItemStack.onCraftedBy` for a stack held by a menu slot or its cursor,
     /// including the item's post-processing and the player's crafted statistic, in transaction
     /// `tx`.
