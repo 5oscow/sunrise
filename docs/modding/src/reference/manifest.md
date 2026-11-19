@@ -44,10 +44,14 @@ folders are unsupported.
 
 ## `sunrise-mod.toml`
 
-The shared [manifest fields](../how-to/content-mods.md#the-manifest) include `id`, `name`, `version`, and the two the tool writes, `api` and `capabilities`:
-`cargo sunrise-mod build` puts `api = "0.2"` and `capabilities = ["registries"]` into the package, and a manifest that
-writes either must write that value (any other is refused, naming both). Unknown fields refuse the manifest,
-naming the nearest valid key when one is close. Native mods may declare top-level `internals`, an array of tables with
+The shared [manifest fields](../how-to/content-mods.md#the-manifest) include `id`, `name`, and `version`.
+`version` is semver (`MAJOR.MINOR.PATCH`, with an optional pre-release and build metadata such as
+`3.6.30+refabricated`); an omitted minor or patch is padded (`1` is `1.0.0`, `1.2` is `1.2.0`).
+A non-semver version is refused when the manifest is read, naming the value.
+
+`cargo sunrise-mod build` puts `api = "0.2"` and `capabilities = ["registries"]` into the package. A manifest
+that writes either field must give that value; any other value is refused, naming both. Unknown fields refuse the
+manifest, naming the nearest valid key when one is close. Native mods may declare top-level `internals`, an array of tables with
 `path`, optional `hash`, and `kind` when a path names several member kinds. Without `hash`, the build uses the fingerprint from the pinned game’s catalog. An explicitly empty `hash` is refused. Native code adds `[native]`:
 
 | Field | Type | Rule |
@@ -264,7 +268,7 @@ the mod list. The scaffold does not create a default icon.
 | What | Limit |
 | --- | --- |
 | A registry file, as downloaded | 64 MiB |
-| Selected native source files, excluding the manifest, icon and resources | 511 files, 64 MiB unpacked in total |
+| Selected native source files, excluding the manifest, icon and resources | 65,536 files, 64 MiB unpacked in total |
 | Content files | 65,536 files, 16 MiB each, 512 MiB in total |
 | `sunrise-mod.toml` | 32 MiB |
 | `icon.png` | 256 KiB encoded, 512 × 512 pixels |

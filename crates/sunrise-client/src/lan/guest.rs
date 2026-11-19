@@ -911,6 +911,14 @@ impl Guest {
             sunrise_protocol::collider_sync::CHANNEL,
         )
     }
+    /// Whether this connection reads general entity spawns (`sunrise:general_entity`): only
+    /// such a guest is paired with a mod's general row.
+    pub fn negotiated_general_entity(&self) -> bool {
+        crate::raw_payloads::negotiated(
+            self.sender.payload_transport(),
+            sunrise_protocol::general_entity::CHANNEL,
+        )
+    }
     /// Whether the guest's play epoch has attachment sync negotiated (a vanilla client never
     /// offers it).
     pub fn negotiated_attachment_sync(&self) -> bool {
@@ -1822,21 +1830,12 @@ pub(super) fn network_stack(
                 .added
                 .push((sunrise_protocol::item::component::TRIM, component));
         }
-        // BannerPatternLayers: each pattern a reference into the synced registry;
-        // a layer that has none leaves the stack without the component. An
-        // ominous banner made by the raid keeps only its flag, so its layers
-        // are the ones the NBT encoder synthesises from it.
-        let patterns: Vec<(&str, &str)> = if d.ominous_banner && d.banner_patterns.is_empty() {
-            crate::item_data::OMINOUS_LAYERS.to_vec()
-        } else {
-            d.banner_patterns
-                .iter()
-                .map(|layer| (&*layer.pattern, &*layer.color))
-                .collect()
-        };
-        let layers: Option<Vec<(i32, i32)>> = patterns
+        // A pattern without a synced registry id leaves out the component.
+        let layers: Option<Vec<(i32, i32)>> = d
+            .banner_layers()
             .iter()
-            .map(|(pattern, color)| {
+            .map(|layer| {
+                let (pattern, color) = (&*layer.pattern, &*layer.color);
                 let name = if pattern.contains(':') {
                     pattern.to_string()
                 } else {
@@ -1854,26 +1853,30 @@ pub(super) fn network_stack(
                 sunrise_protocol::item::Component::BannerPatterns(layers),
             ));
         }
-        // The raid captain's banner: `Raid.getBannerComponentPatch` gives it
-        // the ominous name, rarity and hidden layers, which `StackData` keeps
-        // as `ominous_banner` rather than in `other` (#12530).
-        if d.ominous_banner {
-            stack.added.push((
-                sunrise_protocol::item::component::ITEM_NAME,
-                sunrise_protocol::item::Component::Text(sunrise_core::nbt::Tag::compound([(
-                    "translate",
-                    sunrise_core::nbt::Tag::String("block.minecraft.ominous_banner".into()),
-                )])),
-            ));
-            stack.added.push((
-                sunrise_protocol::item::component::RARITY,
-                sunrise_protocol::item::Component::Int(1),
-            ));
+        if let Some(display @ sunrise_core::nbt::Tag::Compound(_)) =
+            d.saved_other("minecraft:tooltip_display")
+        {
+            let mut seen = std::collections::HashSet::new();
+            let hidden = match display.get("hidden_components") {
+                Some(sunrise_core::nbt::Tag::List(entries)) => entries
+                    .iter()
+                    .filter_map(|tag| {
+                        let name = crate::save::text(Some(tag))?;
+                        let name = sunrise_core::identifier::Identifier::parse(&name).ok()?;
+                        synced_id("minecraft:data_component_type", &name.to_string())
+                    })
+                    .filter(|id| seen.insert(*id))
+                    .collect(),
+                _ => Vec::new(),
+            };
             stack.added.push((
                 sunrise_protocol::item::component::TOOLTIP_DISPLAY,
                 sunrise_protocol::item::Component::TooltipDisplay {
-                    hide: false,
-                    hidden: vec![sunrise_protocol::item::component::BANNER_PATTERNS],
+                    hide: display
+                        .get("hide_tooltip")
+                        .and_then(crate::item_data::component_bool)
+                        .unwrap_or(false),
+                    hidden,
                 },
             ));
         }
@@ -2119,7 +2122,7 @@ pub(super) fn network_stack(
         stack.removed.push(sunrise_protocol::item::component::LORE);
     }
     // The stack's custom rarity ("common", "uncommon", "rare", "epic" or 0..=3).
-    if let Some(r) = s.data().and_then(|d| d.other("minecraft:rarity")) {
+    if let Some(r) = s.data().and_then(|d| d.saved_other("minecraft:rarity")) {
         let index = match r {
             sunrise_core::nbt::Tag::String(s) => match &*s.to_string_lossy() {
                 "common" => Some(0),
@@ -2165,7 +2168,7 @@ pub(super) fn network_stack(
         ));
     }
     // The component as loaded, so a translatable name stays one.
-    if let Some(name) = s.data().and_then(|d| d.other("minecraft:item_name")) {
+    if let Some(name) = s.data().and_then(|d| d.saved_other("minecraft:item_name")) {
         stack.added.push((
             sunrise_protocol::item::component::ITEM_NAME,
             sunrise_protocol::item::Component::Text(name.clone()),

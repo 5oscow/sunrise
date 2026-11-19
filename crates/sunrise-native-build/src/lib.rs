@@ -33,6 +33,7 @@ mod registry_lock;
 pub mod registry_plan;
 mod registry_runtime;
 pub mod registry_rustc;
+mod registry_shared;
 pub mod rust;
 mod slots;
 

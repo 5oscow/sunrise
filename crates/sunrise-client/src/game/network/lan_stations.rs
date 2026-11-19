@@ -733,21 +733,29 @@ impl Game<'_> {
     pub(super) fn lan_station_button(&mut self, conn: u32, window: i32, id: i32) {
         // A mod container's menu: its mod's buttons (`native_menu_button`),
         // as handleContainerButtonClick checks them: the open menu, not a
-        // spectator, still valid.
+        // spectator, still valid. A menu a mod opened from code
+        // (`Slots::Native`) at a block's position is that block's only when
+        // the block's container opens the same menu type, as the client
+        // tells its screen hooks (`menu_opener_block`).
         let mod_menu = self.lan.as_ref().and_then(|host| {
             let g = host.hub.guest(conn)?;
             let menu = g.menu.as_ref().filter(|m| m.window == window)?;
             let pos = menu.pos?;
+            let opened_as = (menu.slots == sunrise_client::lan::menu::Slots::Native)
+                .then(|| menu.registry_id.clone());
             Some((
                 pos,
+                opened_as,
                 !g.spectator() && menu.still_valid(&host.hub.loop_context, &self.world, g),
                 g.carried.clone(),
                 g.uuid,
                 g.entity_id,
             ))
         });
-        if let Some((pos, valid, mut carried, uuid, entity_id)) = mod_menu
-            && self.mod_menu_at(pos).is_some()
+        if let Some((pos, opened_as, valid, mut carried, uuid, entity_id)) = mod_menu
+            && self
+                .mod_menu_at(pos)
+                .is_some_and(|m| opened_as.as_deref().is_none_or(|t| t == m))
         {
             if valid {
                 // The clicking player's cursor stack (`clickMenuButton`'s

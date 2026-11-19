@@ -241,7 +241,7 @@ Wasm threads and shared memory are off for wasm mods. A module that declares or 
 
 ## Compiled module cache
 
-The game caches compiled wasm modules in `<game_dir>/.sunrise-cache/wasm/`, keyed by the
+The game caches compiled wasm modules in `<game_dir>/.sunrise-cache/wasm/`, or in `<home>/.sunrise-cache/wasm/` when `--home` or `SUNRISE_HOME` names a home (even the platform default one), keyed by the
 wasm bytes, Wasmtime compatibility and engine settings. Hits map the compiled file into memory;
 files shipped beside a mod are never loaded as compiled code.
 

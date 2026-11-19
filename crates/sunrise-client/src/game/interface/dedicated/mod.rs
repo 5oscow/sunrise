@@ -49,6 +49,9 @@ pub(super) mod report;
 mod status;
 mod transfer;
 
+#[cfg(test)]
+mod language_tests;
+
 /// What the tick loop tells `ServerWatchdog`: when the tick in progress was
 /// due (`getNextTickTime`), how long a tick is, and whether the server runs.
 struct Watchdog {
@@ -162,7 +165,6 @@ struct Setup {
     universe: PathBuf,
     level_name: String,
     port: Option<u16>,
-    started: Instant,
     /// `--allowMissingMods`: open a world whose saved mods are missing (`missing_mods`).
     allow_missing_mods: bool,
 }
@@ -311,6 +313,12 @@ fn forwarding_secret(online: bool) -> Result<Option<Vec<u8>>> {
     Ok(Some(secret))
 }
 
+/// `DedicatedServer.initServer`: elapsed level-load nanoseconds as ROOT `%.3f` seconds.
+fn startup_done(elapsed: Duration) -> String {
+    let seconds = sunrise_core::java_number::format_fixed(elapsed.as_nanos() as f64 / 1e9, 3);
+    format!("Done ({seconds}s)! For help, type \"help\"")
+}
+
 /// `MinecraftServer.runServer`'s overload warning for a server `behind` its
 /// schedule, in milliseconds and in ticks of `tick`.
 fn overload_warning(behind: Duration, tick: Duration) -> String {
@@ -420,7 +428,6 @@ pub(super) fn preflight(options: &mut Options) -> Result<bool> {
             _ => return Err(format!("{name} is not a recognized option").into()),
         }
     }
-    let started = Instant::now();
     let settings = PathBuf::from("server.properties");
     let props = ServerProperties::from_file(&settings, &mut SystemEntropy::default())?;
     for w in &props.warnings {
@@ -488,7 +495,6 @@ pub(super) fn preflight(options: &mut Options) -> Result<bool> {
             universe,
             level_name,
             port,
-            started,
             allow_missing_mods,
         });
     Ok(true)
@@ -742,6 +748,28 @@ impl std::fmt::Display for DatapacksRefused {
 impl std::error::Error for DatapacksRefused {}
 
 impl Game<'_> {
+    /// Add the adopted packs' English at the dedicated server-starting notice.
+    /// World and registry-load listeners still see only the built-in language.
+    fn start_loaded_dedicated_world(&mut self, packs: &super::functions::PackStack) {
+        use sunrise_client::lang::{self, Language, ResourceSource};
+
+        let layers = self
+            .pack
+            .mod_layers
+            .iter()
+            .chain(
+                packs
+                    .enabled_packs()
+                    .map(sunrise_client::datapack::DataPack::source),
+            )
+            .map(|source| source as &dyn ResourceSource);
+        let language = Language::load_server(&self.ui.vanilla_root, layers, |value| {
+            super::native_text_grammar::build(value, &self.ui.registries, false)
+        });
+        lang::set(language);
+        self.native_server_starting(true);
+    }
+
     /// DedicatedServerProperties.createDimensions for a world that doesn't
     /// exist yet: `level-type`'s preset, a flat world's `generator-settings`
     /// and `generate-structures`, written before the world opens so that
@@ -986,7 +1014,6 @@ impl Game<'_> {
             universe,
             level_name,
             port,
-            started,
             allow_missing_mods,
         } = SETUP
             .get()
@@ -1099,6 +1126,7 @@ impl Game<'_> {
         let lists = Arc::new(Mutex::new(lists));
         self.server_lists = Some(lists.clone());
         log("INFO", &format!("Preparing level \"{level_name}\""));
+        let level_load_started = Instant::now();
         let folder = world_dir.to_string_lossy().into_owned();
         // The mods' common and server configs, read before the server starts.
         self.native_configs_server_start(&world_dir, true);
@@ -1115,11 +1143,10 @@ impl Game<'_> {
         )?)?;
         *startup_began = true;
         self.native_server_about_to_start(true);
-        self.native_server_starting(true);
         self.native_lifecycle_open_started();
         // The registries the server sends are read while the world prepares.
         let sync = super::lan::sync::preload_sync_data(&self.res.core.item_data);
-        self.finish_open_world(prepared)?;
+        let opened_packs = self.finish_open_world(prepared)?;
         // WorldLoader: the world's packs must load before the server starts. The data store is read
         // now rather than at the first tick (reading parses functions; it runs none), and a broken
         // predicate graph stops the start before anything listens (a partial check: predicate_graph.rs).
@@ -1177,6 +1204,7 @@ impl Game<'_> {
         self.streaming.radius = -1;
         self.settle_spawn()?;
         self.prepare_levels()?;
+        let level_load_time = level_load_started.elapsed();
         let gate_lists = lists.clone();
         let gate: LoginGate = Arc::new(move |address, uuid, name| {
             // `ServerActivityMonitor.reportLoginActivity`: a login attempt, however it ends. The management
@@ -1213,6 +1241,7 @@ impl Game<'_> {
                  turn on Velocity forwarding (forwarding.secret, docs/velocity-forwarding.md) or turn [transfer] off"
                 .into());
         }
+        self.start_loaded_dedicated_world(&opened_packs);
         let net = NetConfig {
             bind: (!props.server_ip.is_empty())
                 .then(|| props.server_ip.parse().ok())
@@ -1262,7 +1291,7 @@ impl Game<'_> {
                 .is_some_and(|v| v.trim().eq_ignore_ascii_case("true")),
             older_clients_play: false,
             lod_distance: sunrise_client::lod_net::distance_property(
-                props.raw.get(sunrise_client::lod_net::PROPERTY),
+                props.raw.get(sunrise_client::lod_net::PROPERTY).as_deref(),
             ),
             server_links: if props.bug_report_link.is_empty() {
                 Vec::new()
@@ -1373,13 +1402,7 @@ impl Game<'_> {
                 .get(ADMIN_FEEDBACK_PROPERTY)
                 .is_none_or(|v| v.trim() != "false");
         }
-        log(
-            "INFO",
-            &format!(
-                "Done ({:.3}s)! For help, type \"help\"",
-                started.elapsed().as_secs_f64()
-            ),
-        );
+        log("INFO", &startup_done(level_load_time));
         // DedicatedServer.initServer ends with saveEverything(false, true, true).
         self.save_game()?;
         self.log_saved_levels();
@@ -1414,7 +1437,7 @@ impl Game<'_> {
                     0
                 },
                 sunrise_client::lod_net::distance_property(
-                    props.raw.get(sunrise_client::lod_net::PROPERTY),
+                    props.raw.get(sunrise_client::lod_net::PROPERTY).as_deref(),
                 ),
                 anticheat_on,
             ),
@@ -1833,8 +1856,18 @@ impl Game<'_> {
         self.console_broadcast = Some(inform);
         self.console_command(state, line);
         self.console_broadcast = None;
-        if let Some(host) = self.lan.as_ref() {
-            crash_fixture("hub", || host.hub.guests.iter().any(|g| g.placed));
+        // The fixture panics with the hub out of the game, as a panic in the network tick does.
+        crash_fixture("hub", || {
+            let placed = self
+                .lan
+                .as_ref()
+                .is_some_and(|host| host.hub.guests.iter().any(|g| g.placed));
+            if placed {
+                self.lan = None;
+            }
+            placed
+        });
+        if self.lan.is_some() {
             self.run_level_teleports();
             self.send_admin_feedback(None);
         }
@@ -2626,18 +2659,7 @@ impl Game<'_> {
         } else {
             log("ERROR", &format!("The server thread panicked: {message}"));
         }
-        let acting = self.lan_acting;
-        let hub_lost = self.lan.is_none();
-        if let (Some(conn), Some(host)) = (acting, self.lan.as_mut()) {
-            host.hub
-                .guests
-                .update_connection(conn, |guest| guest.placed = false);
-        }
-        if hub_lost {
-            warn("The panic interrupted the network tick: players are not saved, only the world");
-        } else if acting.is_some() {
-            warn("The panic interrupted a player's turn: that player keeps the last saved file");
-        }
+        self.exclude_interrupted_players(true, warn);
         if integrated {
             // `IntegratedServer.stopServer`'s steps; `save_guest` skips the guest unplaced above.
             return self.stop_integrated(true);
@@ -2822,6 +2844,14 @@ mod tests {
     }
 
     /// Vanilla's words, with how far behind the server is in milliseconds and in whole ticks.
+    #[test]
+    fn done_uses_java_half_up_world_load_seconds() {
+        assert_eq!(
+            super::startup_done(std::time::Duration::from_nanos(2_345_500_000)),
+            "Done (2.346s)! For help, type \"help\""
+        );
+    }
+
     #[test]
     fn the_overload_warning_reads_as_vanilla_s() {
         let tick = std::time::Duration::from_millis(50);

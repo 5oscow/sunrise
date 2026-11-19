@@ -46,6 +46,27 @@ fn success(result: Output) -> String {
     String::from_utf8(result.stdout).unwrap()
 }
 
+#[cfg(unix)]
+fn run_printed_check(root: &Path, publish_output: &str) -> String {
+    let printed = publish_output
+        .lines()
+        .map(str::trim)
+        .find(|line| line.starts_with("cargo sunrise-mod check "))
+        .unwrap();
+    // Substitute the test binary for the installed Cargo subcommand without changing its arguments.
+    success(
+        Command::new("sh")
+            .current_dir(root)
+            .env("SUNRISE_TEST_BIN", BIN)
+            .arg("-c")
+            .arg(format!(
+                "cargo() {{ shift; \"$SUNRISE_TEST_BIN\" \"$@\"; }}\n{printed} --json"
+            ))
+            .output()
+            .unwrap(),
+    )
+}
+
 #[test]
 #[ignore = "daily"]
 fn bad_version_or_checkout_leaves_destination_and_outside_files_unchanged() {
@@ -77,6 +98,8 @@ fn bad_version_or_checkout_leaves_destination_and_outside_files_unchanged() {
     };
     manifest(root, "1/../../sentinel");
     attempt("sunrise-mod.toml: version");
+    manifest(root, "1.0.0+local");
+    attempt("cannot name a registry release");
 
     manifest(root, "1");
     fs::write(checkout.join(ENTRY), "id = [").unwrap();
@@ -105,7 +128,7 @@ fn check_command_accepts_an_update_without_shipping_history_or_the_icon_again() 
     let work = tempfile::tempdir().unwrap();
     let root = work.path();
     let checkout = "Ada's registry";
-    let out = "new submission";
+    let out = "Ada's new submission";
     manifest(root, "1.0.0");
     // A 64 × 64 PNG, not just the IHDR: the old package and the registry both read it.
     fs::write(root.join("icon.png"), STANDARD.decode("iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAAAAACPAi4CAAAAG0lEQVR4nO3BgQAAAADDoPlT3+AEVQEAAAB8AxBAAAFGOA0dAAAAAElFTkSuQmCC").unwrap()).unwrap();
@@ -157,44 +180,23 @@ fn check_command_accepts_an_update_without_shipping_history_or_the_icon_again() 
         published
     );
 
+    assert!(output.contains("cargo sunrise-mod check "));
     #[cfg(unix)]
-    let checked = {
-        let printed = output
-            .lines()
-            .map(str::trim)
-            .find(|line| line.starts_with("cargo sunrise-mod registry check "))
-            .unwrap();
-        // Use the test binary in place of the installed Cargo subcommand, leaving the printed
-        // shell arguments untouched so both the spaces and apostrophe go through the shell.
-        success(
-            Command::new("sh")
-                .current_dir(root)
-                .env("SUNRISE_TEST_BIN", BIN)
-                .arg("-c")
-                .arg(format!(
-                    "cargo() {{ shift; \"$SUNRISE_TEST_BIN\" \"$@\"; }}\n{printed}"
-                ))
-                .output()
-                .unwrap(),
-        )
-    };
+    let checked = run_printed_check(root, &output);
     #[cfg(not(unix))]
-    let checked = {
-        assert!(output.contains("registry check"));
-        success(run(
-            root,
-            &[
-                "registry",
-                "check",
-                checkout,
-                out,
-                "--files",
-                "new submission/files",
-            ],
-        ))
-    };
-    assert!(checked.contains(&new.versions[0].sha256), "{checked}");
-    assert!(!checked.contains(&old.versions[0].sha256), "{checked}");
+    let checked = success(run(
+        root,
+        &[
+            "check",
+            "Ada's new submission/coords_hud-2.0.0.smod",
+            "--json",
+        ],
+    ));
+    let checked: serde_json::Value = serde_json::from_str(&checked).unwrap();
+    assert_eq!(
+        checked["report"]["sha256"].as_str(),
+        Some(new.versions[0].sha256.as_str())
+    );
 }
 
 #[test]
@@ -223,7 +225,14 @@ fn signed_publish_stages_the_exact_prebuilt_package_with_the_checkout_key() {
     fs::write(&built, &signed).unwrap();
     let mut args = args.to_vec();
     args.extend(["--key", key, "--signature", signature.to_str().unwrap()]);
-    success(run(root, &args));
+    let output = success(run(root, &args));
+    assert!(output.contains("--key ") && output.contains("--signature "));
+    #[cfg(unix)]
+    {
+        let checked: serde_json::Value =
+            serde_json::from_str(&run_printed_check(root, &output)).unwrap();
+        assert_eq!(checked["report"]["signed"].as_bool(), Some(true));
+    }
     let staged = root.join("out");
     let entry: Entry = toml::from_str(&fs::read_to_string(staged.join(ENTRY)).unwrap()).unwrap();
     assert_eq!(entry.key.as_deref(), Some(key));

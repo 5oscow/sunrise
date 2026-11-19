@@ -178,6 +178,19 @@ pub struct BlockProperties {
     /// Maximum downward displacement, 0 to 0.2 (default 0.2 for XYZ; XZ has no vertical offset).
     #[serde(default, deserialize_with = "deserialize_vertical_offset")]
     pub max_vertical_offset: Option<f32>,
+    /// Vanilla's note-block instrument constant; unset inherits the template.
+    #[serde(default, deserialize_with = "deserialize_instrument")]
+    pub instrument: Option<mod_vocab::NoteInstrument>,
+    /// Lava ignition flag. The per-position `ignited_by_lava` hook still answers first.
+    #[serde(default, deserialize_with = "deserialize_ignited_by_lava")]
+    pub ignited_by_lava: Option<bool>,
+    /// Whether placement and features may replace this block; the held-own-item rule still applies.
+    #[serde(default, deserialize_with = "deserialize_replaceable")]
+    pub replaceable: Option<bool>,
+    /// Skip faces against any state of this same block; false disables the template's render rule.
+    /// Leaf and ice graphics culling still follows the template class.
+    #[serde(default, deserialize_with = "deserialize_skip_same_block_faces")]
+    pub skip_same_block_faces: Option<bool>,
     /// Opt into `VegetationBlock` survival independently of the template.
     #[serde(default)]
     pub vegetation: bool,
@@ -213,6 +226,47 @@ fn deserialize_offset<'de, D: serde::Deserializer<'de>>(
 ) -> Result<Option<OffsetType>, D::Error> {
     Option::<OffsetType>::deserialize(d)
         .map_err(|e| serde::de::Error::custom(format!("offset: {e}")))
+}
+
+fn deserialize_instrument<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<mod_vocab::NoteInstrument>, D::Error> {
+    Option::<String>::deserialize(deserializer)
+        .map_err(|e| serde::de::Error::custom(format!("instrument: {e}")))?
+        .map(|name| {
+            mod_vocab::NoteInstrument::ALL
+                .into_iter()
+                .find(|instrument| instrument.name().to_ascii_uppercase() == name)
+                .ok_or_else(|| {
+                    serde::de::Error::custom(format!(
+                        "instrument: unknown NoteBlockInstrument constant {name}"
+                    ))
+                })
+        })
+        .transpose()
+}
+
+fn property_bool<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+    key: &str,
+) -> Result<Option<bool>, D::Error> {
+    Option::<bool>::deserialize(deserializer)
+        .map_err(|e| serde::de::Error::custom(format!("{key}: {e}")))
+}
+fn deserialize_ignited_by_lava<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<bool>, D::Error> {
+    property_bool(d, "ignited_by_lava")
+}
+fn deserialize_replaceable<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<bool>, D::Error> {
+    property_bool(d, "replaceable")
+}
+fn deserialize_skip_same_block_faces<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<bool>, D::Error> {
+    property_bool(d, "skip_same_block_faces")
 }
 
 /// Vanilla's `PushReaction`, by its constant's name.
@@ -857,10 +911,12 @@ pub const DYE_COLORS: [&str; 16] = [
 /// the vanilla entity types a mod's type may copy: thrown item
 /// projectiles (`ThrowableItemProjectile`), then living mobs
 /// ([`LIVING_TEMPLATES`]).
-pub const ENTITY_TEMPLATES: [&str; 7] = [
+pub const ENTITY_TEMPLATES: [&str; 9] = [
     "minecraft:snowball",
     "minecraft:cat",
+    "minecraft:drowned",
     "minecraft:parrot",
+    "minecraft:skeleton",
     "minecraft:villager",
     "minecraft:wandering_trader",
     "minecraft:wolf",
@@ -874,9 +930,15 @@ pub const ENTITY_TEMPLATES: [&str; 7] = [
 /// which a native mod can replace (`register_goals`); a villager's is its
 /// brain. The cat, the parrot and the wolf are the tameable ones
 /// (`TamableAnimal`): a type copying one tames, sits and follows its owner.
-pub const LIVING_TEMPLATES: [&str; 6] = [
+/// The skeleton is the ranged one (`AbstractSkeleton`): a type copying it
+/// draws and shoots a bow it holds, shuns the sun and flees wolves. The
+/// drowned is the aquatic fighter: a type copying it swims, goes to water,
+/// and fights with a trident or in melee.
+pub const LIVING_TEMPLATES: [&str; 8] = [
     "minecraft:cat",
+    "minecraft:drowned",
     "minecraft:parrot",
+    "minecraft:skeleton",
     "minecraft:villager",
     "minecraft:wandering_trader",
     "minecraft:wolf",
@@ -888,6 +950,12 @@ mod entity_type;
 pub use entity_type::EntityType;
 pub mod fluid_interaction;
 pub use fluid_interaction::FluidInteraction;
+mod lenient;
+pub use lenient::without_comments;
+#[cfg(feature = "references")]
+mod references;
+#[cfg(feature = "references")]
+pub use references::{Findings, check_references};
 
 /// A block entity type declared in code, with the blocks it supports.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -2813,6 +2881,14 @@ capabilities = ["registries"]
                 "data/ruby/sunrise/entity_type/tabby.json",
                 br#"{"template": "minecraft:cat"}"#,
             ),
+            (
+                "data/ruby/sunrise/entity_type/archer.json",
+                br#"{"template": "minecraft:skeleton"}"#,
+            ),
+            (
+                "data/ruby/sunrise/entity_type/diver.json",
+                br#"{"template": "minecraft:drowned"}"#,
+            ),
         ];
         let content = smod("living", MANIFEST_TEXT, files).unwrap();
         let types: Vec<_> = content
@@ -2832,6 +2908,8 @@ capabilities = ["registries"]
         assert_eq!(
             types,
             [
+                ("ruby:archer", "minecraft:skeleton", true, vec![]),
+                ("ruby:diver", "minecraft:drowned", true, vec![]),
                 (
                     "ruby:ghoul",
                     "minecraft:zombie",
@@ -2969,6 +3047,23 @@ capabilities = ["registries"]
                 smod("offset-refusal", MANIFEST_TEXT, &[(file, json.as_bytes())]).unwrap_err();
             assert!(error.contains(file) && error.contains(key), "{error}");
         }
+    }
+
+    #[test]
+    fn block_instruments_accept_every_vanilla_constant_and_name_unknown_values() {
+        for instrument in mod_vocab::NoteInstrument::ALL {
+            let name = instrument.name().to_ascii_uppercase();
+            let properties: BlockProperties =
+                serde_json::from_str(&format!(r#"{{"instrument":"{name}"}}"#)).unwrap();
+            assert_eq!(properties.instrument, Some(instrument));
+        }
+        let error = serde_json::from_str::<BlockProperties>(r#"{"instrument":"FLUTEISH"}"#)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("instrument") && error.contains("FLUTEISH"),
+            "{error}"
+        );
     }
 
     #[test]

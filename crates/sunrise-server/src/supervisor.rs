@@ -255,6 +255,15 @@ pub fn run(dir: &Path) -> Result<(), String> {
         let written = config
             .write_properties(dir)
             .map_err(|e| format!("server.properties: {e}"))?;
+        for key in written.writer_collisions() {
+            note(
+                &shared,
+                "WARN",
+                &format!(
+                    "Will not copy server.properties key {key:?} back to server.toml: the game's UTF-8 writer cannot distinguish it from another key"
+                ),
+            );
+        }
         prepare_world(&shared, dir, &config)?;
         note(
             &shared,

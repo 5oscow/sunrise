@@ -35,16 +35,15 @@ both the package and the registry.
 
 ## 2. Check the new file
 
-Run the `registry check` command that `publish` prints, from your mod's folder. For a new project with no local
-registry checkout, it looks like this:
+Run the `cargo sunrise-mod check <file>` command that `publish` prints, from your mod's folder. For example:
 
 ```sh
-cargo sunrise-mod registry check 'target/sunrise-mod/publish/base' 'target/sunrise-mod/publish' --files 'target/sunrise-mod/publish/files'
+cargo sunrise-mod check 'target/sunrise-mod/publish/my_mod-0.1.0.smod'
 ```
 
-This checks the newly listed package and its signature, if any. It does not check the entire index: the submission
-folder contains neither previously published packages nor an existing project's images. Registry CI runs
-`registry review` and `registry build` with the full checkout and all listed files after staging.
+This checks the new package and, for a signed project, its signature. `publish` also lists anything left to fill in
+on the entry or page. Registry CI checks the whole checkout and plans installations after staging, with all listed
+files available. Your submission folder does not contain previously published packages or an existing project's images.
 
 For a first listing, you can also try an index containing just your project once the entry and icon are complete:
 
@@ -78,8 +77,8 @@ cargo sunrise-mod registry build 'target/sunrise-mod/publish' --files 'target/su
 Raise `version` in `sunrise-mod.toml`, then run `publish --registry <your checkout of sunrise-mods>` with an output
 folder separate from the checkout. For a signed project, [build and sign first](#signing). `publish` adds the new
 version row to the entry from the checkout, leaving all existing fields and rows in place. The printed local check
-compares that checkout with the output folder, so you do not need to download the old files or copy over the icon
-and screenshots. Repeat steps 2 to 4.
+reads only the new file, so you do not need to download the old files or copy over the icon and screenshots.
+Repeat steps 2 to 4.
 
 Published versions never change and are never removed: a version already in the entry is refused by name, and a file
 that must go is taken down by the registry's maintainers in `revoked.toml`.
@@ -106,6 +105,32 @@ and stages the exact bytes you signed, without rebuilding. If you change the pac
 
 Generate a key pair once with `minisign -G -p my_mod.pub -s my_mod.key`. Keep the secret key (`my_mod.key`) out of
 both your repository and releases; losing it means a new key and a review.
+
+## A collection
+
+Add `collections/<id>.toml` and a square PNG at `icons/<id>.png` in one pull request to
+[sunrise-org/sunrise-mods](https://github.com/sunrise-org/sunrise-mods). A collection is not a package: there's no file
+upload or version to publish.
+
+```toml
+id = "sunrise_creatures"
+name = "Sunrise Creatures"
+summary = "Fireflies, butterflies and their shared library."
+owners = ["octocat"]
+icon = "icons/sunrise_creatures.png"
+members = [
+  { id = "creature" },
+  { id = "fireflies" },
+  { id = "butterflies", default = false },
+]
+```
+
+Members are selected by default unless you set `default = false`. You can add a Markdown `description` and record
+numeric `owner_ids` in the same order as `owners`. `cargo sunrise-mod registry check <base> <head> --files <dir>`
+checks the proposed registry, including the collection; see the [full rules](../reference/registry-index.md#collections).
+
+To add a new mod, list it in the registry, then add its id to `members` in one collection pull request. If you own both
+the collection and the mod, this is a routine membership edit; changes to the page, defaults or owners wait for review.
 
 ## Integrity and takedowns
 

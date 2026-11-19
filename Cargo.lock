@@ -4541,6 +4541,7 @@ dependencies = [
 name = "sunrise-client-core"
 version = "0.1.0"
 dependencies = [
+ "log",
  "serde_json",
  "sunrise-assets",
  "sunrise-core",
@@ -4562,6 +4563,7 @@ dependencies = [
  "log",
  "png",
  "sunrise-client-core",
+ "sunrise-core",
  "sunrise-engine-slots",
  "sunrise-mod-api-macros",
  "sunrise-theme",
@@ -4724,6 +4726,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "sunrise-deflate"
+version = "0.1.0"
+dependencies = [
+ "crc32fast",
+ "simd-adler32",
+]
+
+[[package]]
 name = "sunrise-discord"
 version = "0.1.0"
 dependencies = [
@@ -4774,7 +4784,6 @@ dependencies = [
  "sunrise-client",
  "sunrise-client-lib",
  "sunrise-core",
- "sunrise-guest-stack",
  "sunrise-mod-host",
  "sunrise-mod-package",
  "sunrise-protocol",
@@ -5006,6 +5015,7 @@ dependencies = [
  "sha2",
  "socket2 0.6.5",
  "subtle",
+ "sunrise-assets",
  "sunrise-core",
  "sunrise-mod-api",
  "sunrise-mod-api-macros",
@@ -5513,6 +5523,7 @@ version = "0.1.0"
 dependencies = [
  "cap-fs-ext",
  "cap-std",
+ "crc32fast",
  "flate2",
  "libm",
  "log",
@@ -5524,6 +5535,7 @@ dependencies = [
  "sha2",
  "sunrise-assets",
  "sunrise-core",
+ "sunrise-deflate",
  "sunrise-threads",
  "xxhash-rust",
 ]

@@ -52,14 +52,11 @@ fn allowed_by_server_toml() -> Result<bool> {
     }
 }
 
-/// `f` with English as the language when none is set: a dedicated server's log is English, as
-/// vanilla's is.
+/// The dedicated server does not load client language layers. Use Sunrise's
+/// bundled English for its own missing-mod diagnostics.
 pub(super) fn in_english<R>(f: impl FnOnce() -> R) -> R {
     use sunrise_client::lang;
-    if lang::current().is_some() {
-        return f();
-    }
-    lang::scoped(lang::Language::load(&[], "en_us"), f).0
+    lang::scoped(lang::Language::load(&[], lang::DEFAULT), f).0
 }
 
 impl Game<'_> {

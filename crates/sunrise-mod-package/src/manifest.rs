@@ -40,6 +40,19 @@ fn api() -> String {
 /// Namespaces no mod may claim: vanilla's, the convention tags' (mods add
 /// to those, docs/modding/src/how-to/content-mods.md) and the game's own.
 const RESERVED_NAMESPACES: [&str; 3] = ["minecraft", "c", "sunrise"];
+/// Ids no mod or pack may take: the mod site's own pages under `/mods/` (a project's page is
+/// `/mods/<id>`), and the names of the pages below an id. The site's routes are checked against
+/// this list on its side.
+pub const RESERVED_IDS: [&str; 7] = [
+    "account",
+    "edit",
+    "index",
+    "mine",
+    "policy",
+    "registry-page",
+    "submit",
+];
+
 /// A mod's saved settings, shared by native mods and modpack overrides.
 pub const STORAGE_DIR: &str = ".sunrise-mod-data";
 /// wasm32's whole address space in MiB (4 GiB): the most a mod may declare in `wasm_memory_mib`,
@@ -50,13 +63,61 @@ pub const MAX_WASM_MEMORY_MIB: u32 = 4096;
 /// Maximum manifest bytes accepted by package readers and developer tools.
 pub const MAX_MANIFEST: u64 = 32 << 20;
 
+/// The most source files (`Cargo.toml`, `Cargo.lock`, `build.rs`, `src/**`, the root notices) a
+/// package selects: as many as its content files, so a port laid out one file per class fits.
+pub const MAX_SOURCE_FILES: usize = crate::content::MAX_FILES;
+/// The most bytes those source files take, unpacked.
+pub const MAX_SOURCE_BYTES: u64 = 64 << 20;
+
+/// A mod's version as semver, padding an omitted minor and patch (`1` is `1.0.0`, `1.2` is
+/// `1.2.0`). Pre-release and build metadata are allowed.
+pub fn parse_version(version: &str) -> Result<semver::Version, String> {
+    // Only the `major.minor.patch` core is padded: the dots of a pre-release (`1-rc.1`) or build part
+    // after a `-` or `+` belong to it.
+    let (core, suffix) = version.split_at(version.find(['-', '+']).unwrap_or(version.len()));
+    let padded = match core.matches('.').count() {
+        0 => format!("{core}.0.0{suffix}"),
+        1 => format!("{core}.0{suffix}"),
+        _ => version.to_owned(),
+    };
+    semver::Version::parse(&padded).map_err(|_| {
+        format!(
+            "version {version:?} is not a semver version (MAJOR.MINOR.PATCH, e.g. 3.6.30+refabricated)"
+        )
+    })
+}
+
+/// The first build-metadata identifier of the placeholder a port gives a jar version it could not
+/// read as semver (`0.0.0+unresolved.<the jar's text>`).
+pub const UNRESOLVED_BUILD: &str = "unresolved";
+
+/// Whether `version` is such a placeholder. Dependency resolution never lets one satisfy a
+/// requirement, since semver matching ignores build metadata and `*` or `=0.0.0` would accept it;
+/// it stays refused until someone sets the real version by hand. Any other `0.0.0` is a real version.
+pub fn is_unresolved(version: &semver::Version) -> bool {
+    version.major == 0
+        && version.minor == 0
+        && version.patch == 0
+        && version.pre.is_empty()
+        && version.build.split('.').next() == Some(UNRESOLVED_BUILD)
+}
+
+fn version_from_str<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<semver::Version, D::Error> {
+    let version = String::deserialize(deserializer)?;
+    parse_version(&version).map_err(serde::de::Error::custom)
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Manifest {
     /// `[a-z0-9_]`, 1 to 64 characters: the mod's folder, log and settings key.
     pub id: String,
     pub name: String,
-    pub version: String,
+    /// Semver, read once here: omitted minor and patch are padded ([`parse_version`]).
+    #[serde(deserialize_with = "version_from_str")]
+    pub version: semver::Version,
     #[serde(default)]
     pub description: String,
     #[serde(default)]
@@ -529,6 +590,12 @@ impl Manifest {
                 "{MANIFEST}: a content mod has no code, so no [runtime]"
             ));
         }
+        if RESERVED_IDS.contains(&m.id.as_str()) {
+            return Err(format!(
+                "{MANIFEST}: id {:?} is a page of the mod site, so no mod can be published under it: pick another id",
+                m.id
+            ));
+        }
         if reserved_mod_id(&m.id) {
             return Err(format!(
                 "{MANIFEST}: id {:?} is a reserved Windows device name",
@@ -682,8 +749,7 @@ impl Manifest {
                     ));
                 }
             }
-            if m.version.is_empty()
-                || native.game.is_empty()
+            if native.game.is_empty()
                 || !revision(&native.sunrise)
                 || native.mixins.as_deref().is_some_and(|m| !revision(m))
             {
@@ -1124,7 +1190,7 @@ impl Package {
                     }
                 }
             }
-            if source_count > 511 || source_bytes > 64 << 20 {
+            if source_count > MAX_SOURCE_FILES || source_bytes > MAX_SOURCE_BYTES {
                 return Err("native package exceeds its entry or size limit".into());
             }
             if resource_count > crate::content::MAX_FILES
@@ -1299,7 +1365,7 @@ impl Package {
                             .checked_add(size)
                             .ok_or("native package too large")?;
                         *source_count += 1;
-                        if *source_bytes > 64 << 20 || *source_count > 511 {
+                        if *source_bytes > MAX_SOURCE_BYTES || *source_count > MAX_SOURCE_FILES {
                             return Err("native package exceeds its entry or size limit".into());
                         }
                         files.insert(name, std::fs::read(path).map_err(|e| e.to_string())?);
@@ -1565,6 +1631,30 @@ mod runtime_files_tests;
 
 #[cfg(test)]
 mod tests {
+    /// A short version with a pre-release or build part is padded before it, not after it.
+    #[test]
+    fn a_short_version_with_a_pre_release_is_padded_in_its_core() {
+        for (short, full) in [
+            ("1", "1.0.0"),
+            ("1.2", "1.2.0"),
+            ("1.2.3", "1.2.3"),
+            ("1.2-beta", "1.2.0-beta"),
+            ("1-rc.1", "1.0.0-rc.1"),
+            ("1.2-rc.1", "1.2.0-rc.1"),
+            ("1.2.3-rc.1", "1.2.3-rc.1"),
+            ("1.2+build.5", "1.2.0+build.5"),
+            ("1.0-SNAPSHOT", "1.0.0-SNAPSHOT"),
+        ] {
+            assert_eq!(
+                parse_version(short).unwrap(),
+                semver::Version::parse(full).unwrap(),
+                "{short}"
+            );
+        }
+        assert!(parse_version("").is_err());
+        assert!(parse_version("one.two").is_err());
+    }
+
     use super::*;
 
     #[test]
@@ -1577,6 +1667,34 @@ mod tests {
             error.contains("chemlib::transfer") && error.contains("own hooks and functions"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn a_version_that_is_not_semver_refuses_the_manifest_when_read() {
+        let with = |v: &str| {
+            Manifest::parse(&EXAMPLE.replace("version = \"0.1.0\"", &format!("version = '{v}'")))
+        };
+        let error = with("v1 beta!").unwrap_err();
+        assert!(
+            error.contains(
+                "version \"v1 beta!\" is not a semver version (MAJOR.MINOR.PATCH, e.g. 3.6.30+refabricated)"
+            ),
+            "{error}"
+        );
+        assert!(with("").is_err());
+    }
+
+    #[test]
+    fn an_omitted_minor_and_patch_are_padded() {
+        let with = |v: &str| {
+            Manifest::parse(&EXAMPLE.replace("version = \"0.1.0\"", &format!("version = '{v}'")))
+                .unwrap()
+                .version
+                .to_string()
+        };
+        assert_eq!(with("1"), "1.0.0");
+        assert_eq!(with("1.2"), "1.2.0");
+        assert_eq!(with("3.6.30+refabricated"), "3.6.30+refabricated");
     }
 
     #[test]
@@ -1975,7 +2093,7 @@ capabilities = ["registries"]
         let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
         let package = Package::read_zip(&mut zip).unwrap();
         assert_eq!(package.manifest.id, "ruby");
-        assert_eq!(package.manifest.version, "0.1.0");
+        assert_eq!(package.manifest.version.to_string(), "0.1.0");
         assert_eq!(package.manifest.native.unwrap().game, "26.3");
         assert!(
             Package::write_files(&manifest, &[("Cargo.toml", b""), ("src/../bad.rs", b"")])
@@ -2053,6 +2171,31 @@ capabilities = ["registries"]
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    /// A port written one file per class keeps more than 511 source files, far under the byte cap.
+    #[test]
+    fn a_native_project_of_many_source_files_packs_and_reads() {
+        let root =
+            std::env::temp_dir().join(format!("sunrise-many-sources-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("src/classes")).unwrap();
+        let manifest = format!(
+            "{EXAMPLE}[native]\ngame = '26.3'\nsunrise = '{}'\nmixins = '{}'\n",
+            "a".repeat(40),
+            "b".repeat(40)
+        );
+        std::fs::write(root.join(MANIFEST), manifest).unwrap();
+        std::fs::write(root.join("Cargo.toml"), "[package]\nname = 'ruby'\n").unwrap();
+        std::fs::write(root.join("src/lib.rs"), "mod classes;\n").unwrap();
+        for i in 0..700 {
+            std::fs::write(root.join(format!("src/classes/c{i}.rs")), "pub struct C;\n").unwrap();
+        }
+        let bytes = Package::pack_directory(&root).unwrap();
+        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        assert_eq!(Package::read_zip(&mut zip).unwrap().manifest.id, "ruby");
+        assert!(zip.by_name("src/classes/c699.rs").is_ok());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn package_kind_requires_matching_source_and_native_declaration() {
         let root =
@@ -2104,6 +2247,18 @@ capabilities = ["registries"]
                 error.contains(MANIFEST)
                     && error.contains(id)
                     && error.contains("reserved namespace"),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_page_of_the_mod_site_cannot_be_the_mod_id() {
+        for id in ["mine", "account", "policy", "submit", "index", "edit"] {
+            let manifest = EXAMPLE.replace("id = \"ruby\"", &format!("id = {id:?}"));
+            let error = Manifest::parse(&manifest).unwrap_err();
+            assert!(
+                error.contains(MANIFEST) && error.contains(id) && error.contains("mod site"),
                 "{error}"
             );
         }

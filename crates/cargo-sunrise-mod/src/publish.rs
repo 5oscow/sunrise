@@ -256,7 +256,8 @@ pub fn run(entry_point: mod_surface::child::ChildEntry, args: &[String]) -> Resu
     let root = Path::new(".");
     let manifest = Manifest::parse(&bounded::read(&root.join(MANIFEST), bounded::MAX_MANIFEST)?)?;
     let id = &manifest.id;
-    if !registry::plain_version(&manifest.version) {
+    let release_version = manifest.version.to_string();
+    if !registry::plain_version(&release_version) {
         return Err(format!(
             "{MANIFEST}: version {:?} cannot name a registry release: set `version` to at most 64 ASCII letters, digits, '.', '-' or '_', starting with a letter or digit",
             manifest.version
@@ -268,19 +269,13 @@ pub fn run(entry_point: mod_surface::child::ChildEntry, args: &[String]) -> Resu
         Kind::Mod
     };
     let existing = if let Some(checkout) = &o.registry {
-        let (entries, _) = registry::load_with(checkout, |path| {
-            match bounded::read(path, bounded::MAX_MANIFEST) {
-                Ok(text) => Ok(Some(text)),
-                Err(e) if e.is_not_found() => Ok(None),
-                Err(e) => Err(e.to_string()),
-            }
-        }).map_err(|errors| format!(
+        let loaded = registry::load(checkout).map_err(|errors| format!(
             "--registry {} is not a valid registry checkout: {}. Restore the checked-in entries or use a clean checkout",
             checkout.display(),
             errors.join("; ")
         ))?;
         // The registry loader has bound every entry's id to its file name; select this project's id.
-        entries.into_iter().find(|e| &e.id == id)
+        loaded.entries.into_iter().find(|e| &e.id == id)
     } else {
         None
     };
@@ -297,10 +292,13 @@ pub fn run(entry_point: mod_surface::child::ChildEntry, args: &[String]) -> Resu
                 entry.kind.name()
             ));
         }
-        if entry.versions.iter().any(|v| v.version == manifest.version) {
+        if let Some(listed) = entry.versions.iter().find(|v| {
+            sunrise_mod_package::manifest::parse_version(&v.version)
+                .is_ok_and(|version| version == manifest.version)
+        }) {
             return Err(format!(
                 "{id} {} is already listed in the registry, and a published version never changes: raise `version` in {MANIFEST} and run publish again",
-                manifest.version
+                listed.version
             ));
         }
         if entry.key.is_some() && (o.key.is_none() || o.signature.is_none()) {
@@ -340,11 +338,9 @@ pub fn run(entry_point: mod_surface::child::ChildEntry, args: &[String]) -> Resu
     if out.as_os_str().is_empty() {
         return Err("--out is empty: name a folder for the submission".into());
     }
-    let base = o.registry.clone().unwrap_or_else(|| out.join("base"));
     let mods = out.join(ENTRIES);
     let files = out.join("files");
     let icons = (first && icon.is_some()).then(|| out.join("icons"));
-    let empty_base = o.registry.is_none().then(|| base.join(ENTRIES));
     // An unsigned submission is built first, into the project's own output folder.
     let built = signature
         .is_none()
@@ -356,8 +352,6 @@ pub fn run(entry_point: mod_surface::child::ChildEntry, args: &[String]) -> Resu
             Some(mods.as_path()),
             Some(files.as_path()),
             icons.as_deref(),
-            empty_base.as_ref().map(|_| base.as_path()),
-            empty_base.as_deref(),
         ]
         .into_iter()
         .flatten()
@@ -380,11 +374,11 @@ pub fn run(entry_point: mod_surface::child::ChildEntry, args: &[String]) -> Resu
             }
         }
     }
-    if o.registry.is_some()
+    if let Some(checkout) = &o.registry
         && let Ok(out_path) = dunce::canonicalize(&out)
-        && dunce::canonicalize(&base).is_ok_and(|base_path| base_path == out_path)
+        && dunce::canonicalize(checkout).is_ok_and(|base_path| base_path == out_path)
     {
-        return Err("--out is the registry checkout: choose a separate output folder so the original entry stays available for registry check".into());
+        return Err("--out is the registry checkout: choose a separate output folder so the original entry stays unchanged".into());
     }
 
     let package = if signature.is_some() {
@@ -409,7 +403,7 @@ pub fn run(entry_point: mod_surface::child::ChildEntry, args: &[String]) -> Resu
         )
     })?;
     if report.facts.id.as_deref() != Some(id)
-        || report.facts.version.as_deref() != Some(&manifest.version)
+        || report.facts.version.as_deref() != Some(release_version.as_str())
     {
         return Err(format!(
             "{} does not contain {id} {} from {MANIFEST}: build that version and sign the resulting package before publishing",
@@ -423,10 +417,10 @@ pub fn run(entry_point: mod_surface::child::ChildEntry, args: &[String]) -> Resu
             package.display()
         ));
     }
-    let file = release_name(id, &manifest.version, "smod");
+    let file = release_name(id, &release_version, "smod");
     let version = EntryVersion {
         native_binaries: Vec::new(),
-        version: manifest.version.clone(),
+        version: release_version,
         published: today(),
         game: report
             .facts
@@ -446,14 +440,9 @@ pub fn run(entry_point: mod_surface::child::ChildEntry, args: &[String]) -> Resu
     };
     let entry_text = entry.to_toml()?;
     let (title, body) = pull_request(&entry, &version, report.size, first);
-    for dir in [
-        Some(&mods),
-        Some(&files),
-        icons.as_ref(),
-        empty_base.as_ref(),
-    ]
-    .into_iter()
-    .flatten()
+    for dir in [Some(&mods), Some(&files), icons.as_ref()]
+        .into_iter()
+        .flatten()
     {
         fs::create_dir_all(dir)
             .map_err(|e| format!("{}: {e}; choose a writable --out folder", dir.display()))?;
@@ -510,18 +499,24 @@ pub fn run(entry_point: mod_surface::child::ChildEntry, args: &[String]) -> Resu
             println!("  - {r}");
         }
     }
-    // Prefix relative paths so even --out/--registry values starting with '-' are positional.
+    // Prefix the package path so even --out values starting with '-' are positional.
     // Use single-quoted arguments for the POSIX shell (PowerShell on Windows).
-    let quote = |path: &Path| {
-        let path = root.join(path);
+    let quote = |arg: &str| {
         let escape = if cfg!(windows) { "''" } else { "'\\''" };
-        format!("'{}'", path.to_string_lossy().replace('\'', escape))
+        format!("'{}'", arg.replace('\'', escape))
+    };
+    let packaged = root.join(&out).join(&file);
+    let signing = match (&o.key, &o.signature) {
+        (Some(key), Some(signature)) => format!(
+            " --key {} --signature {}",
+            quote(key),
+            quote(&signature.to_string_lossy()),
+        ),
+        _ => String::new(),
     };
     println!(
-        "\nCheck the new file locally (registry CI checks the whole index):\n  cargo sunrise-mod registry check {} {} --files {}",
-        quote(&base),
-        quote(&out),
-        quote(&files),
+        "\nCheck the new file locally (registry CI checks the whole checkout):\n  cargo sunrise-mod check {}{signing}",
+        quote(&packaged.to_string_lossy()),
     );
     println!("\nPull request: {title}\n\n{body}");
     Ok(())

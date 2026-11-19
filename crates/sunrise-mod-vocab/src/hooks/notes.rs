@@ -16,10 +16,6 @@ A native server tick hook can call `native_server_block` with its context, a dim
 
 `neighbor_changed` observes each authoritative server `neighborChanged` before the block handles it. It supplies the dimension, position, current owned `BlockState`, changed `BlockKey` and moved flag. The changed block key comes from the source block's default state through the prepared state index, after the primary state's routing guard. No registry-name lookup or allocation occurs on this path. Use explicit immutable block metadata for property queries; the hook does not load chunks or change the update queue. Its host is the level with its ticks (`&mut dyn LevelTicksHost`), as vanilla's `neighborChanged` gets the level: a `BlockPart::neighbor_changed` can read its inputs there with `level.signal(pos, direction)`, `direct_signal`, `direct_signal_to`, `best_neighbor_signal` and `has_neighbor_signal`, the same reads as `LevelRef`'s (mods' parts included), and schedule its own tick with `level.schedule_block_tick`, as a diode does (`DiodeBlock.checkTickOnNeighbor`). The reads write nothing and draw nothing, so they leave the update as it was, and cost what the game's own call does. `tick_block` and the other hooks with a `LevelWriteHost` have them too. Contract version `2`: version `1` handed the hook a plain `&dyn LevelHost`. Diverges from upstream.
 
-### Server block changes (draft)
-
-`block_changed` observes a committed authoritative server `Level.setBlock` change before block side effects and neighbour updates. It supplies the dimension, position and old and new state IDs. It does not observe chunk loading or direct storage writes that bypass `Level.setBlock`.
-
 ### Server commands and players
 
 For mods that run where the world is simulated: a dedicated server, a LAN host, single player's server thread
@@ -1771,24 +1767,7 @@ still go on each event or registrar.
 - Mod-block entity contacts: `block_step_on` receives the server dimension, entity id/type, block state and position. Landing is a block Part method, not a global hook (`block_fall_on` is removed; it diverges from upstream): `BlockPart::fall_on` (`Block.fallOn`) receives writable fall distance and damage multiplier before calculation; a zero multiplier prevents fall hurt and generic fall sounds. Creative and fall-immune entities notify with zero multiplier and retain immunity. Non-finite inputs are ignored; negative multipliers are clamped to zero. `BlockPart::bounce_on` (`Block.bounceOn`) fires only when the entity bounced, just before vanilla sets its movement, and may change the movement the bounce leaves. Both run synchronously inside the entity's move on the level random host (reads blocks, draws the level's random in vanilla's order, attachments; no writes); players and mobs fire them, and dropped items fire `fall_on` (kind `minecraft:item`, zero multiplier, read and act on the item through `ItemEntityRef`; an item's `bounce_on` is not fired yet). An item's fall distance grows by its moves down out of water and resets in water and on landing, as `Entity.checkFallDamage` has it; with no Part on the block it lands on, the landing costs one `fall_listens` lookup. `fall_on` asks for writes with `event.request(LandingWrite::SetBlock(state))` or `LandingWrite::DestroyBlock { drop }` (farmland to dirt after its random draw, a turtle egg breaking): they apply at the batch end through the same drain as `entity_inside`, in the order asked, if the block is still the state the entity landed on.
 - `Block.entityInside` is `BlockPart::entity_inside(host, event)` (`EntityInsideEvent { state, pos, entity, precise }`; `precise` is `Entity.checkInsideBlocks`' flag), the Part form of what `block_entity_inside` was; there is no global hook (NeoForge has no bus event for it). It fires mid-sweep, inside the entity's move, on the level random host (`&mut dyn LevelRandomHost`, like `fall_on`): a Part reads blocks and draws the level's random in vanilla's order, interleaved with the vanilla blocks of the same walk; only writes are restricted to the event. The Part queues its writes: `event.apply(InsideEffect::…)` is one of the five `InsideBlockEffectType`s, `event.run_before`/`run_after(effect, EntityWrite)` a typed write to the swept entity (applied inside its own tick, in `StepBasedCollector` order, stopping when it dies), `event.request(InsideWrite::…)` a level write at the touched block, applied at the batch end, guarded on the state (the `fall_on` contract: the complete batch is checked, an invalid state refuses all of the callback's writes). Only a block state a Part listens for fires it; with no listening Part nothing is recorded and the walk allocates nothing. A `Hurt` whose source the entity table answers `Taken` for (its list is lifted that moment, #1606) is refused with a typed error, not a retry and not a panic. Players, mobs, items and projectiles all fire it on the shared walk, inside their own tick or batch; the level writes a contact asked for still land at the batch end, through the drain the landings use. The block's `getEntityInsideCollisionShape`/`insideBlock` shape that decides "inside" is not exposed (tracked on #44).
 
-- A consumable's effect of a mod's own kind. The item's `on_consume_effects` entry of a type in a namespace of its own reaches `consume_effect(kind, data)` when the
-  item is consumed, on the server thread, for the acting player. The kind and the payload converted once to a retained `Tag` at definition load are there;
-  the game's own effects, sounds, teleports and drops are open to the hook. An unclaimed kind does nothing.
-  The hook sees the item's own consumable component, not a patch on the stack; a bare vanilla name and an unknown `minecraft:` kind are the loader's, not the hook's.
-
 - [loot table hooks](#loot-tables), for changing loot a mod didn't make. `loot_table_load(context, id, table)`, in `sunrise-world`'s `loot.rs`, gets each loot table's JSON as it loads, after the data packs' (NeoForge's `LootTableLoadEvent`, Fabric's `LootTableEvents.MODIFY`): add pools or entries, change or replace it, and chests, block and mob drops, fishing and the rest then roll the changed table. It runs on the server for each data load and reload, not client preloads. `loot_drops(context, drops)` gets the items a broken block or a dead mob is about to drop, to add, change or take out (global loot modifiers, `MODIFY_DROPS`), with `LootDrops`: the table rolled, the dimension, the origin, the block or the mob, the player who broke or killed it, the tool and an explosion's radius. It hears blocks a player, an explosion or a mob breaks, not other breaks such as leaves decaying.
-
-- `state_for_placement(state, context, fluid, answer)`: the state a block is about to be placed in
-  (`Block.getStateForPlacement(BlockPlaceContext)`), `state` the block's own default state. Answer only for your own
-  blocks: `answer` set to `Some(Some(state))` places that state (a state of that block, as vanilla sets properties on its own
-  `defaultBlockState`; another block's is ignored), `Some(None)` refuses the placement (vanilla's `null`:
-  the block goes nowhere and the stack is kept), and left empty the block's own placement runs. `context` is vanilla's
-  `BlockPlaceContext`: the clicked face, the placer's rotation, the clicked position, whether the clicked block is
-  being replaced and the item in hand. `fluid` is the fluid in the position the block would go in, which a
-  waterlogged block reads. It is asked for every placer that goes through vanilla's placement (a player's
-  `BlockItem.place`, a dispenser's `DirectionalPlaceContext`), and the answer still takes its survival and entity
-  obstruction checks. `native_state_with_property(state, key, value)` builds the state from `state` and one of its
-  properties, its own declared ones included. Asked on both sides (see above): a client refusal keeps its stack unspent.
 
 - A `minecraft:post_attack` enchantment effect of a mod's own kind, on a mob a player's weapon hit: `enchant_effect` (see
   [A mod's own enchantment effect kinds](../how-to/items/enchantment-effect-kinds.md)).
@@ -2864,9 +2843,9 @@ registration path.
   the current transaction, rolls back on abort, and uses the normal menu broadcast to viewers.
   `level.set_block` uses the level's normal update path.
 
-- Screens a mod draws for its blocks' menus: `screen` lays one out (its height, where each container slot is,
-  where the inventory starts; a slot it leaves out is not in the menu, so shift-clicks skip it) and `screen_draw` draws it with the mod's
-  own GUI textures (`assets/<namespace>/textures/gui`, drawn with `native_sprite`).
+- Screens a mod draws for its menu types: a `MenuPart` attached to the menu type (`r.menu_part("mymod:backpack", Backpack)`) answers `screen`, which lays one out (its height, where each container slot is,
+  where the inventory starts; a slot it leaves out is skipped by the server's shift-clicks) and `screen_draw` draws it with the mod's own GUI textures (`assets/<namespace>/textures/gui`, drawn with `native_sprite`).
+  The screen goes with the menu type, as a `RegisterMenuScreensEvent` screen does, whatever opened the menu: a block's use or `player_open_mod_menu` from an item's use, an entity or a command. Each hook names the mod block whose menu it is (`block`, `None` without one); on a vanilla type only that block's mod's part hears them.
 
 - Buttons, tooltips and item icons on mod screens: `screen_click` and `screen_tooltip` (the client), `menu_button`
   (a button press on the server, on the mod block entity) and the helpers `native_item`, `native_screen_title`, `LevelRef::block`,
@@ -3047,9 +3026,9 @@ registration path.
   restricted level hook, `with_random` on the `LevelRandomHost` draws from the same stream.
 
 - Server lifecycle hooks run once per start, on both the single-player server thread and a dedicated server.
-  `server_about_to_start(dedicated)` runs before worlds load (`ServerAboutToStartEvent`), immediately followed by
-  `server_starting(dedicated)` (`ServerStartingEvent`), before the server accepts play. `server_started(dedicated)`
-  keeps its existing firing point: every level loaded and the first tick not yet run (`ServerStartedEvent`).
+  `server_about_to_start(dedicated)` runs before worlds load (`ServerAboutToStartEvent`).
+  `server_starting(dedicated)` (`ServerStartingEvent`) follows world and pack loading and spawn preparation on dedicated servers, or immediately follows about-to-start on integrated servers. Both precede accepting play.
+  `server_started(dedicated)` runs after every level loads but before the first tick (`ServerStartedEvent`).
   On every exit after startup began, including a failed open, failed tick, or caught panic,
   `server_stopping(dedicated)` (`ServerStoppingEvent`) runs before player cleanup and the final world save attempt.
   `server_stopped(dedicated)` (`ServerStoppedEvent`) runs last, after network teardown, flushing saves and releasing

@@ -588,6 +588,35 @@ impl Game<'_> {
         // entity_join_level).
         self.spawn_mob(kind, at, false, site)
     }
+    /// [`spawn_mob_spawned`](Self::spawn_mob_spawned) for a mob that starts
+    /// moving or turned: `velocity` (`Entity.setDeltaMovement`) and, when
+    /// given, `[yaw, pitch]` in place of the level random's yaw, set before
+    /// it joins. The kind resolves as `spawn_mob_spawned`'s (`cow` is
+    /// `minecraft:cow`), and the ender dragon takes its own creation, facing
+    /// the given yaw; it has no momentum or pitch of its own here, so a
+    /// dragon given a velocity or a pitch is refused.
+    pub(in crate::game) fn spawn_mob_spawned_moving(
+        &mut self,
+        kind: &str,
+        at: [f64; 3],
+        site: SpawnSite,
+        velocity: Vec3,
+        rotation: Option<[f32; 2]>,
+    ) -> Option<u32> {
+        if matches!(kind, "ender_dragon" | "minecraft:ender_dragon") {
+            if velocity != Vec3::ZERO || rotation.is_some_and(|[_, pitch]| pitch != 0.0) {
+                return None;
+            }
+            return self.spawn_dragon_facing(at, site, rotation.map(|[yaw, _]| yaw));
+        }
+        // Not persistent, as `spawn_mob_spawned`'s mob.
+        let mut mob = self.create_mob_reason(kind, at, false, site, rotation.map(|r| r[0]))?;
+        mob.velocity = velocity;
+        if let Some([_, pitch]) = rotation {
+            (mob.head_pitch, mob.previous_head_pitch) = (pitch, pitch);
+        }
+        self.insert_spawned_mob(mob)
+    }
     fn create_mob_reason(
         &mut self,
         kind: &str,
@@ -2260,6 +2289,7 @@ impl Game<'_> {
                     count,
                     speed,
                 } => self.landing_dust(state, Vec3::new(at[0], at[1], at[2]), count, speed),
+                MobEvent::DrinkFinished { mob, stack } => self.finish_mob_drink(mob, &stack),
                 MobEvent::SquidCycle { mob, at } => self.lan_entity_event(mob as i32, 19, at),
                 MobEvent::RabbitHop { mob, at } => self.lan_entity_event(mob as i32, 1, at),
                 MobEvent::Drown { mob, at, bubbles } => self.mob_drown(mob, at, bubbles),
@@ -4970,6 +5000,7 @@ impl Game<'_> {
             .push(sunrise_world::level::LevelEvent::Sound {
                 pos: BlockPos::new(pos[0], pos[1], pos[2]),
                 sound: "minecraft:block.amethyst_block.chime".into(),
+                source: None,
                 volume: 1.0,
                 pitch,
             });
@@ -6030,7 +6061,7 @@ impl Game<'_> {
                     Who::Mob(id) => {
                         let hurt = self.mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
                             let remaining = m.fire_ticks;
-                            if !m.kind.flags.fire_immune {
+                            if !m.fire_immune() {
                                 m.ignite_for_ticks(100);
                             }
                             let hurt = m.damage_projectile(
