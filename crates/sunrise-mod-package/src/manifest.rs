@@ -65,13 +65,55 @@ pub const MAX_SOURCE_FILES: usize = crate::content::MAX_FILES;
 /// The most bytes those source files take, unpacked.
 pub const MAX_SOURCE_BYTES: u64 = 64 << 20;
 
+/// A mod's version as semver, padding an omitted minor and patch (`1` is `1.0.0`, `1.2` is
+/// `1.2.0`). Pre-release and build metadata are allowed.
+pub fn parse_version(version: &str) -> Result<semver::Version, String> {
+    // Only the `major.minor.patch` core is padded: the dots of a pre-release (`1-rc.1`) or build part
+    // after a `-` or `+` belong to it.
+    let (core, suffix) = version.split_at(version.find(['-', '+']).unwrap_or(version.len()));
+    let padded = match core.matches('.').count() {
+        0 => format!("{core}.0.0{suffix}"),
+        1 => format!("{core}.0{suffix}"),
+        _ => version.to_owned(),
+    };
+    semver::Version::parse(&padded).map_err(|_| {
+        format!(
+            "version {version:?} is not a semver version (MAJOR.MINOR.PATCH, e.g. 3.6.30+refabricated)"
+        )
+    })
+}
+
+/// The first build-metadata identifier of the placeholder a port gives a jar version it could not
+/// read as semver (`0.0.0+unresolved.<the jar's text>`).
+pub const UNRESOLVED_BUILD: &str = "unresolved";
+
+/// Whether `version` is such a placeholder. Dependency resolution never lets one satisfy a
+/// requirement, since semver matching ignores build metadata and `*` or `=0.0.0` would accept it;
+/// it stays refused until someone sets the real version by hand. Any other `0.0.0` is a real version.
+pub fn is_unresolved(version: &semver::Version) -> bool {
+    version.major == 0
+        && version.minor == 0
+        && version.patch == 0
+        && version.pre.is_empty()
+        && version.build.split('.').next() == Some(UNRESOLVED_BUILD)
+}
+
+fn version_from_str<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<semver::Version, D::Error> {
+    let version = String::deserialize(deserializer)?;
+    parse_version(&version).map_err(serde::de::Error::custom)
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Manifest {
     /// `[a-z0-9_]`, 1 to 64 characters: the mod's folder, log and settings key.
     pub id: String,
     pub name: String,
-    pub version: String,
+    /// Semver, read once here: omitted minor and patch are padded ([`parse_version`]).
+    #[serde(deserialize_with = "version_from_str")]
+    pub version: semver::Version,
     #[serde(default)]
     pub description: String,
     #[serde(default)]
@@ -626,11 +668,7 @@ impl Manifest {
                     ));
                 }
             }
-            if m.version.is_empty()
-                || native.game.is_empty()
-                || !revision(&native.sunrise)
-                || !revision(&native.mixins)
-            {
+            if native.game.is_empty() || !revision(&native.sunrise) || !revision(&native.mixins) {
                 return Err(format!(
                     "{MANIFEST}: native requires game and exact revisions"
                 ));
@@ -1491,6 +1529,30 @@ mod runtime_files_tests;
 
 #[cfg(test)]
 mod tests {
+    /// A short version with a pre-release or build part is padded before it, not after it.
+    #[test]
+    fn a_short_version_with_a_pre_release_is_padded_in_its_core() {
+        for (short, full) in [
+            ("1", "1.0.0"),
+            ("1.2", "1.2.0"),
+            ("1.2.3", "1.2.3"),
+            ("1.2-beta", "1.2.0-beta"),
+            ("1-rc.1", "1.0.0-rc.1"),
+            ("1.2-rc.1", "1.2.0-rc.1"),
+            ("1.2.3-rc.1", "1.2.3-rc.1"),
+            ("1.2+build.5", "1.2.0+build.5"),
+            ("1.0-SNAPSHOT", "1.0.0-SNAPSHOT"),
+        ] {
+            assert_eq!(
+                parse_version(short).unwrap(),
+                semver::Version::parse(full).unwrap(),
+                "{short}"
+            );
+        }
+        assert!(parse_version("").is_err());
+        assert!(parse_version("one.two").is_err());
+    }
+
     use super::*;
 
     #[test]
@@ -1503,6 +1565,34 @@ mod tests {
             error.contains("chemlib::transfer") && error.contains("own hooks and functions"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn a_version_that_is_not_semver_refuses_the_manifest_when_read() {
+        let with = |v: &str| {
+            Manifest::parse(&EXAMPLE.replace("version = \"0.1.0\"", &format!("version = '{v}'")))
+        };
+        let error = with("v1 beta!").unwrap_err();
+        assert!(
+            error.contains(
+                "version \"v1 beta!\" is not a semver version (MAJOR.MINOR.PATCH, e.g. 3.6.30+refabricated)"
+            ),
+            "{error}"
+        );
+        assert!(with("").is_err());
+    }
+
+    #[test]
+    fn an_omitted_minor_and_patch_are_padded() {
+        let with = |v: &str| {
+            Manifest::parse(&EXAMPLE.replace("version = \"0.1.0\"", &format!("version = '{v}'")))
+                .unwrap()
+                .version
+                .to_string()
+        };
+        assert_eq!(with("1"), "1.0.0");
+        assert_eq!(with("1.2"), "1.2.0");
+        assert_eq!(with("3.6.30+refabricated"), "3.6.30+refabricated");
     }
 
     #[test]
@@ -1866,7 +1956,7 @@ capabilities = ["registries"]
         let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
         let package = Package::read_zip(&mut zip).unwrap();
         assert_eq!(package.manifest.id, "ruby");
-        assert_eq!(package.manifest.version, "0.1.0");
+        assert_eq!(package.manifest.version.to_string(), "0.1.0");
         assert_eq!(package.manifest.native.unwrap().game, "26.3");
         assert!(
             Package::write_files(&manifest, &[("Cargo.toml", b""), ("src/../bad.rs", b"")])

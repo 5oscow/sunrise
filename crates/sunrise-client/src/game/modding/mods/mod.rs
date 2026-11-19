@@ -853,12 +853,12 @@ pub(super) fn content_overlay(
             Ok(_) if source.content_only => {
                 content_mods.push(sunrise_client::save::level_mods::ModRecord {
                     id: m.id.clone(),
-                    version: m.version.clone(),
+                    version: m.version.to_string(),
                 });
                 if announce {
                     announced.push(announced_entry(
                         &m.id,
-                        &m.version,
+                        &m.version.to_string(),
                         m.side,
                         m.runtime.as_ref(),
                     ));

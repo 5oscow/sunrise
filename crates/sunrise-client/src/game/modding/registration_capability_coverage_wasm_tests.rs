@@ -26,7 +26,7 @@ fn run() {
     let inventory = [
         PackageInfo::new(
             manifest.id.clone(),
-            manifest.version.clone(),
+            manifest.version.to_string(),
             PackageKind::Code,
             Side::Both,
             vec![manifest.id.clone()],
