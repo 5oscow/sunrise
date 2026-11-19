@@ -671,7 +671,7 @@ pub(super) struct Remote {
     /// (`handleRespawn`: `newPlayer.setDeltaMovement(oldPlayer.getDeltaMovement())`),
     /// for the player made at the next teleport: a portal's teleport adds to it.
     respawn_velocity: Option<Vec3>,
-    loaded_sent: bool,
+    pub(in crate::game) loaded_sent: bool,
     /// The dimension of the client level the mods heard made
     /// (`native_client_level_load`), to be told dropped once.
     pub(super) heard_level: Option<String>,
