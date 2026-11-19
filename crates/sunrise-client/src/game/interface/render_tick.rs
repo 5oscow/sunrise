@@ -663,7 +663,7 @@ impl Game<'_> {
         Some((TrackingTarget::Entity(id), mob_tracking_body(mob)))
     }
 
-    /// `Hud.updateVignetteBrightness`, from the camera's eye: `Gui.tick` runs it on every tick
+    /// `Hud.updateVignetteBrightness`, from the local player's eye: `Gui.tick` runs it on every tick
     /// the game isn't paused, frozen level or not.
     pub(in crate::game) fn tick_vignette(&mut self) {
         if let Some(e) = self.eye_position() {
