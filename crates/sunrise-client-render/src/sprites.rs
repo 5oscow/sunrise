@@ -145,6 +145,8 @@ pub struct Sprites {
     /// ([`Sprites::listing`]).
     listing: std::sync::OnceLock<BTreeMap<String, crate::atlas_sources::SpriteOrigin>>,
 }
+/// The most memory the square frames of one decoded sprite may take.
+const MAX_FRAMES_BYTES: u64 = 1 << 30;
 /// Edge length of vanilla's block textures: the smallest array layer.
 pub const SPRITE_SIZE: u32 = 16;
 /// The largest sprite array (all layers of the top mip level) when the settings leave it to
@@ -720,20 +722,32 @@ impl Sprites {
             return Err(format!("sprite {name} has invalid frame dimensions").into());
         }
         let columns = png_width / width;
-        let count = columns * (png_height / height);
+        let count = u64::from(columns) * u64::from(png_height / height);
         // Layers are square; a frame of another shape is nearest-resampled to
         // its longer side so UVs (normalized per layer) are unchanged.
         let side = width.max(height);
+        // A pack or mod picks the dimensions: refuse what the square frames would not fit in
+        // before sizing any of them, and take their memory fallibly.
+        let frame_bytes = u64::from(side) * u64::from(side) * 4;
+        if count
+            .checked_mul(frame_bytes)
+            .is_none_or(|total| total > MAX_FRAMES_BYTES)
+        {
+            return Err(format!("sprite {name} is too large for its square frames").into());
+        }
         let mut frames = Vec::new();
-        for index in 0..count {
+        for index in 0..count as u32 {
             let x = index % columns * width;
             let y = index / columns * height;
-            let mut frame = Vec::with_capacity((side * side * 4) as usize);
+            let mut frame = Vec::new();
+            frame.try_reserve_exact(frame_bytes as usize)?;
             for row in 0..side {
                 let source_row = y + row * height / side;
                 for column in 0..side {
-                    let offset =
-                        ((source_row * png_width + x + column * width / side) * 4) as usize;
+                    let offset = (u64::from(source_row) * u64::from(png_width)
+                        + u64::from(x + column * width / side))
+                        as usize
+                        * 4;
                     frame.extend_from_slice(&pixels[offset..offset + 4]);
                 }
             }
@@ -1843,6 +1857,37 @@ mod tests {
         )
         .unwrap();
         assert_eq!(load(&root), [255; 4]);
+        fs::remove_dir_all(&root).unwrap();
+    }
+    #[test]
+    fn a_sprite_too_wide_for_its_square_frames_is_the_missing_texture() {
+        // A 32768 x 1 sheet cut whole: its square frame would be 32768 x 32768 texels.
+        let root = std::env::temp_dir().join(format!("sunrise-wide-cut-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let textures = root.join("assets/demo/textures/block");
+        let atlases = root.join("assets/minecraft/atlases");
+        fs::create_dir_all(&textures).unwrap();
+        fs::create_dir_all(&atlases).unwrap();
+        let mut encoder =
+            png::Encoder::new(File::create(textures.join("wide.png")).unwrap(), 32768, 1);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder
+            .write_header()
+            .unwrap()
+            .write_image_data(&vec![200; 32768 * 4])
+            .unwrap();
+        fs::write(
+            atlases.join("blocks.json"),
+            r#"{"sources":[{"type":"minecraft:unstitch","resource":"demo:block/wide",
+                "regions":[{"sprite":"demo:block/strip","x":0,"y":0,"width":1,"height":1}]}]}"#,
+        )
+        .unwrap();
+        let mut sprites = Sprites::new(ResourceSource::directory(root.clone()));
+        let layer = sprites.insert("demo:block/strip").unwrap();
+        // The missing texture: 16 x 16, black in its top left quarter.
+        assert_eq!(sprites.native[layer as usize].0, SPRITE_SIZE);
+        assert_eq!(sprites.native[layer as usize].1[0][..4], [0, 0, 0, 255]);
         fs::remove_dir_all(&root).unwrap();
     }
 }
