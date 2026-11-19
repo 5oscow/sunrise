@@ -1095,13 +1095,15 @@ pub struct ClipHit {
 }
 
 /// The world's respawn data (`LevelData.RespawnData`): where a player without a spawn point of
-/// their own appears, and facing which way. Sunrise keeps it in the Overworld.
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// their own appears, and facing which way.
+#[derive(Clone, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
 #[derive(sunrise_mod_api_macros::Wire)]
 pub struct RespawnData {
-    /// The spawn block.
-    pub pos: [i32; 3],
+    /// The spawn block in the level `/setworldspawn` ran in (`RespawnData.globalPos`). Players
+    /// go to the Overworld instead while the world has no such level
+    /// (`MinecraftServer.findRespawnDimension`).
+    pub position: GlobalPos,
     /// The yaw in degrees, -180 to 180 (`Mth.wrapDegrees`).
     pub yaw: f32,
     /// The pitch in degrees, -90 to 90.

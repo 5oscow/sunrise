@@ -3515,7 +3515,7 @@ impl Game<'_> {
         {
             self.lan_broadcast_world_spawn();
         }
-        self.native_spawn_change(pos, rot);
+        self.native_spawn_change(dimension.id(), pos, rot);
         // A player whose fallback is the world spawn (no spawnpoint of its
         // own; a bed or an anchor that is gone falls back to it) respawns at
         // the new one.
