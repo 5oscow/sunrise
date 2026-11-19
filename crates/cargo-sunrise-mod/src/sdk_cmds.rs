@@ -257,12 +257,27 @@ fn package_subject(path: &Path) -> Result<Subject, String> {
         )));
     };
     let table = UsesTable::read(&bytes).map_err(|e| format!("{USES_FILE}: {e}"))?;
-    if let Some(native) = &package.manifest.native
-        && native.sunrise != table.made_for
-    {
+    // A native mod pins its build in its manifest, a wasm mod in the `Cargo.toml` it packs.
+    let pin = match &package.manifest.native {
+        Some(native) => Some(native.sunrise.clone()),
+        None => Package::entry(path, "Cargo.toml", MAX_MANIFEST)?
+            .and_then(|bytes| String::from_utf8(bytes).ok())
+            .and_then(|text| text.parse::<toml::Table>().ok())
+            .and_then(|cargo| {
+                let sdk = cargo.get("package")?.get("metadata")?.get("sunrise")?;
+                Some(sdk.get("sdk")?.as_str()?.to_owned())
+            }),
+    };
+    let Some(pin) = pin else {
         return Ok(Subject::NotApplicable(format!(
-            "{name} pins build {} and its list of what it uses was made for {}, so the list says nothing about the pinned build. Pack it again with `cargo sunrise-mod build`.",
-            native.sunrise, table.made_for
+            "{name}'s package does not say which build it pins, so its list of what it uses (made for {}) can't be checked against that build. Pack it again with `cargo sunrise-mod build`.",
+            table.made_for
+        )));
+    };
+    if pin != table.made_for {
+        return Ok(Subject::NotApplicable(format!(
+            "{name} pins build {pin} and its list of what it uses was made for {}, so the list says nothing about the pinned build. Pack it again with `cargo sunrise-mod build`.",
+            table.made_for
         )));
     }
     Ok(Subject::Table { name, table })
@@ -349,11 +364,9 @@ fn fits_lines(entry: ChildEntry, args: &[String]) -> Result<Answer, String> {
         Subject::Table { name, table } => (name, table),
         Subject::NotApplicable(text) => return Ok(Answer::NotApplicable(text)),
     };
-    // A list an older tool wrote names no hook versions: the build it was made for has them.
-    if table.schema != USES_SCHEMA {
-        let made_for = fetch_build(project, &table.made_for)?;
-        table.pin_hook_versions(&surface_of(&made_for)?);
-    }
+    // Whether the build the list was made for gave the hook versions a list of an older tool
+    // lacks: asked for once, and only when a target leaves nothing else to judge.
+    let mut baseline: Option<Result<(), String>> = None;
     println!("{name}:");
     let (mut all, mut known) = (true, true);
     for build in builds {
@@ -362,18 +375,35 @@ fn fits_lines(entry: ChildEntry, args: &[String]) -> Result<Answer, String> {
             println!("{}  made for", target.name);
             continue;
         }
-        match fit(&table.entries, &surface_of(&target)?) {
+        let target_surface = surface_of(&target)?;
+        let mut answer = fit(&table.entries, &target_surface);
+        let mut unfetched = None;
+        if matches!(answer, Fit::Unversioned(_)) && table.schema != USES_SCHEMA {
+            let fetched = baseline.get_or_insert_with(|| {
+                let made_for = fetch_build(project, &table.made_for)?;
+                table.pin_hook_versions(&surface_of(&made_for)?);
+                Ok(())
+            });
+            match fetched {
+                Ok(()) => answer = fit(&table.entries, &target_surface),
+                Err(why) => unfetched = Some(why.clone()),
+            }
+        }
+        match answer {
             Fit::Fits => println!("{}  fits", target.name),
             Fit::Unversioned(hooks) => {
                 known = false;
                 println!(
-                    "{}  not known: nothing the list can judge changed, but it holds no version of {}. Pack the mod again with `cargo sunrise-mod build`, which records them.",
+                    "{}  not known: nothing the list can judge changed, but it holds no version of {}{}. Pack the mod again with `cargo sunrise-mod build`, which records them.",
                     target.name,
                     hooks
                         .iter()
                         .map(|id| format!("`{}`", leaf(id)))
                         .collect::<Vec<_>>()
-                        .join(", ")
+                        .join(", "),
+                    unfetched.map_or(String::new(), |why| format!(
+                        ", and the build it was made for could not be read for them ({why})"
+                    ))
                 );
             }
             Fit::DoesNotFit(misfits) => {

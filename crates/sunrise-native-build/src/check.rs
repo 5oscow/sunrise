@@ -55,13 +55,19 @@ pub enum Unlisted {
     NewerSchema,
     /// Its list was made for another build than the mod pins.
     OtherBuild,
-    /// Nothing the list can judge changed, but an older tool wrote it without the versions of the hooks it names: packing the mod again writes them.
+    /// Nothing the list can judge changed, but it holds no version of some hook it names: packing the mod again writes them.
     HookVersions,
 }
 
 /// The uses table `dir` carries, or why it gives none this build reads; then the mod works on its own build only.
 pub fn table(dir: &Path) -> Result<UsesTable, Unlisted> {
-    let file = std::fs::File::open(dir.join(uses::USES_FILE)).map_err(|_| Unlisted::Missing)?;
+    let file = std::fs::File::open(dir.join(uses::USES_FILE)).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            Unlisted::Missing
+        } else {
+            Unlisted::Unreadable
+        }
+    })?;
     let mut bytes = Vec::new();
     file.take(uses::MAX_USES_BYTES as u64 + 1)
         .read_to_end(&mut bytes)
