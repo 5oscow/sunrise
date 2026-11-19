@@ -838,9 +838,6 @@ pub struct PackResources {
     polytone_post: Option<Arc<sunrise_client::polytone_post::PolytonePost>>,
     /// The packs' Polytone custom colours (`polytone/colors.json`).
     polytone_colors: Arc<sunrise_client::pack_palette::PackColors>,
-    /// The packs' Polytone expression uniforms on core shaders (`shader_modifiers`), when a pack
-    /// has some.
-    shader_modifiers: Option<Arc<sunrise_client::polytone_post::ShaderModifiers>>,
 }
 
 /// A quick craft drag as the screen draws it: each dragged slot's count and

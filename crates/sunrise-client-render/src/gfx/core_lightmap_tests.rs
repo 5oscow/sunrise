@@ -92,14 +92,15 @@ fn draw(
     info: &LightmapInfo,
 ) -> [u8; 16 * 16 * 4] {
     let target = target(device);
-    let (buffer, data) = core.uniforms([0; 48], info);
-    queue.write_buffer(buffer, 0, data);
+    let mut uploads = super::super::upload::Uploads::new(device);
     let mut encoder = device.create_command_encoder(&Default::default());
+    core.upload(&mut uploads, &mut encoder, [0; 48], info);
     core.draw(
         &mut encoder,
         &target,
         &target.create_view(&Default::default()),
     );
+    uploads.finish(&encoder);
     queue.submit([encoder.finish()]);
     (core.submitted().expect("a readback"))();
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
@@ -144,7 +145,7 @@ fn a_pack_lightmap_shader_fills_the_texture_by_sky_row_and_block_column() {
         &|b| b == INFO_BLOCK,
     )
     .expect("the shaders translate");
-    let mut core = CoreLightmap::new(&device, &program).expect("the lightmap pipeline");
+    let mut core = CoreLightmap::new(&device, &program, &[]).expect("the lightmap pipeline");
     core.set_readback(&device, true);
     let pixels = draw(&device, &queue, &mut core, &PROBE);
     for sky in 0..16usize {
@@ -253,7 +254,7 @@ fn vanillas_lightmap_shaders_draw_vanillas_light_texture() {
     let Some((device, queue)) = device() else {
         return;
     };
-    let mut core = CoreLightmap::new(&device, &program).expect("the lightmap pipeline");
+    let mut core = CoreLightmap::new(&device, &program, &[]).expect("the lightmap pipeline");
     core.set_readback(&device, true);
     let expected = vanilla_textures();
     for (info, want) in STATES.iter().zip(expected) {
@@ -265,41 +266,6 @@ fn vanillas_lightmap_shaders_draw_vanillas_light_texture() {
             }
         }
     }
-}
-
-/// An expression uniform is one float (wiki "Shaders"): a shader declaring the block larger
-/// is not used, and the texture stays native, rather than failing at the draw. (A block no
-/// pack's `shader_modifiers` gives is refused earlier, when the shader loads.)
-#[test]
-#[ignore = "daily"]
-fn a_lightmap_shader_whose_expression_block_is_more_than_a_float_is_not_used() {
-    let _gpu = crate::gfx::test_gpu::lock();
-    let Some((device, _)) = device() else {
-        return;
-    };
-    let fragment = |block: &str| {
-        PROBE_FSH
-            .replace("lightmapInfo.SkyFactor", "other.Value.x")
-            .replace(
-                "} lightmapInfo;\n",
-                &format!("}} lightmapInfo;\nlayout(std140) uniform Other {{\n{block}}} other;\n"),
-            )
-    };
-    let program = |block: &str| {
-        crate::core_shader::translate_core_with(
-            SCREENQUAD_VSH,
-            &fragment(block),
-            &[],
-            &|_| None,
-            &GLUE,
-            &|b| b == INFO_BLOCK || b == "Other",
-        )
-        .expect("the shaders translate")
-    };
-    // One vec4 (16 bytes) fits the block's binding; two don't.
-    assert!(CoreLightmap::new(&device, &program("    vec4 Value;\n")).is_some());
-    let program = program("    vec4 Value;\n    vec4 More;\n");
-    assert!(CoreLightmap::new(&device, &program).is_none());
 }
 
 /// F3's lightmap chart closed (the default), a frame draws the texture and copies nothing:
@@ -322,7 +288,7 @@ fn the_light_texture_is_read_back_only_while_f3_charts_it() {
         &|b| b == INFO_BLOCK,
     )
     .expect("the shaders translate");
-    let mut core = CoreLightmap::new(&device, &program).expect("the lightmap pipeline");
+    let mut core = CoreLightmap::new(&device, &program, &[]).expect("the lightmap pipeline");
     // One frame: its uniforms, its draw, its submission, and the readback it starts (if any).
     let frame = |core: &mut CoreLightmap, info: &LightmapInfo| {
         let (buffer, data) = core.uniforms([0; 48], info);
@@ -365,32 +331,65 @@ fn the_light_texture_is_read_back_only_while_f3_charts_it() {
     assert_eq!(fresh, [7; 16 * 16 * 4]);
 }
 
-/// A pack's shader reading `n` expression uniforms (`E0`, `E1`, ...): the first one's value in
-/// red, `SkyFactor` in green.
-fn expression_shader(n: usize) -> CoreProgram {
-    let blocks: String = (0..n)
-        .map(|i| format!("layout(std140) uniform E{i} {{\n    float e{i};\n}};\n"))
-        .collect();
-    let reads: String = (1..n).map(|i| format!(" + 0.0 * e{i}")).collect();
-    let fragment = format!(
-        "#version 330\nlayout(std140) uniform LightmapInfo {{\n    float SkyFactor;\n}} info;\n\
-         {blocks}layout(location = 0) in vec2 texCoord;\nlayout(location = 0) out vec4 fragColor;\n\
-         void main() {{\n    fragColor = vec4(e0{reads}, info.SkyFactor, 0.0, 1.0);\n}}\n"
+/// A pack's lightmap whose vertex stage reads expression uniforms `V0`, `V1`, ... (`vertex` of
+/// them) and whose fragment stage reads `F0`, `F1`, ... (`fragment`), with every one's
+/// expression from its `shader_modifiers` file, resolved as the atlas resolves them. The
+/// fragment writes `F0` in red, `SkyFactor` in green and `F1` in blue.
+fn expression_lightmap(vertex: usize, fragment: usize) -> (CoreProgram, Vec<ExpressionUniform>) {
+    let block =
+        |name: String| format!("layout(std140) uniform {name} {{\n    float {name}v;\n}};\n");
+    let blocks = |prefix: &str, n: usize| -> String {
+        (0..n).map(|i| block(format!("{prefix}{i}"))).collect()
+    };
+    let reads = |prefix: &str, n: usize, from: usize| -> String {
+        (from..n)
+            .map(|i| format!(" + 0.0 * {prefix}{i}v"))
+            .collect()
+    };
+    let vsh = format!(
+        "#version 330\n{}layout(location = 0) out vec2 texCoord;\nvoid main() {{\n    \
+         vec2 uv = vec2((gl_VertexIndex << 1) & 2, gl_VertexIndex & 2);\n    \
+         gl_Position = vec4(uv * vec2(2, 2) + vec2(-1, -1), 0.0{}, 1);\n    texCoord = uv;\n}}\n",
+        blocks("V", vertex),
+        reads("V", vertex, 0)
     );
-    let names: Vec<String> = (0..n).map(|i| format!("E{i}")).collect();
-    crate::core_shader::translate_core_with(
-        SCREENQUAD_VSH,
-        &fragment,
-        &[],
-        &|_| None,
-        &GLUE,
-        &|b| b == INFO_BLOCK || names.iter().any(|n| n == b),
-    )
-    .expect("the shaders translate")
+    let second = if fragment > 1 { "F1v" } else { "0.0" };
+    let fsh = format!(
+        "#version 330\nlayout(std140) uniform LightmapInfo {{\n    float SkyFactor;\n}} info;\n\
+         {}layout(location = 0) in vec2 texCoord;\nlayout(location = 0) out vec4 fragColor;\n\
+         void main() {{\n    fragColor = vec4(F0v{}, info.SkyFactor, {second}, 1.0);\n}}\n",
+        blocks("F", fragment),
+        reads("F", fragment, 2)
+    );
+    let program =
+        crate::core_shader::translate_core_with(&vsh, &fsh, &[], &|_| None, &GLUE, &|_| true)
+            .expect("the shaders translate");
+    let names: Vec<String> = (0..vertex)
+        .map(|i| format!("V{i}"))
+        .chain((0..fragment).map(|i| format!("F{i}")))
+        .collect();
+    let file: serde_json::Map<String, serde_json::Value> =
+        names.iter().map(|n| (n.clone(), "0".into())).collect();
+    let pack = sunrise_assets::resource_source::ResourceSource::indexed(
+        [(
+            "assets/minecraft/polytone/shader_modifiers/core/lightmap.json".to_owned(),
+            sunrise_assets::resource_source::Resource::bytes(
+                serde_json::Value::Object(file).to_string().into_bytes(),
+            ),
+        )]
+        .into_iter()
+        .collect(),
+    );
+    let modifiers = crate::polytone_post::ShaderModifiers::read(&pack, Default::default());
+    let expressions = modifiers
+        .resolve((SHADERS[0], SHADERS[1]), &program, &[INFO_BLOCK])
+        .expect("the uniforms resolve");
+    (program, expressions)
 }
 
-/// The expression uniforms' values the game gives (`Renderer::lightmap_expressions`) reach the
-/// shader's blocks each frame, beside `LightmapInfo`.
+/// The expression uniforms' values (`Renderer::evaluate_pack_expressions`) reach the blocks the
+/// fragment stage reads, each its own, beside `LightmapInfo`: exact bytes for values a unorm
+/// byte holds (0.2 is 51, 0.6 is 153), the two in channels of their own.
 #[test]
 #[ignore = "daily"]
 fn a_lightmap_shader_reads_its_expression_uniforms_values() {
@@ -398,33 +397,40 @@ fn a_lightmap_shader_reads_its_expression_uniforms_values() {
     let Some((device, queue)) = device() else {
         return;
     };
-    let mut core = CoreLightmap::new(&device, &expression_shader(2)).expect("the pipeline");
+    let (program, expressions) = expression_lightmap(0, 2);
+    let mut core = CoreLightmap::new(&device, &program, &expressions).expect("the pipeline");
     core.set_readback(&device, true);
-    assert_eq!(
-        core.expressions,
-        [("E0".to_owned(), 0.0), ("E1".to_owned(), 0.0)]
-    );
-    for (value, red) in [(0.75, 191), (0.25, 64)] {
-        core.expressions[0].1 = value;
-        let pixels = draw(&device, &queue, &mut core, &STATES[1]);
-        assert!(pixels[0].abs_diff(red) <= 1, "{value}: {}", pixels[0]);
-        assert!(pixels[1].abs_diff(179) <= 1, "SkyFactor: {}", pixels[1]);
+    let names: Vec<&str> = core.expressions.iter().map(|(e, _)| &*e.name).collect();
+    assert_eq!(names, ["F0", "F1"]);
+    for (first, second) in [(0.2, 0.6), (0.6, 0.2)] {
+        core.expressions[0].1 = first;
+        core.expressions[1].1 = second;
+        let pixels = draw(&device, &queue, &mut core, &PROBE);
+        let byte = |v: f32| (v * 255.0).round() as u8;
+        for texel in pixels.chunks(4) {
+            assert_eq!(texel, [byte(first), 153, byte(second), 255]);
+        }
     }
 }
 
-/// A device binds at most `max_uniform_buffers_per_shader_stage` blocks to a shader (12 by
-/// default), five of them the lightmap's own: seven expression uniforms are drawn, eight
-/// refused when the pipeline is built, so the texture stays native from the first frame.
+/// A device binds at most `max_uniform_buffers_per_shader_stage` blocks to each stage (12 by
+/// default): each block counts only for the stages that read it. Seven expression uniforms in
+/// each stage are drawn (seven and eight with `LightmapInfo`); twelve in the fragment stage
+/// beside `LightmapInfo` are refused when the pipeline is built, so the texture stays native.
 #[test]
 #[ignore = "daily"]
-fn a_lightmap_shader_reading_more_expression_uniforms_than_the_device_binds_is_refused() {
+fn a_lightmap_shaders_blocks_count_for_the_stages_that_read_them() {
     let _gpu = crate::gfx::test_gpu::lock();
     let Some((device, _)) = device() else {
         return;
     };
     assert_eq!(device.limits().max_uniform_buffers_per_shader_stage, 12);
-    assert!(CoreLightmap::new(&device, &expression_shader(7)).is_some());
-    assert!(CoreLightmap::new(&device, &expression_shader(8)).is_none());
+    let (program, expressions) = expression_lightmap(7, 7);
+    assert!(CoreLightmap::new(&device, &program, &expressions).is_some());
+    let (program, expressions) = expression_lightmap(0, 11);
+    assert!(CoreLightmap::new(&device, &program, &expressions).is_some());
+    let (program, expressions) = expression_lightmap(0, 12);
+    assert!(CoreLightmap::new(&device, &program, &expressions).is_none());
 }
 
 /// What F3's lightmap chart paints across the chart closing and opening again and fullbright
@@ -480,7 +486,7 @@ fn copies_from_before_fullbright_are_never_read() {
         &|b| b == INFO_BLOCK,
     )
     .expect("the shaders translate");
-    let mut core = CoreLightmap::new(&device, &program).expect("the lightmap pipeline");
+    let mut core = CoreLightmap::new(&device, &program, &[]).expect("the lightmap pipeline");
     core.set_readback(&device, true);
     let frame = |core: &mut CoreLightmap, info: &LightmapInfo, poll: bool| {
         let (buffer, data) = core.uniforms([0; 48], info);

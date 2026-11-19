@@ -1004,32 +1004,23 @@ impl Game<'_> {
 
 /// The packs' expression uniforms on the lightmap shader (`shader_modifiers`, wiki "Shaders").
 impl Game<'_> {
-    /// Whether this frame has expression uniforms to evaluate: a pack gives some and the drawn
-    /// lightmap shader reads one. Only then is the frame's expression context made for them.
-    pub(in crate::game) fn lightmap_reads_expressions(&mut self) -> bool {
-        self.pack.shader_modifiers.is_some()
-            && self
-                .renderer
-                .as_mut()
-                .is_some_and(|r| !r.lightmap_expressions().is_empty())
+    /// Whether this frame has expression uniforms to evaluate: the drawn pack lightmap shader
+    /// reads one. Only then is the frame's expression context made for them.
+    pub(in crate::game) fn lightmap_reads_expressions(&self) -> bool {
+        self.renderer
+            .as_ref()
+            .is_some_and(|r| r.reads_pack_expressions())
     }
 
     /// The values of the expression uniforms the drawn lightmap shader reads, from `frame` (the
-    /// packs' expression context): each one's expression, or 0 without one.
+    /// packs' expression context): their programs, resolved when the shader loaded.
     pub(in crate::game) fn evaluate_lightmap_expressions(
         &mut self,
         frame: Option<&sunrise_client::environment::Frame>,
     ) {
-        let (Some(modifiers), Some(frame), Some(renderer)) =
-            (&self.pack.shader_modifiers, frame, self.renderer.as_mut())
-        else {
-            return;
-        };
-        modifiers.evaluate(
-            &sunrise_client::gfx::LIGHTMAP_SHADERS,
-            frame,
-            renderer.lightmap_expressions(),
-        );
+        if let (Some(frame), Some(renderer)) = (frame, self.renderer.as_mut()) {
+            renderer.evaluate_pack_expressions(frame);
+        }
     }
 }
 

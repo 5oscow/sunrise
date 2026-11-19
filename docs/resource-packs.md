@@ -88,6 +88,25 @@ Summary: 50 rows; 42 work, 7 partly (OptiFine/EMF entity models, random entity t
 emissive textures, CIT, GUI sprite scaling, core shaders), 1 doesn't apply. Every vanilla loader in the list above
 reads the pack; what is left is the GUI scaling types and the core shaders, plus the OptiFine-format extras.
 
+### Polytone expression uniforms on core shaders
+
+A pack's `assets/<ns>/polytone/shader_modifiers/<shader>.json` (`minecraft/.../core/lightmap.json` is the shader
+`minecraft:core/lightmap`) maps uniform block names to expressions (wiki "Expression Uniforms on Any Shader"). Today
+the pack lightmap (`core/lightmap` with `core/screenquad`) takes them:
+
+- A block one of its stages reads, declared `uniform Name { float value; };`, holds its expression's value each
+  frame. The file of the stage that reads it gives it; a block both stages read, or that both files give, takes
+  the fragment shader's (`core/lightmap`) first. A block no stage reads is not bound. A block that is not one float,
+  or that no file of its shaders gives, refuses the shader, and the light texture is computed natively.
+- The expression context is the frame's, as the packs' post chains and particles see it: the weather, the game and
+  day time, the dimension and its sky, the player's place and motion, the camera's light, biome and climate, and
+  the packs' config entries (`polytone/config_entries`). Under fullbright nothing is evaluated.
+- Limits: a file is read up to 64 KiB, with at most 16 uniforms, each a GLSL identifier of at most 64 characters
+  not starting `gl_`. An expression has at most 1024 tokens and nests at most 64 levels (brackets and operators),
+  checked before it is parsed. A file over any of these is refused whole, named by its path in the log.
+- The programs are resolved once, when the pack's shaders load; a frame only evaluates them, and uploads 16 bytes
+  for each.
+
 ## Gaps and their work
 
 | Gap | Size | Where |

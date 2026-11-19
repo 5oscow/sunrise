@@ -333,7 +333,13 @@ impl PackResources {
                     particles.join().unwrap(),
                 )
             });
-        let (polytone_post, shader_modifiers) = pack_shading(root.source());
+        let polytone_post = sunrise_client::polytone_post::PolytonePost::read(
+            root.source(),
+            sunrise_client::packs::polytone_configs(&sunrise_client::packs::Source::Opened(
+                root.source().clone(),
+            )),
+        )
+        .map(Arc::new);
         Self {
             layer_names: Arc::new(sunrise_client::block_sprites::texture_names(
                 &render.sprite_layers,
@@ -364,7 +370,6 @@ impl PackResources {
             polytone_particles,
             polytone_post,
             polytone_colors: Arc::new(read_colors(root)),
-            shader_modifiers,
         }
     }
 }
@@ -392,24 +397,6 @@ fn pack_environments(
             None
         }
     }
-}
-
-/// The packs' Polytone post chains and expression uniforms on core shaders
-/// (`shader_modifiers`) at `source`, each with the packs' config entries; `None` for each the
-/// packs don't have.
-pub(in crate::game) fn pack_shading(
-    source: &sunrise_assets::resource_source::ResourceSource,
-) -> (
-    Option<Arc<sunrise_client::polytone_post::PolytonePost>>,
-    Option<Arc<sunrise_client::polytone_post::ShaderModifiers>>,
-) {
-    let configs = sunrise_client::packs::polytone_configs(&sunrise_client::packs::Source::Opened(
-        source.clone(),
-    ));
-    let modifiers =
-        sunrise_client::polytone_post::ShaderModifiers::read(source, configs.clone()).map(Arc::new);
-    let post = sunrise_client::polytone_post::PolytonePost::read(source, configs).map(Arc::new);
-    (post, modifiers)
 }
 
 /// The custom particles and block emitters of the packs merged at `root` (#11486); `None` when

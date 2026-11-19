@@ -5,6 +5,7 @@
 use crate::environment::Frame;
 use crate::post_chain::{Extras, InternalTarget};
 use serde_json::Value as Json;
+use std::sync::Arc;
 use sunrise_polytone::expr::Program;
 
 /// A `polytone/post_chains/<path>.json`.
@@ -187,11 +188,11 @@ impl PolytonePost {
 }
 
 /// The packs' `polytone/shader_modifiers` (`sunrise_polytone::shader_modifiers`): each shader's
-/// expression uniforms, evaluated with the frame's expression context.
+/// expression uniforms, read once when the packs' core shaders load (`hud::pack_text`).
 pub struct ShaderModifiers {
     /// Each shader's id (`minecraft:core/lightmap`) and its uniforms.
-    shaders: Vec<(String, sunrise_polytone::shader_modifiers::ShaderModifier)>,
-    configs: sunrise_polytone::pack::Configs,
+    shaders: Vec<(String, Vec<(String, Arc<Program>)>)>,
+    configs: Arc<sunrise_polytone::pack::Configs>,
 }
 
 /// The largest `shader_modifiers` file read: far more than [`MAX_UNIFORMS`] expressions need.
@@ -199,37 +200,55 @@ pub struct ShaderModifiers {
 /// [`MAX_UNIFORMS`]: sunrise_polytone::shader_modifiers::MAX_UNIFORMS
 pub const MAX_SHADER_MODIFIERS_FILE: u64 = 64 * 1024;
 
+/// One expression uniform of a pipeline, resolved when its shader loads: the block's binding
+/// and the stages that read it, and the program that gives its value each frame.
+#[derive(Clone)]
+pub struct ExpressionUniform {
+    pub name: String,
+    pub binding: u32,
+    pub stages: wgpu::ShaderStages,
+    program: Arc<Program>,
+    configs: Arc<sunrise_polytone::pack::Configs>,
+}
+
+impl ExpressionUniform {
+    /// Its value in `frame` (the packs' expression context): the expression's, 0 when it fails.
+    pub fn evaluate(&self, frame: &Frame) -> f32 {
+        crate::environment::eval_frame(&self.program, frame, &self.configs)
+            .map_or(0.0, |v| v.num() as f32)
+    }
+}
+
+impl std::fmt::Debug for ExpressionUniform {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ExpressionUniform")
+            .field("name", &self.name)
+            .field("binding", &self.binding)
+            .field("stages", &self.stages)
+            .finish()
+    }
+}
+
 impl ShaderModifiers {
-    /// The packs' files at `root`; `None` without any. A file over
-    /// [`MAX_SHADER_MODIFIERS_FILE`], not JSON, or refused by its contents is left out, named
-    /// in the log.
+    /// The packs' files at `root` (the selected packs' stack), each evaluated with `configs`.
+    /// A file over [`MAX_SHADER_MODIFIERS_FILE`], not JSON, or refused by its contents is left
+    /// out, named by its path in the log.
     pub fn read(
         root: &sunrise_assets::resource_source::ResourceSource,
         configs: sunrise_polytone::pack::Configs,
-    ) -> Option<Self> {
-        let shaders = Self::files(root, &|path, e| log::warn!("{path}: not used: {e}"));
-        (!shaders.is_empty()).then_some(Self { shaders, configs })
-    }
-
-    /// The uniforms' names a pipeline drawing with `shaders` is given by the packs at `root`,
-    /// read as [`Self::read`] reads them, for a loader that only needs the names (the game's
-    /// read names the files it leaves out).
-    pub fn names_at(
-        root: &sunrise_assets::resource_source::ResourceSource,
-        shaders: &[&str],
-    ) -> Vec<String> {
+    ) -> Self {
+        let shaders = Self::files(root, &mut |path, e| log::warn!("{path}: not used: {e}"));
         Self {
-            shaders: Self::files(root, &|_, _| {}),
-            configs: Default::default(),
+            shaders,
+            configs: Arc::new(configs),
         }
-        .names(shaders)
     }
 
-    /// Each file's shader and uniforms; `refused` hears of each one left out.
+    /// Each file's shader and uniforms; `refused` hears of each one left out, by its path.
     fn files(
         root: &sunrise_assets::resource_source::ResourceSource,
-        refused: &dyn Fn(&str, String),
-    ) -> Vec<(String, sunrise_polytone::shader_modifiers::ShaderModifier)> {
+        refused: &mut dyn FnMut(&str, String),
+    ) -> Vec<(String, Vec<(String, Arc<Program>)>)> {
         use sunrise_polytone::shader_modifiers::ShaderModifier;
         let mut shaders = Vec::new();
         for namespace in root.namespaces("assets") {
@@ -251,7 +270,11 @@ impl ShaderModifiers {
                             .map_err(|e| e.to_string())
                     });
                 match read {
-                    Ok(modifier) => shaders.push((id, modifier)),
+                    Ok(modifier) => {
+                        let uniforms = modifier.uniforms.into_iter();
+                        let uniforms = uniforms.map(|(n, p)| (n, Arc::new(p))).collect();
+                        shaders.push((id, uniforms));
+                    }
                     Err(e) => refused(&path, e),
                 }
             }
@@ -259,37 +282,66 @@ impl ShaderModifiers {
         shaders
     }
 
-    /// The uniforms a pipeline drawing with `shaders` (its stages' ids) is given.
-    fn uniforms<'a>(
-        &'a self,
-        shaders: &'a [&str],
-    ) -> impl Iterator<Item = &'a (String, Program)> + 'a {
-        self.shaders
-            .iter()
-            .filter(|(id, _)| shaders.contains(&id.as_str()))
-            .flat_map(|(_, modifier)| &modifier.uniforms)
+    /// The expression `name` the file of shader `id` gives.
+    fn uniform(&self, id: &str, name: &str) -> Option<&Arc<Program>> {
+        let (_, uniforms) = self.shaders.iter().find(|(s, _)| s == id)?;
+        uniforms.iter().find(|(n, _)| n == name).map(|(_, p)| p)
     }
 
-    /// Their names.
+    /// The names the files of `shaders` (a pipeline's stages' ids) give: the blocks the loader
+    /// lets the pipeline's shaders declare.
     pub fn names(&self, shaders: &[&str]) -> Vec<String> {
-        self.uniforms(shaders)
-            .map(|(name, _)| name.clone())
-            .collect()
+        let mut names: Vec<String> = (self.shaders.iter())
+            .filter(|(id, _)| shaders.contains(&id.as_str()))
+            .flat_map(|(_, uniforms)| uniforms.iter().map(|(n, _)| n.clone()))
+            .collect();
+        names.sort_unstable();
+        names.dedup();
+        names
     }
 
-    /// This frame's value of each of `wanted` (the uniforms a drawn shader reads), by name: its
-    /// expression's, or 0 when it fails or none of `shaders`' files gives it. Only `wanted` is
-    /// evaluated.
-    pub fn evaluate(&self, shaders: &[&str], frame: &Frame, wanted: &mut [(String, f32)]) {
-        for (name, value) in wanted {
-            *value = self
-                .uniforms(shaders)
-                .find(|(n, _)| n == name)
-                .and_then(|(_, program)| {
-                    crate::environment::eval_frame(program, frame, &self.configs)
-                })
-                .map_or(0.0, |v| v.num() as f32);
+    /// The expression uniforms of `program`, a pipeline whose vertex stage is shader
+    /// `vertex` and whose fragment stage is `fragment` (their ids): each of its blocks but
+    /// `own` that a stage reads, with that stage's file's expression. A block both stages
+    /// read, or that both files give, takes the fragment shader's file's first, then the
+    /// vertex shader's. One no stage reads is not bound; one that isn't one float refuses
+    /// the shader, named.
+    pub fn resolve(
+        &self,
+        (vertex, fragment): (&str, &str),
+        program: &crate::core_shader::CoreProgram,
+        own: &[&str],
+    ) -> Result<Vec<ExpressionUniform>, String> {
+        let mut uniforms = Vec::new();
+        for (i, name) in program.other.iter().enumerate() {
+            if own.contains(&name.as_str()) {
+                continue;
+            }
+            let binding = crate::core_shader::other_binding(i);
+            let stages = program.stages_reading(binding);
+            if stages.is_empty() {
+                continue;
+            }
+            if !program.is_float_block(binding) {
+                return Err(format!("its block {name} is not one float"));
+            }
+            let order = if stages.contains(wgpu::ShaderStages::FRAGMENT) {
+                [fragment, vertex]
+            } else {
+                [vertex, fragment]
+            };
+            let program = (order.iter())
+                .find_map(|id| self.uniform(id, name))
+                .ok_or_else(|| format!("no shader_modifiers file of its shaders gives {name}"))?;
+            uniforms.push(ExpressionUniform {
+                name: name.clone(),
+                binding,
+                stages,
+                program: program.clone(),
+                configs: self.configs.clone(),
+            });
         }
+        Ok(uniforms)
     }
 }
 
@@ -311,70 +363,155 @@ mod tests {
     const LIGHTMAP: &str = "assets/minecraft/polytone/shader_modifiers/core/lightmap.json";
     const SCREENQUAD: &str = "assets/minecraft/polytone/shader_modifiers/core/screenquad.json";
 
-    /// A shader's files give its pipeline their uniforms, by its stages' ids; each frame
-    /// evaluates those a drawn shader reads, 0 for one no file gives.
+    /// A lightmap pipeline's program whose vertex stage reads blocks `vertex` and whose
+    /// fragment stage reads `fragment` (each `uniform Name { float v; };`, or `vec4` for one
+    /// named `Wide`), besides `LightmapInfo` and the blocks in `unused`, declared and not read.
+    fn program(
+        vertex: &[&str],
+        fragment: &[&str],
+        unused: &[&str],
+    ) -> crate::core_shader::CoreProgram {
+        let block = |name: &&str| {
+            let ty = if *name == "Wide" { "vec4" } else { "float" };
+            format!(
+                "layout(std140) uniform {name} {{\n    {ty} {}v;\n}};\n",
+                name.to_lowercase()
+            )
+        };
+        let sum = |names: &[&str]| -> String {
+            names
+                .iter()
+                .map(|n| {
+                    let v = format!("{}v", n.to_lowercase());
+                    if *n == "Wide" {
+                        format!(" + {v}.x")
+                    } else {
+                        format!(" + {v}")
+                    }
+                })
+                .collect()
+        };
+        let vsh = format!(
+            "#version 330\n{}{}layout(location = 0) out float sum;\n\
+             void main() {{\n    sum = 0.0{};\n    gl_Position = vec4(0.0, 0.0, 0.0, 1.0);\n}}\n",
+            vertex.iter().map(block).collect::<String>(),
+            unused.iter().map(block).collect::<String>(),
+            sum(vertex)
+        );
+        let fsh = format!(
+            "#version 330\nlayout(std140) uniform LightmapInfo {{\n    float SkyFactor;\n}} info;\n\
+             {}layout(location = 0) in float sum;\nlayout(location = 0) out vec4 fragColor;\n\
+             void main() {{\n    fragColor = vec4(sum{}, info.SkyFactor, 0.0, 1.0);\n}}\n",
+            fragment.iter().map(block).collect::<String>(),
+            sum(fragment)
+        );
+        crate::core_shader::translate_core_with(
+            &vsh,
+            &fsh,
+            &[],
+            &|_| None,
+            &crate::gfx::core_lightmap::GLUE,
+            &|_| true,
+        )
+        .expect("the shaders translate")
+    }
+
+    fn resolved(
+        modifiers: &ShaderModifiers,
+        program: &crate::core_shader::CoreProgram,
+    ) -> Result<Vec<(String, wgpu::ShaderStages, f32)>, String> {
+        let [vertex, fragment] = crate::gfx::LIGHTMAP_SHADERS;
+        let uniforms = modifiers.resolve((vertex, fragment), program, &["LightmapInfo"])?;
+        let frame = Frame::default();
+        Ok(uniforms
+            .iter()
+            .map(|u| (u.name.clone(), u.stages, u.evaluate(&frame)))
+            .collect())
+    }
+
+    /// A pipeline's expression uniforms resolve at load from its stages' files: a block a
+    /// stage reads takes its value from that stage's file, the fragment shader's first when
+    /// both read it or both files give it; one no stage reads is not bound; one that is no
+    /// single float (a `vec4`, the same 16 bytes) refuses the shader.
     #[test]
-    fn shader_modifiers_give_a_pipelines_shaders_their_uniforms() {
+    fn a_pipelines_expression_uniforms_resolve_from_its_stages_files() {
         let modifiers = ShaderModifiers::read(
             &pack(&[
                 (
                     LIGHTMAP,
-                    r#"{"InNether": "g.dimensionType == 'minecraft:the_nether' ? 1 : 0"}"#.into(),
+                    r#"{"Both": "0.25", "Frag": "0.5", "Wide": "1"}"#.into(),
                 ),
-                (SCREENQUAD, r#"{"Wet": "g.rain()"}"#.into()),
+                (
+                    SCREENQUAD,
+                    r#"{"Both": "0.75", "Vert": "0.125", "Unused": "1"}"#.into(),
+                ),
                 (
                     "assets/minecraft/polytone/shader_modifiers/core/sky.json",
                     r#"{"Sky": "1"}"#.into(),
                 ),
             ]),
             Default::default(),
-        )
-        .expect("the packs' modifiers");
-        let lightmap = crate::gfx::LIGHTMAP_SHADERS;
-        assert_eq!(modifiers.names(&lightmap), ["InNether", "Wet"]);
-        assert_eq!(modifiers.names(&["minecraft:core/sky"]), ["Sky"]);
-        let mut wanted = vec![
-            ("InNether".to_owned(), 7.0),
-            ("Wet".to_owned(), 7.0),
-            ("Sky".to_owned(), 7.0),
-        ];
-        let frame = Frame {
-            dimension: "minecraft:the_nether".into(),
-            rain: 1.0,
-            ..Frame::default()
-        };
-        modifiers.evaluate(&lightmap, &frame, &mut wanted);
-        // `g.rain` is the mean of rain (1) and thunder (0); `Sky` is another shader's.
-        assert_eq!(
-            wanted.iter().map(|(_, v)| *v).collect::<Vec<_>>(),
-            [1.0, 0.5, 0.0]
         );
-        let overworld = Frame {
-            dimension: "minecraft:overworld".into(),
-            ..Frame::default()
-        };
-        modifiers.evaluate(&lightmap, &overworld, &mut wanted[..1]);
-        assert_eq!(wanted[0].1, 0.0);
-        assert!(ShaderModifiers::read(&pack(&[]), Default::default()).is_none());
+        let lightmap = crate::gfx::LIGHTMAP_SHADERS;
+        assert_eq!(
+            modifiers.names(&lightmap),
+            ["Both", "Frag", "Unused", "Vert", "Wide"]
+        );
+        assert_eq!(modifiers.names(&["minecraft:core/sky"]), ["Sky"]);
+        let (v, f) = (wgpu::ShaderStages::VERTEX, wgpu::ShaderStages::FRAGMENT);
+        let split = program(&["Vert", "Both"], &["Frag", "Both"], &["Unused"]);
+        assert_eq!(
+            resolved(&modifiers, &split).unwrap(),
+            [
+                ("Vert".to_owned(), v, 0.125),
+                ("Both".to_owned(), v | f, 0.25),
+                ("Frag".to_owned(), f, 0.5),
+            ]
+        );
+        // Read by the vertex stage only, `Both` takes the vertex shader's file's.
+        let vertex_only = program(&["Both"], &[], &[]);
+        assert_eq!(
+            resolved(&modifiers, &vertex_only).unwrap(),
+            [("Both".to_owned(), v, 0.75)]
+        );
+        // Only one file gives `Frag`: a vertex stage reading it takes that one.
+        let across = program(&["Frag"], &[], &[]);
+        assert_eq!(
+            resolved(&modifiers, &across).unwrap(),
+            [("Frag".to_owned(), v, 0.5)]
+        );
+        let wide = program(&[], &["Wide"], &[]);
+        assert_eq!(
+            resolved(&modifiers, &wide).unwrap_err(),
+            "its block Wide is not one float"
+        );
     }
 
-    /// A file over the read budget, not JSON, or refused by its contents is left out: its
-    /// uniforms are no shader's, so a shader reading one is refused when it loads.
+    /// A file over the read budget, not JSON, or refused by its contents is left out, named by
+    /// its resource path: its uniforms are no shader's, so a shader reading one is refused
+    /// when it loads.
     #[test]
-    fn a_bad_shader_modifiers_file_is_left_out() {
+    fn a_bad_shader_modifiers_file_is_left_out_by_its_path() {
         let budget = MAX_SHADER_MODIFIERS_FILE as usize;
         let padded = |len: usize| {
             let body = r#"{"Tint": "1"}"#;
             format!("{body}{}", " ".repeat(len - body.len()))
         };
         let read = |text: String| {
-            ShaderModifiers::read(&pack(&[(LIGHTMAP, text)]), Default::default())
-                .map(|m| m.names(&crate::gfx::LIGHTMAP_SHADERS))
+            let mut refused = Vec::new();
+            let shaders = ShaderModifiers::files(&pack(&[(LIGHTMAP, text)]), &mut |path, _| {
+                refused.push(path.to_owned())
+            });
+            (shaders.len(), refused)
         };
-        assert_eq!(read(padded(budget)), Some(vec!["Tint".to_owned()]));
-        assert_eq!(read(padded(budget + 1)), None);
-        assert_eq!(read("{\"Tint\": ".into()), None);
-        assert_eq!(read(r#"{"gl_Tint": "1"}"#.into()), None);
+        assert_eq!(read(padded(budget)), (1, vec![]));
+        for bad in [
+            padded(budget + 1),
+            "{\"Tint\": ".into(),
+            r#"{"gl_Tint": "1"}"#.into(),
+        ] {
+            assert_eq!(read(bad), (0, vec![LIGHTMAP.to_owned()]));
+        }
     }
 
     #[test]

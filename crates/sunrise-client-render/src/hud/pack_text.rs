@@ -209,28 +209,35 @@ fn read_shader_file(base: &ResourceSource, path: &str) -> Result<Option<String>,
 }
 
 /// The packs' `core/lightmap` with `core/screenquad`, when a pack replaces either stage: the
-/// pass gives it `LightmapInfo` besides vanilla's blocks, and the packs' expression uniforms on
-/// either stage (`expressions`, from `shader_modifiers`).
+/// pass gives it `LightmapInfo` besides vanilla's blocks, and the packs' expression uniforms
+/// (`modifiers`) of either stage's file, resolved here for the blocks its stages read. A block
+/// no file of its stages names, or an expression block that is not one float, refuses it.
 fn load_lightmap(
     root: &ResourceSource,
     defaults: &ResourceSource,
-    expressions: &[String],
-) -> Option<Arc<CoreProgram>> {
-    load_pair(
+    modifiers: &crate::polytone_post::ShaderModifiers,
+) -> Option<(
+    Arc<CoreProgram>,
+    Vec<crate::polytone_post::ExpressionUniform>,
+)> {
+    let shaders = crate::gfx::core_lightmap::SHADERS;
+    let names = modifiers.names(&shaders);
+    let info = crate::gfx::core_lightmap::INFO_BLOCK;
+    let program = load_pair(
         root,
         defaults,
         ("screenquad", "lightmap"),
         &[],
         &crate::gfx::core_lightmap::GLUE,
-        &|block| {
-            block == crate::gfx::core_lightmap::INFO_BLOCK || expressions.iter().any(|n| n == block)
-        },
-    )
-}
-
-/// The packs' expression uniforms on the lightmap's stages (`shader_modifiers`).
-fn lightmap_expressions(root: &ResourceSource) -> Vec<String> {
-    crate::polytone_post::ShaderModifiers::names_at(root, &crate::gfx::core_lightmap::SHADERS)
+        &|block| block == info || names.iter().any(|n| n == block),
+    )?;
+    match modifiers.resolve((shaders[0], shaders[1]), &program, &[info]) {
+        Ok(expressions) => Some((program, expressions)),
+        Err(e) => {
+            log::warn!("the resource pack's lightmap shader is not used: {e}");
+            None
+        }
+    }
 }
 
 /// The packs' core shaders the atlas carries (text, block outline, sky, stars, lightmap).
@@ -250,7 +257,12 @@ pub(super) fn load_shaders(
     let sky = |name| load_core(root, defaults, name, &[], &crate::gfx::core_sky::GLUE);
     atlas.sky_shader = sky("sky");
     atlas.stars_shader = sky("stars");
-    atlas.lightmap_shader = load_lightmap(root, defaults, &lightmap_expressions(root));
+    // The packs' expression uniforms (`shader_modifiers`), read once, with their config entries.
+    let configs = crate::packs::polytone_configs(&crate::packs::Source::Opened(root.clone()));
+    let modifiers = crate::polytone_post::ShaderModifiers::read(root, configs);
+    let lightmap = load_lightmap(root, defaults, &modifiers);
+    atlas.lightmap_shader = lightmap.as_ref().map(|(program, _)| program.clone());
+    atlas.lightmap_expressions = lightmap.map(|(_, e)| e).unwrap_or_default();
     let world = |defines: &[&str], glue| load_core(root, defaults, "text", defines, glue);
     atlas.text_shaders.world = world(&[], &crate::gfx::core_text::WORLD_GLUE);
     atlas.text_shaders.see_through = world(
@@ -553,8 +565,19 @@ mod tests {
     }
 
     fn lightmap(own: &[(&str, &str)]) -> Option<Arc<CoreProgram>> {
+        lightmap_with_expressions(own).map(|(program, _)| program)
+    }
+
+    /// [`lightmap`] with its expression uniforms, as the atlas loads them.
+    fn lightmap_with_expressions(
+        own: &[(&str, &str)],
+    ) -> Option<(
+        Arc<CoreProgram>,
+        Vec<crate::polytone_post::ExpressionUniform>,
+    )> {
         let (root, defaults) = lightmap_packs(own);
-        load_lightmap(&root, &defaults, &lightmap_expressions(&root))
+        let modifiers = crate::polytone_post::ShaderModifiers::read(&root, Default::default());
+        load_lightmap(&root, &defaults, &modifiers)
     }
 
     /// A pack's lightmap reading an expression uniform (`Tint`) is given it when a pack's
@@ -570,10 +593,27 @@ mod tests {
         let on =
             |shader: &str| format!("assets/minecraft/polytone/shader_modifiers/core/{shader}.json");
         for stage in ["lightmap", "screenquad"] {
-            let program = lightmap(&[(fsh, tinted), (&on(stage), r#"{"Tint": "1"}"#)])
-                .unwrap_or_else(|| panic!("given by {stage}"));
+            let (program, expressions) =
+                lightmap_with_expressions(&[(fsh, tinted), (&on(stage), r#"{"Tint": "1"}"#)])
+                    .unwrap_or_else(|| panic!("given by {stage}"));
             assert_eq!(program.other, ["LightmapInfo", "Tint"]);
+            let resolved: Vec<_> = expressions.iter().map(|e| (&*e.name, e.stages)).collect();
+            assert_eq!(resolved, [("Tint", wgpu::ShaderStages::FRAGMENT)]);
         }
+        // A block the fragment stage declares and doesn't read is not bound; a `vec4` block of
+        // the same 16 bytes refuses the shader.
+        let unread = tinted.replace("vec4(value, ", "vec4(0.0, ");
+        let (_, expressions) =
+            lightmap_with_expressions(&[(fsh, &unread), (&on("lightmap"), r#"{"Tint": "1"}"#)])
+                .expect("the shader, without the block");
+        assert!(expressions.is_empty());
+        let wide = tinted
+            .replace("float value;", "vec4 value;")
+            .replace("vec4(value, ", "vec4(value.x, ");
+        assert!(
+            lightmap(&[(fsh, &wide), (&on("lightmap"), r#"{"Tint": "1"}"#)]).is_none(),
+            "a vec4 block"
+        );
         assert!(
             lightmap(&[(fsh, tinted)]).is_none(),
             "no modifier gives Tint"

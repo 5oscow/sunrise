@@ -1,27 +1,37 @@
 //! A pack's Polytone expression uniforms on its lightmap shader (`shader_modifiers`) through a
-//! game's frame: the atlas gives the shader the block its pack names, and the frame the game
-//! builds evaluates the expression into the renderer's lightmap pipeline. A game with no pack
-//! modifiers evaluates nothing.
-use super::Game;
-use std::sync::Arc;
+//! game's frames, from the pack's resources to the drawn light texture: the menu bundle's atlas
+//! loads the shader and resolves its uniform from the pack's file, the renderer the game builds
+//! from it takes both, and each frame evaluates the program into the block the shader reads. F3's
+//! lightmap chart reads the drawn texture back. Each case runs in a process of its own (one
+//! event loop, its own game resources).
+use super::native_entity_refs::tests::{run_fresh_cases, with_client_game};
+use crate::game::native_hooks::particle_count_tests::frame_scene;
 use sunrise_assets::resource_source::{Resource, ResourceSource};
 
-const SCREENQUAD: &str = "assets/minecraft/shaders/core/screenquad.vsh";
-const LIGHTMAP: &str = "assets/minecraft/shaders/core/lightmap.fsh";
-const MODIFIER: &str = "assets/minecraft/polytone/shader_modifiers/core/lightmap.json";
+const NAME: &str = "game::lightmap_expression_tests::a_packs_lightmap_draws_its_expression_uniform";
+const CASE: &str = "SUNRISE_LIGHTMAP_EXPRESSION_CASE";
 
-/// A pack whose lightmap writes its `Tint` expression uniform in red, with `modifier` as its
-/// `shader_modifiers/core/lightmap.json` when given.
-fn pack(modifier: Option<&str>) -> ResourceSource {
-    let screenquad = "#version 330\nlayout(location = 0) out vec2 texCoord;\nvoid main() {\n    \
-                      vec2 uv = vec2((gl_VertexIndex << 1) & 2, gl_VertexIndex & 2);\n    \
-                      gl_Position = vec4(uv * 2.0 - 1.0, 0.0, 1.0);\n    texCoord = uv;\n}\n";
-    let lightmap = "#version 330\nlayout(std140) uniform LightmapInfo {\n    float SkyFactor;\n} \
-                    info;\nlayout(std140) uniform Tint {\n    float value;\n};\n\
-                    layout(location = 0) in vec2 texCoord;\nlayout(location = 0) out vec4 fragColor;\n\
-                    void main() {\n    fragColor = vec4(value, info.SkyFactor, 0.0, 1.0);\n}\n";
-    let mut files = vec![(SCREENQUAD, screenquad), (LIGHTMAP, lightmap)];
-    files.extend(modifier.map(|m| (MODIFIER, m)));
+/// A pack whose lightmap writes its `Tint` expression uniform (0.2, a value a unorm byte holds
+/// exactly: 51) in red and nothing else, with the file that gives it.
+fn pack() -> ResourceSource {
+    let files = [
+        (
+            "assets/minecraft/shaders/core/screenquad.vsh",
+            "#version 330\nlayout(location = 0) out vec2 texCoord;\nvoid main() {\n    \
+             vec2 uv = vec2((gl_VertexIndex << 1) & 2, gl_VertexIndex & 2);\n    \
+             gl_Position = vec4(uv * 2.0 - 1.0, 0.0, 1.0);\n    texCoord = uv;\n}\n",
+        ),
+        (
+            "assets/minecraft/shaders/core/lightmap.fsh",
+            "#version 330\nlayout(std140) uniform Tint {\n    float value;\n};\n\
+             layout(location = 0) in vec2 texCoord;\nlayout(location = 0) out vec4 fragColor;\n\
+             void main() {\n    fragColor = vec4(value, 0.0, 0.0, 1.0);\n}\n",
+        ),
+        (
+            "assets/minecraft/polytone/shader_modifiers/core/lightmap.json",
+            r#"{"Tint": "0.1 * 2"}"#,
+        ),
+    ];
     ResourceSource::indexed(
         files
             .into_iter()
@@ -30,65 +40,53 @@ fn pack(modifier: Option<&str>) -> ResourceSource {
     )
 }
 
-/// The game's offscreen renderer, on a hidden window.
-fn renderer(game: &mut Game<'_>) {
-    let mut builder = winit::event_loop::EventLoop::builder();
-    #[cfg(target_os = "linux")]
-    {
-        use winit::platform::x11::EventLoopBuilderExtX11;
-        builder.with_x11().with_any_thread(true);
+/// The light texture F3's lightmap chart reads back once frames have drawn it, with the chart
+/// open (the game asks the renderer for the readback each frame): a frame copies it, the device
+/// maps the copy once the frame is done, and a later frame takes it in.
+fn drawn_texture(game: &mut super::Game<'_>) -> [u8; 16 * 16 * 4] {
+    game.screen = super::Screen::Playing;
+    game.debug = true;
+    game.debug_charts.lightmap = true;
+    for _ in 0..32 {
+        game.render_with(|renderer, frame| renderer.render(frame))
+            .unwrap();
+        let renderer = game.renderer.as_ref().unwrap();
+        renderer
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .unwrap();
+        if let Some(pixels) = renderer.lightmap_sample() {
+            return *pixels;
+        }
     }
-    let event_loop = builder.build().expect("an event loop");
-    #[allow(deprecated)]
-    let window = Arc::new(
-        event_loop
-            .create_window(
-                winit::window::Window::default_attributes()
-                    .with_visible(false)
-                    .with_inner_size(winit::dpi::PhysicalSize::new(320, 240)),
-            )
-            .unwrap(),
-    );
-    game.options.offscreen = true;
-    game.renderer = Some(game.new_renderer(window).unwrap());
-}
-
-/// The values the renderer's lightmap pipeline holds after one frame the game builds with the
-/// packs' `modifier` read as its resources do.
-fn after_a_frame(game: &mut Game<'_>, modifier: Option<&str>) -> Vec<(String, f32)> {
-    let pack = pack(modifier);
-    let gui = crate::game::UiResources::load(&pack, std::path::Path::new("")).unwrap();
-    let program = gui.atlas.lightmap_shader.clone();
-    let renderer = game.renderer.as_mut().unwrap();
-    renderer.set_lightmap_shader(program.as_deref());
-    game.pack.shader_modifiers =
-        sunrise_client::polytone_post::ShaderModifiers::read(&pack, Default::default())
-            .map(Arc::new);
-    game.title = None;
-    game.render_with(|renderer, frame| renderer.render(frame))
-        .unwrap();
-    game.renderer
-        .as_mut()
-        .unwrap()
-        .lightmap_expressions()
-        .to_vec()
+    panic!("no light texture read back in 32 frames");
 }
 
 #[test]
 #[ignore = "daily"]
-fn a_frame_gives_the_lightmap_its_expression_uniforms() {
-    // A drawn frame needs the client's resources (its prepared textures).
-    super::native_entity_refs::tests::with_client_game(|game| {
-        renderer(game);
-        let values = after_a_frame(game, Some(r#"{"Tint": "0.25 * 2"}"#));
-        assert_eq!(values, [("Tint".to_owned(), 0.5)]);
-        assert!(game.lightmap_reads_expressions());
-        // Fullbright keeps the light texture white: nothing to evaluate.
-        game.renderer.as_mut().unwrap().fullbright = true;
-        assert!(!game.lightmap_reads_expressions());
-        game.renderer.as_mut().unwrap().fullbright = false;
-        // The block no pack names: the shader isn't the pack's, and nothing is evaluated.
-        assert!(after_a_frame(game, None).is_empty());
-        assert!(!game.lightmap_reads_expressions());
+fn a_packs_lightmap_draws_its_expression_uniform() {
+    if run_fresh_cases(NAME, CASE, &["pack", "fullbright"]) {
+        return;
+    }
+    let fullbright = std::env::var(CASE).unwrap() == "fullbright";
+    with_client_game(|game| {
+        // The pack's resources as the game loads them: the atlas resolves the uniform, and the
+        // renderer the game builds over them takes the shader with it.
+        game.gui = crate::game::UiResources::load(&pack(), std::path::Path::new("")).unwrap();
+        assert!(game.gui.atlas.lightmap_shader.is_some());
+        assert_eq!(game.gui.atlas.lightmap_expressions.len(), 1);
+        let _event_loop = frame_scene(game);
+        game.renderer.as_mut().unwrap().fullbright = fullbright;
+        let texture = drawn_texture(game);
+        if fullbright {
+            // Fullbright keeps the texture white, and nothing is evaluated.
+            assert!(!game.lightmap_reads_expressions());
+            assert!(texture.iter().all(|&b| b == 255));
+        } else {
+            assert!(game.lightmap_reads_expressions());
+            for texel in texture.chunks(4) {
+                assert_eq!(texel, [51, 0, 0, 255]);
+            }
+        }
     });
 }
