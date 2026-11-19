@@ -5,9 +5,9 @@
 //! Shared storage for simulation callback lifecycles and NBT compounds.
 //!
 //! Layout: entries live in a slab of nodes addressed by `u32` index. A bucket holds the first
-//! node of its bin's list (nodes chain through `next`, in iteration order) and, for a tree bin,
-//! the root of a red-black tree over the same nodes. Tree links live in a side table that the
-//! map only allocates with its first tree bin.
+//! node of its bin's list (nodes chain through `next`, in iteration order). Tree links live
+//! in a side table that the map only allocates with its first tree bin. A tree's root is usually
+//! its head; cursor removals can leave another node first, whose parents lead to the root.
 use std::{
     cmp::Ordering,
     mem,
@@ -55,6 +55,7 @@ struct Links {
     left: u32,
     right: u32,
     red: bool,
+    in_tree: bool,
 }
 
 impl Links {
@@ -63,21 +64,7 @@ impl Links {
         left: NIL,
         right: NIL,
         red: false,
-    };
-}
-
-#[derive(Clone, Copy)]
-struct Bucket {
-    /// The first node of the bin's list.
-    head: u32,
-    /// The root of the bin's red-black tree; NIL for a plain bin.
-    root: u32,
-}
-
-impl Bucket {
-    const EMPTY: Self = Self {
-        head: NIL,
-        root: NIL,
+        in_tree: false,
     };
 }
 
@@ -90,7 +77,7 @@ pub struct JavaHashMap<K, V> {
     /// Tree links by node index: empty until the map makes a tree bin, then as long as `nodes`.
     links: Vec<Links>,
     /// The table; empty until the first insertion.
-    buckets: Vec<Bucket>,
+    buckets: Vec<u32>,
     /// The capacity the first insertion allocates.
     initial_capacity: usize,
     /// The table grows when a new key takes the size past this.
@@ -103,7 +90,7 @@ pub struct JavaHashMap<K, V> {
 /// Borrowed Java bucket/list traversal, without a cursor or allocation.
 pub struct Iter<'a, K, V> {
     map: &'a JavaHashMap<K, V>,
-    buckets: std::slice::Iter<'a, Bucket>,
+    buckets: std::slice::Iter<'a, u32>,
     next: u32,
     remaining: usize,
 }
@@ -112,7 +99,7 @@ impl<'a, K: JavaKey, V> Iterator for Iter<'a, K, V> {
     type Item = (&'a K, &'a V);
     fn next(&mut self) -> Option<Self::Item> {
         if self.next == NIL {
-            self.next = self.buckets.find(|bucket| bucket.head != NIL)?.head;
+            self.next = self.buckets.find(|&&head| head != NIL).copied()?;
         }
         let node = self.map.node(self.next);
         self.next = node.next;
@@ -128,8 +115,8 @@ impl<'a, K: JavaKey, V> Iterator for Iter<'a, K, V> {
             acc
         };
         acc = visit_bin(acc, self.next);
-        for bucket in self.buckets {
-            acc = visit_bin(acc, bucket.head);
+        for &head in self.buckets {
+            acc = visit_bin(acc, head);
         }
         acc
     }
@@ -315,9 +302,12 @@ impl<K: JavaKey, V> JavaHashMap<K, V> {
         }
         copy
     }
+    #[inline]
     pub fn get(&self, key: &K) -> Option<&V> {
-        let (_, i) = self.find(key)?;
-        Some(&self.node(i).value)
+        let hash = spread(key.java_hash());
+        let b = hash as u32 as usize & self.buckets.len().wrapping_sub(1);
+        let &head = self.buckets.get(b)?;
+        self.find_node(head, hash, key).map(|(_, node)| &node.value)
     }
     pub fn entries(&self) -> Iter<'_, K, V> {
         Iter {
@@ -376,7 +366,7 @@ impl<K: JavaKey, V> JavaHashMap<K, V> {
             .saturating_mul(size_of::<Option<Node<K, V>>>())
             .saturating_add(self.free.capacity().saturating_mul(size_of::<u32>()))
             .saturating_add(self.links.capacity().saturating_mul(size_of::<Links>()))
-            .saturating_add(self.buckets.capacity().saturating_mul(size_of::<Bucket>()))
+            .saturating_add(self.buckets.capacity().saturating_mul(size_of::<u32>()))
     }
     pub fn put(&mut self, key: K, value: V) -> Option<V> {
         let hash = spread(key.java_hash());
@@ -387,15 +377,15 @@ impl<K: JavaKey, V> JavaHashMap<K, V> {
             self.grow();
         }
         let b = self.bucket_index(hash);
-        let Bucket { head, root } = self.buckets[b];
+        let head = self.buckets[b];
         if head == NIL {
-            self.buckets[b].head = self.alloc(key, value, hash);
-        } else if root != NIL {
+            self.buckets[b] = self.alloc(key, value, hash);
+        } else if let Some(root) = self.root(head) {
             let found = self.tree_find(root, hash, &key);
             if found != NIL {
                 return Some(mem::replace(&mut self.node_mut(found).value, value));
             }
-            self.tree_put(b, key, value, hash);
+            self.tree_put(b, root, key, value, hash);
         } else {
             let mut len = 0;
             let mut last = head;
@@ -432,7 +422,7 @@ impl<K: JavaKey, V> JavaHashMap<K, V> {
     pub fn clear(&mut self) {
         self.mod_count += 1;
         if self.len > 0 {
-            self.buckets.fill(Bucket::EMPTY);
+            self.buckets.fill(NIL);
             self.len = 0;
         }
         self.nodes.clear();
@@ -521,17 +511,52 @@ impl<K: JavaKey, V> JavaHashMap<K, V> {
     }
     fn find_hashed(&self, key: &K, hash: i32) -> Option<(usize, u32)> {
         let b = self.bucket_index(hash);
-        let Bucket { head, root } = self.buckets[b];
-        let found = if root != NIL {
-            self.tree_find(root, hash, key)
+        self.find_node(self.buckets[b], hash, key)
+            .map(|(index, _)| (b, index))
+    }
+    #[inline]
+    fn find_node(&self, head: u32, hash: i32, key: &K) -> Option<(u32, &Node<K, V>)> {
+        if self.links.is_empty() {
+            self.plain_find(head, hash, key)
         } else {
-            let mut i = head;
-            while i != NIL && !self.is_key(i, hash, key) {
-                i = self.node(i).next;
+            self.find_linked(head, hash, key)
+        }
+    }
+    #[cold]
+    fn find_linked(&self, head: u32, hash: i32, key: &K) -> Option<(u32, &Node<K, V>)> {
+        let node = self.nodes.get(head as usize)?.as_ref()?;
+        if node.hash == hash && node.key == *key {
+            return Some((head, node));
+        }
+        if let Some(root) = self.root(head) {
+            let index = self.tree_find(root, hash, key);
+            (index != NIL).then(|| (index, self.node(index)))
+        } else {
+            self.plain_find(node.next, hash, key)
+        }
+    }
+    fn plain_find(&self, mut index: u32, hash: i32, key: &K) -> Option<(u32, &Node<K, V>)> {
+        while let Some(node) = self.nodes.get(index as usize).and_then(Option::as_ref) {
+            if node.hash == hash && node.key == *key {
+                return Some((index, node));
             }
-            i
-        };
-        (found != NIL).then_some((b, found))
+            index = node.next;
+        }
+        None
+    }
+    /// The actual tree root, even if a cursor removed nodes without moving it to the front.
+    fn root(&self, head: u32) -> Option<u32> {
+        let links = self.links.get(head as usize)?;
+        if !links.in_tree {
+            return None;
+        }
+        let mut i = head;
+        let mut parent = links.parent;
+        while parent != NIL {
+            i = parent;
+            parent = self.links[i as usize].parent;
+        }
+        Some(i)
     }
     /// The node of the key equal to `key` in the subtree at `p`. Trees are ordered by hash
     /// first, so a different hash rules out one side; nodes with the same hash can be on both.
@@ -588,6 +613,7 @@ impl<K: JavaKey, V> JavaHashMap<K, V> {
         self.links[i as usize] = Links {
             parent,
             red: true,
+            in_tree: true,
             ..Links::UNUSED
         };
         let mut tree = Tree {
@@ -612,40 +638,38 @@ impl<K: JavaKey, V> JavaHashMap<K, V> {
             self.links.resize(self.nodes.len(), Links::UNUSED);
         }
         let mut root = NIL;
-        let mut i = self.buckets[b].head;
+        let mut i = self.buckets[b];
         while i != NIL {
             root = self.attach(root, i).0;
             i = self.node(i).next;
         }
-        self.buckets[b].root = root;
-        self.move_root_to_front(b);
+        self.move_root_to_front(b, root);
     }
     /// A new key into the tree bin of bucket `b`: it joins the tree, and the list right after
     /// its tree parent.
-    fn tree_put(&mut self, b: usize, key: K, value: V, hash: i32) {
+    fn tree_put(&mut self, b: usize, root: u32, key: K, value: V, hash: i32) {
         let new = self.alloc(key, value, hash);
-        let (root, parent) = self.attach(self.buckets[b].root, new);
-        self.buckets[b].root = root;
+        let (root, parent) = self.attach(root, new);
         let after = self.node(parent).next;
         self.node_mut(new).next = after;
         self.node_mut(parent).next = new;
-        self.move_root_to_front(b);
+        self.move_root_to_front(b, root);
     }
     /// Puts the tree's root first in the bin's list, the other nodes keeping their order.
-    fn move_root_to_front(&mut self, b: usize) {
-        let Bucket { head, root } = self.buckets[b];
+    fn move_root_to_front(&mut self, b: usize, root: u32) {
+        let head = self.buckets[b];
         if root != head {
             self.unlink(b, root);
             self.node_mut(root).next = head;
-            self.buckets[b].head = root;
+            self.buckets[b] = root;
         }
     }
     /// Takes node `i` out of bucket `b`'s list; the others keep their order.
     fn unlink(&mut self, b: usize, i: u32) {
         let next = self.node(i).next;
-        let head = self.buckets[b].head;
+        let head = self.buckets[b];
         if head == i {
-            self.buckets[b].head = next;
+            self.buckets[b] = next;
             return;
         }
         let mut p = head;
@@ -658,35 +682,43 @@ impl<K: JavaKey, V> JavaHashMap<K, V> {
     /// small tree back into a plain bin, judged on the tree before the removal, and otherwise
     /// moves the new root to the front; a cursor's removal does neither.
     fn remove_node(&mut self, b: usize, i: u32, movable: bool) -> V {
-        let root = self.buckets[b].root;
+        let root = self.root(self.buckets[b]);
         self.unlink(b, i);
-        if self.buckets[b].head == NIL {
-            self.buckets[b].root = NIL;
-        } else if root != NIL {
-            let small = movable && {
-                let top = self.links[root as usize];
-                top.right == NIL || top.left == NIL || self.links[top.left as usize].left == NIL
-            };
-            if small {
-                self.buckets[b].root = NIL;
-            } else {
-                let mut tree = Tree {
-                    links: &mut self.links,
-                    root,
-                    nil_parent: NIL,
+        if let Some(root) = root {
+            let head = self.buckets[b];
+            if head != NIL {
+                let small = movable && {
+                    let top = self.links[root as usize];
+                    top.right == NIL || top.left == NIL || self.links[top.left as usize].left == NIL
                 };
-                tree.delete(i);
-                self.buckets[b].root = tree.root;
-                if movable {
-                    self.move_root_to_front(b);
+                if small {
+                    self.untreeify(head);
+                } else {
+                    let mut tree = Tree {
+                        links: &mut self.links,
+                        root,
+                        nil_parent: NIL,
+                    };
+                    tree.delete(i);
+                    let root = tree.root;
+                    if movable {
+                        self.move_root_to_front(b, root);
+                    }
                 }
             }
+            self.links[i as usize] = Links::UNUSED;
         }
         self.mod_count += 1;
         self.len -= 1;
         let node = self.nodes[i as usize].take().expect("live node");
         self.free.push(i);
         node.value
+    }
+    fn untreeify(&mut self, mut head: u32) {
+        while head != NIL {
+            self.links[head as usize] = Links::UNUSED;
+            head = self.node(head).next;
+        }
     }
     /// The node after `i` in iteration order.
     fn successor(&self, i: u32) -> u32 {
@@ -701,15 +733,16 @@ impl<K: JavaKey, V> JavaHashMap<K, V> {
     fn first_node_from(&self, b: usize) -> u32 {
         self.buckets[b..]
             .iter()
-            .find(|bucket| bucket.head != NIL)
-            .map_or(NIL, |bucket| bucket.head)
+            .copied()
+            .find(|&head| head != NIL)
+            .unwrap_or(NIL)
     }
     /// Allocates the first table, or doubles it. Old bucket `j` splits into `j` and `j + old`
     /// by the hash bit `old`, each half in its old order; a single node keeps its bin kind.
     fn grow(&mut self) {
         let old = self.buckets.len();
         if old == 0 {
-            self.buckets = vec![Bucket::EMPTY; self.initial_capacity];
+            self.buckets = vec![NIL; self.initial_capacity];
             self.threshold = threshold_for(self.initial_capacity);
             return;
         }
@@ -717,32 +750,34 @@ impl<K: JavaKey, V> JavaHashMap<K, V> {
             self.threshold = usize::MAX;
             return;
         }
-        let old_buckets = mem::replace(&mut self.buckets, vec![Bucket::EMPTY; old * 2]);
-        for (j, bucket) in old_buckets.into_iter().enumerate() {
-            if bucket.head == NIL {
+        let old_buckets = mem::replace(&mut self.buckets, vec![NIL; old * 2]);
+        for (j, head) in old_buckets.into_iter().enumerate() {
+            if head == NIL {
                 continue;
             }
-            let first = self.node(bucket.head);
+            let first = self.node(head);
             if first.next == NIL {
                 let to = self.bucket_index(first.hash);
-                self.buckets[to] = bucket;
+                self.buckets[to] = head;
                 continue;
             }
-            let halves = self.split_list(bucket.head, old);
+            let tree = self
+                .links
+                .get(head as usize)
+                .is_some_and(|link| link.in_tree);
+            let halves = self.split_list(head, old);
             for (half, &(head, len)) in halves.iter().enumerate() {
                 if head == NIL {
                     continue;
                 }
                 let to = j + half * old;
-                if bucket.root == NIL || len <= UNTREEIFY_LEN {
-                    self.buckets[to] = Bucket { head, root: NIL };
-                } else if halves[1 - half].0 != NIL {
-                    self.buckets[to].head = head;
+                self.buckets[to] = head;
+                if tree && len <= UNTREEIFY_LEN {
+                    self.untreeify(head);
+                } else if tree && halves[1 - half].0 != NIL {
                     self.treeify(to);
-                } else {
-                    // Every node landed here: same tree, same list, same first node.
-                    self.buckets[to] = bucket;
                 }
+                // If the whole tree landed here, its links and head stay unchanged.
             }
         }
         self.threshold = threshold_for(old * 2);
@@ -1162,6 +1197,9 @@ mod tests {
         assert_eq!(next(&map, &mut cursor), Ok(Some((6, 6))));
         assert_eq!(map.remove_current(&mut cursor), Ok(()));
         assert_eq!(order(&map), [3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 1, 0, 2]);
+        assert_eq!(map.get(&collider(6)), None);
+        assert_eq!(map.get(&collider(7)), Some(&7));
+        assert_eq!(map.get(&collider(13)), Some(&13));
         // The next tree insertion moves the root left by the removal, 7, to the front.
         map.put(key(15, 704), 15);
         assert_eq!(order(&map), [7, 3, 4, 5, 8, 9, 10, 11, 12, 13, 15, 1, 0, 2]);
@@ -1176,6 +1214,27 @@ mod tests {
         // Three nodes, still a tree bin: 18 goes after its tree parent 11, then root 12 moves first.
         map.put(key(18, 512), 18);
         assert_eq!(order(&map), [12, 11, 18, 13, 1, 0, 2]);
+    }
+
+    #[test]
+    fn cursor_leaves_a_singleton_tree_that_survives_table_growth() {
+        let mut map = colliders();
+        let mut cursor = map.cursor();
+        while let Some((id, _)) = next(&map, &mut cursor).unwrap() {
+            if id != 6 {
+                map.remove_current(&mut cursor).unwrap();
+            }
+        }
+        // 49 live entries double this 64-bucket table, leaving the tree in bucket 64.
+        for hash in 1..=48 {
+            let id = 100 + hash as u32;
+            map.put(key(id, hash), id);
+        }
+        assert_eq!(map.get(&collider(6)), Some(&6));
+        map.put(key(20, 192), 20);
+        map.put(key(21, 192), 21);
+        // Observed on the JVM: the third put moves the root first. A plain bin would append.
+        assert_eq!(order(&map)[48..], [20, 6, 21]);
     }
 
     /// Java: the 13 puts of the doubling test, remove id 9, `new HashMap<>(map)`, then put id 9
