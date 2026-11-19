@@ -1383,7 +1383,8 @@ pub(crate) const INGREDIENT_MAPS: [&str; 2] = ["key", "shapes"];
 pub struct ResolvedRecipe {
     /// The id as `recipe_sources::sources` names it.
     pub name: String,
-    /// The file as written: what mods and clients see.
+    /// The file as written, but with its `type` canonicalized to
+    /// `namespace:path` (`recipe_sources::decode_type`): what mods and clients see.
     pub file: Arc<Value>,
     /// The file with the `ingredient` hook's answers in place, for the tables
     /// to parse. The file itself when it names no mod kind.
@@ -1502,10 +1503,10 @@ impl ResolvedSources {
         context: &sunrise_world::native_load_context::LoadContext,
     ) -> Result<Self> {
         let context = context.with_fluid_tags(sunrise_items::items::fluid_tag_list(root, overlay)?);
-        Self::resolve_collecting(
-            sunrise_items::recipe_sources::sources(root, overlay)?,
-            &context,
-        )
+        let (sources, refused) = sunrise_items::recipe_sources::sources_collecting(root, overlay)?;
+        let mut resolved = Self::resolve_collecting(sources, &context)?;
+        resolved.failures.extend(refused);
+        Ok(resolved)
     }
     /// Whether every recipe resolved; sources with failures are never shared.
     pub fn is_complete(&self) -> bool {
