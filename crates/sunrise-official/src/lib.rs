@@ -8,6 +8,10 @@
 //! and [`register`] adds them. Nothing here depends on an engine crate.
 #![forbid(unsafe_code)]
 
+// In the SDK this keeps the platform's link to the host dylib, which owns the hook and settings
+// registries. Without it, rustc can link a private copy into the official dylib.
+extern crate sunrise_game as _;
+
 use sunrise_platform::hooks::{self, ClientIdentity, GetTheGame, Hooks};
 use sunrise_platform::{hud, lang, mod_rows, pages, release, settings};
 
