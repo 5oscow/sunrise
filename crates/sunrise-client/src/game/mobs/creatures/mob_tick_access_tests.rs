@@ -3,7 +3,9 @@
 use super::*;
 use crate::game::Dim;
 use crate::game::native_entity_refs::tests::with_game;
-use mod_api::{Despawn, EntityTickListenedEvent, EntityTickPreEvent, Flow, ModEntry, ServerHost};
+use mod_api::{
+    Despawn, EntityTickListenedEvent, EntityTickPreEvent, HostSide, ModEntry, ServerHost,
+};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicU32, Ordering},
@@ -44,15 +46,14 @@ struct MoveOnPre {
 
 #[mod_api::__subscriptions]
 impl mod_api::Hooks for MoveOnPre {
-    fn entity_tick_listened(&self, _: &mut dyn ServerHost, event: &mut EntityTickListenedEvent) {
+    fn entity_tick_listened(&self, _: HostSide<'_>, event: &mut EntityTickListenedEvent) {
         event.listened = true;
     }
-    fn entity_tick_pre(
-        &self,
-        host: &mut dyn ServerHost,
-        event: &mut EntityTickPreEvent<'_>,
-    ) -> Flow {
-        if event.entity == self.id {
+    fn entity_tick_pre(&self, host: HostSide<'_>, event: &mut EntityTickPreEvent<'_>) {
+        let HostSide::Server(host) = host else {
+            panic!("server fixture");
+        };
+        if event.entities.contains(&self.id) {
             let entity = host.entity(self.id).expect("a live handle in its own Pre");
             let at = entity
                 .position(host)
@@ -63,7 +64,6 @@ impl mod_api::Hooks for MoveOnPre {
                 "the tick view writes its position"
             );
         }
-        Flow::Continue
     }
 }
 
@@ -431,15 +431,14 @@ struct DiscardOnPre {
 
 #[mod_api::__subscriptions]
 impl mod_api::Hooks for DiscardOnPre {
-    fn entity_tick_listened(&self, _: &mut dyn ServerHost, event: &mut EntityTickListenedEvent) {
+    fn entity_tick_listened(&self, _: HostSide<'_>, event: &mut EntityTickListenedEvent) {
         event.listened = true;
     }
-    fn entity_tick_pre(
-        &self,
-        host: &mut dyn ServerHost,
-        event: &mut EntityTickPreEvent<'_>,
-    ) -> Flow {
-        if event.entity == self.id {
+    fn entity_tick_pre(&self, host: HostSide<'_>, event: &mut EntityTickPreEvent<'_>) {
+        let HostSide::Server(host) = host else {
+            panic!("server fixture");
+        };
+        if event.entities.contains(&self.id) {
             let victim = host
                 .entity(self.victim)
                 .expect("the other mob is live at the Pre");
@@ -450,7 +449,6 @@ impl mod_api::Hooks for DiscardOnPre {
                 .unwrap()
                 .push((self.victim, discarded, self_live));
         }
-        Flow::Continue
     }
 }
 
@@ -519,4 +517,104 @@ fn a_mob_outside_the_entity_tick_list_checks_no_despawn() {
             );
         });
     });
+}
+
+/// What a tick listener heard: each call's phase and entities, and at a Post where the first
+/// of them stands. Names `minecraft:pig` to `entity_tick_each` when `named`.
+struct TickTiming {
+    named: bool,
+    heard: Arc<Mutex<TickCalls>>,
+}
+
+/// A tick listener's calls, in order: (phase, entities, the first one's position at a Post).
+type TickCalls = Vec<(&'static str, Vec<u32>, Option<[f64; 3]>)>;
+
+#[mod_api::__subscriptions]
+impl mod_api::Hooks for TickTiming {
+    fn entity_tick_listened(&self, _: HostSide<'_>, event: &mut EntityTickListenedEvent) {
+        event.listened = true;
+    }
+    fn entity_tick_pre(&self, _: HostSide<'_>, event: &mut EntityTickPreEvent<'_>) {
+        let mut heard = self.heard.lock().unwrap();
+        heard.push(("pre", event.entities.to_vec(), None));
+    }
+    fn entity_tick_post(&self, host: HostSide<'_>, event: &mut mod_api::EntityTickPostEvent<'_>) {
+        let HostSide::Server(host) = host else {
+            panic!("server fixture");
+        };
+        let at = host
+            .entity(event.entities[0])
+            .and_then(|entity| entity.position(host));
+        let mut heard = self.heard.lock().unwrap();
+        heard.push(("post", event.entities.to_vec(), at));
+    }
+    fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+        if self.named {
+            r.entity_tick_each("minecraft:pig");
+        }
+    }
+}
+
+/// The two pigs' tick hooks through the real creature pass; the first pig falls in its tick.
+fn pig_ticks(named: bool) -> TickCalls {
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    let mods: mod_api::Mods = vec![ModEntry::new(
+        "mob-tick-timing",
+        Box::new(TickTiming {
+            named,
+            heard: heard.clone(),
+        }),
+    )]
+    .into();
+    mod_platform::testing::with_mods(mods, || {
+        with_two_pigs(|game| {
+            let first = game.mobs.iter().position(|mob| mob.id == 71).unwrap();
+            game.mobs.update(first, |mob| {
+                mob.no_ai = false;
+                mob.no_gravity = false;
+                mob.on_ground = false;
+                // Already falling: a mob moves by its velocity before gravity adds to it, so
+                // one at rest would not move in its first tick.
+                mob.velocity = Vec3::new(0.0, -0.5, 0.0);
+            });
+            game.tick_creature_entities().unwrap();
+        });
+    });
+    std::mem::take(&mut *heard.lock().unwrap())
+}
+
+/// A type a mod names is told at NeoForge's moment: each pig alone, its Post right after its
+/// own tick and before the next pig's Pre, and a Post handle reads where its tick took it.
+#[test]
+#[ignore = "daily"]
+fn a_named_type_hears_each_entitys_own_pre_and_post() {
+    let heard = pig_ticks(true);
+    let phases: Vec<_> = heard
+        .iter()
+        .map(|(phase, entities, _)| (*phase, entities.clone()))
+        .collect();
+    assert_eq!(
+        phases,
+        [
+            ("pre", vec![71]),
+            ("post", vec![71]),
+            ("pre", vec![72]),
+            ("post", vec![72]),
+        ]
+    );
+    let first = heard[1].2.expect("the Post reads the first pig");
+    assert!(first[1] < 80.0, "the first pig fell in its tick: {first:?}");
+    assert_eq!(heard[3].2, Some([2.0, 80.0, 0.5]), "the second pig stayed");
+}
+
+/// With no type named, the mobs are told as one family: one Pre before the first tick, one
+/// Post after the last, as before.
+#[test]
+#[ignore = "daily"]
+fn an_unnamed_family_hears_one_pre_and_one_post() {
+    let phases: Vec<_> = pig_ticks(false)
+        .into_iter()
+        .map(|(phase, entities, _)| (phase, entities))
+        .collect();
+    assert_eq!(phases, [("pre", vec![71, 72]), ("post", vec![71, 72])]);
 }

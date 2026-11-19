@@ -776,7 +776,25 @@ impl Game<'_> {
         );
         // Projectiles tick on the client too and fly on between the tracker's
         // updates (10 to 20 ticks apart); a block stops them there, and only
-        // the server decides what they hit.
+        // the server decides what they hit. EntityTickEvent.Pre for them and
+        // the tridents, once for the family before the loop holds them, and
+        // the Post after; a canceled one keeps its state for the tick.
+        let mut round = self.native_tick_round();
+        if round.listening() {
+            for p in self.creatures.projectiles.iter() {
+                round.add(
+                    p.id,
+                    crate::game::native_ticks::TickKind::Fixed(p.entity_type()),
+                );
+            }
+            for t in self.tridents.iter() {
+                round.add(
+                    t.id,
+                    crate::game::native_ticks::TickKind::Fixed("minecraft:trident"),
+                );
+            }
+            self.native_tick_pre_batch(&mut round);
+        }
         let mut projectiles = self.creatures.projectiles.lift();
         #[cfg(test)]
         nested_spawn_tests::after_lift(self, nested_spawn_tests::Point::Projectile);
@@ -798,6 +816,7 @@ impl Game<'_> {
                 border: Some(self.border.bounds()),
             };
             projectiles.for_each_mut(|p| match p.kind {
+                _ if round.canceled(p.id) => {}
                 ProjectileKind::Arrow { .. } => {
                     let _ = sunrise_client::arrows::tick_client(p, &arrow_scene);
                     if let Some(a) = p.arrow.as_mut() {
@@ -812,7 +831,9 @@ impl Game<'_> {
                 _ => remote_projectile_tick(p, &world),
             });
             for t in &mut tridents {
-                t.remote_tick(&world, self.remote_eye(t.owner));
+                if !round.canceled(t.id) {
+                    t.remote_tick(&world, self.remote_eye(t.owner));
+                }
             }
         }
         drop(rain);
@@ -827,6 +848,7 @@ impl Game<'_> {
         for (at, event) in arrow_events {
             self.arrow_event(at, event);
         }
+        self.native_tick_post_batch(round);
         self.arrow_effect_particles();
         let trails: Vec<Vec3> = self
             .creatures
@@ -1381,5 +1403,106 @@ mod nested_spawn_tests {
                 AT
             );
         });
+    }
+}
+
+#[cfg(test)]
+mod entity_tick_tests {
+    use std::sync::{Arc, Mutex};
+
+    /// The tick hooks a listener heard: whether on a client, the phase, entities and kinds.
+    type Heard = Arc<Mutex<Vec<(bool, &'static str, Vec<u32>, Vec<String>)>>>;
+
+    struct Listener(Heard);
+
+    impl Listener {
+        fn record(
+            &self,
+            host: &mod_api::HostSide<'_>,
+            phase: &'static str,
+            entities: &[u32],
+            kinds: &[&str],
+        ) {
+            let client = matches!(host, mod_api::HostSide::Client(_));
+            let kinds = kinds.iter().map(|kind| (*kind).to_owned()).collect();
+            let mut heard = self.0.lock().unwrap();
+            heard.push((client, phase, entities.to_vec(), kinds));
+        }
+    }
+
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Listener {
+        fn entity_tick_listened(
+            &self,
+            _: mod_api::HostSide<'_>,
+            event: &mut mod_api::EntityTickListenedEvent,
+        ) {
+            event.listened = true;
+        }
+        fn entity_tick_pre(
+            &self,
+            host: mod_api::HostSide<'_>,
+            event: &mut mod_api::EntityTickPreEvent<'_>,
+        ) {
+            self.record(&host, "pre", event.entities, event.kinds);
+        }
+        fn entity_tick_post(
+            &self,
+            host: mod_api::HostSide<'_>,
+            event: &mut mod_api::EntityTickPostEvent<'_>,
+        ) {
+            self.record(&host, "post", event.entities, event.kinds);
+        }
+    }
+
+    /// A client's listener hears a remote arrow's own tick there, between the server's
+    /// updates: its Pre before the arrow flies on, its Post after, on the client side.
+    #[test]
+    #[ignore = "daily"]
+    fn a_client_listener_hears_a_remote_arrows_tick() {
+        let heard: Heard = Arc::default();
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "client-entity-ticks",
+            Box::new(Listener(heard.clone())),
+        )]
+        .into();
+        mod_platform::testing::with_mods(mods, || {
+            crate::game::native_entity_refs::tests::with_client_game(|game| {
+                game.world.chunks.insert(
+                    (0, 0),
+                    std::sync::Arc::new(sunrise_client::chunk::Chunk::empty(0, 0)),
+                );
+                game.block_ticks
+                    .add_empty_chunk(sunrise_core::position::ChunkPos::new(0, 0))
+                    .unwrap();
+                assert!(game.spawn_remote_projectile(
+                    "minecraft:arrow",
+                    &sunrise_protocol::packets::play::AddEntity {
+                        id: 71,
+                        uuid: 71,
+                        kind: 0,
+                        position: [3.5, 80.0, 3.5],
+                        velocity: [1.0, 0.0, 0.0],
+                        pitch: 0,
+                        yaw: 0,
+                        head_yaw: 0,
+                        data: 0
+                    },
+                    (0.0, 0.0),
+                ));
+                game.tick_remote_projectiles(|_, at| at);
+                let arrow = game.creatures.projectiles.iter().find(|p| p.id == 71);
+                assert!(arrow.unwrap().position.x > 3.5, "the arrow flew on");
+            });
+        });
+        let arrow = || (vec![71], vec!["minecraft:arrow".to_owned()]);
+        let heard = heard.lock().unwrap();
+        assert_eq!(
+            *heard,
+            [
+                (true, "pre", arrow().0, arrow().1),
+                (true, "post", arrow().0, arrow().1)
+            ]
+        );
     }
 }
