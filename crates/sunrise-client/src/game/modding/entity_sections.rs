@@ -25,6 +25,9 @@
 
 #[path = "entity_sections/observer_cache.rs"]
 pub(super) mod observer_cache;
+#[path = "entity_sections/player.rs"]
+mod player;
+pub(super) use player::PlayerSectionObserver;
 
 use super::Game;
 use crate::mobs::living::section_writes::PositionWrite;
@@ -168,25 +171,51 @@ impl EntitySections {
     }
 }
 
-/// The lightweight host used while a mob's world view is borrowed.  Entity
-/// reads are answered from the write that is currently being delivered; all
-/// other host operations retain their normal typed refusal instead of trying
-/// to borrow the game through the live mob view.
-struct LiveSectionHost {
-    epoch: WorldEpoch,
-    current: Option<(u32, [f64; 3])>,
+#[derive(Clone, Copy)]
+struct SectionWriter {
+    entity: EntityRef,
+    position: [f64; 3],
+    player: Option<PlayerMoveState>,
 }
+
+#[derive(Clone, Copy)]
+struct PlayerMoveState {
+    local_player: Option<mod_api::PlayerRef>,
+    on_ground: bool,
+    velocity: [f64; 3],
+}
+
+/// The Host used while the entity's world view is borrowed. It answers only
+/// reads from the current write; other operations retain their typed refusal.
+struct LiveSectionHost(Option<SectionWriter>);
 
 mod_api::impl_host_areas!(LiveSectionHost);
 mod_api::impl_server_host_areas!(LiveSectionHost);
-mod_api::impl_backend_areas!(LiveSectionHost, except(entity_position));
+mod_api::impl_client_host_areas!(LiveSectionHost, except(menus));
+mod_api::impl_backend_areas!(LiveSectionHost, except(entity_position, entity_physics));
+
+impl mod_api::prelude::MenusClientHost for LiveSectionHost {
+    fn local_player(&self) -> Option<mod_api::PlayerRef> {
+        self.0?.player?.local_player
+    }
+}
 
 impl mod_api::prelude::EntityPositionBackend for LiveSectionHost {
     fn entity_position(&self, entity: EntityRef) -> Option<[f64; 3]> {
-        (entity.epoch() == self.epoch)
-            .then_some(self.current)
-            .flatten()
-            .and_then(|(id, position)| (id == entity.id()).then_some(position))
+        let writer = self.0.filter(|writer| writer.entity == entity)?;
+        Some(writer.position)
+    }
+
+    fn entity_on_ground(&self, entity: EntityRef) -> Option<bool> {
+        let player = self.0.filter(|writer| writer.entity == entity)?.player?;
+        Some(player.on_ground)
+    }
+}
+
+impl mod_api::prelude::EntityPhysicsBackend for LiveSectionHost {
+    fn entity_velocity(&self, entity: EntityRef) -> Option<[f64; 3]> {
+        let player = self.0.filter(|writer| writer.entity == entity)?.player?;
+        Some(player.velocity)
     }
 }
 
@@ -199,14 +228,36 @@ impl mod_api::Host for LiveSectionHost {
 }
 
 impl mod_api::ServerHost for LiveSectionHost {}
+impl mod_api::ClientHost for LiveSectionHost {}
 
+fn tell_live(sections: &std::cell::RefCell<EntitySections>, writer: SectionWriter, server: bool) {
+    let Some(batch) = sections.borrow_mut().begin_telling() else {
+        return;
+    };
+    for crossing in &batch {
+        let entity = EntityRef::new(writer.entity.epoch(), crossing.id);
+        let mut host = LiveSectionHost((entity == writer.entity).then_some(writer));
+        let host = if server {
+            mod_api::HostSide::Server(&mut host)
+        } else {
+            mod_api::HostSide::Client(&mut host)
+        };
+        mod_api::dispatch_entity_entering_section(
+            host,
+            entity,
+            crossing.old,
+            crossing.new,
+            crossing.old[0] != crossing.new[0] || crossing.old[2] != crossing.new[2],
+        );
+    }
+    sections.borrow_mut().end_telling(batch);
+}
 /// Delivers a mob's captured teleport at the write boundary.  The observer
 /// owns only the section table, so it can run while the mob's borrowed world
 /// view is still live.
 pub(crate) struct LiveSectionObserver {
     sections: std::rc::Rc<std::cell::RefCell<EntitySections>>,
     scope: Scope,
-    current: Option<(u32, [f64; 3])>,
 }
 
 impl LiveSectionObserver {
@@ -214,37 +265,7 @@ impl LiveSectionObserver {
         sections: std::rc::Rc<std::cell::RefCell<EntitySections>>,
         scope: Scope,
     ) -> Self {
-        Self {
-            sections,
-            scope,
-            current: None,
-        }
-    }
-
-    fn tell(&mut self) {
-        let Some(mut batch) = self.sections.borrow_mut().begin_telling() else {
-            return;
-        };
-        let mut host = LiveSectionHost {
-            epoch: self.scope.epoch,
-            current: self.current,
-        };
-        for crossing in &batch {
-            host.current = self.current.filter(|(id, _)| *id == crossing.id);
-            let chunk_changed =
-                crossing.old[0] != crossing.new[0] || crossing.old[2] != crossing.new[2];
-            mod_api::dispatch_entity_entering_section(
-                mod_api::HostSide::Server(&mut host),
-                EntityRef::new(self.scope.epoch, crossing.id),
-                crossing.old,
-                crossing.new,
-                chunk_changed,
-            );
-        }
-        batch.clear();
-        let mut sections = self.sections.borrow_mut();
-        sections.telling = batch;
-        sections.busy = false;
+        Self { sections, scope }
     }
 }
 
@@ -255,15 +276,18 @@ impl crate::mobs::living::section_writes::WriteObserver for LiveSectionObserver 
         from: sunrise_core::geometry::Vec3,
         to: sunrise_core::geometry::Vec3,
     ) {
-        self.current = Some((id, [to.x, to.y, to.z]));
-        self.sections.borrow_mut().moved(
-            self.scope,
-            id,
-            Some([from.x, from.y, from.z]),
-            [to.x, to.y, to.z],
+        self.sections
+            .borrow_mut()
+            .moved(self.scope, id, Some(from.components()), to.components());
+        tell_live(
+            &self.sections,
+            SectionWriter {
+                entity: EntityRef::new(self.scope.epoch, id),
+                position: to.components(),
+                player: None,
+            },
+            true,
         );
-        self.tell();
-        self.current = None;
     }
 }
 
