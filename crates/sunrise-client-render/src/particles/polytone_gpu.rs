@@ -688,6 +688,13 @@ impl GpuParticles {
                     return;
                 };
                 id.clone_into(&mut store.id);
+                if def.limit.is_some_and(|l| l as usize > store.limit) {
+                    log::warn!(
+                        "custom particle {id}: keeps {} records, not its limit of {}",
+                        store.limit,
+                        def.limit.unwrap_or_default()
+                    );
+                }
                 self.stores.push(store);
                 let last = self.stores.len() - 1;
                 &mut self.stores[last]
@@ -734,6 +741,35 @@ impl GpuParticles {
     ) {
         for store in &self.stores {
             store.render(frame, self.ticks, light_cache, out, additive);
+        }
+    }
+
+    /// This frame's verdict on the types' quads, once the renderer decided on their shaders:
+    /// the others draw here, in the stores' order, while their quads fit what is left of
+    /// `room`; a type with no sprite in the atlas (`has_sprite`) draws nothing. A type that fits
+    /// neither path is named in the log once, until it draws again by either.
+    fn admit_quads(&mut self, mut room: usize, has_sprite: &dyn Fn(&str) -> bool) {
+        for store in &mut self.stores {
+            store.fallback = false;
+            if store.drawn() {
+                store.unfit_logged = false;
+            }
+            if !store.visible() || store.drawn() || !has_sprite(&store.sprite) {
+                continue;
+            }
+            let quads = store.quads();
+            if quads <= room {
+                room -= quads;
+                store.fallback = true;
+                store.unfit_logged = false;
+            } else if !store.unfit_logged {
+                store.unfit_logged = true;
+                log::warn!(
+                    "custom particle {}: not drawn while its {quads} quads fit neither its \
+                     shader nor the {room} the frame has left for particle quads",
+                    store.id
+                );
+            }
         }
     }
 
@@ -801,7 +837,7 @@ impl super::ParticleEngine {
             })
             .collect();
         let mut renderer = renderer;
-        let mut room = match renderer.as_deref_mut() {
+        let room = match renderer.as_deref_mut() {
             Some(renderer) => {
                 renderer.decide_polytone_shaders(&requests);
                 renderer.polytone_fallback_quads()
@@ -811,27 +847,7 @@ impl super::ParticleEngine {
                 FALLBACK_QUADS
             }
         };
-        // The others draw here, in the stores' order, while their quads fit what is left; a
-        // type with no sprite in the atlas draws nothing.
-        for store in &mut gpu.stores {
-            store.fallback = false;
-            if !store.visible() || store.drawn() || !self.atlas.contains_key(&store.sprite) {
-                continue;
-            }
-            let quads = store.quads();
-            if quads <= room {
-                room -= quads;
-                store.fallback = true;
-                store.unfit_logged = false;
-            } else if !store.unfit_logged {
-                store.unfit_logged = true;
-                log::warn!(
-                    "custom particle {}: not drawn while its {quads} quads fit neither its \
-                     shader nor the {room} the frame has left for particle quads",
-                    store.id
-                );
-            }
-        }
+        gpu.admit_quads(room, &|sprite| self.atlas.contains_key(sprite));
         let live = || gpu.stores.iter().filter(|s| s.visible());
         let for_shaders =
             live().any(|s| s.drawn() && s.shader.as_ref().is_some_and(|sh| sh.samples_heightmap));
@@ -1154,7 +1170,32 @@ mod tests {
         assert_eq!(quads(&store, 15), 0, "under the ground");
     }
 
-    /// A pack's `limit` sizes the ring up to [`MAX_RECORDS`]; the wiki's default is 16384.
+    /// A refusal is named in the log once, and again after the type draws by its shader and
+    /// is refused anew.
+    #[test]
+    fn a_refusal_after_a_recovery_by_its_shader_is_named_again() {
+        let mut gpu = GpuParticles::default();
+        let mut store = store(None);
+        store.records.push(record([0.0; 3], 0, 20.0));
+        let shader = store.shader.clone().unwrap();
+        gpu.stores.push(store);
+        let unfit = |gpu: &GpuParticles| gpu.stores[0].unfit_logged;
+        shader.set_drawn(false);
+        gpu.admit_quads(0, &|_| true);
+        assert!(unfit(&gpu), "refused: named");
+        shader.set_drawn(true);
+        gpu.admit_quads(0, &|_| true);
+        assert!(!unfit(&gpu), "drawn by its shader");
+        shader.set_drawn(false);
+        gpu.admit_quads(0, &|_| true);
+        assert!(
+            unfit(&gpu) && !gpu.stores[0].fallback,
+            "refused again: named again"
+        );
+    }
+
+    /// A pack's `limit` sizes the ring up to [`MAX_RECORDS`] (a larger one is named in the log
+    /// when the type first spawns); the wiki's default is 16384.
     #[test]
     fn the_ring_of_records_is_bounded() {
         let ring = |limit: Option<u32>| {
