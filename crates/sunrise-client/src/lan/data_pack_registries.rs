@@ -272,9 +272,7 @@ impl PackRegistryDefinitions {
 }
 
 fn check_network_nbt(tag: &Tag) -> Result<(), String> {
-    sunrise_core::nbt::write_network(tag, sunrise_core::nbt::Limits::default())
-        .map(|_| ())
-        .map_err(|error| format!("network NBT: {error}"))
+    sunrise_protocol::buf::check_network_nbt(tag).map_err(|error| format!("network {error}"))
 }
 
 fn decode_definition(
@@ -661,6 +659,12 @@ mod tests {
 
     #[test]
     fn every_bad_winning_definition_is_reported_in_one_error() {
+        let mut oversized = enchantment("Oversized");
+        // Each string fits modified UTF-8, but together they exceed the 2 MiB quota.
+        oversized["description"] = json!(vec!["x".repeat(64_000); 33]);
+        assert!(
+            sunrise_core::nbt::write_network(&json_to_nbt(&oversized), Default::default()).is_ok()
+        );
         let files = [
             (
                 "dialog/test:broken".into(),
@@ -710,6 +714,10 @@ mod tests {
             (
                 "enchantment/test:unencodable".into(),
                 vec![enchantment(&"\0".repeat(32_768)).to_string().into_bytes()],
+            ),
+            (
+                "enchantment/test:oversized".into(),
+                vec![oversized.to_string().into_bytes()],
             ),
             ("painting_variant/test:numeric_style".into(), vec![br#"{"asset_id":"test:mural","width":1,"height":1,"title":{"text":"No","bold":1}}"#.to_vec()]),
             ("painting_variant/test:numeric_object".into(), vec![br#"{"asset_id":"test:mural","width":1,"height":1,"author":{"object":7,"sprite":"test:icon"}}"#.to_vec()]),
@@ -776,6 +784,7 @@ mod tests {
                 "enchantment",
                 &[
                     ("not_read", "read failed"),
+                    ("oversized", "byte limit exceeded"),
                     ("wrong_level", "max_level"),
                     ("unencodable", "modified UTF-8"),
                 ],
