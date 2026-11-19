@@ -55,7 +55,7 @@ impl Game<'_> {
         self.native_players_equipment();
         self.announce_guest_advancements();
         let mut told = None;
-        for (conn, _) in turns {
+        for &(conn, _) in &turns {
             self.native_player_tick_post_alone(&round, &mut told);
             let canceled = self.player_tick_canceled(conn);
             let Some(host) = self.lan.as_mut() else {
@@ -130,11 +130,16 @@ impl Game<'_> {
             if let Some(host) = self.lan.as_mut() {
                 host.hub.flush_progress(conn);
             }
-            // ServerLevel.tickPassenger runs rideTick on the level path.
-            self.guest_vehicle_tick(conn);
         }
         self.native_player_tick_post_alone(&round, &mut told);
         self.native_tick_post_batch(round);
+        // Entity.rideTick positions the rider after its tick (and after Post
+        // even for batched listeners). Canceling the tick does not stop this.
+        for (conn, passenger) in turns {
+            if passenger && !self.on_server_trip(conn) {
+                self.guest_vehicle_tick(conn);
+            }
+        }
     }
 
     fn advance_guest_entity_clock(&mut self, conn: u32) {
@@ -252,6 +257,13 @@ impl Game<'_> {
     }
 
     fn tick_guest_connection(&mut self, conn: u32) {
+        self.tick_guest_connection_body(conn);
+        if !self.on_server_trip(conn) {
+            self.guest_vehicle_movement_baseline(conn);
+        }
+    }
+
+    fn tick_guest_connection_body(&mut self, conn: u32) {
         let Some(host) = self.lan.as_mut() else {
             return;
         };
