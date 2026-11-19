@@ -144,7 +144,7 @@ fn hover(event: &Map<String, Value>, reg: &Registries, snbt: bool) -> Option<Val
             let id = Identifier::parse(event.get("id")?.as_str()?)
                 .ok()?
                 .to_string();
-            if !reg.items.is_empty() && !reg.items.contains(&id) {
+            if id == "minecraft:air" || (!reg.items.is_empty() && !reg.items.contains(&id)) {
                 return None;
             }
             let mut out = json!({"action":action,"id":id});
@@ -158,10 +158,12 @@ fn hover(event: &Map<String, Value>, reg: &Registries, snbt: bool) -> Option<Val
                 let patch = v.as_object()?;
                 let mut normalized = Map::new();
                 for (key, value) in patch {
-                    let id = Identifier::parse(key.strip_prefix('!').unwrap_or(key)).ok()?;
-                    if key.starts_with('!') {
+                    if let Some(removed) = key.strip_prefix('!') {
+                        value.as_object()?;
+                        let id = Identifier::parse(removed).ok()?;
                         normalized.insert(format!("!{id}"), json!({}));
                     } else {
+                        let id = Identifier::parse(key).ok()?;
                         normalized.insert(id.to_string(), value.clone());
                     }
                 }
