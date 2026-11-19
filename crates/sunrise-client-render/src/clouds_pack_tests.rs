@@ -94,6 +94,29 @@ fn faces_wrap_the_texture_as_vanilla_does() {
     assert_eq!(faces(&input(&texture, -5.0, 3, false)), expected);
 }
 
+/// A tall texture (2 by 4), cells 1, 0 and 0, 1 and 0, 2 filled: cell 1, 0's east neighbour
+/// wraps by the height to column 2, and cell 0, 2's west one to column 3, both past the image.
+/// Vanilla's `getPixel` throws there (the texture never loads); here they count as empty, so
+/// each cell gets that face (1, 0's east face is -1, 0, -123), and nothing reads past the row:
+/// read as the next row's cell, 1, 0's east neighbour would be 0, 1, filled, and take the face
+/// away. Faces from the Python transcription with that one rule.
+#[test]
+fn a_tall_textures_neighbours_past_the_image_count_as_empty() {
+    let mut filled = vec![false; 8];
+    filled[1] = true;
+    filled[2] = true;
+    filled[4] = true;
+    let texture = (2, 4, filled);
+    #[rustfmt::skip]
+    let expected = [
+        -1, 0, -128, -1, 0, -123, -1, 0, -112, -1, 0, -111, -1, 0, -110, -1, 0, -109, -1, 0,
+        -108, -1, 0, -107, 0, 0, 64, 0, 0, 66, 0, 0, 80, 0, 0, 81, 0, 0, 82, 0, 0, 83, 0, 0, 84,
+        0, 0, 85, 0, 0, -128, 0, 0, -124, 0, 0, -112, 0, 0, -111, 0, 0, -110, 0, 0, -109, 0, 0,
+        -108, 0, 0, -107, 0, -1, 0, 0, -1, 3, 0, 1, 0,
+    ];
+    assert_eq!(faces(&input(&texture, -5.0, 1, false)), expected);
+}
+
 /// Faces kept while `faces_key` holds are the ones built afresh: along a path through cells and
 /// in and out of the layer, an unchanged key never hides changed faces, and the path does
 /// change cells and sides.

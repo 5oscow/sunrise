@@ -145,7 +145,7 @@ fn prepare(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     core: &mut CoreClouds,
-    vanilla: &[u8],
+    vanilla: &[u8; 1024],
     input: &crate::clouds::Input<'_>,
 ) -> Result<u32, TooManyFaces> {
     let mut uploads = super::super::upload::Uploads::new(device);
@@ -237,7 +237,7 @@ fn a_pack_clouds_shader_reads_the_faces_and_cloud_info() {
 }
 
 /// A frame's faces past what the device binds to one storage buffer are refused, named by
-/// their size; ones that fit, to the byte, grow the buffer.
+/// their own size (not the buffer's rounded one); ones that fit, to the byte, grow the buffer.
 #[test]
 #[ignore = "daily"]
 fn faces_past_the_devices_storage_limit_are_refused() {
@@ -252,7 +252,7 @@ fn faces_past_the_devices_storage_limit_are_refused() {
     input.fast = false;
     input.range = 128;
     let faces = crate::clouds::pack::faces(&input).len() as u64;
-    let bytes = faces.next_power_of_two() * 4;
+    let bytes = faces * 4;
     let limit = device.limits().max_storage_buffer_binding_size;
     assert_eq!(limit, 128 << 20, "wgpu's default limit");
     assert!(bytes <= limit, "{bytes} bytes fit");
@@ -358,4 +358,44 @@ fn vanillas_clouds_shaders_draw_a_cell_above_the_camera() {
     let pixels = draw(&device, &queue, &core, true);
     let middle = ((SIZE / 2) * SIZE + SIZE / 2) as usize * 4;
     assert_eq!(pixels[middle..middle + 4], [143, 143, 143, 255]);
+}
+
+/// A replacement shader that doesn't read `CloudFaces`: drawn all the same, one quad a face,
+/// placed by `gl_VertexIndex` alone (here every quad covers the target in one colour, 51, 102,
+/// 153 of 255).
+#[test]
+#[ignore = "daily"]
+fn a_clouds_shader_that_reads_no_faces_still_draws_a_quad_a_face() {
+    let _gpu = crate::gfx::test_gpu::lock();
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let vsh = "#version 330\nvoid main() {\n    int corner = gl_VertexIndex % 4;\n\
+        vec2 xy = vec2(corner == 1 || corner == 2 ? 1.0 : -1.0, corner >= 2 ? 1.0 : -1.0);\n\
+        gl_Position = vec4(xy, 0.5, 1.0);\n}\n";
+    let fsh = "#version 330\nlayout(location = 0) out vec4 fragColor;\n\
+        void main() {\n    fragColor = vec4(0.2, 0.4, 0.6, 1.0);\n}\n";
+    let program = crate::core_shader::translate_core_with(vsh, fsh, &[], &|_| None, &GLUE, &|b| {
+        b == INFO_BLOCK || b == FACES
+    })
+    .expect("the shaders translate");
+    assert!(program.other.is_empty(), "reads neither block");
+    let mut core =
+        CoreClouds::new(&device, wgpu::TextureFormat::Rgba8Unorm, &program).expect("pipelines");
+    let mut filled = vec![false; 16];
+    filled[3] = true;
+    let texture = (4, 4, filled);
+    assert_eq!(
+        prepare(
+            &device,
+            &queue,
+            &mut core,
+            &[0; 1024],
+            &flat_input(&texture)
+        ),
+        Ok(1)
+    );
+    for texel in draw(&device, &queue, &core, false).chunks(4) {
+        assert_eq!(texel, [51, 102, 153, 255]);
+    }
 }

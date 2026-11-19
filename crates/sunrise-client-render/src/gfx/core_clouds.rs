@@ -49,7 +49,9 @@ pub(super) struct CoreClouds {
     faces: wgpu::Buffer,
     /// Ints the faces buffer holds.
     capacity: u64,
-    faces_binding: u32,
+    /// Where the shader reads `CloudFaces`; none when it doesn't (its vertex stage may place
+    /// the quads from `gl_VertexIndex` alone), and the faces then stay on the CPU, counted.
+    faces_binding: Option<u32>,
     info_binding: Option<u32>,
     /// The faces uploaded last, in quads, and what they were built for: while it holds, they
     /// are not built again (`CloudRenderer.prepare`).
@@ -59,8 +61,8 @@ pub(super) struct CoreClouds {
 
 impl CoreClouds {
     /// The pipelines for `program`, drawing into the world's `format`; `None` when the pack's
-    /// shader does not read the faces, reads a block it is not given, or does not compile for
-    /// the backend.
+    /// shader reads a block it is not given or does not compile for the backend. A shader that
+    /// doesn't read `CloudFaces` is drawn too, as many quads as the faces.
     pub(super) fn new(
         device: &wgpu::Device,
         format: wgpu::TextureFormat,
@@ -73,10 +75,7 @@ impl CoreClouds {
                 .position(|n| n == name)
                 .map(crate::core_shader::other_binding)
         };
-        let Some(faces_binding) = binding(FACES) else {
-            log::warn!("the resource pack's clouds shader is not used: it doesn't read {FACES}");
-            return None;
-        };
+        let faces_binding = binding(FACES);
         let info_binding = binding(INFO_BLOCK);
         // A pack's shader is untrusted: the backend failing to compile it is an internal error.
         let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
@@ -102,8 +101,8 @@ impl CoreClouds {
         let mut entries: Vec<wgpu::BindGroupLayoutEntry> =
             (0..4).map(|b| block(b, BLOCK_SIZES[b as usize])).collect();
         entries.extend(info_binding.map(|b| block(b, INFO_SIZE)));
-        entries.push(wgpu::BindGroupLayoutEntry {
-            binding: faces_binding,
+        entries.extend(faces_binding.map(|binding| wgpu::BindGroupLayoutEntry {
+            binding,
             visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
             ty: wgpu::BindingType::Buffer {
                 ty: wgpu::BufferBindingType::Storage { read_only: true },
@@ -111,7 +110,7 @@ impl CoreClouds {
                 min_binding_size: None,
             },
             count: None,
-        });
+        }));
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Resource pack clouds"),
             entries: &entries,
@@ -205,23 +204,25 @@ impl CoreClouds {
         device: &wgpu::Device,
         uploads: &mut super::upload::Uploads,
         encoder: &mut wgpu::CommandEncoder,
-        vanilla: &[u8],
+        vanilla: &[u8; INFO_OFFSET as usize],
         input: &crate::clouds::Input<'_>,
     ) -> Result<u32, TooManyFaces> {
         let key = crate::clouds::pack::faces_key(input);
         if self.key.as_ref() != Some(&key) {
             let faces = crate::clouds::pack::faces(input);
             let ints = faces.len() as u64;
-            if ints > self.capacity {
-                let capacity = ints.next_power_of_two();
+            if self.faces_binding.is_some() && ints > self.capacity {
+                // The faces' own bytes against what the device binds; the buffer grows to the
+                // next power of two within that.
                 let limit = device.limits().max_storage_buffer_binding_size;
-                if capacity * 4 > limit {
+                if ints * 4 > limit {
                     // The faces kept are still the last key's: the next frame tries again.
                     return Err(TooManyFaces {
-                        bytes: capacity * 4,
+                        bytes: ints * 4,
                         limit,
                     });
                 }
+                let capacity = ints.next_power_of_two().min(limit / 4);
                 self.capacity = capacity;
                 self.faces = faces_buffer(device, capacity);
                 self.group = bind(
@@ -233,14 +234,14 @@ impl CoreClouds {
                     self.info_binding,
                 );
             }
-            if !faces.is_empty() {
+            if self.faces_binding.is_some() && !faces.is_empty() {
                 uploads.buffer(encoder, &self.faces, 0, bytemuck::cast_slice(&faces));
             }
             self.quads = (faces.len() / 3) as u32;
             self.key = Some(key);
         }
         let mut data = [0u8; UNIFORM_BYTES];
-        data[..INFO_OFFSET as usize].copy_from_slice(&vanilla[..INFO_OFFSET as usize]);
+        data[..INFO_OFFSET as usize].copy_from_slice(vanilla);
         data[INFO_OFFSET as usize..].copy_from_slice(&crate::clouds::pack::info(input));
         uploads.buffer(encoder, &self.uniform, 0, &data);
         Ok(self.quads)
@@ -265,13 +266,14 @@ impl CoreClouds {
     }
 }
 
-/// The pipeline's group: the vanilla blocks and `CloudInfo` from `uniform`, the faces.
+/// The pipeline's group: the vanilla blocks and `CloudInfo` from `uniform`, the faces when the
+/// shader reads them.
 fn bind(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
     uniform: &wgpu::Buffer,
     faces: &wgpu::Buffer,
-    faces_binding: u32,
+    faces_binding: Option<u32>,
     info_binding: Option<u32>,
 ) -> wgpu::BindGroup {
     let range = |binding: u32, offset: u64, size: u64| wgpu::BindGroupEntry {
@@ -286,10 +288,10 @@ fn bind(
         .map(|i| range(i as u32, BLOCK_OFFSETS[i], BLOCK_SIZES[i]))
         .collect();
     entries.extend(info_binding.map(|b| range(b, INFO_OFFSET, INFO_SIZE)));
-    entries.push(wgpu::BindGroupEntry {
-        binding: faces_binding,
+    entries.extend(faces_binding.map(|binding| wgpu::BindGroupEntry {
+        binding,
         resource: faces.as_entire_binding(),
-    });
+    }));
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Resource pack clouds"),
         layout,

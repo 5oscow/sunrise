@@ -75,6 +75,18 @@ fn integer_texel_buffers_become_storage_buffers_the_pipeline_gives() {
     assert!(translate_core_with(VSH, FSH, &[], &|_| None, &GLUE, &without).is_err());
 }
 
+/// Two buffers' fetches, interleaved, rewritten in the one pass.
+#[test]
+fn every_buffers_fetches_are_rewritten_in_one_pass() {
+    let text = "uniform isamplerBuffer A;\nuniform usamplerBuffer B;\n\
+                int a = texelFetch(A, 1).r + int(texelFetch(B,2).r) + texelFetch(A,3).r;\n";
+    assert_eq!(
+        texel_fetches(text),
+        "uniform isamplerBuffer A;\nuniform usamplerBuffer B;\n\
+         int a = hz_fetch_A( 1).r + int(hz_fetch_B(2).r) + hz_fetch_A(3).r;\n"
+    );
+}
+
 /// The rewrite only touches `texelFetch` calls on a declared integer buffer.
 #[test]
 fn only_fetches_from_integer_buffers_are_rewritten() {

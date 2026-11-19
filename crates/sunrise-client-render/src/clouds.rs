@@ -462,7 +462,8 @@ pub mod pack {
         let (key, uniform) = input.state(1);
         let (w, h, filled) = input.texture;
         let (w, h) = (*w as i32, *h as i32);
-        let empty = |x: i32, y: i32| !filled[(y * w + x) as usize];
+        // A neighbour outside the image counts as empty (see below).
+        let empty = |x: i32, y: i32| x >= w || !filled[(y * w + x) as usize];
         // RelativeCameraPos: above the layer's top, below its bottom, or inside it.
         let bottom = uniform.offset[1];
         let above = bottom + 4.0 < 0.0;
@@ -487,7 +488,10 @@ pub mod pack {
                 return;
             }
             // The neighbours `CloudRenderer.prepare` packs into a cell, east and west wrapping
-            // by the texture's height as vanilla's do.
+            // by the texture's height as vanilla's do. On a tall texture (taller than wide) that
+            // can name a column past the image for a cell in the first or last column: vanilla's
+            // `NativeImage.getPixel` throws there, so the texture never loads and the reload
+            // fails; here that neighbour counts as empty, and every other cell is vanilla's.
             let north = empty(ix, (iy - 1).rem_euclid(h));
             let east = empty((ix + 1).rem_euclid(h), iy);
             let south = empty(ix, (iy + 1).rem_euclid(h));
@@ -517,16 +521,9 @@ pub mod pack {
                 }
             }
         };
-        for ring in 0..=2 * radius {
-            for x in -ring..=ring {
-                let z = ring - x.abs();
-                if z >= 0 && z <= radius && x * x + z * z <= radius * radius {
-                    if z != 0 {
-                        cell(x, -z);
-                    }
-                    cell(x, z);
-                }
-            }
+        // buildMesh's rings, nearest first.
+        for (x, z) in super::cells(radius) {
+            cell(x, z);
         }
         faces
     }

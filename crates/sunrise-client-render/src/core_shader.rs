@@ -67,47 +67,52 @@ pub struct CoreProgram {
 }
 
 /// The integer texel buffers a stage declares (`uniform isamplerBuffer` or `usamplerBuffer`).
-fn texel_buffers(text: &str) -> Vec<String> {
+fn texel_buffers(text: &str) -> HashSet<&str> {
     text.lines()
         .flat_map(declaration_lines)
         .filter_map(declaration)
         .filter(|d| d.storage == "uniform" && matches!(d.ty, "isamplerBuffer" | "usamplerBuffer"))
-        .map(|d| d.name.to_owned())
+        .map(|d| d.name)
         .collect()
 }
 
 /// `texelFetch(Buffer, i)` on each integer texel buffer as `hz_fetch_Buffer(i)`, which the
 /// buffer's declaration defines (see `rewrite`); `texelFetch` on anything else is left alone.
+/// One pass over the text, however many buffers it declares: each `texelFetch` is looked at
+/// once, its first argument's name looked up among them.
 fn texel_fetches(text: &str) -> String {
-    let mut out = text.to_owned();
-    for name in texel_buffers(text) {
-        let mut rewritten = String::with_capacity(out.len());
-        let mut rest = out.as_str();
-        while let Some(at) = rest.find("texelFetch") {
-            rewritten.push_str(&rest[..at]);
-            let after = &rest[at + "texelFetch".len()..];
-            // A name only ending in `texelFetch` is not it; one only starting with it has no
-            // `(` next, so it isn't rewritten either.
-            let whole = !rest[..at].chars().next_back().is_some_and(is_ident);
-            let args = after.trim_start().strip_prefix('(').map(str::trim_start);
-            match args.and_then(|a| a.strip_prefix(name.as_str())) {
-                Some(tail)
-                    if whole
-                        && !tail.starts_with(is_ident)
-                        && tail.trim_start().starts_with(',') =>
-                {
-                    write!(rewritten, "hz_fetch_{name}(").unwrap();
-                    rest = &tail.trim_start()[1..];
+    let buffers = texel_buffers(text);
+    if buffers.is_empty() {
+        return text.to_owned();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find("texelFetch") {
+        out.push_str(&rest[..at]);
+        let after = &rest[at + "texelFetch".len()..];
+        // A name only ending in `texelFetch` is not it; one only starting with it has no `(`
+        // next, so it isn't rewritten either.
+        let whole = !rest[..at].chars().next_back().is_some_and(is_ident);
+        let args = after.trim_start().strip_prefix('(').map(str::trim_start);
+        let name = args.map(|a| &a[..a.find(|c: char| !is_ident(c)).unwrap_or(a.len())]);
+        match (args, name) {
+            (Some(args), Some(name)) if whole && buffers.contains(name) => {
+                let tail = args[name.len()..].trim_start();
+                if let Some(tail) = tail.strip_prefix(',') {
+                    write!(out, "hz_fetch_{name}(").unwrap();
+                    rest = tail;
+                    continue;
                 }
-                _ => {
-                    rewritten.push_str("texelFetch");
-                    rest = after;
-                }
+                out.push_str("texelFetch");
+                rest = after;
+            }
+            _ => {
+                out.push_str("texelFetch");
+                rest = after;
             }
         }
-        rewritten.push_str(rest);
-        out = rewritten;
     }
+    out.push_str(rest);
     out
 }
 
