@@ -22,6 +22,8 @@ pub(super) struct Fangs {
     pub life: i32,
     pub owner: u32,
     pub started: bool,
+    /// `Entity.remainingFireTicks`, counted down by `baseTick`.
+    pub fire_ticks: i32,
     /// `Entity.random`. The attack sound's pitch is its first draw.
     random: LegacyRandom,
 }
@@ -76,6 +78,7 @@ impl Game<'_> {
             life: 22,
             owner,
             started: false,
+            fire_ticks: 0,
             random: sunrise_client::mobs::entity_random(id, Vec3::new(at[0], at[1], at[2])),
         });
     }
@@ -83,6 +86,7 @@ impl Game<'_> {
         sunrise_client::entity_nbt::evoker_fangs_to_nbt(
             Vec3::new(f.pos[0], f.pos[1], f.pos[2]),
             f.motion,
+            f.fire_ticks,
             f.yaw,
             f.warmup,
             self.persist.uuids.get(&f.owner).copied(),
@@ -159,6 +163,10 @@ impl Game<'_> {
         super::entity::taken_pass_tests::after_take(self);
         list.retain_mut(|f| {
             self.fangs_fluid_step(f);
+            // Entity.baseTick: the fangs burn down; their hurt does nothing.
+            if f.fire_ticks > 0 {
+                f.fire_ticks -= 1;
+            }
             f.warmup = f.warmup.wrapping_sub(1);
             if f.warmup >= 0 {
                 return true;
