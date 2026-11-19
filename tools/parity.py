@@ -1594,6 +1594,24 @@ def named_only(config):
     return dict(config.get("named_only", {}))
 
 
+def share_of(path, found, parser):
+    """The harness names a share must run, from the JSON list the plan job wrote.
+
+    The plan job computes one selection for the whole run and splits it there, so every runner runs exactly
+    its share and the merge can prove the shares cover the selection. A name this tree does not have means the
+    plan and the tree disagree, which is refused rather than silently run as something else."""
+    try:
+        names = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        parser.error(f"--harness-file: {path}: {error}")
+    if not isinstance(names, list) or not all(isinstance(name, str) for name in names):
+        parser.error(f"--harness-file: {path} is not a JSON list of harness names")
+    unknown = [name for name in names if name not in found]
+    if unknown:
+        parser.error("--harness-file names harnesses this tree does not have: " + ", ".join(unknown))
+    return names
+
+
 def report_retries(results, flaky):
     """Say loudly which harnesses needed their one retry (a known flaky one, or one that failed with reused oracle
     results), here and in the CI job's summary: a pass on the retry counts, so this is where flakes stay visible."""
@@ -1641,6 +1659,9 @@ def main():
                         help="comma-separated machines from tools/parity_hosts.json to run harnesses on as well "
                              "(default: PARITY_HOSTS, else the file's default; '' for this machine only)")
     parser.add_argument("--timeout", type=int, default=3600, help="seconds per harness")
+    parser.add_argument("--harness-file", type=Path, metavar="FILE",
+                        help="run exactly the harness names in this JSON list: the daily plan's share of one selection, "
+                             "so several runners cover the whole set and no harness twice")
     parser.add_argument("--repeat", type=int, default=1, help="run each selected harness this many times; its runs "
                         "must agree (oracle results are reused after the first unless --fresh)")
     parser.add_argument("--flake-check", metavar="REF", help="harnesses new or changed since the merge base with REF "
@@ -1676,7 +1697,11 @@ def main():
             print(f"{name:<40} {status:<15} {seconds}")
         save_state(state)
         return 0
-    if args.names:
+    share = None if args.harness_file is None else share_of(args.harness_file, found, parser)
+    if share is not None:
+        chosen = list(share)
+        print(f"Share: {len(chosen)} harnesses from {args.harness_file}.", flush=True)
+    elif args.names:
         chosen = args.names
     elif args.all:
         chosen = list(found)
@@ -1732,7 +1757,7 @@ def main():
             print(name)
         print(f"{len(selected)} of {len(found)} harnesses would run" if args.list else "Nothing to run: every harness passed with its current inputs.")
         save_state(state)
-        if not args.list:
+        if not args.list and share is None:
             finished_run([])
         return 0
 
@@ -1792,7 +1817,8 @@ def main():
             executor.stop()
     save_state(state)
     failed = sorted(name for name, record in results.items() if record["status"] != "pass")
-    finished_run(failed)
+    if share is None:  # a share is never the whole run: tools/gate.py judges last-run.json
+        finished_run(failed)
     print(f"\n{len(results) - len(failed)} passed, {len(failed)} failed in {elapsed / 60:.1f} min.")
     report_retries(results, known_flaky(config))
     for index, name in enumerate(failed):

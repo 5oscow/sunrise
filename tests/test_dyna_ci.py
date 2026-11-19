@@ -649,7 +649,7 @@ class ParityWorkflowTests(unittest.TestCase):
         ci = self.root / "tools/ci"
         ci.mkdir(parents=True)
         shutil.copy(ROOT / "tools/ci/parity_verdict.py", ci)
-        self.slot = self.root / "parity-keep/77-2"
+        self.slot = self.root / "parity-keep/77-2-bucket-0"
 
     def step(self, name):
         return subprocess.run(["bash", "-e", "-c", self.steps[name]["run"]], cwd=self.root, env=self.env,
@@ -663,24 +663,25 @@ class ParityWorkflowTests(unittest.TestCase):
 
     def test_an_early_failure_cannot_report_a_previous_slots_result(self):
         # Both an older attempt and stale state in the current directory survive until the first workflow step.
-        for path in (self.slot.with_name("77-1"), self.slot):
+        for path in (self.slot.with_name("77-1-bucket-0"), self.slot):
             path.mkdir(parents=True)
             (path / "parity.log").write_text("FAIL loot_old 3s\n0 passed, 1 failed in 1.0 min.\n")
             (path / "selection.json").write_text('["loot_old"]')
             (path / "exit").write_text("1\n")
         self.initialise()
         self.assertFalse((self.slot / "parity.log").exists())
-        self.assertTrue((self.slot.with_name("77-1") / "parity.log").exists())
+        self.assertTrue((self.slot.with_name("77-1-bucket-0") / "parity.log").exists())
         # A setup step failed before any harness could run. The always() reporter still runs.
         self.assertEqual(self.steps["Write the harnesses' verdict"]["if"], "always()")
         result = self.step("Write the harnesses' verdict")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "")
         report = json.loads((self.root / "parity.json").read_text())
-        self.assertEqual(report, {"passed": [], "failed": [], "complete": False,
+        self.assertEqual(report, {"passed": [], "failed": [], "complete": False, "selected": [],
+                                  "bucket": None, "of": 1,
                                   "scope": {"run_id": "77", "run_attempt": "2", "commit": "current"}})
         self.assertEqual(self.steps["Upload the harnesses' verdict"]["with"]["name"],
-                         "daily-report-parity-${{ github.run_attempt }}")
+                         "daily-report-parity-${{ github.run_attempt }}-${{ matrix.bucket }}")
 
     def test_parity_public_output_is_names_and_results_only(self):
         self.initialise()
