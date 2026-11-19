@@ -132,7 +132,7 @@ fn case_rows(game: &mut Game<'_>, case: &serde_json::Value) -> serde_json::Value
 }
 
 #[test]
-#[ignore = "daily"]
+#[ignore = "run through tools/test_block_entity_item_geometry_parity.py"]
 fn block_entity_items_match_the_vanilla_cases() {
     let (Ok(cases), Ok(out)) = (
         std::env::var("SUNRISE_BLOCK_ENTITY_ITEM_CASES"),
