@@ -301,7 +301,6 @@ impl<'a> BlockTables<'a> {
             BlockClass::IronBars => data.is(Class::IronBars),
             BlockClass::StainedGlassPane => data.is(Class::StainedGlassPane),
             BlockClass::TrapDoor => data.is(Class::TrapDoor),
-            _ => unreachable!("BlockClass: unhandled variant"),
         }))
     }
     /// The immutable local ordinals of `block`, independent of current world ID order.

@@ -3,7 +3,7 @@
 //! game's published tables; definitions are copied out and property values are borrowed.
 use crate::{
     BlockKey, BlockMetadata, BlockSoundType, BlockState, BlockStateError, BlockStateRange,
-    BlockStateRecord, Host, host::block_states::BlockStatesBackend,
+    BlockStateRecord, Host, LevelReadError, host::block_states::BlockStatesBackend,
 };
 
 /// One property and its legal values in a state definition.
@@ -64,9 +64,7 @@ pub enum WeatheringAge {
 /// with [`BlockStates::block_class`]: it is the engine's own classification of the block, not a
 /// tag, so a datapack that edits `minecraft:stairs` does not change it. A mod block declared on
 /// a vanilla behaviour template belongs to that template's classes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-#[derive(sunrise_mod_api_macros::Wire)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, sunrise_mod_api_macros::Wire)]
 pub enum BlockClass {
     /// `StairBlock`.
     Stair,
@@ -281,9 +279,16 @@ impl BlockStates<'_> {
     }
     /// Whether `state`'s block is of vanilla class `class`, subclasses included (Java's
     /// `instanceof`). It reads the engine's class of the block, never a tag, so it does not move
-    /// when a pack edits a tag. None for an unknown state or no game backend.
-    pub fn block_class(&self, state: BlockState, class: BlockClass) -> Option<bool> {
-        self.backend?.block_state_class(state, class).ok().flatten()
+    /// when a pack edits a tag. `Ok(None)` for an unknown state; the refusal the read met
+    /// otherwise (`Unavailable`: a host with no game behind it, or a phase that cannot read).
+    pub fn block_class(
+        &self,
+        state: BlockState,
+        class: BlockClass,
+    ) -> Result<Option<bool>, LevelReadError> {
+        self.backend
+            .ok_or(LevelReadError::Unavailable)?
+            .block_state_class(state, class)
     }
     /// `BlockState.isRedstoneConductor` when vanilla decides from `state` alone. None for an
     /// unknown state, no game backend, or a context-dependent predicate (such as shulker boxes).
