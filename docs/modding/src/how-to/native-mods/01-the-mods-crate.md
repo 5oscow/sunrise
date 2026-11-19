@@ -29,8 +29,7 @@ are not replaced without `--update-lock`; a refused input leaves the existing lo
 A starter that uses only the SDK does not need registry pins until it adds a
 registry dependency.
 
-A build never repins a dependency the lock already pins, and a player's build never writes a lock:
-it refuses a package the mod's lock doesn't pin.
+A build never repins a dependency the lock already pins.
 A build may resolve registry **index metadata** online using an inert manifest whose
 requirements are exact pins. Before fetching crate archives, every resulting identity and
 checksum must match a supplied lock. Cargo checks downloaded archives against those checksums.
@@ -70,27 +69,27 @@ A package the SDK builds from its own patched source (the `[patch]` table of the
 source, never the registry's. A native library with conflicting providers cannot be silently
 substituted.
 
-Git dependencies other than the proven launcher-owned SDK declaration, alternate registries,
+Git dependencies other than the SDK's own declaration, alternate registries,
 paths escaping the mod, linked dependency paths, `[patch]`, `[replace]`, and mod-owned Cargo source
 configuration are refused. Local crates inside the mod are traversed without copying their code
 into the registry resolver. Registry dependencies remain native code: their build scripts and
 proc macros execute during compilation, and the resulting mod runs with your rights. Trust their
 authors as well as the mod's author.
 
-Before compiling these dependencies, the launcher shows how many registry crates the mod adds and
-names the reachable build scripts and proc macros. Declining stops before any mod dependency is
-compiled. Native-code permission is also required; downloading a checksummed crate
-does not make its code trusted.
+`cargo sunrise-mod build` compiles these dependencies without asking: you chose them, and their build
+scripts and proc macros run with your rights. A player's launcher asks first: it shows how many registry
+crates the mod adds and names the reachable build scripts and proc macros, and declining stops before any
+mod dependency is compiled. Downloading a checksummed crate does not make its code trusted.
 
 For native builds, Cargo compiles the mod's registry graph and the final wrapper
 against immutable SDK binaries. Registry dependencies never cause an automatic source rebuild.
 The SDK must include its locked graph and runtime native-library inventory; SDKs without
-that information refuse registry builds. The launcher preserves the compiler/cache wrapper chain
-and uses its pinned Rust compiler.
+that information refuse registry builds. The build preserves the compiler/cache wrapper chain
+and uses the SDK's pinned Rust compiler.
 
 **SDK crate identities are not interchangeable.** A registry-built copy of a trait or type is not
 the SDK's copy, even at the same version. For example, passing an SDK value implementing the SDK's
-`serde::Serialize` to a registry-built `serde_json` can fail with Rust E0277. The launcher reports
+`serde::Serialize` to a registry-built `serde_json` can fail with Rust E0277. The build reports
 that boundary; it does not replace either library or rebuild the game to hide it. Keep private
 registry types behind your mod's API-facing values.
 
@@ -107,7 +106,7 @@ A mod's own build script is refused with `E_NATIVE_BUILD_SCRIPT`: ship generated
 pinned SDK's feature set. These restrictions do not prohibit the separately approved build scripts
 of registry dependencies.
 
-The launcher adds a small generated module to the crate's root, the library entry that the game
+The build adds a small generated module to the crate's root, the library entry that the game
 loads, and that module exports two `#[unsafe(no_mangle)]` functions. A crate root may say
 `#![deny(unsafe_code)]`, which the module overrides for itself alone, but not
 `#![forbid(unsafe_code)]`, which nothing can override: such a mod is refused by name before it
