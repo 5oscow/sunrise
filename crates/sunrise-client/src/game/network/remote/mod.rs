@@ -6883,6 +6883,8 @@ impl Game<'_> {
         }
     }
     fn tick_remote_entities(&mut self, running: bool) {
+        use crate::game::native_ticks::{PLAYER, TickKind};
+
         if running {
             self.tick_text_displays();
             self.tick_remote_ominous_item_spawners();
@@ -6894,17 +6896,24 @@ impl Game<'_> {
         // The mount this client moves ticks in `remote_ride` instead, as its
         // authoritative side (LivingEntity.tick with travelRidden).
         let driven = self.driven_mount().map(|m| m.id);
+        let alone_player = round.alone_kind(PLAYER);
         let mut alone_any = false;
         if round.listening() {
             let players = self.remote.as_ref().map(|r| &r.level_players);
             for m in self.mobs.iter() {
                 let player = players.is_some_and(|p| p.contains_key(&(m.id as i32)));
                 if (running || player) && driven != Some(m.id) {
-                    if round.alone_mob(&m.kind) {
-                        alone_any = true;
+                    let alone = if player {
+                        alone_player
                     } else {
-                        let kind = crate::game::native_ticks::TickKind::Mob(m.kind.clone());
-                        round.add(m.id, kind);
+                        round.alone_mob(&m.kind)
+                    };
+                    if alone {
+                        alone_any = true;
+                    } else if player {
+                        round.add(m.id, TickKind::Fixed(PLAYER));
+                    } else {
+                        round.add(m.id, TickKind::Mob(m.kind.clone()));
                     }
                 }
             }
@@ -6959,10 +6968,20 @@ impl Game<'_> {
         // The window's own player already splashes from its motion tick.
         let own = self.remote.as_ref().map(|r| r.entity_id);
         for i in 0..self.mobs.len() {
-            let (id, told_alone) = (
-                self.mobs[i].id,
-                alone_any && round.alone_mob(&self.mobs[i].kind),
-            );
+            let mob = &self.mobs[i];
+            let id = mob.id;
+            let told_alone = alone_any
+                && if self
+                    .remote
+                    .as_ref()
+                    .unwrap()
+                    .level_players
+                    .contains_key(&(id as i32))
+                {
+                    alone_player
+                } else {
+                    round.alone_mob(&mob.kind)
+                };
             // One told alone takes this step in its own turn, after its Pre (below).
             if round.canceled(id) || told_alone && fluids[i].is_some() && driven != Some(id) {
                 continue;
@@ -7100,11 +7119,15 @@ impl Game<'_> {
                 continue;
             }
             // Of a type a mod named: its own Pre, then its fluid step and its tick.
-            let alone = (alone_any && round.alone_mob(&self.mobs[i].kind))
-                .then(|| std::sync::Arc::clone(&self.mobs[i].kind));
+            let alone = if player {
+                alone_player.then_some(TickKind::Fixed(PLAYER))
+            } else {
+                (alone_any && round.alone_mob(&self.mobs[i].kind))
+                    .then(|| TickKind::Mob(self.mobs[i].kind.clone()))
+            };
             if let Some(kind) = &alone {
                 let stamp = self.mobs.stamp();
-                let ticks = self.native_tick_pre_one(&mut round, id, &kind.id);
+                let ticks = self.native_tick_pre_one(&mut round, id, kind.id());
                 if self.mobs.stamp() != stamp {
                     places = Some(crate::game::native_ticks::places_of(
                         self.mobs.iter().map(|m| m.id),
@@ -7376,7 +7399,7 @@ impl Game<'_> {
             // Its own Post, right after its turn.
             if let Some(kind) = &alone {
                 let stamp = self.mobs.stamp();
-                self.native_tick_post_one(&round, id, &kind.id);
+                self.native_tick_post_one(&round, id, kind.id());
                 if self.mobs.stamp() != stamp {
                     places = Some(crate::game::native_ticks::places_of(
                         self.mobs.iter().map(|m| m.id),
@@ -10790,6 +10813,74 @@ pub(crate) mod tests {
             game.tick_remote_entities(false);
             assert_eq!(game.item_frames[0].ticks, 2);
         });
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn named_remote_players_are_told_one_by_one() {
+        use mod_api::{
+            EntityTickListenedEvent, EntityTickPostEvent, EntityTickPreEvent, Hooks, HostSide,
+            ModEntry, Mods, Registrar,
+        };
+        use std::sync::{Arc, Mutex};
+        type Calls = Arc<Mutex<Vec<(bool, Vec<u32>)>>>;
+        struct Named(Calls);
+        #[mod_api::__subscriptions]
+        impl Hooks for Named {
+            fn entity_tick_listened(&self, _: HostSide<'_>, event: &mut EntityTickListenedEvent) {
+                event.listened = true;
+            }
+            fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
+                r.entity_tick_each("minecraft:player");
+            }
+            fn entity_tick_pre(&self, _: HostSide<'_>, event: &mut EntityTickPreEvent<'_>) {
+                self.0.lock().unwrap().push((true, event.entities.to_vec()));
+            }
+            fn entity_tick_post(&self, _: HostSide<'_>, event: &mut EntityTickPostEvent<'_>) {
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push((false, event.entities.to_vec()));
+            }
+        }
+        let heard: Calls = Arc::default();
+        let mods: Mods = vec![ModEntry::new(
+            "remote-player-ticks",
+            Box::new(Named(heard.clone())),
+        )]
+        .into();
+        crate::game::api_values::install_parts(&mods).unwrap();
+        mod_platform::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_client_game(|game| {
+                let (client, _server) = sunrise_protocol::connection::Pipe::pair();
+                game.connect_local(client, "avatar-tick-client").unwrap();
+                let remote = game.remote.as_mut().unwrap();
+                let kind = remote.player_type.as_ref().unwrap().clone();
+                assert!(
+                    !kind.flags.tick_alone,
+                    "render model does not select tick routing"
+                );
+                for id in [66, 67] {
+                    remote.level_players.insert(id, id as u128);
+                    game.mobs.push(sunrise_client::mobs::Mob::new(
+                        id as u32,
+                        kind.clone(),
+                        sunrise_core::geometry::Vec3::ZERO,
+                        0.0,
+                    ));
+                }
+                game.tick_remote_entities(false);
+            });
+        });
+        assert_eq!(
+            *heard.lock().unwrap(),
+            [
+                (true, vec![66]),
+                (false, vec![66]),
+                (true, vec![67]),
+                (false, vec![67])
+            ]
+        );
     }
 
     /// The remote player animation uses the scoped item answer once per tick.

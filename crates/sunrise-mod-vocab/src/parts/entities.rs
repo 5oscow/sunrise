@@ -255,7 +255,7 @@ pub trait EntitiesRegistrar {
     /// namespaced lowercase id refuses the mod's registration.
     fn entity_tick_each(&mut self, entity: &str);
 
-    /// [`Self::entity_tick_each`] for every entity type: NeoForge's timing for every entity,
+    /// [`Self::entity_tick_each`] for every entity type the tick hooks observe,
     /// as a port of a NeoForge mod that listens to `EntityTickEvent` needs.
     fn entity_tick_each_entity(&mut self);
 }

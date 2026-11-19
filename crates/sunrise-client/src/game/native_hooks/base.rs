@@ -3846,15 +3846,9 @@ impl Game<'_> {
     }
     /// The entities `entities` are about to tick in the level `dimension`, and `kinds` holds
     /// the type of each, in the same order (NeoForge's `EntityTickEvent.Pre`, right before each
-    /// entity's tick in `tickNonPassenger`). Told on the server for the mobs, item entities,
-    /// minecarts, boats, general rows and projectiles that tick, and on a client for the mobs,
-    /// other players, projectiles and tridents it ticks. Minecarts, boats and general rows are
-    /// told alone, right before their own tick, and so are the server's mobs and item entities
-    /// of a type a mod named (`Registrar::entity_tick_each`, or every type after
-    /// `entity_tick_each_entity`); the others once for the family, before its first tick. Push an
-    /// entity of `entities` onto `canceled` and it does not tick this tick and
-    /// `native_entity_tick_post` is not told; IDs not in `entities` are ignored, and an ID pushed
-    /// twice counts once. Never told with no entity.
+    /// entity's tick in `tickNonPassenger`). Entity families may be observed on either side;
+    /// see the hook catalog for coverage. Some routes run one call per entity, while others
+    /// batch the family. Only IDs offered to this call may enter its cancellation output.
     pub(in crate::game) fn native_entity_tick_pre(
         &mut self,
         dimension: &str,

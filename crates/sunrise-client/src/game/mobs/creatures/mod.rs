@@ -4675,6 +4675,7 @@ impl Game<'_> {
             if round.canceled(projectiles[i].id) {
                 continue;
             }
+            let section_from = projectiles[i].position;
             // A ghast's fireball or a wind charge is pickable, so a pearl, an
             // arrow or a trident can strike it (`Projectile.isPickable`,
             // `Projectile.onHit`).
@@ -4883,7 +4884,7 @@ impl Game<'_> {
                     self,
                     &mut section_steps,
                     projectiles.get(i),
-                    at,
+                    section_from,
                     keep_flags[i],
                 );
             // Its own Post, right after its tick, also when it ended in it. Its block effects and

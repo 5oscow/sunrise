@@ -32,6 +32,14 @@ level upkeep and outgoing state updates still run. The server resolves whether
 the body runs before the pre hook; a listener changing the player's position
 does not change that decision for the current tick.
 
+## Entity tick hooks
+
+`entity_tick_pre` and `entity_tick_post` version 3 observe additional entity families, including
+server players, named projectiles, displays and other entities the server keeps without simulation.
+Whether a call represents one entity or a family depends on the tick route and the types named in
+registration. Keep cancellations within the current Pre call. The player connection body remains
+separate from the server-side entity tick, and the local client avatar is not observed by these hooks.
+
 ## Explosion membership
 
 `explosion_detonate` version 2 exposes mutable `blocks` and `entities` lists

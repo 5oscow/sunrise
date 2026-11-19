@@ -27,7 +27,7 @@ pub(super) enum TickKind {
 }
 
 impl TickKind {
-    fn id(&self) -> &str {
+    pub(super) fn id(&self) -> &str {
         match self {
             Self::Fixed(id) => id,
             Self::Mob(kind) => &kind.id,
