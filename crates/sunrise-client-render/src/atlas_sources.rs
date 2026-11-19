@@ -552,7 +552,10 @@ pub fn atlases(
 pub fn listed(
     source: &crate::resource_source::ResourceSource,
 ) -> Vec<(String, BTreeMap<String, SpriteOrigin>)> {
-    let textures = list_textures(source);
+    let mut textures = list_textures(source);
+    // `list` searches them by their identifiers, which sort differently from their paths
+    // (`a0:` before `a:`).
+    textures.sort_unstable();
     atlases(source)
         .into_iter()
         .map(|(atlas, sources)| (atlas, list(&sources, &textures, &mut unasked)))
@@ -768,5 +771,29 @@ mod tests {
                 "{x},{y} {width}x{height}"
             );
         }
+    }
+
+    #[test]
+    fn listed_finds_textures_of_namespaces_that_share_a_prefix() {
+        let source = crate::resource_source::ResourceSource::indexed(
+            [
+                ("assets/a/textures/block/sheet.png", b"png".as_slice()),
+                ("assets/a0/textures/block/other.png", b"png"),
+                (
+                    "assets/minecraft/atlases/blocks.json",
+                    br#"{"sources":[{"type":"single","resource":"a:block/sheet","sprite":"x:one"},
+                        {"type":"single","resource":"a0:block/other","sprite":"x:two"}]}"#,
+                ),
+            ]
+            .map(|(name, bytes)| {
+                (
+                    name.to_owned(),
+                    sunrise_assets::resource_source::Resource::bytes(bytes.to_vec()),
+                )
+            })
+            .into(),
+        );
+        let (_, blocks) = listed(&source).into_iter().next().unwrap();
+        assert_eq!(blocks.keys().collect::<Vec<_>>(), ["x:one", "x:two"]);
     }
 }
