@@ -843,7 +843,16 @@ impl Game<'_> {
     /// The entity's yaw and pitch in degrees (`Entity.getYRot`, `getXRot`); 0
     /// for the kinds that don't turn. API 373.
     pub(super) fn entity_rotation(&self, entity: EntityRef) -> Option<[f32; 2]> {
-        Some(self.target_rotation(self.native_entity_read_target(entity)?))
+        if let Some(target) = self.native_entity_read_target(entity) {
+            return Some(self.target_rotation(target));
+        }
+        let (remote, id) = self.native_client_entity_context(entity)?;
+        remote
+            .general
+            .rows
+            .get(&id)
+            .filter(|row| row.shown)
+            .map(|row| row.rotation)
     }
     /// The entity's type (`Entity.getType`): `minecraft:zombie`. API
     /// 373.

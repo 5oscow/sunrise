@@ -252,6 +252,15 @@ impl Game<'_> {
                     self.native_entity_left(id);
                 }
                 Target::Player | Target::Guest(_) | Target::Mob(_) => {}
+                // Both command kill and handle removal already notified this row's
+                // leave. Retire its owning slot so tracking drops the row too.
+                Target::General(id) => {
+                    let rows = &mut self.resident_entities.general.rows;
+                    if let Some(index) = rows.iter().position(|row| row.id == id) {
+                        rows.remove(index);
+                        self.forget_entity(id);
+                    }
+                }
                 // The remaining kinds `/kill` already removes with no death.
                 t => self.kill_target_in_level(t),
             }

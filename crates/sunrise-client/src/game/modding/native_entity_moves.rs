@@ -111,7 +111,11 @@ impl Game<'_> {
                 !r.iter().all(|v| v.is_finite())
                     || !matches!(
                         t,
-                        Target::Player | Target::Guest(_) | Target::Mob(_) | Target::Other(_)
+                        Target::Player
+                            | Target::Guest(_)
+                            | Target::Mob(_)
+                            | Target::Other(_)
+                            | Target::General(_)
                     )
             })
         {
@@ -196,6 +200,13 @@ impl Game<'_> {
                     o.yaw = yaw;
                     o.pitch = pitch;
                 });
+                true
+            }
+            Target::General(id) => {
+                let Some(row) = self.resident_entities.general.row_mut(id) else {
+                    return false;
+                };
+                row.rotation = [yaw, pitch];
                 true
             }
             _ => false,

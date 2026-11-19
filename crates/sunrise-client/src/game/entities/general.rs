@@ -532,6 +532,10 @@ impl GeneralTypeCatalog {
         &self.entries[slot].id
     }
 
+    pub(in crate::game) fn keys(&self) -> impl Iterator<Item = &str> {
+        self.entries.iter().map(|entry| entry.id.as_str())
+    }
+
     /// The type's declared width and height, for the row's bounds.
     pub fn dimensions(&self, slot: usize) -> (f64, f64) {
         let entry = &self.entries[slot];
@@ -656,6 +660,36 @@ pub struct GeneralStore {
     /// Each mount rewrite retires the rider adjacency, independently of the
     /// join list's structural write stamp.
     pub mount_writes: u64,
+}
+
+impl GeneralStore {
+    pub(in crate::game) fn row(&self, id: u32) -> Option<&GeneralRow> {
+        self.rows.iter().find(|row| row.id == id)
+    }
+
+    pub(in crate::game) fn row_mut(&mut self, id: u32) -> Option<&mut GeneralRow> {
+        self.rows.iter_mut().find(|row| row.id == id)
+    }
+
+    pub(in crate::game) fn passenger_ids(&self, vehicle: u32) -> impl Iterator<Item = u32> + '_ {
+        self.rows
+            .iter()
+            .filter(move |row| row.mount == Some(vehicle))
+            .map(|row| row.id)
+    }
+}
+
+impl Game<'_> {
+    /// Clears direct general passenger links. A passenger keeps its own riders.
+    pub(in crate::game) fn eject_general_passengers(&mut self, vehicle: u32) {
+        let general = &mut self.resident_entities.general;
+        for row in &mut general.rows {
+            if row.mount == Some(vehicle) {
+                row.mount = None;
+                general.mount_writes += 1;
+            }
+        }
+    }
 }
 
 /// Root-to-rider adjacency of the general rows, as a first-child and
@@ -1244,8 +1278,7 @@ impl Entity for GeneralRow {
         general_type_catalog().bounds(self.type_slot, self.position)
     }
     fn selector_target(&self) -> Option<Target> {
-        // Stage 2 rows never join a world; a selector cannot name one yet.
-        None
+        Some(Target::General(self.id))
     }
     fn native_type(&self) -> Cow<'static, str> {
         Cow::Owned(general_type_catalog().key(self.type_slot).to_owned())

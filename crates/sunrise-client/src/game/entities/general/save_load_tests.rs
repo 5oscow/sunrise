@@ -578,6 +578,136 @@ fn transferred_general_tree_loads_as_the_same_logical_entity() {
     });
 }
 
+#[test]
+#[ignore = "daily"]
+fn a_same_level_teleport_places_the_general_tree_and_unseats_a_separately_moved_rider() {
+    with_types(|game| {
+        let rider = record_tag("mymod:robot", [9, 9, 9, 9], b"", Vec::new());
+        let root = record_tag("mymod:robot", [1, 2, 3, 4], b"", vec![rider]);
+        game.load_listed("mymod:robot", None, None, root).unwrap();
+        let rows = &game.resident_entities.general.rows;
+        let (root, rider) = (
+            game.entity(rows[0].id).unwrap(),
+            game.entity(rows[1].id).unwrap(),
+        );
+        let _world = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+
+        let to = [10.5, 64.0, 0.5];
+        assert!(root.teleport_to(game, to, Some([90.0, 30.0])));
+        assert_eq!(root.position(game), Some(to));
+        assert_eq!(rider.position(game), Some(to));
+        assert_eq!(rider.rotation(game), Some([90.0, 30.0]));
+
+        let rider_to = [12.5, 64.0, 0.5];
+        assert!(rider.teleport_to(game, rider_to, None));
+        assert_eq!(rider.position(game), Some(rider_to));
+        assert_eq!(rider.vehicle(game), None);
+        assert_eq!(root.position(game), Some(to));
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn killing_or_removing_a_general_row_keeps_its_passengers_in_the_level() {
+    with_types(|game| {
+        for (word, by_command) in [(1, true), (2, false)] {
+            let rider = record_tag("mymod:robot", [word, 1, 0, 0], b"", Vec::new());
+            let root = record_tag("mymod:robot", [word, 0, 0, 0], b"", vec![rider]);
+            let start = game.resident_entities.general.rows.len();
+            game.load_listed("mymod:robot", None, None, root).unwrap();
+            let rows = &game.resident_entities.general.rows;
+            let (root, rider) = (
+                game.entity(rows[start].id).unwrap(),
+                game.entity(rows[start + 1].id).unwrap(),
+            );
+            let _world = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+
+            if by_command {
+                game.kill_target(Target::General(root.id()));
+            } else {
+                assert!(root.remove(game, mod_api::RemovalReason::Discarded));
+                assert_eq!(rider.vehicle(game), None);
+                game.native_removals_flush();
+            }
+            assert!(game.resident_entities.general.row(root.id()).is_none());
+            assert!(!game.persist.uuids.contains_key(&root.id()));
+            assert_eq!(root.position(game), None);
+            assert_eq!(rider.position(game), Some([0.5, 64.0, 0.5]));
+            assert_eq!(rider.vehicle(game), None);
+        }
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn a_general_entity_turns_in_place_without_dismounting() {
+    with_types(|game| {
+        let rider = record_tag("mymod:robot", [9, 9, 9, 9], b"", Vec::new());
+        let root = record_tag("mymod:robot", [1, 2, 3, 4], b"", vec![rider]);
+        game.load_listed("mymod:robot", None, None, root).unwrap();
+        let rows = &game.resident_entities.general.rows;
+        let (root, rider) = (
+            game.entity(rows[0].id).unwrap(),
+            game.entity(rows[1].id).unwrap(),
+        );
+        let _world = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+
+        assert!(rider.set_rotation(game, 90.0, 30.0));
+        assert_eq!(rider.rotation(game), Some([90.0, 30.0]));
+        assert_eq!(rider.position(game), Some([0.5, 64.0, 0.5]));
+        assert_eq!(rider.vehicle(game), Some(root));
+        assert!(!rider.set_rotation(game, f32::NAN, 0.0));
+        assert_eq!(rider.rotation(game), Some([90.0, 30.0]));
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn a_general_row_has_its_declared_kind_and_is_selectable_by_type() {
+    with_types(|game| {
+        for (key, uuid) in [("mymod:robot", [1, 2, 3, 4]), ("mymod:ghost", [4, 3, 2, 1])] {
+            game.load_listed(key, None, None, record_tag(key, uuid, b"", Vec::new()))
+                .unwrap();
+        }
+        let rows = &game.resident_entities.general.rows;
+        let (robot, ghost) = (
+            game.entity(rows[0].id).unwrap(),
+            game.entity(rows[1].id).unwrap(),
+        );
+        game.build_registries();
+        let _world = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+
+        assert_eq!(robot.kind(game).unwrap().id(game), "mymod:robot");
+        assert_eq!(ghost.kind(game).unwrap().id(game), "mymod:ghost");
+        assert!(game.as_console(|game| game.run_command("kill @e[type=mymod:robot]")));
+        assert_eq!(robot.position(game), None);
+        assert_eq!(ghost.position(game), Some([0.5, 64.0, 0.5]));
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn a_volume_selector_finds_a_general_rows_box_without_its_origin() {
+    with_types(|game| {
+        game.load_listed(
+            "mymod:robot",
+            None,
+            None,
+            record_tag("mymod:robot", [1, 2, 3, 4], b"", Vec::new()),
+        )
+        .unwrap();
+        let id = game.resident_entities.general.rows[0].id;
+        game.build_registries();
+        // The 0.8-wide row is centered at x=0.5. The selector starts at x=0.75,
+        // so the edge of the box enters its volume but the position does not.
+        let _world = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+        assert!(game.as_console(|game| {
+            game.run_command("kill @e[type=mymod:robot,x=0.75,y=64,z=0,dx=0,dy=0,dz=0]")
+        }));
+        assert!(game.resident_entities.general.row(id).is_none());
+    });
+}
+
 /// A tree travels between dimensions with its riders: the source ends with
 /// zero rows and stale ids, the destination holds the same tree — same
 /// UUIDs, same mount links — with fresh join identities, the root placed.

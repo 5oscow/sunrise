@@ -1446,8 +1446,23 @@ impl Game<'_> {
         // PositionMoveRotation.calculateAbsolute clamps pitch before setXRot.
         let rotation = rotation.map(|[yaw, pitch]| [yaw, pitch.clamp(-90.0, 90.0)]);
         match t {
-            // Stage 3's insertion joins live rows; there is nothing to place.
-            Target::General(_) => {}
+            Target::General(id) => {
+                if let Some(entity) = self.entity(id) {
+                    self.entity_stop_riding(entity);
+                }
+                if let Some(row) = self.resident_entities.general.row_mut(id) {
+                    row.position = v;
+                    row.previous = v;
+                    if let Some([yaw, pitch]) = rotation {
+                        if yaw.is_finite() {
+                            row.rotation[0] = yaw;
+                        }
+                        if !pitch.is_nan() {
+                            row.rotation[1] = entity_pitch(pitch);
+                        }
+                    }
+                }
+            }
             Target::Guest(_) => {
                 self.for_player(t, |g| {
                     g.teleport_to_relative(Target::Player, pos, rotation, relative, turn_riders)
@@ -2249,8 +2264,12 @@ impl Game<'_> {
             });
         }
         match t {
-            // Stage 3's insertion joins live rows; there is nothing to kill.
-            Target::General(_) => {}
+            Target::General(id) => {
+                let Some(entity) = self.entity(id) else {
+                    return;
+                };
+                self.remove_target_now(entity, t);
+            }
             Target::Guest(_) => {
                 self.for_player(t, |g| g.kill_target(Target::Player));
             }
