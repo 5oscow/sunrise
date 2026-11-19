@@ -2512,7 +2512,7 @@ impl Screen {
                     {
                         let left = (w / 2.0).floor() - 154.0;
                         let value = crate::ui::slider_value(left, 308.0, cursor.0);
-                        *expiration = (value * (EXPIRATIONS.len() - 1) as f32).round() as usize;
+                        *expiration = (value * (EXPIRATIONS.len() - 1) as f64).round() as usize;
                     }
                 }
                 _ => {}
@@ -2542,7 +2542,7 @@ impl Screen {
             return;
         };
         let left = (w / 2.0).floor() - 106.0;
-        let value = range.from_slider(crate::ui::slider_value(left, 212.0, cursor.0));
+        let value = range.from_slider(crate::ui::slider_value(left, 212.0, cursor.0) as f32);
         if which == 0 {
             draft.render_distance = Some(value);
         } else {
@@ -5072,8 +5072,8 @@ impl Screen {
                             if (slider_y..slider_y + 20.0).contains(&y)
                                 && (left..left + 212.0).contains(&x)
                             {
-                                *picked =
-                                    range.from_slider(crate::ui::slider_value(left, 212.0, x));
+                                *picked = range
+                                    .from_slider(crate::ui::slider_value(left, 212.0, x) as f32);
                                 self.settings_slider = Some(which);
                                 return Outcome::None;
                             }
@@ -5151,7 +5151,7 @@ impl Screen {
                     let left = (w / 2.0).floor() - 154.0;
                     if (93.0..113.0).contains(&y) && (left..left + 308.0).contains(&x) {
                         let value = crate::ui::slider_value(left, 308.0, x);
-                        *expiration = (value * (EXPIRATIONS.len() - 1) as f32).round() as usize;
+                        *expiration = (value * (EXPIRATIONS.len() - 1) as f64).round() as usize;
                         self.other_slider = Some(2);
                         return Outcome::None;
                     }
