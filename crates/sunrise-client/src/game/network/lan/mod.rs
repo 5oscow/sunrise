@@ -5384,7 +5384,10 @@ pub(crate) mod world_spawn_sync_tests {
             );
         });
     }
+}
 
+#[cfg(test)]
+mod world_spawn_join_tests {
     /// `PrepareSpawnTask.start`: a returning player whose saved level the world no longer has
     /// joins in the world spawn's level (`respawnData.dimension()`), at its saved position and
     /// rotation, not in the Overworld.
