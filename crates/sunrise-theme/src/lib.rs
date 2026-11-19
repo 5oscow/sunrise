@@ -273,9 +273,6 @@ impl Motion {
     pub const fn duration(&self) -> Duration {
         Duration::from_millis(self.ms)
     }
-    pub fn secs(&self) -> f32 {
-        self.ms as f32 / 1000.
-    }
     /// The eased progress for a linear `t` in 0..1.
     pub fn ease(&self, t: f32) -> f32 {
         bezier(self.curve, t)
