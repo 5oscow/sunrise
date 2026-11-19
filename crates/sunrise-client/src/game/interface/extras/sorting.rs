@@ -137,13 +137,8 @@ impl Game<'_> {
         if self.carried.is_some() {
             return;
         }
-        let menu = (self.screen, self.container, self.remote_menu_id());
-        let order = self.creative_search_items();
-        // The build hook may close the screen or change its carried stack.
-        if self.carried.is_some() || menu != (self.screen, self.container, self.remote_menu_id()) {
-            return;
-        }
         let views: Vec<Option<ItemStack>> = slots.iter().map(|&s| self.slot_view(s)).collect();
+        let order = self.stock_sort_order();
         let clicks = {
             let rank = |s: &ItemStack| {
                 let order = Creative::order_of(&order, s).unwrap_or(usize::MAX);

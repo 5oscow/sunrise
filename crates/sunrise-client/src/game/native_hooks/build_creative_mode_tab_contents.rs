@@ -1,6 +1,7 @@
 //! One demand-driven creative catalog per logical side, and the scoped edit event.
 use super::*;
-use crate::game::api_values::{TryIntoApi, TryIntoEngine};
+use crate::game::api_values::{TryIntoApi, TryIntoEngine, stack_value};
+use mod_api::__private::{ModPhase, current_phase};
 use mod_api::{
     CreativeModeTabInfo, CreativeModeTabs, CreativeTabChange, CreativeTabEdit,
     CreativeTabEditError, CreativeTabList, CreativeTabPermissions, CreativeTabPlacement,
@@ -46,6 +47,7 @@ struct Published {
 struct ActiveBuild {
     key: BuildKey,
     partial: Contents,
+    items: Arc<Items>,
     edit: RefCell<Option<EditSession>>,
 }
 
@@ -110,15 +112,9 @@ impl Game<'_> {
         {
             return Ok(published.lists.clone());
         }
-        let holders = match &self.remote {
-            Some(remote) => {
-                sunrise_client::creative::live_holders(&remote.builtin, &remote.registries)
-            }
-            None => self
-                .registry_sync()
-                .ok_or(CreativeTabReadError::Unavailable)?
-                .creative_holders(),
-        };
+        let holders = self
+            .creative_holders()
+            .ok_or(CreativeTabReadError::Unavailable)?;
         let items = match (&self.server_items, &self.world_tables) {
             (Some(items), _) => Arc::clone(items),
             (_, Some(tables)) => Arc::clone(&tables.items),
@@ -137,6 +133,7 @@ impl Game<'_> {
                 permissions,
             },
             partial: Arc::from([]),
+            items: items.clone(),
             edit: RefCell::new(None),
         });
         let lists = catalog.build(
@@ -192,6 +189,16 @@ impl Game<'_> {
         Ok(lists)
     }
 
+    fn creative_holders(&self) -> Option<Holders> {
+        match &self.remote {
+            Some(remote) => Some(sunrise_client::creative::live_holders(
+                &remote.builtin,
+                &remote.registries,
+            )),
+            None => self.registry_sync().map(|sync| sync.creative_holders()),
+        }
+    }
+
     /// The screen uses the completed cache, with the same holder definitions for search text.
     pub(in crate::game) fn refresh_creative_tabs(&mut self) {
         let Ok(lists) = self.build_creative(self.creative_permissions()) else {
@@ -209,6 +216,9 @@ impl Game<'_> {
         &mut self,
         permissions: CreativeTabPermissions,
     ) -> Result<Arc<CreativeModeTabs>, CreativeTabReadError> {
+        if current_phase() != ModPhase::World {
+            return Err(CreativeTabReadError::Unavailable);
+        }
         let lists = self.build_creative(permissions)?;
         let catalog = self.creative_screen.catalog();
         if self.creative_contents.active.is_some() {
@@ -227,16 +237,49 @@ impl Game<'_> {
 
     /// The search tab's canonical display list (not the client-only UI additions).
     pub(in crate::game) fn creative_search_items(&mut self) -> Vec<ItemStack> {
+        if current_phase() != ModPhase::World {
+            return Vec::new();
+        }
         let Ok(lists) = self.build_creative(self.creative_permissions()) else {
             return Vec::new();
         };
         self.creative_screen
             .catalog()
-            .tabs()
-            .iter()
-            .zip(&*lists)
-            .find(|(tab, _)| tab.kind == Kind::Search)
-            .map_or_else(Vec::new, |(_, contents)| contents.display.clone())
+            .search_display(&lists)
+            .to_vec()
+    }
+
+    /// The built-in sorter is only a reader. A cold sort previews stock order
+    /// without publishing anything or giving mods a creative callback.
+    pub(in crate::game) fn stock_sort_order(&self) -> Vec<ItemStack> {
+        let preview;
+        let lists = if let Some(published) = &self.creative_contents.published {
+            &published.lists
+        } else {
+            preview = self.creative_screen.catalog().build(
+                Parameters {
+                    features: self.enabled_feature_ids(),
+                    operator: false,
+                    holders: &self.creative_holders().unwrap_or_default(),
+                    items: self.items(),
+                },
+                None,
+                |_, _, _| {},
+            );
+            &preview
+        };
+        self.creative_screen.search_order_from(lists)
+    }
+
+    pub(in crate::game) fn creative_stack_key(&self, stack: &ItemStack) -> Option<ItemStack> {
+        self.native_lifecycle.epoch()?;
+        // Use the very same prototypes as the generator during a reentrant read.
+        let items = self
+            .creative_contents
+            .active
+            .as_ref()
+            .map_or_else(|| self.items(), |active| &active.items);
+        comparison_key(stack.clone(), items).ok()
     }
 
     pub(in crate::game) fn creative_tab_entries(
@@ -244,7 +287,7 @@ impl Game<'_> {
         edit: CreativeTabEdit,
         list: CreativeTabList,
     ) -> Result<Vec<ItemStack>, CreativeTabEditError> {
-        self.edit_creative(edit, |contents| Ok(list_items(contents, list).clone()))
+        self.edit_creative(edit, |contents, _| Ok(list_items(contents, list).clone()))
     }
 
     pub(in crate::game) fn creative_tab_change(
@@ -271,15 +314,19 @@ impl Game<'_> {
         stack: mod_api::ItemStack,
         visibility: CreativeTabVisibility,
     ) -> Result<(), CreativeTabEditError> {
-        self.edit_creative(edit, |contents| {
+        self.edit_creative(edit, |contents, items| {
             if stack.count() != 1 {
                 return Err(CreativeTabEditError::Count);
             }
-            let items = self.items();
-            let stack = edit_stack(&stack, items)?;
+            let mut stack = stack.try_into_engine(items)?;
+            normalize_components(&mut stack, items);
             let (anchor, after) = match &placement {
-                CreativeTabPlacement::Before(anchor) => (Some(edit_stack(anchor, items)?), false),
-                CreativeTabPlacement::After(anchor) => (Some(edit_stack(anchor, items)?), true),
+                CreativeTabPlacement::Before(anchor) => {
+                    (Some(comparison_key(stack_value(anchor)?, items)?), false)
+                }
+                CreativeTabPlacement::After(anchor) => {
+                    (Some(comparison_key(stack_value(anchor)?, items)?), true)
+                }
                 _ => (None, false),
             };
             for list in target_lists(visibility) {
@@ -313,8 +360,8 @@ impl Game<'_> {
         stack: &mod_api::ItemStack,
         visibility: CreativeTabVisibility,
     ) -> Result<(), CreativeTabEditError> {
-        self.edit_creative(edit, |contents| {
-            let stack = edit_stack(stack, self.items())?;
+        self.edit_creative(edit, |contents, items| {
+            let stack = comparison_key(stack_value(stack)?, items)?;
             for list in target_lists(visibility) {
                 list_items(contents, *list)
                     .retain(|entry| !entry.same_item_same_components(&stack));
@@ -326,8 +373,11 @@ impl Game<'_> {
     fn edit_creative<T>(
         &self,
         edit: CreativeTabEdit,
-        apply: impl FnOnce(&mut TabContents) -> Result<T, CreativeTabEditError>,
+        apply: impl FnOnce(&mut TabContents, &Items) -> Result<T, CreativeTabEditError>,
     ) -> Result<T, CreativeTabEditError> {
+        if current_phase() != ModPhase::World {
+            return Err(CreativeTabEditError::Stale);
+        }
         let Some(active) = &self.creative_contents.active else {
             return Err(CreativeTabEditError::Stale);
         };
@@ -339,7 +389,7 @@ impl Game<'_> {
             .as_mut()
             .filter(|s| s.token == edit)
             .ok_or(CreativeTabEditError::Stale)?;
-        apply(&mut session.contents)
+        apply(&mut session.contents, &active.items)
     }
 }
 
@@ -371,16 +421,16 @@ fn snapshot(
     Arc::new(CreativeModeTabs::new(permissions, tabs))
 }
 
-fn edit_stack(
-    stack: &mod_api::ItemStack,
+// Comparison ignores count and resident maxima, but damage must fit the component codec.
+fn comparison_key(
+    mut stack: ItemStack,
     items: &Items,
-) -> Result<ItemStack, CreativeTabEditError> {
-    // Counts on anchors/removals are ignored, including when received over Wire.
-    let mut stack = stack.clone();
-    stack.set_count(1).expect("one is not an empty stack");
-    let mut stack = stack
-        .try_into_engine(items)
-        .map_err(CreativeTabEditError::Stack)?;
+) -> Result<ItemStack, mod_api::StackWriteError> {
+    if i32::try_from(stack.damage).is_err() {
+        return Err(mod_api::StackWriteError::DamageExceeded {
+            maximum: i32::MAX as u32,
+        });
+    }
     normalize_components(&mut stack, items);
     Ok(stack)
 }

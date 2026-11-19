@@ -59,10 +59,15 @@ impl CreativeModeTabInfo {
     }
 
     /// `CreativeModeTab.contains`: exact item and components in the search list, ignoring count.
-    pub fn contains(&self, stack: &ItemStack) -> bool {
-        self.search_items
-            .iter()
-            .any(|listed| listed.is_stackable_with(stack))
+    /// Use the originating world's Host to interpret the query against its item prototypes.
+    pub fn contains(&self, host: &dyn Host, stack: &ItemStack) -> bool {
+        backend_of(host)
+            .and_then(|backend| backend.creative_stack_key(stack))
+            .is_some_and(|key| {
+                self.search_items
+                    .iter()
+                    .any(|listed| listed.is_stackable_with(&key))
+            })
     }
 }
 
@@ -88,16 +93,20 @@ impl CreativeModeTabs {
     }
 
     /// The item tabs whose display list contains the exact item and components, ignoring count.
+    /// Use the originating world's Host to interpret the query against its item prototypes.
     pub fn tabs_showing<'a>(
         &'a self,
-        stack: &'a ItemStack,
-    ) -> impl Iterator<Item = &'a CreativeModeTabInfo> {
+        host: &dyn Host,
+        stack: &ItemStack,
+    ) -> impl Iterator<Item = &'a CreativeModeTabInfo> + use<'a> {
+        let key = backend_of(host).and_then(|backend| backend.creative_stack_key(stack));
         self.tabs.iter().filter(move |tab| {
             tab.category
-                && tab
-                    .display_items
-                    .iter()
-                    .any(|shown| shown.is_stackable_with(stack))
+                && key.as_ref().is_some_and(|key| {
+                    tab.display_items
+                        .iter()
+                        .any(|shown| shown.is_stackable_with(key))
+                })
         })
     }
 }
@@ -264,45 +273,5 @@ impl CreativeTabEdit {
             }
         }
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::ItemKey;
-
-    #[test]
-    fn membership_separates_display_from_search_and_matches_components() {
-        let plain = ItemStack::of(ItemKey(1));
-        let mut damaged = plain.clone();
-        damaged.set_damage(3);
-        let tabs = CreativeModeTabs::new(
-            CreativeTabPermissions::Normal,
-            vec![
-                CreativeModeTabInfo::new(
-                    "test:tools".into(),
-                    true,
-                    vec![plain.clone()],
-                    vec![damaged.clone()],
-                ),
-                CreativeModeTabInfo::new(
-                    "minecraft:search".into(),
-                    false,
-                    vec![plain.clone()],
-                    vec![plain.clone()],
-                ),
-            ],
-        );
-        let tab = tabs.tab("test:tools").unwrap();
-        assert!(tab.contains(&damaged));
-        assert!(!tab.contains(&plain));
-        assert_eq!(
-            tabs.tabs_showing(&plain)
-                .map(|t| t.id.as_str())
-                .collect::<Vec<_>>(),
-            ["test:tools"]
-        );
-        assert!(tabs.tabs_showing(&damaged).next().is_none());
     }
 }

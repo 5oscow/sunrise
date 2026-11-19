@@ -202,8 +202,8 @@ These read the local player as the client sees it. They take no mod-controlled n
 - `ClientHost::creative_search_items()` returns the built creative search tab's display order,
   for ranking stacks in inventory sorters. It requests the catalog with the local player's permission
   and Operator Items Tab option. A cache miss can fire the creative build hook, so this read needs a
-  mutable world Host. It excludes client-only presentation additions. For membership reads on either
-  side, see [creative tab contents](../content-mods.md).
+  mutable Host. It returns an empty list during setup and excludes client-only presentation additions.
+  For membership reads on either side, see [creative tab contents](../content-mods.md).
 - `ClientHost::item_uses_block_light(&stack, context)` is `ItemStackRenderState.usesBlockLight` of the
   stack's model resolved for an `ItemDisplayContext` (no owner or level): true for a model lit like a
   block from the side (`gui_light: side`), false for a flat item lit from the front. It is what

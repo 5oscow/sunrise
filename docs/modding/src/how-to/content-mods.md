@@ -739,8 +739,10 @@ From either side of an open world, call
 ordinary players, or request `Operator` explicitly to include operator
 generator output. The choice does not grant permission. The returned
 snapshot includes every registered tab, even empty or special tabs. Use
-`tab.contains(&stack)` for exact membership in that tab's search list and
-`snapshot.tabs_showing(&stack)` for category tabs that display it. The game
+`tab.contains(host, &stack)` for exact membership in that tab's search list and
+`snapshot.tabs_showing(host, &stack)` for category tabs that display it. Use the
+originating world's Host so redundant component patches compare against its
+item prototypes. The game
 builds only on demand, keeps one complete snapshot per side, and does not
 rebuild just because tags changed. A same-parameter read from a build listener
 sees completed tabs and the previous contents of the remaining tabs;

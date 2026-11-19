@@ -68,7 +68,8 @@ pub trait ItemsHost {
     /// A same-parameter read from a listener sees tabs already built and the previous
     /// contents of tabs not yet built. Reentering with different parameters is refused.
     /// Published snapshots stay immutable. Permission is a build parameter, not a grant.
-    #[access(WorldOnly)]
+    /// During setup or without a live world, returns [`CreativeTabReadError::Unavailable`].
+    #[access(ClientSetup)]
     fn creative_tabs(
         &mut self,
         permissions: CreativeTabPermissions,
@@ -163,9 +164,9 @@ pub trait ItemsClientHost {
     /// Side: client.
     /// The creative search tab's final display order, for ranking stacks in inventory sorters.
     /// This requests the same catalog as the creative screen (using the player's permission and
-    /// Operator Items Tab option). On a miss it dispatches the creative build hook. If the
-    /// catalog is unavailable or a different build is in progress, this returns an empty list.
-    #[access(WorldOnly)]
+    /// Operator Items Tab option). On a miss it dispatches the creative build hook. During setup,
+    /// without a live catalog, or during a different build, this returns an empty list.
+    #[access(ClientSetup)]
     fn creative_search_items(&mut self) -> Vec<ItemStack>;
     /// Side: client.
     /// Registered enchantments, in registry order.
@@ -192,17 +193,20 @@ pub trait ItemsClientHost {
 #[doc(hidden)]
 #[sunrise_mod_api_macros::host_area]
 pub trait ItemsBackend {
-    // The edit handle names one callback-scoped output, not a world write. Its read
-    // backend is shared by both logical sides and checks the active edit on each call.
+    /// Side: both. Normalize a creative membership key against the game's item prototypes.
+    #[access(Metadata)]
+    fn creative_stack_key(&self, stack: &ItemStack) -> Option<ItemStack>;
+
+    // The editor checks the active callback on both sides; setup can only return Stale.
     /// Side: both. Read the current entries through the active creative tab editor.
-    #[access(WorldOnly)]
+    #[access(ClientSetup)]
     fn creative_tab_entries(
         &self,
         edit: CreativeTabEdit,
         list: CreativeTabList,
     ) -> Result<Vec<ItemStack>, CreativeTabEditError>;
     /// Side: both. Apply a change to the active creative tab editor.
-    #[access(WorldOnly)]
+    #[access(ClientSetup)]
     fn creative_tab_change(
         &self,
         edit: CreativeTabEdit,

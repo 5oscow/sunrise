@@ -236,7 +236,7 @@ pub enum LoadAccess {
     WorldOnly,
     /// Registry and immutable metadata available in setup and reload.
     Metadata,
-    /// The existing client setup reads, not general reload permissions.
+    /// Callable during setup but not reload, on the logical sides allowed by the Host trait.
     ClientSetup,
     /// Published asset/data facts, including resource-cache queries.
     PublishedResources,

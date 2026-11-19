@@ -465,8 +465,7 @@ impl Creative {
                 tab.items.clone_from(&contents[i].display);
             }
             if tab.search {
-                search.clone_from(&tab.items);
-                append_unique(&mut search, &self.ungrouped);
+                search = self.with_ungrouped(&tab.items);
             }
             self.apply_pack(&mut tab);
             if self.contents.is_none() || recipe.kind != Kind::Category || !tab.items.is_empty() {
@@ -476,6 +475,17 @@ impl Creative {
         self.tabs = tabs;
         self.search_items = search;
         self.index_search();
+    }
+
+    /// The built-in sorter keeps the creative UI's ranking for ungrouped items, too.
+    pub fn search_order_from(&self, contents: &[Arc<TabContents>]) -> Vec<ItemStack> {
+        self.with_ungrouped(self.catalog.search_display(contents))
+    }
+
+    fn with_ungrouped(&self, search: &[ItemStack]) -> Vec<ItemStack> {
+        let mut order = search.to_vec();
+        append_unique(&mut order, &self.ungrouped);
+        order
     }
 
     pub fn built_contents(&self) -> Option<&[Arc<TabContents>]> {

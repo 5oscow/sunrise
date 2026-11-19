@@ -45,6 +45,11 @@ mod_api::impl_client_host_areas!(Catalog);
 impl Backend for Catalog {}
 mod_api::impl_backend_areas!(Catalog, except(items));
 impl ItemsBackend for Catalog {
+    fn creative_stack_key(&self, stack: &ItemStack) -> Option<ItemStack> {
+        assert_eq!(stack, &self.stack);
+        Some(self.stack.clone())
+    }
+
     fn creative_tab_entries(
         &self,
         edit: CreativeTabEdit,
@@ -116,6 +121,8 @@ fn creative_reads_and_scoped_edits_cross_generated_wire_calls_on_both_sides() {
         let tab = tabs.tab("test:items").unwrap();
         assert!(tab.display_items.is_empty());
         assert_eq!(tab.search_items, [stack.clone()]);
+        assert!(tab.contains(&guest, &stack));
+        assert!(tabs.tabs_showing(&guest, &stack).next().is_none());
         assert_eq!(
             edit.entries(&guest, CreativeTabList::Search).unwrap(),
             [stack.clone()]

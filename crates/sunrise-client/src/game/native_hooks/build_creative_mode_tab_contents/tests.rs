@@ -1,7 +1,12 @@
 use super::*;
-use crate::game::native_entity_refs::tests::{with_client_game, with_game};
-use mod_api::{BuildCreativeModeTabContentsEvent, Hooks, HostSide, ModEntry, prelude::ItemsHost};
+use crate::game::native_entity_refs::tests::{fixture_root, with_client_game, with_game_role};
+use crate::game::{execution_role::ExecutionRole, world_loading::WorldRequest};
+use mod_api::__private::PhaseOwner;
+use mod_api::prelude::ItemsHost;
+use mod_api::{BuildCreativeModeTabContentsEvent, Hooks, HostSide, ModEntry};
+use std::path::Path;
 use std::sync::Mutex;
+use sunrise_core::nbt::{Compound, Tag};
 
 #[derive(Default)]
 struct Seen {
@@ -13,6 +18,17 @@ struct Edit(Arc<Mutex<Seen>>);
 
 fn stack(id: &str, count: u32) -> mod_api::ItemStack {
     mod_api::ItemStack::new(mod_api::__private::item_key(id).unwrap(), count).unwrap()
+}
+
+fn stone_key(max_stack: i32) -> mod_api::ItemStack {
+    let mut stone = stack("minecraft:stone", 42);
+    stone
+        .set_components(Compound::from([(
+            "minecraft:max_stack_size".into(),
+            Tag::Int(max_stack),
+        )]))
+        .unwrap();
+    stone
 }
 
 #[mod_api::__subscriptions]
@@ -61,11 +77,46 @@ impl Hooks for Edit {
         assert_eq!(
             event.edit.insert(
                 host,
-                CreativeTabPlacement::Before(stack("minecraft:stone", 42)),
+                CreativeTabPlacement::Before(stone_key(64)),
                 stack("minecraft:dirt", 1),
                 CreativeTabVisibility::Both
             ),
             Err(CreativeTabEditError::MissingAnchor(CreativeTabList::Search)),
+        );
+        let mut absent = stack("minecraft:iron_sword", 50);
+        absent.set_damage(1000);
+        assert_eq!(
+            event.edit.insert(
+                host,
+                CreativeTabPlacement::After(absent.clone()),
+                stack("minecraft:glass", 1),
+                CreativeTabVisibility::Parent,
+            ),
+            Err(CreativeTabEditError::MissingAnchor(CreativeTabList::Parent))
+        );
+        event
+            .edit
+            .remove(host, &absent, CreativeTabVisibility::Both)
+            .unwrap();
+        absent.set_damage(u32::MAX);
+        assert_eq!(
+            event
+                .edit
+                .remove(host, &absent, CreativeTabVisibility::Both),
+            Err(CreativeTabEditError::Stack(
+                mod_api::StackWriteError::DamageExceeded {
+                    maximum: i32::MAX as u32
+                }
+            )),
+        );
+        assert_eq!(
+            event.edit.insert(
+                host,
+                CreativeTabPlacement::Last,
+                stack("minecraft:stick", 1),
+                CreativeTabVisibility::Both,
+            ),
+            Err(CreativeTabEditError::Duplicate(CreativeTabList::Search))
         );
         // The disabled barrier still anchors the insertion during the event.
         event
@@ -77,13 +128,143 @@ impl Hooks for Edit {
                 CreativeTabVisibility::Search,
             )
             .unwrap();
+        event
+            .edit
+            .remove(
+                host,
+                &stack("minecraft:stick", 47),
+                CreativeTabVisibility::Search,
+            )
+            .unwrap();
     }
+}
+
+struct Observe;
+
+#[mod_api::__subscriptions]
+impl Hooks for Observe {
+    fn build_creative_mode_tab_contents(
+        &self,
+        host: HostSide,
+        event: &mut BuildCreativeModeTabContentsEvent<'_>,
+    ) {
+        if event.tab != "test:a" {
+            return;
+        }
+        let host: &dyn mod_api::Host = match host {
+            HostSide::Client(host) => host,
+            HostSide::Server(host) => host,
+        };
+        assert_eq!(
+            event.edit.entries(host, CreativeTabList::Parent).unwrap(),
+            [
+                stack("minecraft:dirt", 1),
+                stack("minecraft:stone", 1),
+                stack("minecraft:barrier", 1),
+                stack("minecraft:stick", 1)
+            ]
+        );
+        assert_eq!(
+            event.edit.entries(host, CreativeTabList::Search).unwrap(),
+            [stack("minecraft:torch", 1), stack("minecraft:barrier", 1)]
+        );
+        let mut stone = stone_key(64);
+        stone.set_count(1).unwrap();
+        event
+            .edit
+            .insert(
+                host,
+                CreativeTabPlacement::Last,
+                stone,
+                CreativeTabVisibility::Search,
+            )
+            .unwrap();
+    }
+}
+
+fn definition(max_level: i32) -> serde_json::Value {
+    serde_json::json!({
+        "description": {"text":"Fixture levels"}, "supported_items":"minecraft:iron_sword",
+        "weight": 1, "anvil_cost": 1, "max_level": max_level,
+        "min_cost": {"base": 1,"per_level_above_first": 1},
+        "max_cost": {"base": 10,"per_level_above_first": 1}, "slots": ["mainhand"], "effects": {},
+    })
+}
+
+fn open_dedicated_world(game: &mut Game<'_>, root: &Path, max_level: i32) {
+    let pack = root.join("datapacks/holders");
+    let entries = pack.join("data/test/enchantment");
+    std::fs::create_dir_all(&entries).unwrap();
+    std::fs::write(
+        entries.join("levels.json"),
+        definition(max_level).to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        pack.join("pack.mcmeta"),
+        r#"{"pack":{"description":"holders","min_format":94,"max_format":94}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("datapacks.json"),
+        r#"{"enabled":["vanilla","file/holders"],"disabled":[]}"#,
+    )
+    .unwrap();
+    let mut request = WorldRequest::new(
+        "creative",
+        Some("Creative registry fixture"),
+        Some(1),
+        true,
+        None,
+        Arc::new(sunrise_client::gamerules::RuleRegistry::vanilla()),
+    )
+    .unwrap();
+    request.save_root = root.to_owned();
+    game.native_lifecycle_open_started();
+    game.load_world(request).unwrap();
+    game.native_lifecycle_world_ready();
+}
+
+fn replace_client_definition(game: &mut Game<'_>, max_level: i32) {
+    let mut registries = (*game.remote.as_ref().unwrap().registries).clone();
+    registries.registries.insert(
+        "minecraft:enchantment".into(),
+        vec![(
+            "test:levels".into(),
+            Some(sunrise_client::scoreboard::json_to_tag(&definition(
+                max_level,
+            ))),
+        )],
+    );
+    game.set_registries(Arc::new(registries));
+}
+
+fn book_level(snapshot: &CreativeModeTabs) -> i32 {
+    let books = &snapshot.tab("test:holders").unwrap().display_items;
+    let levels: Vec<_> = books
+        .iter()
+        .filter_map(|book| {
+            let Tag::Int(level) = book
+                .components()?
+                .as_nbt()
+                .get(&"minecraft:stored_enchantments".into())?
+                .get("test:levels")?
+            else {
+                return None;
+            };
+            Some(*level)
+        })
+        .collect();
+    let [level] = levels.as_slice() else {
+        panic!("expected one highest-level fixture book, got {levels:?}")
+    };
+    *level
 }
 
 #[test]
 #[ignore = "daily"]
 fn creative_catalog_builds_lazily_and_edits_before_filtering_on_both_sides() {
-    use crate::game::{execution_role::ExecutionRole, native_client_session::tests::logged_client};
+    use crate::game::native_client_session::tests::logged_client;
     use sunrise_client::creative::Creative;
     let row = |item: &str, visibility: &str| {
         serde_json::json!({
@@ -99,17 +280,33 @@ fn creative_catalog_builds_lazily_and_edits_before_filtering_on_both_sides() {
             ]},
             {"id":"minecraft:hotbar","type":"HOTBAR","build":[]},
             {"id":"test:b","type":"CATEGORY","build":[row("minecraft:sand", both)],"operator_build":[row("minecraft:glass", both)]},
+            {"id":"test:holders","type":"CATEGORY","build":[{"kind":"enchantments","all_levels":false,"visibility":both}]},
             {"id":"minecraft:search","type":"SEARCH","build":[]},
             {"id":"minecraft:inventory","type":"INVENTORY","build":[]},
         ]
     });
     let seen = Arc::new(Mutex::new(Seen::default()));
-    let setups = vec![ModEntry::new("tab_edit", Box::new(Edit(seen.clone())))].into();
+    let setups = vec![
+        ModEntry::new("first_edit", Box::new(Edit(seen.clone()))),
+        ModEntry::new("later_edit", Box::new(Observe)),
+    ]
+    .into();
     let check = |game: &mut Game<'_>, side| {
-        let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
         game.creative_screen = Creative::from_json(&catalog).unwrap();
         assert!(!game.creative_screen.has_contents());
-        assert!(seen.lock().unwrap().events.is_empty());
+        {
+            // Enter through the generated native forwarding methods, not Game's impls.
+            let _setup = PhaseOwner::scope(ModPhase::Setup);
+            if side == LogicalSide::Client {
+                let host: &mut dyn mod_api::ClientHost = game;
+                assert!(host.creative_search_items().is_empty());
+            }
+            let host: &mut dyn mod_api::Host = game;
+            assert_eq!(
+                host.creative_tabs(CreativeTabPermissions::Normal),
+                Err(CreativeTabReadError::Unavailable)
+            );
+        }
         let flags = |game: &mut Game<'_>, ids: [&str; 2]| {
             let flags = ids.map(str::to_owned).into();
             if let Some(remote) = &mut game.remote {
@@ -119,37 +316,76 @@ fn creative_catalog_builds_lazily_and_edits_before_filtering_on_both_sides() {
             }
         };
         flags(game, ["test:alpha", "test:beta"]);
+        assert_eq!(game.stock_sort_order()[0].item.as_ref(), "minecraft:stick");
+        assert!(seen.lock().unwrap().events.is_empty());
         let normal = ItemsHost::creative_tabs(game, CreativeTabPermissions::Normal).unwrap();
+        assert_eq!(game.stock_sort_order()[0].item.as_ref(), "minecraft:torch");
         let a = normal.tab("test:a").unwrap();
         assert_eq!(
             a.display_items,
-            [stack("minecraft:dirt", 1), stack("minecraft:stone", 1)]
+            [
+                stack("minecraft:dirt", 1),
+                stack("minecraft:stone", 1),
+                stack("minecraft:stick", 1)
+            ]
         );
         assert_eq!(
             a.search_items,
-            [stack("minecraft:stick", 1), stack("minecraft:torch", 1)]
+            [stack("minecraft:torch", 1), stack("minecraft:stone", 1)]
         );
-        assert!(!a.contains(&stack("minecraft:dirt", 1)));
-        assert!(a.contains(&stack("minecraft:torch", 8)));
         flags(game, ["test:beta", "test:alpha"]);
         let host: &mut dyn mod_api::Host = game;
+        assert!(!a.contains(host, &stack("minecraft:dirt", 1)));
+        assert!(a.contains(host, &stack("minecraft:torch", 8)));
+        assert_eq!(
+            normal
+                .tabs_showing(host, &stack("minecraft:dirt", 1))
+                .next()
+                .unwrap()
+                .id,
+            "test:a"
+        );
+        assert!(
+            normal
+                .tabs_showing(host, &stack("minecraft:torch", 1))
+                .next()
+                .is_none()
+        );
+        assert!(a.contains(host, &stone_key(64)));
+        assert_eq!(
+            normal.tabs_showing(host, &stone_key(64)).next().unwrap().id,
+            "test:a"
+        );
+        assert!(!a.contains(host, &stone_key(32)));
+        assert!(normal.tabs_showing(host, &stone_key(32)).next().is_none());
         let cached = host.creative_tabs(CreativeTabPermissions::Normal).unwrap();
         assert!(Arc::ptr_eq(&normal, &cached));
         let old = seen.lock().unwrap().token.unwrap();
-        assert_eq!(
-            old.entries(host, CreativeTabList::Search),
-            Err(CreativeTabEditError::Stale)
-        );
+        {
+            let _setup = PhaseOwner::scope(ModPhase::Setup);
+            assert_eq!(
+                old.entries(host, CreativeTabList::Search),
+                Err(CreativeTabEditError::Stale)
+            );
+            assert_eq!(
+                old.remove(
+                    host,
+                    &stack("minecraft:stone", 1),
+                    CreativeTabVisibility::Both
+                ),
+                Err(CreativeTabEditError::Stale)
+            );
+        }
         let operator = host
             .creative_tabs(CreativeTabPermissions::Operator)
             .unwrap();
         assert!(!Arc::ptr_eq(&normal, &operator));
         assert_eq!(
-            operator.tab("minecraft:search").unwrap().display_items,
+            operator.tab("minecraft:search").unwrap().display_items[..3],
             [
-                stack("minecraft:stick", 1),
                 stack("minecraft:torch", 1),
-                stack("minecraft:glass", 1),
+                stack("minecraft:stone", 1),
+                stack("minecraft:glass", 1)
             ]
         );
         assert_eq!(
@@ -166,6 +402,7 @@ fn creative_catalog_builds_lazily_and_edits_before_filtering_on_both_sides() {
             [
                 "test:a",
                 "test:b",
+                "test:holders",
                 "minecraft:hotbar",
                 "minecraft:search",
                 "minecraft:inventory",
@@ -175,31 +412,38 @@ fn creative_catalog_builds_lazily_and_edits_before_filtering_on_both_sides() {
         .collect();
         assert_eq!(actual, expected);
 
-        // A replacement provider drops the last build without invalidating an Arc
-        // the caller kept. It must not dispatch until the next read.
-        if let Some(remote) = &game.remote {
-            let replacement = Arc::new((*remote.registries).clone());
-            game.set_registries(replacement);
-        } else {
-            game.reset_creative_contents();
-        }
+        assert_eq!(book_level(&normal), 2);
+        normal
+    };
+    let check_replacement = |game: &mut Game<'_>, old: Arc<CreativeModeTabs>| {
+        // Registry installation must not dispatch; the next demand uses the changed definition.
         assert!(seen.lock().unwrap().events.is_empty());
         let fresh = ItemsHost::creative_tabs(game, CreativeTabPermissions::Normal).unwrap();
-        assert!(!Arc::ptr_eq(&normal, &fresh));
-        assert_eq!(*normal, *fresh);
-        assert_eq!(seen.lock().unwrap().events.len(), 5);
+        assert_eq!(book_level(&fresh), 4);
+        assert_eq!(book_level(&old), 2);
+        assert_eq!(seen.lock().unwrap().events.len(), 6);
         seen.lock().unwrap().events.clear();
     };
     mod_platform::testing::with_mods(setups, || {
-        with_game(|game| {
-            game.options.execution_role = ExecutionRole::DedicatedServer;
-            check(game, LogicalSide::Server);
+        let _world = PhaseOwner::scope(ModPhase::World);
+        with_game_role(fixture_root(), ExecutionRole::DedicatedServer, |game| {
+            let _publication = sunrise_client::datapack_net::isolate_server_publication();
+            let worlds = tempfile::tempdir().unwrap();
+            open_dedicated_world(game, &worlds.path().join("old"), 2);
+            let old = check(game, LogicalSide::Server);
+            game.finish_close_world().unwrap();
+            open_dedicated_world(game, &worlds.path().join("new"), 4);
+            check_replacement(game, old);
+            game.finish_close_world().unwrap();
         });
         with_client_game(|game| {
             let _server = logged_client(game);
             game.native_lifecycle
                 .begin_open(mod_api::Authority::RemoteClient);
-            check(game, LogicalSide::Client);
+            replace_client_definition(game, 2);
+            let old = check(game, LogicalSide::Client);
+            replace_client_definition(game, 4);
+            check_replacement(game, old);
         });
     });
 }
