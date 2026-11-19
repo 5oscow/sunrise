@@ -989,6 +989,30 @@ template's, with `template` added and its attributes in place of the template's.
 a client mod registers a renderer for it ([entity renderers](client/entity-renderers.md)); the content declaration
 inherits the template's goals.
 
+#### Block entity containers
+
+A code mod declares a block entity's `ModContainer` with `Registrar::block_container`. The
+container's `faces` say which slots each side reaches; `inputs` lists the slots insertion may use.
+Per-slot `insert_rules` provide static admission, with missing entries treated as `Any`.
+
+For state-dependent admission, implement `BlockEntityPart::can_place_item`
+(vanilla's `Container.canPlaceItem`). Its `CanPlaceItemEvent` gives the server part the block
+entity's saved data and current slots, the queried slot index and the offered stack. Returning
+`Some(true)` or `Some(false)` replaces the declared rule for that slot; `None` keeps it. Face
+and input-slot rules and stack limits still apply. Hoppers and hopper minecarts, droppers,
+default `ITEMS` and `STORAGE` insertion, and nonempty offers from `/loot insert` and
+`/loot replace block` use this query. `/item replace block` keeps its direct slot-write behavior.
+The default `STORAGE.space_for` does not ask the part: for subscribed slots it counts
+physical room after face and input checks. An actual insert asks with its remaining offer
+before applying the stack limit.
+
+The query has no Host and may run for a slot that is never written. Seed a filter from the
+accepted write, not from the query. Default capability writes to mod-owned storage are
+silent: they do not emit `contents_changed` on their own. Use an explicit `set_changed`
+notice or seed in a provider that owns the accepted write. Menu clicks and quick-move
+still use the declared rules and `menu_slot_rules` (vanilla's `Slot.mayPlace`); they do not
+ask the block entity part.
+
 #### Menu types
 
 A mod menu type (vanilla's `MenuType`) is declared in `data/<id>/sunrise/menu/<name>.json`: its container's slot count
