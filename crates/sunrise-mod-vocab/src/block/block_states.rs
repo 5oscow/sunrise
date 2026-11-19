@@ -45,6 +45,21 @@ impl StateConstraint {
     }
 }
 
+/// Vanilla `WeatheringCopper.WeatherState`, from fresh copper to fully oxidized.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[non_exhaustive]
+#[derive(sunrise_mod_api_macros::Wire)]
+pub enum WeatheringAge {
+    /// Fresh and unaffected by weathering.
+    Unaffected,
+    /// First stage after fresh copper.
+    Exposed,
+    /// Second stage after fresh copper.
+    Weathered,
+    /// Final stage.
+    Oxidized,
+}
+
 /// An invalid constraint, identifying its index in the supplied list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -114,6 +129,42 @@ impl BlockMetadata for BlockStates<'_> {
 }
 
 impl BlockStates<'_> {
+    /// `WeatheringCopper.getAge`. None for an unknown state or a block that
+    /// doesn't implement weathering, including waxed copper; ask `unwaxed`
+    /// first to get the age of a waxed block's underlying stage.
+    pub fn weathering_age(&self, state: BlockState) -> Option<WeatheringAge> {
+        self.backend?.block_weathering_age((&state).into())
+    }
+
+    /// `WeatheringCopper.getNext`: the next weathering stage, retaining
+    /// compatible state properties. None if no such stage or state exists.
+    /// Reads the host's loaded oxidation maps before the vanilla chain.
+    pub fn next_weathering_stage(&self, state: BlockState) -> Option<BlockState> {
+        self.backend?.block_next_weathering_stage((&state).into())
+    }
+
+    /// `WeatheringCopper.getPrevious`: the previous weathering stage,
+    /// retaining compatible state properties. None if no such stage or state
+    /// exists. Reads the host's loaded oxidation maps before the vanilla chain.
+    pub fn previous_weathering_stage(&self, state: BlockState) -> Option<BlockState> {
+        self.backend?
+            .block_previous_weathering_stage((&state).into())
+    }
+
+    /// `HoneycombItem.getWaxed`: the waxed counterpart, retaining compatible
+    /// state properties. None if the state does not have one or is unknown.
+    /// Reads the host's loaded waxables map before vanilla's.
+    pub fn waxed(&self, state: BlockState) -> Option<BlockState> {
+        self.backend?.block_state_waxed((&state).into())
+    }
+
+    /// `HoneycombItem.WAX_OFF_BY_BLOCK`: the unwaxed counterpart, retaining
+    /// compatible state properties. None if the state does not have one or
+    /// is unknown. Reads the host's loaded waxables map before vanilla's.
+    pub fn unwaxed(&self, state: BlockState) -> Option<BlockState> {
+        self.backend?.block_state_unwaxed((&state).into())
+    }
+
     /// `BlockState.canBeReplaced()`: whether placing a block where `state` stands replaces it
     /// (air, grass, water, snow layers). None for an unknown state, or a host without a game.
     pub fn replaceable(&self, state: BlockState) -> Option<bool> {

@@ -1,6 +1,6 @@
 # Block-state facts
 
-A `BlockState` is an API-owned value pairing a `BlockKey` with a block-local canonical ordinal, not a numeric engine state ID or a live object. Read facts without a world position on either side through `host.block_states()` (import `HostBlockStates`). The service reads the game's loaded tables. Fact queries and matching allocate nothing; `definition` copies the property data for the caller. Property operations on `BlockState` borrow explicit immutable block metadata; `block()` and `ordinal()` need no host:
+A `BlockState` is an API-owned value pairing a `BlockKey` with a block-local canonical ordinal, not a numeric engine state ID or a live object. Read facts without a world position on either side through `host.block_states()` (import `HostBlockStates`). The service reads the game's loaded tables. Basic fact queries and matching allocate nothing; `definition` copies the property data for the caller. Property operations on `BlockState` borrow explicit immutable block metadata; `block()` and `ordinal()` need no host:
 
 | Method | Vanilla |
 |---|---|
@@ -26,6 +26,25 @@ Use `StateConstraint` for each partial constraint; `StateMatchError` identifies 
 Whether a block conducts redstone depends on where it stands in vanilla's signature (`BlockState.isRedstoneConductor(level, pos)`), so it is read on the level: `LevelRef::is_redstone_conductor(host, pos)` (server side, `None` for an unloaded position).
 
 Queries return `None` for an unknown state or block, including an invalid local ordinal, and on a host with no game behind it (a mod's test double). The ordinal order is defined by the complete canonical property constraints, not by the engine's numeric enumeration.
+
+## Copper weathering and wax
+
+- `weathering_age(state) -> Option<WeatheringAge>` reads `WeatheringCopper.getAge`:
+  `Unaffected`, `Exposed`, `Weathered` or `Oxidized`. Waxed blocks and blocks
+  without vanilla's weathering behavior have no age.
+- `next_weathering_stage(state)` and `previous_weathering_stage(state)` read
+  `WeatheringCopper.getNext` and `getPrevious`. At either end of the chain, the
+  missing neighbor is `None`.
+- `waxed(state)` and `unwaxed(state)` read the corresponding twin from
+  `HoneycombItem`'s waxables or inverse map. If `unwaxed(state)` has a result,
+  the input is waxed. Use the unwaxed result to read the underlying age.
+
+The relations return owned states and keep the input's compatible properties
+(such as stair facing or waterlogging). They use the host's loaded
+[block data maps](../items/data-maps.md) where present, falling back to the
+vanilla relations; server data maps aren't synced to remote clients. No call
+changes the world. These reads return `None` until the corresponding tables
+are published.
 
 ## Fluid-state facts
 

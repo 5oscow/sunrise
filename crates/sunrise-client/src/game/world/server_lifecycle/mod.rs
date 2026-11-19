@@ -267,6 +267,12 @@ impl Game<'_> {
         self.session_lock = None;
         self.interrupted_turns.clear();
         self.crash_save = Default::default();
+        // The integrated client retains these resources after joining this
+        // thread. Retire the world's maps here, also on failed opens that
+        // published tables before adopting a world.
+        if let Some(rest) = self.res.rest.get() {
+            rest.behaviours.set_block_maps(None);
+        }
         super::cauldron_interactions::clear();
         self.clear_world_parts();
         self.world_adopted = false;
