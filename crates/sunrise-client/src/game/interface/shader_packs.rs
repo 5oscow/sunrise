@@ -13,7 +13,7 @@ use sunrise_shader_api::Api;
 use sunrise_shaders::{BlockIds, Macros, Pack, Properties, dimension_folder_named, load_post};
 
 use super::native_shaders::{fingerprint, outcome, refused, remember};
-use super::{Dim, Game};
+use super::{Dim, Game, Screen};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use sunrise_client_render::render_geometry::EntitySpan;
@@ -91,22 +91,17 @@ pub(super) fn picked_pack(settings: &sunrise_client::settings::Settings) -> &str
     )
 }
 
-/// Sets the picked pack, for the pack list and the toggle key alike: an empty pick turns
-/// shaders off and keeps the last non-empty pick, a non-empty pick (or a switch to another
-/// pack) becomes the last one too. The toggle key resumes exactly this last pick.
-/// The body lives on the render crate's `Graphics` so the settings screen and the game use
-/// one implementation; this forwards to it.
-pub(super) fn set_shader_pick(settings: &mut sunrise_client::settings::Settings, new_key: &str) {
-    settings.sunrise.set_shader_pick(new_key);
-}
-
-/// What the toggle key decided: the pack it turned off or resumed, a hint when there is
+/// What the toggle key decided: the pack it turned off or asked for, a hint when there is
 /// nothing (or nothing left) to resume, or nothing when the developer override wins.
+/// Announcing "on" is the selection request: the loader still has to accept the pack (its
+/// refusal path reports that), and a pack whose owning mod is off never starts.
 pub(super) enum TogglePlan {
     /// Turned `name` off; the chat names it.
     Off(String),
-    /// Resumed `name`; the chat names it.
+    /// Asked for `name`; the chat names it.
     On(String),
+    /// The last pick's owning mod is off: hint with its name, change nothing.
+    HintModOff(String),
     /// Nothing to resume: clear `last` (a pack removed after it was turned off) and hint.
     HintClearLast,
     /// Nothing to resume; hint.
@@ -116,13 +111,15 @@ pub(super) enum TogglePlan {
 }
 
 /// The toggle key's decision on the pick, without touching the game: `dev_override` is
-/// `dev_pack()` (the `SUNRISE_SHADER_PACK` override wins over the pick), and `present` says
-/// whether the last pick is still installed. Pure so tests cover every branch without a game.
+/// `dev_pack()` (the `SUNRISE_SHADER_PACK` override wins over the pick), `present` says
+/// whether the last pick is still installed, and `active` whether its owning mod lets it
+/// run (`active_pack`). Pure so tests cover every branch without a game.
 pub(super) fn plan_shader_toggle(
     pick: &str,
     last: &str,
     dev_override: bool,
     present: impl FnOnce(&str) -> bool,
+    active: impl FnOnce(&str) -> bool,
 ) -> TogglePlan {
     if dev_override {
         return TogglePlan::Noop;
@@ -130,14 +127,32 @@ pub(super) fn plan_shader_toggle(
     if !pick.is_empty() {
         return TogglePlan::Off(pick.to_owned());
     }
-    if last.is_empty() || !present(last) {
-        return if last.is_empty() {
-            TogglePlan::Hint
-        } else {
-            TogglePlan::HintClearLast
-        };
+    if last.is_empty() {
+        return TogglePlan::Hint;
+    }
+    if !present(last) {
+        return TogglePlan::HintClearLast;
+    }
+    if !active(last) {
+        return TogglePlan::HintModOff(last.to_owned());
     }
     TogglePlan::On(last.to_owned())
+}
+
+/// The Extras page's shader pack key, by identity: the translated key's vanilla name against
+/// the bound one, so a rebind never becomes another mapping's default (Replay Studio's
+/// camera-keyframe shortcut stays physical K's).
+impl Game<'_> {
+    pub(super) fn shader_pack_key_press(&mut self, name: &str) -> bool {
+        if self.screen != Screen::Playing
+            || name == "key.keyboard.unknown"
+            || self.settings.extras.shader_pack_key != name
+        {
+            return false;
+        }
+        self.toggle_shader_pack();
+        true
+    }
 }
 
 /// What a renderer readies for the pick, unless it was refused, is missing or its owner is off.
@@ -1278,13 +1293,14 @@ mod native_pack_tests {
 
 #[cfg(test)]
 mod toggle_tests {
-    use super::{TogglePlan, plan_shader_toggle, set_shader_pick};
+    use super::{TogglePlan, plan_shader_toggle};
     use sunrise_client::settings::Settings;
 
-    fn plan(pick: &str, last: &str, present: bool) -> String {
-        match plan_shader_toggle(pick, last, false, |_| present) {
+    fn plan(pick: &str, last: &str, present: bool, active: bool) -> String {
+        match plan_shader_toggle(pick, last, false, |_| present, |_| active) {
             TogglePlan::Off(name) => format!("off {name}"),
             TogglePlan::On(name) => format!("on {name}"),
+            TogglePlan::HintModOff(name) => format!("mod-off {name}"),
             TogglePlan::HintClearLast => "hint-clear".into(),
             TogglePlan::Hint => "hint".into(),
             TogglePlan::Noop => "noop".into(),
@@ -1292,13 +1308,15 @@ mod toggle_tests {
     }
 
     /// The key turns the picked pack off and remembers it, resumes it, and hints when there
-    /// is nothing to resume; a removed pack clears the memory instead of failing.
+    /// is nothing to resume; a removed pack clears the memory instead of failing, and a pack
+    /// whose owning mod is off is reported instead of announced.
     #[test]
     fn the_toggle_turns_off_resumes_and_hints() {
-        assert_eq!(plan("A.zip", "", true), "off A.zip");
-        assert_eq!(plan("", "A.zip", true), "on A.zip");
-        assert_eq!(plan("", "", true), "hint");
-        assert_eq!(plan("", "A.zip", false), "hint-clear");
+        assert_eq!(plan("A.zip", "", true, true), "off A.zip");
+        assert_eq!(plan("", "A.zip", true, true), "on A.zip");
+        assert_eq!(plan("", "", true, true), "hint");
+        assert_eq!(plan("", "A.zip", false, true), "hint-clear");
+        assert_eq!(plan("", "native-frame_owner", true, false), "mod-off native-frame_owner");
     }
 
     /// The developer override wins over the pick: the key does nothing.
@@ -1307,7 +1325,7 @@ mod toggle_tests {
         for (pick, last) in [("A.zip", ""), ("", "A.zip"), ("", "")] {
             assert!(
                 matches!(
-                    plan_shader_toggle(pick, last, true, |_| true),
+                    plan_shader_toggle(pick, last, true, |_| true, |_| true),
                     TogglePlan::Noop
                 ),
                 "pick {pick:?}, last {last:?}"
@@ -1323,17 +1341,35 @@ mod toggle_tests {
         let pick_of = |s: &Settings| {
             (
                 s.sunrise.shader_pack.clone(),
-                s.sunrise.last_shader_pack.clone(),
+                s.extras.last_shader_pack.clone(),
             )
         };
-        set_shader_pick(&mut s, "A.zip");
+        s.set_shader_pick("A.zip");
         assert_eq!(pick_of(&s), ("A.zip".into(), "A.zip".into()));
         // Picking another pack while turned off by the key forgets the older one.
-        set_shader_pick(&mut s, "");
-        set_shader_pick(&mut s, "B.zip");
+        s.set_shader_pick("");
+        s.set_shader_pick("B.zip");
         assert_eq!(pick_of(&s), ("B.zip".into(), "B.zip".into()));
         // Unpicking by hand keeps the memory, as the key's turning off does.
-        set_shader_pick(&mut s, "");
+        s.set_shader_pick("");
         assert_eq!(pick_of(&s), ("".into(), "B.zip".into()));
+    }
+
+    /// A rapid double press ends where a single one does: off keeps the memory, on takes it
+    /// back, and the loader (not the key) owns reinstalling the pack.
+    #[test]
+    fn a_rapid_double_press_restores_the_pick() {
+        let mut s = Settings::default();
+        s.set_shader_pick("sunrise:warm");
+        s.set_shader_pick("");
+        assert_eq!(
+            (s.sunrise.shader_pack.as_str(), s.extras.last_shader_pack.as_str()),
+            ("", "sunrise:warm")
+        );
+        s.set_shader_pick(&s.extras.last_shader_pack.clone());
+        assert_eq!(
+            (s.sunrise.shader_pack.as_str(), s.extras.last_shader_pack.as_str()),
+            ("sunrise:warm", "sunrise:warm")
+        );
     }
 }

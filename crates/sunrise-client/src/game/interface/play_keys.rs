@@ -43,8 +43,9 @@ impl Game<'_> {
             return Ok(());
         }
         if self.sort_key_press(key)
-            || sunrise_client::keybinds::key_name(key)
-                .is_some_and(|name| self.hud_editor_key_press(name))
+            || sunrise_client::keybinds::key_name(key).is_some_and(|name| {
+                self.hud_editor_key_press(name) || self.shader_pack_key_press(name)
+            })
         {
             return Ok(());
         }
@@ -194,7 +195,6 @@ impl Game<'_> {
             KeyCode::Slash if self.screen == Screen::Playing => self.open_chat_method("/"),
             // key.toggleGui is a KeyMapping: it clicks only with no screen open.
             KeyCode::F1 if self.screen == Screen::Playing => self.toggle_hide_gui(),
-            KeyCode::KeyK if self.screen == Screen::Playing => self.toggle_shader_pack(),
             KeyCode::F11 => self.toggle_fullscreen(),
             KeyCode::F5 if self.screen == Screen::Playing && !self.replay.playing() => {
                 self.cycle_camera()

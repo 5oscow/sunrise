@@ -1,7 +1,7 @@
 //! The options screens bound to the game: drawing, input, applying settings
 //! (video, sound, chat, font, language) and the F11 fullscreen toggle.
+use super::shader_packs::{TogglePlan, active_pack, dev_pack, plan_shader_toggle};
 use super::{Game, ResizeState, Screen};
-use super::shader_packs::{TogglePlan, dev_pack, plan_shader_toggle, set_shader_pick};
 use serde_json::{Value, json};
 use sunrise_client::{
     Result,
@@ -711,10 +711,12 @@ impl Game<'_> {
         self.settings.save(&Self::options_path());
         self.apply_ui_settings();
     }
-    /// K (key.toggleShaderPack): turns the picked shader pack off, or resumes the last pick.
-    /// The same persistent pick the Shader Packs screen writes: turning off keeps the last
-    /// non-empty pick, resuming restores it. With `SUNRISE_SHADER_PACK` set the developer
-    /// override wins and the key does nothing.
+    /// The Extras page's shader pack key: turns the picked pack off, or asks for the last
+    /// pick again. The same persistent pick the Shader Packs screen writes: turning off keeps
+    /// the last non-empty pick, resuming restores it, and the off state survives a restart.
+    /// With `SUNRISE_SHADER_PACK` set the developer override wins and the key does nothing.
+    /// Invalidation stays with the normal selection path: the next frame's `shader_pack_inputs`
+    /// sees the changed pick and drops or loads the pack itself, for either pack kind.
     pub(super) fn toggle_shader_pack(&mut self) {
         let present = |key: &str| {
             sunrise_client::shader_pack_list::resolve(&Self::shader_packs_dir(), key)
@@ -723,9 +725,10 @@ impl Game<'_> {
         };
         let plan = plan_shader_toggle(
             &self.settings.sunrise.shader_pack,
-            &self.settings.sunrise.last_shader_pack,
+            &self.settings.extras.last_shader_pack,
             dev_pack().is_some(),
             present,
+            |key| !active_pack(key, &self.settings.mods).is_empty(),
         );
         match plan {
             TogglePlan::Noop => {}
@@ -733,26 +736,21 @@ impl Game<'_> {
                 self.system_message(Text::tr("sunrise.shaders.noPack", &[]));
             }
             TogglePlan::HintClearLast => {
-                self.settings.sunrise.last_shader_pack.clear();
+                self.settings.extras.last_shader_pack.clear();
                 self.settings.save(&Self::options_path());
                 self.system_message(Text::tr("sunrise.shaders.noPack", &[]));
             }
+            TogglePlan::HintModOff(name) => {
+                self.system_message(Text::tr("sunrise.shaders.modOff", &[&name]));
+            }
             TogglePlan::Off(name) => {
-                set_shader_pick(&mut self.settings, "");
+                self.settings.set_shader_pick("");
                 self.settings.save(&Self::options_path());
-                self.pack_ids = None;
-                if let Some(renderer) = self.renderer.as_mut() {
-                    renderer.drop_shader_packs();
-                }
                 self.system_message(Text::tr("sunrise.shaders.suspended", &[&name]));
             }
             TogglePlan::On(name) => {
-                set_shader_pick(&mut self.settings, &name);
+                self.settings.set_shader_pick(&name);
                 self.settings.save(&Self::options_path());
-                self.pack_ids = None;
-                if let Some(renderer) = self.renderer.as_mut() {
-                    renderer.drop_shader_packs();
-                }
                 self.system_message(Text::tr("sunrise.shaders.resumed", &[&name]));
             }
         }
