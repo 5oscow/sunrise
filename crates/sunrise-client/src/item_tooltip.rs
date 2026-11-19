@@ -1377,6 +1377,7 @@ pub fn detail_lines(
             lines.push(name_line(&ItemStack::new(item, 1), translate));
         }
     }
+    lines.extend(written_book_lines(stack, &display, translate));
     lines.extend(firework_lines(stack, translate));
     // PotionContents.addToTooltip: the effects, then their attribute modifiers.
     if is_potion_item(&stack.item) && display.shows("minecraft:potion_contents") {

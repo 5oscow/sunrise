@@ -1496,6 +1496,31 @@ mod tests {
     }
 
     #[test]
+    fn search_matches_a_written_book_s_author_only_while_its_content_is_visible() {
+        let book = |hidden: &str| {
+            format!(
+                r#"{{id:"minecraft:written_book",count:1,components:{{"minecraft:enchantments":{{"minecraft:sharpness":1}},"minecraft:written_book_content":{{title:{{raw:"Notes"}},author:"Ada Lovelace",pages:[{{raw:"one"}}]}}{hidden}}}}}"#
+            )
+        };
+        let visible = book("");
+        let hidden = book(
+            r#","minecraft:tooltip_display":{hidden_components:["minecraft:written_book_content"]}"#,
+        );
+        let creative = fixture(serde_json::json!([
+            {"id":"minecraft:ingredients", "type":"CATEGORY", "build":[row(&visible), row(&hidden)]},
+            {"id":"minecraft:search", "type":"SEARCH", "build":[]}
+        ]));
+        assert_eq!(creative.search_items().len(), 2);
+        let language = lang::Language::of("en_us", [("book.byAuthor".into(), "by %1$s".into())]);
+        lang::scoped(language, || {
+            assert_eq!(
+                creative.search_results("by ada lovelace", &Names::default()),
+                [0]
+            );
+        });
+    }
+
+    #[test]
     fn search_matches_visible_attributes_alongside_live_painting_lines() {
         use sunrise_items::creative_catalog::{Holders, Painting};
         let stack = |hidden: &str| {
