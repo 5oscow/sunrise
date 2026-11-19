@@ -59,7 +59,7 @@ pub fn main_rs(
         .collect::<String>();
     let inventory = mods.iter().map(|m| format!(
         "    mod_api::__private::native::BuiltMod {{ id: {:?}, version: {:?}, side: mod_api::Side::{:?} }},\n",
-        m.id, m.version, m.side,
+        m.id, m.version.to_string(), m.side,
     )).collect::<String>();
     let api_points = listed
         .iter()
