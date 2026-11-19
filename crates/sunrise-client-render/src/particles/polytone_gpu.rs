@@ -5,8 +5,9 @@
 //! function runs when the frame's particle quads are built, beside the engine's own particles.
 //! A type with its own `shader` instead hands its records to that shader ([`ShaderBatch`]),
 //! which computes the quads on the graphics card as the wiki's 1.21.11 format describes. The
-//! renderer decides each frame, before the quads are built, whether it draws the shader
-//! (`Renderer::decide_polytone_shaders`); a type whose shader it can't draw keeps its quads here.
+//! renderer decides each frame, before the quads are built and before the heightmap is read,
+//! whether it draws the shader and has room for all of its records ([`GpuParticleRenderer`]); a
+//! type whose shader it can't draw keeps its quads here.
 use super::{ParticleLevel, ParticleLightCache};
 use crate::hud::Rect;
 use crate::mesher::Vertex;
@@ -249,9 +250,7 @@ impl Store {
             light_at,
             surface,
         } = *frame;
-        if self.def.render_type == RenderType::Invisible
-            || self.shader.as_ref().is_some_and(|s| s.drawn())
-        {
+        if self.def.render_type == RenderType::Invisible || self.drawn() {
             return;
         }
         let Some(&(rect, _)) = atlas.get(&self.sprite) else {
@@ -410,6 +409,7 @@ impl GpuShader {
     }
 
     /// Whether the renderer can't use this shader (the type draws its quads, and no batch).
+    #[cfg(test)]
     pub fn refused(&self) -> bool {
         self.state.load(Ordering::Relaxed) == REFUSED
     }
@@ -493,10 +493,6 @@ impl Orientation {
     }
 }
 
-/// The most quads a frame hands the renderer for one type: a type's ring of records times its
-/// `area`'s copies is the pack's to choose.
-const MAX_SHADER_QUADS: usize = 1 << 20;
-
 /// What a frame's quads are built from.
 #[derive(Clone, Copy)]
 pub(super) struct QuadFrame<'a> {
@@ -517,20 +513,33 @@ pub(super) struct BatchFrame<'a> {
     /// The engine's tick and the partial tick drawn.
     pub now: u64,
     pub partial: f32,
-    /// The heightmap `Sampler1` holds.
+    /// The heightmap `Sampler1` holds (the renderer was handed it before the batches).
     pub heightmap: Option<HeightmapArea>,
     pub light_at: &'a dyn Fn([i32; 3]) -> u8,
 }
 
 impl Store {
-    /// The type's own shader, unless the renderer refused it.
-    fn usable_shader(&self) -> Option<&Arc<GpuShader>> {
-        self.shader.as_ref().filter(|s| !s.refused())
+    /// Whether the type has live records that draw (an invisible type draws none).
+    fn visible(&self) -> bool {
+        !self.records.is_empty() && self.def.render_type != RenderType::Invisible
+    }
+
+    /// Whether the renderer draws the type with its own shader in this frame.
+    fn drawn(&self) -> bool {
+        self.shader.as_ref().is_some_and(|s| s.drawn())
+    }
+
+    /// The most quads the type hands its shader this frame: each live record times its
+    /// `area`'s copies (some may expire before the batch, none are added).
+    fn quads(&self) -> usize {
+        let copies = self.gpu.area.map_or(1, |(_, n)| n as usize);
+        self.records.len().saturating_mul(copies)
     }
 
     /// The live records for the type's own shader in `frame`, each repeated for the copies of
     /// its `area` on its own place (the shader spreads them, by `gl_VertexIndex`, as the default
-    /// shader does). `None` for a type without one, or one the renderer doesn't draw.
+    /// shader does). `None` for a type without one, or one the renderer doesn't draw; the
+    /// renderer only draws a type it has room for ([`ShaderRequest`]), so every record goes.
     pub(super) fn shader_batch(
         &self,
         frame: &BatchFrame,
@@ -550,15 +559,11 @@ impl Store {
         // An `area`'s copies stack on the record (measured on the real mod: nine copies of an
         // 8-block area draw on one spot, three additive ones three times as bright).
         let copies = self.gpu.area.map_or(1, |(_, n)| n as usize);
-        let mut vertices =
-            Vec::with_capacity((self.records.len() * copies).min(MAX_SHADER_QUADS) * 4);
+        let mut vertices = Vec::with_capacity(self.quads() * 4);
         for r in &self.records {
             let spawn = (r.spawn as i64 - base as i64) as f32;
             if time - spawn >= r.lifetime {
                 continue;
-            }
-            if vertices.len() / 4 + copies > MAX_SHADER_QUADS {
-                break;
             }
             let world = DVec3::from_array(r.position);
             let packed = light_cache.get(ParticleLevel::block_at(r.position), frame.light_at);
@@ -604,18 +609,41 @@ impl Store {
 pub(super) struct GpuParticles {
     stores: Vec<Store>,
     ticks: u64,
-    /// The heightmap last asked for (`ParticleEngine::polytone_heightmap_due`), and its tick.
-    heightmap: Option<(HeightmapArea, u64)>,
-    /// Its heights, for the quads of the types that die under it.
-    surface: Option<Surface>,
+    /// The heights last read (`ParticleEngine::polytone_gpu_decide`) and the tick they were
+    /// read on: the quads of the types that die under them read them, and a renderer uploads
+    /// them for the shaders that sample them.
+    surface: Option<(Surface, u64)>,
 }
 
-/// A heightmap to fill now: where, and whether a shader samples it (else only the quads drawn
-/// here read its heights).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct HeightmapRefresh {
-    pub area: HeightmapArea,
-    pub for_shaders: bool,
+/// A type the renderer decides on: its shader, and the most quads it hands over this frame.
+#[derive(Debug)]
+pub struct ShaderRequest {
+    pub shader: Arc<GpuShader>,
+    pub quads: usize,
+}
+
+/// The renderer's side of the packs' GPU particles with their own shader (`gfx::Renderer`).
+/// Each frame, before its quads are built: [`Self::decide_polytone_shaders`], then
+/// [`Self::set_polytone_heightmap`] when a shader that samples it draws; after the quads,
+/// [`Self::set_polytone_batches`].
+pub trait GpuParticleRenderer {
+    /// Its verdict on each request for the frame about to be built (`GpuShader::set_drawn`): it
+    /// draws a type with its shader only when the shader builds there and it has room for all
+    /// of the type's quads. The others' types draw their quads.
+    fn decide_polytone_shaders(&mut self, requests: &[ShaderRequest]);
+    /// The heights the drawn shaders sample (`Sampler1`) this frame, the area their blocks
+    /// advertise; the same snapshot as the last one is uploaded once.
+    fn set_polytone_heightmap(&mut self, surface: &Surface);
+    /// The batches of the types it draws with their own shaders this frame.
+    fn set_polytone_batches(&mut self, batches: Vec<ShaderBatch>);
+}
+
+/// Where the heightmap is read from: `size` columns a side around the camera, above `min_y` (the
+/// world's bottom), each column's motion-blocking top from `top(x, z)`.
+pub struct HeightmapSource<'a> {
+    pub size: u32,
+    pub min_y: i32,
+    pub top: &'a dyn Fn(i32, i32) -> i32,
 }
 
 impl GpuParticles {
@@ -658,13 +686,12 @@ impl GpuParticles {
             store.records.clear();
             store.next = 0;
         }
-        self.heightmap = None;
         self.surface = None;
     }
 
     /// The heights the quads of the types that die under the heightmap read.
     pub(super) fn surface(&self) -> Option<&Surface> {
-        self.surface.as_ref()
+        self.surface.as_ref().map(|(surface, _)| surface)
     }
 
     pub(super) fn records(&self) -> usize {
@@ -684,77 +711,102 @@ impl GpuParticles {
             store.render(frame, self.ticks, light_cache, out, additive);
         }
     }
-}
 
-/// The GPU particle types drawn with their own shaders.
-impl super::ParticleEngine {
-    /// The shaders of the GPU particle types with live records, for the renderer to decide
-    /// on before the frame's quads are built.
-    pub fn polytone_shaders(&self) -> Vec<Arc<GpuShader>> {
-        self.polytone_gpu
-            .stores
-            .iter()
-            .filter(|s| s.len() > 0)
-            .filter_map(|s| s.shader.clone())
-            .collect()
-    }
-
-    /// The heightmap GPU particles want refilled now (wiki "GPU Particles": the motion-blocking
-    /// heights of `size` columns a side around the camera, every half second), with `min_y` the
-    /// world's bottom; `None` while no type with live records reads it, or the last one is
-    /// fresh. A type reads it when its shader samples it (`Sampler1`), or when it dies under it
-    /// and draws its quads here. The caller fills it before the frame's quads are built: for
-    /// the shaders' texture when [`HeightmapRefresh::for_shaders`], and
-    /// [`Self::set_polytone_surface`] for the quads.
-    pub fn polytone_heightmap_due(
-        &mut self,
-        camera: DVec3,
-        size: u32,
-        min_y: i32,
-    ) -> Option<HeightmapRefresh> {
-        let gpu = &mut self.polytone_gpu;
-        let live = || gpu.stores.iter().filter(|s| s.len() > 0);
-        let for_shaders = live().any(|s| {
-            s.usable_shader()
-                .is_some_and(|shader| shader.samples_heightmap)
-        });
-        let for_quads = live().any(|s| {
-            s.gpu.kill_below_heightmap && !s.shader.as_ref().is_some_and(|shader| shader.drawn())
-        });
-        if !for_shaders && !for_quads {
-            return None;
+    /// The heights for `camera` from `source`, unless the last ones are still fresh: read every
+    /// half second (10 ticks, wiki "GPU Particles"), or at once for another world's bottom or
+    /// size.
+    fn refresh_surface(&mut self, camera: DVec3, source: &HeightmapSource) {
+        if let Some((surface, at)) = &self.surface {
+            let area = surface.area();
+            if self.ticks < at + 10 && area.min_y == source.min_y && area.size == source.size {
+                return;
+            }
         }
-        if let Some((area, at)) = gpu.heightmap
-            && gpu.ticks < at + 10
-            && area.min_y == min_y
-        {
-            return None;
-        }
-        let half = (size / 2) as i32;
+        let size = source.size as i32;
+        let half = size / 2;
         let area = HeightmapArea {
             origin: [
                 camera.x.floor() as i32 - half,
                 camera.z.floor() as i32 - half,
             ],
-            size,
-            min_y,
+            size: source.size,
+            min_y: source.min_y,
         };
-        gpu.heightmap = Some((area, gpu.ticks));
-        Some(HeightmapRefresh { area, for_shaders })
+        let heights: Arc<[u16]> = (0..size.saturating_mul(size))
+            .map(|i| {
+                let (x, z) = (area.origin[0] + i % size, area.origin[1] + i / size);
+                let top = (source.top)(x, z);
+                (i64::from(top) - i64::from(area.min_y)).clamp(0, i64::from(u16::MAX)) as u16
+            })
+            .collect();
+        match Surface::new(area, heights) {
+            Ok(surface) => self.surface = Some((surface, self.ticks)),
+            Err(e) => log::warn!("GPU particle heightmap not read: {e}"),
+        }
+    }
+}
+
+/// The GPU particle types drawn with their own shaders.
+impl super::ParticleEngine {
+    /// Before the frame's quads are built: the renderer's verdict on the shaders of the types
+    /// with live records that draw, then the heightmap for the readers that draw in this frame
+    /// (a drawn shader that samples it, or a `kill_below_heightmap` type drawn as quads). A
+    /// drawn shader that samples it gets the heights its block advertises before its first
+    /// frame, from any renderer. Without a renderer every type draws its quads.
+    pub fn polytone_gpu_decide(
+        &mut self,
+        renderer: Option<&mut dyn GpuParticleRenderer>,
+        camera: DVec3,
+        source: &HeightmapSource,
+    ) {
+        let gpu = &mut self.polytone_gpu;
+        let requests: Vec<ShaderRequest> = gpu
+            .stores
+            .iter()
+            .filter(|s| s.visible())
+            .filter_map(|s| {
+                let shader = s.shader.clone()?;
+                Some(ShaderRequest {
+                    shader,
+                    quads: s.quads(),
+                })
+            })
+            .collect();
+        let mut renderer = renderer;
+        match renderer.as_deref_mut() {
+            Some(renderer) => renderer.decide_polytone_shaders(&requests),
+            None => requests.iter().for_each(|r| r.shader.set_drawn(false)),
+        }
+        let live = || gpu.stores.iter().filter(|s| s.visible());
+        let for_shaders =
+            live().any(|s| s.drawn() && s.shader.as_ref().is_some_and(|sh| sh.samples_heightmap));
+        let for_quads = live().any(|s| s.gpu.kill_below_heightmap && !s.drawn());
+        if !for_shaders && !for_quads {
+            return;
+        }
+        gpu.refresh_surface(camera, source);
+        if for_shaders && let (Some(renderer), Some((surface, _))) = (renderer, &gpu.surface) {
+            renderer.set_polytone_heightmap(surface);
+        }
     }
 
-    /// The heights the caller filled for the area [`Self::polytone_heightmap_due`] asked for,
-    /// for this frame's quads on.
-    pub fn set_polytone_surface(&mut self, area: HeightmapArea, heights: &[u16]) {
-        self.polytone_gpu.surface = Some(Surface {
-            area,
-            heights: heights.into(),
-        });
+    /// After the frame's quads (and any clear in their extraction): the records of the types
+    /// the renderer draws with their own shader go to it.
+    pub fn polytone_gpu_hand_over(
+        &self,
+        renderer: Option<&mut dyn GpuParticleRenderer>,
+        camera: DVec3,
+        partial: f32,
+        light_at: &dyn Fn([i32; 3]) -> u8,
+    ) {
+        if let Some(renderer) = renderer {
+            renderer.set_polytone_batches(self.polytone_shader_batches(camera, partial, light_at));
+        }
     }
 
     /// The GPU particle types the renderer draws with their own shaders this frame (wiki "GPU
     /// Particles"): each one's live records with this frame's block and uniforms.
-    pub fn polytone_shader_batches(
+    pub(super) fn polytone_shader_batches(
         &self,
         camera: DVec3,
         partial: f32,
@@ -768,7 +820,7 @@ impl super::ParticleEngine {
             camera,
             now: gpu.ticks,
             partial,
-            heightmap: gpu.heightmap.map(|(area, _)| area),
+            heightmap: gpu.surface().map(Surface::area),
             light_at,
         };
         let mut light_cache = ParticleLightCache::default();
@@ -1011,14 +1063,12 @@ mod tests {
         };
         let atlas = HashMap::from([("test:particle/rain".to_owned(), (rect, true))]);
         // Ground at y 64 over a 4x4 area from (0, 0).
-        let surface = Surface {
-            area: HeightmapArea {
-                origin: [0, 0],
-                size: 4,
-                min_y: 0,
-            },
-            heights: vec![64u16; 16].into(),
+        let area = HeightmapArea {
+            origin: [0, 0],
+            size: 4,
+            min_y: 0,
         };
+        let surface = Surface::new(area, vec![64u16; 16].into()).unwrap();
         let quads = |store: &Store, sky: u8| {
             let (mut out, mut additive) = (Vec::new(), Vec::new());
             let light_at = move |_: [i32; 3]| sky << 4;

@@ -2,13 +2,20 @@
 //! records aren't in the native particle count, and the frame still builds their quads when no
 //! renderer draws the type's shader; rain that dies under the heightmap reads heights taken
 //! before those quads, from its first frame.
-use crate::game::native_entity_refs::tests::with_game;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use sunrise_assets::resource_source::{Resource, ResourceSource};
 use sunrise_client::hud::Rect;
 use sunrise_client::particles::polytone::Registry;
 use sunrise_client::particles::{ParticleEngine, ParticleOptions};
+
+/// A game over the prepared resources that registers no mod tables of the process (the
+/// particles here are the pack's): `server_game`, not the mod fixture's `with_game`.
+fn with_game(test: impl FnOnce(&mut crate::game::Game<'_>)) {
+    let mut resources = None;
+    let mut game = crate::game::game_tests::tests::server_game(&mut resources);
+    test(&mut game);
+}
 
 /// A pack with one GPU particle type, `test:rain`, drawn with a vanilla particle sprite and
 /// no shader of its own; `kill_below_heightmap` when `dies_under`.
