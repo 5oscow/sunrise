@@ -299,19 +299,6 @@ fn pack_entries(
     }
 }
 
-/// Validate the winning dialog files, after pack selection and load conditions.
-fn persistent_dialog_entries(entries: &mut Vec<((String, String), Value, bool)>) {
-    entries.retain(|((namespace, path), value, _)| {
-        match sunrise_world::item_defaults::validate_dialog(value) {
-            Ok(()) => true,
-            Err(error) => {
-                log::warn!("dialog {namespace}:{path} rejected: {error}");
-                false
-            }
-        }
-    });
-}
-
 /// The mods' dimension types, below the packs': the overworld's with the
 /// mod's fields over it. No client knows them, so their data is always sent.
 fn mod_dimension_types(
@@ -720,9 +707,6 @@ impl SyncData {
                 overlay.conditions,
                 path,
             );
-            if *key == "minecraft:dialog" {
-                persistent_dialog_entries(&mut entries);
-            }
             let mut entries = damage_entries.unwrap_or_else(|| {
                 entries
                     .into_iter()
@@ -2395,3 +2379,46 @@ mod component_tests {
 
 #[path = "data_condition_filter.rs"]
 mod condition_filter;
+
+#[cfg(test)]
+mod transient_dialog_tests {
+    use super::*;
+    #[test]
+    fn a_dialog_naming_a_transient_component_refuses_the_registry_load() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("items.json"), b"{}").unwrap();
+        let defaults = sunrise_world::item_defaults::read(root.path()).unwrap();
+        let files = [
+            (
+                "dialog/test:bad_item".into(),
+                vec![br#"{"type":"minecraft:notice","title":"bad","body":[{"type":"minecraft:item","item":{"id":"minecraft:stone","components":{"!minecraft:map_post_processing":{}}}}]}"#.to_vec()],
+            ),
+            (
+                "dialog/test:bad_hover".into(),
+                vec![br#"{"type":"minecraft:notice","title":{"text":"bad","hover_event":{"action":"show_item","id":"minecraft:stone","components":{"minecraft:additional_trade_cost":3}}}}"#.to_vec()],
+            ),
+            (
+                "dialog/test:good".into(),
+                vec![br#"{"type":"minecraft:notice","title":"kept","body":[{"type":"minecraft:item","item":{"id":"minecraft:stone","components":{"minecraft:tooltip_display":{"hidden_components":["minecraft:creative_slot_lock"]}}}}]}"#.to_vec()],
+            ),
+        ];
+        let conditions = sunrise_world::conditions::LoadConditions::new([]);
+        let (_, admitted) = PackRegistryDefinitions::stage(
+            root.path(),
+            &defaults,
+            &sunrise_world::loot::PackOverlay {
+                files: &files,
+                conditions: &conditions,
+            },
+            &BTreeMap::new(),
+            &Default::default(),
+            |_| true,
+        );
+        let error = admitted.unwrap_err();
+        assert!(error.contains("minecraft:dialog:"), "{error}");
+        assert!(error.contains("test:bad_item: "), "{error}");
+        assert!(error.contains("test:bad_hover: "), "{error}");
+        assert!(error.contains("minecraft:map_post_processing"), "{error}");
+        assert!(!error.contains("test:good"), "{error}");
+    }
+}
