@@ -224,11 +224,8 @@ mod tests {
 
     #[test]
     fn hash_and_order() {
-        assert_eq!(java_string_hash("harness".encode_utf16()), {
-            "harness"
-                .chars()
-                .fold(0i32, |h, c| h.wrapping_mul(31).wrapping_add(c as i32))
-        });
+        // String.hashCode over UTF-16 code units: the emoji is two surrogates.
+        assert_eq!(java_string_hash("\u{1F600}".encode_utf16()), 1_772_899);
         let mut o = OpenOrder::new(16, 0.5);
         for k in ["harness", "harness_h"] {
             o.insert(k);
