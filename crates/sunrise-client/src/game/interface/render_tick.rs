@@ -1000,19 +1000,20 @@ impl Game<'_> {
     }
 }
 
-/// The packs' expression uniforms on the lightmap shader (`shader_modifiers`, wiki "Shaders").
+/// The packs' expression uniforms on core shaders (`shader_modifiers`, wiki "Shaders").
 impl Game<'_> {
-    /// Whether this frame has expression uniforms to evaluate: the drawn pack lightmap shader
-    /// reads one. Only then is the frame's expression context made for them.
-    pub(in crate::game) fn lightmap_reads_expressions(&self) -> bool {
+    /// Whether this frame has expression uniforms to evaluate: a drawn pack core shader (the
+    /// lightmap, the sky, the stars or the block outline) reads one. Only then is the frame's
+    /// expression context made for them.
+    pub(in crate::game) fn reads_pack_expressions(&mut self) -> bool {
         self.renderer
-            .as_ref()
+            .as_mut()
             .is_some_and(|r| r.reads_pack_expressions())
     }
 
-    /// The values of the expression uniforms the drawn lightmap shader reads, from `frame` (the
-    /// packs' expression context): their programs, resolved when the shader loaded.
-    pub(in crate::game) fn evaluate_lightmap_expressions(
+    /// The values of the expression uniforms the drawn pack core shaders read, from `frame`
+    /// (the packs' expression context): their programs, resolved when the shaders loaded.
+    pub(in crate::game) fn evaluate_pack_expressions(
         &mut self,
         frame: Option<&sunrise_client::environment::Frame>,
     ) {
