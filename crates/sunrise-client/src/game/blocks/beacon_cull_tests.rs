@@ -14,6 +14,15 @@ use sunrise_client::{
 };
 
 fn game<'a>(resources: &'a mut Option<Arc<crate::game::Resources>>) -> Game<'a> {
+    game_as(resources, execution_role::ExecutionRole::IntegratedServer)
+}
+
+/// A game loaded from the prepared resources as `role`: a client also loads what it draws with
+/// (the GUI and item atlas, baked block models).
+pub(super) fn game_as<'a>(
+    resources: &'a mut Option<Arc<crate::game::Resources>>,
+    role: execution_role::ExecutionRole,
+) -> Game<'a> {
     let root = std::path::PathBuf::from(
         std::env::var_os("SUNRISE_TEST_RESOURCES")
             .expect("set SUNRISE_TEST_RESOURCES to prepared resources"),
@@ -27,14 +36,14 @@ fn game<'a>(resources: &'a mut Option<Arc<crate::game::Resources>>) -> Game<'a> 
         &settings,
         std::time::Instant::now(),
         false,
-        execution_role::ExecutionRole::IntegratedServer,
+        role,
         &Progress::new(),
         &mut |_, _| unreachable!(),
     )
     .unwrap();
     let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
     options.resources = root.clone();
-    options.execution_role = execution_role::ExecutionRole::IntegratedServer;
+    options.execution_role = role;
     let res = &*resources.insert(loaded.resources);
     let mut game = Game::new(
         res,
