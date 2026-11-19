@@ -165,10 +165,10 @@ for an unknown state; `min_y()` and `height()` read the level's build range. It 
 and `is_loaded(pos)` (`Level.isLoaded`: inside the build height and in a loaded chunk),
 `is_raining_at(pos)` (`Level.isRainingAt`, false where `pos` is not loaded) and `enabled_features()`
 (`LevelReader.enabledFeatures`, a borrowed `FeatureFlags<'_>`). These queries do not allocate.
-None of them loads a chunk. Light above the build height reads as full sky and below it as
-none, and a chunk that isn't loaded reads as the game's query does (full sky, no block light),
-so check `is_loaded` first. It also answers tag and fluid questions without a `Host`: `block_in_tag(block_key, tag)`,
-`fluid_state(pos)` (`getFluidState`, `None` where the block read is),
+None of them loads a chunk. The raw light query supplies defaults (including full sky in a
+missing column), so check `is_loaded` first when you need a resident block. `LevelHost` also answers
+tag and fluid questions without a `Host`: `block_in_tag(block_key, tag)`, `fluid_state(pos)`
+(`getFluidState`, `None` where the block read is),
 `state_fluid_state(state)` and `fluid_in_tag(fluid_name, tag)`. Fluid reads return `FluidState` with a
 `FluidKey`, amount, falling flag and engine-derived source flag; `is_empty()` and `is_source()` report
 those states without a registry lookup. `block_state_id(name)` parses a block and properties, and `block_state_default(block)` gives a block's default state, as on `Host`; both return `None` for invalid input or unavailable context. Tag reads are `None` when authoritative tags are unavailable, including on a client before its server's tags are applied. For item membership and member lists, use `Host::tags()`: resolve a `TagKey` with `Tags::key`, then call `Tags::is_in_tag`, `Tags::items` or `Tags::fluids`. Membership reads return `None` on clients until server-sent tags are applied, which `tags_updated` announces; they never substitute local resource-pack tags.
@@ -179,7 +179,27 @@ load or reload, and `ClientPacketReceived { integrated_server }` for a client's 
 integrated client, whose server already updated the shared static data. Installing client tags
 announces the bound defaults; it does not rebind those defaults.
 
-`block_face_sturdy(pos, face, support)` reads `BlockState.isFaceSturdy` through the same engine query as the level handle, including dynamic and published shapes. `canSupportRigidBlock` is `(pos, Up, Rigid)`. `canSupportCenter` is `(pos, face, Center)`, except that vanilla also refuses `Down` on blocks tagged `minecraft:unstable_bottom_center`. `can_see_sky(pos)` tests full stored sky light through the level handle's query. Both return `None` on clients, for unloaded or out-of-height positions, or in a callback without the corresponding view. Neither loads chunks or opens loot containers. They are owning-game-thread reads, not available in worker-thread hook bodies.
+`block_face_sturdy(pos, face, support)` reads `BlockState.isFaceSturdy` through the same engine
+query as the level handle. It uses the server level's or current client level's local shapes,
+including dynamic and published shapes, and returns `None` for unloaded or out-of-height
+positions. `canSupportRigidBlock` is `(pos, Up, Rigid)`. `canSupportCenter` is `(pos, face, Center)`,
+except that vanilla also refuses `Down` on blocks tagged `minecraft:unstable_bottom_center`.
+
+`can_see_sky(pos)` tests the published sky light for 15, not the heightmap or block light. It
+returns false everywhere in a dimension without skylight. In vanilla, sky light can be stored in
+padding sections above and below build height. Above the highest stored section, or in a column
+with no stored sections, there is full sky. A missing section below a stored one repeats the
+bottom row of the next stored section above it. An unloaded column beside non-air sections can
+have retained light in that band: the server reads its last light there and the client has no
+full sky there.
+
+**Known gap ([#2761](https://github.com/sunrise-org/sunrise/issues/2761)):** In skylit dimensions,
+Sunrise reads the resident column's allocated sections, with full sky above them and in every
+missing column, and darkness below them, instead of tracking vanilla's padding and unloaded border.
+
+Both reads return `None` in callbacks without the corresponding view. A `LevelRef` must still
+name an open server level or the current client level. Neither read loads chunks or opens loot
+containers. Both require the owning game thread, not a worker-thread hook body.
 
 `block_entity(pos)` reads this level's block entity without loading a chunk; it returns `None` when absent, unloaded or out for its tick. On a client it returns only the local block entity handle. `container_size(at)` and `container_stack(at, slot)` are the same side-local capability snapshots as `ItemsHost` supplies; neither generates unopened loot, and both refuse clients and unloaded positions. `BlockEntityPartState::state_in(level, entity)` and `state_existing_in` read the same attachment snapshots as their `Host` equivalents, without inserting a default, generating loot or loading chunks. Unloaded or stale holders fail; clients have no server Part state. All are owning-game-thread reads, never available in worker hook bodies.
 
