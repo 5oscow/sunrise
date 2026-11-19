@@ -328,11 +328,7 @@ mod tests {
             let kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();
             game.mobs
                 .push(Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0));
-            let shears = mod_api::ItemStack::new(
-                mod_api::__private::item_key("minecraft:shears").unwrap(),
-                1,
-            )
-            .unwrap();
+            let shears = sunrise_client::items::ItemStack::new("minecraft:shears", 1);
             for reloading in [false, true] {
                 let setup = PhaseOwner::scope(ModPhase::Setup);
                 let _reload = reloading.then(|| setup.reloading().unwrap());
