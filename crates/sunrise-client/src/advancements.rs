@@ -141,6 +141,30 @@ pub fn facts_asked_in(v: &Value) -> FactsAsked {
     }
     asked
 }
+/// Whether a predicate, a list of conditions or an item modifier may read an
+/// entity's scores: it holds an `entity_scores` leaf, or a `minecraft:reference`
+/// to a predicate file that may.
+pub fn asks_scores(v: &Value) -> bool {
+    let mut todo = vec![v];
+    while let Some(v) = todo.pop() {
+        match v {
+            Value::Array(list) => todo.extend(list),
+            Value::Object(o) => {
+                let kind = (o.get("condition").or_else(|| o.get("type")))
+                    .or_else(|| o.get("function"))
+                    .and_then(Value::as_str);
+                if kind.is_some_and(|k| {
+                    matches!(&*full(k), "minecraft:entity_scores" | "minecraft:reference")
+                }) {
+                    return true;
+                }
+                todo.extend(o.values());
+            }
+            _ => {}
+        }
+    }
+    false
+}
 fn frame(v: &Value) -> Frame {
     match v.as_str() {
         Some("goal") => Frame::Goal,

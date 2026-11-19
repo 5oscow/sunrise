@@ -554,12 +554,22 @@ impl Game<'_> {
                     }
                     _ => {
                         let source = self.command_source.unwrap_or_else(|| self.player_source());
+                        // Scores are read from the holder's board only where
+                        // an `entity_scores` leaf may ask.
+                        let scored = adv::asks_scores(cond);
+                        let view = |game: &mut Self, t| {
+                            if scored {
+                                game.entity_view_scored(t, cond)
+                            } else {
+                                game.entity_view_asked(t, cond)
+                            }
+                        };
                         let this = source
                             .entity
                             .filter(|_| c.without_this.is_none())
-                            .map(|t| self.entity_view_scored(t, cond));
-                        let target = c.target.map(|t| self.entity_view_scored(t, cond));
-                        let interacting = c.interacting.map(|t| self.entity_view_scored(t, cond));
+                            .map(|t| view(self, t));
+                        let target = c.target.map(|t| view(self, t));
+                        let interacting = c.interacting.map(|t| view(self, t));
                         let entities = context_entities(
                             c,
                             this.as_ref(),
@@ -806,6 +816,13 @@ mod tests {
         // source (here with no entity) is only `this`.
         game.set_allow_commands(true);
         assert!(game.run_command("scoreboard objectives add points dummy"));
+        game.player = Some(
+            sunrise_client::motion::PlayerMotion::new(
+                game.motion,
+                sunrise_core::geometry::Vec3::new(0.5, 64.0, 0.5),
+            )
+            .unwrap(),
+        );
         assert!(game.run_command("scoreboard players set @s points 5"));
         let mut source = game.player_source();
         source.entity = None;
