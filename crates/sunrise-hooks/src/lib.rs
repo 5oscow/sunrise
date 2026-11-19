@@ -27,6 +27,7 @@ pub mod pages;
 pub mod perf;
 mod registry;
 pub mod settings;
+pub mod sound;
 pub mod tunnel;
 
 use registry::Registry;

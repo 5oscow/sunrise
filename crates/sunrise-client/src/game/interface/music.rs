@@ -210,8 +210,6 @@ impl Game<'_> {
         };
         self.audio
             .set_listener_reserve(self.settings.extras.ui_sound_reserve);
-        self.audio
-            .set_mod_streams(self.settings.extras.mod_audio_streams);
         // Client mods' sounds asked for since the last update start with it, then their stops
         // and fades apply.
         self.apply_mod_sounds();

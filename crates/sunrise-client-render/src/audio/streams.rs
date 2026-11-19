@@ -19,7 +19,9 @@ use mod_api::{
 };
 use std::sync::{
     Arc, Mutex, MutexGuard, Weak,
-    atomic::{AtomicBool, AtomicI16, AtomicU8, AtomicU32, AtomicU64, Ordering::*, fence},
+    atomic::{
+        AtomicBool, AtomicI16, AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering::*, fence,
+    },
 };
 
 /// How far from the origin a position may lie, in blocks (the world border's limit).
@@ -326,6 +328,9 @@ pub(super) struct StreamVoice {
 #[derive(Default)]
 pub(super) struct StreamPool {
     controls: Mutex<Vec<Arc<Control>>>,
+    /// How many controls there are, so that with no stream open the main thread's calls and the
+    /// tick take no lock at all.
+    open: AtomicUsize,
     /// The output went away (a failed reopen): no stream opens until it is back.
     lost: AtomicBool,
 }
@@ -333,6 +338,11 @@ pub(super) struct StreamPool {
 impl StreamPool {
     fn controls(&self) -> MutexGuard<'_, Vec<Arc<Control>>> {
         self.controls.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Whether no stream is open: the lock-free test every call that has nothing to do starts with.
+    fn idle(&self) -> bool {
+        self.open.load(Relaxed) == 0
     }
 
     /// Opens a stream for `owner`, a mod. The ring is allocated here, before the mixer is
@@ -405,26 +415,39 @@ impl StreamPool {
             ring,
             current: [0.0; 2],
             fraction: 0.0,
-            view: View::default(),
+            // The placement just published: a voice is never heard Flat while its real placement
+            // is not in. Should the callback find a writer in the middle of a change before it
+            // has read any, it keeps this, or silence.
+            view: control.view().unwrap_or(View {
+                positional: true,
+                placed: false,
+                at: [0.0; 3],
+            }),
         };
         match mixer.lock() {
             Ok(mut mixer) => mixer.streams.push(voice),
             Err(_) => return Err(AudioRefusal::NoOutput),
         }
         controls.push(control);
+        self.open.store(controls.len(), Relaxed);
         Ok(Arc::new(handle))
     }
 
     /// Lets go of the streams a mod stopped or dropped: their voices leave the mixer, and with
     /// the last of them their rings are freed.
     pub(super) fn reap(&self, mixer: &Mutex<Mixer>) {
+        if self.idle() {
+            return;
+        }
         let mut controls = self.controls();
         let before = controls.len();
         controls.retain(|c| !c.closed.load(Acquire));
+        self.open.store(controls.len(), Relaxed);
         if controls.len() != before {
-            // The voices leave into a list made before the lock; their rings drop after the
-            // lock is released, never in the callback.
-            let mut gone = Vec::with_capacity(before - controls.len());
+            // The voices leave into a list made before the lock, with room for every voice there
+            // was (a mod may stop another stream meanwhile): nothing allocates under the lock,
+            // and the rings drop after it is released, never in the callback.
+            let mut gone = Vec::with_capacity(before);
             if let Ok(mut mixer) = mixer.lock() {
                 let mut i = 0;
                 while i < mixer.streams.len() {
@@ -443,6 +466,9 @@ impl StreamPool {
     /// there, where it doesn't (untracked, unloaded, removed) the stream is unplaced. Takes no
     /// lock the output callback takes.
     pub(super) fn follow_entities(&self, mut resolve: impl FnMut(EntityRef) -> Option<[f64; 3]>) {
+        if self.idle() {
+            return;
+        }
         for control in self.controls().iter() {
             control.follow(&mut resolve);
         }
@@ -451,6 +477,9 @@ impl StreamPool {
     /// The listener left its level: every positional stream is silent until its mod places it
     /// again.
     pub(super) fn unplace(&self) {
+        if self.idle() {
+            return;
+        }
         for control in self.controls().iter() {
             control.unplace();
         }
@@ -511,57 +540,101 @@ pub(super) fn mix(
             avail -= 1;
             c.playing.store(true, Release);
         }
-        // What the callback last read whole stands if a writer is in the middle of a change.
-        if let Some(view) = c.view() {
-            voice.view = view;
-        }
         let volume = f32::from_bits(c.volume.load(Relaxed)) * category_gain[c.category];
         // Gain per output channel, and the one a mono output takes (no panning); NaN anywhere
-        // is silence.
-        let [left, right, mono] = if !voice.view.positional {
-            [volume; 3]
-        } else if !voice.view.placed {
+        // is silence. A stream with no volume is not looked at.
+        let [left, right, mono] = if volume == 0.0 {
             [0.0; 3]
         } else {
-            let at = voice.view.at;
-            let away = |camera: &([f64; 3], Basis, u32)| {
-                [
-                    at[0] - camera.0[0],
-                    at[1] - camera.0[1],
-                    at[2] - camera.0[2],
-                ]
-            };
-            let sqr = |d: [f64; 3]| d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-            match cameras
-                .iter()
-                .min_by(|a, b| sqr(away(a)).total_cmp(&sqr(away(b))))
-            {
-                None => [0.0; 3],
-                Some(camera) => {
-                    let d = away(camera);
-                    let (forward, up, right) = camera.1;
-                    let dot =
-                        |a: [f64; 3], b: [f64; 3]| (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) as f32;
-                    let distance = sqr(d).sqrt() as f32;
-                    let gain = volume * distance_gain(Some(c.range), distance);
-                    let [mut l, mut r] = super::stereo_gains_with_length(
-                        dot(d, right),
-                        dot(d, up),
-                        dot(d, forward),
-                        distance,
-                    );
-                    if shared_listeners {
-                        let middle = (l + r) * 0.5;
-                        l = middle + (l - middle) * 0.5;
-                        r = middle + (r - middle) * 0.5;
+            // What the callback last read whole stands if a writer is in the middle of a change.
+            if let Some(view) = c.view() {
+                voice.view = view;
+            }
+            if !voice.view.positional {
+                [volume; 3]
+            } else if !voice.view.placed {
+                [0.0; 3]
+            } else {
+                let at = voice.view.at;
+                let away = |camera: &([f64; 3], Basis, u32)| {
+                    [
+                        at[0] - camera.0[0],
+                        at[1] - camera.0[1],
+                        at[2] - camera.0[2],
+                    ]
+                };
+                let sqr = |d: [f64; 3]| d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+                match cameras
+                    .iter()
+                    .min_by(|a, b| sqr(away(a)).total_cmp(&sqr(away(b))))
+                {
+                    None => [0.0; 3],
+                    Some(camera) => {
+                        let d = away(camera);
+                        let (forward, up, right) = camera.1;
+                        let dot = |a: [f64; 3], b: [f64; 3]| {
+                            (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) as f32
+                        };
+                        let distance = sqr(d).sqrt() as f32;
+                        let gain = volume * distance_gain(Some(c.range), distance);
+                        let [mut l, mut r] = super::stereo_gains_with_length(
+                            dot(d, right),
+                            dot(d, up),
+                            dot(d, forward),
+                            distance,
+                        );
+                        if shared_listeners {
+                            let middle = (l + r) * 0.5;
+                            l = middle + (l - middle) * 0.5;
+                            r = middle + (r - middle) * 0.5;
+                        }
+                        [l * gain, r * gain, gain]
                     }
-                    [l * gain, r * gain, gain]
                 }
             }
         };
         let [left, right, mono] = [left, right, mono].map(|g| if g.is_finite() { g } else { 0.0 });
         let step = f64::from(c.rate) / f64::from(rate);
+        let output_frames = out.len() / channels;
+        if left == 0.0 && right == 0.0 && mono == 0.0 {
+            // Inaudible (muted, no volume, unplaced, out of range): no resampling and no mixing,
+            // only the ring's head moves, as far as the output would have taken it. The source
+            // frame wanted at the start of each output frame but the first is
+            // `floor(fraction + step * (frames - 1))`, as the loop below counts them.
+            if output_frames > 0 {
+                let wanted = (voice.fraction + step * (output_frames - 1) as f64) as u64;
+                let advance = wanted.min(avail);
+                if advance > 0 {
+                    voice.current = frame_at(taken + advance - 1);
+                }
+                taken += advance;
+                if wanted > advance {
+                    c.playing.store(false, Release);
+                } else {
+                    voice.fraction += step * output_frames as f64 - wanted as f64;
+                }
+            }
+            ring.head.store(head + taken * ch as u64, Release);
+            continue;
+        }
         for frame in out.chunks_mut(channels) {
+            // The source frames the last output frame moved past. A frame that is not there yet
+            // is an underrun only now, when the output needs it: one that merely has not arrived
+            // by the end of a buffer is looked for again in the next.
+            while voice.fraction >= 1.0 {
+                if avail == 0 {
+                    // Silence, and buffering again until `prebuffer_ms` is back.
+                    c.playing.store(false, Release);
+                    break;
+                }
+                voice.current = frame_at(taken);
+                taken += 1;
+                avail -= 1;
+                voice.fraction -= 1.0;
+            }
+            if !c.playing.load(Relaxed) {
+                break;
+            }
             // Between two source frames the output is their mix; past the last one queued it
             // holds that one, so every accepted frame plays for its whole length.
             let now = if voice.fraction > 0.0 && avail > 0 {
@@ -585,21 +658,6 @@ pub(super) fn mix(
                 } * mono;
             }
             voice.fraction += step;
-            while voice.fraction >= 1.0 {
-                if avail == 0 {
-                    // Underrun: this frame was the last there was. Silence, and buffering
-                    // again until `prebuffer_ms` is back.
-                    c.playing.store(false, Release);
-                    break;
-                }
-                voice.current = frame_at(taken);
-                taken += 1;
-                avail -= 1;
-                voice.fraction -= 1.0;
-            }
-            if !c.playing.load(Relaxed) {
-                break;
-            }
         }
         ring.head.store(head + taken * ch as u64, Release);
     }
@@ -726,9 +784,9 @@ mod tests {
         assert_eq!(stream.push(&half(10_000)), 6_720);
         assert_eq!(stream.push(&half(1)), 0);
         assert_eq!(stream.buffered_ms(), 140);
-        // Playing makes room again: 480 frames played, and the one the resampler holds.
+        // Playing makes room again: the 480 frames played.
         rig.play(480);
-        assert_eq!(stream.push(&half(10_000)), 481);
+        assert_eq!(stream.push(&half(10_000)), 480);
     }
 
     #[test]
@@ -1016,17 +1074,101 @@ mod tests {
         assert!(rig.play(64).iter().all(|s| s.abs() < 1e-6));
     }
 
+    /// 24 kHz mono, so one source frame plays for exactly two output frames: no rounding.
+    fn half_rate(category: SoundSource) -> StreamSpec {
+        StreamSpec::new(category, 1, 24_000).with_prebuffer_ms(20)
+    }
+
     #[test]
-    fn a_muted_switch_silences_streams_but_their_audio_is_still_consumed() {
+    fn a_stream_with_no_volume_takes_its_audio_in_at_the_pace_of_one_that_is_heard() {
+        let rig = Rig::new();
+        let heard = rig.open("mod", &half_rate(SoundSource::Voice)).unwrap();
+        let unheard = rig.open("mod", &half_rate(SoundSource::Music)).unwrap();
+        for stream in [&heard, &unheard] {
+            stream.push(&ramp(2_000));
+        }
+        rig.mixer.lock().unwrap().stream_gain[SoundSource::Music.index()] = 0.0;
+        // Odd buffer lengths, so the half frames carry from one buffer to the next.
+        for frames in [481, 479, 1_001, 3] {
+            let out = rig.play(frames);
+            assert!(out.iter().any(|s| *s != 0.0));
+            assert_eq!(heard.buffered_ms(), unheard.buffered_ms());
+        }
+        assert!(heard.buffered_ms() < 2_000 * 1000 / 24_000);
+        // Heard again, it plays from where the audio has got to, as the other does.
+        rig.mixer.lock().unwrap().stream_gain[SoundSource::Music.index()] = 1.0;
+        let out = rig.play(8);
+        for pair in out.chunks(2) {
+            assert!(pair[0] != 0.0 && pair[0] == pair[1]);
+        }
+        assert_eq!(heard.state(), unheard.state());
+    }
+
+    #[test]
+    fn an_unheard_stream_that_runs_dry_goes_back_to_buffering_like_a_heard_one() {
+        let rig = Rig::new();
+        let stream = rig.open("mod", &half_rate(SoundSource::Music)).unwrap();
+        stream.push(&ramp(480));
+        rig.mixer.lock().unwrap().stream_gain[SoundSource::Music.index()] = 0.0;
+        // 480 source frames last 960 output frames.
+        rig.play(960);
+        assert_eq!(stream.state(), AudioStreamState::Playing);
+        rig.play(2);
+        assert_eq!(stream.state(), AudioStreamState::Buffering);
+    }
+
+    #[test]
+    fn audio_that_has_not_arrived_by_the_end_of_a_buffer_is_not_an_underrun() {
         let rig = Rig::new();
         let stream = rig.open("mod", &spec()).unwrap();
+        stream.push(&half(960));
+        // Exactly the audio there is: the buffer ends where it does, nothing has run dry.
+        assert!(rig.play(960).iter().all(|s| (*s - 0.5).abs() < 1e-6));
+        assert_eq!(stream.state(), AudioStreamState::Playing);
+        // A chunk much smaller than the prebuffer arrives before the next buffer: it plays.
+        stream.push(&half(100));
+        let out = rig.play(100);
+        assert!(out.iter().all(|s| (*s - 0.5).abs() < 1e-6), "{out:?}");
+        assert_eq!(stream.state(), AudioStreamState::Playing);
+        // Only now that the output needs a frame and none is there does it run dry.
+        rig.play(1);
+        assert_eq!(stream.state(), AudioStreamState::Buffering);
+    }
+
+    #[test]
+    fn a_stream_is_never_heard_flat_before_its_placement_is_in() {
+        let rig = Rig::new();
+        let stream = rig
+            .open(
+                "mod",
+                &spec().with_placement(StreamPlacement::At([0.0, 0.0, 10_000.0])),
+            )
+            .unwrap();
         stream.push(&half(2_000));
-        rig.mixer.lock().unwrap().streams_muted = true;
-        let before = stream.buffered_ms();
-        assert!(rig.play(480).iter().all(|s| *s == 0.0));
-        assert_eq!(before - stream.buffered_ms(), 10);
-        rig.mixer.lock().unwrap().streams_muted = false;
-        assert!(rig.play(16).iter().all(|s| *s > 0.4));
+        // A writer is in the middle of a change when the callback first looks.
+        let control = rig.pool.controls()[0].clone();
+        control.sequence.store(1, Relaxed);
+        assert!(rig.play(64).iter().all(|s| *s == 0.0));
+        let voice = &rig.mixer.lock().unwrap().streams[0];
+        assert!(voice.view.positional && voice.view.placed);
+    }
+
+    #[test]
+    fn with_no_stream_open_the_pool_takes_no_lock_of_the_mixers() {
+        let rig = Rig::new();
+        assert!(rig.pool.idle());
+        // The callback holds the mixer: with nothing open, nothing here waits for it.
+        let _callback = rig.mixer.lock().unwrap();
+        rig.pool.reap(&rig.mixer);
+        rig.pool.unplace();
+        rig.pool.follow_entities(|_| unreachable!());
+        drop(_callback);
+        let stream = rig.open("mod", &spec()).unwrap();
+        assert!(!rig.pool.idle());
+        stream.stop();
+        rig.pool.reap(&rig.mixer);
+        assert!(rig.pool.idle());
+        assert_eq!(rig.voices(), 0);
     }
 
     #[test]

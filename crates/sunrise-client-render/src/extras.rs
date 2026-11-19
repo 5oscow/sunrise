@@ -33,9 +33,6 @@ pub struct Extras {
     /// Positional sounds leave a few static sound channels free for UI sounds
     /// and others played to the listener (`sound_engine::HEARD_RESERVE`).
     pub ui_sound_reserve: bool,
-    /// Mods' audio streams (`ClientHost::open_audio_stream`) are heard. On by default: off, every
-    /// mod stream plays on unheard.
-    pub mod_audio_streams: bool,
     /// The player's own name tag over its model in third person.
     pub own_name_tag: bool,
     /// NeoForge's `skipModdedSplashesIfVanillaModified`, on by default: a
@@ -92,7 +89,6 @@ impl Default for Extras {
             dynamic_lights: false,
             lod_zoom_detail: false,
             ui_sound_reserve: false,
-            mod_audio_streams: true,
             own_name_tag: false,
             skip_modded_splashes_if_vanilla_modified: true,
             hide_block_particles: false,
@@ -144,7 +140,6 @@ impl Extras {
                 "dynamicLights" => e.dynamic_lights = flag(e.dynamic_lights),
                 "lodZoomDetail" => e.lod_zoom_detail = flag(e.lod_zoom_detail),
                 "uiSoundReserve" => e.ui_sound_reserve = flag(e.ui_sound_reserve),
-                "modAudioStreams" => e.mod_audio_streams = flag(e.mod_audio_streams),
                 "ownNameTag" => e.own_name_tag = flag(e.own_name_tag),
                 "skipModdedSplashesIfVanillaModified" => {
                     e.skip_modded_splashes_if_vanilla_modified =
@@ -203,10 +198,6 @@ impl Extras {
         push("dynamicLights", &bool_text(self.dynamic_lights));
         push("lodZoomDetail", &bool_text(self.lod_zoom_detail));
         push("uiSoundReserve", &bool_text(self.ui_sound_reserve));
-        // Written only when off, so a file with the default keeps the format it always had.
-        if !self.mod_audio_streams {
-            push("modAudioStreams", &bool_text(false));
-        }
         push("ownNameTag", &bool_text(self.own_name_tag));
         push(
             "skipModdedSplashesIfVanillaModified",
@@ -401,8 +392,6 @@ pub enum Item {
     OwnNameTag,
     HideBlockParticles,
     UiSoundReserve,
-    /// Whether mods' audio streams are heard.
-    ModAudioStreams,
     /// The Music... page on Music & Sounds (`Music page`).
     MusicPage,
     MouseTweaks,
@@ -447,7 +436,6 @@ pub fn rows() -> Vec<Result<Item, &'static str>> {
         Err("sunrise.extras.header.multiplayer"),
         Err("sunrise.extras.header.sound"),
         Ok(UiSoundReserve),
-        Ok(ModAudioStreams),
         Ok(MusicPage),
         Err("sunrise.extras.header.menus"),
         Ok(WheelCyclesSettings),
@@ -463,7 +451,6 @@ impl Item {
             Item::OwnNameTag => "sunrise.extras.own_name_tag",
             Item::HideBlockParticles => "sunrise.extras.hide_block_particles",
             Item::UiSoundReserve => "sunrise.extras.ui_sound_reserve",
-            Item::ModAudioStreams => "sunrise.extras.mod_audio_streams",
             Item::MusicPage => "sunrise.extras.music_page",
             Item::MouseTweaks => "sunrise.extras.mouse_tweaks",
             Item::MouseTweaksWheel => "sunrise.extras.mouse_tweaks_wheel",
@@ -488,7 +475,6 @@ impl Item {
             Item::OwnNameTag => "sunrise.extras.own_name_tag.tooltip",
             Item::HideBlockParticles => "sunrise.extras.hide_block_particles.tooltip",
             Item::UiSoundReserve => "sunrise.extras.ui_sound_reserve.tooltip",
-            Item::ModAudioStreams => "sunrise.extras.mod_audio_streams.tooltip",
             Item::MusicPage => "sunrise.extras.music_page.tooltip",
             Item::MouseTweaks => "sunrise.extras.mouse_tweaks.tooltip",
             Item::MouseTweaksWheel => "sunrise.extras.mouse_tweaks_wheel.tooltip",
@@ -522,7 +508,6 @@ impl Item {
             Item::OwnNameTag => "Own name tag",
             Item::HideBlockParticles => "Hide block-break particles",
             Item::UiSoundReserve => "Keep channels for UI sounds",
-            Item::ModAudioStreams => "Mod audio streams",
             Item::MusicPage => "Music page",
             Item::MouseTweaks => "Mouse Tweaks controls",
             Item::MouseTweaksWheel => "Scroll wheel moves items",
@@ -543,7 +528,7 @@ impl Item {
     pub fn parent(self) -> Option<Item> {
         use Item::*;
         Some(match self {
-            UiSoundReserve | ModAudioStreams => return None,
+            UiSoundReserve => return None,
             MouseTweaksWheel => MouseTweaks,
             SortKey => Sort,
             ChatIndicator => ChatAnimation,
@@ -573,9 +558,6 @@ impl Item {
             }
             Item::UiSoundReserve => {
                 "Sounds in the world leave 16 of the 247 sound channels free, so a flood of them (a big explosion) can't silence menu clicks."
-            }
-            Item::ModAudioStreams => {
-                "Mods can play audio they make (voice chat, a radio, a music player). Off, all of it plays on unheard."
             }
             Item::MusicPage => {
                 "Music & Sounds gets a Music... page: play any built-in track now, or turn one off so the game stops picking it. Nothing changes until you turn a track off."
@@ -620,7 +602,6 @@ impl Item {
         match self {
             Item::Fullbright => Some(Cost::None),
             Item::UiSoundReserve => Some(Cost::None),
-            Item::ModAudioStreams => Some(Cost::None),
             Item::MusicPage => Some(Cost::None),
             Item::DynamicLights => Some(Cost::Low),
             Item::ChatAnimation => Some(Cost::None),
@@ -641,7 +622,6 @@ impl Item {
             Item::OwnNameTag => e.own_name_tag,
             Item::HideBlockParticles => e.hide_block_particles,
             Item::UiSoundReserve => e.ui_sound_reserve,
-            Item::ModAudioStreams => e.mod_audio_streams,
             Item::MusicPage => e.music_page,
             Item::MouseTweaks => e.mouse_tweaks,
             Item::MouseTweaksWheel => e.mouse_tweaks_wheel,
@@ -678,7 +658,6 @@ impl Item {
             Item::OwnNameTag => e.own_name_tag = !e.own_name_tag,
             Item::HideBlockParticles => e.hide_block_particles = !e.hide_block_particles,
             Item::UiSoundReserve => e.ui_sound_reserve = !e.ui_sound_reserve,
-            Item::ModAudioStreams => e.mod_audio_streams = !e.mod_audio_streams,
             Item::MusicPage => e.music_page = !e.music_page,
             Item::MouseTweaks => e.mouse_tweaks = !e.mouse_tweaks,
             Item::MouseTweaksWheel => e.mouse_tweaks_wheel = !e.mouse_tweaks_wheel,
@@ -846,22 +825,10 @@ mod tests {
     }
 
     #[test]
-    fn mod_audio_streams_are_on_until_turned_off_and_stay_off() {
-        assert!(Extras::parse("").mod_audio_streams);
-        let mut e = Extras::default();
-        Item::ModAudioStreams.cycle(&mut e, false);
-        assert_eq!(Item::ModAudioStreams.switch(&e), Some(false));
-        assert!(!Extras::parse(&e.serialize()).mod_audio_streams);
-        assert!(!Extras::parse("modAudioStreams:false\n").mod_audio_streams);
-    }
-
-    #[test]
     fn everything_is_off_by_default_and_round_trips() {
         let d = Extras::default();
         assert!(!d.fullbright && !d.dynamic_lights);
         assert!(!d.mouse_tweaks && !d.sort && !d.own_name_tag && !d.ui_sound_reserve);
-        // The one extra that is on by default: nothing is lost until the player turns it off.
-        assert!(d.mod_audio_streams);
         assert!(!d.hide_block_particles && !d.pregen);
         assert!(!d.music_page && d.music_off.is_empty());
         assert!(!d.wheel_cycles_settings);

@@ -38,7 +38,7 @@ A stopped stream's samples are freed by the game, whatever handles you keep: aft
 
 ## The player's switch
 
-Sunrise Extras has a "Mod audio streams" switch (Sound section), on by default. Off, every mod stream still opens and its audio is still consumed, but nothing is heard, so a mod needs no special case and builds up no latency.
+Sunrise Extras has a "Mod audio streams" switch (Sound section), on by default. Off, every mod stream still opens and its audio is still taken in at its own pace, but nothing is mixed and nothing is heard, so a mod needs no special case and builds up no latency. The switch is Sunrise Extras' (`crates/sunrise-official/src/mod_audio.rs`); the engine only owns the gain it sets, and a build without Extras has no switch.
 
 ## What `state` says
 

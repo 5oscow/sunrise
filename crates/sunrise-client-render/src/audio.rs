@@ -129,8 +129,6 @@ struct Mixer {
     streams: Vec<streams::StreamVoice>,
     /// Each `SoundSource`'s volume for a stream: master times the group, as every sound's.
     stream_gain: [f32; 11],
-    /// The player turned "Mod audio streams" off: they still play through, unheard.
-    streams_muted: bool,
     /// A mod's muffle of the sounds it does not exempt.
     muffle: Muffle,
     limiter_peak: f32,
@@ -403,6 +401,8 @@ pub struct Audio {
     preview: crate::sound_preview::SoundPreview,
     /// A mod's muffle fading out (`muffle`), advanced by `tick`.
     muffle: Option<MuffleFade>,
+    /// The `stream_gain` the mixer was last given: it is locked again only when this changes.
+    stream_gain_sent: [f32; 11],
     /// `SoundEngine.lastSeenDevices`: the system default output last seen.
     #[cfg(feature = "audio")]
     default_seen: Option<String>,
@@ -996,11 +996,7 @@ fn mix(mixer: &mut Mixer, data: &mut [f32], channels: usize, rate: u32) {
     streams::mix(
         &mut mixer.streams,
         &mixer.cameras,
-        if mixer.streams_muted {
-            &[0.0; 11]
-        } else {
-            &mixer.stream_gain
-        },
+        &mixer.stream_gain,
         out,
         channels,
         rate,
@@ -1372,6 +1368,7 @@ impl Audio {
             stopped: Default::default(),
             preview: Default::default(),
             muffle: None,
+            stream_gain_sent: [f32::NAN; 11],
             #[cfg(feature = "audio")]
             default_seen: if live { default_output_name() } else { None },
             #[cfg(feature = "audio")]
@@ -1551,6 +1548,7 @@ impl Audio {
             stopped: Default::default(),
             preview: Default::default(),
             muffle: None,
+            stream_gain_sent: [f32::NAN; 11],
             // The primary backend owns and maintains the output device.
             #[cfg(feature = "audio")]
             default_seen: self.default_seen.clone(),
@@ -1710,12 +1708,14 @@ impl Audio {
     }
     /// Places each entity-placed stream at its entity's position as `resolve` finds it now, or
     /// leaves it unplaced where it finds none. Called once a frame; it does nothing, and locks
-    /// nothing the output callback takes, with no stream open.
+    /// nothing the output callback takes, with no stream open or while their gain is zero.
     pub fn follow_stream_entities(
         &self,
         resolve: impl FnMut(mod_api::EntityRef) -> Option<[f64; 3]>,
     ) {
-        self.backend.streams.follow_entities(resolve);
+        if sunrise_hooks::sound::engine::mod_stream_gain() > 0.0 {
+            self.backend.streams.follow_entities(resolve);
+        }
     }
     /// The listener left its level (`updateLevelInEngines(null)`): every vanilla sound stops, and
     /// every positional mod stream is unplaced until its mod places it again; flat streams play
@@ -1723,12 +1723,6 @@ impl Audio {
     pub fn leave_level(&mut self) {
         self.stop_all();
         self.backend.streams.unplace();
-    }
-    /// The player's "Mod audio streams" switch: off, every mod stream plays on unheard.
-    pub fn set_mod_streams(&self, on: bool) {
-        if let Ok(mut m) = self.backend.mixer.lock() {
-            m.streams_muted = !on;
-        }
     }
     /// `SoundManager.tick(paused)`, once per client tick.
     pub fn tick(&mut self, paused: bool, ctx: &TickContext) {
@@ -1744,10 +1738,17 @@ impl Audio {
         }
         self.sync_volumes();
         self.backend.streams.reap(&self.backend.mixer);
-        if let Ok(mut m) = self.backend.mixer.lock() {
-            for (source, gain) in m.stream_gain.iter_mut().enumerate() {
-                *gain = self.engine.final_source_volume(source).clamp(0.0, 1.0);
-            }
+        // The volume a stream plays at is the sound's own, times the gain a crate above sets for
+        // mods' audio; the mixer is locked only when one of them changed.
+        let mod_gain = sunrise_hooks::sound::engine::mod_stream_gain();
+        let gain = std::array::from_fn(|source| {
+            self.engine.final_source_volume(source).clamp(0.0, 1.0) * mod_gain
+        });
+        if gain != self.stream_gain_sent
+            && let Ok(mut m) = self.backend.mixer.lock()
+        {
+            m.stream_gain = gain;
+            self.stream_gain_sent = gain;
         }
         self.engine.tick(paused, ctx, &mut self.backend);
         // A paused game holds a mod's muffle where it is, as it holds the sounds.

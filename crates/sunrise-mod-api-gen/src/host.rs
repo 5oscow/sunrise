@@ -619,7 +619,11 @@ pub(crate) fn refusal_errors(root: &Path) -> Result<std::collections::BTreeSet<S
             let path = entry.map_err(|e| e.to_string())?.path();
             if path.is_dir() {
                 folders.push(path);
-            } else if path.extension().is_some_and(|extension| extension == "rs") {
+            } else if path.extension().is_some_and(|extension| extension == "rs")
+                && !path.file_stem().is_some_and(|stem| {
+                    stem == "tests" || stem.to_string_lossy().ends_with("_tests")
+                })
+            {
                 crate::rerun_if_changed(&path.display().to_string());
                 let source =
                     fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -638,6 +642,14 @@ fn access_refusal_impls(source: &str) -> Result<Vec<String>, String> {
         .iter()
         .filter_map(|item| match item {
             Item::Impl(item) => {
+                // A test-only impl never reaches the generated forwarders.
+                (!item.attrs.iter().any(|a| {
+                    a.path().is_ident("cfg")
+                        && quote::ToTokens::to_token_stream(a)
+                            .to_string()
+                            .contains("test")
+                }))
+                .then_some(())?;
                 let (_, path, _) = item.trait_.as_ref()?;
                 (path.segments.last()?.ident == "AccessRefusal").then_some(())?;
                 let Type::Path(ty) = &*item.self_ty else {
@@ -1286,6 +1298,12 @@ mod state_write_tests;
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_non_test_impls_of_the_marker_name_a_refusal() {
+        let source = "impl AccessRefusal for A {}\n#[cfg(test)]\nimpl AccessRefusal for B {}\nimpl Other for C {}";
+        assert_eq!(access_refusal_impls(source).unwrap(), ["A"]);
+    }
+
     use super::*;
 
     /// A marked error is refusal-shaped as a `Result`'s error and an unmarked one is not; the
