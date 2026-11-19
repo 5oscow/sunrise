@@ -738,7 +738,11 @@ impl Instrument {
             let id = event["sound_id"]
                 .as_str()
                 .ok_or("sound_event must be a sound id or definition")?;
-            (id, Some(event["range"].as_f64().map(|n| n as f32)))
+            let fixed = match &event["range"] {
+                Value::Null => None,
+                range => Some(range.as_f64().ok_or("sound_event.range must be a number")? as f32),
+            };
+            (id, Some(fixed))
         };
         let sound = sunrise_core::identifier::Identifier::parse(sound)
             .map_err(|error| format!("sound_event: {error}"))?

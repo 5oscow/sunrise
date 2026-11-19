@@ -294,18 +294,17 @@ fn columns(widths: &[f32], columns: usize, first: usize) -> Element {
     let row_width = |ws: &[f32]| ws.iter().sum::<f32>() + 2.0 * (ws.len().max(1) - 1) as f32;
     let mut parts = Vec::new();
     let last = &widths[full..];
-    // GridLayout spreads the final row over every column it spans (Divisor).
-    let spread = row_width(last) - 2.0 * (columns - 1) as f32;
-    let (each, extra) = if last.is_empty() {
-        (0.0, 0.0)
-    } else {
-        ((spread / columns as f32).floor(), spread % columns as f32)
-    };
     let width = if full == 0 {
-        // No full row: the span alone sizes the grid, without a slot for every
-        // (possibly billions of) absent columns.
-        each.max(0.0) * columns as f32 + extra.ceil().max(0.0) + 2.0 * (columns - 1) as f32
+        // No full row: only the actual buttons size and space the row.
+        row_width(last)
     } else {
+        // GridLayout spreads the final row over every column it spans (Divisor).
+        let spread = row_width(last) - 2.0 * (columns - 1) as f32;
+        let (each, extra) = if last.is_empty() {
+            (0.0, 0.0)
+        } else {
+            ((spread / columns as f32).floor(), spread % columns as f32)
+        };
         let mut col = vec![(0.0f32, 0.0); columns];
         for (i, w) in widths[..full].iter().enumerate() {
             let width = &mut col[i % columns].0;
@@ -647,18 +646,34 @@ mod tests {
             assert!(Dialog::parse(&packet_dialog(invalid)).is_none());
         }
         let dialog = Dialog::parse(&packet_dialog(i32::MAX)).unwrap();
-        let Kind::MultiAction {
-            columns: count,
-            actions,
-            ..
-        } = dialog.kind
+        let font = Font::load(
+            &sunrise_assets::resource_source::ResourceSource::default(),
+            &std::collections::HashMap::new(),
+            &[],
+            (1, 1),
+            (0, 0),
+            crate::hud::Rect {
+                u0: 0.0,
+                v0: 0.0,
+                u1: 1.0,
+                v1: 1.0,
+                w: 1,
+                h: 1,
+            },
+        );
+        let layout = Layout::new(&dialog, &font, (320.0, 240.0));
+        let mut placed = layout.placed(0.0);
+        let Some((
+            Part::Button {
+                rect: [x, _, w, h], ..
+            },
+            true,
+        )) = placed.next()
         else {
-            panic!("wrong dialog kind")
+            panic!("expected one body button")
         };
-        let widths: Vec<_> = actions.iter().map(|button| button.width as f32).collect();
-        let grid = columns(&widths, count.get(), 0);
-        assert_eq!(grid.parts.len(), 1);
-        assert_eq!(grid.h, 20.0);
+        assert_eq!([x, w, h], [85.0, 150.0, 20.0]);
+        assert!(placed.next().is_none());
     }
 
     #[test]

@@ -374,13 +374,18 @@ pub fn component_nbt(v: &Value) -> Tag {
 }
 
 impl SyncData {
-    /// Collect conditions from the same files used by the lazy wire reader.
+    /// Admit the typed pack winners and collect conditions from the other
+    /// files used by the lazy wire reader, even if typed admission fails.
     /// The world's damage catalog is already staged, and supplies its frozen wire data.
-    pub fn stage_registry_conditions(
+    pub fn stage_registry_definitions(
         resources: &Path,
         overlay: &sunrise_world::loot::PackOverlay<'_>,
-        packed: Option<&PackRegistryDefinitions>,
-    ) {
+        read_errors: &BTreeMap<String, String>,
+        text_registries: &crate::command::Registries,
+        sound_exists: impl Fn(&str) -> bool,
+    ) -> Result<PackRegistryDefinitions, String> {
+        let (packed, admitted) =
+            PackRegistryDefinitions::stage(overlay, read_errors, text_registries, sound_exists);
         let root = resources.join("data/minecraft");
         for &key in SYNCHRONIZED {
             if key == "minecraft:damage_type" {
@@ -388,14 +393,11 @@ impl SyncData {
             }
             let path = key.trim_start_matches("minecraft:");
             let mut entries = synchronized_entries(&root, resources, key, overlay);
-            if let Some(packed) = packed {
-                // Admission already checked the typed winners' conditions.
-                packed.discard_replaced(key, &mut entries);
-            } else if PACK_REGISTRIES.contains(&key) {
-                pack_entries(path, overlay, &mut entries);
-            }
+            // Admission already checked the typed winners' conditions.
+            packed.discard_replaced(key, &mut entries);
             condition_filter::filter(&mut entries, false, overlay.conditions, path);
         }
+        admitted.map(|()| packed)
     }
 
     /// No registries, tags or recipes: enough for tests of the login phase.
@@ -1282,11 +1284,15 @@ mod tests {
         )
         .unwrap();
         let files = [
-            ("instrument/minecraft:override".into(), vec![b"{}".to_vec()]),
+            ("instrument/minecraft:override".into(), vec![b"{".to_vec()]),
             (
                 "dialog/test:valid".into(),
-                vec![bad("absent:loser"), b"{}".to_vec()],
+                vec![
+                    bad("absent:loser"),
+                    br#"{"type":"minecraft:notice","title":"Winner"}"#.to_vec(),
+                ],
             ),
+            ("world_clock/test:bad".into(), vec![b"[]".to_vec()]),
             (
                 "dialog/test:bad".into(),
                 vec![b"{}".to_vec(), bad("absent:dialog")],
@@ -1297,28 +1303,69 @@ mod tests {
             ),
         ];
         let conditions = sunrise_world::conditions::LoadConditions::new([]);
-        SyncData::stage_registry_conditions(
+        let Err(typed) = SyncData::stage_registry_definitions(
             root.path(),
             &sunrise_world::loot::PackOverlay {
                 files: &files,
                 conditions: &conditions,
             },
-            None,
-        );
-        let error = conditions.check_errors().unwrap_err();
-        assert!(
-            error.contains("data/test/dialog/bad.json: unknown load conditions [absent:dialog]"),
-            "{error}"
-        );
-        assert!(
-            error.contains(
-                "data/test/dimension_type/bad.json: unknown load conditions [minecraft:unknown]"
-            ),
-            "{error}"
-        );
-        assert!(error.contains("data/test/worldgen/biome/wire_biome.json: unknown load conditions [absent:wire_biome]"), "{error}");
-        assert!(!error.contains("absent:loser"), "{error}");
-        assert!(!error.contains("absent:root_instrument"), "{error}");
+            &BTreeMap::new(),
+            &Default::default(),
+            |_| true,
+        ) else {
+            panic!("staged malformed typed registries")
+        };
+        for diagnostic in [
+            "minecraft:dialog:\n  test:bad: unknown load conditions [absent:dialog]",
+            "minecraft:dimension_type:\n  test:bad: unknown load conditions [minecraft:unknown]",
+            "minecraft:world_clock:\n  test:bad: not a map",
+        ] {
+            assert!(typed.contains(diagnostic), "{typed}");
+        }
+        assert!(!typed.contains("absent:loser"), "{typed}");
+        let untyped = conditions.check_errors().unwrap_err();
+        assert!(untyped.contains("data/test/worldgen/biome/wire_biome.json: unknown load conditions [absent:wire_biome]"), "{untyped}");
+        for losing_or_already_checked in [
+            "absent:root_instrument",
+            "absent:dialog",
+            "minecraft:unknown",
+        ] {
+            assert!(!untyped.contains(losing_or_already_checked), "{untyped}");
+        }
+    }
+
+    #[test]
+    fn a_pack_clock_is_admitted_against_the_world_candidates_bound_tags() {
+        let root = tempfile::tempdir().unwrap();
+        let files = [(
+            "world_clock/test:conditional".into(),
+            vec![
+                br#"{"neoforge:conditions":[{"type":"neoforge:tag_empty","tag":"test:marker"}]}"#
+                    .to_vec(),
+            ],
+        )];
+        for (tags, emitted) in [(["test:unrelated"], true), (["test:marker"], false)] {
+            let conditions = sunrise_world::conditions::LoadConditions::new([])
+                .with_tags([("minecraft:item", tags)]);
+            let packed = SyncData::stage_registry_definitions(
+                root.path(),
+                &sunrise_world::loot::PackOverlay {
+                    files: &files,
+                    conditions: &conditions,
+                },
+                &BTreeMap::new(),
+                &Default::default(),
+                |_| true,
+            )
+            .unwrap();
+            assert_eq!(conditions.check_errors(), Ok(()));
+            let mut entries = Vec::new();
+            packed.append_encoded("minecraft:world_clock", &mut entries);
+            assert_eq!(
+                entries.first().map(|entry| entry.0.1.as_str()),
+                emitted.then_some("conditional")
+            );
+        }
     }
 
     #[test]
@@ -1856,6 +1903,23 @@ mod tests {
     }
 
     #[test]
+    fn pack_instrument_inline_sound_range_is_a_float_tag() {
+        let files = [(
+            "instrument/demo:horn".into(),
+            vec![br#"{"sound_event":{"sound_id":"test:sound","range":9.5},"use_duration":4,"range":128,"description":"Horn"}"#.to_vec()],
+        )];
+        let overlay = sunrise_world::loot::PackOverlay::new(&files);
+        let entries = pack_entries("instrument", &overlay, Vec::new());
+        assert_eq!(
+            entries[0]
+                .1
+                .get("sound_event")
+                .and_then(|sound| sound.get("range")),
+            Some(&Tag::Float(9.5_f32.to_bits())),
+        );
+    }
+
+    #[test]
     fn world_pack_banner_patterns_reach_clients() {
         use serde_json::json;
         assert_pack_holder_sync(
@@ -1895,7 +1959,13 @@ mod tests {
         write("data/minecraft/world_clock/the_end.json", "{}");
         write(
             "data/demo/dimension_type/moon.json",
-            r#"{"default_clock":"demo:moon"}"#,
+            r##"{
+                "min_y":0,"height":64,"logical_height":64,"has_skylight":true,
+                "has_ceiling":false,"has_ender_dragon_fight":false,"coordinate_scale":1.0,
+                "ambient_light":0.0,"infiniburn":"#minecraft:infiniburn_overworld",
+                "monster_spawn_light_level":0,"monster_spawn_block_light_limit":0,
+                "default_clock":"demo:moon"
+            }"##,
         );
         let packs = crate::datapack::discover(&world);
         let files: Vec<_> = crate::datapack::DataStore::load(&packs.iter().collect::<Vec<_>>())

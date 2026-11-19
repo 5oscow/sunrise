@@ -249,28 +249,6 @@ impl Game<'_> {
             conditions: &conditions,
             files: &files,
         };
-        let packed_registry_definitions = if !reload && self.is_logical_server() {
-            Some(Arc::new(
-                sunrise_client::lan::data::PackRegistryDefinitions::load(
-                    &overlay,
-                    &read_errors,
-                    &self.ui.registries,
-                    |id| {
-                        self.ui
-                            .registries
-                            .ids("minecraft:sound_event")
-                            .binary_search_by(|sound| sound.as_str().cmp(id))
-                            .is_ok()
-                    },
-                )
-                .map_err(|error| {
-                    log::error!("{error}");
-                    std::io::Error::other(error)
-                })?,
-            ))
-        } else {
-            None
-        };
         let mut data_map_types = Vec::new();
         self.native_data_map_types(&mut data_map_types);
         let base = if reload {
@@ -305,14 +283,26 @@ impl Game<'_> {
             conditions: &conditions,
             files: &files,
         };
-        if !reload {
-            // These synchronized registries are normally decoded only when a peer joins.
-            sunrise_client::lan::data::SyncData::stage_registry_conditions(
+        let packed_registry_definitions = if !reload {
+            // Admit the frozen pack definitions with this candidate's bound
+            // tags, even if no peer joins and triggers the full wire load.
+            sunrise_client::lan::data::SyncData::stage_registry_definitions(
                 root,
                 &overlay,
-                packed_registry_definitions.as_deref(),
-            );
-        }
+                &read_errors,
+                &self.ui.registries,
+                |id| {
+                    self.ui
+                        .registries
+                        .ids("minecraft:sound_event")
+                        .binary_search_by(|sound| sound.as_str().cmp(id))
+                        .is_ok()
+                },
+            )
+            .map(|definitions| Some(Arc::new(definitions)))
+        } else {
+            Ok(None)
+        };
         // Visit independently readable registries before consuming any result.
         // One rejected winner must not hide the other entries' diagnostics.
         let loot =
@@ -335,18 +325,25 @@ impl Game<'_> {
                 &overlay,
             )
         };
-        if let Err(mut errors) = conditions.check_errors() {
-            // Report a broken loot reference alongside the conditions that may
-            // have removed its target. Recipe discovery reports its own errors.
-            for error in [loot.as_ref().err(), sources.as_ref().err()]
-                .into_iter()
-                .flatten()
-            {
-                use std::fmt::Write;
-                let _ = write!(errors, "; {error}");
-            }
-            return Err(errors.into());
-        }
+        let packed_registry_definitions =
+            match (packed_registry_definitions, conditions.check_errors()) {
+                (Ok(packed), Ok(())) => packed,
+                (packed, conditions) => {
+                    // A rejected registry must not hide independent load errors.
+                    let errors = [
+                        packed.err(),
+                        conditions.err(),
+                        loot.as_ref().err().map(ToString::to_string),
+                        datapack_candidate.as_ref().err().map(ToString::to_string),
+                        sources.as_ref().err().map(ToString::to_string),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                    return Err(errors.into());
+                }
+            };
         let sources = sources?;
         let mut loot = loot?;
         items.component_defaults = loot.component_defaults().clone();
