@@ -123,15 +123,17 @@ fn rains_at(world: &World, biomes: &Biomes, x: i32, y: i32, z: i32) -> bool {
 }
 
 impl Game<'_> {
-    /// Polytone GPU particles with their own shader, before the frame's quads are built: their
-    /// heightmap (`Sampler1`) every half second, and the renderer's verdict on each shader.
+    /// Polytone GPU particles, before the frame's quads are built: their heightmap every half
+    /// second (a custom shader's `Sampler1`, and the surface rain drawn as quads dies under),
+    /// and the renderer's verdict on each shader.
     pub(super) fn polytone_gpu_decide(&mut self, camera: glam::DVec3) {
         let world = &self.world;
-        if let Some(area) = self.particles.polytone_heightmap_due(
+        if let Some(refresh) = self.particles.polytone_heightmap_due(
             camera,
             sunrise_client::gfx::POLYTONE_HEIGHTMAP_SIZE,
             world.bottom_y(),
         ) {
+            let area = refresh.area;
             let properties = &self.pack.assets.properties;
             let size = area.size as i32;
             let heights: Vec<u16> = (0..size * size)
@@ -141,9 +143,12 @@ impl Game<'_> {
                     (top - area.min_y).clamp(0, i32::from(u16::MAX)) as u16
                 })
                 .collect();
-            if let Some(renderer) = &self.renderer {
+            if refresh.for_shaders
+                && let Some(renderer) = &self.renderer
+            {
                 renderer.set_polytone_heightmap(&heights);
             }
+            self.particles.set_polytone_surface(area, &heights);
         }
         if let Some(renderer) = self.renderer.as_mut() {
             renderer.decide_polytone_shaders(&self.particles.polytone_shaders());

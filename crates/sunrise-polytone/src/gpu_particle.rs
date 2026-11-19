@@ -117,6 +117,37 @@ pub struct HeightmapArea {
     pub min_y: i32,
 }
 
+/// The heightmap's heights on the CPU, for the GPU particle types drawn as quads that die under
+/// it (`kill_below_heightmap`).
+#[derive(Clone, Debug)]
+pub struct Surface {
+    pub area: HeightmapArea,
+    /// `size` × `size` heights above `min_y`, x along a row and z down the rows.
+    pub heights: Box<[u16]>,
+}
+
+impl Surface {
+    /// Whether `at` is under the motion-blocking surface of its column; a column outside the
+    /// area (any finite or infinite place) takes its nearest edge, as the shaders' clamped
+    /// sampler does.
+    pub fn covers(&self, at: [f64; 3]) -> bool {
+        let size = self.area.size;
+        if size == 0 || self.heights.len() < (size as usize).pow(2) {
+            return false;
+        }
+        // In floats: a place far outside saturates no integer, and NaN takes the first column.
+        let last = f64::from(size - 1);
+        let column =
+            |v: f64, origin: i32| (v.floor() - f64::from(origin)).clamp(0.0, last) as usize;
+        let (x, z) = (
+            column(at[0], self.area.origin[0]),
+            column(at[2], self.area.origin[1]),
+        );
+        let top = i64::from(self.area.min_y) + i64::from(self.heights[z * size as usize + x]);
+        at[1] < top as f64
+    }
+}
+
 /// What a frame adds to a type's knobs in its block.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct BlockFrame {
@@ -207,6 +238,68 @@ mod tests {
             area: None,
             kill_below_heightmap: false,
         }
+    }
+
+    /// Rain dies at the surface of its own column (wiki "GPU Particles": the motion-blocking
+    /// heightmap), not where the sky is shaded: in front of a hill it falls to the grass.
+    #[test]
+    fn the_surface_covers_what_is_below_its_column() {
+        // A 4x4 area from (10, 20) above y -64: ground at y 64, the column (12, 21) a hill
+        // up to 80.
+        let mut heights = vec![128u16; 16];
+        heights[4 + 2] = 144;
+        let surface = Surface {
+            area: HeightmapArea {
+                origin: [10, 20],
+                size: 4,
+                min_y: -64,
+            },
+            heights: heights.into(),
+        };
+        assert!(!surface.covers([11.5, 64.0, 20.5]));
+        assert!(surface.covers([11.5, 63.9, 20.5]));
+        assert!(surface.covers([12.5, 79.0, 21.5]));
+        assert!(!surface.covers([12.5, 80.5, 21.5]));
+        // Beside the hill the drop still falls.
+        assert!(!surface.covers([13.5, 70.0, 21.5]));
+    }
+
+    /// A place far outside the area takes the edge on its own side, however far: no
+    /// overflow, and not the opposite edge.
+    #[test]
+    fn far_places_take_the_nearest_edge() {
+        // Ground at y 10 along the first column (x 0), y 50 along the last (x 3), y 30 between.
+        let heights: Vec<u16> = (0..16)
+            .map(|i| match i % 4 {
+                0 => 10,
+                3 => 50,
+                _ => 30,
+            })
+            .collect();
+        let surface = Surface {
+            area: HeightmapArea {
+                origin: [-2, -2],
+                size: 4,
+                min_y: 0,
+            },
+            heights: heights.into(),
+        };
+        for x in [
+            f64::MIN,
+            -1.0e300,
+            f64::NEG_INFINITY,
+            f64::from(i32::MIN) - 5.0,
+        ] {
+            assert!(surface.covers([x, 9.0, 0.0]), "{x}");
+            assert!(!surface.covers([x, 11.0, 0.0]), "{x}");
+        }
+        for x in [f64::MAX, 1.0e300, f64::INFINITY, f64::from(i32::MAX) + 5.0] {
+            assert!(surface.covers([x, 49.0, 0.0]), "{x}");
+            assert!(!surface.covers([x, 51.0, 0.0]), "{x}");
+        }
+        // The same along z, the rows.
+        assert!(surface.covers([0.0, 29.0, f64::MAX]));
+        assert!(surface.covers([0.0, 29.0, f64::MIN]));
     }
 
     /// The block as floats, as the shader reads it.

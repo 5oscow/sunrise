@@ -14,7 +14,9 @@ use glam::{DVec3, Mat3, Quat, Vec3 as FVec3};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
-use sunrise_polytone::gpu_particle::{BlockFrame, GPU_BLOCK_SIZE, HeightmapArea, gpu_block};
+use sunrise_polytone::gpu_particle::{
+    BlockFrame, GPU_BLOCK_SIZE, HeightmapArea, Surface, gpu_block,
+};
 use sunrise_polytone::particles::{CustomParticle, Gpu, RenderType};
 
 /// How a particle quad turns (`rotation_mode`).
@@ -245,6 +247,7 @@ impl Store {
             facing,
             partial,
             light_at,
+            surface,
         } = *frame;
         if self.def.render_type == RenderType::Invisible
             || self.shader.as_ref().is_some_and(|s| s.drawn())
@@ -317,12 +320,12 @@ impl Store {
                     at[1] + offset[1],
                     at[2] + offset[2] + sway_z,
                 ];
-                let block = ParticleLevel::block_at(world);
-                let packed = light_cache.get(block, light_at);
-                // kill_below_heightmap: under the surface, where the sky doesn't reach.
-                if gpu.kill_below_heightmap && packed >> 4 < 15 {
+                // kill_below_heightmap: under the motion-blocking surface around the camera.
+                if gpu.kill_below_heightmap && surface.is_some_and(|s| s.covers(world)) {
                     continue;
                 }
+                let block = ParticleLevel::block_at(world);
+                let packed = light_cache.get(block, light_at);
                 let block_light = u32::from((packed & 15).max(self.def.light_level));
                 let light = (u32::from(packed >> 4) * 16) | ((block_light * 16) << 8);
                 let center = (DVec3::from_array(world) - camera).as_vec3();
@@ -504,6 +507,8 @@ pub(super) struct QuadFrame<'a> {
     pub facing: Quat,
     pub partial: f32,
     pub light_at: &'a dyn Fn([i32; 3]) -> u8,
+    /// The heights `kill_below_heightmap` types die under, taken before the quads.
+    pub surface: Option<&'a Surface>,
 }
 
 /// What a frame's batches are built from.
@@ -594,13 +599,23 @@ impl Store {
 }
 
 /// The packs' GPU particles: each type's records, the ticks they count in and the heightmap
-/// their shaders read.
+/// they read.
 #[derive(Default)]
 pub(super) struct GpuParticles {
     stores: Vec<Store>,
     ticks: u64,
     /// The heightmap last asked for (`ParticleEngine::polytone_heightmap_due`), and its tick.
     heightmap: Option<(HeightmapArea, u64)>,
+    /// Its heights, for the quads of the types that die under it.
+    surface: Option<Surface>,
+}
+
+/// A heightmap to fill now: where, and whether a shader samples it (else only the quads drawn
+/// here read its heights).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HeightmapRefresh {
+    pub area: HeightmapArea,
+    pub for_shaders: bool,
 }
 
 impl GpuParticles {
@@ -644,6 +659,12 @@ impl GpuParticles {
             store.next = 0;
         }
         self.heightmap = None;
+        self.surface = None;
+    }
+
+    /// The heights the quads of the types that die under the heightmap read.
+    pub(super) fn surface(&self) -> Option<&Surface> {
+        self.surface.as_ref()
     }
 
     pub(super) fn records(&self) -> usize {
@@ -678,23 +699,29 @@ impl super::ParticleEngine {
             .collect()
     }
 
-    /// The heightmap area GPU particle shaders want refilled now (wiki "GPU Particles": the
-    /// motion-blocking heights of `size` columns a side around the camera, every half second),
-    /// with `min_y` the world's bottom; `None` while no type with live records has a shader
-    /// that samples it (`Sampler1`), or the last one is fresh. The caller fills it.
+    /// The heightmap GPU particles want refilled now (wiki "GPU Particles": the motion-blocking
+    /// heights of `size` columns a side around the camera, every half second), with `min_y` the
+    /// world's bottom; `None` while no type with live records reads it, or the last one is
+    /// fresh. A type reads it when its shader samples it (`Sampler1`), or when it dies under it
+    /// and draws its quads here. The caller fills it before the frame's quads are built: for
+    /// the shaders' texture when [`HeightmapRefresh::for_shaders`], and
+    /// [`Self::set_polytone_surface`] for the quads.
     pub fn polytone_heightmap_due(
         &mut self,
         camera: DVec3,
         size: u32,
         min_y: i32,
-    ) -> Option<HeightmapArea> {
+    ) -> Option<HeightmapRefresh> {
         let gpu = &mut self.polytone_gpu;
-        let reads = gpu.stores.iter().any(|s| {
-            s.len() > 0
-                && s.usable_shader()
-                    .is_some_and(|shader| shader.samples_heightmap)
+        let live = || gpu.stores.iter().filter(|s| s.len() > 0);
+        let for_shaders = live().any(|s| {
+            s.usable_shader()
+                .is_some_and(|shader| shader.samples_heightmap)
         });
-        if !reads {
+        let for_quads = live().any(|s| {
+            s.gpu.kill_below_heightmap && !s.shader.as_ref().is_some_and(|shader| shader.drawn())
+        });
+        if !for_shaders && !for_quads {
             return None;
         }
         if let Some((area, at)) = gpu.heightmap
@@ -713,7 +740,16 @@ impl super::ParticleEngine {
             min_y,
         };
         gpu.heightmap = Some((area, gpu.ticks));
-        Some(area)
+        Some(HeightmapRefresh { area, for_shaders })
+    }
+
+    /// The heights the caller filled for the area [`Self::polytone_heightmap_due`] asked for,
+    /// for this frame's quads on.
+    pub fn set_polytone_surface(&mut self, area: HeightmapArea, heights: &[u16]) {
+        self.polytone_gpu.surface = Some(Surface {
+            area,
+            heights: heights.into(),
+        });
     }
 
     /// The GPU particle types the renderer draws with their own shaders this frame (wiki "GPU
@@ -937,6 +973,7 @@ mod tests {
                 facing: Quat::IDENTITY,
                 partial: 0.0,
                 light_at: &|_| 0xF0,
+                surface: None,
             };
             let mut light_cache = ParticleLightCache::default();
             store.render(&frame, 12, &mut light_cache, &mut out, &mut additive);
@@ -951,6 +988,61 @@ mod tests {
         shader.set_drawn(false);
         assert_eq!(quads(&store), 1, "refused: its quads again");
         assert!(batch(&store, DVec3::ZERO, 12, 0.0).is_none());
+    }
+
+    /// Wiki "GPU Particles": a `kill_below_heightmap` type drawn as quads hides the ones under
+    /// the motion-blocking surface of their column, not the ones where the sky is shaded: a drop
+    /// in front of a hill, in its shade, still falls to the grass.
+    #[test]
+    fn rain_dies_under_the_heightmap_not_in_sky_shade() {
+        let json = serde_json::json!({
+            "type": "gpu", "texture": "test:textures/particle/rain.png",
+            "render_type": "opaque", "kill_below_heightmap": true
+        });
+        let def = Arc::new(CustomParticle::parse(&json).unwrap());
+        let mut store = Store::new(&def, None).unwrap();
+        let rect = Rect {
+            u0: 0.0,
+            v0: 0.0,
+            u1: 1.0,
+            v1: 1.0,
+            w: 16,
+            h: 16,
+        };
+        let atlas = HashMap::from([("test:particle/rain".to_owned(), (rect, true))]);
+        // Ground at y 64 over a 4x4 area from (0, 0).
+        let surface = Surface {
+            area: HeightmapArea {
+                origin: [0, 0],
+                size: 4,
+                min_y: 0,
+            },
+            heights: vec![64u16; 16].into(),
+        };
+        let quads = |store: &Store, sky: u8| {
+            let (mut out, mut additive) = (Vec::new(), Vec::new());
+            let light_at = move |_: [i32; 3]| sky << 4;
+            let frame = QuadFrame {
+                atlas: &atlas,
+                camera: DVec3::ZERO,
+                facing: Quat::IDENTITY,
+                partial: 0.0,
+                light_at: &light_at,
+                surface: Some(&surface),
+            };
+            let mut light_cache = ParticleLightCache::default();
+            store.render(&frame, 10, &mut light_cache, &mut out, &mut additive);
+            out.len() / 4
+        };
+        let still = |y: f64| Record {
+            velocity: [0.0; 3],
+            ..record([1.5, y, 1.5], 10, 20.0)
+        };
+        store.records.push(still(64.5));
+        assert_eq!(quads(&store, 15), 1, "above the ground in the open");
+        assert_eq!(quads(&store, 8), 1, "above the ground in a hill's shade");
+        store.records[0] = still(63.5);
+        assert_eq!(quads(&store, 15), 0, "under the ground");
     }
 
     #[test]
