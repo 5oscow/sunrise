@@ -2319,7 +2319,7 @@ sunrise-client game::remote::tests::remote_columns_tests::streaming_adoption_and
 sunrise-client game::remote::tests::remote_player_use_animation_dispatches_once lib daily resources
 sunrise-client game::remote::tests::spear_jab_tests::a_spear_jab_sends_only_its_stab lib daily resources
 sunrise-client game::remote::tests::tracking_emitters_follow_the_packet_target lib daily resources
-sunrise-client game::remote::tests::transactional_bucket_hands_reach_the_owning_client lib daily resources
+sunrise-client game::remote::tests::object_interactions_tests::transactional_bucket_hands_reach_the_owning_client lib daily resources
 sunrise-client game::remote::tests::update_attributes_answers_the_local_players_living_reads lib daily resources
 sunrise-client game::remote_mob_use_tests::remote_mob_takes_only_adult_piglin_currency_with_free_offhand lib daily resources
 sunrise-client game::remote_projectiles::nested_spawn_tests::own_rocket_lift_keeps_a_new_attachment_until_the_next_pass lib daily resources
