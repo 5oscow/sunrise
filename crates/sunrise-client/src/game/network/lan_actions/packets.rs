@@ -156,7 +156,8 @@ impl Game<'_> {
         {
             return;
         }
-        // The window a packet names is the open one, as in vanilla's handlers.
+        // The window a packet names is the open one, as in vanilla's handlers. With no menu open
+        // this is 0, so a container-0 packet asks the validity of no menu.
         let open_window = |host: &LanHost| {
             super::super::native_menus::open_menu_of(host, conn).map_or(0, |(window, _, _)| window)
         };
