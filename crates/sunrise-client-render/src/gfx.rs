@@ -341,9 +341,8 @@ pub struct Renderer {
     gpu_timer: Option<timing::GpuTimer>,
     /// GPU frame times (ms) read back since the caller last drained them.
     pub gpu_times: Vec<f32>,
-    /// The last lightmap written, RGBA rows of sky level by block level
-    /// (F3+4 shows it).
-    pub lightmap_pixels: [u8; 16 * 16 * 4],
+    /// The light texture's pixels F3+4 shows, with what drew them (`lightmap_sample`).
+    lightmap_chart: core_lightmap::LightmapChart,
     /// Time the last `render` spent blocked on the GPU or the display
     /// (acquiring, presenting, offscreen pacing, the submit thread holding the queue),
     /// excluded from CPU time.
@@ -586,7 +585,7 @@ pub struct Renderer {
     section_copy_bytes: u64,
     /// When a large translucent page may start to shrink (`shrink_translucent`).
     shrink_gate: ShrinkGate,
-    /// Whether `lightmap` holds `lightmap_pixels` yet.
+    /// Whether `lightmap` holds `lightmap_chart`'s native pixels yet.
     lightmap_uploaded: bool,
     sprite_minimum_size: u32,
     /// Each sprite layer's own side, before the arrays scaled it up (`mipmap::Settings::native_size`).
@@ -3240,7 +3239,7 @@ impl Renderer {
             },
             gpu_timer,
             gpu_times: Vec::new(),
-            lightmap_pixels: [0; 16 * 16 * 4],
+            lightmap_chart: core_lightmap::LightmapChart::new(),
             last_wait: std::time::Duration::ZERO,
             last_encode: std::time::Duration::ZERO,
             window,

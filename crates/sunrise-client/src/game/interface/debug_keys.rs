@@ -370,14 +370,11 @@ impl Game<'_> {
                 scale, scale,
             )]));
             draws.extend(charts);
+            // Nothing until the texture drawn now has been read (`Renderer::lightmap_sample`).
             if self.debug_shows_lightmap()
-                && let Some(r) = &self.renderer
+                && let Some(pixels) = self.renderer.as_ref().and_then(|r| r.lightmap_sample())
             {
-                draws.extend(sunrise_client::debug_chart::lightmap(
-                    &r.lightmap_pixels,
-                    width,
-                    height,
-                ));
+                draws.extend(sunrise_client::debug_chart::lightmap(pixels, width, height));
             }
             draws.push(hud_layout::GuiDraw::Pop);
         }
