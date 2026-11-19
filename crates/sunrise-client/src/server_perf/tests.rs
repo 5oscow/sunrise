@@ -1196,7 +1196,7 @@ fn the_sunrise_options_read_back_as_given() {
         lod_distance: Some(0),
     };
     assert_eq!(
-        start_of(&scratch, &rules, older.clone()).sunrise_options,
+        start_of(&scratch, &rules, older).sunrise_options,
         Some(older)
     );
 }

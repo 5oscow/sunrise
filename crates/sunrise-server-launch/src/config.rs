@@ -98,7 +98,7 @@ enabled = true               # false pauses it and keeps the webhook
 "##;
 
 /// Each typed setting: its section, its name, and the vanilla key it writes.
-pub const TYPED: [(&str, &str, &str); 20] = [
+pub const TYPED: [(&str, &str, &str); 19] = [
     ("server", "motd", "motd"),
     ("server", "port", "server-port"),
     ("server", "bind", "server-ip"),
