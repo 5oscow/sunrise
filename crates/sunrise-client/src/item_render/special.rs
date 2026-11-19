@@ -810,20 +810,46 @@ mod tests {
                 ((*t).to_owned(), rect)
             })
             .collect();
-        let drawn = |argument: Value, has_foil: bool| {
-            let mut quads: Vec<ItemQuad> = Vec::new();
-            submit(
-                &renderer,
-                &SpecialModel {
-                    kind: SpecialKind::Shield,
-                },
-                &argument,
-                has_foil,
-                Mat4::IDENTITY,
-                &sprites,
-                &super::super::NoHost,
-                &mut quads,
-            );
+        use super::super::{ItemRenderState, LayerGeometry, LayerRender, NoHost};
+        use sunrise_assets::item_model::{DisplayContext, FoilType};
+        let display = DisplayContext::ThirdPersonRightHand;
+        let drawn = |argument: Value, has_foil: bool, tint: Option<u32>| {
+            let mut state = ItemRenderState {
+                display,
+                layers: vec![LayerRender {
+                    geometry: LayerGeometry::Special {
+                        model: SpecialModel {
+                            kind: SpecialKind::Shield,
+                        },
+                        argument,
+                    },
+                    tints: Vec::new(),
+                    foil: if has_foil {
+                        FoilType::Standard
+                    } else {
+                        FoilType::None
+                    },
+                    matrix: Mat4::IDENTITY,
+                    particle: String::new(),
+                    uses_block_light: false,
+                    extents: Default::default(),
+                    display,
+                }],
+                oversized_in_gui: false,
+                animated: false,
+                cit_glint: None,
+                hdr_tier: 0,
+                hdr_light: 0,
+                held_tint: None,
+            };
+            if let Some(rgb) = tint {
+                state.set_held_tint(rgb);
+            }
+            let mut quads = Vec::new();
+            state.submit(&renderer, &sprites, &NoHost, Mat4::IDENTITY, &mut quads);
+            quads
+        };
+        let texture_and_foil = |quads: &[ItemQuad]| {
             quads
                 .iter()
                 .map(|q| {
@@ -843,8 +869,9 @@ mod tests {
                 "color": "blue"
             }]
         });
+        let untinted = drawn(banner.clone(), true, None);
         assert_eq!(
-            drawn(banner.clone(), true),
+            texture_and_foil(&untinted),
             [
                 ("entity/shield/shield_base", Foil::Standard),
                 ("entity/shield/base", Foil::Standard),
@@ -852,7 +879,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            drawn(banner, false),
+            texture_and_foil(&drawn(banner.clone(), false, None)),
             [
                 ("entity/shield/shield_base", Foil::None),
                 ("entity/shield/base", Foil::None),
@@ -860,9 +887,19 @@ mod tests {
             ]
         );
         assert_eq!(
-            drawn(Value::Null, true),
+            texture_and_foil(&drawn(Value::Null, true, None)),
             [("entity/shield/shield_base_nopattern", Foil::Standard)]
         );
+        // Removing green acts on the base and both pattern passes without changing
+        // the model's (possibly resource-pack-defined) red and blue or the foil.
+        let expected = untinted
+            .into_iter()
+            .map(|q| ItemQuad {
+                color: q.color & 0xFFFF_00FF,
+                ..q
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(drawn(banner, true, Some(0xFF_00_FF)), expected);
     }
     /// `DecoratedPotRenderer` draws every part with `RenderTypes.entitySolid`,
     /// whose pipeline culls back faces: the pot's flat `top` and `bottom`
