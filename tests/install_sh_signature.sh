@@ -91,15 +91,16 @@ done
 if PATH="$W/fake:$W/sys" command -v openssl > /dev/null; then echo "FAIL openssl is reachable from the installer's PATH"; fails=$((fails+1)); fi
 
 # Every case runs install.sh as published, but for its pin block: a copy pins the test build (or the case's PIN)
-# as verifier@VER (default test), for every platform, or only for PLATFORM (e.g. macos_arm64) with every other
+# as verifier@VER (default test), for every platform, or only for FIXTURE_PIN_PLATFORM (e.g. macos_arm64) with every other
 # platform pinned to a digest nothing matches. The verifier trusts the case's throwaway key (SUNRISE_VERIFY_TEST_KEY).
 VERIFY_SHA=$(sha256sum "$VERIFY_BIN" | cut -d' ' -f1)
 NOTHING=0000000000000000000000000000000000000000000000000000000000000000
+FIXTURE_PIN_PLATFORM=  # only the macOS case sets it, never the environment
 pinned_copy() {  # out version sha
   local others=$3 want=6
-  [ -z "${PLATFORM:-}" ] || { others=$NOTHING; want=1; }
+  [ -z "${FIXTURE_PIN_PLATFORM:-}" ] || { others=$NOTHING; want=1; }
   sed -e "s/^VERIFIER_VERSION=.*/VERIFIER_VERSION=$2/" -e "s/^VERIFIER_SHA256_\([a-z0-9_]*\)=.*/VERIFIER_SHA256_\1=$others/" \
-    -e "s/^VERIFIER_SHA256_${PLATFORM:-none}=.*/VERIFIER_SHA256_${PLATFORM:-none}=$3/" "$root/packaging/server/install.sh" > "$1"
+    -e "s/^VERIFIER_SHA256_${FIXTURE_PIN_PLATFORM:-none}=.*/VERIFIER_SHA256_${FIXTURE_PIN_PLATFORM:-none}=$3/" "$root/packaging/server/install.sh" > "$1"
   [ "$(grep -c "^VERIFIER_VERSION=$2\$" "$1")" = 1 ] && [ "$(grep -c "^VERIFIER_SHA256_[a-z0-9_]*=$3\$" "$1")" = "$want" ] \
     && [ "$(grep -c "^VERIFIER_SHA256_[a-z0-9_]*=" "$1")" = 6 ] \
     || { echo "FAIL could not pin the fixture copy of install.sh (one version line, $want of six hash lines)"; exit 1; }
@@ -194,7 +195,7 @@ verdict "verifier from another release than the pinned one not fetched" 1 "could
 # fake archive isn't a real zip, so the install stops after the check; the check passing is what this case proves.
 d=$W/mac; ARCHIVE=sunrise-macos-arm64.zip VERIFIER=sunrise-verify-macos-arm64 make_release "$d" v1.2.3
 ARCHIVE=sunrise-macos-arm64.zip json "$d" v1.2.3 yes
-FAKE_OS=Darwin FAKE_ARCH=arm64 PLATFORM=macos_arm64 run "$d" --version v1.2.3
+FAKE_OS=Darwin FAKE_ARCH=arm64 FIXTURE_PIN_PLATFORM=macos_arm64 run "$d" --version v1.2.3
 check "M1 macOS arm64 verifier selected and the archive checked" 1 "Release signature OK" "$(cat "$d/rc")" "$d/out"
 grep -qx "https://github.com/sunrise-org/sunrise/releases/download/verifier%40test/sunrise-verify-macos-arm64" "$d/urls" \
   || { echo "FAIL M1 the macOS arm64 verifier was not fetched from the pinned release"; fails=$((fails+1)); }
