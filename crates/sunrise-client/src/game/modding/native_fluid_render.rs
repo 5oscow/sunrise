@@ -295,7 +295,7 @@ mod tests {
         };
         let drawn_with = |stack: &FluidStack, options| {
             let mut draw = frame();
-            let look = fluid_box_look("test:potion", Some(&honey), 3, layers).unwrap();
+            let look = fluid_box_look("test:potion", Some(&honey), 15, layers).unwrap();
             let result = draw_fluid_box(
                 &mut draw,
                 look,
@@ -309,12 +309,14 @@ mod tests {
         let (result, vertices) = drawn_with(&plain, options);
         assert_eq!(result, Ok(()));
         assert_eq!(vertices.len(), 6 * 4);
-        // The look's sprite layer and its 0xAARRGGBB tint as ABGR; block light 3 kept, as the
-        // look's own light level 3 is no higher.
+        // The look's sprite layer and its 0xAARRGGBB tint as ABGR; block light raised from the
+        // draw's to the look's own light level 15.
+        let lit = fluid_light(0x30C0, 15);
+        assert_ne!(lit, 0x30C0);
         assert!(
             vertices
                 .iter()
-                .all(|v| v.glint_uv == [9.0, 0.0] && v.color == 0xC000_AAFF && v.light == 0x30C0)
+                .all(|v| v.glint_uv == [9.0, 0.0] && v.color == 0xC000_AAFF && v.light == lit)
         );
         // Components change nothing, and `argb` still replaces the look's tint.
         let (result, same) = drawn_with(&with_components, options);
@@ -342,11 +344,14 @@ mod tests {
                 luminosity: 0
             })
         );
-        // No tint is the grey `DrawContext::fluid` draws.
+        // No tint is the colour `DrawContext::fluid` draws (`fluid_tint`).
         let plain = sunrise_mod_package::content::FluidLook { tint: None, ..flat };
         assert_eq!(
             fluid_box_look("test:honey", Some(&plain), 0, layers).map(|look| look.tint),
-            Ok(0xFF9A_9A9A)
+            Ok(crate::game::native_panel_recipes::fluid_tint(
+                "test:honey",
+                None
+            ))
         );
     }
 }

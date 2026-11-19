@@ -203,8 +203,8 @@ draw.fluid_box(&tank.stack, [0.125, 0.0625, 0.125, 0.875, level, 0.875], options
   draws its tint as a flat colour) once per block, cut at whole-block lines.
   Each tile keeps its place in the sprite. The box is not inset. `uv_shrink_ratio` is the
   sprite's `TextureAtlasSprite.uvShrinkRatio` (`0.0..=1.0`), and `render_bottom` adds the bottom face.
-- The colour is the fluid's tint (water `0xFF3F76E4`, lava white, a mod fluid's look `tint`, opaque
-  white when it has none), never the biome's water colour. `with_argb` replaces it, alpha
+- The colour is the fluid's tint (water `0xFF3F76E4`, lava white, a mod fluid's look `tint`, grey
+  `0xFF9A9A9A` when it has none, as `DrawContext::fluid` draws it), never the biome's water colour. `with_argb` replaces it, alpha
   included. Faces have no directional shading. Sky light is the draw's own, and block light
   rises to the fluid's `light_level` (lava 15, water 0, a mod fluid's block's).
 - Each fluid's look is resolved once per resource load; a box does one indexed read.

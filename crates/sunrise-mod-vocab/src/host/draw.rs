@@ -478,7 +478,7 @@ pub trait BlockEntityDrawContext {
     /// animated still sprite (`block/water_still`, a look's `sprite`; a look with no sprite draws
     /// its tint flat), one tile per block, cut at whole-block lines and keeping each part's
     /// place in its tile, with no inset of the box. The tint is the fluid's (water `0xFF3F76E4`,
-    /// lava white, a look's `tint`, opaque white when it has none), not the biome's water
+    /// lava white, a look's `tint`, grey `0xFF9A9A9A` when it has none, as `fluid` draws it), not the biome's water
     /// colour, unless `options.argb` replaces it. Sky light stays as `draw.light`; block light
     /// rises to the fluid's `light_level` (15 for lava). No face is shaded by direction. Faces are sorted far to
     /// near, alpha blended, culled from behind and write depth, drawn with the block entities
