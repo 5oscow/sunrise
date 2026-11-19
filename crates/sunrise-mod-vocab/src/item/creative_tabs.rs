@@ -140,6 +140,8 @@ pub enum CreativeTabPlacement {
 
 /// Backend request for one edit, with the unconverted API stack. The editor
 /// owns count and component comparison for this callback, not a world write.
+// hidden: this is the generated backend request; mods use CreativeTabEdit.
+// exhaustive: both backends dispatch the closed set of insert and remove requests.
 #[doc(hidden)]
 #[derive(Clone, Debug, Wire)]
 pub enum CreativeTabChange {
