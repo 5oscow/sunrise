@@ -288,6 +288,13 @@ impl EntityTable {
         rows.into_iter().map(|(_, id)| id).collect()
     }
 
+    /// Each admitted id's lookup admission, for callers that answer in lookup
+    /// order (equip answers).
+    pub fn admission_order(&mut self) -> impl Fn(u32) -> Option<JoinSeq> + '_ {
+        self.drain();
+        |id| Some(self.rows.get(&NonZeroU32::new(id)?)?.admission)
+    }
+
     /// `Callback.onMove`: member `id` crossed into another section, so it is
     /// at the end of that section now; its lookup place does not change. The
     /// section authority calls this at the movement boundary, as each move
