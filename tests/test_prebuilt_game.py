@@ -996,20 +996,35 @@ class SmokeStartTests(unittest.TestCase):
             self.assertTrue((root / "src/../assets/icons/sunrise.icns").is_file())
         self.assertTrue(all("/sunrise-launcher/" + "a" * 40 + "/" in url for url in urls))
 
-    def test_only_expected_missing_resources_exit_is_accepted_and_homes_are_scratch(self):
+    def test_start_requires_the_expected_missing_resources_exit_for_each_side(self):
         from types import SimpleNamespace
-        for code in (1, 0, 2, 3221225477):
-            with self.subTest(code=code), tempfile.TemporaryDirectory() as directory:
+        for side, code, launcher, refusal in (
+            ("client", 1, True, None),
+            ("server", 1, False, None),
+            ("client", 1, False, "client omitted the launcher download URL"),
+            ("server", 1, True, "server showed the launcher download URL"),
+            ("client", 0, True, "stopped before the prepared-files check"),
+            ("client", 2, True, "stopped before the prepared-files check"),
+            ("client", 3221225477, True, "stopped before the prepared-files check"),
+        ):
+            with self.subTest(side=side, code=code, launcher=launcher), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
-                result = subprocess.CompletedProcess([], code, stdout=prebuilt_game.NO_RESOURCES)
+                out = root / "out"
+                out.mkdir()
+                (out / prebuilt_game.IDENTITY).write_text(json.dumps({"side": side}))
+                stdout = prebuilt_game.NO_RESOURCES
+                if launcher:
+                    stdout += "\nSunrise is started from its launcher: download it at https://example.test (Download)."
+                result = subprocess.CompletedProcess([], code, stdout=stdout)
                 with patch.dict(sys.modules, {"lab": SimpleNamespace(game_env=lambda **_: {"SUNRISE_HOME": "/inherited"})}), \
+                     patch.object(prebuilt_game.sys, "platform", "linux"), \
                      patch.object(prebuilt_game.subprocess, "run", return_value=result) as run, \
                      contextlib.redirect_stdout(io.StringIO()):
-                    if code == 1:
-                        prebuilt_game.start(root / "out")
+                    if refusal is None:
+                        prebuilt_game.start(out)
                     else:
-                        with self.assertRaises(SystemExit):
-                            prebuilt_game.start(root / "out")
+                        with self.assertRaisesRegex(SystemExit, refusal):
+                            prebuilt_game.start(out)
                 environment = run.call_args.kwargs["env"]
                 for key in ("SUNRISE_HOME", "SUNRISE_LAUNCHER_HOME", "XDG_DATA_HOME", "XDG_CONFIG_HOME"):
                     self.assertTrue(Path(environment[key]).is_relative_to(root))
