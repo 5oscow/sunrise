@@ -84,6 +84,7 @@ FRESH = "sdk / fresh"
 # Steps whose reports name failing tests. Failures outside those steps still need a job-level issue.
 WINDOWS_ROWS_JOB = "windows-runtime-leases / runtime-leases"
 WINDOWS_ROWS_STEP = "The Windows-only daily rows"
+WASM_STD_BUILD, WASM_STD_COMPARE = "wasm-std-names / build (", "wasm-std-names / compare"
 FIXTURE_TESTS_STEPS = ("Validate and load the fixture", "Run the client tests that load the compiled fixture")
 # The SDK legs' checks of the SDK they just built (prebuilt-game-build.yml), by step: a failed one is its own issue per
 # check and platform, `Daily: sdk <check> (<platform>)`, closed only by a run in which that step passed.
@@ -311,8 +312,9 @@ def verdicts(jobs, reports, results, legs, parity_report, all_legs):
     if results.get(LINUX_SDK_CALL, {}).get("result", "success") != "success":
         linux_sdk_red.add("sdk")  # the leg's own item (its failed `fresh`, say) is the Linux legs' too
     fn_replace_blocked = False
-    failed_legs = {job["name"].split(" / ", 1)[0] for job in leg_jobs(jobs, all_legs)
-                   if job["conclusion"] in ("failure", "cancelled", "timed_out") and not never_started(job)}
+    # The wasm std comparison needs both builds: one that failed is the item, not the comparison it skipped.
+    std_build_failed = any(job["name"].startswith(WASM_STD_BUILD) and job["conclusion"] in ("failure", "cancelled", "timed_out")
+                           and not never_started(job) for job in jobs)
     for job in leg_jobs(jobs, all_legs):
         if never_started(job) or job["name"].startswith(f"{PARITY} / "):
             continue  # parity uses its own verdict, including when the job passed
@@ -328,8 +330,8 @@ def verdicts(jobs, reports, results, legs, parity_report, all_legs):
             continue
         if job["conclusion"] == "skipped" and job["name"].split(" / ", 1)[0] in helpers:
             continue  # its leg's failed helper is the one item for it, below
-        if job["conclusion"] == "skipped" and job["name"].split(" / ", 1)[0] in failed_legs:
-            continue  # it needed a job of its leg that failed (a comparison of two builds): that job is the item
+        if job["name"] == WASM_STD_COMPARE and job["conclusion"] == "skipped" and std_build_failed:
+            continue
         steps = failed_steps(job)
         problems = [dict(item, leg=job["name"]) for item in (report or {}).get("problems", ())]
         by_name = [item for item in problems if named(item)]
