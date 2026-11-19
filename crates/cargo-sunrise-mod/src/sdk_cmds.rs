@@ -257,6 +257,14 @@ fn package_subject(path: &Path) -> Result<Subject, String> {
         )));
     };
     let table = UsesTable::read(&bytes).map_err(|e| format!("{USES_FILE}: {e}"))?;
+    if let Some(native) = &package.manifest.native
+        && native.sunrise != table.made_for
+    {
+        return Ok(Subject::NotApplicable(format!(
+            "{name} pins build {} and its list of what it uses was made for {}, so the list says nothing about the pinned build. Pack it again with `cargo sunrise-mod build`.",
+            native.sunrise, table.made_for
+        )));
+    }
     Ok(Subject::Table { name, table })
 }
 
@@ -299,6 +307,7 @@ pub(crate) fn fits(entry: ChildEntry, args: &[String]) -> ExitCode {
     match fits_lines(entry, args) {
         Ok(Answer::Fits) => ExitCode::SUCCESS,
         Ok(Answer::DoesNotFit) => ExitCode::from(1),
+        Ok(Answer::Unknown) => ExitCode::from(2),
         // An answer, not a failure: printed plainly.
         Ok(Answer::NotApplicable(text)) => {
             println!("{text}");
@@ -315,6 +324,8 @@ pub(crate) fn fits(entry: ChildEntry, args: &[String]) -> ExitCode {
 enum Answer {
     Fits,
     DoesNotFit,
+    /// No build misfits, and for one the list cannot say; its line is printed.
+    Unknown,
     /// The question does not apply: why, not yet printed.
     NotApplicable(String),
 }
@@ -344,7 +355,7 @@ fn fits_lines(entry: ChildEntry, args: &[String]) -> Result<Answer, String> {
         table.pin_hook_versions(&surface_of(&made_for)?);
     }
     println!("{name}:");
-    let mut all = true;
+    let (mut all, mut known) = (true, true);
     for build in builds {
         let target = fetch_build(project, build)?;
         if target.build == table.made_for {
@@ -353,6 +364,18 @@ fn fits_lines(entry: ChildEntry, args: &[String]) -> Result<Answer, String> {
         }
         match fit(&table.entries, &surface_of(&target)?) {
             Fit::Fits => println!("{}  fits", target.name),
+            Fit::Unversioned(hooks) => {
+                known = false;
+                println!(
+                    "{}  not known: nothing the list can judge changed, but it holds no version of {}. Pack the mod again with `cargo sunrise-mod build`, which records them.",
+                    target.name,
+                    hooks
+                        .iter()
+                        .map(|id| format!("`{}`", leaf(id)))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
             Fit::DoesNotFit(misfits) => {
                 all = false;
                 let count = misfits
@@ -368,10 +391,10 @@ fn fits_lines(entry: ChildEntry, args: &[String]) -> Result<Answer, String> {
             }
         }
     }
-    Ok(if all {
-        Answer::Fits
-    } else {
-        Answer::DoesNotFit
+    Ok(match (all, known) {
+        (false, _) => Answer::DoesNotFit,
+        (true, false) => Answer::Unknown,
+        (true, true) => Answer::Fits,
     })
 }
 
@@ -482,7 +505,8 @@ fn report(
 ) -> String {
     let total = uses.items.len();
     let misfits = match fit(uses.entries(), new_surface) {
-        Fit::Fits => vec![],
+        // A fresh scan names every hook's version.
+        Fit::Fits | Fit::Unversioned(_) => vec![],
         Fit::DoesNotFit(misfits) => misfits,
     };
     let mut changed: Vec<&str> = misfits.iter().map(|m| m.id.as_str()).collect();
