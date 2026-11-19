@@ -4852,7 +4852,6 @@ name = "sunrise-hot-paths-game"
 version = "0.1.0"
 dependencies = [
  "sunrise-client",
- "sunrise-guest-stack",
  "sunrise-mod-api",
  "sunrise-mod-host",
  "sunrise-mod-package",
