@@ -55,7 +55,6 @@ use page::clamp_text;
 use page::closest_expiration;
 use page::days_left_text;
 pub use page::human_readable;
-use page::{percent_label, transfer_bar_width, transfer_percentage, upload_limit_size};
 use page::loading_dots;
 use page::main_footer_h;
 use page::pdp_entries;
@@ -69,6 +68,7 @@ use page::subscription_label;
 use page::task_stack_top;
 use page::wrap_lines;
 use page::{DIFFICULTIES, DIFFICULTY_DEFAULT, EXPIRATIONS, GAME_MODE_DEFAULT, GAME_MODES};
+use page::{percent_label, transfer_bar_width, transfer_percentage, upload_limit_size};
 
 use picture::{face_from_skin, realm_name_valid, resample_icon, slot_name, template_none_lines};
 pub use settings::{ConfigureTab, SettingsDraft};
