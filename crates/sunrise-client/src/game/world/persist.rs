@@ -23,6 +23,10 @@ mod hurt_by_refs;
 mod lookup_order_tests;
 
 use super::{FallingBlock, Game};
+
+/// Levels of NBT nesting kept clear under the writer's guard for what surrounds a passenger
+/// chain: the chunk root, its `Entities` list, the root entity and its own data.
+const SAVE_NESTING_MARGIN: usize = 64;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -1260,7 +1264,22 @@ impl Game<'_> {
             .rev()
             .map(|rider| (ROOT, rider))
             .collect();
+        // Nesting of each node under `tag`: one compound and one list per level.
+        let mut levels: Vec<usize> = Vec::new();
         while let Some((parent, rider)) = pending.pop() {
+            let level = if parent == ROOT {
+                1
+            } else {
+                levels[parent] + 1
+            };
+            // The disk writer's own recursion guard: past it no tree can be written, so a chain
+            // this deep is cut here and said so, never built (its drop would recurse as deep).
+            if level * 2 + SAVE_NESTING_MARGIN > sunrise_core::nbt::DISK_WRITE_NESTING_GUARD {
+                log::error!(
+                    "entity {rider}: passenger chain deeper than {level} riders is not saved"
+                );
+                continue;
+            }
             let own = if let Some(object) = self.mob_object_slot(rider) {
                 Some(self.mob_object_nbt(object))
             } else {
@@ -1268,6 +1287,7 @@ impl Game<'_> {
             };
             let Some(own) = own else { continue };
             let node = nodes.len();
+            levels.push(level);
             nodes.push((parent, own));
             pending.extend(
                 self.vehicle_passenger_ids(rider)

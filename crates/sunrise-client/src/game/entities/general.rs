@@ -676,7 +676,11 @@ pub struct RiderIndex {
 
 impl RiderIndex {
     /// Whether the index describes `rows` and their mounts as they stand now, so a lookup
-    /// through it needs no scan of the rows.
+    /// through it needs no scan of the rows. It is current after each tick pass's refresh and
+    /// stale only from the first row insert, removal or mount write after it until the next
+    /// refresh: lookups in that window scan instead, so a pass whose listeners change many
+    /// mounts pays one scan per lookup, never a wrong answer (a lookup takes `&self`, so it
+    /// cannot rebuild the index itself).
     fn is_fresh(&self, rows: &GeneralRows, mounts: u64) -> bool {
         self.stamp == Some(rows.stamp()) && self.length == rows.len() && self.mounts == mounts
     }
@@ -686,7 +690,7 @@ impl RiderIndex {
     /// the row count and the mounts hold still.
     pub fn refresh(&mut self, rows: &GeneralRows, mounts: u64) {
         let stamp = rows.stamp();
-        if self.stamp == Some(stamp) && self.length == rows.len() && self.mounts == mounts {
+        if self.is_fresh(rows, mounts) {
             return;
         }
         self.stamp = Some(stamp);
@@ -1358,6 +1362,7 @@ mod tests {
     /// A passenger chain has no depth bound of its own, as in vanilla: even a
     /// chain far deeper than any NBT could hold checks without exhausting the stack.
     #[test]
+    #[ignore = "daily"]
     fn a_deep_passenger_chain_checks_iteratively() {
         let mut root = record([1, 2, 3, 4], "mymod:robot");
         let mut node = &mut root;
