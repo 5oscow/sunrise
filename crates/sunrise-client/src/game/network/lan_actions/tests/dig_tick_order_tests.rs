@@ -56,6 +56,7 @@ enum Event {
     EntityPre(u32, Option<i32>),
     EntityPost(u32),
     Dig(u128, i32),
+    LevelPost(&'static str),
     PlayerPre(u128, &'static str, Option<i32>, Option<i32>),
     PlayerPost(u128),
     Criterion(u128, String),
@@ -64,6 +65,23 @@ enum Event {
 struct Observe {
     events: Arc<Mutex<Vec<Event>>>,
     cancel: u32,
+    check_delayed_destroy: bool,
+}
+
+const DELAYED: [i32; 3] = [9, 63, 9];
+
+impl Observe {
+    fn assert_delayed_block_is_air(&self, host: &dyn ServerHost, uuid: u128) {
+        if self.check_delayed_destroy && uuid == 123 {
+            let level = host.level("minecraft:overworld").unwrap();
+            let air = host.block_state_id("minecraft:air").unwrap();
+            assert_eq!(
+                level.block_state(host, DELAYED),
+                Some(air),
+                "delayed destroy finished before the player body"
+            );
+        }
+    }
 }
 
 #[mod_api::__subscriptions]
@@ -116,8 +134,17 @@ impl mod_api::Hooks for Observe {
                 .push(Event::Criterion(event.player, event.criterion.into()));
         }
     }
+    fn level_tick_post(&self, host: HostSide<'_>, _: &mut mod_api::LevelTickPostEvent) {
+        if let HostSide::Server(host) = host {
+            self.events
+                .lock()
+                .unwrap()
+                .push(Event::LevelPost(host.dimension()));
+        }
+    }
     fn player_tick_pre(&self, host: HostSide<'_>, event: &mut mod_api::PlayerTickPreEvent) {
         let HostSide::Server(host) = host else { return };
+        self.assert_delayed_block_is_air(host, event.player.uuid());
         let entity = event.player.entity();
         self.events.lock().unwrap().push(Event::PlayerPre(
             event.player.uuid(),
@@ -126,7 +153,9 @@ impl mod_api::Hooks for Observe {
             entity.damage_cooldown_time(host),
         ));
     }
-    fn player_tick_post(&self, _: HostSide<'_>, event: &mut mod_api::PlayerTickPostEvent) {
+    fn player_tick_post(&self, host: HostSide<'_>, event: &mut mod_api::PlayerTickPostEvent) {
+        let HostSide::Server(host) = host else { return };
+        self.assert_delayed_block_is_air(host, event.player.uuid());
         self.events
             .lock()
             .unwrap()
@@ -149,6 +178,7 @@ fn advancement_criteria_straddle_the_player_body_even_with_entity_cancel() {
             Box::new(Observe {
                 events: Arc::clone(&heard),
                 cancel: 23,
+                check_delayed_destroy: false,
             }),
         )]
         .into(),
@@ -252,6 +282,7 @@ fn player_tick_hooks_observe_advanced_dig_progress_and_skipped_body_still_ticks_
             Box::new(Observe {
                 events: Arc::clone(&heard),
                 cancel: 23,
+                check_delayed_destroy: true,
             }),
         )]
         .into(),
@@ -266,11 +297,17 @@ fn player_tick_hooks_observe_advanced_dig_progress_and_skipped_body_still_ticks_
                     .registry
                     .default_state("minecraft:stone")
                     .unwrap();
+                let start = 20_000;
+                game.lan.as_mut().unwrap().hub.ticks = start;
                 for (dim, conns) in [(Dim::Overworld, [1, 3]), (Dim::Nether, [2, 4])] {
                     game.enter_level(dim).unwrap();
                     game.world
                         .chunks
                         .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+                    if dim == Dim::Overworld {
+                        let [x, y, z] = DELAYED;
+                        game.world.set(x, y, z, stone).unwrap();
+                    }
                     for conn in conns {
                         let mut player = guest(conn);
                         player.dimension = dim.id().into();
@@ -290,15 +327,11 @@ fn player_tick_hooks_observe_advanced_dig_progress_and_skipped_body_still_ticks_
                         if spec {
                             play.destroy_delay = 5;
                         } else {
-                            play.digging = Some((pos, [0, 1, 0]));
-                            play.mining = Some(Mining {
+                            play.arm_mining_for_test(
                                 pos,
-                                progress: 0.0,
-                                per_tick: 0.0,
-                                ticks: 1,
-                                crack: None,
-                            });
-                            play.last_progress = -1;
+                                start,
+                                (conn == 1).then_some((DELAYED, 0)),
+                            );
                         }
                         game.as_guest(conn, |game| {
                             let health = &mut game.player.as_mut().unwrap().health;
@@ -342,10 +375,12 @@ fn player_tick_hooks_observe_advanced_dig_progress_and_skipped_body_still_ticks_
                         Dig(123, 0),
                         EntityPost(20),
                         EntityPost(22),
+                        LevelPost("minecraft:overworld"),
                         EntityPre(21, Some(8)),
                         EntityPre(23, Some(8)),
                         Dig(124, 0),
                         EntityPost(21),
+                        LevelPost("minecraft:the_nether"),
                         PlayerPre(123, "minecraft:overworld", Some(7), Some(4)),
                         PlayerPost(123),
                         PlayerPre(124, "minecraft:the_nether", Some(7), Some(4)),

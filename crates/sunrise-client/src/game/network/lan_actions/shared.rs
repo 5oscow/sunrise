@@ -261,6 +261,26 @@ pub(super) struct GuestSwap {
 }
 
 impl GuestPlay {
+    #[cfg(test)]
+    pub(in crate::game) fn arm_mining_for_test(
+        &mut self,
+        pos: [i32; 3],
+        start: u64,
+        delayed: Option<([i32; 3], u64)>,
+    ) {
+        self.digging = Some((pos, [0, 1, 0]));
+        self.dig_start = start;
+        self.mining = Some(Mining {
+            pos,
+            progress: 0.0,
+            per_tick: 0.0,
+            ticks: 1,
+            crack: None,
+        });
+        self.delayed = delayed;
+        self.last_progress = -1;
+    }
+
     /// The guest's `Player.attackStrengthTicker` outside its turn.
     pub(in crate::game) fn attack_ticks(&self) -> u32 {
         self.attack_ticks
