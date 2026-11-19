@@ -94,7 +94,8 @@ impl Game<'_> {
         {
             let host = ReadLevel { game: self, level };
             save_additional(level, pos, generation, kind, tag, |id, entity, tag| {
-                mod_api::dispatch_block_entity_save_additional(&host, id, entity, tag);
+                let pos = [pos.0, pos.1, pos.2];
+                mod_api::dispatch_block_entity_save_additional(&host, id, entity, pos, level, tag);
             })
         } else {
             None
@@ -149,7 +150,8 @@ impl GameLevel<'_> {
                     kind,
                     tag,
                     |id, entity, tag| {
-                        self.native_block_entity_save_additional(id, entity, tag);
+                        let pos = [pos.0, pos.1, pos.2];
+                        self.native_block_entity_save_additional(id, entity, pos, level, tag);
                     },
                 )
             } else {
@@ -162,8 +164,10 @@ impl GameLevel<'_> {
         &self,
         id: mod_api::BlockEntityTypeKey,
         entity: BlockEntityRef,
+        pos: [i32; 3],
+        level: LevelRef,
         tag: &mut Compound,
     ) {
-        self.fire_block_entity_save_additional(id, entity, tag);
+        self.fire_block_entity_save_additional(id, entity, pos, level, tag);
     }
 }
