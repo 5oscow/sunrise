@@ -1629,6 +1629,22 @@ impl<'a> Cursor<'a> {
 mod tests {
     use super::*;
     #[test]
+    fn collecting_into_a_compound_keeps_insertion_order_whatever_the_size_hint() {
+        let entries =
+            || (0..40).map(|i| (JavaString::from(format!("key{i}").as_str()), Tag::Int(i)));
+        let mut inserted = Compound::new();
+        for (key, value) in entries() {
+            inserted.insert(key, value);
+        }
+        let order = |map: &Compound| map.keys().map(|key| key.0.clone()).collect::<Vec<_>>();
+        // `entries()` reports an exact size; the filter reports only an upper bound.
+        let exact: Compound = entries().collect();
+        let inexact: Compound = entries().filter(|_| true).collect();
+        assert_eq!(order(&exact), order(&inserted));
+        assert_eq!(order(&inexact), order(&inserted));
+    }
+
+    #[test]
     fn compound_collision_history_survives_snbt_binary_and_copies() {
         // Java String.hashCode("Aa") == String.hashCode("BB") == 2112.
         // Replacement stays in place; removing and reinserting moves the key.
