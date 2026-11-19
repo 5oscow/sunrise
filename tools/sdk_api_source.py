@@ -13,9 +13,7 @@ resolved and no dev- or build-dependencies, and, for a crate whose build script 
 that copies `generated/` into `OUT_DIR`. The generated files name source files by absolute path; the checkout's
 root is written as ROOT_TOKEN and the build script puts the API source's own root in its place. `build` runs on a
 POSIX host (CI's Linux leg): it relocates `/`-separated paths only. `Cargo.lock` pins
-the versions the game's lockfile has, and each manifest asks for the resolved features the game's build has —
-a transitive package is named when the game's other crates, not the API's, unify its features. Same commit,
-same bytes.
+the versions the game's lockfile has. Same commit, same bytes.
 """
 
 import argparse
@@ -182,13 +180,11 @@ def resolve_workspace(value, inherited: dict, what: str):
 
 
 def normalise_manifest(manifest: dict, workspace: dict, crate: Crate, crates: dict[str, Crate],
-                       features: dict[str, list[str]], resolved: dict[str, tuple[set[str], bool]],
-                       pins: dict | None = None) -> str:
+                       features: dict[str, list[str]], resolved: dict[str, tuple[set[str], bool]]) -> str:
     """The crate's manifest as the API source carries it: workspace keys resolved, path dependencies pointing
     inside the API source, no dev- or build-dependencies, no targets but the library. A registry dependency named
     in `resolved` (its resolved features, and whether its defaults are on) asks for exactly the features the game's
-    build resolves for it, so an author compiles the API as the player's prebuilt game does. `pins` names
-    transitive packages the same way, for the feature unification the game's other crates perform."""
+    build resolves for it, so an author compiles the API as the player's prebuilt game does."""
     inherited_package = workspace.get("workspace", {}).get("package", {})
     inherited_dependencies = workspace.get("workspace", {}).get("dependencies", {})
     package = {key: resolve_workspace(manifest["package"][key], inherited_package, key)
@@ -225,7 +221,7 @@ def normalise_manifest(manifest: dict, workspace: dict, crate: Crate, crates: di
             written[name] = spec
         return written
 
-    out.append(table("dependencies", dependencies({**manifest.get("dependencies", {}), **(pins or {})})))
+    out.append(table("dependencies", dependencies(manifest.get("dependencies", {}))))
     for platform, entries in sorted(manifest.get("target", {}).items()):
         if entries.get("dependencies"):
             out.append(table(f"target.{json.dumps(platform)}.dependencies", dependencies(entries["dependencies"])))
@@ -372,39 +368,6 @@ def lock_disagreements(slice_lock: dict, game_lock: dict) -> list[str]:
                   if (package["name"], package["version"], package.get("source"), package.get("checksum")) not in game)
 
 
-def closure_pins(metadata: dict, ours_features: dict[str, set[str]], game: dict[str, set[str]],
-                 declared: set[str], root: str = API) -> tuple[dict[str, dict], dict[str, dict]]:
-    """The registry packages of the game's `root` runtime closure that the staged API source does not resolve
-    with the game's features, as `(missing, drifted)` direct-dependency specs. Cargo unifies features over the
-    whole workspace: crates the API source does not have can turn on features of a package the API reaches only
-    transitively (the game's `digest` and `crypto-common` on `md-5` and `crc-fast`). A pin names the package at
-    the game's version and asks for exactly the features the game resolves, so the slice can never enable more
-    than the game does. Packages in `missing` are absent from the slice's resolution entirely: normally a drift
-    pin pulls them in, so they are only worth naming once the drift is pinned."""
-    packages = {package["id"]: package for package in metadata["packages"]}
-    missing, drifted = {}, {}
-    for package_id in prebuilt_game.runtime_packages(metadata, root):
-        package = packages[package_id]
-        if package["source"] is None or package["name"] in declared:
-            continue
-        key = f"{package['name']} {package['version']}"
-        want = game.get(key, set())
-        have = ours_features.get(key)
-        spec = {"version": f"={package['version']}"}
-        if "default" not in want:
-            spec["default-features"] = False
-        if want - {"default"}:
-            spec["features"] = sorted(want - {"default"})
-        if have is None:
-            # A package for another target only (wasi on a POSIX host) has no resolved features to ask for: a
-            # pinned parent's edge brings it in.
-            if key in game:
-                missing[package["name"]] = spec
-        elif want - have:
-            drifted[package["name"]] = spec
-    return missing, drifted
-
-
 def build_messages(arguments: list[str], target_dir: Path, packages: tuple[str, ...] = (API, WASMTIME)) -> list[dict]:
     output = run(["cargo", "check", "--locked", *(f"-p{package}" for package in packages), "--message-format", "json",
                   *arguments], cwd=ROOT,
@@ -514,29 +477,12 @@ def build(out: Path) -> dict[str, bytes]:
     out.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=out.parent, prefix=f".{out.name}.") as staging:
         staged = Path(staging) / "api"
-        api_manifest = f"{by_name[API].directory}/Cargo.toml"
-        pins: dict[str, dict] = {}
-        for _ in range(5):
-            for path, data in files.items():
-                (staged / path).parent.mkdir(parents=True, exist_ok=True)
-                (staged / path).write_bytes(data)
-            # Cargo keeps the game's pins and drops the packages the API does not use.
-            shutil.copyfile(workspace_root / "Cargo.lock", staged / "Cargo.lock")
-            run(["cargo", "metadata", "--format-version", "1"], cwd=staged, env=isolated())
-            ours_features = target_features(tree(staged, API, isolated()))
-            missing, drifted = closure_pins(metadata, ours_features, game,
-                                            set(normal_dependencies(manifests[API])))
-            if not missing and not drifted:
-                break
-            # Feature unification spans the game's whole workspace: drift pins ask for the features its other
-            # crates turn on; only once the drift is pinned are packages still missing named directly.
-            pins.update(drifted or missing)
-            files[api_manifest] = normalise_manifest(
-                manifests[API], workspace, by_name[API], by_name, features[API],
-                requested_features(metadata, by_name[API], manifests[API], game), pins).encode()
-        else:
-            raise Refusal("E_CLOSURE", "the API source cannot resolve the game's closure: "
-                          + ", ".join(sorted(pins)))
+        for path, data in files.items():
+            (staged / path).parent.mkdir(parents=True, exist_ok=True)
+            (staged / path).write_bytes(data)
+        # Cargo keeps the game's pins and drops the packages the API does not use.
+        shutil.copyfile(workspace_root / "Cargo.lock", staged / "Cargo.lock")
+        run(["cargo", "metadata", "--format-version", "1"], cwd=staged, env=isolated())
         files["Cargo.lock"] = (staged / "Cargo.lock").read_bytes()
         disagreeing = lock_disagreements(tomllib.loads(files["Cargo.lock"].decode()),
                                          tomllib.loads((workspace_root / "Cargo.lock").read_text()))
@@ -598,37 +544,35 @@ def starter_mod(folder: Path, wasmtime: bool = False) -> None:
     (folder / "src/lib.rs").write_text(fill((TEMPLATE / "lib.rs").read_text()))
 
 
-def check_root(game: dict, ours: dict, root: str, game_tree: str, consumer_tree: str, consumer: str,
-               exact: bool = True) -> int:
+def check_root(game: dict, ours: dict, root: str, game_tree: str, consumer_tree: str, consumer: str) -> int:
     """One API root's closure and features: the prebuilt game's against the API source's, and `consumer`'s own
     resolution (its `cargo tree`) against the game's. Each root is judged by a consumer that depends on it: a starter
-    that names only `sunrise-mod-api` says nothing of `sunrise-wasmtime`. Returns the closure's size. A root that is
-    not `exact` may resolve fewer packages and features than the game: the game's other crates turn on features of
-    wasmtime's dependencies (rustls and ring turn on `digest`'s `subtle` and `rand_core`), which the API source does
-    not have; it must still resolve nothing, and turn on no feature, that the game does not. The root and `wasmtime` themselves
-    are exact: a mod's local check sees the surface the launcher binds."""
+    that names only `sunrise-mod-api` says nothing of `sunrise-wasmtime`. Returns the closure's size. The API source
+    may resolve fewer packages and features than the game: Cargo unifies features over the game's whole workspace, and
+    its other crates turn on features of packages a root reaches (`sunrise-client` asks `digest` for `mac` and
+    `crypto-common` for `getrandom`; rustls and ring do the same under wasmtime), which the API source does not have
+    and a wasm mod could not build. It must still resolve nothing, and turn on no feature, that the game does not.
+    The root itself, and `wasmtime` where the root reaches it, are exact: a mod's local check sees the surface the
+    launcher binds."""
 
     def closure(metadata: dict) -> set[tuple[str, str]]:
         packages = {package["id"]: package for package in metadata["packages"]}
         return {(packages[package]["name"], packages[package]["version"])
                 for package in prebuilt_game.runtime_packages(metadata, root)}
 
-    if (closure(game) != closure(ours)) if exact else not closure(ours) <= closure(game):
-        raise Refusal("E_CLOSURE", f"the prebuilt game's {root} closure {sorted(closure(game) - closure(ours))} "
-                                   f"against the API source's {sorted(closure(ours) - closure(game))}")
+    if not closure(ours) <= closure(game):
+        raise Refusal("E_CLOSURE", f"the API source's {root} closure holds {sorted(closure(ours) - closure(game))}, "
+                                   "which the prebuilt game's does not")
     game_features, own_features = target_features(game_tree), target_features(consumer_tree)
-    if exact:
-        differing = feature_disagreements(game_features, own_features, {f"{n} {v}" for n, v in closure(ours)})
-    else:
-        # The consumer turns on no feature the game does not: the game's others may add features, never the reverse.
-        differing = [f"{key}: game {sorted(game_features.get(key, set()) - {'default'})}, "
-                     f"ours {sorted(features - {'default'})}"
-                     for key, features in sorted(own_features.items())
-                     if key in game_features and features - game_features[key]]
-        # The root itself and wasmtime are the surface a mod names: exactly the game's, as the launcher binds them.
-        named = {key for key in game_features.keys() | own_features.keys() if key.split(" ")[0] in (root, "wasmtime")}
-        differing += [line for line in feature_disagreements(game_features, own_features, named)
-                      if line not in differing]
+    # The consumer turns on no feature the game does not: the game's others may add features, never the reverse.
+    differing = [f"{key}: game {sorted(game_features.get(key, set()) - {'default'})}, "
+                 f"ours {sorted(features - {'default'})}"
+                 for key, features in sorted(own_features.items())
+                 if key in game_features and features - game_features[key]]
+    # The root itself and wasmtime are the surface a mod names: exactly the game's, as the launcher binds them.
+    named = {f"{name} {version}" for name, version in closure(game) if name in (root, "wasmtime")}
+    differing += [line for line in feature_disagreements(game_features, own_features, named)
+                  if line not in differing]
     if differing:
         raise Refusal("E_FEATURES", f"{consumer} compiles {root} with other features than the game: "
                       + "; ".join(differing))
@@ -676,9 +620,8 @@ def check(api: Path, scratch: Path) -> None:
                           cwd=mod / MOD_PATH, env=environment))
 
     game_tree = tree(ROOT, prebuilt_game.GAME)
-    sizes = {root: check_root(game, ours, root, game_tree, tree(folder, name, environment), name, exact)
-             for root, folder, name, exact in ((API, mod, "mod-starter", True),
-                                               (WASMTIME, native, "mod-starter-wasmtime", False))}
+    sizes = {root: check_root(game, ours, root, game_tree, tree(folder, name, environment), name)
+             for root, folder, name in ((API, mod, "mod-starter"), (WASMTIME, native, "mod-starter-wasmtime"))}
     for folder, name in ((mod, "mod-starter"), (native, "mod-starter-wasmtime")):
         disagreeing = lock_disagreements(tomllib.loads((folder / "Cargo.lock").read_text()),
                                          tomllib.loads((ROOT / "Cargo.lock").read_text()))
