@@ -106,10 +106,11 @@ impl Game<'_> {
     /// A mod's label as `SubmitNodeCollection.submitNameTag` draws a name: 0.5 above `at`,
     /// facing the camera, 0.025 blocks a font pixel. See-through, twice: opaque white text in
     /// the world, its light raised to at least 2 unless `exact_light` (no backdrop), and the
-    /// faded text on the backdrop over everything, unlit. Otherwise once, depth tested and translucent: the faded
-    /// text on the backdrop in the caller's light. The faded text's alpha (unless `faded_alpha`) and
-    /// the backdrop's follow the player's text background opacity. Refused whole, before any layout, for a
-    /// position that is not finite; glyphs a refused label rasterized still upload.
+    /// faded text on the backdrop over everything, unlit. Otherwise once, depth tested and
+    /// translucent: the faded text on the backdrop in the caller's light. The faded text's alpha
+    /// (unless `faded_alpha`) and the backdrop's follow the player's text background opacity.
+    /// Refused whole, before any layout, for a position that is not finite; glyphs a refused
+    /// label rasterized still upload.
     pub(super) fn native_world_name_tag(
         &self,
         draw: &mut WorldGeometry,

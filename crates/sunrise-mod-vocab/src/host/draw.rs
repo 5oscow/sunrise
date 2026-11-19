@@ -547,9 +547,10 @@ pub trait WorldDrawContext {
     /// translucent, the faded text on the backdrop, in [`NameTagOptions::light`] as given. With
     /// it, twice, as an unsneaking name: opaque in the world (sky and block light each at least
     /// 2, or exactly [`NameTagOptions::light`] with [`NameTagOptions::exact_light`]), and
-    /// faded on the backdrop over everything, walls included, unlit. Labels draw with
-    /// the world's name tags, far to near, whatever the stage. Each glyph and backdrop quad, both copies counted, takes one of
-    /// the view's 4,096 quads shared with [`quads`](Self::quads) ([`usage`](Self::usage)).
+    /// faded on the backdrop over everything, walls included, unlit. Labels draw with the
+    /// world's name tags, far to near, whatever the stage. Each glyph and backdrop quad, both
+    /// copies counted, takes one of the view's 4,096 quads shared with
+    /// [`quads`](Self::quads) ([`usage`](Self::usage)).
     /// Refuses a non-finite `at` ([`DrawError::NonFinite`]), text deeper than 512 component
     /// nodes ([`DrawError::TextTooDeep`]) or otherwise refused ([`DrawError::TextRefused`]),
     /// and a label past the quads left ([`DrawError::CapacityExceeded`]); on `Err` nothing
