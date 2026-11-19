@@ -74,11 +74,17 @@ the order the moves happen: an entity that steps out of a section and back is
 at the end of it again, and a passenger enters after its vehicle. A vehicle
 comes before its passengers.
 
-Some differences remain. Several moves within one entity's own tick, such as an
-enderman's teleport and its walk, count as one crossing, from where it was to
-where it ended. Entities that the engine keeps outside the residency families,
-such as lingering potion clouds, lightning bolts and eyes of ender, are not
-lookup members at all.
+Section entry order does not depend on a listener of `entity_entering_section`:
+the engine records each server crossing whether or not a mod hears it.
+
+Some differences remain. Vanilla notes a section change at every position write;
+here minecarts, boats, projectiles, dropped items, primed TNT, falling blocks,
+fireworks, experience orbs and the other server entities that report after their
+own update count several moves within one tick as one crossing, from where the
+entity was to where it ended (mobs and players are told per write). A block
+piston's push is recorded only while a mod listens to `entity_entering_section`.
+Entities that the engine keeps outside the residency families, such as lingering
+potion clouds, lightning bolts and eyes of ender, are not lookup members at all.
 The call allocates buffers for the result and sorts admission keys; it does not
 allocate an object per entity. Cache the result when doing several passes in one
 hook rather than repeatedly crossing the host boundary.
