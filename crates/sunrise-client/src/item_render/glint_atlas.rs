@@ -17,7 +17,9 @@ pub(super) fn load(
         .get("minecraft:items")
         .map(Vec::as_slice)
         .unwrap_or(&[]);
-    let textures = atlas_sources::list_textures(root);
+    let mut textures = atlas_sources::list_textures(root);
+    // `list` searches them by their identifiers, which sort differently from their paths.
+    textures.sort_unstable();
     let decode = |name: &str| {
         crate::hud::decode_bytes(
             &root

@@ -398,6 +398,43 @@ fn invalid_and_generated_sprites_match_vanilla() {
 }
 
 #[test]
+fn namespaces_sharing_a_prefix_are_all_listed_in_the_glint_atlas() {
+    // `a0:` sorts before `a:` as an identifier, though `assets/a/` comes first as a path.
+    let root = std::env::temp_dir().join(format!("sunrise-glint-prefix-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(root.join("assets/minecraft/atlases")).unwrap();
+    fs::write(
+        root.join("assets/minecraft/atlases/items.json"),
+        r#"{"sources":[{"type":"single","resource":"a:item/one"},{"type":"single","resource":"a0:item/two"}]}"#,
+    )
+    .unwrap();
+    png(
+        &root.join("assets/a/textures/item/one.png"),
+        16,
+        16,
+        [255; 4],
+    );
+    png(
+        &root.join("assets/a0/textures/item/two.png"),
+        16,
+        16,
+        [255; 4],
+    );
+    let atlas = glint_atlas::load(
+        &sunrise_assets::resource_source::ResourceSource::directory(root.clone()),
+        1,
+        16384,
+    )
+    .unwrap();
+    // Each is its own 16 x 16 cell; one the listing missed would be the missing sprite's.
+    let corner = |name: &str| [atlas[name].u0, atlas[name].v0];
+    assert_ne!(corner("a:item/one"), corner("a0:item/two"));
+    assert_ne!(corner("a:item/one"), corner("missingno"));
+    assert_ne!(corner("a0:item/two"), corner("missingno"));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn invalid_texture_metadata_does_not_move_book_glint() {
     let root = fixture("texture-metadata");
     let image = root.join("assets/minecraft/textures/item/large.png");
