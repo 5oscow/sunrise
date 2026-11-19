@@ -416,9 +416,8 @@ mod tests {
         assert_eq!(tab.search[5].stored_enchantments()[0].1, 2);
         assert_eq!(holder(5, "minecraft:instrument"), "test:z");
         assert_eq!(holder(6, "minecraft:instrument"), "test:a");
-        let layers = &tab.display[7].data().unwrap().banner_patterns;
         assert_eq!(
-            layers,
+            tab.display[7].banner_layers(),
             &[crate::banner_layer::BannerLayer::new("test:present", "red")]
         );
         let enabled = run(&["test:experimental".into()]);

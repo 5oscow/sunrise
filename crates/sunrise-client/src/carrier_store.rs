@@ -35,7 +35,7 @@ use std::{
 };
 use sunrise_core::nbt::{self, JavaString, Limits, NamedTag, Tag};
 use sunrise_server_files::durable;
-use sunrise_world::compression::Compression;
+use sunrise_world::compression::{Compression, decode_single_gzip_member};
 
 /// The journal slot file names, in slot order.
 pub const SLOTS: [&str; 2] = ["sunrise_carriers.journal.0", "sunrise_carriers.journal.1"];
@@ -1805,15 +1805,14 @@ pub fn encode_operation(operation: &Operation) -> Result<Vec<u8>, OpError> {
     Ok(compressed)
 }
 
-/// Decodes an operation file: the compressed size is checked before
-/// decompression, every length against its budget before allocation, and
-/// state images go through the validator.
+/// Decodes an operation file: exactly one gzip member, with the compressed
+/// size checked before decompression, each length bounded before allocation,
+/// and state images checked by the validator.
 pub fn decode_operation(bytes: &[u8], states: &dyn StateValidator) -> Result<Operation, OpError> {
     if bytes.len() > MAX_OP_COMPRESSED {
         return Err(OpError::CompressedTooBig { size: bytes.len() });
     }
-    let raw = Compression::Gzip
-        .decode(bytes, MAX_OP_DECODED)
+    let raw = decode_single_gzip_member(bytes, MAX_OP_DECODED)
         .map_err(|_| OpError::Malformed("operation does not decompress"))?;
     let (root, used) =
         nbt::read_named(&raw, op_limits()).map_err(|e| OpError::Malformed(leak(e.reason)))?;

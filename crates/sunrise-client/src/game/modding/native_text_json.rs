@@ -108,7 +108,7 @@ mod tests {
     }
 
     /// Objects and lists that are not one component are refused whole, however deep.
-    const NOT_COMPONENTS: [&str; 43] = [
+    const NOT_COMPONENTS: [&str; 44] = [
         "{}",
         r#"{"color":"red"}"#,
         r#"{"unrelated":"x","extra":[]}"#,
@@ -148,6 +148,7 @@ mod tests {
         r#"{"text":"a","click_event":"run_command"}"#,
         r#"{"text":"a","hover_event":{"action":"show_text"}}"#,
         r#"{"text":"a","hover_event":{"action":"show_text","value":{}}}"#,
+        r#"{"text":"a","hover_event":{"action":"show_item","id":"minecraft:bad item"}}"#,
         // The partial result is never used: a good entry before a bad one.
         r#"["a",{"text":"b","extra":["ok",{"bad":1}]}]"#,
         r#"{"text":"a","bold":true,"extra":["ok",{"text":"b","italic":"no"}]}"#,
