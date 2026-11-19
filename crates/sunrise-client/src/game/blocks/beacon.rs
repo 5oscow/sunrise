@@ -8,6 +8,7 @@ use super::{
     stations::{INPUT, Kind},
 };
 use sunrise_client::{
+    block_entity_reach::Reach,
     containers::{Beacon, BlockEntity},
     effects::EffectInstance,
     hud::HudBatch,
@@ -694,7 +695,11 @@ impl Game<'_> {
         let scoping = self.scoping();
         // `BeaconRenderer.shouldRender` culls at the render distance; far
         // terrain extends that to its own distance.
-        let view = f64::from(self.terrain_distance() * 16);
+        let view = if self.lod.is_some() {
+            self.terrain_distance()
+        } else {
+            self.effective_render_distance()
+        };
         let world = &self.world;
         if self.lod.is_some() {
             // The beam stays after its chunk unloads; once the chunk is back,
@@ -725,12 +730,16 @@ impl Game<'_> {
         }
         for (k, sections) in &self.far_beacons {
             let base = glam::DVec3::new(f64::from(k.0) + 0.5, f64::from(k.1), f64::from(k.2) + 0.5);
-            let offset = base - camera;
-            let horizontal = glam::DVec2::new(offset.x, offset.z).length();
-            if horizontal >= view {
+            // A test instance's beam is its renderer's (`TestInstanceRenderer.shouldRender`).
+            let reach = match world.block_entities.get(k) {
+                Some(BlockEntity::TestInstanceBlock(_)) => Reach::TestInstance,
+                _ => Reach::Beacon,
+            };
+            if !reach.should_render([k.0, k.1, k.2], camera, view) {
                 continue;
             }
-            let distance = horizontal as f32;
+            let offset = base - camera;
+            let distance = glam::DVec2::new(offset.x, offset.z).length() as f32;
             let scale = if scoping {
                 1.0
             } else {

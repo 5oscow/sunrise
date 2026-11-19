@@ -157,6 +157,7 @@ use sunrise_client::{
     assets::{Assets, RenderAssets},
     audio::Audio,
     biome::Biomes,
+    block_entity_reach::Reach,
     block_entity_render::{
         self, BlockEntityRenderer, CacheOptions, Scene as BlockEntityScene, StaticCacheFrameStats,
         StaticSectionSnapshot,
@@ -5625,21 +5626,13 @@ impl Game<'_> {
             // Block entities outside the view frustum are skipped (with a
             // block of margin for models larger than their block).
             let view = self.view_frustum;
+            let reach = |state: u32| Reach::of(&self.res.facts().get(BlockStateId(state)).name);
             // Beams and structure outlines reach far outside their block
             // (BlockEntityRenderer.shouldRenderOffScreen): never culled.
-            let off_screen = |state: u32| {
-                let name = &*self.res.facts().get(BlockStateId(state)).name;
-                matches!(
-                    name,
-                    "minecraft:beacon"
-                        | "minecraft:end_gateway"
-                        | "minecraft:structure_block"
-                        | "minecraft:test_instance_block"
-                )
-            };
-            let long_range = |state: u32| {
-                &*self.res.facts().get(BlockStateId(state)).name == "minecraft:end_gateway"
-            };
+            let off_screen = |state: u32| reach(state).off_screen();
+            // Sections past 64 blocks are kept for what reaches further (the End gateway).
+            let long_range =
+                |state: u32| reach(state).view_distance(self.effective_render_distance()) > 64;
             let in_view = |p: &[i32; 3]| {
                 view.is_none_or(|v| {
                     let o = (glam::DVec3::new(f64::from(p[0]), f64::from(p[1]), f64::from(p[2]))

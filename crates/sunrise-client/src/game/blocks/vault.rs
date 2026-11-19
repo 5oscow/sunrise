@@ -7,6 +7,7 @@ use sunrise_assets::item_model::DisplayContext;
 use sunrise_client::{
     Result,
     block_entities::BlockEntityLease,
+    block_entity_reach::Reach,
     block_entity_render::vertex_light,
     containers::BlockEntity,
     item_render,
@@ -292,7 +293,7 @@ impl Game<'_> {
                 continue;
             };
             let at = glam::DVec3::new(f64::from(key.0), f64::from(key.1), f64::from(key.2));
-            if at.distance_squared(camera) >= 64.0 * 64.0 {
+            if !Reach::Default.should_render([key.0, key.1, key.2], camera, 0) {
                 continue;
             }
             let state = self.resolve_item(stack, DisplayContext::Ground, None, 0);

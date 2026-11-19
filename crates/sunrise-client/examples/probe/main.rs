@@ -20,6 +20,7 @@ mod audio_attributes_fixture;
 mod audio_common;
 mod auto_jump_probe;
 mod block_entity_anim_fixture;
+mod block_entity_reach_fixture;
 mod block_entity_render_fixture;
 mod block_entity_tickers_fixture;
 mod block_particles_fixture;
@@ -138,6 +139,7 @@ probes! {
     audio_attributes_fixture,
     auto_jump_probe,
     block_entity_anim_fixture,
+    block_entity_reach_fixture,
     block_entity_render_fixture,
     block_entity_tickers_fixture,
     block_particles_fixture,

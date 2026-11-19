@@ -5,6 +5,7 @@
 use super::Game;
 use std::collections::HashSet;
 use sunrise_client::{
+    block_entity_reach::Reach,
     containers::BlockEntity,
     gizmos::{Gizmos, InvisibleBlock},
     structure_block::{
@@ -60,21 +61,21 @@ impl Game<'_> {
     /// `BlockEntityWithBoundingBoxRenderer`: for a player who may use game
     /// master blocks (or a spectator), each structure block's box and, with
     /// Show Invisible Blocks on, a marker for every barrier, light, structure
-    /// void and air block in it. Blocks beyond `getViewDistance` (96) are
-    /// not drawn.
+    /// void and air block in it, as far as each renderer reaches (`Reach`).
     pub(super) fn bounding_box_gizmos(&self, camera: [f64; 3], g: &mut Gizmos) {
         let game_master = self.can_use_game_master_blocks() || self.spectator();
         let facts = self.res.facts();
+        let render_distance = self.effective_render_distance();
+        let camera_at = glam::DVec3::from_array(camera);
         for (pos, entity) in self.world.block_entities.boxes() {
-            let centre = [pos.0, pos.1, pos.2].map(|v| f64::from(v) + 0.5);
-            let dist: f64 = (0..3).map(|i| (centre[i] - camera[i]).powi(2)).sum();
             let block = [pos.0, pos.1, pos.2];
+            let drawn = |reach: Reach| reach.should_render(block, camera_at, render_distance);
             let (mode, area) = match entity {
-                BlockEntity::StructureBlock(b) if game_master && dist < 96.0 * 96.0 => {
+                BlockEntity::StructureBlock(b) if game_master && drawn(Reach::BoundingBox) => {
                     (b.render_mode(), b.renderable_box())
                 }
                 BlockEntity::TestInstanceBlock(b) => {
-                    if !game_master || dist >= 96.0 * 96.0 {
+                    if !game_master || !drawn(Reach::TestInstance) {
                         continue;
                     }
                     // TestInstanceBlockEntity.renderMode: BOX.

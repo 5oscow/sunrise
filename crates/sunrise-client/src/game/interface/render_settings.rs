@@ -214,6 +214,15 @@ impl Game<'_> {
         }
     }
 
+    /// `Options.getEffectiveRenderDistance`: the render distance, capped by the server's view
+    /// distance when it sent one.
+    pub(super) fn effective_render_distance(&self) -> i32 {
+        match &self.remote {
+            Some(r) if r.view_distance > 0 => self.settings.render_distance.min(r.view_distance),
+            _ => self.settings.render_distance,
+        }
+    }
+
     /// Only enabled LOD worlds extend the renderer's range, never simulation.
     pub(super) fn terrain_distance(&self) -> i32 {
         if self.lod.is_some() {

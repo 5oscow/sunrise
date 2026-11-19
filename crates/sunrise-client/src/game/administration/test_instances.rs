@@ -8,6 +8,7 @@ use super::{
     test_entities::{aabb_of, inflate},
 };
 use sunrise_client::{
+    block_entity_reach::Reach,
     block_entity_render::vertex_light,
     component::name_text,
     containers::BlockEntity,
@@ -327,14 +328,12 @@ impl Game<'_> {
             .iter()
             .map(|(&pos, (text, _))| ([pos.0, pos.1, pos.2], text.clone(), HIGHLIGHT_FILL))
             .collect();
+        let render_distance = self.effective_render_distance();
         for (pos, entity) in &self.world.block_entities {
             let BlockEntity::TestInstanceBlock(b) = entity else {
                 continue;
             };
-            // BeaconRenderer.getViewDistance: 256, by the horizontal distance.
-            let dx = f64::from(pos.0) + 0.5 - camera.x;
-            let dz = f64::from(pos.2) + 0.5 - camera.z;
-            if dx * dx + dz * dz >= 256.0 * 256.0 {
+            if !Reach::TestInstance.should_render([pos.0, pos.1, pos.2], camera, render_distance) {
                 continue;
             }
             for marker in &b.error_markers {
