@@ -878,7 +878,7 @@ mod tests {
     use mod_api::HostTransaction;
     use mod_api::ServerHost;
     use std::sync::Arc;
-    use sunrise_client::{chunk::Chunk, lan::menu::Slots};
+    use sunrise_client::{chunk::Chunk, containers::ModBlockEntityFields, lan::menu::Slots};
     use sunrise_world::registry::BlockStateId;
 
     #[test]
@@ -1002,7 +1002,10 @@ mod tests {
             let holder = || {
                 BlockEntity::Mod(Box::new(ModBlockEntity::new(
                     "test:holder".into(),
-                    compound("{count:3}"),
+                    ModBlockEntityFields {
+                        nbt: compound("{count:3}"),
+                        ..Default::default()
+                    },
                 )))
             };
             game.world.block_entities.insert(pos, holder());
