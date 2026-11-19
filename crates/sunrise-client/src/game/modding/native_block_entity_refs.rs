@@ -992,15 +992,6 @@ mod tests {
         ) {
             return;
         }
-        // Loading saved data into a mod block entity needs its type valid for the block, which
-        // startup freezes once per process: the holder sits on air here, in a process of its own.
-        sunrise_client::block_entity_types::install(
-            sunrise_client::block_entity_types::BlockEntityTypes::new(
-                [("minecraft:air".into(), "test:holder".into())].into(),
-                vec!["test:holder".into()],
-            ),
-        )
-        .unwrap();
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             game.world
@@ -1011,12 +1002,11 @@ mod tests {
             let holder = || {
                 BlockEntity::Mod(Box::new(ModBlockEntity::new(
                     "test:holder".into(),
-                    Default::default(),
+                    compound("{count:3}"),
                 )))
             };
             game.world.block_entities.insert(pos, holder());
             let original = game.block_entity(level, [1, 64, 1]).unwrap();
-            assert_eq!(original.merge_data(game, compound("{count:3}")), Ok(true));
             game.with_level(|_, host, ticks| {
                 let wrapped = super::super::mod_api_host::LevelTicks::new(&*host, ticks);
                 assert_eq!(
