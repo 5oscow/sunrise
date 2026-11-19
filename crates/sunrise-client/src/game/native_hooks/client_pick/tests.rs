@@ -594,6 +594,29 @@ fn a_click_on_a_cushion_at_a_non_finite_position_is_refused() {
     });
 }
 
+/// `Cushion.interact` passes when anything already sits on it, whatever kind
+/// of entity the server lists as its passenger: the click goes on to the item.
+#[test]
+#[ignore = "daily"]
+fn a_click_on_a_cushion_with_a_synced_passenger_passes_to_the_item() {
+    use sunrise_protocol::packets::play::{self, Clientbound as C};
+    with_picked_cushion(|game, server, target| {
+        game.refresh_client_pick(1.0);
+        assert_eq!(game.crosshair_target(), Some(target));
+        game.handle_packet(C::SetPassengers(play::SetPassengers {
+            vehicle: 31,
+            passengers: vec![77],
+        }))
+        .unwrap();
+        game.remote_use(mod_api::InteractionAttempt::Press);
+        let actions = sent_actions(game, server);
+        assert!(
+            actions.contains(&("item", 0)),
+            "an occupied cushion does not consume the click: {actions:?}"
+        );
+    });
+}
+
 struct CountPicks(Arc<Mutex<Vec<f32>>>);
 #[mod_api::__subscriptions]
 impl Hooks for CountPicks {

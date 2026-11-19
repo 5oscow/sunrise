@@ -1,2 +1,3 @@
 sunrise-client game::native_hooks::client_pick::tests::a_click_on_a_cushion_at_a_non_finite_position_is_refused lib daily resources
+sunrise-client game::native_hooks::client_pick::tests::a_click_on_a_cushion_with_a_synced_passenger_passes_to_the_item lib daily resources
 sunrise-client game::remote::interaction_event_tests::right_click_on_a_cushion_is_taken_by_the_cushion_on_a_client lib daily resources
