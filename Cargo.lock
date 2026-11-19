@@ -5199,7 +5199,6 @@ dependencies = [
  "libc",
  "object 0.39.1",
  "proc-macro2",
- "quote",
  "semver",
  "serde",
  "serde_json",
