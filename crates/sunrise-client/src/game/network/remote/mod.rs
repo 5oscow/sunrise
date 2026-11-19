@@ -6260,11 +6260,6 @@ impl Game<'_> {
         }
         self.tick_remote_guardian_eyes(running);
         self.tick_hand();
-        // Gui.tick's vignette and the player's screen effects run in a frozen level too; under
-        // `SUNRISE_STILL` they wait for the world, as the rest of the HUD does.
-        if !hold {
-            self.tick_screen_effects();
-        }
         if running {
             self.tick_particles();
         } else if self.clock.still() {

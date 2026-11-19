@@ -618,7 +618,7 @@ impl Game<'_> {
         !canceled
     }
     /// `Lightmap.getBrightness(getMaxLocalRawBrightness(eye))`.
-    pub(in crate::game) fn eye_brightness(&self, eye: [f64; 3]) -> f32 {
+    fn eye_brightness(&self, eye: [f64; 3]) -> f32 {
         let b = [
             eye[0].floor() as i32,
             eye[1].floor() as i32,
@@ -678,27 +678,13 @@ impl Game<'_> {
         Some((TrackingTarget::Entity(id), mob_tracking_body(mob)))
     }
 
-    /// `Hud.updateVignetteBrightness` (`Gui.tick`, on every tick the game isn't paused) and what
-    /// `LocalPlayer.aiStep` runs for the screen: the portal's transition effect and cooldown,
-    /// Nausea's spin and the water vision. `/tick freeze` freezes neither: it stops the level,
-    /// not the HUD or the player (`TickRateManager.isEntityFrozen` is false for a player).
-    pub(in crate::game) fn tick_screen_effects(&mut self) {
-        let Some(e) = self.eye_position() else {
-            return;
-        };
-        let brightness = self.eye_brightness(e);
-        let inside_portal = self.client_portal_effect();
-        self.screen_fx.tick(brightness, inside_portal);
-        // LocalPlayer.aiStep: processPortalCooldown after the transition
-        // effect (a local world's player counts down in handlePortal).
-        if self.remote.is_some() && self.portals.player.cooldown > 0 {
-            self.portals.player.cooldown -= 1;
+    /// `Hud.updateVignetteBrightness`, from the camera's eye: `Gui.tick` runs it on every tick
+    /// the game isn't paused, frozen level or not.
+    pub(in crate::game) fn tick_vignette(&mut self) {
+        if let Some(e) = self.eye_position() {
+            let brightness = self.eye_brightness(e);
+            self.screen_fx.tick_vignette(brightness);
         }
-        let nausea = self.potions.effects.get("nausea").map(nausea_has_effect);
-        self.screen_fx.tick_spinning(nausea);
-        // LocalPlayer water vision.
-        let in_water = self.camera_fog_type(e) == FogType::Water;
-        self.fog.tick(in_water, self.spectator());
     }
 
     pub(super) fn tick_particles(&mut self) {
@@ -707,12 +693,24 @@ impl Game<'_> {
         self.update_animation_inputs();
         let mut laps = sunrise_client::spans::laps();
         let eye = self.eye_position();
-        // A client of a server ticks these in `tick_remote_player`, frozen level or not.
-        if self.remote.is_none() {
-            self.tick_screen_effects();
-        }
         if let Some(e) = eye {
-            // AtmosphericFogEnvironment rain fog.
+            // A client of a server eases the vignette in `tick_hud`, frozen level or not.
+            if self.remote.is_none() {
+                let brightness = self.eye_brightness(e);
+                self.screen_fx.tick_vignette(brightness);
+            }
+            let inside_portal = self.client_portal_effect();
+            self.screen_fx.tick_portal(inside_portal);
+            // LocalPlayer.aiStep: processPortalCooldown after the transition
+            // effect (a local world's player counts down in handlePortal).
+            if self.remote.is_some() && self.portals.player.cooldown > 0 {
+                self.portals.player.cooldown -= 1;
+            }
+            let nausea = self.potions.effects.get("nausea").map(nausea_has_effect);
+            self.screen_fx.tick_spinning(nausea);
+            // LocalPlayer water vision and AtmosphericFogEnvironment rain fog.
+            let in_water = self.camera_fog_type(e) == FogType::Water;
+            self.fog.tick(in_water, self.spectator());
             let (rain, sky_light, rains) = self.rain_fog_inputs(e);
             update_rain_fog(&mut self.fog, rain, sky_light, rains, 1.0);
         }
