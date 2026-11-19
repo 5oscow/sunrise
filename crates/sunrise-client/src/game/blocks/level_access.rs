@@ -1301,6 +1301,7 @@ impl LevelAccess for GameLevel<'_> {
         if let Some((key, entity)) = sunrise_client::save::decode_block_entity_for_block(&tag, name)
         {
             self.world.block_entities.insert(key, entity);
+            self.notify_block_entity_load_additional(key);
             if tag.get("LootTable").is_some() {
                 self.emit(LevelEvent::ContainerLootTable { pos, tag });
             }

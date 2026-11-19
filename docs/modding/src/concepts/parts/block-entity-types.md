@@ -169,6 +169,17 @@ identity and position. Like `merge_data`, it loads transactionally and synchroni
 load or an unchanged result.
 
 
+### Reading data loaded by the server
+
+Implement `BlockEntityPart::block_entity_load_additional` to refresh mod-owned state after the server
+applies a saved payload, including `/data merge` and `/data modify`, cloning, structure and item
+placement, falling-block landing, and chunk load. `event.tag` is the applied mod payload and the
+read-only level host already sees the updated instance. `block_entity_on_load` follows when that
+instance is new; it also fires for a fresh placement that had no saved data.
+
+Direct Mod API `merge_data` and `replace_data` writes and transaction restores do not fire the
+notice. Client sync instead uses `block_entity_data_received`.
+
 ## Transform saved data with a structure
 
 Add an optional `.transform(...)` step to the declaration when the saved payload contains a facing
