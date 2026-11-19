@@ -259,10 +259,37 @@ type FetchSdk<'a> = &'a dyn Fn(&Path, &str) -> Result<sdk_fetch::PinnedSdk, Stri
 /// Makes the mod `args` asks for; a code mod's folder is returned, with its SDK fetched into it
 /// by `fetch`.
 fn new(args: &[String], fetch: FetchSdk) -> Result<Option<PathBuf>, String> {
-    let path = args
-        .first()
-        .filter(|a| !a.starts_with("--"))
-        .ok_or("cargo sunrise-mod new <path>")?;
+    let usage = || help::of("new").expect("new has help");
+    let unexpected = |arg: &str| {
+        let reason = match arg {
+            "--native" | "--wasm" | "--content" => {
+                format!("unknown option {arg}; use --template {}", &arg[2..])
+            }
+            _ => format!("unexpected argument {arg}"),
+        };
+        format!("{reason}\n{}", usage().trim_end())
+    };
+    let (path, options) = args.split_first().ok_or_else(usage)?;
+    if path.starts_with('-') {
+        return Err(unexpected(path));
+    }
+    let (mut name, mut template, mut sunrise) = (None, None, None);
+    let mut options = options.iter().map(String::as_str);
+    while let Some(option) = options.next() {
+        let slot = match option {
+            "--name" => &mut name,
+            "--template" => &mut template,
+            "--sunrise" => &mut sunrise,
+            _ => return Err(unexpected(option)),
+        };
+        let value = options
+            .next()
+            .ok_or_else(|| format!("missing value after {option}\n{}", usage().trim_end()))?;
+        if value.starts_with('-') {
+            return Err(unexpected(value));
+        }
+        slot.get_or_insert(value);
+    }
     let dir = Path::new(path);
     if dir.exists() {
         return Err(format!("{} already exists", dir.display()));
@@ -281,19 +308,12 @@ fn new(args: &[String], fetch: FetchSdk) -> Result<Option<PathBuf>, String> {
             }
         })
         .collect();
-    let name = flag(args, "--name").map_or_else(|| base.replace(['-', '_'], " "), str::to_string);
+    let name = name.map_or_else(|| base.replace(['-', '_'], " "), str::to_string);
     let fill = |t: &str| t.replace("{id}", &id).replace("{name}", &name);
-    match flag(args, "--template") {
+    match template {
         None | Some("content") => {}
         Some(template @ ("native" | "wasm")) => {
-            new_code(
-                dir,
-                &id,
-                template == "native",
-                flag(args, "--sunrise"),
-                fetch,
-                fill,
-            )?;
+            new_code(dir, &id, template == "native", sunrise, fetch, fill)?;
             return Ok(Some(dir.to_owned()));
         }
         Some(_) => return Err("--template is content, native or wasm".into()),
@@ -720,6 +740,21 @@ mod tests {
             dir: project.join(sdk_fetch::DIR),
             surface: project.join(sdk_fetch::DIR).join("surface.json"),
         })
+    }
+
+    #[test]
+    fn new_rejects_unknown_flags_without_creating_a_mod() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("greeter");
+        for arg in ["--native", "--wasm", "--content", "--typo", "-x"] {
+            let error = new(&[path.display().to_string(), arg.into()], &offline).unwrap_err();
+            assert!(error.contains(arg), "{error}");
+            assert!(error.contains("usage: cargo sunrise-mod new <path>"));
+            if matches!(arg, "--native" | "--wasm" | "--content") {
+                assert!(error.contains(&format!("use --template {}", &arg[2..])));
+            }
+            assert!(!path.exists());
+        }
     }
 
     fn code_args(path: &Path, template: &str) -> [String; 5] {
