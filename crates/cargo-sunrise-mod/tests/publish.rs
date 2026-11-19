@@ -120,6 +120,16 @@ fn bad_version_or_checkout_leaves_destination_and_outside_files_unchanged() {
     fs::remove_file(checkout.join("mods/other.toml")).unwrap();
     fs::write(checkout.join(ENTRY), format!("{correct}\n[[versions]]\nversion = '1'\npublished = '2026-11-18'\ngame = '26.3'\nfile = 'coords_hud-1.smod'\nsha256 = '{}'\n", "0".repeat(64))).unwrap();
     attempt("coords_hud 1");
+
+    fs::remove_file(checkout.join(ENTRY)).unwrap();
+    fs::create_dir(checkout.join("collections")).unwrap();
+    fs::write(
+        checkout.join("collections/coords_hud.toml"),
+        "id = 'coords_hud'\nname = 'HUD mods'\nsummary = 'A selection of HUD mods.'\n\
+         owners = ['ada']\nicon = 'icons/coords_hud.png'\nmembers = [{ id = 'other_mod' }]\n",
+    )
+    .unwrap();
+    attempt("collection");
 }
 
 #[test]
