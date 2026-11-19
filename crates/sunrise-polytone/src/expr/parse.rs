@@ -74,6 +74,7 @@ struct Parser {
 /// The statements and how many local slots they use.
 pub(super) fn parse(src: &str) -> Result<(Vec<Stmt>, usize), String> {
     let tokens = tokens(src)?;
+    super::budget::check(&tokens).map_err(|e| e.to_string())?;
     let mut p = Parser {
         legacy: legacy::is_legacy(&tokens),
         tokens,

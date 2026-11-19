@@ -342,3 +342,80 @@ fn the_fast_path_answers_what_the_interpreter_does() {
     assert!(Program::compile(corpus[0]).unwrap().fast.is_some());
     assert!(Program::compile(corpus[1]).unwrap().fast.is_some());
 }
+
+/// A pack's expression deep enough to overflow the parser's or the evaluator's stack is refused
+/// before it is parsed, by a pass over its tokens that doesn't recurse: brackets, unary
+/// operators, `?` and `^` each nest a level; a long expression is refused by its token count.
+/// The deepest and longest that pass still parse and run on a small stack.
+#[test]
+fn a_program_too_deep_or_too_long_is_refused_before_it_is_parsed() {
+    use super::budget::{MAX_DEPTH, MAX_TOKENS, OverBudget};
+    let refused = |src: &str| Program::compile(src).unwrap_err();
+    let depth = OverBudget::Depth.to_string();
+    // A hundred thousand levels each way: refused without parsing them (by their length).
+    let deep = 100_000;
+    for src in [
+        format!("{}1{}", "(".repeat(deep), ")".repeat(deep)),
+        format!("{}1", "-".repeat(deep)),
+        format!("{}1", "!".repeat(deep)),
+        format!("{}1", "1 ^ ".repeat(deep)),
+    ] {
+        assert_eq!(
+            refused(&src),
+            OverBudget::Tokens(src.matches(['(', ')', '-', '!', '^', '1']).count()).to_string()
+        );
+    }
+    // At the limit and one past it, for each kind of level.
+    let parens = |n: usize| format!("{}1{}", "(".repeat(n), ")".repeat(n));
+    assert!(Program::compile(&parens(MAX_DEPTH)).is_ok());
+    assert_eq!(refused(&parens(MAX_DEPTH + 1)), depth);
+    let negations = |n: usize| format!("{}1", "-".repeat(n));
+    assert!(Program::compile(&negations(MAX_DEPTH)).is_ok());
+    assert_eq!(refused(&negations(MAX_DEPTH + 1)), depth);
+    let ternaries = |n: usize| format!("{}0", "1 ? 0 : ".repeat(n));
+    assert!(Program::compile(&ternaries(MAX_DEPTH)).is_ok());
+    assert_eq!(refused(&ternaries(MAX_DEPTH + 1)), depth);
+    let powers = |n: usize| format!("{}1", "1 ^ ".repeat(n));
+    assert!(Program::compile(&powers(MAX_DEPTH)).is_ok());
+    assert_eq!(refused(&powers(MAX_DEPTH + 1)), depth);
+    // Statements and arguments don't nest: each starts its level's count again.
+    let siblings = format!(
+        "a = {0}; b = {0}; lerp({1}, {1}, 0.5)",
+        negations(MAX_DEPTH),
+        negations(MAX_DEPTH - 1)
+    );
+    assert!(
+        Program::compile(&siblings).is_ok(),
+        "{:?}",
+        Program::compile(&siblings).err()
+    );
+    // A chain of binary operators nests as deep as its operators; so do method calls.
+    let chain = |terms: usize| vec!["1"; terms].join(" + ");
+    let longest = Program::compile(&chain(MAX_DEPTH + 1)).unwrap();
+    assert_eq!(refused(&chain(MAX_DEPTH + 2)), depth);
+    // The most tokens, in statements that each nest little.
+    let statements = |n: usize| "a = 1 + 2; ".repeat(n) + "a";
+    let tokens = |n: usize| 6 * n + 1;
+    let fits = (MAX_TOKENS - 1) / 6;
+    assert!(Program::compile(&statements(fits)).is_ok());
+    assert_eq!(
+        refused(&statements(fits + 1)),
+        OverBudget::Tokens(tokens(fits + 1)).to_string()
+    );
+    // The deepest chain and nesting run, and drop, on a 256 KiB stack.
+    let deepest = Program::compile(&format!("{}1", "-".repeat(MAX_DEPTH))).unwrap();
+    std::thread::Builder::new()
+        .stack_size(256 * 1024)
+        .spawn(move || {
+            let mut world = World::default();
+            assert_eq!(
+                longest.eval(&mut world).unwrap().num(),
+                (MAX_DEPTH + 1) as f64
+            );
+            assert_eq!(deepest.eval(&mut world).unwrap().num(), 1.0);
+            drop((longest, deepest));
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
