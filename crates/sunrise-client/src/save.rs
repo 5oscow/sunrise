@@ -7770,25 +7770,32 @@ mod tests {
             block_entity_encode::encode(pos, &back, "gtmod:macerator", &Default::default()),
             reordered
         );
-        // Unordered lists the loader cannot read exactly stay the mod's, as saved.
-        for items in [
-            r#"Items:[{Slot:1b,id:"minecraft:stone",count:1,note:"mine"},{Slot:0b,id:"minecraft:stone",count:1}]"#,
-            r#"Items:[{Slot:1b,id:"minecraft:stone",count:1},{Slot:1b,id:"minecraft:dirt",count:1}]"#,
+        // A lossless slot is modeled even beside an opaque row. Duplicate
+        // slot indices stay opaque because the engine cannot model both stacks.
+        let duplicate = r#"Items:[{Slot:1b,id:"minecraft:stone",count:1},{Slot:1b,id:"minecraft:dirt",count:1}]"#;
+        let modeled = [Some(crate::items::ItemStack::new("minecraft:stone", 1))];
+        let parse = |items| {
+            sunrise_core::nbt::parse_snbt(&format!(r#"{{id:"gtmod:cable",x:0,y:0,z:0,{items}}}"#))
+                .unwrap()
+                .0
+        };
+        for (input, output, slots) in [
+            (
+                r#"Items:[{Slot:1b,id:"minecraft:stone",count:1,note:"mine"},{Slot:0b,id:"minecraft:stone",count:1}]"#,
+                r#"Items:[{Slot:0b,id:"minecraft:stone",count:1},{Slot:1b,id:"minecraft:stone",count:1,note:"mine"}]"#,
+                modeled.as_slice(),
+            ),
+            (duplicate, duplicate, &[]),
         ] {
-            let saved = sunrise_core::nbt::parse_snbt(&format!(
-                r#"{{id:"gtmod:cable",x:0,y:0,z:0,{items}}}"#
-            ))
-            .unwrap()
-            .0;
-            let (pos, back) = decode_block_entity(&saved).expect("mod block entity");
+            let (pos, back) = decode_block_entity(&parse(input)).expect("mod block entity");
             let crate::containers::BlockEntity::Mod(m) = &back else {
                 panic!("not a mod's");
             };
-            assert!(m.items.is_empty(), "{items}");
+            assert_eq!(m.items.as_slice(), slots, "{input}");
             assert_eq!(
                 block_entity_encode::encode(pos, &back, "gtmod:cable", &Default::default()),
-                saved,
-                "{items}"
+                parse(output),
+                "{input}"
             );
         }
         // Vanilla's types are never a mod's, modelled or not.
