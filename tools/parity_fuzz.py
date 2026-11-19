@@ -399,12 +399,14 @@ def shrink(runner, failing, rounds):
 # ---------------------------------------------------------------------------------------------------------------
 # Command line
 
-# The clock agrees before and after I/O; the chest contents and armor stand survive the reload.
+# The clock and saved state agree across I/O. Lava must not fire an overdue tick just because it reloaded.
 SMOKE = [{'family': 'smoke', 'seed': 1, 'steps': [
     {'k': 'block', 'block': 'chest', 'at': [7, 0, 7], 'nbt': {'Items': '[{Slot:0b,id:"minecraft:stone",count:3}]'}},
     {'k': 'summon', 'type': 'armor_stand', 'at': [3.5, 0, 3.5], 'n': 0, 'nbt': {}},
+    {'k': 'block', 'block': 'lava', 'at': [11, 0, 12]},
     {'k': 'cmd', 'cmd': '/time query gametime'}, {'k': 'reload'}, {'k': 'cmd', 'cmd': '/time query gametime'},
-    {'k': 'read_block', 'at': [7, 0, 7]}, {'k': 'read_entity', 'n': 0}]}]
+    {'k': 'read_block', 'at': [7, 0, 7]}, {'k': 'read_entity', 'n': 0}, {'k': 'tick', 'n': 1},
+    {'k': 'cmd', 'cmd': '/execute if block {0} minecraft:lava', 'at': [[12, 0, 12]]}]}]
 
 
 def main():
