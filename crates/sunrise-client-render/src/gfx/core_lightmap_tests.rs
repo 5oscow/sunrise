@@ -402,13 +402,16 @@ fn a_lightmap_shader_reads_its_expression_uniforms_values() {
     core.set_readback(&device, true);
     let names: Vec<&str> = core.expressions.iter().map(|(e, _)| &*e.name).collect();
     assert_eq!(names, ["F0", "F1"]);
-    for (first, second) in [(0.2, 0.6), (0.6, 0.2)] {
+    // 0.2 is 51 of 255 and 0.6 is 153; `SkyFactor` 0.6 in green.
+    for (first, second, texel) in [
+        (0.2, 0.6, [51, 153, 153, 255]),
+        (0.6, 0.2, [153, 153, 51, 255]),
+    ] {
         core.expressions[0].1 = first;
         core.expressions[1].1 = second;
         let pixels = draw(&device, &queue, &mut core, &PROBE);
-        let byte = |v: f32| (v * 255.0).round() as u8;
-        for texel in pixels.chunks(4) {
-            assert_eq!(texel, [byte(first), 153, byte(second), 255]);
+        for drawn in pixels.chunks(4) {
+            assert_eq!(drawn, texel);
         }
     }
 }

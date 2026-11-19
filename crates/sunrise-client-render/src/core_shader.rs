@@ -81,31 +81,35 @@ impl CoreProgram {
         stages
     }
 
-    /// Whether every stage that declares the block at `binding` of set 0 declares it as one
-    /// float (`uniform Name { float value; };`), what an expression uniform holds.
+    /// Whether every stage that reads the block at `binding` of set 0 declares it as one float
+    /// (`uniform Name { float value; };`), what an expression uniform holds. A stage that only
+    /// declares it, whatever its shape, binds nothing of it.
     pub fn is_float_block(&self, binding: u32) -> bool {
-        [&self.vertex, &self.fragment].into_iter().all(|module| {
-            module
-                .global_variables
-                .iter()
-                .filter(|(_, g)| {
-                    g.binding
-                        .as_ref()
-                        .is_some_and(|b| b.group == 0 && b.binding == binding)
-                })
-                .all(|(_, g)| match &module.types[g.ty].inner {
-                    naga::TypeInner::Struct { members, .. } => {
-                        matches!(
-                            members.as_slice(),
-                            [member] if matches!(
-                                module.types[member.ty].inner,
-                                naga::TypeInner::Scalar(naga::Scalar::F32)
+        [&self.vertex, &self.fragment]
+            .into_iter()
+            .filter(|module| entry_points_read(module, binding))
+            .all(|module| {
+                module
+                    .global_variables
+                    .iter()
+                    .filter(|(_, g)| {
+                        g.binding
+                            .as_ref()
+                            .is_some_and(|b| b.group == 0 && b.binding == binding)
+                    })
+                    .all(|(_, g)| match &module.types[g.ty].inner {
+                        naga::TypeInner::Struct { members, .. } => {
+                            matches!(
+                                members.as_slice(),
+                                [member] if matches!(
+                                    module.types[member.ty].inner,
+                                    naga::TypeInner::Scalar(naga::Scalar::F32)
+                                )
                             )
-                        )
-                    }
-                    _ => false,
-                })
-        })
+                        }
+                        _ => false,
+                    })
+            })
     }
 
     pub fn reads_binding(&self, binding: u32) -> bool {

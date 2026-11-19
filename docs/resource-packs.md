@@ -96,14 +96,20 @@ the pack lightmap (`core/lightmap` with `core/screenquad`) takes them:
 
 - A block one of its stages reads, declared `uniform Name { float value; };`, holds its expression's value each
   frame. The file of the stage that reads it gives it; a block both stages read, or that both files give, takes
-  the fragment shader's (`core/lightmap`) first. A block no stage reads is not bound. A block that is not one float,
-  or that no file of its shaders gives, refuses the shader, and the light texture is computed natively.
+  the fragment shader's (`core/lightmap`) first, then the vertex shader's (`core/screenquad`). A block no stage reads
+  is not bound, and a stage that only declares it doesn't decide its shape. A block a stage reads that is not one
+  float, or that no file of its shaders gives, refuses the shader, and the light texture is computed natively.
+- Each block, vanilla's and `LightmapInfo` included, is bound only to the stages that read it, and counts against
+  the device's limit of uniform blocks per stage (`max_uniform_buffers_per_shader_stage`, 12 by default) for those
+  stages only: a shader over it in either stage is refused.
 - The expression context is the frame's, as the packs' post chains and particles see it: the weather, the game and
   day time, the dimension and its sky, the player's place and motion, the camera's light, biome and climate, and
   the packs' config entries (`polytone/config_entries`). Under fullbright nothing is evaluated.
 - Limits: a file is read up to 64 KiB, with at most 16 uniforms, each a GLSL identifier of at most 64 characters
-  not starting `gl_`. An expression has at most 1024 tokens and nests at most 64 levels (brackets and operators),
-  checked before it is parsed. A file over any of these is refused whole, named by its path in the log.
+  not starting `gl_`. An expression has at most 1024 tokens; its tree is at most 64 levels high and its parse
+  nests at most 16 levels deep (a statement, its expression, each bracket and each unary operator), both checked as
+  it is parsed. A file over any of these, or whose path names no shader, is refused whole, named by its path in the
+  log.
 - The programs are resolved once, when the pack's shaders load; a frame only evaluates them, and uploads 16 bytes
   for each.
 

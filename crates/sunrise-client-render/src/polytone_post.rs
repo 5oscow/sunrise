@@ -229,6 +229,26 @@ impl std::fmt::Debug for ExpressionUniform {
     }
 }
 
+/// Why a pack core shader's expression uniforms refuse it when it loads.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ExpressionRefusal {
+    /// A stage reads the block, and it is not one float.
+    NotOneFloat(String),
+    /// A stage reads the block, and no `shader_modifiers` file of the pipeline's shaders gives it.
+    NotGiven(String),
+}
+
+impl std::fmt::Display for ExpressionRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotOneFloat(name) => write!(f, "its block {name} is not one float"),
+            Self::NotGiven(name) => {
+                write!(f, "no shader_modifiers file of its shaders gives {name}")
+            }
+        }
+    }
+}
+
 impl ShaderModifiers {
     /// The packs' files at `root` (the selected packs' stack), each evaluated with `configs`.
     /// A file over [`MAX_SHADER_MODIFIERS_FILE`], not JSON, or refused by its contents is left
@@ -253,7 +273,11 @@ impl ShaderModifiers {
         let mut shaders = Vec::new();
         for namespace in root.namespaces("assets") {
             for path in root.list(&format!("assets/{namespace}/polytone/shader_modifiers/")) {
+                if !path.ends_with(".json") {
+                    continue;
+                }
                 let Some(id) = sunrise_polytone::implicit_id(&path, "shader_modifiers") else {
+                    refused(&path, "its path names no shader".to_owned());
                     continue;
                 };
                 let read = root
@@ -311,7 +335,7 @@ impl ShaderModifiers {
         (vertex, fragment): (&str, &str),
         program: &crate::core_shader::CoreProgram,
         own: &[&str],
-    ) -> Result<Vec<ExpressionUniform>, String> {
+    ) -> Result<Vec<ExpressionUniform>, ExpressionRefusal> {
         let mut uniforms = Vec::new();
         for (i, name) in program.other.iter().enumerate() {
             if own.contains(&name.as_str()) {
@@ -323,7 +347,7 @@ impl ShaderModifiers {
                 continue;
             }
             if !program.is_float_block(binding) {
-                return Err(format!("its block {name} is not one float"));
+                return Err(ExpressionRefusal::NotOneFloat(name.clone()));
             }
             let order = if stages.contains(wgpu::ShaderStages::FRAGMENT) {
                 [fragment, vertex]
@@ -332,7 +356,7 @@ impl ShaderModifiers {
             };
             let program = (order.iter())
                 .find_map(|id| self.uniform(id, name))
-                .ok_or_else(|| format!("no shader_modifiers file of its shaders gives {name}"))?;
+                .ok_or_else(|| ExpressionRefusal::NotGiven(name.clone()))?;
             uniforms.push(ExpressionUniform {
                 name: name.clone(),
                 binding,
@@ -419,7 +443,7 @@ mod tests {
     fn resolved(
         modifiers: &ShaderModifiers,
         program: &crate::core_shader::CoreProgram,
-    ) -> Result<Vec<(String, wgpu::ShaderStages, f32)>, String> {
+    ) -> Result<Vec<(String, wgpu::ShaderStages, f32)>, ExpressionRefusal> {
         let [vertex, fragment] = crate::gfx::LIGHTMAP_SHADERS;
         let uniforms = modifiers.resolve((vertex, fragment), program, &["LightmapInfo"])?;
         let frame = Frame::default();
@@ -483,7 +507,32 @@ mod tests {
         let wide = program(&[], &["Wide"], &[]);
         assert_eq!(
             resolved(&modifiers, &wide).unwrap_err(),
-            "its block Wide is not one float"
+            ExpressionRefusal::NotOneFloat("Wide".into())
+        );
+        // A `vec4` the vertex stage only declares binds nothing: the fragment stage's float of
+        // that name is what the pipeline reads.
+        let declared = crate::core_shader::translate_core_with(
+            "#version 330\nlayout(std140) uniform Frag {\n    vec4 unused;\n};\n\
+             layout(location = 0) out float sum;\n\
+             void main() {\n    sum = 0.0;\n    gl_Position = vec4(0.0, 0.0, 0.0, 1.0);\n}\n",
+            "#version 330\nlayout(std140) uniform Frag {\n    float fragv;\n};\n\
+             layout(location = 0) in float sum;\nlayout(location = 0) out vec4 fragColor;\n\
+             void main() {\n    fragColor = vec4(sum + fragv);\n}\n",
+            &[],
+            &|_| None,
+            &crate::gfx::core_lightmap::GLUE,
+            &|_| true,
+        )
+        .expect("the shaders translate");
+        assert_eq!(
+            resolved(&modifiers, &declared).unwrap(),
+            [("Frag".to_owned(), f, 0.5)]
+        );
+        // A block a stage reads that no file of the pipeline's shaders gives.
+        let ungiven = program(&[], &["Sky"], &[]);
+        assert_eq!(
+            resolved(&modifiers, &ungiven).unwrap_err(),
+            ExpressionRefusal::NotGiven("Sky".into())
         );
     }
 
@@ -512,6 +561,12 @@ mod tests {
         ] {
             assert_eq!(read(bad), (0, vec![LIGHTMAP.to_owned()]));
         }
+        // A file whose path names no shader (an id may not have capitals) is named too.
+        let bad_path = "assets/minecraft/polytone/shader_modifiers/core/Lightmap.json";
+        let mut refused = Vec::new();
+        let files = pack(&[(bad_path, r#"{"Tint": "1"}"#.into())]);
+        let shaders = ShaderModifiers::files(&files, &mut |path, _| refused.push(path.to_owned()));
+        assert_eq!((shaders.len(), refused), (0, vec![bad_path.to_owned()]));
     }
 
     #[test]
