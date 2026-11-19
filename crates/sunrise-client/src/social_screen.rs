@@ -294,7 +294,7 @@ pub fn draw_background(batch: &mut HudBatch, atlas: &HudAtlas, in_world: bool) {
     ui::menu_background(batch, atlas, 0.0, 0.0, w, h, in_world);
     // `extractBackground`: the panel and the search icon.
     let mx = margin_x(w) + 3.0;
-    ui::blit_sprite(
+    ui::nine_slice(
         batch,
         atlas,
         "social_interactions/background",

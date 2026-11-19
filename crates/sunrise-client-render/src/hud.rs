@@ -87,9 +87,12 @@ pub struct HudAtlas {
     pub width: u32,
     pub height: u32,
     pub sprites: HashMap<String, Rect>,
-    /// The GUI atlas's own answer where a model's sprite or a removal makes a name ambiguous:
-    /// its rect, or none for a sprite its list removed or failed ([`HudAtlas::gui_rect`]).
+    /// The GUI atlas's own sprites by GUI id, each with an entry of its own: its rect, or none for
+    /// a sprite its list removed or failed ([`HudAtlas::gui_lookup`]).
     pub gui: HashMap<String, GuiSprite>,
+    /// The ids the model atlases give a sprite to: no GUI lookup of an id the GUI list lacks
+    /// answers with one.
+    pub model_ids: HashSet<String>,
     /// Resolved player-profile names and UUIDs for inline head components.
     pub object_skins: HashMap<String, String>,
     pub object_skins_revision: u64,
@@ -611,14 +614,16 @@ fn walked_frames_fit(root: &ResourceSource, texture: &str) -> bool {
 enum GuiPublished {
     /// The sprite is packed under this name.
     Packed(String),
-    /// The list removed it or its origin didn't finish. `model`: a model's sprite has the id.
-    Missing { model: bool },
+    /// The list removed it or its origin didn't finish.
+    Missing,
 }
 /// The GUI atlas's answer for one id ([`HudAtlas::gui_lookup`]).
 #[derive(Clone, Copy, Debug)]
 pub enum GuiSprite {
+    /// The sprite the id names.
     Rect(Rect),
-    Missing { model: bool },
+    /// The id is listed, and its sprite was removed or its origin didn't finish.
+    Missing,
 }
 /// What [`atlas_sprites`] found.
 #[derive(Default)]
@@ -636,6 +641,8 @@ struct AtlasSprites {
     /// The GUI atlas's own answer for the names a model or a removal makes ambiguous: the packed
     /// name its pixels are under, or none for a sprite its list removed or failed.
     gui: Vec<(String, GuiPublished)>,
+    /// The ids the model atlases give a sprite to.
+    model_ids: HashSet<String>,
 }
 /// What the atlas definitions (`atlases/*.json`) change in the texture files already packed:
 /// the sprites to add (generated ones such as the armour trim palettes and `unstitch` regions,
@@ -717,11 +724,15 @@ fn atlas_sprites(root: &ResourceSource, packed: &[PackedImage]) -> AtlasSprites 
         }));
     }
     // The GUI atlas owns every id its final list names, and every id a filter or `Remove` took
-    // out of it, by that id: its sprite is the walked file where an entry keeps it, else packed
-    // under a name of its own (`#gui:<id>`: `#` is in no identifier, so no model's or mod's name
-    // can be it). No walked file is dropped unless the GUI list owns its id.
+    // out of it, by that id: its sprite is the walked file the entry itself is, else packed under
+    // a name of its own (`#gui:<id>`: `#` is in no identifier, so no model's or mod's name can be
+    // it). A walked file is dropped only for the id whose own key it is, and not while another
+    // entry stands on it; a file of the same name another owner packed (a registered atlas's
+    // projection, a live texture's) is no GUI id's to drop.
     if listing.defines("minecraft:gui") {
         let mut claimed: HashSet<String> = HashSet::new();
+        let mut standing: HashSet<String> = HashSet::new();
+        let mut dropping: Vec<String> = Vec::new();
         let removed = listing.removed("minecraft:gui").map(|id| (id, None));
         for (id, origin) in gui
             .iter()
@@ -730,29 +741,30 @@ fn atlas_sprites(root: &ResourceSource, packed: &[PackedImage]) -> AtlasSprites 
         {
             let plain = id.strip_prefix("minecraft:").unwrap_or(id);
             let key = gui_sprite::atlas_key_of_gui_sprite(id);
-            let walked = [key.as_str(), plain]
-                .into_iter()
-                .find(|name| have.contains(name) && !model_names.contains(name));
-            claimed.extend(walked.map(str::to_owned));
-            let stands = matches!(origin, Some(SpriteOrigin::File(texture))
-                if walked.is_some_and(|name| texture.strip_prefix("minecraft:").unwrap_or(texture) == name)
-                    && walked_frames_fit(root, texture));
-            if stands {
-                gui_table.push((
-                    plain.to_owned(),
-                    GuiPublished::Packed(walked.unwrap().to_owned()),
-                ));
+            let own = (have.contains(key.as_str()) && !model_names.contains(key.as_str()))
+                .then(|| key.clone());
+            claimed.extend(own.clone());
+            let stands = match origin {
+                Some(SpriteOrigin::File(texture)) => {
+                    let name = texture.strip_prefix("minecraft:").unwrap_or(texture);
+                    ([key.as_str(), plain].contains(&name)
+                        && have.contains(name)
+                        && !model_names.contains(name)
+                        && walked_frames_fit(root, texture))
+                    .then(|| name.to_owned())
+                }
+                _ => None,
+            };
+            if let Some(name) = stands {
+                claimed.insert(name.clone());
+                standing.insert(name.clone());
+                gui_table.push((plain.to_owned(), GuiPublished::Packed(name)));
                 continue;
             }
+            dropping.extend(own);
             let material = origin.and_then(|origin| atlas_sources::finish_origin(root, origin));
-            dropped.extend(walked.map(str::to_owned));
             let Some(material) = material else {
-                gui_table.push((
-                    plain.to_owned(),
-                    GuiPublished::Missing {
-                        model: model_names.contains(plain),
-                    },
-                ));
+                gui_table.push((plain.to_owned(), GuiPublished::Missing));
                 continue;
             };
             let packed_as = format!("{GUI_KEY}{id}");
@@ -762,6 +774,7 @@ fn atlas_sprites(root: &ResourceSource, packed: &[PackedImage]) -> AtlasSprites 
             gui_table.push((plain.to_owned(), GuiPublished::Packed(packed_as.clone())));
             finished.push((packed_as, material, false));
         }
+        dropped.extend(dropping.into_iter().filter(|name| !standing.contains(name)));
         // A walked GUI sprite the list names nowhere is no sprite of the GUI atlas.
         for (name, ..) in packed {
             let path = name.split_once(':').map_or(name.as_str(), |(_, p)| p);
@@ -856,6 +869,7 @@ fn atlas_sprites(root: &ResourceSource, packed: &[PackedImage]) -> AtlasSprites 
         flags,
         gui_files,
         gui: gui_table,
+        model_ids: model_names.into_iter().map(str::to_owned).collect(),
     }
 }
 /// The prefix of the name a GUI atlas sprite is packed under when a model's sprite has its name.
@@ -994,20 +1008,20 @@ impl HudAtlas {
         self.packed = Some(slot);
     }
     /// A GUI atlas sprite by its id (`minecraft:container/slot`, `container/slot`, a mod's
-    /// `mymod:panel`): the GUI atlas's own sprite where its list has one, a sprite its list
-    /// removed or failed as [`GuiSprite::Missing`] (never a model's sprite of the id; a live
-    /// texture or a registered atlas's sprite at an id the list removed stays reachable), and for
-    /// an id the list says nothing of the sprite packed under the name.
+    /// `mymod:panel`): [`GuiSprite::Rect`] for the GUI list's own sprite, or for a live texture
+    /// or a registered atlas's sprite of the name where the list has none; [`GuiSprite::Missing`]
+    /// for an id the list removed or failed; none for an id the GUI atlas does not own. A model's
+    /// sprite of the name is never the GUI's.
     pub fn gui_lookup(&self, id: &str) -> Option<GuiSprite> {
         let id = id.strip_prefix("minecraft:").unwrap_or(id);
         match self.gui.get(id) {
-            Some(GuiSprite::Missing { model: false }) => Some(
-                self.sprites
-                    .get(id)
-                    .map_or(GuiSprite::Missing { model: false }, |r| GuiSprite::Rect(*r)),
-            ),
-            Some(sprite) => Some(*sprite),
-            None => self.sprites.get(id).map(|rect| GuiSprite::Rect(*rect)),
+            Some(GuiSprite::Rect(rect)) => Some(GuiSprite::Rect(*rect)),
+            listed => self
+                .sprites
+                .get(id)
+                .filter(|_| !self.model_ids.contains(id))
+                .map(|rect| GuiSprite::Rect(*rect))
+                .or(listed.copied()),
         }
     }
     /// Whether the GUI atlas's list has a sprite of its own at `id`.
@@ -1017,18 +1031,17 @@ impl HudAtlas {
             Some(GuiSprite::Rect(_))
         )
     }
-    /// The rect a GUI draw uses for GUI sprite `id`: the sprite's own, the missing sprite for one
-    /// the GUI list removed, none for an id the atlas lacks.
+    /// The rect a GUI draw uses for GUI sprite `id`: [`HudAtlas::gui_lookup`]'s, the missing
+    /// sprite for an id the list removed or failed, none for an id the atlas does not own.
     pub fn gui_rect(&self, id: &str) -> Option<&Rect> {
-        match self.gui_lookup(id)? {
-            GuiSprite::Rect(_) => {
-                let id = id.strip_prefix("minecraft:").unwrap_or(id);
-                match self.gui.get(id) {
-                    Some(GuiSprite::Rect(rect)) => Some(rect),
-                    _ => self.sprites.get(id),
-                }
-            }
-            GuiSprite::Missing { .. } => self.sprites.get(MISSING_SPRITE),
+        let id = id.strip_prefix("minecraft:").unwrap_or(id);
+        match self.gui.get(id) {
+            Some(GuiSprite::Rect(rect)) => Some(rect),
+            listed => self
+                .sprites
+                .get(id)
+                .filter(|_| !self.model_ids.contains(id))
+                .or_else(|| listed.and_then(|_| self.sprites.get(MISSING_SPRITE))),
         }
     }
     /// [`HudAtlas::gui_rect`], or the missing sprite where the atlas has no such GUI sprite (an
@@ -1176,6 +1189,7 @@ impl HudAtlas {
             height: 1,
             sprites: HashMap::new(),
             gui: HashMap::new(),
+            model_ids: HashSet::new(),
             object_skins: HashMap::new(),
             object_skins_revision: Self::next_revision(),
             translucent: HashSet::new(),
@@ -1250,6 +1264,7 @@ impl HudAtlas {
             translucent: HashSet::new(),
             flags: HashMap::new(),
             gui: HashMap::new(),
+            model_ids: HashSet::new(),
             object_skins: HashMap::new(),
             object_skins_revision: Self::next_revision(),
             sprite_animations: Vec::new(),
@@ -1560,6 +1575,7 @@ impl HudAtlas {
         let mut cit_names = HashSet::new();
         let mut gui_files = HashMap::new();
         let mut gui_names = Vec::new();
+        let mut model_ids = HashSet::new();
         if full {
             let found = atlas_sprites(root, &images);
             let dropped = found.dropped;
@@ -1573,6 +1589,7 @@ impl HudAtlas {
             flags.extend(found.flags);
             gui_files = found.gui_files;
             gui_names = found.gui;
+            model_ids = found.model_ids;
             for (image, image_flags, is_animated) in cit_sprites(root, &images) {
                 cit_names.insert(image.0.clone());
                 if let Some(f) = image_flags {
@@ -1765,10 +1782,8 @@ impl HudAtlas {
                 let sprite = match published {
                     GuiPublished::Packed(key) => sprites
                         .get(&key)
-                        .map_or(GuiSprite::Missing { model: false }, |rect| {
-                            GuiSprite::Rect(*rect)
-                        }),
-                    GuiPublished::Missing { model } => GuiSprite::Missing { model },
+                        .map_or(GuiSprite::Missing, |rect| GuiSprite::Rect(*rect)),
+                    GuiPublished::Missing => GuiSprite::Missing,
                 };
                 (id, sprite)
             })
@@ -1785,6 +1800,7 @@ impl HudAtlas {
             height,
             sprites,
             gui,
+            model_ids,
             object_skins: HashMap::new(),
             object_skins_revision: Self::next_revision(),
             translucent,
@@ -3718,7 +3734,7 @@ mod tests {
     /// answer and the model lookup is the model's: a GUI replacement is found as the GUI's pixels,
     /// a GUI sprite its list removed or failed is the missing sprite, never the model's. Names the
     /// GUI list says nothing of (a registered atlas's sprite, a live dynamic texture) resolve
-    /// through the plain table.
+    /// through the plain table, where no model has the name.
     #[test]
     fn a_gui_entry_never_takes_a_models_sprite_of_its_id() {
         let items = r#"{"sources":[{"type":"minecraft:unstitch","resource":"demo:item/sheet","divisor_x":2,
@@ -3771,6 +3787,80 @@ mod tests {
         atlas.sprites.insert("demo:live".into(), live);
         assert_eq!(size(atlas.gui_rect("demo:live")), Some((1, 1)));
         assert!(atlas.gui_rect("demo:unknown").is_none());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+    /// Two legal GUI ids that name one walked file each keep their own sprite: `panel` stands on
+    /// the walked `gui/sprites/panel`, and `gui/sprites/panel` (the id whose plain name that is)
+    /// has another origin, so replacing one never touches the other. An id only a model has
+    /// is no GUI sprite, while its model lookup finds it.
+    #[test]
+    fn two_gui_ids_of_one_walked_name_and_a_model_only_id_keep_their_own_results() {
+        let items = r#"{"sources":[{"type":"minecraft:unstitch","resource":"demo:item/sheet","divisor_x":2,
+            "regions":[{"sprite":"demo:item/model_only","x":0,"y":0,"width":1,"height":1}]}]}"#;
+        let root = model_atlas_root("gui-two-ids", items, r#"{"sources":[]}"#);
+        write_pixel(
+            &root.join("assets/minecraft/textures/gui/sprites/panel.png"),
+            [200, 0, 0, 255],
+        );
+        std::fs::write(
+            root.join("assets/minecraft/atlases/gui.json"),
+            r#"{"sources":[
+                {"type":"minecraft:directory","prefix":"","source":"gui/sprites"},
+                {"type":"minecraft:single","resource":"demo:item/sheet","sprite":"minecraft:gui/sprites/panel"}]}"#,
+        )
+        .unwrap();
+        let atlas = HudAtlas::build(&ResourceSource::directory(root.clone())).unwrap();
+        let panel = *atlas.gui_rect("panel").unwrap();
+        let other = *atlas.gui_rect("gui/sprites/panel").unwrap();
+        assert_eq!(
+            texel_at(&atlas, panel, 0, 0),
+            [200, 0, 0, 255],
+            "the walked file"
+        );
+        assert_eq!(
+            other.texels((atlas.width, atlas.height)),
+            (2, 1),
+            "the sheet"
+        );
+        assert_eq!(texel_at(&atlas, other, 0, 0), [255, 0, 0, 255]);
+        assert_ne!((panel.u0, panel.v0), (other.u0, other.v0), "two sprites");
+        assert!(atlas.gui_lookup("demo:item/model_only").is_none());
+        assert!(atlas.gui_rect("demo:item/model_only").is_none());
+        assert!(atlas.sprites.contains_key("demo:item/model_only"));
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+    /// A file another owner packed under a name that is also a GUI id (a registered atlas's
+    /// projection is `mymod:gui/atlases/...`) is not erased by a GUI filter of that id: it stays
+    /// in the packed table and the GUI lookup still finds it.
+    #[test]
+    fn a_gui_filter_never_erases_a_registered_atlas_sprite_of_its_name() {
+        let root = model_atlas_root("gui-registered", r#"{"sources":[]}"#, r#"{"sources":[]}"#);
+        write_pixel(
+            &root.join("assets/demo/textures/gui/atlases/icons/demo/heart.png"),
+            [0, 200, 0, 255],
+        );
+        std::fs::write(
+            root.join("assets/minecraft/atlases/gui.json"),
+            r#"{"sources":[
+                {"type":"minecraft:single","resource":"demo:item/sheet","sprite":"demo:gui/atlases/icons/demo/heart"},
+                {"type":"minecraft:filter","pattern":{"namespace":"demo","path":"gui/atlases/icons/demo/heart"}}]}"#,
+        )
+        .unwrap();
+        let atlas = HudAtlas::build(&ResourceSource::directory(root.clone())).unwrap();
+        let name = "demo:gui/atlases/icons/demo/heart";
+        let packed = *atlas
+            .sprites
+            .get(name)
+            .expect("the projection stays packed");
+        assert_eq!(texel_at(&atlas, packed, 0, 0), [0, 200, 0, 255]);
+        assert!(
+            !atlas.gui_owns(name),
+            "the list has no sprite of its own there"
+        );
+        assert_eq!(
+            texel_at(&atlas, *atlas.gui_rect(name).unwrap(), 0, 0),
+            [0, 200, 0, 255]
+        );
         std::fs::remove_dir_all(&root).unwrap();
     }
     /// A resource tree with only a GUI definition publishes its GUI sprites.

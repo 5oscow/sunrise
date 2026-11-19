@@ -254,12 +254,24 @@ impl DynamicTextures {
             self.limits.bytes - held.bytes,
         ))
     }
-    /// A rebuilt atlas (a resource reload) with `pool` and `sprites`: every image keeps its name,
+    /// A rebuilt atlas (a resource reload) with `pool`, `sprites` and the GUI table `gui`: every image keeps its name,
     /// class and slot there and is patched again with its kept pixels. An atlas with no pool
     /// leaves the names unbound and the pixels kept, until one has a pool again.
-    pub fn rebind(&mut self, pool: Option<&Pool>, sprites: &mut HashMap<String, Rect>) {
+    pub fn rebind(
+        &mut self,
+        pool: Option<&Pool>,
+        sprites: &mut HashMap<String, Rect>,
+        gui: &mut HashMap<String, super::GuiSprite>,
+    ) {
         let Some(pool) = pool else { return };
         for (id, image) in &mut self.images {
+            // A texture holds its id first: a GUI entry the new load brought for it is skipped.
+            let name = id.to_string();
+            let plain = name.strip_prefix("minecraft:").unwrap_or(&name);
+            if matches!(gui.get(plain), Some(super::GuiSprite::Rect(_))) {
+                log::warn!("GUI atlas: sprite {id} skipped: a dynamic texture holds the id");
+                gui.remove(plain);
+            }
             sprites.insert(
                 id.to_string(),
                 pool.rect(image.class, image.slot, image.size),
@@ -407,6 +419,40 @@ mod tests {
         assert_eq!(sized([1025, 1025], 0), Err(TooLarge));
     }
 
+    /// A resource reload that brings a GUI entry for an id a live texture holds skips the entry:
+    /// the texture, which held the id first, is what the id names, and an id no texture holds
+    /// keeps its entry.
+    #[test]
+    fn a_reload_keeps_a_live_texture_over_a_gui_entry_for_its_id() {
+        use crate::hud::GuiSprite;
+        let (mut textures, pool) = (textures(), pool());
+        let mut sprites = HashMap::new();
+        assert_eq!(
+            textures.create(
+                Some(&pool),
+                &mut sprites,
+                Some("demo"),
+                &id("demo:held"),
+                [2, 2],
+                &[1; 16]
+            ),
+            Ok(())
+        );
+        let entry = GuiSprite::Rect(sprites["demo:held"]);
+        let mut rebuilt = HashMap::new();
+        let mut gui = HashMap::from([
+            ("demo:held".to_owned(), entry),
+            ("demo:other".to_owned(), entry),
+        ]);
+        textures.rebind(Some(&pool), &mut rebuilt, &mut gui);
+        assert!(!gui.contains_key("demo:held"), "the entry is skipped");
+        assert!(gui.contains_key("demo:other"), "another id's entry stays");
+        assert!(
+            rebuilt.contains_key("demo:held"),
+            "the texture is bound again"
+        );
+    }
+
     /// A GUI atlas list that lists then removes an id leaves it to a live texture made there, which
     /// then resolves as itself and not as the missing sprite; an id the list has a sprite for is
     /// the list's (the game refuses a live texture there), and a model's sprite of a removed id
@@ -461,7 +507,7 @@ mod tests {
         // Removed ids: the missing sprite, and not the model's sprite for `demo:item/modeled`.
         assert!(matches!(
             atlas.gui_lookup("demo:gone"),
-            Some(GuiSprite::Missing { model: false })
+            Some(GuiSprite::Missing)
         ));
         assert_eq!(size(&atlas, "demo:item/modeled"), missing);
         assert_eq!(
@@ -909,7 +955,7 @@ mod tests {
         };
         // The new atlas's sprites, packed from the packs alone.
         let mut rebuilt = HashMap::new();
-        textures.rebind(Some(&new), &mut rebuilt);
+        textures.rebind(Some(&new), &mut rebuilt, &mut HashMap::new());
         let mut names: Vec<_> = rebuilt.keys().cloned().collect();
         names.sort();
         assert_eq!(names, ["alpha:a", "beta:b"]);

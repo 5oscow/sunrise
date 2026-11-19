@@ -315,7 +315,7 @@ impl Game<'_> {
         } else {
             "container/slot_highlight_back"
         };
-        sunrise_client::ui::blit_sprite(
+        sunrise_client::ui::nine_slice(
             batch,
             &self.gui.atlas,
             sprite,

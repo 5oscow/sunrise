@@ -801,7 +801,6 @@ fn paint_with(
     mut items: Option<&mut dyn GuiItems>,
 ) {
     let mut stack = vec![IDENTITY];
-    // One buffer for the sprite keys, instead of a string per drawn sprite.
     for d in draws {
         let start = batch.vertices.len();
         let pose = *stack.last().unwrap_or(&IDENTITY);
@@ -860,15 +859,10 @@ fn paint_with(
                 h,
                 color,
             } => {
-                batch.sprite_scaled(
-                    atlas,
-                    sprite,
-                    *x as f32,
-                    *y as f32,
-                    *w as f32,
-                    *h as f32,
-                    abgr(*color),
-                );
+                // A block atlas sprite, by its packed name, never a GUI sprite of the same id.
+                if let Some(r) = atlas.sprites.get(sprite.as_ref()).copied() {
+                    batch.rect_uv(*x as f32, *y as f32, *w as f32, *h as f32, r, abgr(*color));
+                }
             }
             GuiDraw::Blit { blend, .. } if *blend != Blend::Textured && items.is_none() => {}
             GuiDraw::Blit {

@@ -341,7 +341,7 @@ impl Game<'_> {
                 (true, true) => "widget/button_highlighted",
                 (true, false) => "widget/button",
             };
-            sunrise_client::ui::blit_sprite(batch, atlas, sprite, x, y, 20.0, 20.0, u32::MAX);
+            sunrise_client::ui::nine_slice(batch, atlas, sprite, x, y, 20.0, 20.0, u32::MAX);
             let color = if active {
                 u32::MAX
             } else {

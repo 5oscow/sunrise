@@ -130,28 +130,6 @@ fn nine_slice_metadata(sprite: &str) -> Option<NineSlice> {
         .as_ref()
         .and_then(|m| m.get(sprite).copied())
 }
-/// The sprite's nine-slice metadata; without any (no resources loaded), its
-/// GUI size and the widgets' usual borders.
-fn scaling(sprite: &str, r: &Rect) -> NineSlice {
-    nine_slice_metadata(sprite).unwrap_or(NineSlice {
-        width: r.w,
-        height: r.h,
-        border: match sprite {
-            "sunrise/jei/button_enabled_v2"
-            | "sunrise/jei/button_disabled_v2"
-            | "sunrise/jei/button_highlight_v2" => [6; 4],
-            "sunrise/jei/search_background_v2" => [6; 4],
-            "sunrise/jei/interactive_ingredient_tooltip_background" => [16; 4],
-            "sunrise/jei/recipe_preview_background_v2" => [16; 4],
-            "sunrise/jei/scrollbar_background_v2" => [6; 4],
-            "sunrise/jei/scrollbar_marker_v2" => [2, 2, 2, 1],
-            "widget/button" | "widget/button_highlighted" | "widget/button_disabled" => [3; 4],
-            "widget/slider_handle" | "widget/slider_handle_highlighted" => [2, 2, 2, 3],
-            _ => [1; 4],
-        },
-        stretch_inner: false,
-    })
-}
 /// The region `[x, y, w, h]` of a sprite `size` GUI pixels large, in its
 /// own units (`TextureAtlasSprite.getU(x / width)`).
 fn sub(r: Rect, size: [f32; 2], [x, y, w, h]: [f32; 4]) -> Rect {
@@ -185,10 +163,12 @@ fn tile(batch: &mut HudBatch, r: Rect, size: [f32; 2], src: [f32; 4], dst: [f32;
         y += sh;
     }
 }
-/// `GuiGraphicsExtractor.blitNineSlicedSprite`: the corners at their size,
-/// the edges and centre tiled (or stretched with `stretch_inner`), all in
-/// the sprite's `gui.scaling` units, so a high-resolution pack's sprite draws
-/// as the default one does.
+/// `GuiGraphicsExtractor.blitSprite`: a sprite over `w` × `h` as its `gui.scaling` says: the
+/// corners at their size and the edges and centre tiled (or stretched with `stretch_inner`), all
+/// in the sprite's `gui.scaling` units so a high-resolution pack's sprite draws as the default
+/// one does, or stretched when it has no scaling, as vanilla's default (`tile`, which no vanilla
+/// sprite uses, isn't read yet: it stretches). The sprite the atlas published decides: a sprite
+/// its list removed or failed draws as the missing sprite, stretched, with no scaling of its own.
 pub fn nine_slice(
     batch: &mut HudBatch,
     atlas: &HudAtlas,
@@ -199,39 +179,21 @@ pub fn nine_slice(
     h: f32,
     color: u32,
 ) {
-    if let Some(r) = atlas.gui_rect(sprite) {
-        match crate::hud::sprite_modifiers::draws(atlas, sprite, *r, [x, y, w, h], color) {
-            Some(draws) => {
-                for d in draws {
-                    draw_nine_slice(batch, d.rect, scaling(&d.key, &d.rect), d.at, d.color);
-                }
+    let Some(r) = atlas.gui_rect(sprite) else {
+        return;
+    };
+    let published = !matches!(
+        atlas.gui_lookup(sprite),
+        Some(crate::hud::GuiSprite::Missing)
+    );
+    let scaling = |key: &str| nine_slice_metadata(key).filter(|_| published);
+    match crate::hud::sprite_modifiers::draws(atlas, sprite, *r, [x, y, w, h], color) {
+        Some(draws) => {
+            for d in draws {
+                draw_sprite(batch, d.rect, scaling(&d.key), d.at, d.color);
             }
-            None => draw_nine_slice(batch, *r, scaling(sprite, r), [x, y, w, h], color),
         }
-    }
-}
-/// `GuiGraphicsExtractor.blitSprite`: a sprite over `w` × `h` as its
-/// `gui.scaling` says, nine-sliced, or stretched when it has no metadata.
-/// (`tile`, which no vanilla sprite uses, isn't read yet: it stretches.)
-pub fn blit_sprite(
-    batch: &mut HudBatch,
-    atlas: &HudAtlas,
-    sprite: &str,
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
-    color: u32,
-) {
-    if let Some(r) = atlas.gui_rect(sprite) {
-        match crate::hud::sprite_modifiers::draws(atlas, sprite, *r, [x, y, w, h], color) {
-            Some(draws) => {
-                for d in draws {
-                    draw_sprite(batch, d.rect, nine_slice_metadata(&d.key), d.at, d.color);
-                }
-            }
-            None => draw_sprite(batch, *r, nine_slice_metadata(sprite), [x, y, w, h], color),
-        }
+        None => draw_sprite(batch, *r, scaling(sprite), [x, y, w, h], color),
     }
 }
 /// `GuiGraphicsExtractor.blit(location, x, y, u, v, width, height, textureWidth,
@@ -1226,7 +1188,7 @@ pub fn tooltip_sprites(
         return false;
     }
     for sprite in [background, frame] {
-        blit_sprite(
+        nine_slice(
             batch,
             atlas,
             sprite,
@@ -2370,6 +2332,84 @@ mod tests {
         let q = quads(&batch);
         assert_eq!(q.len(), 1);
         assert_quad(q[0], ([0.0, 0.0, 27.0, 18.0], [0.0, 0.0, 1.0, 1.0]));
+    }
+    /// A GUI sprite draws as the sprite the atlas published says: an alias of a file with
+    /// nine-slice metadata is nine-sliced, a generated sprite (a cut of that file) carries none of
+    /// it and stretches, and a sprite whose origin failed draws the missing sprite stretched,
+    /// whatever the failed file's metadata said.
+    #[test]
+    fn a_sprite_is_scaled_by_the_metadata_of_the_sprite_the_atlas_published() {
+        let root = std::env::temp_dir().join(format!("sunrise-ui-scaling-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let textures = root.join("assets/demo/textures/gui");
+        std::fs::create_dir_all(&textures).unwrap();
+        std::fs::create_dir_all(root.join("assets/minecraft/atlases")).unwrap();
+        let nine = r#""gui":{"scaling":{"type":"nine_slice","width":6,"height":6,"border":2,"stretch_inner":true}}"#;
+        for (name, mcmeta) in [
+            ("panel", format!("{{{nine}}}")),
+            (
+                "bad",
+                format!(r#"{{"animation":{{"width":4,"height":4}},{nine}}}"#),
+            ),
+        ] {
+            let mut encoder = png::Encoder::new(
+                std::fs::File::create(textures.join(format!("{name}.png"))).unwrap(),
+                6,
+                6,
+            );
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder
+                .write_header()
+                .unwrap()
+                .write_image_data(&[255; 6 * 6 * 4])
+                .unwrap();
+            std::fs::write(textures.join(format!("{name}.png.mcmeta")), mcmeta).unwrap();
+        }
+        std::fs::write(
+            root.join("assets/minecraft/atlases/blocks.json"),
+            r#"{"sources":[]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("assets/minecraft/atlases/items.json"),
+            r#"{"sources":[]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("assets/minecraft/atlases/gui.json"),
+            r#"{"sources":[
+                {"type":"minecraft:single","resource":"demo:gui/panel","sprite":"demo:alias"},
+                {"type":"minecraft:unstitch","resource":"demo:gui/panel","divisor_x":1,"divisor_y":1,
+                 "regions":[{"sprite":"demo:made","x":0,"y":0,"width":6,"height":6}]},
+                {"type":"minecraft:single","resource":"demo:gui/bad","sprite":"demo:failed"}]}"#,
+        )
+        .unwrap();
+        let source = ResourceSource::directory(root.clone());
+        let atlas = HudAtlas::build(&source).unwrap();
+        set_metadata(read_metadata(&source));
+        std::fs::remove_dir_all(&root).unwrap();
+        let drawn = |id: &str| {
+            let mut batch = HudBatch::scratch([640, 480]);
+            nine_slice(&mut batch, &atlas, id, 0.0, 0.0, 20.0, 20.0, u32::MAX);
+            quads(&batch)
+        };
+        // The alias carries its file's nine-slice: nine quads, the corners 2 GUI pixels.
+        let alias = drawn("demo:alias");
+        assert_eq!(alias.len(), 9);
+        assert_eq!(alias[0].0, [0.0, 0.0, 2.0, 2.0]);
+        // The generated cut has no scaling of its own, though its source file has: one stretched quad.
+        let made = drawn("demo:made");
+        assert_eq!(made.len(), 1);
+        assert_eq!(made[0].0, [0.0, 0.0, 20.0, 20.0]);
+        // The failed origin draws the missing sprite stretched.
+        let failed = drawn("demo:failed");
+        let missing = atlas.sprites[crate::hud::MISSING_SPRITE];
+        assert_eq!(failed.len(), 1);
+        assert_eq!(
+            failed[0].1,
+            [missing.u0, missing.v0, missing.u1, missing.v1]
+        );
     }
     #[test]
     fn borders_shrink_to_half_the_drawn_size() {

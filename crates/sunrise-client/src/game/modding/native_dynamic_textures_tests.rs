@@ -88,3 +88,27 @@ fn a_mods_dynamic_texture_draws_under_its_id_until_it_is_freed() {
         });
     });
 }
+
+/// The game's GUI atlas lists vanilla's `container/slot`: a mod's live texture is refused at that
+/// id (the list holds it first), and still made at an id the list has no sprite for.
+#[test]
+#[ignore = "daily"]
+fn a_dynamic_texture_is_refused_at_an_id_the_gui_atlas_owns() {
+    let mods = vec![ModEntry::new("api-only", Box::new(ApiOnly))];
+    with_mods(mods.into(), || {
+        crate::game::native_entity_refs::tests::with_client_game(|game| {
+            let green = GREEN.repeat(16 * 16);
+            let make = |game: &mut crate::game::Game, id: &str| {
+                let id = Identifier::parse(id).unwrap();
+                as_mod("api-only", || {
+                    game.create_dynamic_texture(&id, 16, 16, &green)
+                })
+            };
+            assert_eq!(
+                make(game, "minecraft:container/slot"),
+                Err(DynamicTextureError::NameTaken)
+            );
+            assert_eq!(make(game, "api-only:dynamic/free"), Ok(()));
+        });
+    });
+}

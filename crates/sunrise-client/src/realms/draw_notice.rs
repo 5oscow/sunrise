@@ -32,7 +32,7 @@ impl Screen {
         // The grid starts at the entry's content origin: the entry's own +2.
         let content_x = rx + 2.0;
         // `ImageWidget.sprite(20, 20, icon/info)`, padded 7.
-        crate::ui::blit_sprite(
+        crate::ui::nine_slice(
             batch,
             atlas,
             "icon/info",
@@ -79,7 +79,7 @@ impl Screen {
             } else {
                 "widget/cross_button"
             };
-            crate::ui::blit_sprite(
+            crate::ui::nine_slice(
                 batch,
                 atlas,
                 sprite,
