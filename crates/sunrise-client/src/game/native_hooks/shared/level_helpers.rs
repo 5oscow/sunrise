@@ -277,4 +277,3 @@ fn put_block_entity(world: &mut sunrise_client::world::World, pos: [i32; 3], ent
         world.block_entities.insert(key, entity);
     }
 }
-

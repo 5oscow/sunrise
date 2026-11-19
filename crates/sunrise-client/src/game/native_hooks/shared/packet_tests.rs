@@ -30,9 +30,8 @@ fn serverbound_packet_view_names_the_packets_the_game_sends() {
         configuration::CustomPayload,
         play::{Serverbound, SetCarriedItem},
     };
-    let slot = super::serverbound_packet_view(&Serverbound::SetCarriedItem(SetCarriedItem {
-        slot: 3,
-    }));
+    let slot =
+        super::serverbound_packet_view(&Serverbound::SetCarriedItem(SetCarriedItem { slot: 3 }));
     assert_eq!(slot.id.to_string(), "minecraft:set_carried_item");
     assert_eq!(slot.custom_payload, None);
 
@@ -50,4 +49,3 @@ fn serverbound_packet_view_names_the_packets_the_game_sends() {
     let unknown = super::serverbound_packet_view(&Serverbound::Unknown(-1, vec![9]));
     assert_eq!(unknown.id.to_string(), "sunrise:unknown");
 }
-

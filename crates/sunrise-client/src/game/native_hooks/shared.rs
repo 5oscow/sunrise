@@ -27,8 +27,11 @@ mod label_tests;
 #[path = "shared/loot.rs"]
 mod loot;
 #[cfg(test)]
-#[path = "shared/particle_count_tests.rs"]
-pub(super) mod particle_count_tests;
+#[path = "shared/packet_tests.rs"]
+mod packet_tests;
+#[cfg(test)]
+#[path = "shared/runtime_environment_tests.rs"]
+mod runtime_environment_tests;
 #[cfg(test)]
 #[path = "shared/screen_position_tests.rs"]
 mod screen_position_tests;
@@ -38,6 +41,10 @@ mod slot_icon_tests;
 #[cfg(test)]
 #[path = "shared/slot_tooltip_tests.rs"]
 mod slot_tooltip_tests;
+#[path = "shared/system_helpers.rs"]
+mod system_helpers;
+#[path = "shared/world_helpers.rs"]
+mod world_helpers;
 
 use super::screen_build::ObservedScreen;
 use crate::game::api_values::{TryIntoApi, TryIntoEngine};
@@ -68,7 +75,7 @@ enum ScreenDecision {
     ModScreen(&'static str),
 }
 
-fn observed_overlay_id(overlays: &[(bool, &'static str)]) -> Option<&'static str> {
+pub(super) fn observed_overlay_id(overlays: &[(bool, &'static str)]) -> Option<&'static str> {
     overlays.iter().find_map(|(open, id)| open.then_some(*id))
 }
 
@@ -1853,7 +1860,6 @@ fn dimension_id(dimension: LevelDimension) -> &'static str {
     }
 }
 
-
 /// A mob's kind as the hook points name it (`minecraft:zombie`).
 pub(super) fn mob_kind(mob: &sunrise_client::mobs::Mob) -> String {
     crate::game::native_namespaced_id::namespaced(&mob.kind.id)
@@ -3015,7 +3021,7 @@ impl Game<'_> {
 /// (`DebugScreenOverlay.extractRenderState`): its left and right columns
 /// the top corners, and its charts the bottom corners `charts` (bottom left,
 /// bottom right) says they are drawn in.
-fn debug_takes(corner: Corner, debug: bool, charts: [bool; 2]) -> bool {
+pub(super) fn debug_takes(corner: Corner, debug: bool, charts: [bool; 2]) -> bool {
     debug
         && match corner {
             Corner::TopLeft | Corner::TopRight => true,
@@ -3025,7 +3031,7 @@ fn debug_takes(corner: Corner, debug: bool, charts: [bool; 2]) -> bool {
 }
 
 /// A menu of `MOD_MENUS` or a content mod's menu type, by its name.
-fn mod_menu(name: &str) -> Option<(&'static str, usize)> {
+pub(super) fn mod_menu(name: &str) -> Option<(&'static str, usize)> {
     MOD_MENUS
         .into_iter()
         .find(|(menu, _)| *menu == name)
@@ -3521,67 +3527,6 @@ mod tests {
 
     #[test]
     #[ignore = "daily"]
-    fn client_host_reads_current_pause_state() {
-        use super::super::native_entity_refs::tests::with_game;
-        use crate::game::execution_role::ExecutionRole;
-
-        with_game(|game| {
-            game.options.execution_role = ExecutionRole::Client;
-            game.pause = false;
-            assert!(!mod_api::prelude::ClientViewClientHost::is_paused(game));
-            game.pause = true;
-            assert!(mod_api::prelude::ClientViewClientHost::is_paused(game));
-        });
-    }
-
-    #[test]
-    #[ignore = "daily"]
-    fn client_host_reads_playing_and_key_mappings() {
-        use super::super::Screen;
-        use super::super::native_entity_refs::tests::with_game;
-        use crate::game::execution_role::ExecutionRole;
-
-        use winit::keyboard::KeyCode;
-
-        with_game(|game| {
-            game.options.execution_role = ExecutionRole::Client;
-            game.screen = Screen::Playing;
-            assert!(mod_api::prelude::ClientInputClientHost::playing(game));
-            game.screen = Screen::Chat;
-            assert!(!mod_api::prelude::ClientInputClientHost::playing(game));
-
-            // Vanilla's default bindings: forward is W, attack the left mouse button.
-            let forward = mod_api::prelude::ClientInputClientHost::mapping(game, "key.forward")
-                .unwrap()
-                .unwrap();
-            assert_eq!(
-                (forward.down, forward.label),
-                (false, mod_api::Text::literal("W"))
-            );
-            game.keys.insert(KeyCode::KeyW);
-            assert!(
-                mod_api::prelude::ClientInputClientHost::mapping(game, "key.forward")
-                    .unwrap()
-                    .unwrap()
-                    .down
-            );
-            let attack = mod_api::prelude::ClientInputClientHost::mapping(game, "key.attack")
-                .unwrap()
-                .unwrap();
-            assert_eq!(
-                attack.label,
-                mod_api::Text::translate("key.mouse.left", Vec::new())
-            );
-            assert!(
-                mod_api::prelude::ClientInputClientHost::mapping(game, "key.mymod.boost")
-                    .unwrap()
-                    .is_none()
-            );
-        });
-    }
-
-    #[test]
-    #[ignore = "daily"]
     fn replacing_mod_block_entity_payload_keeps_its_type_and_saved_identity() {
         use super::super::native_entity_refs::tests::with_game;
         use std::sync::Arc;
@@ -3942,35 +3887,6 @@ mod tests {
         assert_eq!(game.screen_hovered_item(), None);
     }
 
-    /// A mod's own screen opens only over the world, never over another
-    /// screen, an overlay (the title screen, a book, loading, no window) or
-    /// another mod's; opening it again is a no-op.
-    #[test]
-    fn a_mod_screen_opens_only_over_the_world() {
-        use super::{Screen, mod_screen_opens};
-        assert_eq!(mod_screen_opens(Screen::Playing, false, None, "a"), None);
-        assert_eq!(
-            mod_screen_opens(Screen::Playing, true, None, "a"),
-            Some(false)
-        );
-        for other in [
-            Screen::Paused,
-            Screen::Inventory,
-            Screen::Chat,
-            Screen::Options,
-        ] {
-            assert_eq!(mod_screen_opens(other, false, None, "a"), Some(false));
-        }
-        assert_eq!(
-            mod_screen_opens(Screen::Mod, false, Some("a"), "a"),
-            Some(true)
-        );
-        assert_eq!(
-            mod_screen_opens(Screen::Mod, false, Some("b"), "a"),
-            Some(false)
-        );
-    }
-
     /// The characters a `ScreenEvent.CharacterTyped.Pre` sees are the
     /// printable ones of a text: a cancelled one leaves that text and a
     /// control character (a key, not text) is never offered a hook.
@@ -4029,7 +3945,6 @@ mod tests {
             (glam::DVec3::new(1.0, 5.0, 3.0), 10.0, 20.0)
         );
     }
-
 
     /// A mod's property write: none for a key or value the block lacks, the
     /// state itself when it already has the value, else the new state.
@@ -4345,49 +4260,5 @@ mod tests {
             hurt_server_args(Hurting::Entity(6, "minecraft:item", arrow), &NO_ATTACK),
             (6, "minecraft:item", arrow)
         );
-    }
-
-    /// A mod container opens a slot grid or a furnace's menu, by its slot
-    /// count; no menu with rules of its own (a brewing stand's, a crafter's).
-    #[test]
-    fn mod_menus_are_slot_grids_and_furnaces() {
-        use super::mod_menu;
-        assert_eq!(mod_menu("minecraft:hopper"), Some(("minecraft:hopper", 5)));
-        assert_eq!(mod_menu("minecraft:generic_9x3").map(|m| m.1), Some(27));
-        assert_eq!(mod_menu("minecraft:furnace").map(|m| m.1), Some(3));
-        assert_eq!(mod_menu("minecraft:brewing_stand"), None);
-        assert_eq!(mod_menu("hopper"), None);
-    }
-
-    /// The config folder is `config/` beside `options.txt`, made when
-    /// missing.
-    #[test]
-    fn config_dir_is_config_in_the_game_folder() {
-        use super::config_dir;
-        let root = std::env::temp_dir().join(format!("sunrise-config-dir-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        assert!(!root.join("config").exists());
-        let dir = config_dir(&root).unwrap();
-        assert_eq!(dir, root.join("config"));
-        assert!(dir.is_dir());
-        assert_eq!(config_dir(&root).unwrap(), dir);
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    /// Vanilla's F3 draws a column in each top corner (`extractLines`, left
-    /// and right aligned), and its charts along the bottom.
-    #[test]
-    fn the_debug_screen_takes_both_top_corners_and_its_charts_corners() {
-        use super::{Corner, debug_takes};
-        for corner in Corner::ALL {
-            assert!(!debug_takes(corner, false, [true, true]), "{corner:?}");
-        }
-        assert!(debug_takes(Corner::TopLeft, true, [false, false]));
-        assert!(debug_takes(Corner::TopRight, true, [false, false]));
-        assert!(!debug_takes(Corner::BottomLeft, true, [false, false]));
-        assert!(!debug_takes(Corner::BottomRight, true, [false, false]));
-        assert!(debug_takes(Corner::BottomLeft, true, [true, false]));
-        assert!(!debug_takes(Corner::BottomRight, true, [true, false]));
-        assert!(debug_takes(Corner::BottomRight, true, [false, true]));
     }
 }
