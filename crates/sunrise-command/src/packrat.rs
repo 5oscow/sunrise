@@ -264,11 +264,6 @@ impl<V: Value> Grammar<V> {
         let rule = self.id(name);
         Term::Named { rule, store: name }
     }
-    /// Dictionary.namedWithAlias.
-    pub fn named_as(&mut self, name: Atom, store: Atom) -> Term<V> {
-        let rule = self.id(name);
-        Term::Named { rule, store }
-    }
 
     /// Grammar.parseForCommands: parse at the reader's cursor; on failure
     /// the first error stored at the furthest position.
