@@ -2,8 +2,6 @@ use super::*;
 
 pub(super) struct StagedWorldTables {
     pub(super) tables: Option<WorldTables>,
-    pub(super) packed_registry_definitions:
-        Option<Arc<sunrise_client::lan::data::PackRegistryDefinitions>>,
     pub(super) advancements: Arc<sunrise_client::advancements::Tree>,
     pub(super) health: sunrise_client::health::HealthResources,
     pub(super) datapack_registries: Option<mod_api::DatapackRegistrySet>,

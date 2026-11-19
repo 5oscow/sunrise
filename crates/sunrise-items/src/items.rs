@@ -950,12 +950,13 @@ impl Items {
         defaults: &ItemDefaults,
     ) -> Result<Self> {
         let mut items = Self::load_registry(root, registry, facts, overlay, defaults)?;
+        items.load_resource_registries(root, overlay, defaults)?;
         items.load_table_loot(root, overlay, defaults)?;
         Ok(items)
     }
 
-    /// Load the item registry and tags before resolving the world's loot
-    /// references. The owning load must bind its separately prepared loot data.
+    /// Load the item registry and tags before admitting dependent registries.
+    /// The owning load must then install instruments, enchantments and loot.
     pub fn load_registry(
         root: &Path,
         registry: &BlockRegistry,
@@ -1040,7 +1041,9 @@ impl Items {
     /// Every item's defaults, tags and block-to-item identities, without
     /// placement state ids (for headless tools that never place blocks).
     pub fn catalog(root: &Path, overlay: &PackOverlay, defaults: &ItemDefaults) -> Result<Self> {
-        let mut items = Self::catalog_items(root, overlay, defaults)?;
+        let mut items = Self::catalog_items(root, overlay, defaults, |items| {
+            items.load_resource_registries(root, overlay, defaults)
+        })?;
         ingredient_defaults::load_component_damage_registry(root, overlay, &mut items)?;
         Ok(items)
     }
@@ -1051,15 +1054,22 @@ impl Items {
         overlay: &PackOverlay,
         defaults: &ItemDefaults,
         damage: sunrise_client_core::registries::RegistryIds,
+        load_registries: impl FnOnce(&mut Self) -> Result<()>,
     ) -> Result<Self> {
-        let mut items = Self::catalog_items(root, overlay, defaults)?;
+        let mut items = Self::catalog_items(root, overlay, defaults, load_registries)?;
         Arc::make_mut(&mut items.component_registry)
             .by_registry
             .insert("minecraft:damage_type".into(), damage);
         Ok(items)
     }
-    fn catalog_items(root: &Path, overlay: &PackOverlay, defaults: &ItemDefaults) -> Result<Self> {
+    fn catalog_items(
+        root: &Path,
+        overlay: &PackOverlay,
+        defaults: &ItemDefaults,
+        load_registries: impl FnOnce(&mut Self) -> Result<()>,
+    ) -> Result<Self> {
         let mut items = Self::load_with(root, &HashMap::new(), overlay, defaults)?;
+        load_registries(&mut items)?;
         items.block_items = Arc::new(ingredient_defaults::block_items(root)?);
         items.load_table_loot(root, overlay, defaults)?;
         Ok(items)
@@ -1306,17 +1316,10 @@ impl Items {
             order.push(id);
         }
         let registry_order = registry_order(root, &order);
-        let enchantments = Arc::new(crate::enchant::Enchantments::load_with(
-            root, overlay, defaults,
-        )?);
         Ok(Self {
             items,
             block_items: Default::default(),
-            component_registry: ingredient_defaults::component_registry(
-                root,
-                &enchantments,
-                &entity_tags,
-            )?,
+            component_registry: ingredient_defaults::component_registry(root, &entity_tags)?,
             mob_visibility,
             order,
             registry_order,
@@ -1328,10 +1331,37 @@ impl Items {
             block_tag_order: load_tag_lists(root, "block", overlay)?,
             fluid_tag_order: load_tag_lists(root, "fluid", overlay)?,
             songs: load_songs(root, overlay),
-            instruments: load_instruments(root, overlay),
-            enchantments,
             ..Self::default()
         })
+    }
+
+    /// Load from resource files when there is no staged world registry snapshot.
+    pub fn load_resource_registries(
+        &mut self,
+        root: &Path,
+        overlay: &PackOverlay,
+        defaults: &ItemDefaults,
+    ) -> Result<()> {
+        self.install_registries(
+            crate::enchant::Enchantments::load_with(root, overlay, defaults)?,
+            load_instruments(root, overlay),
+        );
+        Ok(())
+    }
+
+    /// Install the dependent registries and the component decoder's matching ids.
+    pub fn install_registries(
+        &mut self,
+        enchantments: crate::enchant::Enchantments,
+        instruments: HashMap<String, Instrument>,
+    ) {
+        Arc::make_mut(&mut self.component_registry).enchantments = enchantments
+            .list
+            .iter()
+            .map(|entry| entry.id.to_string())
+            .collect();
+        self.enchantments = Arc::new(enchantments);
+        self.instruments = instruments;
     }
 
     fn load_table_loot(

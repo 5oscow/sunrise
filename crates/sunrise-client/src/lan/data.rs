@@ -190,6 +190,7 @@ pub struct SyncData {
     /// Entry names per synchronized registry (for id lookups).
     pub dynamic: Dynamic,
     registries: Vec<(String, Entries)>,
+    packed_registries: Option<Arc<PackRegistryDefinitions>>,
     pub tags: UpdateTags,
     pub features: Vec<String>,
     /// Vanilla's command tree (the commands report), when found.
@@ -379,16 +380,25 @@ impl SyncData {
     /// The world's damage catalog is already staged, and supplies its frozen wire data.
     pub fn stage_registry_definitions(
         resources: &Path,
+        defaults: &sunrise_world::item_defaults::ItemDefaults,
         overlay: &sunrise_world::loot::PackOverlay<'_>,
         read_errors: &BTreeMap<String, String>,
         text_registries: &crate::command::Registries,
         sound_exists: impl Fn(&str) -> bool,
     ) -> Result<PackRegistryDefinitions, String> {
-        let (packed, admitted) =
-            PackRegistryDefinitions::stage(overlay, read_errors, text_registries, sound_exists);
+        let (packed, admitted) = PackRegistryDefinitions::stage(
+            resources,
+            defaults,
+            overlay,
+            read_errors,
+            text_registries,
+            sound_exists,
+        );
         let root = resources.join("data/minecraft");
         for &key in SYNCHRONIZED {
-            if key == "minecraft:damage_type" {
+            if key == "minecraft:damage_type"
+                || PackRegistryDefinitions::includes_prepared_entries(key)
+            {
                 continue;
             }
             let path = key.trim_start_matches("minecraft:");
@@ -407,6 +417,7 @@ impl SyncData {
             builtin: Builtin::default(),
             dynamic: Dynamic::default(),
             registries: Vec::new(),
+            packed_registries: None,
             tags: UpdateTags {
                 registries: Vec::new(),
             },
@@ -513,7 +524,7 @@ impl SyncData {
         resources: &Path,
         overlay: &sunrise_world::loot::PackOverlay,
         damage: &FrozenDamage,
-        packed: Option<&PackRegistryDefinitions>,
+        packed: Option<&Arc<PackRegistryDefinitions>>,
         defaults: &sunrise_world::item_defaults::ItemDefaults,
         sources: &crate::crafting::ResolvedSources,
         advancements: Option<&Arc<Tree>>,
@@ -538,7 +549,7 @@ impl SyncData {
         biomes: Option<&crate::biome::Biomes>,
         kept: Option<&Self>,
         damage: Option<&FrozenDamage>,
-        packed: Option<&PackRegistryDefinitions>,
+        packed: Option<&Arc<PackRegistryDefinitions>>,
         same_files: bool,
         defaults: &sunrise_world::item_defaults::ItemDefaults,
         sources: &crate::crafting::ResolvedSources,
@@ -556,24 +567,30 @@ impl SyncData {
                 .and_then(|p| Builtin::load(&p).ok())
                 .ok_or("registries.json not found next to the resources")?,
         );
-        let loaded;
-        let packed = if kept.is_none() && packed.is_none() {
+        let packed = if let Some(kept) = kept {
+            kept.packed_registries.clone()
+        } else if let Some(packed) = packed {
+            Some(packed.clone())
+        } else {
             let text_registries = crate::command::Registries {
                 entity_types: builtin
                     .get("minecraft:entity_type")
                     .map_or_else(Vec::new, |ids| ids.names.clone()),
                 ..Default::default()
             };
-            loaded =
-                PackRegistryDefinitions::load(overlay, &BTreeMap::new(), &text_registries, |id| {
+            Some(Arc::new(PackRegistryDefinitions::load(
+                resources,
+                defaults,
+                overlay,
+                &BTreeMap::new(),
+                &text_registries,
+                |id| {
                     builtin
                         .get("minecraft:sound_event")
                         .and_then(|sounds| sounds.id(id))
                         .is_some()
-                })?;
-            Some(&loaded)
-        } else {
-            packed
+                },
+            )?))
         };
         let root: PathBuf = resources.join("data/minecraft");
         let mut registries = Vec::new();
@@ -607,7 +624,11 @@ impl SyncData {
                 continue;
             }
             let path = key.trim_start_matches("minecraft:");
-            let mut entries = synchronized_entries(&root, resources, key, overlay);
+            let mut entries = if PackRegistryDefinitions::includes_prepared_entries(key) {
+                Vec::new()
+            } else {
+                synchronized_entries(&root, resources, key, overlay)
+            };
             let mut damage_entries = None;
             if *key == "minecraft:damage_type" {
                 // Validate the actual resource bytes before publishing any
@@ -651,7 +672,7 @@ impl SyncData {
                 }
                 damage_entries = Some(decoded);
             }
-            if let Some(packed) = packed {
+            if let Some(packed) = &packed {
                 packed.discard_replaced(key, &mut entries);
             }
             // A biome the mods' modifiers changed is not the client's own file any more:
@@ -686,19 +707,13 @@ impl SyncData {
                 overlay.conditions,
                 path,
             );
-            if *key == "minecraft:enchantment" {
-                if let Some(packed) = packed {
-                    packed.append_enchantments(&mut entries);
-                }
-                holder_sets::expand_enchantments(&mut entries, resources, overlay, defaults)?;
-            }
             let mut entries = damage_entries.unwrap_or_else(|| {
                 entries
                     .into_iter()
                     .map(|(key, value, packed)| (key, json_to_nbt(&value), packed))
                     .collect()
             });
-            if let Some(packed) = packed {
+            if let Some(packed) = &packed {
                 packed.append_encoded(key, &mut entries);
             }
             file_order(&mut entries);
@@ -771,7 +786,12 @@ impl SyncData {
                 None => {
                     let (recipes, groups) = startup::time("sync.network_recipes", || {
                         super::recipes::network_recipes(
-                            resources, overlay, defaults, sources, damage,
+                            resources,
+                            overlay,
+                            defaults,
+                            sources,
+                            damage,
+                            packed.as_deref(),
                         )
                     })
                     .map_err(|error| error.to_string())?;
@@ -783,6 +803,7 @@ impl SyncData {
                     })
                 }
             },
+            packed_registries: packed,
         };
         sync.recipes = startup::time("sync.update_recipes", || {
             super::recipes::update_recipes(
@@ -1247,14 +1268,20 @@ mod tests {
         overlay: &sunrise_world::loot::PackOverlay,
         mut entries: Vec<((String, String), Value, bool)>,
     ) -> Vec<((String, String), Tag, bool)> {
-        let registries =
-            PackRegistryDefinitions::load(overlay, &BTreeMap::new(), &Default::default(), |_| true)
-                .unwrap();
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("items.json"), b"{}").unwrap();
+        let defaults = sunrise_world::item_defaults::read(root.path()).unwrap();
+        let registries = PackRegistryDefinitions::load(
+            root.path(),
+            &defaults,
+            overlay,
+            &BTreeMap::new(),
+            &Default::default(),
+            |_| true,
+        )
+        .unwrap();
         let key = format!("minecraft:{key}");
         registries.discard_replaced(&key, &mut entries);
-        if key == "minecraft:enchantment" {
-            registries.append_enchantments(&mut entries);
-        }
         let mut entries = entries
             .into_iter()
             .map(|(key, value, packed)| (key, json_to_nbt(&value), packed))
@@ -1302,9 +1329,12 @@ mod tests {
                 vec![bad("minecraft:unknown")],
             ),
         ];
+        std::fs::write(root.path().join("items.json"), b"{}").unwrap();
+        let defaults = sunrise_world::item_defaults::read(root.path()).unwrap();
         let conditions = sunrise_world::conditions::LoadConditions::new([]);
         let Err(typed) = SyncData::stage_registry_definitions(
             root.path(),
+            &defaults,
             &sunrise_world::loot::PackOverlay {
                 files: &files,
                 conditions: &conditions,
@@ -1337,6 +1367,8 @@ mod tests {
     #[test]
     fn a_pack_clock_is_admitted_against_the_world_candidates_bound_tags() {
         let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("items.json"), b"{}").unwrap();
+        let defaults = sunrise_world::item_defaults::read(root.path()).unwrap();
         let files = [(
             "world_clock/test:conditional".into(),
             vec![
@@ -1349,6 +1381,7 @@ mod tests {
                 .with_tags([("minecraft:item", tags)]);
             let packed = SyncData::stage_registry_definitions(
                 root.path(),
+                &defaults,
                 &sunrise_world::loot::PackOverlay {
                     files: &files,
                     conditions: &conditions,
@@ -2016,6 +2049,9 @@ mod tests {
     /// (`WorldClock.DIRECT_CODEC`), where it used to be skipped; any map is a clock.
     #[test]
     fn a_malformed_world_clock_refuses_the_load() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("items.json"), b"{}").unwrap();
+        let defaults = sunrise_world::item_defaults::read(root.path()).unwrap();
         let check = |json: &[u8]| {
             let files = vec![
                 (
@@ -2025,6 +2061,8 @@ mod tests {
                 ("world_clock/demo:moon".to_owned(), vec![json.to_vec()]),
             ];
             PackRegistryDefinitions::load(
+                root.path(),
+                &defaults,
                 &sunrise_world::loot::PackOverlay::new(&files),
                 &BTreeMap::new(),
                 &Default::default(),
@@ -2322,5 +2360,3 @@ mod component_tests {
 
 #[path = "data_condition_filter.rs"]
 mod condition_filter;
-#[path = "data_holder_sets.rs"]
-mod holder_sets;
