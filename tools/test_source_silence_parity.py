@@ -30,11 +30,20 @@ def main():
         raise RuntimeError('Prepared resources required: set SUNRISE_TEST_RESOURCES')
     sources = [Path(__file__).resolve(),
         lab.ROOT / 'mods/sunrise/src/test/java/dev/sunriselab/parity/VanillaSourceSilenceOracle.java',
-        *[lab.ROOT / 'crates/sunrise-client/src' / p for p in (
-            'game.rs', 'mobs.rs', 'mobs/hostile.rs', 'mobs/wither.rs', 'mobs/sulfur_cube.rs',
-            'game/entities/explosion.rs', 'game/entities/tnt.rs', 'game/items/potions.rs',
-            'game/world/persist.rs', 'game/mobs/creatures/mod.rs', 'game/mobs/wither.rs',
-            'game/mobs/dragon.rs', 'game/entities/minecarts.rs')]]
+        lab.ROOT / 'crates/sunrise-client/src/game.rs',
+        lab.ROOT / 'crates/sunrise-client/src/mobs.rs',
+        lab.ROOT / 'crates/sunrise-client/src/mobs/hostile.rs',
+        lab.ROOT / 'crates/sunrise-client/src/mobs/wither.rs',
+        lab.ROOT / 'crates/sunrise-client/src/mobs/sulfur_cube.rs',
+        lab.ROOT / 'crates/sunrise-client/src/game/entities/explosion.rs',
+        lab.ROOT / 'crates/sunrise-client/src/game/entities/tnt.rs',
+        lab.ROOT / 'crates/sunrise-client/src/game/items/potions.rs',
+        lab.ROOT / 'crates/sunrise-client/src/game/world/persist.rs',
+        lab.ROOT / 'crates/sunrise-client/src/game/mobs/creatures/mod.rs',
+        lab.ROOT / 'crates/sunrise-client/src/game/mobs/wither.rs',
+        lab.ROOT / 'crates/sunrise-client/src/game/mobs/dragon.rs',
+        lab.ROOT / 'crates/sunrise-client/src/game/entities/minecarts.rs',
+    ]
     hashes = h.base.source_hashes(sources)
     classes, dependencies, _ = h.compile_oracle(build, 'VanillaSourceSilenceOracle',
         jars, baking.client_libraries(), lock['minecraft']['java_major'])
