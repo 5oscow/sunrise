@@ -50,8 +50,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   coordinates without requiring loaded chunks. `mod_id` is a loaded package id as a string; `resource:<registry>`
   is `CommandArgumentValue::Id`, an id that registry holds. A custom argument is `CommandArgumentValue::Custom
   { kind, value }`: its registered type's id and what its parser returned. Missing optional arguments are absent.
-  Parsing, permission and resolution failures produce feedback without calling listeners. The console resolves from the Overworld spawn's
-  block corner with zero rotation and no source entity (`@s` fails). Return `Flow::Cancel` when handled.
+  Parsing, permission and resolution failures produce feedback without calling listeners. The console resolves from the world spawn's
+  block corner, in the level the spawn is in, with zero rotation and no source entity (`@s` fails). Return `Flow::Cancel` when handled.
 - **`armor_stand_manipulate(player, name, stand_id, slot, cancel)`**: a player takes an item from an armor stand or
   puts one on it, heard after the stand's disabled-slot checks and before anything moves. `slot` is `mainhand`,
   `offhand`, `feet`, `legs`, `chest` or `head`. Set `cancel` and nothing changes (the click is spent). The player's

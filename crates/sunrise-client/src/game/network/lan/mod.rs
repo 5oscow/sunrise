@@ -5107,10 +5107,10 @@ impl super::Dim {
     /// Overworld when the world has no such level. It borrows only the level data, so a
     /// `TickCtx` can name it beside the world it borrows mutably.
     pub(super) fn of_world_spawn(level: &sunrise_client::save::Level) -> Self {
-        match level.world_spawn_dimension.as_deref() {
-            Some(id) if Self::exists(id) => Self::from_id(id),
-            _ => Self::Overworld,
-        }
+        level
+            .world_spawn_dimension
+            .as_deref()
+            .map_or(Self::Overworld, Self::from_id)
     }
 }
 
