@@ -111,22 +111,24 @@ jobs:
       # Warns past 80% of Windows' 65,535 exported names per DLL and fails past 90%.
       - name: Exported names, toward Windows' 65,535
         run: python tools/prebuilt_game.py exports prebuilt | tee -a "$GITHUB_STEP_SUMMARY"
+      # The checks' scratch folders are in the runner's temporary folder, never target/: rust-cache saves and restores
+      # target/, pruning each folder it does not know to Cargo's own, so a scratch folder came back half there
+      # (an emptied check folder without its mark: E_SCRATCH), and its builds made the cache larger for nothing.
       - name: Two mod libraries share the game's exact Rust state
         id: linkage
         if: matrix.linkage
-        run: python tools/native_dylib_probe.py --sdk prebuilt --output target/native-dylib-probe
+        run: python tools/native_dylib_probe.py --sdk prebuilt --output "$RUNNER_TEMP/native-dylib-probe"
       - name: The starter mod checks against the API source alone, host and wasm32
         if: matrix.name == 'linux'
         run: |
           rustup target add wasm32-unknown-unknown
-          rm -rf target/api-source
-          python tools/sdk_api_source.py build target/api-source
-          python tools/sdk_api_source.py check target/api-source
+          python tools/sdk_api_source.py build "$RUNNER_TEMP/api-source"
+          python tools/sdk_api_source.py check "$RUNNER_TEMP/api-source" --scratch "$RUNNER_TEMP/sdk-api-source-check"
       - name: Probe command log
         if: failure() && steps.linkage.outcome == 'failure'
         run: |
-          if [ -f target/native-dylib-probe/commands.log ]; then
-            tail -n 120 target/native-dylib-probe/commands.log
+          if [ -f "$RUNNER_TEMP/native-dylib-probe/commands.log" ]; then
+            tail -n 120 "$RUNNER_TEMP/native-dylib-probe/commands.log"
           fi
       # The leg's assets, named for its target and side; the layout's number is in each identity (package_format).
       # The surface export runs the sunrise-stage that `build` compiled from this commit (target/prebuilt/tools).
@@ -140,7 +142,7 @@ jobs:
       # passed to it.
       - name: A native mod builds through the shipped route
         if: matrix.name == 'macos'
-        run: python tools/ci/native_build_route.py --sdk prebuilt --tool target/release/cargo-sunrise-mod --work target/native-route
+        run: python tools/ci/native_build_route.py --sdk prebuilt --tool target/release/cargo-sunrise-mod --work "$RUNNER_TEMP/native-route"
       - name: Asset sizes
         run: (cd dist && du -h *) | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
