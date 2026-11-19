@@ -71,10 +71,9 @@ impl crate::game::Game<'_> {
         block: BlockId,
         context: &PlacementContext,
     ) -> Option<BlockStateId> {
-        self.with_level(|behaviours, level, ticks| {
-            let random = level.random().clone();
+        self.with_placement_preview_level(|behaviours, level, ticks| {
             let mut dry = DryLevel::new(level);
-            dry.random = random;
+            dry.random = (*level.world.random).clone();
             dry.reads = Some(ticks);
             behaviours.state_for_resolved_placement(&mut dry, ticks, block, context)
         })

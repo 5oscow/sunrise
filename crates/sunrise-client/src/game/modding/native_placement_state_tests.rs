@@ -162,6 +162,38 @@ fn vanilla_candidates_use_the_resolved_context_without_placing() {
 
 #[test]
 #[ignore = "daily"]
+fn placement_read_leaves_queued_spill_untouched() {
+    with_game("placement_read_leaves_queued_spill_untouched", |game| {
+        let level = game.level(game.dim.id()).unwrap();
+        let block = game.block_key("minecraft:oak_log").unwrap();
+        let context = PlacementContext::new(POS, Direction::Up, None);
+        let stack = sunrise_client::items::ItemStack::new("minecraft:stick", 3);
+        let pos = [8.5, 70.5, 8.5];
+        let motion = Some([0.0, 0.25, 0.0]);
+        let delay = 10;
+        game.spill.spawns.push(crate::game::spill::Spawn {
+            random: None,
+            stack: stack.clone(),
+            pos,
+            motion,
+            delay,
+        });
+        let dropped = game.dropped.len();
+        assert!(level.state_for_placement(game, block, &context).is_some());
+        assert_eq!(game.dropped.len(), dropped);
+        let [queued] = game.spill.spawns.as_slice() else {
+            panic!("the spill must still contain the original item");
+        };
+        assert_eq!(queued.stack, stack);
+        assert_eq!(queued.pos, pos);
+        assert_eq!(queued.motion, motion);
+        assert_eq!(queued.delay, delay);
+        assert!(queued.random.is_none());
+    });
+}
+
+#[test]
+#[ignore = "daily"]
 fn refusals_and_unavailable_inputs_return_no_state() {
     with_game("refusals_and_unavailable_inputs_return_no_state", |game| {
         let level = game.level(game.dim.id()).unwrap();
