@@ -556,6 +556,18 @@ pub fn atlases(
         .collect()
 }
 
+/// Every atlas of a resource tree with the sprites its merged definition lists, from one
+/// listing of the textures: the one pass the HUD atlas and the block sprites both read.
+pub fn listed(
+    source: &crate::resource_source::ResourceSource,
+) -> Vec<(String, BTreeMap<String, SpriteOrigin>)> {
+    let textures = list_textures(source);
+    atlases(source)
+        .into_iter()
+        .map(|(atlas, sources)| (atlas, list(&sources, &textures, &mut unasked)))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

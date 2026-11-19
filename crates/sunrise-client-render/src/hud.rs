@@ -599,9 +599,8 @@ fn walked_minecraft_texture(name: &str) -> bool {
 /// armour trim sprites, `unstitch` regions) and files listed under another id,
 /// such as other namespaces' item textures; and the animated ones' names.
 fn atlas_sprites(root: &ResourceSource, packed: &[PackedImage]) -> (Vec<PackedImage>, Vec<String>) {
-    use crate::atlas_sources::{self, SpriteOrigin, unasked};
+    use crate::atlas_sources::{self, SpriteOrigin};
     let have: std::collections::HashSet<&str> = packed.iter().map(|i| i.0.as_str()).collect();
-    let textures = atlas_sources::list_textures(root);
     // Each new name with its origins in the atlases' order: the first that
     // loads is the sprite. They load at once (a content pack's atlases list
     // tens of thousands of files), and come out in the order a load of one
@@ -609,11 +608,11 @@ fn atlas_sprites(root: &ResourceSource, packed: &[PackedImage]) -> (Vec<PackedIm
     let mut names: Vec<(String, Vec<(usize, SpriteOrigin)>)> = Vec::new();
     let mut slots = std::collections::HashMap::new();
     let mut order = 0;
-    for (atlas, sources) in atlas_sources::atlases(root) {
+    for (atlas, listed) in atlas_sources::listed(root) {
         // The other atlases' renamed files (GUI sprites, particles...) are
         // looked up by their texture paths here.
         let item_models = atlas == "minecraft:blocks" || atlas == "minecraft:items";
-        for (id, origin) in atlas_sources::list(&sources, &textures, &mut unasked) {
+        for (id, origin) in listed {
             if !item_models && matches!(origin, SpriteOrigin::File(_)) {
                 continue;
             }

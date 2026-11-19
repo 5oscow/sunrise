@@ -141,6 +141,9 @@ pub struct Sprites {
     /// Textures [`Sprites::prefetch`] decoded ahead of their insert, by sprite name or
     /// resource path.
     ready: std::collections::HashMap<String, crate::sprite_cache::Decoded>,
+    /// The sprites only an atlas definition makes (`unstitch`, `paletted_permutations`, a mod's
+    /// pixels), listed once on the first id with no texture file ([`Sprites::generated`]).
+    generated: std::sync::OnceLock<BTreeMap<String, crate::atlas_sources::SpriteOrigin>>,
 }
 /// Edge length of vanilla's block textures: the smallest array layer.
 pub const SPRITE_SIZE: u32 = 16;
@@ -247,6 +250,20 @@ impl Sprites {
         if let Some(disk) = &mut self.disk {
             disk.save();
         }
+    }
+    /// The generated sprites of the merged `minecraft:blocks` and `minecraft:items`
+    /// definitions. A model's material names no atlas: the baker looks in the items atlas first,
+    /// then the blocks atlas, so an id in both is the items atlas's.
+    fn generated(&self) -> &BTreeMap<String, crate::atlas_sources::SpriteOrigin> {
+        self.generated.get_or_init(|| {
+            let mut atlases: BTreeMap<_, _> = crate::atlas_sources::listed(&self.source)
+                .into_iter()
+                .collect();
+            let mut ids = atlases.remove("minecraft:blocks").unwrap_or_default();
+            ids.extend(atlases.remove("minecraft:items").unwrap_or_default());
+            ids.retain(|_, origin| !matches!(origin, crate::atlas_sources::SpriteOrigin::File(_)));
+            ids
+        })
     }
     /// How many array layers the textures take.
     pub fn count(&self) -> usize {
@@ -460,7 +477,7 @@ impl Sprites {
             .collect();
         let decoded = crate::par::par_map(&names, |name| {
             if name.contains(':') {
-                Self::decode(&self.source, name).ok()
+                self.decode(name).ok()
             } else {
                 Self::decode_file(&self.source, name, name).ok()
             }
@@ -475,8 +492,12 @@ impl Sprites {
         // Custom Item Textures' files are outside `textures/`, which the disk cache's
         // fingerprint covers: like `insert_file`'s, they skip it.
         let cit = name.starts_with("sunrise_cit:") || !name.contains(':');
-        let disk = self.disk.as_mut().filter(|_| !cit);
-        let cached = disk.as_ref().and_then(|d| d.get(name)).cloned();
+        let cached = self
+            .disk
+            .as_ref()
+            .filter(|_| !cit)
+            .and_then(|d| d.get(name))
+            .cloned();
         let decoded = match cached {
             Some(decoded) => decoded,
             None => {
@@ -491,10 +512,10 @@ impl Sprites {
                             };
                             Self::decode_file_data(&self.source, &path, name, Some(bytes))?
                         }
-                        None => Self::decode(&self.source, name)?,
+                        None => self.decode(name)?,
                     },
                 };
-                if let Some(disk) = disk {
+                if let Some(disk) = self.disk.as_mut().filter(|_| !cit) {
                     disk.insert(name, decoded.clone());
                 }
                 decoded
@@ -628,14 +649,25 @@ impl Sprites {
             self.animations.push(animation);
         }
     }
-    /// Read and decode one texture and its `.mcmeta`.
-    fn decode(source: &ResourceSource, name: &str) -> Result<crate::sprite_cache::Decoded> {
+    /// Read and decode one texture and its `.mcmeta`; an id with no file is cut or recoloured
+    /// by the atlas definition that lists it, and has no `.mcmeta`, as in vanilla.
+    fn decode(&self, name: &str) -> Result<crate::sprite_cache::Decoded> {
         if !name.contains(':') {
             return Err("invalid sprite identifier".into());
         }
         // `texture_resource`, so Custom Item Textures' `sunrise_cit:` sprites find their file.
         let path = crate::atlas_sources::texture_resource(name, "textures");
-        Self::decode_file(source, &path, name)
+        if !self.source.contains(&path)
+            && let Some(origin) = self.generated().get(name)
+        {
+            let image = crate::atlas_sources::generate(origin, &|texture, directory| {
+                let file = crate::atlas_sources::texture_resource(texture, directory);
+                read_rgba(&self.source, &file).ok()
+            })
+            .ok_or_else(|| format!("sprite {name} could not be generated"))?;
+            return Self::decode_image(name, None, image);
+        }
+        Self::decode_file(&self.source, &path, name)
     }
     fn decode_file(
         source: &ResourceSource,
@@ -657,6 +689,18 @@ impl Sprites {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
             Err(error) => return Err(error.into()),
         };
+        let image = match png {
+            Some(bytes) => decode_rgba(bytes)?,
+            None => read_rgba(source, path)?,
+        };
+        Self::decode_image(name, metadata, image)
+    }
+    /// What decoding a sprite's pixels and `.mcmeta` sections gives.
+    fn decode_image(
+        name: &str,
+        metadata: Option<BTreeMap<String, Box<serde_json::value::RawValue>>>,
+        (png_width, png_height, pixels): (u32, u32, Vec<u8>),
+    ) -> Result<crate::sprite_cache::Decoded> {
         let animation_text = metadata
             .as_ref()
             .and_then(|v| v.get("animation"))
@@ -665,10 +709,6 @@ impl Sprites {
             .as_deref()
             .map(AnimationMetadata::from_json)
             .transpose()?;
-        let (png_width, png_height, pixels) = match png {
-            Some(bytes) => decode_rgba(bytes)?,
-            None => read_rgba(source, path)?,
-        };
         let (width, height) = if let Some(animation) = &animation {
             let [width, height] =
                 animation.frame_size(i32::try_from(png_width)?, i32::try_from(png_height)?);
@@ -1702,5 +1742,89 @@ mod tests {
         let stepped = test_clip(16, 0, r#"{"frametime":4}"#);
         assert_eq!(stepped.blend(1), blend(0, 0, 0));
         assert_eq!(stepped.blend(5), blend(1, 1, 0));
+    }
+    /// A scratch resource folder with a 2 x 2 sheet whose pixels are red, green, blue and
+    /// white (row by row, 16 texels each), and the blocks atlas `blocks_atlas` over it.
+    fn atlas_root(tag: &str, blocks_atlas: &str, items_atlas: Option<&str>) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!("sunrise-atlas-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let textures = root.join("assets/demo/textures/block");
+        fs::create_dir_all(&textures).unwrap();
+        let colors = [
+            [255, 0, 0, 255],
+            [0, 255, 0, 255],
+            [0, 0, 255, 255],
+            [255; 4],
+        ];
+        let pixels: Vec<u8> = (0..32 * 32)
+            .flat_map(|i| colors[(i / 32 / 16) * 2 + (i % 32) / 16])
+            .collect();
+        let mut encoder =
+            png::Encoder::new(File::create(textures.join("sheet.png")).unwrap(), 32, 32);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder
+            .write_header()
+            .unwrap()
+            .write_image_data(&pixels)
+            .unwrap();
+        let atlases = root.join("assets/minecraft/atlases");
+        fs::create_dir_all(&atlases).unwrap();
+        fs::write(atlases.join("blocks.json"), blocks_atlas).unwrap();
+        if let Some(items) = items_atlas {
+            fs::write(atlases.join("items.json"), items).unwrap();
+        }
+        root
+    }
+    fn quadrant(sprite: &str, x: u8, y: u8) -> String {
+        format!(
+            r#"{{"sources":[{{"type":"minecraft:unstitch","resource":"demo:block/sheet","divisor_x":2,"divisor_y":2,"regions":[{{"sprite":"{sprite}","x":{x},"y":{y},"width":1,"height":1}}]}}]}}"#
+        )
+    }
+    #[test]
+    fn an_unstitched_sprite_has_its_pixels_not_the_missing_texture() {
+        let root = atlas_root("unstitch", &quadrant("demo:block/green", 1, 0), None);
+        let mut sprites = Sprites::new(ResourceSource::directory(root.clone()));
+        let layer = sprites.insert("demo:block/green").unwrap();
+        let frame = &sprites.native[layer as usize].1[0];
+        assert_eq!(sprites.native[layer as usize].0, 16);
+        assert!(frame.chunks(4).all(|p| p == [0, 255, 0, 255]));
+        fs::remove_dir_all(&root).unwrap();
+    }
+    #[test]
+    fn the_items_atlas_names_a_sprite_before_the_blocks_atlas() {
+        let root = atlas_root(
+            "items-first",
+            &quadrant("demo:block/shared", 0, 0),
+            Some(&quadrant("demo:block/shared", 0, 1)),
+        );
+        let mut sprites = Sprites::new(ResourceSource::directory(root.clone()));
+        let layer = sprites.insert("demo:block/shared").unwrap();
+        assert!(
+            sprites.native[layer as usize].1[0]
+                .chunks(4)
+                .all(|p| p == [0, 0, 255, 255])
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+    #[test]
+    fn a_changed_atlas_definition_does_not_serve_the_cached_sprite() {
+        let root = atlas_root("cache", &quadrant("demo:block/cut", 0, 0), None);
+        let load = |root: &std::path::Path| {
+            let mut sprites = Sprites::with_disk_cache(&ResourceRoot::directory(root.to_owned()));
+            let layer = sprites.insert("demo:block/cut").unwrap();
+            sprites.save_disk_cache();
+            sprites.native[layer as usize].1[0][..4].to_vec()
+        };
+        assert_eq!(load(&root), [255, 0, 0, 255]);
+        assert_eq!(load(&root), [255, 0, 0, 255]);
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        fs::write(
+            root.join("assets/minecraft/atlases/blocks.json"),
+            quadrant("demo:block/cut", 1, 1),
+        )
+        .unwrap();
+        assert_eq!(load(&root), [255; 4]);
+        fs::remove_dir_all(&root).unwrap();
     }
 }
