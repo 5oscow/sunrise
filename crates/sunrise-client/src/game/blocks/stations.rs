@@ -1896,10 +1896,10 @@ impl Game<'_> {
             }
         }
         details.start("minecraft:attribute_modifiers", lines.len());
-        let shown = display.shows("minecraft:attribute_modifiers");
+        let attributes_shown = display.shows("minecraft:attribute_modifiers");
         let (modifier_lines, added) = self.stack_attribute_tooltip(
             stack,
-            shown,
+            attributes_shown,
             nested,
             advanced,
             creative,
@@ -2675,6 +2675,38 @@ mod tests {
                         .unwrap()
                         .contains(&attribute_line)
                 );
+                let mut attributes_hidden = stack.clone();
+                attributes_hidden.data_mut().set_other(
+                    "minecraft:tooltip_display",
+                    Some(Tag::compound([(
+                        "hidden_components",
+                        Tag::List(vec![Tag::String("minecraft:attribute_modifiers".into())]),
+                    )])),
+                );
+                let attributes_hidden =
+                    ItemResource::of(&crate::game::api_values::test_snapshot(&attributes_hidden));
+                let lines = attributes_hidden.tooltip(game, false, false).unwrap();
+                assert!(lines.contains(&attribute_line));
+                assert!(lines.contains(&TooltipElement::Text(
+                    mod_api::Text::literal("listener"),
+                    u32::MAX,
+                )));
+
+                let mut crossbow = super::ItemStack::new("minecraft:crossbow", 1);
+                crossbow
+                    .data_mut()
+                    .charged
+                    .push(super::ItemStack::new("minecraft:arrow", 1));
+                let lines = game.stack_tooltip_lines(&crossbow, false, false);
+                assert_eq!(
+                    lines
+                        .iter()
+                        .filter(|(text, _)| text.plain().trim() == "listener")
+                        .count(),
+                    1,
+                    "only the crossbow gets the final tooltip event",
+                );
+
                 for advanced in [false, true] {
                     let lines = resource.tooltip(game, advanced, false).unwrap();
                     assert!(lines.last().is_some_and(|line| {
