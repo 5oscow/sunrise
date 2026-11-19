@@ -6,11 +6,10 @@
 //! and SHA-256, and `PULL_REQUEST.md`. It is not a complete registry checkout.
 use crate::{
     bounded::{self, Symlinks},
-    internals::atomic_write,
+    internals::{atomic_write, check_output_dir},
 };
 use std::{
     fs,
-    io::ErrorKind,
     path::{Path, PathBuf},
 };
 use sunrise_mod_package::{
@@ -357,22 +356,8 @@ pub fn run(entry_point: mod_surface::child::ChildEntry, args: &[String]) -> Resu
         .flatten()
         .chain(built.into_iter().flatten()),
     ) {
-        match fs::symlink_metadata(dir) {
-            Ok(meta) if meta.is_dir() => {}
-            Ok(_) => {
-                return Err(format!(
-                    "{} is not a real directory: publish writes only into real folders; replace it with one, or choose a --out folder without symlinks",
-                    dir.display()
-                ));
-            }
-            Err(e) if e.kind() == ErrorKind::NotFound => {}
-            Err(e) => {
-                return Err(format!(
-                    "{}: {e}; choose a writable --out folder",
-                    dir.display()
-                ));
-            }
-        }
+        check_output_dir(dir)
+            .map_err(|e| format!("{e}; choose a writable --out folder without symlinks"))?;
     }
     if let Some(checkout) = &o.registry
         && let Ok(out_path) = dunce::canonicalize(&out)
