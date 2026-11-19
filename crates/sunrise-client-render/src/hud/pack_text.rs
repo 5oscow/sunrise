@@ -139,16 +139,28 @@ fn read_shader_file(base: &ResourceSource, path: &str) -> Result<Option<String>,
 }
 
 /// The packs' `core/lightmap` with `core/screenquad`, when a pack replaces either stage: the
-/// pass gives it `LightmapInfo` besides vanilla's blocks.
-fn load_lightmap(root: &ResourceSource, defaults: &ResourceSource) -> Option<Arc<CoreProgram>> {
+/// pass gives it `LightmapInfo` besides vanilla's blocks, and the packs' expression uniforms on
+/// either stage (`expressions`, from `shader_modifiers`).
+fn load_lightmap(
+    root: &ResourceSource,
+    defaults: &ResourceSource,
+    expressions: &[String],
+) -> Option<Arc<CoreProgram>> {
     load_pair(
         root,
         defaults,
         ("screenquad", "lightmap"),
         &[],
         &crate::gfx::core_lightmap::GLUE,
-        &|block| block == crate::gfx::core_lightmap::INFO_BLOCK,
+        &|block| {
+            block == crate::gfx::core_lightmap::INFO_BLOCK || expressions.iter().any(|n| n == block)
+        },
     )
+}
+
+/// The packs' expression uniforms on the lightmap's stages (`shader_modifiers`).
+fn lightmap_expressions(root: &ResourceSource) -> Vec<String> {
+    crate::polytone_post::ShaderModifiers::names_at(root, &crate::gfx::core_lightmap::SHADERS)
 }
 
 /// The packs' core shaders the atlas carries (text, block outline, sky, stars, lightmap).
@@ -168,7 +180,7 @@ pub(super) fn load_shaders(
     let sky = |name| load_core(root, defaults, name, &[], &crate::gfx::core_sky::GLUE);
     atlas.sky_shader = sky("sky");
     atlas.stars_shader = sky("stars");
-    atlas.lightmap_shader = load_lightmap(root, defaults);
+    atlas.lightmap_shader = load_lightmap(root, defaults, &lightmap_expressions(root));
     let world = |defines: &[&str], glue| load_core(root, defaults, "text", defines, glue);
     atlas.text_shaders.world = world(&[], &crate::gfx::core_text::WORLD_GLUE);
     atlas.text_shaders.see_through = world(
@@ -472,7 +484,34 @@ mod tests {
 
     fn lightmap(own: &[(&str, &str)]) -> Option<Arc<CoreProgram>> {
         let (root, defaults) = lightmap_packs(own);
-        load_lightmap(&root, &defaults)
+        load_lightmap(&root, &defaults, &lightmap_expressions(&root))
+    }
+
+    /// A pack's lightmap reading an expression uniform (`Tint`) is given it when a pack's
+    /// `shader_modifiers` gives either stage one of that name, and refused for an unknown block
+    /// otherwise.
+    #[test]
+    fn a_lightmap_shader_is_given_the_packs_expression_uniforms() {
+        let fsh = "assets/minecraft/shaders/core/lightmap.fsh";
+        let tinted = "#version 330\nlayout(std140) uniform LightmapInfo {\n    float SkyFactor;\n} info;\n\
+                      layout(std140) uniform Tint {\n    float value;\n};\n\
+                      layout(location = 0) in vec2 texCoord;\nlayout(location = 0) out vec4 fragColor;\n\
+                      void main() {\n    fragColor = vec4(value, info.SkyFactor, 0.0, 1.0);\n}\n";
+        let on =
+            |shader: &str| format!("assets/minecraft/polytone/shader_modifiers/core/{shader}.json");
+        for stage in ["lightmap", "screenquad"] {
+            let program = lightmap(&[(fsh, tinted), (&on(stage), r#"{"Tint": "1"}"#)])
+                .unwrap_or_else(|| panic!("given by {stage}"));
+            assert_eq!(program.other, ["LightmapInfo", "Tint"]);
+        }
+        assert!(
+            lightmap(&[(fsh, tinted)]).is_none(),
+            "no modifier gives Tint"
+        );
+        assert!(
+            lightmap(&[(fsh, tinted), (&on("sky"), r#"{"Tint": "1"}"#)]).is_none(),
+            "another shader's"
+        );
     }
 
     /// [`lightmap`]'s translation, with why it is refused.

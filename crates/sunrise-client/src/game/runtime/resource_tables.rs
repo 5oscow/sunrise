@@ -333,13 +333,14 @@ impl PackResources {
                     particles.join().unwrap(),
                 )
             });
-        let polytone_post = sunrise_client::polytone_post::PolytonePost::read(
-            root.source(),
-            sunrise_client::packs::polytone_configs(&sunrise_client::packs::Source::Opened(
-                root.source().clone(),
-            )),
-        )
-        .map(Arc::new);
+        let configs = sunrise_client::packs::polytone_configs(
+            &sunrise_client::packs::Source::Opened(root.source().clone()),
+        );
+        let shader_modifiers =
+            sunrise_client::polytone_post::ShaderModifiers::read(root.source(), configs.clone())
+                .map(Arc::new);
+        let polytone_post =
+            sunrise_client::polytone_post::PolytonePost::read(root.source(), configs).map(Arc::new);
         Self {
             layer_names: Arc::new(sunrise_client::block_sprites::texture_names(
                 &render.sprite_layers,
@@ -369,6 +370,7 @@ impl PackResources {
             polytone_particles,
             polytone_post,
             polytone_colors: Arc::new(read_colors(root)),
+            shader_modifiers,
         }
     }
 }

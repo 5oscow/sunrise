@@ -186,9 +186,190 @@ impl PolytonePost {
     }
 }
 
+/// The packs' `polytone/shader_modifiers` (`sunrise_polytone::shader_modifiers`): each shader's
+/// expression uniforms, evaluated with the frame's expression context.
+pub struct ShaderModifiers {
+    /// Each shader's id (`minecraft:core/lightmap`) and its uniforms.
+    shaders: Vec<(String, sunrise_polytone::shader_modifiers::ShaderModifier)>,
+    configs: sunrise_polytone::pack::Configs,
+}
+
+/// The largest `shader_modifiers` file read: far more than [`MAX_UNIFORMS`] expressions need.
+///
+/// [`MAX_UNIFORMS`]: sunrise_polytone::shader_modifiers::MAX_UNIFORMS
+pub const MAX_SHADER_MODIFIERS_FILE: u64 = 64 * 1024;
+
+impl ShaderModifiers {
+    /// The packs' files at `root`; `None` without any. A file over
+    /// [`MAX_SHADER_MODIFIERS_FILE`], not JSON, or refused by its contents is left out, named
+    /// in the log.
+    pub fn read(
+        root: &sunrise_assets::resource_source::ResourceSource,
+        configs: sunrise_polytone::pack::Configs,
+    ) -> Option<Self> {
+        let shaders = Self::files(root, &|path, e| log::warn!("{path}: not used: {e}"));
+        (!shaders.is_empty()).then_some(Self { shaders, configs })
+    }
+
+    /// The uniforms' names a pipeline drawing with `shaders` is given by the packs at `root`,
+    /// read as [`Self::read`] reads them, for a loader that only needs the names (the game's
+    /// read names the files it leaves out).
+    pub fn names_at(
+        root: &sunrise_assets::resource_source::ResourceSource,
+        shaders: &[&str],
+    ) -> Vec<String> {
+        Self {
+            shaders: Self::files(root, &|_, _| {}),
+            configs: Default::default(),
+        }
+        .names(shaders)
+    }
+
+    /// Each file's shader and uniforms; `refused` hears of each one left out.
+    fn files(
+        root: &sunrise_assets::resource_source::ResourceSource,
+        refused: &dyn Fn(&str, String),
+    ) -> Vec<(String, sunrise_polytone::shader_modifiers::ShaderModifier)> {
+        use sunrise_polytone::shader_modifiers::ShaderModifier;
+        let mut shaders = Vec::new();
+        for namespace in root.namespaces("assets") {
+            for path in root.list(&format!("assets/{namespace}/polytone/shader_modifiers/")) {
+                let Some(id) = sunrise_polytone::implicit_id(&path, "shader_modifiers") else {
+                    continue;
+                };
+                let read = root
+                    .read_limited(&path, MAX_SHADER_MODIFIERS_FILE)
+                    .map_err(|e| e.to_string())
+                    .and_then(|bytes| {
+                        serde_json::from_slice::<Json>(&bytes).map_err(|e| e.to_string())
+                    })
+                    .and_then(|json| ShaderModifier::parse(&json).map_err(|e| e.to_string()));
+                match read {
+                    Ok(modifier) => shaders.push((id, modifier)),
+                    Err(e) => refused(&path, e),
+                }
+            }
+        }
+        shaders
+    }
+
+    /// The uniforms a pipeline drawing with `shaders` (its stages' ids) is given.
+    fn uniforms<'a>(
+        &'a self,
+        shaders: &'a [&str],
+    ) -> impl Iterator<Item = &'a (String, Program)> + 'a {
+        self.shaders
+            .iter()
+            .filter(|(id, _)| shaders.contains(&id.as_str()))
+            .flat_map(|(_, modifier)| &modifier.uniforms)
+    }
+
+    /// Their names.
+    pub fn names(&self, shaders: &[&str]) -> Vec<String> {
+        self.uniforms(shaders)
+            .map(|(name, _)| name.clone())
+            .collect()
+    }
+
+    /// This frame's value of each of `wanted` (the uniforms a drawn shader reads), by name: its
+    /// expression's, or 0 when it fails or none of `shaders`' files gives it. Only `wanted` is
+    /// evaluated.
+    pub fn evaluate(&self, shaders: &[&str], frame: &Frame, wanted: &mut [(String, f32)]) {
+        for (name, value) in wanted {
+            *value = self
+                .uniforms(shaders)
+                .find(|(n, _)| n == name)
+                .and_then(|(_, program)| {
+                    crate::environment::eval_frame(program, frame, &self.configs)
+                })
+                .map_or(0.0, |v| v.num() as f32);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Packs in memory: `files` (path, text).
+    fn pack(files: &[(&str, String)]) -> sunrise_assets::resource_source::ResourceSource {
+        use sunrise_assets::resource_source::{Resource, ResourceSource};
+        ResourceSource::indexed(
+            files
+                .iter()
+                .map(|(p, t)| ((*p).to_owned(), Resource::bytes(t.clone().into_bytes())))
+                .collect(),
+        )
+    }
+
+    const LIGHTMAP: &str = "assets/minecraft/polytone/shader_modifiers/core/lightmap.json";
+    const SCREENQUAD: &str = "assets/minecraft/polytone/shader_modifiers/core/screenquad.json";
+
+    /// A shader's files give its pipeline their uniforms, by its stages' ids; each frame
+    /// evaluates those a drawn shader reads, 0 for one no file gives.
+    #[test]
+    fn shader_modifiers_give_a_pipelines_shaders_their_uniforms() {
+        let modifiers = ShaderModifiers::read(
+            &pack(&[
+                (
+                    LIGHTMAP,
+                    r#"{"InNether": "g.dimensionType == 'minecraft:the_nether' ? 1 : 0"}"#.into(),
+                ),
+                (SCREENQUAD, r#"{"Wet": "g.rain()"}"#.into()),
+                (
+                    "assets/minecraft/polytone/shader_modifiers/core/sky.json",
+                    r#"{"Sky": "1"}"#.into(),
+                ),
+            ]),
+            Default::default(),
+        )
+        .expect("the packs' modifiers");
+        let lightmap = crate::gfx::LIGHTMAP_SHADERS;
+        assert_eq!(modifiers.names(&lightmap), ["InNether", "Wet"]);
+        assert_eq!(modifiers.names(&["minecraft:core/sky"]), ["Sky"]);
+        let mut wanted = vec![
+            ("InNether".to_owned(), 7.0),
+            ("Wet".to_owned(), 7.0),
+            ("Sky".to_owned(), 7.0),
+        ];
+        let frame = Frame {
+            dimension: "minecraft:the_nether".into(),
+            rain: 1.0,
+            ..Frame::default()
+        };
+        modifiers.evaluate(&lightmap, &frame, &mut wanted);
+        // `g.rain` is the mean of rain (1) and thunder (0); `Sky` is another shader's.
+        assert_eq!(
+            wanted.iter().map(|(_, v)| *v).collect::<Vec<_>>(),
+            [1.0, 0.5, 0.0]
+        );
+        let overworld = Frame {
+            dimension: "minecraft:overworld".into(),
+            ..Frame::default()
+        };
+        modifiers.evaluate(&lightmap, &overworld, &mut wanted[..1]);
+        assert_eq!(wanted[0].1, 0.0);
+        assert!(ShaderModifiers::read(&pack(&[]), Default::default()).is_none());
+    }
+
+    /// A file over the read budget, not JSON, or refused by its contents is left out: its
+    /// uniforms are no shader's, so a shader reading one is refused when it loads.
+    #[test]
+    fn a_bad_shader_modifiers_file_is_left_out() {
+        let budget = MAX_SHADER_MODIFIERS_FILE as usize;
+        let padded = |len: usize| {
+            let body = r#"{"Tint": "1"}"#;
+            format!("{body}{}", " ".repeat(len - body.len()))
+        };
+        let read = |text: String| {
+            ShaderModifiers::read(&pack(&[(LIGHTMAP, text)]), Default::default())
+                .map(|m| m.names(&crate::gfx::LIGHTMAP_SHADERS))
+        };
+        assert_eq!(read(padded(budget)), Some(vec!["Tint".to_owned()]));
+        assert_eq!(read(padded(budget + 1)), None);
+        assert_eq!(read("{\"Tint\": ".into()), None);
+        assert_eq!(read(r#"{"gl_Tint": "1"}"#.into()), None);
+    }
 
     #[test]
     fn poly_globals_follow_std140() {

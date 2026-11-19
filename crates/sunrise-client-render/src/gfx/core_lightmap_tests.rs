@@ -85,7 +85,7 @@ fn draw(
     info: &LightmapInfo,
 ) -> [u8; 16 * 16 * 4] {
     let target = target(device);
-    queue.write_buffer(&core.uniform, 0, &CoreLightmap::uniforms([0; 48], info));
+    queue.write_buffer(&core.uniform, 0, &core.uniforms([0; 48], info));
     let mut encoder = device.create_command_encoder(&Default::default());
     core.draw(&mut encoder, &target);
     queue.submit([encoder.finish()]);
@@ -148,7 +148,7 @@ fn a_pack_lightmap_shader_fills_the_texture_by_sky_row_and_block_column() {
     // Frames read back out of their buffers' order: the newest one wins. P lands in buffer 0
     // and is taken in; Q goes to buffer 1, R to buffer 0 again, and both land before F3 looks.
     let frame = |core: &mut CoreLightmap, info: &LightmapInfo, poll: bool| {
-        queue.write_buffer(&core.uniform, 0, &CoreLightmap::uniforms([0; 48], info));
+        queue.write_buffer(&core.uniform, 0, &core.uniforms([0; 48], info));
         let mut encoder = device.create_command_encoder(&Default::default());
         core.draw(&mut encoder, &target(&device));
         queue.submit([encoder.finish()]);
@@ -223,30 +223,38 @@ fn vanillas_lightmap_shaders_draw_the_native_lightmap() {
     }
 }
 
-/// A shader reading a block the lightmap pass doesn't give is not used: the texture stays
-/// native, rather than failing at the draw.
+/// An expression uniform is one float (wiki "Shaders"): a shader declaring the block larger
+/// is not used, and the texture stays native, rather than failing at the draw. (A block no
+/// pack's `shader_modifiers` gives is refused earlier, when the shader loads.)
 #[test]
 #[ignore = "daily"]
-fn a_lightmap_shader_reading_another_block_is_not_used() {
+fn a_lightmap_shader_whose_expression_block_is_more_than_a_float_is_not_used() {
     let _gpu = crate::gfx::test_gpu::lock();
     let Some((device, _)) = device() else {
         return;
     };
-    let fragment = PROBE_FSH
-        .replace("lightmapInfo.SkyFactor", "other.Value")
-        .replace(
-            "} lightmapInfo;\n",
-            "} lightmapInfo;\nlayout(std140) uniform Other {\n    float Value;\n} other;\n",
-        );
-    let program = crate::core_shader::translate_core_with(
-        SCREENQUAD_VSH,
-        &fragment,
-        &[],
-        &|_| None,
-        &GLUE,
-        &|b| b == INFO_BLOCK || b == "Other",
-    )
-    .expect("the shaders translate");
+    let fragment = |block: &str| {
+        PROBE_FSH
+            .replace("lightmapInfo.SkyFactor", "other.Value.x")
+            .replace(
+                "} lightmapInfo;\n",
+                &format!("}} lightmapInfo;\nlayout(std140) uniform Other {{\n{block}}} other;\n"),
+            )
+    };
+    let program = |block: &str| {
+        crate::core_shader::translate_core_with(
+            SCREENQUAD_VSH,
+            &fragment(block),
+            &[],
+            &|_| None,
+            &GLUE,
+            &|b| b == INFO_BLOCK || b == "Other",
+        )
+        .expect("the shaders translate")
+    };
+    // One vec4 (16 bytes) fits the block's binding; two don't.
+    assert!(CoreLightmap::new(&device, &program("    vec4 Value;\n")).is_some());
+    let program = program("    vec4 Value;\n    vec4 More;\n");
     assert!(CoreLightmap::new(&device, &program).is_none());
 }
 
@@ -273,7 +281,7 @@ fn the_light_texture_is_read_back_only_while_f3_charts_it() {
     let mut core = CoreLightmap::new(&device, &program).expect("the lightmap pipeline");
     // One frame: its uniforms, its draw, its submission, and the readback it starts (if any).
     let frame = |core: &mut CoreLightmap, info: &LightmapInfo| {
-        queue.write_buffer(&core.uniform, 0, &CoreLightmap::uniforms([0; 48], info));
+        queue.write_buffer(&core.uniform, 0, &core.uniforms([0; 48], info));
         let mut encoder = device.create_command_encoder(&Default::default());
         core.draw(&mut encoder, &target(&device));
         queue.submit([encoder.finish()]);
@@ -305,4 +313,66 @@ fn the_light_texture_is_read_back_only_while_f3_charts_it() {
         "the copy from before the close is gone"
     );
     assert_eq!(fresh, [7; 16 * 16 * 4]);
+}
+
+/// A pack's shader reading `n` expression uniforms (`E0`, `E1`, ...): the first one's value in
+/// red, `SkyFactor` in green.
+fn expression_shader(n: usize) -> CoreProgram {
+    let blocks: String = (0..n)
+        .map(|i| format!("layout(std140) uniform E{i} {{\n    float e{i};\n}};\n"))
+        .collect();
+    let reads: String = (1..n).map(|i| format!(" + 0.0 * e{i}")).collect();
+    let fragment = format!(
+        "#version 330\nlayout(std140) uniform LightmapInfo {{\n    float SkyFactor;\n}} info;\n\
+         {blocks}layout(location = 0) in vec2 texCoord;\nlayout(location = 0) out vec4 fragColor;\n\
+         void main() {{\n    fragColor = vec4(e0{reads}, info.SkyFactor, 0.0, 1.0);\n}}\n"
+    );
+    let names: Vec<String> = (0..n).map(|i| format!("E{i}")).collect();
+    crate::core_shader::translate_core_with(
+        SCREENQUAD_VSH,
+        &fragment,
+        &[],
+        &|_| None,
+        &GLUE,
+        &|b| b == INFO_BLOCK || names.iter().any(|n| n == b),
+    )
+    .expect("the shaders translate")
+}
+
+/// The expression uniforms' values the game gives (`Renderer::lightmap_expressions`) reach the
+/// shader's blocks each frame, beside `LightmapInfo`.
+#[test]
+#[ignore = "daily"]
+fn a_lightmap_shader_reads_its_expression_uniforms_values() {
+    let _gpu = crate::gfx::test_gpu::lock();
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let mut core = CoreLightmap::new(&device, &expression_shader(2)).expect("the pipeline");
+    core.set_readback(&device, true);
+    assert_eq!(
+        core.expressions,
+        [("E0".to_owned(), 0.0), ("E1".to_owned(), 0.0)]
+    );
+    for (value, red) in [(0.75, 191), (0.25, 64)] {
+        core.expressions[0].1 = value;
+        let pixels = draw(&device, &queue, &mut core, &STATES[1]);
+        assert!(pixels[0].abs_diff(red) <= 1, "{value}: {}", pixels[0]);
+        assert!(pixels[1].abs_diff(179) <= 1, "SkyFactor: {}", pixels[1]);
+    }
+}
+
+/// A device binds at most `max_uniform_buffers_per_shader_stage` blocks to a shader (12 by
+/// default), five of them the lightmap's own: seven expression uniforms are drawn, eight
+/// refused when the pipeline is built, so the texture stays native from the first frame.
+#[test]
+#[ignore = "daily"]
+fn a_lightmap_shader_reading_more_expression_uniforms_than_the_device_binds_is_refused() {
+    let _gpu = crate::gfx::test_gpu::lock();
+    let Some((device, _)) = device() else {
+        return;
+    };
+    assert_eq!(device.limits().max_uniform_buffers_per_shader_stage, 12);
+    assert!(CoreLightmap::new(&device, &expression_shader(7)).is_some());
+    assert!(CoreLightmap::new(&device, &expression_shader(8)).is_none());
 }

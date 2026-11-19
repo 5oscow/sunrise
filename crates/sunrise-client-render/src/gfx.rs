@@ -174,6 +174,7 @@ mod celestial;
 mod census;
 pub mod compositor;
 pub(crate) mod core_lightmap;
+pub use core_lightmap::SHADERS as LIGHTMAP_SHADERS;
 pub(crate) mod core_lines;
 pub(crate) mod core_sky;
 pub(crate) mod core_text;
