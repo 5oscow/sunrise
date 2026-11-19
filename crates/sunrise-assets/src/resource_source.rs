@@ -63,7 +63,9 @@ enum Storage {
         source: ResourceSource,
         prefix: String,
     },
-    Index(BTreeMap<String, Resource>),
+    /// The winning files by name, and for the names several layers provide, every layer's file,
+    /// lowest first ([`ResourceSource::stack`]).
+    Index(BTreeMap<String, Resource>, BTreeMap<String, Vec<Resource>>),
 }
 
 /// A winning resource keeps its source alive; merged resources keep only their
@@ -97,7 +99,9 @@ impl Resource {
 /// Clones share the open archive; construct a new source for a resource reload.
 /// Equality and hashing identify that generation, rather than comparing file contents.
 #[derive(Clone)]
-pub struct ResourceSource(Arc<Storage>);
+pub struct ResourceSource(Arc<Storage>, Arc<Memo>);
+/// What one resource generation computed for its readers, by the type of the value.
+type Memo = std::sync::Mutex<HashMap<std::any::TypeId, Arc<dyn std::any::Any + Send + Sync>>>;
 impl PartialEq for ResourceSource {
     fn eq(&self, other: &Self) -> bool {
         self.same_generation(other)
@@ -116,7 +120,7 @@ impl std::fmt::Debug for ResourceSource {
             #[cfg(not(target_arch = "wasm32"))]
             Storage::Archive(_) => "Archive",
             Storage::Prefix { .. } => "Prefix",
-            Storage::Index(_) => "Index",
+            Storage::Index(..) => "Index",
         };
         f.debug_tuple("ResourceSource").field(&kind).finish()
     }
@@ -178,14 +182,7 @@ impl ResourceRoot {
             return self;
         }
         let root = Arc::make_mut(&mut self.0);
-        let source = &root.source;
-        let mut files: BTreeMap<_, _> = source
-            .list("")
-            .into_iter()
-            .map(|name| (name.clone(), Resource::file(source.clone(), name)))
-            .collect();
-        files.extend(textures);
-        root.source = ResourceSource::indexed(files);
+        root.source = root.source.extended(textures);
         root.runtime_block_sprites = block_sprites;
         self
     }
@@ -317,18 +314,73 @@ impl ResourceSource {
             Storage::Archive(archive) => {
                 collect(archive.names().filter(|name| stays_inside(name)), top)
             }
-            Storage::Index(files) => collect(files.keys().map(String::as_str), top),
+            Storage::Index(files, _) => collect(files.keys().map(String::as_str), top),
             _ => collect(
                 self.list(&format!("{top}/")).iter().map(String::as_str),
                 top,
             ),
         }
     }
+    fn from(storage: Storage) -> Self {
+        Self(Arc::new(storage), Arc::default())
+    }
     pub fn indexed(files: BTreeMap<String, Resource>) -> Self {
-        Self(Arc::new(Storage::Index(files)))
+        Self::from(Storage::Index(files, BTreeMap::new()))
+    }
+    /// An index that also keeps, for each name in `layers`, the file of every layer that
+    /// provides it, lowest first: what [`ResourceSource::stack`] gives.
+    pub fn indexed_with_layers(
+        files: BTreeMap<String, Resource>,
+        layers: BTreeMap<String, Vec<Resource>>,
+    ) -> Self {
+        Self::from(Storage::Index(files, layers))
+    }
+    /// Every layer's file of `name`, lowest first, the winning one last: where the source was
+    /// made from layers ([`ResourceSource::indexed_with_layers`]) their files, else the one
+    /// file. Empty where there is none.
+    pub fn stack(&self, name: &str) -> Vec<Resource> {
+        match self.0.as_ref() {
+            Storage::Index(files, layers) => match layers.get(name) {
+                Some(layers) => layers.clone(),
+                None => files.get(name).cloned().into_iter().collect(),
+            },
+            _ if self.contains(name) => vec![Resource::file(self.clone(), name.to_owned())],
+            _ => Vec::new(),
+        }
+    }
+    /// The layers of the names an index keeps them for ([`ResourceSource::indexed_with_layers`]).
+    pub fn layers(&self) -> Option<&BTreeMap<String, Vec<Resource>>> {
+        match self.0.as_ref() {
+            Storage::Index(_, layers) => Some(layers),
+            _ => None,
+        }
+    }
+    /// A source of the same files, `files` added over them, in the same generation: it keeps
+    /// the layers and shares what [`ResourceSource::cached`] holds.
+    pub fn extended(&self, files: BTreeMap<String, Resource>) -> Self {
+        let mut index: BTreeMap<_, _> = self
+            .list("")
+            .into_iter()
+            .map(|name| (name.clone(), Resource::file(self.clone(), name)))
+            .collect();
+        index.extend(files);
+        let layers = self.layers().cloned().unwrap_or_default();
+        Self(Arc::new(Storage::Index(index, layers)), self.1.clone())
+    }
+    /// A value computed once for this generation and shared by every clone of the source and
+    /// every source `extended` from it: the first caller makes it, the rest wait for it and take
+    /// the same one. `make` must not call `cached` on this source.
+    pub fn cached<T: Send + Sync + 'static>(&self, make: impl FnOnce() -> T) -> Arc<T> {
+        let mut memo = self.1.lock().unwrap_or_else(|e| e.into_inner());
+        let value = memo
+            .entry(std::any::TypeId::of::<T>())
+            .or_insert_with(|| Arc::new(make()));
+        Arc::clone(value)
+            .downcast()
+            .expect("a value is kept under its own type")
     }
     pub fn directory(root: PathBuf) -> Self {
-        Self(Arc::new(Storage::Directory(root)))
+        Self::from(Storage::Directory(root))
     }
     #[cfg(not(target_arch = "wasm32"))]
     pub fn archive(path: &Path) -> io::Result<Self> {
@@ -337,7 +389,7 @@ impl ResourceSource {
     /// Share an archive that was already opened while discovering its metadata.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn opened_archive(archive: Zip) -> Self {
-        Self(Arc::new(Storage::Archive(archive)))
+        Self::from(Storage::Archive(archive))
     }
     /// Select an overlay root. Folder paths are trusted repository inputs;
     /// archive prefixes must remain inside that archive.
@@ -354,10 +406,10 @@ impl ResourceSource {
                 "unsafe archive prefix",
             ));
         }
-        Ok(Self(Arc::new(Storage::Prefix {
+        Ok(Self::from(Storage::Prefix {
             source: self.clone(),
             prefix: format!("{directory}/"),
-        })))
+        }))
     }
     pub fn read(&self, name: &str) -> io::Result<Vec<u8>> {
         if !stays_inside(name) {
@@ -371,7 +423,7 @@ impl ResourceSource {
             #[cfg(not(target_arch = "wasm32"))]
             Storage::Archive(archive) => archive.read(name),
             Storage::Prefix { source, prefix } => source.read(&format!("{prefix}{name}")),
-            Storage::Index(files) => files
+            Storage::Index(files, _) => files
                 .get(name)
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, name.to_owned()))?
                 .read(),
@@ -388,7 +440,7 @@ impl ResourceSource {
             #[cfg(not(target_arch = "wasm32"))]
             Storage::Archive(_) => None,
             Storage::Prefix { source, prefix } => source.folder_of(&format!("{prefix}{name}")),
-            Storage::Index(files) => match &files.get(name)?.0 {
+            Storage::Index(files, _) => match &files.get(name)?.0 {
                 ResourceStorage::File { source, name } => source.folder_of(name),
                 ResourceStorage::Bytes(_) => None,
             },
@@ -413,7 +465,7 @@ impl ResourceSource {
             Storage::Prefix { source, prefix } => {
                 source.copy_to(&format!("{prefix}{name}"), out, budget)
             }
-            Storage::Index(files) => match &files
+            Storage::Index(files, _) => match &files
                 .get(name)
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, name.to_owned()))?
                 .0
@@ -447,7 +499,7 @@ impl ResourceSource {
             #[cfg(not(target_arch = "wasm32"))]
             Storage::Archive(archive) => archive.read_head(name, max),
             Storage::Prefix { source, prefix } => source.read_head(&format!("{prefix}{name}"), max),
-            Storage::Index(files) => match &files
+            Storage::Index(files, _) => match &files
                 .get(name)
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, name.to_owned()))?
                 .0
@@ -476,7 +528,7 @@ impl ResourceSource {
             #[cfg(not(target_arch = "wasm32"))]
             Storage::Archive(archive) => archive.contains(name),
             Storage::Prefix { source, prefix } => source.contains(&format!("{prefix}{name}")),
-            Storage::Index(files) => files.contains_key(name),
+            Storage::Index(files, _) => files.contains_key(name),
         }
     }
     /// Read only when the complete resource fits the limit. Bounds actual bytes
@@ -497,7 +549,7 @@ impl ResourceSource {
             Storage::Prefix { source, prefix } => {
                 return source.read_limited(&format!("{prefix}{name}"), max);
             }
-            Storage::Index(files) => match &files
+            Storage::Index(files, _) => match &files
                 .get(name)
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, name.to_owned()))?
                 .0
@@ -553,7 +605,7 @@ impl ResourceSource {
                 .into_iter()
                 .filter_map(|name| name.strip_prefix(base).map(str::to_owned))
                 .collect(),
-            Storage::Index(files) => files
+            Storage::Index(files, _) => files
                 .range(prefix.to_owned()..)
                 .map_while(|(name, _)| name.starts_with(prefix).then(|| name.clone()))
                 .collect(),
@@ -641,7 +693,7 @@ impl ResourceSource {
             Storage::Prefix { source, prefix } => {
                 source.file_fingerprint(&format!("{prefix}{name}"), archives)
             }
-            Storage::Index(files) => match &files.get(name)?.0 {
+            Storage::Index(files, _) => match &files.get(name)?.0 {
                 ResourceStorage::File { source, name } => source.file_fingerprint(name, archives),
                 ResourceStorage::Bytes(bytes) => {
                     let mut hash = DefaultHasher::new();

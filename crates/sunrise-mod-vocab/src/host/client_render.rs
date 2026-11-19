@@ -138,8 +138,10 @@ pub trait ClientRenderClientHost {
     fn block_sprites(&self, blocks: &[BlockState]) -> Vec<Option<BlockSprites>>;
     /// Side: client.
     /// Published asset/data read: available in Setup, Reloading and World.
-    /// For a client mod: each texture's sprite by name (`minecraft:block/stone`, `block/stone`), none for one no
-    /// model uses. API 380.
+    /// For a client mod: each texture's sprite by name (`minecraft:block/stone`, `block/stone`) in the blocks
+    /// atlas, none for one it lacks. The blocks atlas holds the sprites block models name and every sprite a
+    /// mod's sprite source made in it, though no model names it; a sprite only the items atlas lists is not
+    /// in it. API 380.
     #[access(PublishedResources)]
     fn texture_sprites(&self, textures: &[&str]) -> Vec<Option<SpriteRef>>;
     /// Side: client.

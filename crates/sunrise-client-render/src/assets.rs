@@ -363,7 +363,11 @@ impl RenderAssets {
         parsed: Option<crate::model_library::ParsedModels>,
     ) -> Result<Self> {
         let registry = assets.registry;
-        let mut sprites = crate::sprites::Sprites::with_disk_cache(root);
+        let mut sprites = if draws {
+            crate::sprites::Sprites::with_disk_cache(root)
+        } else {
+            crate::sprites::Sprites::for_server(root.source().clone())
+        };
         for name in MATERIALS {
             sprites.insert(&format!("minecraft:block/{name}"))?;
         }
@@ -392,6 +396,11 @@ impl RenderAssets {
         sprites.keep_apart(crate::connected::ConnectedTextures::matched_sprites(
             &ctm_rules,
         ));
+        if draws {
+            // After the rules' names are kept apart, so a sprite a source made keeps its own layer
+            // where a rule matches it.
+            sprites.insert_mod_sprites()?;
+        }
         let mut models = if draws {
             let _step = crate::spans::startup::step("core.models_bake");
             crate::models::prepare_with_models(root, registry, &mut sprites, &parsed)?

@@ -4,6 +4,7 @@ use mod_api::__private::game::*;
 use mod_api::{RuntimeSprite, TextureAtlas};
 use std::collections::BTreeMap;
 use sunrise_assets::resource_source::{Resource, ResourceRoot, ResourceSource, stays_inside};
+use sunrise_client::atlas_sources;
 
 pub(in crate::game) fn collect_runtime_sprites() -> Vec<RuntimeSprite> {
     let mut sprites = Vec::new();
@@ -19,6 +20,25 @@ pub(in crate::game) fn stage_runtime_sprites(
     root: ResourceRoot,
     sprites: &[RuntimeSprite],
 ) -> ResourceRoot {
+    stage_runtime_with(
+        root,
+        sprites,
+        &sunrise_client_render::mod_sprite_sources::Registered,
+    )
+}
+
+/// [`stage_runtime_sprites`] asking `mods` for the sources' answers.
+pub(super) fn stage_runtime_with(
+    root: ResourceRoot,
+    sprites: &[RuntimeSprite],
+    mods: &dyn atlas_sources::ModSources,
+) -> ResourceRoot {
+    if !sprites.is_empty() {
+        // The game's atlases are listed over the packs' files alone when no registered atlas was
+        // staged first, before these generated textures join the generation: no reader or
+        // directory source sees one.
+        atlas_sources::shared(root.source(), mods);
+    }
     let mut files = BTreeMap::new();
     let mut blocks = Vec::new();
     let mut pixels = 0;
