@@ -10,17 +10,25 @@ says which page answers what and the few things that are not in it. Read the pag
 
 ## Writing a mod
 
-Start from `docs/modding/src/for-agents.md`: the exact commands and the rules that decide whether a mod compiles.
-The three start pages (`start/first-content-mod.md`, `start/first-mod.md`, `start/first-wasm-mod.md`) are the same
-steps with their explanations.
+Choose the walkthrough under `docs/modding/src/` for the kind of mod you are making:
 
-- `cargo sunrise-mod new` writes the project and `sunrise-mod.toml`. Never write the manifest, a pin or a commit
-  by hand; every field is in `reference/manifest.md`.
-- `cargo sunrise-mod check` after every edit, `build` to compile and pack, `run` to play, `cargo test` for the
-  logic. `cargo sunrise-mod help all` lists every command; `reference/sdk/05-commands.md` describes the SDK ones.
+- **Native:** `for-agents.md` and `start/first-mod.md`. Use `cargo sunrise-mod build` to compile and pack,
+  `cargo sunrise-mod run` to play from the staged project, and `cargo test` for the Rust logic.
+- **Wasm:** `start/first-wasm-mod.md`. Use `cargo sunrise-mod build --wasm`, then the page's
+  `sunrise-client --dev-mod` command to try the package.
+- **Content-only:** `start/first-content-mod.md`. Follow its data and packaging steps; there is no Cargo test
+  target or SDK to install.
+
+`cargo sunrise-mod new` generates the project and `sunrise-mod.toml`. Edit declared fields such as the name,
+description and dependencies as needed (`reference/manifest.md`); do not write the manifest from scratch
+or change generated pins by hand. For code mods, `cargo sunrise-mod update` changes the pins.
+
+- Use `cargo sunrise-mod check` after an edit. `cargo sunrise-mod help all` lists the commands;
+  `reference/sdk/05-commands.md` describes the SDK commands.
 - Find a hook with `cargo sunrise-mod hooks <words>`, never by guessing a name.
 - The mod tools need no launcher. If a step seems to need one, that is a bug in the tool or the book: report it.
-- The game needs resources prepared from the user's own Minecraft (`start/first-mod.md`, "Prepared resources").
+- To try a mod in game, follow `AGENTS.md` for a scratch home and game directory, never an existing player
+  install. Use resources prepared from the user's own Minecraft (`start/first-mod.md`, "Prepared resources").
   Ask for the folder. Never download or commit Mojang's files.
 
 ## Which page
@@ -44,9 +52,23 @@ steps with their explanations.
 - The tool is `crates/cargo-sunrise-mod`; the package rules and manifest are `crates/sunrise-mod-package`; the
   native compile and its JSON commands are `crates/sunrise-native-build`. `AGENTS.md` has the crate table and the
   mod API's rules.
-- Try a change on a real mod with the tool from the checkout: `cargo build -p cargo-sunrise-mod`, then run
-  `target/debug/cargo-sunrise-mod new|check|build …` in a scratch folder outside the repository. It fetches the
-  published SDK of the current Nightly; `new --sunrise <build>` pins another.
+- Try a change on a real mod with a host debug build of the tool. From the checkout, resolve the executable
+  before changing directories. This example creates a native mod and fetches the current Nightly's SDK;
+  `new --sunrise <build>` pins another build. For Wasm, use the Wasm template and `build --wasm` instead.
+
+  ```sh
+  cargo build -p cargo-sunrise-mod
+  target_dir=$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')
+  mod_tool="$target_dir/debug/cargo-sunrise-mod"
+  scratch=$(mktemp -d)
+  export SUNRISE_MOD_CACHE="$scratch/mod-cache"
+  cd "$scratch"
+  "$mod_tool" new smoke-mod --template native
+  cd smoke-mod
+  "$mod_tool" check
+  "$mod_tool" build
+  ```
+
 - The SDK a project uses is in its `.sunrise/sdk/`; compiled slices and build work are in the per-user cache
   (`SUNRISE_MOD_CACHE`, see `start/first-mod.md`). `SUNRISE_SDK_BASE` (a URL or a folder) replaces the release
   server (`crates/cargo-sunrise-mod/src/sdk_fetch.rs`).
