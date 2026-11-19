@@ -589,8 +589,9 @@ pub(super) fn load_resources_for_mods(
             client_reload::collect_texture_atlases(),
         )
     };
-    resolved = client_reload::stage_runtime_sprites(resolved, &runtime_sprites);
+    // Every atlas is listed over the packs' files before any generated texture joins them.
     resolved = client_reload::stage_texture_atlases(resolved, &texture_atlases);
+    resolved = client_reload::stage_runtime_sprites(resolved, &runtime_sprites);
     let threads = settings.sunrise.worker_threads();
     // One pool of workers for every level's streaming, the client's and the
     // server thread's (sunrise_threads::jobs), sized before any world opens.
@@ -679,11 +680,11 @@ pub(super) fn load_resources_for_mods(
         pack_error = Some(failure);
         can_rollback = false;
         root = vanilla_root.to_path_buf();
-        resolved = client_reload::stage_runtime_sprites(
+        resolved = client_reload::stage_texture_atlases(
             sunrise_assets::resource_source::ResourceRoot::directory(root.clone()),
-            &runtime_sprites,
+            &texture_atlases,
         );
-        resolved = client_reload::stage_texture_atlases(resolved, &texture_atlases);
+        resolved = client_reload::stage_runtime_sprites(resolved, &runtime_sprites);
     };
     // Every loaded game publishes scalar registry keys, including callers that
     // load a prepared root directly instead of building a mod content overlay.

@@ -714,8 +714,8 @@ pub(super) fn stage_pack(
     progress: &super::Progress,
 ) -> sunrise_client::Result<StagedPack> {
     let resource_root = startup_root(vanilla_root, selected, server, mod_sources)?;
-    let resource_root = super::client_reload::stage_runtime_sprites(resource_root, runtime_sprites);
     let resource_root = super::client_reload::stage_texture_atlases(resource_root, texture_atlases);
+    let resource_root = super::client_reload::stage_runtime_sprites(resource_root, runtime_sprites);
     let root = resource_root.prepared().to_path_buf();
     let source = resource_root.source().clone();
     progress.set(1);

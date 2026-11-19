@@ -623,8 +623,8 @@ fn atlas_sprites(
 ) {
     use crate::atlas_sources::{self, Materials, SpriteOrigin};
     let have: HashSet<&str> = packed.iter().map(|i| i.0.as_str()).collect();
-    let mut listed = atlas_sources::listed(root);
-    let materials = Materials::take(root, &mut listed);
+    let materials = Materials::new(root);
+    let listing = materials.listing();
     let ids: Vec<&str> = materials.ids().into_iter().collect();
     // Each id's winner, all at once: `None` where no origin finishes, `Some(None)` where the
     // file already walked stands.
@@ -714,9 +714,12 @@ fn atlas_sprites(
     // tens of thousands of files).
     let mut names: Vec<(String, Vec<SpriteOrigin>)> = Vec::new();
     let mut slots = HashMap::new();
-    for (_, listing) in listed {
-        for (id, origin) in listing {
-            let name = id.strip_prefix("minecraft:").unwrap_or(&id).to_owned();
+    for (atlas, sprites) in listing.atlases() {
+        if matches!(atlas.as_str(), "minecraft:blocks" | "minecraft:items") {
+            continue;
+        }
+        for (id, origin) in sprites {
+            let name = id.strip_prefix("minecraft:").unwrap_or(id).to_owned();
             // A model's sprite is the model atlases' winner above, not another atlas's output.
             if matches!(origin, SpriteOrigin::File(_))
                 || have.contains(name.as_str())
@@ -728,7 +731,7 @@ fn atlas_sprites(
                 names.push((name, Vec::new()));
                 names.len() - 1
             });
-            names[slot].1.push(origin);
+            names[slot].1.push(origin.clone());
         }
     }
     let load = |texture: &str| {
