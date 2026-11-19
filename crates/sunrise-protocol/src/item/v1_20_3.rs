@@ -766,6 +766,11 @@ fn legacy_tag(stack: &Stack) -> Result<Tag> {
         Some(Component::Nbt(tag @ Tag::Compound(_))) => tag.clone(),
         _ => d::empty_map(),
     };
+    // Install the residual block-entity data before the modeled fields write into
+    // it. Component traversal order must not decide which payload survives.
+    if let Some(Component::Raw(bytes)) = stack.component(component::BLOCK_ENTITY_DATA) {
+        legacy_raw(&mut tag, component::BLOCK_ENTITY_DATA, bytes)?;
+    }
     let mut hide = 0;
     for (kind, value) in &stack.added {
         match (*kind, value) {
@@ -1002,6 +1007,7 @@ fn legacy_tag(stack: &Stack) -> Result<Tag> {
             (75, Component::Int(color)) => {
                 set_sub(&mut tag, "BlockEntityTag", "Base", Tag::Int(*color))
             }
+            (component::BLOCK_ENTITY_DATA, _) => {}
             (kind, Component::Raw(bytes)) => legacy_raw(&mut tag, kind, bytes)?,
             _ => {}
         }
@@ -1944,6 +1950,47 @@ mod tests {
         // Semantic fallback retains the edited raw data, but does not fabricate an old Potion.
         // 764 reads Potion instead of the modern item field: this is not gameplay parity.
         assert!(entity.get("Potion").is_none());
+    }
+
+    #[test]
+    fn legacy_container_overlays_block_entity_data_in_both_component_orders() {
+        let _registries = ids::legacy_registries(Arc::new(context()));
+        let base = typed_data(
+            &Tag::compound([
+                ("id", d::string("minecraft:chest")),
+                ("Keep", Tag::Int(42)),
+                ("Items", Tag::List(Vec::new())),
+            ]),
+            "minecraft:block_entity_type",
+        )
+        .unwrap();
+        let contents = container(&Tag::List(vec![Tag::compound([
+            ("slot", Tag::Int(2)),
+            (
+                "item",
+                Tag::compound([("id", d::string("minecraft:stone")), ("count", Tag::Int(3))]),
+            ),
+        ])]))
+        .unwrap();
+        let mut stack = Stack::new(404, 1);
+        stack.added = vec![(77, contents), (component::BLOCK_ENTITY_DATA, base)];
+        let expected = Tag::compound([
+            ("id", d::string("minecraft:chest")),
+            ("Keep", Tag::Int(42)),
+            (
+                "Items",
+                Tag::List(vec![Tag::compound([
+                    ("id", d::string("minecraft:stone")),
+                    ("Count", Tag::Byte(3)),
+                    ("Slot", Tag::Byte(2)),
+                ])]),
+            ),
+        ]);
+        for _ in 0..2 {
+            let tag = legacy_tag(&stack).unwrap();
+            assert_eq!(tag.get("BlockEntityTag"), Some(&expected));
+            stack.added.reverse();
+        }
     }
 
     fn check_legacy_fixture(
