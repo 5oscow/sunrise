@@ -796,6 +796,21 @@ pub struct Facts {
     pub wasm: bool,
 }
 
+/// Whether a package's own `found` version and a registry's `listed` label are one version. A mod's
+/// are the same when both parse to the same semver (`1.2-beta` is `1.2.0-beta`); every other
+/// kind, and a label that does not parse, compares exactly.
+pub(crate) fn same_version(kind: &Kind, found: &str, listed: &str) -> bool {
+    if matches!(kind, Kind::Mod | Kind::NativeMod)
+        && let (Ok(found), Ok(listed)) = (
+            crate::manifest::parse_version(found),
+            crate::manifest::parse_version(listed),
+        )
+    {
+        return found == listed;
+    }
+    found == listed
+}
+
 impl Facts {
     /// Whether the file is the one `version` of `project` describes.
     pub fn matches(&self, project: &Project, version: &Version) -> Result<(), String> {
@@ -806,7 +821,10 @@ impl Facts {
         caps.sort();
         listed.sort();
         let differs = self.id.as_ref().is_some_and(|id| *id != project.id)
-            || self.version.as_ref().is_some_and(|v| *v != version.version)
+            || self
+                .version
+                .as_ref()
+                .is_some_and(|v| !same_version(&project.kind, v, &version.version))
             || self.api != version.api
             || self.side != version.side
             || caps != listed
@@ -861,7 +879,7 @@ pub fn inspect(kind: &Kind, path: &Path) -> Result<Facts, String> {
                 wasm: m.wasm.is_some(),
                 capabilities: m.capabilities,
                 id: Some(m.id),
-                version: Some(m.version),
+                version: Some(m.version.to_string()),
                 api: m.api,
                 side: Some(m.side),
                 ..Facts::default()

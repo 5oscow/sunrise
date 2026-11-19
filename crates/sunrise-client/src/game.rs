@@ -219,8 +219,8 @@ use {
         fluid::FluidState,
         level::{
             Behaviours, BucketContent, EntityQuery, Landing, LevelAccess, LevelEvent, PlaceContext,
-            PlaceOutcome, PlacementContext, PlayerContext, PlayerEffect, RandomTickMaskUpdate,
-            Ticks, flags as level_flags,
+            PlacementContext, PlayerContext, PlayerEffect, RandomTickMaskUpdate, Ticks,
+            flags as level_flags,
         },
         registry::BlockStateId,
     },
@@ -814,6 +814,7 @@ pub struct PackResources {
     data_source: sunrise_assets::resource_source::ResourceSource,
     data_changes: sunrise_assets::resource_source::ResourceSource,
     additional_data: Arc<[Arc<sunrise_client::datapack::DataPack>]>,
+    mod_layers: Arc<[sunrise_assets::resource_source::ResourceSource]>,
     assets: Arc<Assets>,
     block_registries: Arc<sunrise_client::command::args::Registries>,
     render: Arc<RenderAssets>,
@@ -1946,6 +1947,13 @@ struct Game<'a> {
     save_after_guest_turn: bool,
     /// Guests whose records are displaced by nested player swaps, outer first.
     lan_guest_swaps: Vec<u32>,
+    /// Connections whose turn a panic interrupted this tick: the turn helpers record the
+    /// player before re-raising, the end-of-turn path records it before its callbacks run and
+    /// clears it after a clean put-back. Cleared at the start of every server tick; the crash
+    /// save leaves these players' files as last saved (`server_lifecycle`).
+    interrupted_turns: Vec<u32>,
+    /// What teardown decided about the interrupted turns, for the writes after it.
+    crash_save: server_lifecycle::CrashSave,
     /// Ender chests a mod opened for a guest inside that guest's turn
     /// (`player_open_ender_chest`), by connection, with their titles: opened as the turn
     /// ends, once the guest's own ender chest is back in their record.
@@ -2739,12 +2747,9 @@ impl Game<'_> {
     fn loot_block_entity(&self, pos: [i32; 3], block: &str) -> Option<sunrise_core::nbt::Tag> {
         let key = (pos[0], pos[1], pos[2]);
         match self.world.block_entities.get(&key) {
-            Some(entity) => Some(sunrise_client::save::block_entity_encode::encode(
-                key,
-                entity,
-                block,
-                self.res.items(),
-            )),
+            Some(entity) => {
+                Some(self.encode_live_block_entity(key, entity, block, self.res.items()))
+            }
             None => spill::saved_entity(&self.world, pos),
         }
     }
@@ -2786,16 +2791,15 @@ impl Game<'_> {
     /// `Block.getDrops` for a block a player breaks: the block's loot table
     /// with the player as `this`, drawing from its server random sequence
     /// (`LootContext.Builder.create`), else the level random. The roll's
-    /// origin is the block's centre and `block_entity` the entity it had.
+    /// origin is the block's centre and `pending` retains its block entity.
     fn block_loot_at(
         &mut self,
         pos: [i32; 3],
         state: BlockStateId,
         held: Option<&ItemStack>,
-        block_entity: Option<sunrise_core::nbt::Tag>,
     ) -> Vec<ItemStack> {
         let dynamic = self.pending.dynamic(pos);
-        let place = self.loot_place_at(pos.map(|v| f64::from(v) + 0.5), block_entity);
+        let place = self.loot_place_at(pos.map(|v| f64::from(v) + 0.5), None);
         let (_, entity) = self.native_clicker();
         let mut drops = sunrise_world::loot::with_native_loot_place(place, || {
             let roll = sunrise_client::items::BlockLootRoll {
@@ -4229,18 +4233,35 @@ impl Game<'_> {
         let held = self.held().cloned();
         let key = (pos[0], pos[1], pos[2]);
         self.unpack_loot(container_loot::LootTarget::Block(key), None);
-        let loot_entity = if self.creative {
-            None
-        } else {
-            self.loot_block_entity(pos, &facts.name)
+        let live = (!self.creative)
+            .then(|| self.live_block_entity(key, &facts.name))
+            .flatten();
+        // Mod data is encoded only if the removed block goes on to roll loot.
+        let mod_source = match &live {
+            Some((BlockEntity::Mod(_), _)) => Some((
+                self.world.block_entities.generation(&key),
+                self.world.block_names.get(&key).cloned(),
+                self.world.block_lock(key).cloned(),
+            )),
+            Some((entity, _)) => {
+                let saved = sunrise_client::save::block_entity_encode::encode(
+                    key,
+                    entity,
+                    &facts.name,
+                    self.res.items(),
+                );
+                self.pending.record_from(&self.world, pos, saved);
+                None
+            }
+            None => {
+                if !self.creative
+                    && let Some(tag) = spill::saved_entity(&self.world, pos)
+                {
+                    self.pending.record_saved(pos, &tag);
+                }
+                None
+            }
         };
-        let live = self.live_block_entity(key, &facts.name);
-        if let Some((entity, _)) = &live {
-            self.pending
-                .record_from(&self.world, pos, entity, &facts.name, self.res.items());
-        } else if let Some(tag) = spill::saved_entity(&self.world, pos) {
-            self.pending.record_saved(pos, &tag);
-        }
         let hive = match self.world.block_entities.get(&key) {
             Some(BlockEntity::Beehive(h)) => self.hive_state(pos).map(|s| ((**h).clone(), s)),
             _ => None,
@@ -4264,7 +4285,18 @@ impl Game<'_> {
                 if let Some(p) = self.player.as_mut() {
                     p.cause_food_exhaustion(0.005);
                 }
-                let stacks = self.block_loot_at(pos, state, held.as_ref(), loot_entity);
+                if let (Some((entity, _)), Some((generation, name, lock))) = (&live, mod_source) {
+                    let saved = self.encode_removed_block_entity(
+                        key,
+                        entity,
+                        generation,
+                        &facts.name,
+                        self.res.items(),
+                    );
+                    self.pending
+                        .record_source(pos, spill::source_snapshot(saved, name, lock.as_ref()));
+                }
+                let stacks = self.block_loot_at(pos, state, held.as_ref());
                 let silk = held
                     .as_ref()
                     .is_some_and(|h| h.enchantment_level("minecraft:silk_touch") > 0);
@@ -5378,7 +5410,7 @@ impl Game<'_> {
         }
         laps.lap("eg_fire_items");
         for stand in &self.armor_stands {
-            if stand.fire_ticks > 0 && !stand.marker {
+            if stand.is_on_fire() && !stand.marker {
                 let scale = if stand.small { 0.5 } else { 1.0 };
                 let at = stand.render_position(alpha);
                 if !fire_visible([at.x, at.y, at.z], 0.5 * scale, 1.975 * scale) {
@@ -5453,7 +5485,7 @@ impl Game<'_> {
         self.player_model_geometry(camera, player_alpha, &mut out);
         if self.own_body_in_view()
             && let Some(p) = &self.player
-            && p.fire_ticks > 0
+            && p.is_on_fire()
             && !(p.spectator || self.own_render_canceled())
         {
             let feet = self
@@ -6303,11 +6335,37 @@ impl Game<'_> {
         .into_iter()
         .map(|mut c| {
             self.attach_save_data(&mut c);
+            if mod_api::__private::has_part_hook(mod_api::HookId::BlockEntitySaveAdditional) {
+                let edits: std::collections::BTreeMap<_, _> = c
+                    .block_entities
+                    .iter()
+                    .filter_map(|(pos, entity)| {
+                        let BlockEntity::Mod(entity) = entity else {
+                            return None;
+                        };
+                        if !matches!(
+                            self.world.block_entities.get(pos),
+                            Some(BlockEntity::Mod(_))
+                        ) {
+                            return None;
+                        }
+                        self.capture_block_entity_payload(*pos, entity.id(), &entity.nbt)
+                            .map(|edited| (*pos, edited))
+                    })
+                    .collect();
+                if !edits.is_empty() {
+                    Arc::make_mut(c.saved.get_or_insert_with(Default::default))
+                        .block_entity_save_edits = Some(Arc::new(edits));
+                }
+            }
             Arc::new(c)
         })
         .collect()
     }
-    fn finish_open_world(&mut self, prepared: world_loading::PreparedWorld) -> Result<()> {
+    fn finish_open_world(
+        &mut self,
+        prepared: world_loading::PreparedWorld,
+    ) -> Result<functions::PackStack> {
         self.reset_tutorial();
         // Another world: its generator, not the last one's Density line.
         self.debug_density.borrow_mut().clear();
@@ -6344,7 +6402,7 @@ impl Game<'_> {
         self.share_spawn_conditions();
         self.score = Default::default();
         reset_world_progress(&mut self.adv, &mut self.stats);
-        self.open_world_datapacks(&level.enabled_features)?;
+        let stack = self.open_world_datapacks(&level.enabled_features)?;
         let root = self.options.resources.clone();
         self.damage_tag_generation = self.damage_tag_generation.wrapping_add(1);
         // A code-mod switch can have rebuilt the root since `Game::new`.
@@ -6493,7 +6551,8 @@ impl Game<'_> {
             facts.cardinal_light == sunrise_world::dimension_type::CardinalLight::Nether;
         self.load_world_state()?;
         self.native_world_opened(dim);
-        self.open_saved_portal_levels()
+        self.open_saved_portal_levels()?;
+        Ok(stack)
     }
     fn finish_close_world(&mut self) -> Result<()> {
         self.ambience.clear(&mut self.audio);
@@ -9779,20 +9838,7 @@ impl Game<'_> {
                             {
                                 self.smooth_camera_action();
                             }
-                            for mapped in self.settings.keys.translate_mouse_all(button) {
-                                match mapped {
-                                    Err(b)
-                                        if !self.shared_default_acts(b, Some(input.as_str())) => {}
-                                    Err(b) => self.mouse_mapping(b, pressed, Source::Keyboard)?,
-                                    Ok(k) if pressed => {
-                                        self.keys.insert(k);
-                                        self.key_pressed(k, k)?;
-                                    }
-                                    Ok(k) => {
-                                        self.keys.remove(&k);
-                                    }
-                                }
-                            }
+                            self.mapped_mouse_event(button, &input, pressed)?;
                         }
                         Screen::Inventory | Screen::Creative
                             if !matches!(button, MouseButton::Left | MouseButton::Right) =>
@@ -11115,6 +11161,8 @@ impl<'a> Game<'a> {
             lan_building_boxes: Default::default(),
             save_after_guest_turn: false,
             lan_guest_swaps: Vec::new(),
+            interrupted_turns: Vec::new(),
+            crash_save: Default::default(),
             lan_ender_menus: Vec::new(),
             player_state: Default::default(),
             lan_break_pos: None,
@@ -11381,17 +11429,22 @@ pub(crate) fn run_with(
         return run_loading(options, early_settings, vanilla_root, None, started);
     }
     let mut pack_error = None;
-    let selected_root = packs::startup_root(
-        &vanilla_root,
-        &early_settings.resource_packs,
-        &[],
-        &options.mods,
-    )
-    .or_else(|e| {
-        log::warn!("Sunrise: resource packs not applied: {e}");
-        pack_error = Some(e.to_string());
-        mods::content_root(&vanilla_root, &options.mods)
-    })?;
+    let selected_root = if options.execution_role.is_dedicated_server() {
+        // Dedicated startup sees enabled mod assets but no client's resource packs.
+        mods::content_root(&vanilla_root, &options.mods)?
+    } else {
+        packs::startup_root(
+            &vanilla_root,
+            &early_settings.resource_packs,
+            &[],
+            &options.mods,
+        )
+        .or_else(|e| {
+            log::warn!("Sunrise: resource packs not applied: {e}");
+            pack_error = Some(e.to_string());
+            mods::content_root(&vanilla_root, &options.mods)
+        })?
+    };
     let mut loaded = load_resources_for_mods(
         selected_root,
         pack_finders::data_packs(&options.mods),
@@ -11597,11 +11650,13 @@ fn write_level_for_role(
     dir: &std::path::Path,
     role: execution_role::ExecutionRole,
     items: &crate::items::Items,
+    keep_owner_file: bool,
 ) -> Result<()> {
-    if role.writes_singleplayer_player() {
-        level.write(dir, items)
-    } else {
-        level.write_without_player(dir)
+    match (role.writes_singleplayer_player(), keep_owner_file) {
+        (true, false) => level.write(dir, items),
+        // A crash save keeps the owner's file as last saved, and a legacy `Data.Player`.
+        (true, true) => level.write_keeping_player(dir),
+        (false, _) => level.write_without_player(dir),
     }
 }
 

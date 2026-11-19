@@ -1332,7 +1332,7 @@ impl Game<'_> {
                 }
                 let params = sunrise_world::loot::EntityLootParams {
                     this: sunrise_world::loot::LootEntity {
-                        on_fire: stand.fire_ticks > 0,
+                        on_fire: stand.is_on_fire(),
                         baby: false,
                         ..sunrise_world::loot::LootEntity::new("minecraft:armor_stand")
                     },
@@ -1431,6 +1431,7 @@ impl Game<'_> {
         // Entity.isInvulnerableTo: the flag, then EnchantmentHelper.isImmuneToDamage.
         let a = &self.armor_stands[i];
         if (invulnerable && !creative)
+            || (a.mod_fire_immune && tagged("minecraft:is_fire"))
             || a.invisible
             || a.marker
             || self.stand_immune_to_damage(i, damage_type, causing)
@@ -1460,7 +1461,10 @@ impl Game<'_> {
             return false;
         }
         if ignites {
-            if self.armor_stands[i].fire_ticks > 0 {
+            if self.armor_stands[i].mod_fire_immune {
+                return false;
+            }
+            if self.armor_stands[i].is_on_fire() {
                 self.cause_stand_damage(i, 0.15, damage_type, causing_id);
             } else {
                 // igniteForSeconds(5.0f): at least 100 ticks, and

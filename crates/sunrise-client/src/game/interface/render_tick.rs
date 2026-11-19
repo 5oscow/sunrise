@@ -530,7 +530,7 @@ impl Game<'_> {
         let fire = || self.pack.assets.registry.default_state("minecraft:fire");
         let on_fire = self.camera_type.is_first_person()
             && !spectator
-            && p.fire_ticks > 0
+            && p.is_on_fire()
             && (!modded
                 || fire().is_none_or(|fire| {
                     self.screen_effect_kept(

@@ -371,7 +371,9 @@ impl Game<'_> {
             self.pad.in_use = true;
             self.pad.keyboard_took_over = false;
         }
+        let previous_move = self.pad_move();
         self.pad.state = state;
+        self.resume_stick_mappings(previous_move);
         self.pad_radial_frame();
         self.pad_drop_frame();
         self.pad_output_frame();
@@ -590,6 +592,7 @@ impl Game<'_> {
                     return Ok(());
                 }
                 let screen_open = self.screen != Screen::Playing || self.title.is_some();
+                self.keys.resume_device_input(&KeyCode::ShiftLeft);
                 let was = self.keys.held(Action::Sneak);
                 self.toggles.pad_toggle(SNEAK, screen_open);
                 self.sync_toggle(SNEAK);
@@ -725,6 +728,27 @@ impl Game<'_> {
             return None;
         }
         gamepad::move_vector(self.pad.state.left, settings.move_deadzone)
+    }
+
+    /// A changed stick component is input for that direction, even below the digital
+    /// threshold. Positive and negative travel take over their own mappings only.
+    fn resume_stick_mappings(&mut self, previous: Option<[f32; 2]>) {
+        let before = previous.unwrap_or_default();
+        let after = self.pad_move().unwrap_or_default();
+        for (axis, (positive, negative)) in [
+            (KeyCode::KeyA, KeyCode::KeyD),
+            (KeyCode::KeyW, KeyCode::KeyS),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if before[axis].max(0.0) != after[axis].max(0.0) {
+                self.keys.resume_device_input(&positive);
+            }
+            if before[axis].min(0.0) != after[axis].min(0.0) {
+                self.keys.resume_device_input(&negative);
+            }
+        }
     }
 
     /// The right stick turns the view, once per frame (`Entity.turn`).

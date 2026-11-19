@@ -497,7 +497,11 @@ fn version_at(
             entry.id
         ));
     }
-    if facts.version.as_ref().is_some_and(|x| *x != v.version) {
+    if facts
+        .version
+        .as_ref()
+        .is_some_and(|x| !super::same_version(&entry.kind, x, &v.version))
+    {
         return Err(format!(
             "the file says version {:?}",
             facts.version.unwrap_or_default()

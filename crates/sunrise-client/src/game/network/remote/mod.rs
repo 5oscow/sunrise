@@ -26,9 +26,7 @@ mod block_entity_data_tests;
 use super::raw_backlog::Received;
 use super::remote_chunks::{ChunkDecoder, ChunkFormat, Next};
 use super::render_tick::{mob_tracking_body, player_tracking_body};
-use super::{
-    Dim, Game, Mining, PlaceOutcome, Screen, item_use::ticks_left, level_sounds::LevelSound,
-};
+use super::{Dim, Game, Mining, Screen, item_use::ticks_left, level_sounds::LevelSound};
 use crate::game::api_values::TryIntoApi;
 use mod_api::InteractionKey;
 use std::{
@@ -36,7 +34,6 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use sunrise_client::actions::Action;
 use sunrise_client::first_person::{Hand, SwingAnimation};
 use sunrise_client::input_queue::InputQueue;
 use sunrise_client::{
@@ -254,6 +251,7 @@ pub(super) struct Tracked {
     /// this base, so the server's next delta still lands where it means.
     codec_base: [f64; 3],
     on_fire: bool,
+    mod_fire_immune: bool,
     silent: bool,
     /// `Entity.vehicle`: the entity it rides (`SetPassengers`), whatever either one's type.
     pub(in crate::game) vehicle: Option<u32>,
@@ -835,7 +833,6 @@ pub(super) struct Remote {
     /// a SWAP_ITEM_WITH_OFFHAND (`remote_hand_slot_set`).
     swap_answer: [bool; 2],
     stop_mining: bool,
-    placing: Option<([i32; 3], u64)>,
     /// `CommonPlayerSpawnInfo.isFlat`: the level is a superflat one.
     pub(super) flat: bool,
     death_message: Option<sunrise_client::text::Text>,
@@ -1341,7 +1338,6 @@ impl Game<'_> {
             pending_keys: InputQueue::new(queued_keys::PENDING_KEYS),
             swap_answer: [false; 2],
             stop_mining: false,
-            placing: None,
             flat: false,
             death_message: None,
             show_death_screen: true,
@@ -1588,7 +1584,6 @@ impl Game<'_> {
             pending_keys: InputQueue::new(queued_keys::PENDING_KEYS),
             swap_answer: [false; 2],
             stop_mining: false,
-            placing: None,
             flat: false,
             death_message: None,
             show_death_screen: true,
@@ -2238,8 +2233,9 @@ impl Game<'_> {
     /// `Minecraft.runTick` handles every packet that came (`runAllTasks`)
     /// before the frame's ticks. What this frame's poll left for later (chunks
     /// past its budget or still decoding, and everything after them) is taken
-    /// when a tick is about to run, so the tick moves through those chunks and
-    /// a batch's `ChunkBatchReceived` goes out from it, as vanilla's does.
+    /// when a tick is about to run, so the tick moves through those chunks, as
+    /// vanilla's does. A batch's `ChunkBatchReceived` is not among them: the
+    /// network thread answers it (`net::receive_play`).
     pub(in crate::game) fn poll_remote_before_tick(&mut self) -> Result<()> {
         if self.remote.as_ref().is_none_or(|r| r.backlog.is_empty()) {
             return Ok(());
@@ -2823,6 +2819,7 @@ impl Game<'_> {
                     position,
                     codec_base: position,
                     on_fire: false,
+                    mod_fire_immune: false,
                     silent: false,
                     vehicle: None,
                 },
@@ -3484,12 +3481,6 @@ impl Game<'_> {
             // `poll_remote` forgets a run of them at once.
             C::ForgetLevelChunk(p) => {
                 self.forget_remote_columns(&mut [(p.pos[0], p.pos[1])].into_iter().collect(), true);
-            }
-            C::ChunkBatchFinished(_) => {
-                // ChunkBatchSizeCalculator's ceiling; meshing runs on workers.
-                self.send(S::ChunkBatchReceived(play::ChunkBatchReceived {
-                    chunks_per_tick: 64.0,
-                }));
             }
             C::BlockUpdate(p) => self.server_block(p.pos, p.state),
             C::AddTransientBlock(p) => self.add_transient_block(p.pos, p.state),
@@ -6357,7 +6348,6 @@ impl Game<'_> {
         self.cooldowns.tick();
         // Player.tick's sleep counter (the darkening and the wake-up fade).
         self.sleep_timer = super::tick_sleep_timer(self.sleep_timer, self.sleeping.is_some());
-        let stick = self.pad_move();
         if self.player.is_none() {
             return Ok(None);
         }
@@ -6367,19 +6357,12 @@ impl Game<'_> {
             .as_ref()
             .is_some_and(|r| r.level_load.is_active());
         let playing = self.screen == Screen::Playing && !loading && !self.dialog_open();
-        let held = |action| playing && self.keys.held(action);
-        let mut keys = Keys {
-            forward: held(Action::Forward),
-            backward: held(Action::Back),
-            left: held(Action::Left),
-            right: held(Action::Right),
-            jump: held(Action::Jump),
-            shift: held(Action::Sneak),
-            sprint: held(Action::Sprint),
-            sprint_suppressed: false,
-            analog: None,
-        }
-        .with_stick(stick.filter(|_| playing));
+        let stick = self.pad_move();
+        let mut keys = if playing {
+            self.sample_movement_keys(stick)
+        } else {
+            Keys::default()
+        };
         // On a server (not this game's own server thread), the stick moves as the keys it sets do
         // (`KeyboardInput.tick`: 8 directions, full speed). The server only hears those keys
         // (`ServerboundPlayerInputPacket`), and an anticheat that predicts from them pulls back
@@ -6529,10 +6512,12 @@ impl Game<'_> {
         // The server decides fire the window cannot predict (blaze fireballs,
         // fire aspect, lightning): Entity.isOnFire reads the synched flag, so
         // the predicted tick's countdown must not end it while it is set.
-        player.fire_ticks = hold_server_fire(
-            player.fire_ticks,
-            self.remote.as_ref().is_some_and(|r| r.own_on_fire),
-        );
+        if !player.mod_fire_immune {
+            player.fire_ticks = hold_server_fire(
+                player.fire_ticks,
+                self.remote.as_ref().is_some_and(|r| r.own_on_fire),
+            );
+        }
         // LocalPlayer.onUpdateAbilities: flight turned on or off (a double
         // jump, a spectator, landing) is sent to the server.
         let flying = player.flying;
@@ -8306,13 +8291,32 @@ impl Game<'_> {
     /// than past them (the server would refuse it). Its place sound is the
     /// placer's own (`playSound(player, ...)`: the server sends it to the
     /// others only).
-    fn predict_place(&mut self, (pos, changes): &DryPlace, seq: i32) {
-        let ticks = self.ticks;
-        if let Some(r) = self.remote.as_mut() {
-            // set_block plays the place sound of the block at `placing`.
-            r.placing = Some(([pos.x, pos.y, pos.z], ticks));
+    fn predict_place(&mut self, placed: &DryPlace, stack: &ItemStack, seq: i32) {
+        let pos = placed.pos;
+        let at = [pos.x, pos.y, pos.z];
+        // The dry simulation puts the stack state in the primary write. The
+        // live copy takes item components before replaying the other cells.
+        let Some((primary, rest)) = placed.changes.split_first() else {
+            return;
+        };
+        self.predict_blocks(std::slice::from_ref(primary), seq);
+        if placed.matches_candidate {
+            self.apply_predicted_item(at, stack);
         }
-        self.predict_blocks(changes, seq);
+        self.predict_blocks(rest, seq);
+        let state = primary.1;
+        if !self.res.facts().is_air(state) {
+            let sound = self.own_sound_type(at, state, mod_api::BlockSoundCause::Place);
+            self.play_client_local_sound(
+                LevelSound::new(
+                    &sound.place,
+                    at.map(|n| f64::from(n) + 0.5),
+                    (sound.volume + 1.0) / 2.0,
+                    sound.pitch * 0.8,
+                )
+                .in_source(mod_api::SoundSource::Blocks),
+            );
+        }
     }
 
     /// The idle controller guide cannot know what these Parts will decide on a click.
@@ -8360,20 +8364,31 @@ impl Game<'_> {
             item: stack.item.to_string(),
             can_use_game_master_blocks: self.can_use_game_master_blocks(),
         };
+        let registry = self.pack.assets.registry;
         self.with_level(|b, level, ticks| {
             let mut level = DryLevel::new(level);
             level.reads = Some(ticks);
             level.asks_mods = asks_mods;
-            match b.place_block(
+            let placed = b.place_block_with_state(
                 &mut level,
                 &mut sunrise_world::level::Ticks::default(),
                 &ctx,
-            ) {
-                PlaceOutcome::Placed { pos, .. } => {
-                    Some((pos, level.changed.into_iter().collect()))
-                }
-                PlaceOutcome::Failed => None,
-            }
+                |state| {
+                    crate::game::block_items::item_block_state(
+                        registry,
+                        state,
+                        stack,
+                        ctx.can_use_game_master_blocks,
+                    )
+                },
+            )?;
+            let pos = placed.context.pos;
+            let primary = level.changed.remove_entry(&pos);
+            Some(DryPlace {
+                pos,
+                matches_candidate: placed.matches_candidate,
+                changes: primary.into_iter().chain(level.changed).collect(),
+            })
         })
     }
 
@@ -9745,7 +9760,11 @@ type DryChanges = Vec<(sunrise_core::position::BlockPos, BlockStateId)>;
 /// What a use on the dry level changed, and the sounds it played.
 pub(super) type DryUse = (DryChanges, Vec<DrySound>);
 /// Where `BlockItem.place` on the dry level placed, and the blocks it set.
-type DryPlace = (sunrise_core::position::BlockPos, DryChanges);
+pub(super) struct DryPlace {
+    pub(super) pos: sunrise_core::position::BlockPos,
+    matches_candidate: bool,
+    pub(super) changes: DryChanges,
+}
 
 /// The blocks a guest's hand flips that its use predicts (and hears at once): a wooden or
 /// copper door, trapdoor or fence gate, a lever, a button or a cauldron, whose fill level
@@ -10218,6 +10237,15 @@ impl Remote {
         } else {
             self.entities.get(&id).map(|t| t.on_fire)
         }
+    }
+    pub(in crate::game) fn tracked_fire_immunity(&self, id: i32) -> Option<bool> {
+        Some(self.entities.get(&id)?.mod_fire_immune)
+    }
+    pub(in crate::game) fn set_tracked_fire_immunity(&mut self, id: i32, immune: bool) -> bool {
+        self.entities.get_mut(&id).is_some_and(|entity| {
+            entity.mod_fire_immune = immune;
+            true
+        })
     }
     /// The kind and last sent position of a tracked server entity.
     pub(super) fn tracked(&self, id: i32) -> Option<(&str, [f64; 3])> {
@@ -10757,6 +10785,7 @@ pub(crate) mod tests {
                     position: [0.0; 3],
                     codec_base: [0.0; 3],
                     on_fire: false,
+                    mod_fire_immune: false,
                     silent: false,
                     vehicle: None,
                 },
@@ -13716,7 +13745,7 @@ pub(crate) mod tests {
             let preview = game
                 .remote_can_place(&hit, &stack)
                 .expect("client predicts the alias");
-            assert_eq!([preview.0.x, preview.0.y, preview.0.z], pos);
+            assert_eq!([preview.pos.x, preview.pos.y, preview.pos.z], pos);
             assert_eq!(
                 game.world.block(pos[0], pos[1], pos[2]),
                 game.res.facts().air,
@@ -14737,6 +14766,7 @@ pub(crate) mod tests {
             position: [0.0, 64.0, 0.0],
             codec_base: [0.0, 64.0, 0.0],
             on_fire: false,
+            mod_fire_immune: false,
             silent: false,
             vehicle: None,
         };
@@ -14776,6 +14806,7 @@ pub(crate) mod tests {
                 position: [8.5, 64.0, -3.5],
                 codec_base: [8.5, 64.0, -3.5],
                 on_fire: false,
+                mod_fire_immune: false,
                 silent: false,
                 vehicle: None,
             },
@@ -14821,6 +14852,7 @@ pub(crate) mod tests {
                 position: [8.5, 64.0, -3.5],
                 codec_base: [8.5, 64.0, -3.5],
                 on_fire: false,
+                mod_fire_immune: false,
                 silent: true,
                 vehicle: None,
             },

@@ -521,7 +521,7 @@ impl Game<'_> {
                     .world
                     .block_entities
                     .get_mut(&pos)
-                    .and_then(|block| block.slots_mut().get_mut(index))
+                    .and_then(|block| block.slot_mut(index))
                 else {
                     return false;
                 };

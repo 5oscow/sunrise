@@ -1589,6 +1589,8 @@ pub struct Mob {
     /// checks made outside the mob world (minecarts, boats).
     pub on_climbable: bool,
     pub fire_ticks: i32,
+    /// Unsaved fire immunity granted on this logical side.
+    pub mod_fire_immune: bool,
     pub ticks_frozen: i32,
     /// `Entity.isInPowderSnow` as of the last mob tick, for the skeleton's
     /// freezing tracker read at save time.
@@ -2710,12 +2712,20 @@ impl Mob {
             .sum();
         (base - 0.15 * f64::from(protection)).max(0.0)
     }
+    /// The mob type's fire immunity or a live grant. Species-specific hurt rules
+    /// (such as the Creaking's heart-bound damage gate) stay on their own paths.
+    pub fn fire_immune(&self) -> bool {
+        self.kind.flags.fire_immune || self.mod_fire_immune
+    }
     /// Entity.isOnFire: fire-immune mobs never count as burning, even on the
     /// tick a sun or fire check set their timer before `base_tick` clears it.
     pub fn is_on_fire(&self) -> bool {
-        !self.kind.flags.fire_immune && self.fire_ticks > 0
+        self.fire_ticks > 0 && !self.fire_immune()
     }
     pub fn ignite_for_ticks(&mut self, ticks: i32) {
+        if self.mod_fire_immune {
+            return;
+        }
         self.fire_ticks = self
             .fire_ticks
             .max((f64::from(ticks) * self.burning_time()).ceil() as i32);
@@ -3651,6 +3661,7 @@ impl Mob {
             climbing: false,
             on_climbable: false,
             fire_ticks: 0,
+            mod_fire_immune: false,
             ticks_frozen: 0,
             in_powder_snow: false,
             was_in_powder_snow: false,

@@ -88,6 +88,17 @@ fn files_pass_against_their_entries() {
 }
 
 #[test]
+fn install_verification_compares_mod_versions_as_semver() {
+    let mut index = sample();
+    let smod = fixtures().join("coords_hud-0.1.0.smod");
+    index.projects[0].versions[0].version = "0.1".into();
+    assert_eq!(check(&index, "coords_hud", &smod), Ok(Trust::Verified));
+    index.projects[0].versions[0].version = "0.2".into();
+    let e = check(&index, "coords_hud", &smod).unwrap_err();
+    assert!(e.contains("isn't what the index lists"), "{e}");
+}
+
+#[test]
 fn a_changed_file_key_or_manifest_is_refused() {
     let index = sample();
     let dir = std::env::temp_dir().join(format!("sunrise-index-{}", std::process::id()));

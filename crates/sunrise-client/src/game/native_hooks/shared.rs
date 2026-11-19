@@ -1974,19 +1974,21 @@ impl Game<'_> {
         pos: BlockPos,
         state: BlockStateId,
         placed_against: BlockStateId,
-        companion: Option<(BlockPos, BlockStateId)>,
+        extra: impl IntoIterator<Item = (BlockPos, BlockStateId)>,
     ) -> bool {
-        let placement = match companion {
-            None => Placement::Single,
-            Some((at, extra)) => {
-                let (Ok(state), Ok(extra)) = (state.try_into_api(), extra.try_into_api()) else {
-                    return false;
-                };
-                Placement::Multi(Vec::from([
-                    BlockPlacement::new(pos, state),
-                    BlockPlacement::new(at, extra),
-                ]))
-            }
+        let mut extra = extra.into_iter();
+        let placement = if let Some(first) = extra.next() {
+            let Some(writes) = std::iter::once((pos, state))
+                .chain(std::iter::once(first))
+                .chain(extra)
+                .map(|(at, state)| Some(BlockPlacement::new(at, state.try_into_api().ok()?)))
+                .collect()
+            else {
+                return false;
+            };
+            Placement::Multi(writes)
+        } else {
+            Placement::Single
         };
         let mut canceled = false;
         self.native_entity_place(placer, pos, state, placed_against, placement, &mut canceled);
@@ -1998,44 +2000,69 @@ impl Game<'_> {
         &mut self,
         ctx: &PlaceContext,
         by_player: bool,
-    ) -> Option<(PlacementContext, BlockStateId)> {
-        if !mod_api::__private::listened(mod_api::HookId::EntityPlace) {
-            return self
-                .with_level(|b, level, ticks| b.place_block_with_context(level, ticks, ctx));
-        }
-        let (decision, preview) =
-            self.with_level(|b, level, ticks| b.decide_placement(level, ticks, ctx))?;
-        let against_pos = decision.placed_against_pos();
-        let block = |game: &Game<'_>, pos: BlockPos| game.world.block(pos.x, pos.y, pos.z);
-        let against = block(self, against_pos);
-        let target_before = block(self, preview.pos);
-        let companion_before = preview.companion.map(|(pos, _)| (pos, block(self, pos)));
-        let hand = if by_player {
-            self.held().cloned()
-        } else {
-            None
+        stack: &ItemStack,
+    ) -> crate::Result<Option<sunrise_world::level::AppliedPlacement>> {
+        let registry = self.pack.assets.registry;
+        let game_master = ctx.can_use_game_master_blocks;
+        let stack_state =
+            |state| crate::game::block_items::item_block_state(registry, state, stack, game_master);
+        let Some((decision, preview)) =
+            self.with_level(|b, level, ticks| b.decide_placement(level, ticks, ctx, stack_state))
+        else {
+            return Ok(None);
         };
-        let placer = by_player
-            .then(|| self.native_clicker().1.cast_unsigned())
-            .and_then(|entity| self.entity(entity));
-        // The existing block revision and journal epoch cover rule inputs such as
-        // supporting blocks and block-entity shapes without tracing ordinary reads.
-        let level = (self.dim, self.world.revision, self.transactions.writes());
-        if self.placement_canceled(
-            placer,
-            preview.pos,
-            preview.state,
-            against,
-            preview.companion,
-        ) || level != (self.dim, self.world.revision, self.transactions.writes())
-            || block(self, preview.pos) != target_before
-            || block(self, against_pos) != against
-            || companion_before.is_some_and(|(pos, state)| block(self, pos) != state)
-            || (by_player && self.held() != hand.as_ref())
-        {
-            return None;
+        let veto = mod_api::__private::listened(mod_api::HookId::EntityPlace);
+        if veto {
+            let against_pos = decision.placed_against_pos();
+            let block = |game: &Game<'_>, pos: BlockPos| game.world.block(pos.x, pos.y, pos.z);
+            let against = block(self, against_pos);
+            let target_before = block(self, preview.pos);
+            // One proposed state per affected cell. A companion at the pre-clear
+            // position supersedes the intermediate air or water write.
+            let extra = preview.companion.into_iter().chain(
+                preview
+                    .pre_clear
+                    .filter(|(pos, _)| preview.companion.is_none_or(|(at, _)| at != *pos)),
+            );
+            let hand = if by_player {
+                self.held().cloned()
+            } else {
+                None
+            };
+            let placer = by_player
+                .then(|| self.native_clicker().1.cast_unsigned())
+                .and_then(|entity| self.entity(entity));
+            // The block revision and journal epoch cover supporting blocks and
+            // block-entity shapes without tracing ordinary reads.
+            let level = (self.dim, self.world.revision, self.transactions.writes());
+            if self.placement_canceled(placer, preview.pos, preview.state, against, extra)
+                || level != (self.dim, self.world.revision, self.transactions.writes())
+                || block(self, preview.pos) != target_before
+                || block(self, against_pos) != against
+                || (by_player && self.held() != hand.as_ref())
+            {
+                return Ok(None);
+            }
         }
-        self.with_level(|b, level, ticks| b.apply_placement(level, ticks, decision))
+        let Some(placed) = self
+            .with_level(|b, level, ticks| b.apply_placement(level, ticks, decision, stack_state))
+        else {
+            return Ok(None);
+        };
+        if placed.matches_candidate {
+            let pos = placed.context.pos;
+            let target = [pos.x, pos.y, pos.z];
+            self.apply_block_item_data(target, placed.state, stack, game_master);
+            self.with_level(|b, level, ticks| b.placement_set_placed_by(level, ticks, &placed));
+            let placer = by_player.then(|| self.native_acting_player()).flatten();
+            self.set_placed_by(target, placer, Some(stack))?;
+            self.block_item_placed(stack, placer, &placed.context);
+            if by_player {
+                self.trigger_block("minecraft:placed_block", target, stack);
+            }
+        }
+        self.with_level(|b, level, ticks| b.report_placement(level, ticks, &placed));
+        Ok(Some(placed))
     }
     /// `MobEvent::PlaceBlock`: a mob sets `state` at `pos` unless a mod
     /// cancels `entity_place`. Enderman attempts use `enderman_place_block`.
@@ -2220,6 +2247,7 @@ impl Game<'_> {
 
     /// Tells the mods of the chunks that came into this level.
     pub(super) fn native_chunks_loaded(&mut self) {
+        self.fire_pending_block_entity_data_loads();
         let loaded = std::mem::take(&mut self.world.loaded_chunks);
         if self.remote.is_some() {
             return;
@@ -2831,7 +2859,7 @@ impl Game<'_> {
                 .insert(m.id.clone(), sunrise_client::mod_list::ModInfo::of(m, None));
             Installed {
                 id: m.id.clone(),
-                title: [m.name.as_str(), " ", m.version.as_str()].concat(),
+                title: format!("{} {}", m.name, m.version),
                 description: m.description.clone(),
                 problem: None,
                 dev: false,
