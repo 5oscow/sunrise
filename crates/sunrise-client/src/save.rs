@@ -15,7 +15,7 @@
 //! `level.dat`) are migrated on open.
 use crate::mod_chunk_tickets::{ModTicket, ModTickets, TicketOwner};
 mod backpressure;
-use backpressure::compress_records;
+use compression_pool::{CompressedWrite, compress_records};
 pub mod biome_regions;
 pub mod block_entity_encode;
 mod block_entity_order;
@@ -27,7 +27,7 @@ mod horizon_names_tests;
 pub mod level_mods;
 mod respawn;
 mod writes;
-use writes::{Outstanding, Writer};
+use writes::{Outstanding, QueuedWrite, Writer};
 
 use crate::{
     Result,
@@ -691,7 +691,12 @@ pub fn block_entity_data(
     lock: Option<&Tag>,
     items: &crate::items::Items,
 ) -> Tag {
-    let mut tag = block_entity_encode::encode(p, e, block, items);
+    let tag = block_entity_encode::encode(p, e, block, items);
+    command_block_entity_data(tag, lock)
+}
+
+/// Apply the command data view to an encoded block entity.
+pub fn command_block_entity_data(mut tag: Tag, lock: Option<&Tag>) -> Tag {
     if let Tag::Compound(map) = &mut tag {
         map.remove(&"keepPacked".into());
         if let Some(lock) = lock {
@@ -722,10 +727,10 @@ pub fn decode_end_gateway(tag: &Tag) -> crate::containers::EndGateway {
     }
 }
 /// A mod's block entity: its compound without `id` and the position, and
-/// its `Items` as slots (`ContainerHelper.loadAllItems`; the game sizes them
-/// to the block's container when it uses them). `Items` that do not re-encode
-/// exactly (compared in slot order) stay the mod's own.
+/// the `Items` rows that can be represented losslessly as modeled slots.
+/// The game sizes the modeled vector to its container when it uses it.
 fn decode_mod_block_entity(id: String, tag: &Tag) -> Option<crate::containers::ModBlockEntity> {
+    use crate::block_entity_nbt::saved_item_slot;
     let Tag::Compound(map) = tag else {
         return None;
     };
@@ -737,25 +742,35 @@ fn decode_mod_block_entity(id: String, tag: &Tag) -> Option<crate::containers::M
     let shapes = nbt
         .remove(&crate::containers::SHAPES_KEY.into())
         .and_then(|tag| crate::containers::PublishedShapes::from_tag(&tag));
-    // `Slot` is a byte: 256 slots at most.
-    let mut items = decode_items(nbt.get(&"Items".into()), 256);
-    // Compared in slot order, the order `encode_items` writes: vanilla loads by `Slot`.
-    let encoded = sunrise_items::item_nbt::encode_items_using(&items, |stack| Tag::from(stack));
-    let matches = match (nbt.get(&"Items".into()), &encoded) {
-        (Some(Tag::List(saved)), Tag::List(encoded)) => {
-            let mut saved: Vec<&Tag> = saved.iter().collect();
-            saved.sort_by_key(|entry| number(entry.get("Slot")).unwrap_or(0) as u8);
-            saved.into_iter().eq(encoded.iter())
+    let mut items = Vec::new();
+    let key = "Items".into();
+    if let Some(Tag::List(entries)) = nbt.get_mut(&key) {
+        let mut occurrences = [0u8; 256];
+        for slot in entries.iter().filter_map(saved_item_slot) {
+            occurrences[slot] = occurrences[slot].saturating_add(1);
         }
-        (saved, encoded) => saved == Some(encoded),
-    };
-    if matches {
-        nbt.remove(&"Items".into());
-        while items.last().is_some_and(Option::is_none) {
-            items.pop();
+        entries.retain(|raw| {
+            let Some(slot) = saved_item_slot(raw) else {
+                return true;
+            };
+            if occurrences[slot] == 1
+                && let Some(stack) = item_from_nbt(raw)
+                && let Tag::Compound(mut canonical) = Tag::from(&stack)
+            {
+                canonical.insert("Slot".into(), Tag::Byte(slot as i8));
+                if raw == &Tag::Compound(canonical) {
+                    if items.len() <= slot {
+                        items.resize(slot + 1, None);
+                    }
+                    items[slot] = Some(stack);
+                    return false;
+                }
+            }
+            true
+        });
+        if entries.is_empty() && !items.is_empty() {
+            nbt.remove(&key);
         }
-    } else {
-        items.clear();
     }
     let mut entity = crate::containers::ModBlockEntity::new(
         id,
@@ -1263,6 +1278,18 @@ pub fn encode_with(
     shape: LevelShape,
     items: &crate::items::Items,
 ) -> NamedTag {
+    encode_full(chunk, registry, biomes, tables, shape, items, true)
+}
+
+fn encode_full(
+    chunk: &Chunk,
+    registry: &BlockRegistry,
+    biomes: &Biomes,
+    tables: Option<&SaveTables>,
+    shape: LevelShape,
+    items: &crate::items::Items,
+    apply_block_entity_edits: bool,
+) -> NamedTag {
     let sky_light = shape.sky_light;
     let mut sections = Vec::new();
     let air = tables.map_or(0, |t| t.air);
@@ -1359,7 +1386,13 @@ pub fn encode_with(
         .filter(|(_, e)| !block_entity_placeholder(e))
         .map(|(p, e)| {
             let block = block_name(p);
-            let mut current = block_entity_encode::encode(*p, e, &block, items);
+            let mut current = block_entity_encode::encode_with(*p, e, &block, items, |_, _| {
+                if apply_block_entity_edits {
+                    extras?.block_entity_save_edits.as_ref()?.get(p).cloned()
+                } else {
+                    None
+                }
+            });
             if let Some((_, name)) = chunk.block_names.iter().find(|(q, _)| q == p)
                 && let Tag::Compound(map) = &mut current
             {
@@ -2052,18 +2085,19 @@ fn write_region_records(
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs() as u32);
     let compressed = compress_records(records, timestamp);
-    let mut by_region: BTreeMap<(i32, i32), Vec<(ChunkPos, Option<ChunkRecord>)>> = BTreeMap::new();
-    for (&((x, z), _), record) in records.iter().zip(compressed) {
+    type RegionWrite<'a> = (ChunkPos, &'a Record, Option<CompressedWrite>);
+    let mut by_region: BTreeMap<(i32, i32), Vec<RegionWrite<'_>>> = BTreeMap::new();
+    for (&((x, z), source), record) in records.iter().zip(compressed) {
         let record = record?;
         by_region
             .entry((x >> 5, z >> 5))
             .or_default()
-            .push((ChunkPos::new(x, z), record));
+            .push((ChunkPos::new(x, z), source, record));
     }
     for ((rx, rz), list) in by_region {
         let path = region_path(root, folder, rx, rz);
         // Clearing chunks of a region that doesn't exist changes nothing.
-        let create = list.iter().any(|(_, r)| r.is_some());
+        let create = list.iter().any(|(_, _, r)| r.is_some());
         let Some(region) = cached_region(cache, (rx, rz), &path, create)? else {
             continue;
         };
@@ -2072,13 +2106,13 @@ fn write_region_records(
         let _writing = far_regions::writing(cache, (rx, rz));
         let mut region = region.lock().map_err(|_| "region file poisoned")?;
         let mut changed = false;
-        for (pos, record) in &list {
+        for (pos, source, record) in list {
             match record {
                 Some(record) => {
-                    region.write(*pos, record)?;
+                    write_chunk_record(&mut region, pos, source, record)?;
                     changed = true;
                 }
-                None => changed |= region.clear(*pos, timestamp)?,
+                None => changed |= region.clear(pos, timestamp)?,
             }
         }
         if changed {
@@ -2094,6 +2128,42 @@ fn write_region_records(
         }
     }
     Ok(())
+}
+
+fn write_chunk_record(
+    region: &mut RegionFile,
+    pos: ChunkPos,
+    source: &Record,
+    CompressedWrite { record, primary }: CompressedWrite,
+) -> std::io::Result<()> {
+    let error = match region.write(pos, &record) {
+        Ok(()) => {
+            if primary {
+                source.accept_block_entity_edits();
+            }
+            return Ok(());
+        }
+        Err(error) => error,
+    };
+    if !primary
+        || !error
+            .get_ref()
+            .is_some_and(|cause| cause.is::<sunrise_world::region::CompressedChunkLimit>())
+    {
+        return Err(error);
+    }
+    let (compression, timestamp) = (record.compression, record.timestamp);
+    drop(record);
+    let Some(stored) = source.without_block_entity_edits() else {
+        return Err(error);
+    };
+    log::warn!(
+        "block_entity_save_additional: discarding listener edits from chunk {},{}: {error}",
+        pos.x,
+        pos.z
+    );
+    let stored = ChunkRecord::from_nbt(&stored, compression, timestamp, Limits::saved())?;
+    region.write(pos, &stored)
 }
 
 /// `job(i)` for every `i` below `count`, in order, shared between this thread
@@ -2266,7 +2336,7 @@ fn upgrade_record<'a>(
 /// Chunk and entity records waiting for the writer thread, by (entities?,
 /// x, z): reads see them before the region files do.
 type PendingWrites = Mutex<HashMap<(Folder, i32, i32), (u64, Record)>>;
-type WriteBatch = (Folder, Vec<((i32, i32), Record, u64)>);
+type WriteBatch = (Folder, Vec<QueuedWrite>);
 /// The region folders of a dimension.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Folder {
@@ -2731,7 +2801,9 @@ impl SaveDir {
     }
     /// A record as saved: the pending write first, then the region file.
     fn read_record_raw(&self, folder: &str, x: i32, z: i32) -> Option<NamedTag> {
-        self.try_read_record_raw(folder, x, z).ok().flatten()
+        self.try_read_record_raw(folder, x, z, Record::tag_for_metadata)
+            .ok()
+            .flatten()
     }
     /// `read_record_raw`, telling a record that isn't there (`Ok(None)`) from a read that failed
     /// (`Err`, already reported): the second may succeed on a later read.
@@ -2740,6 +2812,7 @@ impl SaveDir {
         folder: &str,
         x: i32,
         z: i32,
+        read_pending: fn(&Record) -> Option<Arc<NamedTag>>,
     ) -> std::result::Result<Option<NamedTag>, ()> {
         let pending = self
             .pending
@@ -2748,7 +2821,7 @@ impl SaveDir {
             .get(&(Folder::of(folder), x, z))
             .map(|(_, r)| r.clone());
         if let Some(record) = pending {
-            return Ok(record.tag().map(|t| (*t).clone()));
+            return Ok(read_pending(&record).map(|t| (*t).clone()));
         }
         let cache = match Folder::of(folder) {
             Folder::Region => &self.regions,
@@ -2774,8 +2847,9 @@ impl SaveDir {
         folder: &str,
         x: i32,
         z: i32,
+        read_pending: fn(&Record) -> Option<Arc<NamedTag>>,
     ) -> std::result::Result<Option<NamedTag>, ()> {
-        let Some(mut record) = self.try_read_record_raw(folder, x, z)? else {
+        let Some(mut record) = self.try_read_record_raw(folder, x, z, read_pending)? else {
             return Ok(None);
         };
         match self.upgrade_record(Folder::of(folder), &mut record) {
@@ -2788,7 +2862,9 @@ impl SaveDir {
     }
     /// A record brought to the current version (`upgrade_record`).
     fn read_record(&self, folder: &str, x: i32, z: i32) -> Option<NamedTag> {
-        self.try_read_record(folder, x, z).ok().flatten()
+        self.try_read_record(folder, x, z, Record::tag_for_metadata)
+            .ok()
+            .flatten()
     }
     fn upgrade_record(&self, folder: Folder, record: &mut NamedTag) -> Result<()> {
         upgrade_record(folder, record, || {
@@ -2809,7 +2885,7 @@ impl SaveDir {
         registry: &BlockRegistry,
         biomes: &Biomes,
     ) -> std::result::Result<Option<Chunk>, ()> {
-        let Some(root) = self.try_read_record("region", x, z)? else {
+        let Some(root) = self.try_read_record("region", x, z, Record::tag)? else {
             return Ok(None);
         };
         let tables = self.tables.get().map(|t| &**t);
@@ -6639,7 +6715,8 @@ mod tests {
                 .pop()
                 .expect("one record")
                 .expect("an encoded record")
-                .expect("a chunk, not a deletion");
+                .expect("a chunk, not a deletion")
+                .record;
             assert_eq!(
                 written.compression,
                 Compression::selected(),
@@ -6683,7 +6760,7 @@ mod tests {
                 })
                 .transpose()
                 .unwrap();
-            let got = got.unwrap();
+            let got = got.unwrap().map(|r| r.record);
             assert_eq!(
                 got.as_ref().map(|r| (&r.compressed, r.timestamp)),
                 want.as_ref().map(|r| (&r.compressed, r.timestamp))
@@ -7543,6 +7620,74 @@ mod tests {
             panic!("not a mod's");
         };
         assert!(bad.shapes().is_none());
+    }
+
+    #[test]
+    fn mod_block_entity_items_claim_only_the_slots_written() {
+        use crate::{
+            containers::{BlockEntity, ModBlockEntity},
+            items::ItemStack,
+        };
+        let parse = |s| sunrise_core::nbt::parse_snbt(s).unwrap().0;
+        let saved = parse(
+            r#"{id:"test:machine",x:0,y:64,z:0,Items:[{Slot:0b,raw:"superseded"},{Slot:1b,raw:"retained"},{raw:"no slot"}]}"#,
+        );
+        let (pos, BlockEntity::Mod(mut data)) = decode_block_entity(&saved).unwrap() else {
+            panic!("expected mod block entity")
+        };
+        let encode = |data: &ModBlockEntity| {
+            block_entity_encode::encode(
+                pos,
+                &BlockEntity::Mod(Box::new(data.clone())),
+                "test:machine",
+                &Default::default(),
+            )
+        };
+        data.items.resize(2, None);
+        *data.item_slot_mut(0).unwrap() = Some(ItemStack::new("minecraft:stone", 2));
+        let encoded = encode(&data);
+        assert_eq!(
+            encoded.get("Items"),
+            Some(&parse(
+                r#"[{Slot:0b,id:"minecraft:stone",count:2},{Slot:1b,raw:"retained"},{raw:"no slot"}]"#
+            ))
+        );
+        let (_, BlockEntity::Mod(reloaded)) = decode_block_entity(&encoded).unwrap() else {
+            panic!("expected mod block entity")
+        };
+        assert_eq!(reloaded.items[0], data.items[0]);
+        assert_eq!(encode(&reloaded), encoded);
+        *data.item_slot_mut(0).unwrap() = None;
+        // A tick reply replacing the mutable fields, including shrinking the
+        // modeled vector to zero, cannot restore the old saved row for slot 0.
+        let mut snapshot = (**data).clone();
+        snapshot.items.clear();
+        let revision = data.revision().changes() + 1;
+        data.apply_snapshot(snapshot, revision);
+        assert_eq!(
+            encode(&data).get("Items"),
+            Some(&parse(r#"[{Slot:1b,raw:"retained"},{raw:"no slot"}]"#))
+        );
+        data.items.resize(2, None);
+        *data.item_slot_mut(1).unwrap() = None;
+        assert_eq!(
+            encode(&data).get("Items"),
+            Some(&parse(r#"[{raw:"no slot"}]"#))
+        );
+        let (_, BlockEntity::Mod(mixed)) = decode_block_entity(&parse(
+            r#"{id:"test:machine",x:0,y:64,z:0,Items:[{Slot:0b,raw:"opaque"},{Slot:1b,id:"minecraft:stone",count:2}]}"#,
+        ))
+        .unwrap() else {
+            panic!("expected mod block entity")
+        };
+        assert_eq!(
+            mixed.items,
+            [None, Some(ItemStack::new("minecraft:stone", 2))]
+        );
+        data.nbt.insert("Items".into(), parse("{energy:5}"));
+        assert_eq!(encode(&data).get("Items"), Some(&parse("{energy:5}")));
+        data.nbt.remove(&"Items".into());
+        assert_eq!(encode(&data).get("Items"), None);
     }
 
     #[test]

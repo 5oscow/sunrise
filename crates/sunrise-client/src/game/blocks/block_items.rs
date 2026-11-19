@@ -90,14 +90,18 @@ impl Game<'_> {
     }
 
     /// The block entity at `key` as vanilla saves it, with its custom name.
-    fn saved_block_entity(&self, key: (i32, i32, i32)) -> Option<Tag> {
+    fn saved_block_entity(&self, key: (i32, i32, i32), for_save: bool) -> Option<Tag> {
         let entity = self.world.block_entities.get(&key)?;
         let block = &self
             .res
             .facts()
             .get(self.world.block(key.0, key.1, key.2))
             .name;
-        let mut tag = save::block_entity_encode::encode(key, entity, block, self.res.items());
+        let mut tag = if for_save {
+            self.encode_live_block_entity(key, entity, block, self.res.items())
+        } else {
+            save::block_entity_encode::encode(key, entity, block, self.res.items())
+        };
         if let (Some(name), Tag::Compound(map)) = (self.world.block_names.get(&key), &mut tag) {
             map.insert("CustomName".into(), name.clone());
         }
@@ -152,7 +156,7 @@ impl Game<'_> {
     /// `pos`, if any, onto `stack` (`BlockItem.setBlockEntityData`, then
     /// `ItemStack.applyComponents(collectComponents())`).
     pub(super) fn add_block_data(&self, pos: [i32; 3], stack: &mut ItemStack) {
-        if let Some(saved) = self.saved_block_entity((pos[0], pos[1], pos[2])) {
+        if let Some(saved) = self.saved_block_entity((pos[0], pos[1], pos[2]), true) {
             apply_patch(stack, block_entity_item::pick(&saved));
         }
     }
@@ -240,8 +244,14 @@ impl Game<'_> {
             self.world.block_entities.get(&key),
             Some(BlockEntity::CopperGolemStatue(_))
         );
-        if (include_data || banner || pot || statue)
-            && let Some(saved) = self.saved_block_entity(key)
+        // A mod entity contributes only once, to the winning stack in add_block_data.
+        let mod_entity = matches!(
+            self.world.block_entities.get(&key),
+            Some(BlockEntity::Mod(_))
+        );
+        if !mod_entity
+            && (include_data || banner || pot || statue)
+            && let Some(saved) = self.saved_block_entity(key, false)
         {
             let mut picked = block_entity_item::pick(&saved);
             if pot {
@@ -263,7 +273,7 @@ impl Game<'_> {
         if !filled {
             return;
         }
-        let Some(saved) = self.saved_block_entity(key) else {
+        let Some(saved) = self.saved_block_entity(key, false) else {
             return;
         };
         let state = self.world.block(pos[0], pos[1], pos[2]);
@@ -337,7 +347,7 @@ impl Game<'_> {
         self.pending.clear(pos);
         let state = self.world.block(pos[0], pos[1], pos[2]);
         self.sculk_place_entity(state);
-        let Some(saved) = self.saved_block_entity(key) else {
+        let Some(saved) = self.saved_block_entity(key, false) else {
             return;
         };
         let placed = block_entity_item::place(&saved, &components(stack), game_master);
@@ -884,7 +894,7 @@ mod styled_name_model_tests {
         assert_eq!(slots[26].as_ref().unwrap().count, 5);
         assert_eq!(&*slots[0].as_ref().unwrap().item, "minecraft:diamond");
         assert_eq!(&*slots[26].as_ref().unwrap().item, "minecraft:apple");
-        let no_raw = game.saved_block_entity(pos).unwrap();
+        let no_raw = game.saved_block_entity(pos, false).unwrap();
         let command = game.block_entity_nbt([pos.0, pos.1, pos.2]).unwrap();
         let chunk = chunk_saved(game, pos);
         for (route, saved) in [

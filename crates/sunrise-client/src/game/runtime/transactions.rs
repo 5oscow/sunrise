@@ -813,12 +813,11 @@ impl Game<'_> {
     /// the list: the entity is kept whole instead, length and all.
     pub(super) fn journal_block_entity_slot(&mut self, pos: Pos, slot: usize) {
         self.transactions.writes = self.transactions.writes.wrapping_add(1);
-        let exists = self
-            .world
-            .block_entities
-            .get(&pos)
-            .is_some_and(|entity| slot < entity.slots().len());
-        if !exists {
+        let entity = self.world.block_entities.get(&pos);
+        // Claiming an opaque row changes the saved compound as well as the slot.
+        if entity.is_none_or(|entity| slot >= entity.slots().len())
+            || matches!(entity, Some(BlockEntity::Mod(m)) if m.has_opaque_item_slot(slot))
+        {
             return self.journal_block_entity(pos);
         }
         let Some(level) = self.transactions.last_mut() else {
@@ -828,11 +827,7 @@ impl Game<'_> {
             return;
         }
         level.slots.entry((pos, slot)).or_insert_with(|| KeptSlot {
-            stack: self
-                .world
-                .block_entities
-                .get(&pos)
-                .and_then(|entity| entity.slots().get(slot).cloned().flatten()),
+            stack: entity.and_then(|entity| entity.slots()[slot].clone()),
             generation: self.world.block_entities.generation(&pos),
         });
     }

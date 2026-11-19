@@ -596,6 +596,11 @@ pub(super) fn emit<'a>(
                 inits.push(format!("{name}: ModBlockEntityView::new({name})"));
             } else if batch_entry.is_some() {
                 inits.push(format!("{name}: &mut {batch}"));
+            } else if hook.event_per_listener
+                && matches!(field_ty, Type::Reference(ref reference) if reference.mutability.is_some())
+            {
+                // Keep write-through access, but not changes to the reference itself.
+                inits.push(format!("{name}: &mut *{name}"));
             } else {
                 inits.push(name.clone());
             }
@@ -642,9 +647,14 @@ pub(super) fn emit<'a>(
         } else {
             "// no wire: borrowed event crosses as call arguments."
         };
+        let non_exhaustive = if hook.non_exhaustive {
+            "#[non_exhaustive]\n"
+        } else {
+            ""
+        };
         if is_render {
             render_dispatch.push_str(&format!(
-                "#[allow(missing_docs)]\n{wire_form}\npub struct {event_type}{generics} {{\n{fields}}}\n"
+                "{non_exhaustive}#[allow(missing_docs)]\n{wire_form}\npub struct {event_type}{generics} {{\n{fields}}}\n"
             ));
             continue;
         }
@@ -921,7 +931,7 @@ pub(super) fn emit<'a>(
             .as_ref()
             .map_or(trait_name, |(part_trait, _)| part_trait);
         dispatch.push_str(&format!(
-            "/// What [`{trait_name}::{name}`] is told. Each field is that hook's argument of the same name, described in the hook's doc.\n#[allow(missing_docs)]\n{wire_form}\npub struct {event_type}{generics} {{\n{fields}}}\n"
+            "/// What [`{trait_name}::{name}`] is told. Each field is that hook's argument of the same name, described in the hook's doc.\n{non_exhaustive}#[allow(missing_docs)]\n{wire_form}\npub struct {event_type}{generics} {{\n{fields}}}\n"
         ));
         if declaration_only {
             continue;
@@ -940,6 +950,23 @@ pub(super) fn emit<'a>(
             },
             inits.join(", "),
         );
+        // A scoped listener with a writable borrowed payload can still share its
+        // pointee, but every Part gets a fresh event with the original inputs.
+        let (build, local_event) = if hook.event_per_listener {
+            if contract != Contract::Listen
+                || scoped.is_none()
+                || !write_back.is_empty()
+                || !stack_outputs.is_empty()
+                || name == "block_entity_tick"
+            {
+                return Err(format!(
+                    "{name}: event_per_listener requires a scoped listener without scalar or stack writeback"
+                ));
+            }
+            (String::new(), build)
+        } else {
+            (build, String::new())
+        };
         let build = if name == "block_entity_tick" {
             format!("{build} let mut tick_changed = false;")
         } else {
@@ -991,7 +1018,7 @@ pub(super) fn emit<'a>(
                 }
                 _ => format!("{callee}.{name}({invoke});"),
             };
-            format!("{invocation} {stack_after}")
+            format!("{local_event} {invocation} {stack_after}")
         };
         let binding = if answered || hook.collect_validator.is_some() {
             format!("(mod_id, {mod_item})")

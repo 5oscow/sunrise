@@ -1229,8 +1229,10 @@ impl Game<'_> {
         let key = (p[0], p[1], p[2]);
         let name = self.data_block_name(p);
         let e = self.world.block_entities.get(&key)?;
-        let mut tag =
-            save::block_entity_data(key, e, &name, self.world.block_lock(key), self.items());
+        let mut tag = save::command_block_entity_data(
+            self.encode_live_block_entity(key, e, &name, self.items()),
+            self.world.block_lock(key),
+        );
         if name == "minecraft:hopper" {
             set_key(
                 &mut tag,

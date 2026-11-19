@@ -552,7 +552,15 @@ impl Game<'_> {
                 .get(&rest.item)
                 .map_or(64, |i| i.max_stack)
                 .max(1);
-            for cell in entity.slots_mut() {
+            for slot in 0..entity.slots().len() {
+                let existing = &entity.slots()[slot];
+                if existing
+                    .as_ref()
+                    .is_some_and(|item| !item.same_item_same_components(&rest))
+                {
+                    continue;
+                }
+                let cell = entity.slot_mut(slot).unwrap();
                 match cell {
                     None => {
                         let n = rest.count.min(max);
@@ -562,12 +570,11 @@ impl Game<'_> {
                         });
                         rest.count -= n;
                     }
-                    Some(e) if e.same_item_same_components(&rest) => {
+                    Some(e) => {
                         let n = rest.count.min(max.saturating_sub(e.count));
                         e.count += n;
                         rest.count -= n;
                     }
-                    Some(_) => {}
                 }
                 if rest.count == 0 {
                     break;
