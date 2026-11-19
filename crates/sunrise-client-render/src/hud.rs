@@ -594,102 +594,122 @@ fn walked_minecraft_texture(name: &str) -> bool {
         .any(|folder| name.starts_with(folder) && name.as_bytes().get(folder.len()) == Some(&b'/'))
 }
 
-/// Sprites the atlas definitions (`atlases/*.json`) add beyond the texture
-/// files already packed: generated ones (`paletted_permutations` such as the
-/// armour trim sprites, `unstitch` regions) and files listed under another id,
-/// such as other namespaces' item textures; and the animated ones' names.
-fn atlas_sprites(root: &ResourceSource, packed: &[PackedImage]) -> (Vec<PackedImage>, Vec<String>) {
-    use crate::atlas_sources::{self, SpriteOrigin};
-    let have: std::collections::HashSet<&str> = packed.iter().map(|i| i.0.as_str()).collect();
-    // Each new name with its origins in the atlases' order: the first that
-    // loads is the sprite. They load at once (a content pack's atlases list
-    // tens of thousands of files), and come out in the order a load of one
-    // after another would give.
-    let mut names: Vec<(String, Vec<(usize, SpriteOrigin)>)> = Vec::new();
-    let mut slots = std::collections::HashMap::new();
-    let mut order = 0;
-    // A model's material looks in the items atlas first, then the blocks atlas.
+/// What the atlas definitions (`atlases/*.json`) change in the texture files already packed:
+/// the sprites to add (generated ones such as the armour trim palettes and `unstitch` regions,
+/// and files listed under another id), the animated ones' names, and the packed names to drop.
+///
+/// A model's material is one finished sprite, the one the item masks resolve: the items atlas's
+/// first, then the blocks atlas's. The walked file of its name stands only when that is the
+/// winning origin; a rename, a cut or a palette replaces it, and a walked block or item texture
+/// no atlas keeps is dropped, as the model baker would find it missing.
+fn atlas_sprites(
+    root: &ResourceSource,
+    packed: &[PackedImage],
+) -> (Vec<PackedImage>, Vec<String>, HashSet<String>) {
+    use crate::atlas_sources::{self, Materials, SpriteOrigin};
+    let have: HashSet<&str> = packed.iter().map(|i| i.0.as_str()).collect();
     let mut listed = atlas_sources::listed(root);
-    listed.sort_by_key(|(atlas, _)| atlas != "minecraft:items");
-    for (atlas, listed) in listed {
-        // The other atlases' renamed files (GUI sprites, particles...) are
-        // looked up by their texture paths here.
-        let item_models = atlas == "minecraft:blocks" || atlas == "minecraft:items";
-        for (id, origin) in listed {
-            if !item_models && matches!(origin, SpriteOrigin::File(_)) {
-                continue;
+    let materials = Materials::take(root, &mut listed);
+    let ids: Vec<&str> = materials.ids().into_iter().collect();
+    // Each id's winner, all at once: `None` where no origin finishes, `Some(None)` where the
+    // file already walked stands.
+    let winners: HashMap<&str, Option<Option<atlas_sources::Material>>> = ids
+        .iter()
+        .copied()
+        .zip(crate::par::par_map(&ids, |id| {
+            let name = id.strip_prefix("minecraft:").unwrap_or(id);
+            materials.resolve(id, |origin| match origin {
+                SpriteOrigin::File(texture) if texture == id && have.contains(name) => Some(None),
+                // A file under a walked folder is packed under its own name or was too large
+                // for the atlas: either way it is not added again.
+                SpriteOrigin::File(texture)
+                    if texture.strip_prefix("minecraft:") == Some(name)
+                        && walked_minecraft_texture(name) =>
+                {
+                    None
+                }
+                origin => atlas_sources::finish_origin(root, origin).map(Some),
+            })
+        }))
+        .collect();
+    let mut dropped = HashSet::new();
+    let mut out = Vec::new();
+    let mut animated = Vec::new();
+    if !materials.is_bare() {
+        for (name, ..) in packed {
+            let path = name.split_once(':').map_or(name.as_str(), |(_, p)| p);
+            let winner = winners
+                .get(atlas_sources::qualified(name).as_str())
+                .and_then(|w| w.as_ref());
+            let stands = matches!(winner, Some(None));
+            let replaced = matches!(winner, Some(Some(_)));
+            if replaced || (!stands && (path.starts_with("block/") || path.starts_with("item/"))) {
+                dropped.insert(name.clone());
             }
+        }
+        for (id, winner) in winners {
+            let Some(Some(material)) = winner else {
+                continue;
+            };
+            let name = id.strip_prefix("minecraft:").unwrap_or(id).to_owned();
+            let path = id.split_once(':').map_or(id, |(_, p)| p);
+            let image = match &material.resource {
+                Some(file) => {
+                    // Animated strips keep their first frame and animate, like the packed
+                    // files, under any folder: vanilla animates every sprite of these atlases
+                    // (a server pack's `wynn/...` as well as `item/...`).
+                    let mcmeta = root.read_to_string(&format!("{file}.mcmeta")).ok();
+                    let animation = animation_of(mcmeta.as_deref());
+                    if animation.is_some() {
+                        animated.push(name.clone());
+                    }
+                    if animation.is_some()
+                        || path.starts_with("block/")
+                        || path.starts_with("item/")
+                    {
+                        first_frame(material.image, animation.as_ref())
+                    } else {
+                        material.image
+                    }
+                }
+                None => material.image,
+            };
+            out.push((name, image.0, image.1, image.2));
+        }
+        out.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    }
+    // The other atlases' generated sprites (GUI sprites, particles...), by the first origin
+    // that loads, in the atlases' order; they load at once (a content pack's atlases list
+    // tens of thousands of files).
+    let mut names: Vec<(String, Vec<SpriteOrigin>)> = Vec::new();
+    let mut slots = HashMap::new();
+    for (_, listing) in listed {
+        for (id, origin) in listing {
             let name = id.strip_prefix("minecraft:").unwrap_or(&id).to_owned();
-            // A texture file packed under its own name is the sprite; any other origin of
-            // the id (a rename, a cut, a palette) replaces it.
-            if have.contains(name.as_str())
-                && matches!(&origin, SpriteOrigin::File(texture) if *texture == id)
-            {
-                continue;
-            }
-            // A file under a walked folder is packed under its own name already:
-            // only a renamed one is new. Other namespaces' files (content mods)
-            // are never in those folders, nor are extra directories a pack adds
-            // to the blocks atlas (`custom/...`).
-            if let SpriteOrigin::File(texture) = &origin
-                && texture.strip_prefix("minecraft:") == Some(name.as_str())
-                && walked_minecraft_texture(name.as_str())
-            {
+            if matches!(origin, SpriteOrigin::File(_)) || have.contains(name.as_str()) {
                 continue;
             }
             let slot = *slots.entry(name.clone()).or_insert_with(|| {
                 names.push((name, Vec::new()));
                 names.len() - 1
             });
-            names[slot].1.push((order, origin));
-            order += 1;
+            names[slot].1.push(origin);
         }
     }
     let load = |texture: &str| {
         decode_resource(root, &atlas_sources::texture_resource(texture, "textures")).ok()
     };
-    let first = |(name, origins): &(String, Vec<(usize, SpriteOrigin)>)| {
-        origins.iter().find_map(|(order, origin)| {
-            let mut animated = false;
-            let image = match origin {
-                SpriteOrigin::File(texture) => {
-                    // Its path under `textures/` in any namespace (a server
-                    // pack's `lobby:item/...` as well as vanilla's).
-                    let path = texture.split_once(':').map_or(texture.as_str(), |(_, p)| p);
-                    let file = atlas_sources::texture_resource(texture, "textures");
-                    decode_resource(root, &file).ok().map(|image| {
-                        // Animated strips keep their first frame and animate, like the
-                        // packed files, under any folder: vanilla animates every sprite of
-                        // these atlases (a server pack's `wynn/...` as well as `item/...`).
-                        let mcmeta = root.read_to_string(&format!("{file}.mcmeta")).ok();
-                        let animation = animation_of(mcmeta.as_deref());
-                        animated = animation.is_some();
-                        if animated || path.starts_with("block/") || path.starts_with("item/") {
-                            first_frame(image, animation.as_ref())
-                        } else {
-                            image
-                        }
-                    })
-                }
-                generated => atlas_sources::generate(generated, &load),
-            };
-            image.map(|(w, h, pixels)| (*order, (name.clone(), w, h, pixels), animated))
+    out.extend(
+        crate::par::par_map(&names, |(name, origins)| {
+            origins
+                .iter()
+                .find_map(|origin| atlas_sources::generate(origin, &load))
+                .map(|(w, h, pixels)| (name.clone(), w, h, pixels))
         })
-    };
-    let mut out: Vec<_> = crate::par::par_map(&names, first)
         .into_iter()
-        .flatten()
-        .collect();
-    out.sort_unstable_by_key(|(order, ..)| *order);
-    let animated = out
-        .iter()
-        .filter(|(.., animated)| *animated)
-        .map(|(_, image, _)| image.0.clone())
-        .collect();
-    (
-        out.into_iter().map(|(_, image, _)| image).collect(),
-        animated,
-    )
+        .flatten(),
+    );
+    (out, animated, dropped)
 }
 /// `MissingTextureAtlasSprite`: what a sprite the atlas lacks draws as.
 pub const MISSING_SPRITE: &str = "sunrise/missing";
@@ -1337,7 +1357,12 @@ impl HudAtlas {
         }
         let mut cit_names = HashSet::new();
         if full {
-            let (more, more_animated) = atlas_sprites(root, &images);
+            let (more, more_animated, dropped) = atlas_sprites(root, &images);
+            images.retain(|image| !dropped.contains(&image.0));
+            flags.retain(|name, _| !dropped.contains(name));
+            gui_sizes.retain(|name, _| !dropped.contains(name));
+            maps.retain(|name, _| !dropped.contains(name));
+            animated.retain(|name| !dropped.contains(name));
             images.extend(more);
             animated.extend(more_animated);
             for (image, image_flags, is_animated) in cit_sprites(root, &images) {
@@ -3081,18 +3106,15 @@ mod coverage_tests;
 
 #[cfg(test)]
 mod tests {
-    /// A model's material looks in the items atlas first: its cut of `demo:item/cut` replaces
-    /// both the blocks atlas's cut and a texture file packed under that name.
-    #[test]
-    fn the_items_atlas_cut_replaces_a_packed_file_and_the_blocks_cut() {
-        let root =
-            std::env::temp_dir().join(format!("sunrise-hud-items-first-{}", std::process::id()));
+    /// A scratch tree with a 2 x 1 sheet (an opaque red texel, then a transparent green one) and
+    /// the two atlas definitions.
+    fn model_atlas_root(tag: &str, items: &str, blocks: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!("sunrise-hud-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let textures = root.join("assets/demo/textures/item");
         let atlases = root.join("assets/minecraft/atlases");
         std::fs::create_dir_all(&textures).unwrap();
         std::fs::create_dir_all(&atlases).unwrap();
-        // 2 x 1 sheet: an opaque red texel, then a transparent green one.
         let mut encoder = png::Encoder::new(
             std::fs::File::create(textures.join("sheet.png")).unwrap(),
             2,
@@ -3105,20 +3127,50 @@ mod tests {
             .unwrap()
             .write_image_data(&[255, 0, 0, 255, 0, 255, 0, 0])
             .unwrap();
-        let cut = |x: u8| {
-            format!(
-                r#"{{"sources":[{{"type":"minecraft:unstitch","resource":"demo:item/sheet","divisor_x":2,
-                "regions":[{{"sprite":"demo:item/cut","x":{x},"y":0,"width":1,"height":1}}]}}]}}"#
-            )
-        };
-        std::fs::write(atlases.join("items.json"), cut(1)).unwrap();
-        std::fs::write(atlases.join("blocks.json"), cut(0)).unwrap();
+        std::fs::write(atlases.join("items.json"), items).unwrap();
+        std::fs::write(atlases.join("blocks.json"), blocks).unwrap();
+        root
+    }
+    fn cut(sprite: &str, x: u8) -> String {
+        format!(
+            r#"{{"sources":[{{"type":"minecraft:unstitch","resource":"demo:item/sheet","divisor_x":2,
+            "regions":[{{"sprite":"{sprite}","x":{x},"y":0,"width":1,"height":1}}]}}]}}"#
+        )
+    }
+    /// A model's material is the items atlas's cut when it has one: it replaces both the blocks
+    /// atlas's cut and the walked file of that name, which is dropped from the pack.
+    #[test]
+    fn the_items_atlas_cut_replaces_a_packed_file_and_the_blocks_cut() {
+        let root = model_atlas_root(
+            "cut-wins",
+            &cut("demo:item/cut", 1),
+            &cut("demo:item/cut", 0),
+        );
         let packed = vec![("demo:item/cut".to_owned(), 1, 1, vec![9, 9, 9, 9])];
-        let (images, _) = atlas_sprites(&ResourceSource::directory(root.clone()), &packed);
+        let (images, _, dropped) = atlas_sprites(&ResourceSource::directory(root.clone()), &packed);
         assert_eq!(
             images,
             [("demo:item/cut".to_owned(), 1, 1, vec![0, 255, 0, 0])]
         );
+        assert_eq!(dropped, HashSet::from(["demo:item/cut".to_owned()]));
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+    /// The items atlas keeps the walked file of its name; the blocks atlas's lower cut of that
+    /// name adds nothing and drops nothing. A walked item texture neither atlas lists is dropped.
+    #[test]
+    fn a_walked_file_the_items_atlas_keeps_stands_and_an_unlisted_one_goes() {
+        let items = r#"{"sources":[{"type":"minecraft:single","resource":"demo:item/kept"}]}"#;
+        let root = model_atlas_root("walked", items, &cut("demo:item/kept", 0));
+        let textures = root.join("assets/demo/textures/item");
+        std::fs::copy(textures.join("sheet.png"), textures.join("kept.png")).unwrap();
+        let packed = vec![
+            ("demo:item/kept".to_owned(), 1, 1, vec![9, 9, 9, 9]),
+            ("item/unlisted".to_owned(), 1, 1, vec![8, 8, 8, 8]),
+            ("gui/not_a_model".to_owned(), 1, 1, vec![7, 7, 7, 7]),
+        ];
+        let (images, _, dropped) = atlas_sprites(&ResourceSource::directory(root.clone()), &packed);
+        assert_eq!(images, []);
+        assert_eq!(dropped, HashSet::from(["item/unlisted".to_owned()]));
         std::fs::remove_dir_all(&root).unwrap();
     }
     use super::*;

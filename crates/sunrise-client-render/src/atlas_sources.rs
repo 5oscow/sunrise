@@ -616,10 +616,23 @@ pub fn finish_origin(
 
 impl Materials {
     pub fn new(source: &crate::resource_source::ResourceSource) -> Self {
-        let mut listed: BTreeMap<_, _> = listed(source).into_iter().collect();
+        Self::take(source, &mut listed(source))
+    }
+    /// The materials of an already made [`listed`], whose other atlases are left in it.
+    pub fn take(
+        source: &crate::resource_source::ResourceSource,
+        listed: &mut Vec<(String, BTreeMap<String, SpriteOrigin>)>,
+    ) -> Self {
+        let mut take = |atlas: &str| {
+            listed
+                .iter()
+                .position(|(name, _)| name == atlas)
+                .map(|at| listed.remove(at).1)
+                .unwrap_or_default()
+        };
         Self {
-            items: listed.remove("minecraft:items").unwrap_or_default(),
-            blocks: listed.remove("minecraft:blocks").unwrap_or_default(),
+            items: take("minecraft:items"),
+            blocks: take("minecraft:blocks"),
             defined: ["blocks", "items"]
                 .iter()
                 .any(|atlas| source.contains(&format!("assets/minecraft/atlases/{atlas}.json"))),
