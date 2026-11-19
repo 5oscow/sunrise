@@ -582,6 +582,9 @@ impl<K: JavaKey, V> JavaHashMap<K, V> {
     }
     /// The first node of the first non-empty bucket from `b` on.
     fn first_node_from(&self, b: usize) -> u32 {
+        if self.len == 0 {
+            return NIL;
+        }
         self.buckets[b..]
             .iter()
             .find(|bucket| bucket.head != NIL)
