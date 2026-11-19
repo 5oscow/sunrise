@@ -1,0 +1,1 @@
+sunrise-client-lib save::chunk_disk_tests::writer_stack::compiled_chunk_save_hook_updates_the_region_record lib daily wasm-fixture
