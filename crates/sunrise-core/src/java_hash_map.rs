@@ -197,12 +197,6 @@ impl<'a, K: JavaKey, V> Entry<'a, K, V> {
         });
         &mut self.map.node_mut(index).value
     }
-    pub fn or_default(self) -> &'a mut V
-    where
-        V: Default,
-    {
-        self.or_insert_with(V::default)
-    }
 }
 
 impl<K: JavaKey, V> IntoIterator for JavaHashMap<K, V> {
@@ -1241,10 +1235,11 @@ mod tests {
         map.remove(&key(9, 3));
         assert_eq!(order(&map), [4, 0, 2, 6, 8, 10, 11, 5, 1, 3, 7, 12]);
         // 12 entries fit 16 buckets, where the source has 32.
-        let mut copy = map.copied();
-        assert_eq!(order(&copy), [4, 5, 0, 2, 1, 3, 6, 8, 7, 10, 11, 12]);
-        copy.put(key(9, 3), 9);
-        assert_eq!(order(&copy), [4, 0, 2, 6, 8, 10, 9, 11, 5, 1, 3, 7, 12]);
+        for mut copy in [map.copied(), map.into_copy()] {
+            assert_eq!(order(&copy), [4, 5, 0, 2, 1, 3, 6, 8, 7, 10, 11, 12]);
+            copy.put(key(9, 3), 9);
+            assert_eq!(order(&copy), [4, 0, 2, 6, 8, 10, 9, 11, 5, 1, 3, 7, 12]);
+        }
 
         let mut one = JavaHashMap::default();
         one.put(key(0, 1), 0);
