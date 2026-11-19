@@ -784,33 +784,42 @@ mod keep_jumping_tests {
 
 #[cfg(test)]
 mod set_size_tests {
-    use super::*;
-    use crate::mobs::finalize::{Attr, base_value};
+    use super::Species;
+    use crate::{
+        entity_nbt::mob_from_nbt,
+        mobs::finalize::{Attr, base_value},
+    };
     use std::sync::Arc;
+    use sunrise_core::nbt::Tag;
 
     /// #2675: `AbstractCubeMob.readAdditionalSaveData` passes `Size + 1`;
     /// the size, max health, speed and attack damage use it clamped to
     /// 1..=127, while `MagmaCube.setSize` sets the armor from it unclamped.
     #[test]
-    fn magma_cube_armor_follows_the_requested_size() {
+    fn magma_cube_load_uses_unclamped_size_for_armor() {
+        let id = "minecraft:magma_cube";
         let mut kind = crate::mobs::sensor_scan_tests::kind();
         let ty = Arc::make_mut(&mut kind);
-        ty.id = "minecraft:magma_cube".into();
+        ty.id = id.into();
         ty.species = Species::MagmaCube;
-        // (saved Size, clamped size, armor base)
-        for (saved, clamped, armor) in [(-1, 1, 0.0), (-5, 1, -12.0), (199, 127, 600.0)] {
-            let mut m = Mob::new(1, kind.clone(), Vec3::ZERO, 0.0);
-            set_size(&mut m, saved + 1);
+        let types = [(id.into(), kind)].into();
+        // (saved Size, clamped size, armor base, max health base, speed base)
+        for (saved, clamped, armor, health, speed) in [
+            (-1, 1, 0.0, 1.0, 0.3_f32),
+            (-5, 1, -12.0, 1.0, 0.3),
+            (199, 127, 600.0, 16_129.0, 12.9),
+            // The first overflows Size + 1; the second only overflows the armor product.
+            (i32::MAX, 1, -2_147_483_648.0, 1.0, 0.3),
+            (715_827_882, 127, -2_147_483_647.0, 16_129.0, 12.9),
+        ] {
+            let tag = Tag::compound([("id", Tag::String(id.into())), ("Size", Tag::Int(saved))]);
+            let m = mob_from_nbt(&tag, &types, 1, None).unwrap();
             assert_eq!(m.extra.size, clamped, "Size {saved}");
             assert_eq!(base_value(&m, Attr::Armor), armor, "Size {saved}");
-            assert_eq!(
-                base_value(&m, Attr::MaxHealth),
-                f64::from(clamped * clamped),
-                "Size {saved}"
-            );
+            assert_eq!(base_value(&m, Attr::MaxHealth), health, "Size {saved}");
             assert_eq!(
                 base_value(&m, Attr::MovementSpeed),
-                f64::from(0.2f32 + 0.1f32 * clamped as f32),
+                f64::from(speed),
                 "Size {saved}"
             );
             assert_eq!(
