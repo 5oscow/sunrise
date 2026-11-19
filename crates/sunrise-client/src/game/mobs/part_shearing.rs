@@ -39,9 +39,16 @@ impl Game<'_> {
                 hook: "is_shearable",
                 part: Some(attached.type_name()),
             });
-            let answer = attached
-                .part()
-                .is_shearable(self, entity, player, &shears)?;
+            // Called outside the world (a reload or setup) a refused Host call is no answer.
+            let answer = match mod_api::__private::contain_outside_world(|| {
+                attached.part().is_shearable(self, entity, player, &shears)
+            }) {
+                Ok(answer) => answer?,
+                Err(refusal) => {
+                    refusal.report();
+                    return None;
+                }
+            };
             Some((at, answer))
         })
     }
@@ -71,7 +78,15 @@ impl Game<'_> {
                 hook: "on_sheared",
                 part: Some(attached.type_name()),
             });
-            attached.part().on_sheared(self, entity, player, &shears)
+            match mod_api::__private::contain_outside_world(|| {
+                attached.part().on_sheared(self, entity, player, &shears)
+            }) {
+                Ok(drops) => drops,
+                Err(refusal) => {
+                    refusal.report();
+                    Vec::new()
+                }
+            }
         };
         // The part may have moved or removed the mob: its drops fall where it is now.
         let index = self.mobs.iter().position(|m| m.id == id && !m.removed);
@@ -248,6 +263,84 @@ mod tests {
             assert!(!game.shear_entity((4, 64, 0)).unwrap(), "the sheep refuses");
             assert!(!game.mobs.iter().any(|m| m.id == 2 && m.extra.sheared));
             assert!(!game.dropped.iter().any(|d| d.stack.item.ends_with("_wool")));
+        });
+    }
+
+    /// A cow whose part reads the world through the Host, as a mod's part may.
+    struct GatedCow;
+    #[mod_api::sunrise_part]
+    impl mod_api::EntityPart for GatedCow {
+        fn is_shearable(
+            &self,
+            host: &dyn mod_api::Host,
+            _: mod_api::EntityRef,
+            _: Option<PlayerRef>,
+            _: &mod_api::ItemStack,
+        ) -> Option<bool> {
+            let _ = host.level("minecraft:overworld");
+            Some(true)
+        }
+        fn on_sheared(
+            &self,
+            host: &mut dyn mod_api::ServerHost,
+            _: mod_api::EntityRef,
+            _: Option<PlayerRef>,
+            _: &mod_api::ItemStack,
+        ) -> Vec<mod_api::ItemStack> {
+            let _ = host.level("minecraft:overworld");
+            let leather = mod_api::__private::item_key("minecraft:leather").unwrap();
+            vec![mod_api::ItemStack::new(leather, 1).unwrap()]
+        }
+    }
+    struct GatedMod;
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for GatedMod {
+        fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+            r.entity_part("minecraft:cow", GatedCow);
+        }
+    }
+
+    /// Entity parts run in ticks, after the thread reached World. Fired in Setup and in Reloading anyway,
+    /// a part's world read is a contained refusal (no answer, no drops), never the no-scope panic; in World
+    /// the same part shears.
+    #[test]
+    #[ignore = "daily"]
+    fn a_part_shearing_outside_the_world_is_refused_not_a_panic() {
+        use super::super::native_entity_refs::tests::{run_fresh_cases, with_game};
+        use mod_api::__private::{ModPhase, PhaseOwner};
+        if run_fresh_cases(
+            "game::part_shearing::tests::a_part_shearing_outside_the_world_is_refused_not_a_panic",
+            "SUNRISE_PART_SHEARING_PHASE_CHILD",
+            &["valid"],
+        ) {
+            return;
+        }
+        let entries = vec![mod_api::ModEntry::new("gated", Box::new(GatedMod))];
+        mod_platform::__private::install(entries.into());
+        crate::game::api_values::install_parts(&[mod_api::ModEntry::new(
+            "gated",
+            Box::new(GatedMod),
+        )])
+        .unwrap();
+        with_game(|game| {
+            game.resolve_parts().unwrap();
+            game.next_entity = game.next_entity.max(1);
+            let kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();
+            game.mobs
+                .push(Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0));
+            let shears = mod_api::ItemStack::new(
+                mod_api::__private::item_key("minecraft:shears").unwrap(),
+                1,
+            )
+            .unwrap();
+            for reloading in [false, true] {
+                let setup = PhaseOwner::scope(ModPhase::Setup);
+                let _reload = reloading.then(|| setup.reloading().unwrap());
+                assert_eq!(game.part_shearable(0, None, &shears), None);
+                game.part_shear(0, 0, None, &shears);
+                assert!(game.dropped.is_empty(), "a refused part drops nothing");
+            }
+            assert_eq!(game.part_shearable(0, None, &shears), Some((0, true)));
         });
     }
 }
