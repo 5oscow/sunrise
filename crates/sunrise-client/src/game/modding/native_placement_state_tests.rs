@@ -1,0 +1,261 @@
+//! The server placement-state query through the public handle on prepared resources.
+use super::{
+    Dim, Game,
+    native_entity_refs::tests::{run_fresh_cases, with_game_at},
+};
+use mod_api::{
+    Block, BlockPart, BlockState, BlockStateRecord, BlocksEvent, Hooks, LevelRef, LevelSide,
+    ModEntry, Mods, PlacementContext, Registrar, RegistrationContext, StateForPlacementEvent,
+    WorldEpoch,
+};
+use std::sync::Arc;
+use sunrise_client::chunk::Chunk;
+use sunrise_core::{
+    geometry::Direction,
+    position::{BlockPos, ChunkPos},
+};
+
+const BLOCK: &str = "placement_read:camouflage";
+const POS: BlockPos = BlockPos::new(8, 70, 8);
+
+struct PlacementPart;
+#[mod_api::sunrise_part]
+impl BlockPart for PlacementPart {
+    fn state_for_placement(
+        &self,
+        level: LevelSide<'_>,
+        event: &mut StateForPlacementEvent<'_>,
+    ) -> Option<Option<BlockState>> {
+        let LevelSide::Server(level) = level else {
+            panic!("the query should ask the server part");
+        };
+        let default = level.block_state_default(event.state.block()).unwrap();
+        assert_eq!(event.state, default);
+        if event.context.sneaking {
+            return Some(None);
+        }
+        if event.context.inside {
+            return Some(Some(
+                BlockStateRecord::new(default.block(), u16::MAX).into(),
+            ));
+        }
+        // A real non-replaceable block is clicked, but the query must use the
+        // independent destination and replacement flag supplied by the caller.
+        assert_eq!(event.context.pos, POS);
+        assert_eq!(event.context.hit_pos, POS.offset(2, 0, 0));
+        assert!(event.context.replace_clicked);
+        assert_eq!(event.context.face, Direction::East);
+        assert_eq!(event.context.hit, [10.0, 70.75, 8.0]);
+        assert_eq!(event.context.yaw, -90.0);
+        assert_eq!(event.context.pitch, 35.0);
+        assert_eq!(
+            event.context.item,
+            mod_api::__private::item_key("minecraft:oak_log")
+        );
+        assert_eq!(level.has_neighbor_signal([POS.x, POS.y, POS.z]), Some(true));
+        Some(level.block_state_id("minecraft:oak_log[axis=z]"))
+    }
+}
+
+struct PlacementReadMod;
+#[mod_api::__subscriptions]
+impl Hooks for PlacementReadMod {
+    fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+        let block = r.block_key(BLOCK);
+        r.block_part(block, PlacementPart);
+    }
+
+    fn blocks(&self, _: &RegistrationContext, event: &mut BlocksEvent<'_>) {
+        event.blocks.push(Block::new(BLOCK, "minecraft:stone"));
+    }
+}
+
+fn with_game(name: &str, test: impl FnOnce(&mut Game<'_>)) {
+    if run_fresh_cases(
+        &format!("game::native_placement_state_tests::{name}"),
+        "SUNRISE_PLACEMENT_STATE_CHILD",
+        &["run"],
+    ) {
+        return;
+    }
+    let mods: Mods = vec![ModEntry::new("placement_read", Box::new(PlacementReadMod))].into();
+    mod_platform::testing::with_mods(mods.clone(), || {
+        super::api_values::install_parts(&mods).unwrap();
+        mod_api::__private::mark_game_thread();
+        let base = std::path::PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap());
+        let root = super::mods::content_root(&base, &Default::default()).unwrap();
+        with_game_at(root.prepared().to_path_buf(), |game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            game.block_ticks
+                .add_empty_chunk(ChunkPos::new(0, 0))
+                .unwrap();
+            test(game);
+        });
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn vanilla_candidates_use_the_resolved_context_without_placing() {
+    with_game(
+        "vanilla_candidates_use_the_resolved_context_without_placing",
+        |game| {
+            use super::api_values::TryIntoEngine;
+            let level = game.level(game.dim.id()).unwrap();
+            let mut context = PlacementContext::new(POS, Direction::East, None);
+            context.yaw = -90.0;
+            context.hit[1] += 0.75;
+            let registry = game.pack.assets.registry;
+            // A read must not change the destination or its neighbours, or enqueue the dry coral's
+            // death tick and spend the random draw its placement rule would make.
+            let occupied = POS.offset(1, 0, 0);
+            game.world
+                .set(
+                    occupied.x,
+                    occupied.y,
+                    occupied.z,
+                    registry.default_state("minecraft:stone").unwrap(),
+                )
+                .unwrap();
+            let blocks = |game: &Game<'_>| {
+                std::iter::once(POS)
+                    .chain(Direction::ALL.map(|face| {
+                        let [x, y, z] = face.normal();
+                        POS.offset(x, y, z)
+                    }))
+                    .map(|p| game.world.block(p.x, p.y, p.z))
+                    .collect::<Vec<_>>()
+            };
+            let before = blocks(game);
+            let rng = game.world.random.state();
+            let ticks = game.block_ticks.blocks.count();
+            for (block, key, expected) in [
+                ("minecraft:oak_stairs", "facing", "east"),
+                ("minecraft:oak_log", "axis", "x"),
+                ("minecraft:oak_slab", "type", "top"),
+                // `BlockItem.place` would refuse this unsupported door: this read does not.
+                ("minecraft:oak_door", "half", "lower"),
+            ] {
+                let state = level
+                    .state_for_placement(&*game, game.block_key(block).unwrap(), &context)
+                    .unwrap();
+                let state = registry.state(state.try_into_engine(&()).unwrap()).unwrap();
+                assert_eq!(state.name, block);
+                assert_eq!(state.properties[key], expected, "{block}");
+            }
+            assert!(
+                level
+                    .state_for_placement(
+                        &*game,
+                        game.block_key("minecraft:tube_coral").unwrap(),
+                        &context
+                    )
+                    .is_some()
+            );
+            assert_eq!(blocks(game), before);
+            assert_eq!(game.world.random.state(), rng);
+            assert_eq!(game.block_ticks.blocks.count(), ticks);
+        },
+    );
+}
+
+#[test]
+#[ignore = "daily"]
+fn refusals_and_unavailable_inputs_return_no_state() {
+    with_game("refusals_and_unavailable_inputs_return_no_state", |game| {
+        let level = game.level(game.dim.id()).unwrap();
+        let mut context = PlacementContext::new(POS, Direction::Up, None);
+        // No surface supports a vine in this empty column.
+        let vine = game.block_key("minecraft:vine").unwrap();
+        assert_eq!(level.state_for_placement(&*game, vine, &context), None);
+        let mod_block = game.block_key(BLOCK).unwrap();
+        context.sneaking = true;
+        assert_eq!(level.state_for_placement(&*game, mod_block, &context), None);
+        context.sneaking = false;
+        context.inside = true;
+        assert_eq!(
+            level.state_for_placement(&*game, mod_block, &context),
+            game.block_state_default(mod_block)
+                .map(|state| super::api_values::TryIntoApi::try_into_api(&state).unwrap())
+        );
+
+        let stone = game.block_key("minecraft:stone").unwrap();
+        let stale = LevelRef::new(WorldEpoch::new(level.epoch().get() + 1), level.dimension());
+        let closed = LevelRef::new(level.epoch(), mod_api::DimensionKey::NETHER);
+        let unknown = mod_api::__private::parts_installation::block_key(u32::MAX);
+        for (level, block, pos) in [
+            (level, unknown, POS),
+            (stale, stone, POS),
+            (closed, stone, POS),
+            (level, stone, POS.offset(0, 1_000, 0)),
+            (level, stone, POS.offset(16, 0, 0)),
+        ] {
+            context.pos = pos;
+            assert_eq!(level.state_for_placement(&*game, block, &context), None);
+        }
+        assert_eq!(game.world.chunks.len(), 1);
+        context.pos = POS;
+        assert!(level.state_for_placement(&*game, stone, &context).is_some());
+        game.options.execution_role = super::execution_role::ExecutionRole::Client;
+        let client: &dyn mod_api::ClientHost = game;
+        assert_eq!(level.state_for_placement(client, stone, &context), None);
+    });
+}
+
+#[test]
+#[ignore = "daily"]
+fn another_blocks_state_is_returned_from_the_parked_levels_part() {
+    with_game(
+        "another_blocks_state_is_returned_from_the_parked_levels_part",
+        |game| {
+            use super::api_values::TryIntoApi;
+            let level = game.level(game.dim.id()).unwrap();
+            let registry = game.pack.assets.registry;
+            let log = game
+                .block_state_id("minecraft:oak_log[axis=z]")
+                .unwrap()
+                .try_into_api()
+                .unwrap();
+            let mod_block = game.block_key(BLOCK).unwrap();
+            let mut context = PlacementContext::new(
+                POS,
+                Direction::East,
+                mod_api::__private::item_key("minecraft:oak_log"),
+            );
+            context.hit_pos = POS.offset(2, 0, 0);
+            context.replace_clicked = true;
+            context.hit = [10.0, 70.75, 8.0];
+            context.yaw = -90.0;
+            context.pitch = 35.0;
+            game.world
+                .set(
+                    10,
+                    70,
+                    8,
+                    registry.default_state("minecraft:stone").unwrap(),
+                )
+                .unwrap();
+            let comparator = game
+                .block_state_id("minecraft:comparator[facing=west,powered=true]")
+                .unwrap();
+            game.world.set(7, 70, 8, comparator).unwrap();
+            game.block_ticks
+                .comparator_outputs
+                .insert(POS.offset(-1, 0, 0), 8);
+            assert!(game.enter_command_level(Dim::Nether).is_some());
+            assert_eq!(
+                level.state_for_placement(&*game, mod_block, &context),
+                Some(log)
+            );
+            let door = game.block_key("minecraft:oak_door").unwrap();
+            let state = level.state_for_placement(&*game, door, &context).unwrap();
+            use super::api_values::TryIntoEngine;
+            let state = registry.state(state.try_into_engine(&()).unwrap()).unwrap();
+            assert_eq!(state.properties["powered"], "true");
+            assert_eq!(game.dim, Dim::Nether, "the query never swaps the level in");
+        },
+    );
+}

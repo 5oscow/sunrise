@@ -314,6 +314,12 @@ The veto's placement neighbour and the post-placement notice use the resolved fa
 and the notice uses the resolved click location. Neither changes the sides of the block placement or
 survival hooks.
 
+On the server, `level.state_for_placement(host, block, &context)` runs that block's
+`Block.getStateForPlacement`, including its `state_for_placement` parts, without resolving the
+click again or placing anything. It returns the candidate before the additional survival,
+obstruction and permission checks of item placement. A camouflage block can use this read to
+store the held block's placement state, including a stair's facing or a log's axis.
+
 A neighbour's `BlockPart::fence_gate_in_wall` answers whether a fence gate sits at wall height
 beside that state. It runs on both sides at placement and shape updates, with a read-only `LevelSide`:
 `Some(true)` counts as a wall, `Some(false)` does not, and `None` keeps the `minecraft:walls` tag
