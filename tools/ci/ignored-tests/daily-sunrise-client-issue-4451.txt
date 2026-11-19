@@ -2293,7 +2293,7 @@ sunrise-client game::remote::tests::an_end_crystal_click_on_a_block_ends_there l
 sunrise-client game::remote::tests::block_alias_survival_consumption_and_client_prediction lib daily resources
 sunrise-client game::remote::tests::chat_event_tests::mod_chat_needs_a_joined_player_and_what_the_chat_option_allows lib daily resources
 sunrise-client game::remote::tests::chat_event_tests::mods_replace_and_cancel_received_chat lib daily resources
-sunrise-client game::remote::tests::client_camera_entity_returns_to_player_after_removal lib daily resources
+sunrise-client game::remote::tests::client_camera_tests::client_camera_entity_returns_to_player_after_removal lib daily resources
 sunrise-client game::remote::tests::client_day_time_reads_overworld_clock_across_packets_and_levels lib daily resources
 sunrise-client game::remote::tests::client_epochs_follow_level_replacement_and_logout lib daily resources
 sunrise-client game::remote::tests::client_handle_reads_answer_from_the_clients_copy lib daily resources
