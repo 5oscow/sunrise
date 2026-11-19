@@ -206,7 +206,7 @@ fn a_veto_of_the_first_of_two_reports_in_one_tick_corrects_and_the_second_is_not
             assert_eq!(
                 state(game),
                 ([20.0, 0.0], 0, true),
-                "the first is corrected and not applied; the second met the unconfirmed teleport, which keeps its rotation and drops its position"
+                "the second turn applies with the inbox drained and the correction still unconfirmed"
             );
         });
     });
