@@ -844,6 +844,13 @@ mod control_tests {
     use super::*;
 
     #[test]
+    fn plain_integer_options_accept_java_decimal_digits() {
+        // Temurin 25 Integer.parseInt("+٢９") returns 29.
+        let file = OptionsFile::parse("overrideWidth:+٢９\n");
+        assert_eq!(file.get("overrideWidth"), Some(&V::Int(29)));
+    }
+
+    #[test]
     fn describes_values_with_what_they_accept() {
         let f = OptionsFile::default();
         let fov = f.describe("fov").unwrap();
