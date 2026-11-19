@@ -129,18 +129,16 @@ pub(crate) fn stage_for_run(
         }
         let file = fs::File::open(&original).map_err(|e| unavailable(&e.to_string()))?;
         let staged = jar.cache_path(&dest);
+        #[cfg(unix)]
         let reusable = fs::symlink_metadata(&staged).is_ok_and(|metadata| {
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::MetadataExt;
-                if metadata.nlink() != 1 {
-                    return false;
-                }
-            }
-            metadata.is_file() && !is_link(&metadata)
+            use std::os::unix::fs::MetadataExt;
+            metadata.is_file() && metadata.nlink() == 1 && !is_link(&metadata)
         }) && fs::File::open(&staged)
             .and_then(|staged| hash_reader::<sha2::Sha512>(staged, io::sink()))
             .is_ok_and(|hash| format!("{hash:x}") == jar.sha512());
+        // Without a link count we cannot tell whether a staged file shares its bytes with the source.
+        #[cfg(not(unix))]
+        let reusable = false;
         let hash = if reusable {
             // Still verify the selected original; a previous run must not mask a bad input.
             hash_reader::<sha2::Sha512>(file, io::sink())
@@ -299,7 +297,7 @@ mod tests {
     }
 
     #[test]
-    fn run_reuses_verified_copies_and_an_original_cannot_change_them() {
+    fn run_replaces_linked_copies_and_keeps_verified_bytes_on_refusal() {
         let root = tempfile::tempdir().unwrap();
         let (manifest, source, original) = fixture(root.path());
         let stage = || stage_for_run(&manifest, root.path(), Some(&source), &[]);
@@ -309,14 +307,19 @@ mod tests {
         assert_eq!(fs::read_dir(&jars).unwrap().count(), 0);
 
         fs::write(&original, b"abc").unwrap();
-        stage().unwrap();
         let staged = manifest.jar[0].cache_path(&jars);
-        let handle = fs::File::options().write(true).open(&staged).unwrap();
-        let stamp = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000);
-        handle.set_modified(stamp).unwrap();
-        drop(handle);
+        #[cfg(any(unix, windows))]
+        fs::hard_link(&original, &staged).unwrap();
         stage().unwrap();
-        assert_eq!(fs::metadata(&staged).unwrap().modified().unwrap(), stamp);
+        #[cfg(unix)]
+        {
+            let handle = fs::File::options().write(true).open(&staged).unwrap();
+            let stamp = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000);
+            handle.set_modified(stamp).unwrap();
+            drop(handle);
+            stage().unwrap();
+            assert_eq!(fs::metadata(&staged).unwrap().modified().unwrap(), stamp);
+        }
 
         fs::write(&original, b"in-place edit").unwrap();
         assert_eq!(fs::read(&staged).unwrap(), b"abc");
