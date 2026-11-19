@@ -642,6 +642,11 @@ impl Materials {
     pub fn is_bare(&self) -> bool {
         !self.defined
     }
+    /// Whether the items atlas lists `id`: its model material is that atlas's, which may not be
+    /// the blocks atlas's sprite of the name.
+    pub fn in_items(&self, id: &str) -> bool {
+        self.items.contains_key(id)
+    }
     /// Every id either atlas lists.
     pub fn ids(&self) -> std::collections::BTreeSet<&str> {
         self.items

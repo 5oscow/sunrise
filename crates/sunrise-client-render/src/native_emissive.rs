@@ -44,11 +44,7 @@ pub fn load_optifine(root: &ResourceSource, sprites: &mut Sprites) -> Vec<(Strin
     // Blocks with identical pixels share a layer (and the shader pairs by layer): a shared
     // base would glow on every block that shares it, so it gets no overlay.
     let mut sharing: BTreeMap<u32, usize> = BTreeMap::new();
-    for (_, layer) in sprites
-        .layers
-        .iter()
-        .filter(|(name, _)| !name.starts_with(crate::sprites::FILE_KEY_PREFIX))
-    {
+    for layer in sprites.layers.values() {
         *sharing.entry(*layer).or_default() += 1;
     }
     let mut bases: Vec<String> = sprites
@@ -108,15 +104,16 @@ pub const CUTOUT: u32 = 1 << 31;
 /// one per base layer with native mods' first, sorted by base layer for the shader's early exit.
 pub fn table<'a>(
     layers: &BTreeMap<String, u32>,
+    files: &BTreeMap<String, u32>,
     native: impl IntoIterator<Item = (&'a str, &'a str)>,
     optifine: &'a [(String, String)],
 ) -> Vec<[u32; 4]> {
     let mut by_base: BTreeMap<u32, [u32; 4]> = BTreeMap::new();
-    for pair in mappings(layers, native.into_iter().take(NATIVE)) {
+    for pair in mappings(layers, files, native.into_iter().take(NATIVE)) {
         by_base.insert(pair[0], pair);
     }
     let optifine = optifine.iter().map(|(b, o)| (b.as_str(), o.as_str()));
-    for [b, o, z, w] in mappings(layers, optifine) {
+    for [b, o, z, w] in mappings(layers, files, optifine) {
         by_base.entry(b).or_insert([b, o | CUTOUT, z, w]);
     }
     by_base.into_values().collect()
@@ -125,14 +122,12 @@ pub fn table<'a>(
 /// Only loaded base/overlay pairs are sent to the GPU; sorted for vertex lookup.
 pub fn mappings<'a>(
     layers: &BTreeMap<String, u32>,
+    files: &BTreeMap<String, u32>,
     requests: impl IntoIterator<Item = (&'a str, &'a str)>,
 ) -> Vec<[u32; 4]> {
     let mut pairs = BTreeMap::new();
     for (base, overlay) in requests.into_iter().take(MAX) {
-        if let (Some(&b), Some(&o)) = (
-            layers.get(base),
-            layers.get(&crate::sprites::Sprites::file_key(overlay)),
-        ) {
+        if let (Some(&b), Some(&o)) = (layers.get(base), files.get(overlay)) {
             pairs.entry(b).or_insert(o);
         }
     }
@@ -210,16 +205,8 @@ mod tests {
                 "minecraft:block/stone_e".into()
             )]
         );
-        assert!(
-            sprites
-                .layers
-                .contains_key(&Sprites::file_key("minecraft:block/stone_e"))
-        );
-        assert!(
-            !sprites
-                .layers
-                .contains_key(&Sprites::file_key("minecraft:block/granite_e"))
-        );
+        assert!(sprites.files.contains_key("minecraft:block/stone_e"));
+        assert!(!sprites.files.contains_key("minecraft:block/granite_e"));
         // The pack's own suffix.
         let props = root.join("assets/minecraft/optifine/emissive.properties");
         std::fs::create_dir_all(props.parent().unwrap()).unwrap();
@@ -264,33 +251,29 @@ mod tests {
 
     #[test]
     fn the_table_keeps_native_pairs_first_and_flags_optifine_cutout() {
-        let layers: BTreeMap<String, u32> = [
-            ("a", 5),
-            ("file//a_e", 6),
-            ("b", 2),
-            ("file//b_e", 3),
-            ("file//native", 9),
-        ]
-        .map(|(n, l)| (n.to_owned(), l))
-        .into();
+        let layers: BTreeMap<String, u32> =
+            [("a", 5), ("b", 2)].map(|(n, l)| (n.to_owned(), l)).into();
+        let files: BTreeMap<String, u32> = [("a_e", 6), ("b_e", 3), ("native", 9)]
+            .map(|(n, l)| (n.to_owned(), l))
+            .into();
         let optifine = [
             ("a".to_owned(), "a_e".to_owned()),
             ("b".to_owned(), "b_e".to_owned()),
         ];
         // A native mod pairs `a` too: its pair wins; `b` stays the pack's, flagged.
-        let t = table(&layers, [("a", "native")], &optifine);
+        let t = table(&layers, &files, [("a", "native")], &optifine);
         assert_eq!(
             t,
             [[2, 3 | CUTOUT, 0, 0], [5, 9, 0, 0]],
             "sorted by base layer"
         );
         // Native mods keep their 32: of 40 requests on 40 bases, the first 32.
-        let mut layers: BTreeMap<String, u32> =
-            (0..41u32).map(|i| (format!("s{i}"), 100 + i)).collect();
-        layers.insert("file//s0".into(), 100);
+        let layers: BTreeMap<String, u32> =
+            (1..41u32).map(|i| (format!("s{i}"), 100 + i)).collect();
+        let files: BTreeMap<String, u32> = [("s0".to_owned(), 100)].into();
         let names: Vec<String> = (1..41).map(|i| format!("s{i}")).collect();
         let many = names.iter().map(|n| (n.as_str(), "s0"));
-        let t = table(&layers, many, &[]);
+        let t = table(&layers, &files, many, &[]);
         assert_eq!(t.len(), 32);
         assert_eq!(
             t.last(),
@@ -300,14 +283,12 @@ mod tests {
     }
     #[test]
     fn only_existing_pairs_are_mapped() {
-        let layers = [
-            ("minecraft:block/ore".into(), 3),
-            ("file//mine:emissive/ore".into(), 7),
-        ]
-        .into();
+        let layers = [("minecraft:block/ore".into(), 3)].into();
+        let files = [("mine:emissive/ore".into(), 7)].into();
         assert_eq!(
             mappings(
                 &layers,
+                &files,
                 [
                     ("minecraft:block/ore", "mine:emissive/ore"),
                     ("missing", "mine:emissive/ore")

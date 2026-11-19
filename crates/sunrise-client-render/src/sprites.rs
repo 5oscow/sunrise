@@ -113,6 +113,12 @@ pub struct Sprites {
     pub minimum_size: u32,
     pub pixels: Vec<u8>,
     pub layers: BTreeMap<String, u32>,
+    /// The layers of texture files read on their own (`insert_limited`), by name: apart from
+    /// `layers`, as a file is not the model material of its name.
+    pub files: BTreeMap<String, u32>,
+    /// The model materials of ids the items atlas lists, by name; `layers` keeps the blocks
+    /// atlas's sprite of a name.
+    items_layers: BTreeMap<String, u32>,
     pub animations: Vec<SpriteAnimation>,
     pub opaque: Vec<bool>,
     pub translucent: Vec<bool>,
@@ -145,8 +151,6 @@ pub struct Sprites {
     /// ([`Sprites::materials`]).
     materials: std::sync::OnceLock<crate::atlas_sources::Materials>,
 }
-/// What starts the `layers` key of a file read on its own: no id or resource path does.
-pub const FILE_KEY_PREFIX: &str = "file//";
 /// Where a sprite's pixels are looked up: as a model's material (the items atlas, then the
 /// blocks atlas), in the blocks atlas alone, or as a texture file read on its own.
 #[derive(Clone, Copy)]
@@ -154,6 +158,13 @@ enum Lookup<'a> {
     Model,
     Blocks,
     File(&'a [u8]),
+}
+/// Which of the layer maps by name a sprite is kept in.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Slot {
+    Layers,
+    Items,
+    Files,
 }
 /// The most memory the square frames of one decoded sprite may take.
 const MAX_FRAMES_BYTES: u64 = 1 << 30;
@@ -387,8 +398,8 @@ impl Sprites {
     /// [`Sprites::insert`] without the missing-texture fallback: a file that doesn't load is an
     /// error, and nothing is added.
     pub fn try_insert(&mut self, name: &str) -> Result<u32> {
-        match self.layers.get(name) {
-            Some(layer) => Ok(*layer),
+        match self.layer_of(self.slot_of(Lookup::Model, name), name) {
+            Some(layer) => Ok(layer),
             None => self.load(name, Lookup::Model),
         }
     }
@@ -396,15 +407,10 @@ impl Sprites {
     /// including cached layers. The checked bytes are reused when decoding.
     pub fn try_insert_limited(&mut self, name: &str, max: u64) -> Result<u32> {
         let bytes = self.limited_png(name, max)?;
-        match self.layers.get(&Self::file_key(name)) {
+        match self.files.get(name) {
             Some(layer) => Ok(*layer),
             None => self.load(name, Lookup::File(&bytes)),
         }
-    }
-    /// The key of a texture file read on its own ([`Sprites::insert_limited`]) in `layers`: the
-    /// file is not the model material of the same id, which an atlas definition may not list.
-    pub fn file_key(name: &str) -> String {
-        format!("{FILE_KEY_PREFIX}{name}")
     }
     fn limited_png(&self, name: &str, max: u64) -> Result<Vec<u8>> {
         let path = if name.contains(':') {
@@ -414,35 +420,64 @@ impl Sprites {
         };
         Ok(self.source.read_limited(&path, max)?)
     }
-    /// Like `insert`, but refuses unreadable or oversized PNG data before decoding.
+    /// Like `insert`, but refuses unreadable or oversized PNG data before decoding. The layer
+    /// is the file's own, in [`Sprites::files`]: not a model material, which an atlas
+    /// definition may not list.
     pub fn insert_limited(&mut self, name: &str, max: u64) -> Result<u32> {
         let bytes = self.limited_png(name, max)?;
-        if let Some(layer) = self.layers.get(&Self::file_key(name)) {
+        if let Some(layer) = self.files.get(name) {
             return Ok(*layer);
         }
         let loaded = self.load(name, Lookup::File(&bytes));
-        self.or_missing(name, loaded)
+        self.or_missing(Slot::Files, name, loaded)
     }
     /// [`Sprites::insert`] for what names the blocks atlas itself, as the fluid renderer does:
-    /// the blocks atlas's sprite, not the items atlas's of the same id.
+    /// the blocks atlas's sprite, in [`Sprites::layers`], not the items atlas's of the same id.
     pub fn insert_in_blocks(&mut self, name: &str) -> Result<u32> {
         if let Some(layer) = self.layers.get(name) {
             return Ok(*layer);
         }
         let loaded = self.load(name, Lookup::Blocks);
-        self.or_missing(name, loaded)
+        self.or_missing(Slot::Layers, name, loaded)
     }
     /// The layer of a texture, added on first use. A texture that is missing
     /// or does not load (a resource pack's filter or a broken file) becomes
     /// vanilla's missing texture, as in a stitched atlas.
     pub fn insert(&mut self, name: &str) -> Result<u32> {
-        if let Some(layer) = self.layers.get(name) {
-            return Ok(*layer);
+        let slot = self.slot_of(Lookup::Model, name);
+        if let Some(layer) = self.layer_of(slot, name) {
+            return Ok(layer);
         }
         let loaded = self.load(name, Lookup::Model);
-        self.or_missing(name, loaded)
+        self.or_missing(slot, name, loaded)
     }
-    fn or_missing(&mut self, name: &str, loaded: Result<u32>) -> Result<u32> {
+    /// Where a lookup's layer is kept by name. A model's material is the items atlas's first,
+    /// so one the items atlas lists is kept apart, and the blocks atlas's sprite of that name
+    /// (what mods and the fluids look up) stays in [`Sprites::layers`].
+    fn slot_of(&self, lookup: Lookup, name: &str) -> Slot {
+        match lookup {
+            Lookup::File(_) => Slot::Files,
+            Lookup::Model if self.materials().in_items(name) => Slot::Items,
+            _ => Slot::Layers,
+        }
+    }
+    fn layer_of(&self, slot: Slot, name: &str) -> Option<u32> {
+        match slot {
+            Slot::Layers => &self.layers,
+            Slot::Items => &self.items_layers,
+            Slot::Files => &self.files,
+        }
+        .get(name)
+        .copied()
+    }
+    fn slot_mut(&mut self, slot: Slot) -> &mut BTreeMap<String, u32> {
+        match slot {
+            Slot::Layers => &mut self.layers,
+            Slot::Items => &mut self.items_layers,
+            Slot::Files => &mut self.files,
+        }
+    }
+    fn or_missing(&mut self, slot: Slot, name: &str, loaded: Result<u32>) -> Result<u32> {
         match loaded {
             Ok(layer) => Ok(layer),
             Err(e) => {
@@ -468,7 +503,7 @@ impl Sprites {
                 self.pbr.push([None, None]);
                 self.translucent.push(false);
                 self.mips.push(crate::mipmap::Settings::default());
-                self.layers.insert(name.to_owned(), layer);
+                self.slot_mut(slot).insert(name.to_owned(), layer);
                 self.native.push((SPRITE_SIZE, Arc::new(vec![frame]), 0));
                 Ok(layer)
             }
@@ -543,21 +578,24 @@ impl Sprites {
                 decoded
             }
         };
-        match lookup {
-            Lookup::File(_) => {
-                // The layer is the file's own: the model material of the same id, if any, keeps
-                // its place.
-                let model = self.layers.get(name).copied();
-                let layer = self.register(name, decoded)?;
-                match model {
-                    Some(model) => self.layers.insert(name.to_owned(), model),
-                    None => self.layers.remove(name),
-                };
-                self.layers.insert(Self::file_key(name), layer);
-                Ok(layer)
-            }
-            _ => self.register(name, decoded),
+        let slot = self.slot_of(lookup, name);
+        if slot == Slot::Layers {
+            return self.register(name, decoded);
         }
+        // `register` names the layer in `layers`: the blocks atlas's sprite of that name, if
+        // any, keeps its place.
+        let blocks = self.layers.get(name).copied();
+        let layer = self.register(name, decoded)?;
+        match blocks {
+            Some(blocks) => self.layers.insert(name.to_owned(), blocks),
+            None => self.layers.remove(name),
+        };
+        self.slot_mut(slot).insert(name.to_owned(), layer);
+        if slot == Slot::Items && !self.layers.contains_key(name) {
+            // The name still answers with the blocks atlas's sprite.
+            self.load(name, Lookup::Blocks).ok();
+        }
+        Ok(layer)
     }
     /// The layer of a texture outside `textures/` (an OptiFine pack's connected-texture tile),
     /// named by its resource path and added on first use. Unlike [`Sprites::insert`], a texture
@@ -2071,6 +2109,92 @@ mod tests {
                 .chunks(4)
                 .all(|p| p == [255; 4])
         );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A scratch tree with `sheet.png` (red, green, blue, white quadrants) and the two atlases'
+    /// definitions, each cutting the given `(sprite, x, y)` quadrants of it.
+    fn cut_atlases(
+        tag: &str,
+        items: &[(&str, u8, u8)],
+        blocks: &[(&str, u8, u8)],
+    ) -> std::path::PathBuf {
+        let definition = |cuts: &[(&str, u8, u8)]| {
+            let regions: Vec<String> = cuts
+                .iter()
+                .map(|(sprite, x, y)| {
+                    format!(r#"{{"sprite":"{sprite}","x":{x},"y":{y},"width":1,"height":1}}"#)
+                })
+                .collect();
+            format!(
+                r#"{{"sources":[{{"type":"minecraft:unstitch","resource":"demo:block/sheet",
+                "divisor_x":2,"divisor_y":2,"regions":[{}]}}]}}"#,
+                regions.join(",")
+            )
+        };
+        atlas_root(tag, &definition(blocks), Some(&definition(items)))
+    }
+    fn first_texel(sprites: &Sprites, layer: u32) -> [u8; 4] {
+        sprites.native[layer as usize].1[0][..4].try_into().unwrap()
+    }
+    #[test]
+    fn a_model_and_a_fluid_naming_one_id_each_get_their_own_atlas_sprite() {
+        // `both` is white in the items atlas and red in the blocks atlas; `items_only` is blue.
+        let root = cut_atlases(
+            "model-fluid",
+            &[("demo:block/both", 1, 1), ("demo:block/items_only", 0, 1)],
+            &[("demo:block/both", 0, 0)],
+        );
+        for model_first in [true, false] {
+            let mut sprites = Sprites::new(ResourceSource::directory(root.clone()));
+            let (model, fluid) = if model_first {
+                let model = sprites.insert("demo:block/both").unwrap();
+                (model, sprites.insert_in_blocks("demo:block/both").unwrap())
+            } else {
+                let fluid = sprites.insert_in_blocks("demo:block/both").unwrap();
+                (sprites.insert("demo:block/both").unwrap(), fluid)
+            };
+            assert_eq!(
+                first_texel(&sprites, model),
+                [255; 4],
+                "model first: {model_first}"
+            );
+            assert_eq!(
+                first_texel(&sprites, fluid),
+                [255, 0, 0, 255],
+                "model first: {model_first}"
+            );
+            // The name mods and the fluid renderer look up is the blocks atlas's sprite.
+            assert_eq!(sprites.layers["demo:block/both"], fluid);
+            // An id only the items atlas lists: the blocks lookup misses, the model finds it.
+            let miss = sprites.insert_in_blocks("demo:block/items_only").unwrap();
+            assert_eq!(first_texel(&sprites, miss), [0, 0, 0, 255]);
+            let found = sprites.insert("demo:block/items_only").unwrap();
+            assert_eq!(first_texel(&sprites, found), [0, 0, 255, 255]);
+        }
+        fs::remove_dir_all(&root).unwrap();
+    }
+    #[test]
+    fn a_broken_file_read_on_its_own_leaves_the_model_sprite_in_place() {
+        let root = cut_atlases("raw-broken", &[], &[("demo:block/cut", 0, 0)]);
+        let mut sprites = Sprites::new(ResourceSource::directory(root.clone()));
+        let model = sprites.insert("demo:block/cut").unwrap();
+        // A readable file that is no PNG, at the same id.
+        fs::write(
+            root.join("assets/demo/textures/block/cut.png"),
+            b"not a png",
+        )
+        .unwrap();
+        let raw = sprites.insert_limited("demo:block/cut", 1 << 20).unwrap();
+        assert_ne!(raw, model);
+        assert_eq!(
+            first_texel(&sprites, raw),
+            [0, 0, 0, 255],
+            "the missing texture"
+        );
+        assert_eq!(sprites.files["demo:block/cut"], raw);
+        assert_eq!(sprites.layers["demo:block/cut"], model);
+        assert_eq!(first_texel(&sprites, model), [255, 0, 0, 255]);
         fs::remove_dir_all(&root).unwrap();
     }
 }
