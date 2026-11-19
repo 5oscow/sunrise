@@ -95,7 +95,7 @@ pub(super) fn cart_known_movement(velocity: Vec3) -> Vec3 {
 /// The entity id a vehicle's riders point at, for the targets that carry some.
 fn vehicle_id(t: Target) -> Option<u32> {
     match t {
-        Target::Boat(id) | Target::Cart(id) | Target::Mob(id) => Some(id),
+        Target::Boat(id) | Target::Cart(id) | Target::Mob(id) | Target::General(id) => Some(id),
         _ => None,
     }
 }
@@ -635,7 +635,8 @@ impl Game<'_> {
         new: Vec3,
         rotation: Option<PlacedRotation>,
     ) {
-        let riders = self.mob_passenger_ids(vehicle);
+        let mut riders = self.mob_passenger_ids(vehicle);
+        riders.extend(self.resident_entities.general.passenger_ids(vehicle));
         let mut guest_steps = Vec::new();
         for id in riders {
             let mut carried = None;
@@ -657,6 +658,14 @@ impl Game<'_> {
                     m.previous_yaw = yaw;
                     m.previous_head_pitch = pitch;
                 }
+            } else if let Some(row) = self.resident_entities.general.row_mut(id) {
+                let from = row.position;
+                row.position = passenger_destination(old, new, from);
+                row.previous = row.position;
+                if let Some(placed) = rotation {
+                    row.rotation = passenger_rotation(placed.before, placed.after, row.rotation);
+                }
+                carried = Some((from, row.position));
             }
             // Each rider's `teleportSetPosition` is a position update of its own.
             if let Some((from, to)) = carried {

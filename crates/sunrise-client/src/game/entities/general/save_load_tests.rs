@@ -472,6 +472,34 @@ fn transferred_general_tree_loads_as_the_same_logical_entity() {
     });
 }
 
+#[test]
+#[ignore = "daily"]
+fn a_same_level_teleport_places_the_general_tree_and_unseats_a_separately_moved_rider() {
+    with_types(|game| {
+        let rider = record_tag("mymod:robot", [9, 9, 9, 9], b"", Vec::new());
+        let root = record_tag("mymod:robot", [1, 2, 3, 4], b"", vec![rider]);
+        game.load_listed("mymod:robot", None, None, root).unwrap();
+        let rows = &game.resident_entities.general.rows;
+        let (root, rider) = (
+            game.entity(rows[0].id).unwrap(),
+            game.entity(rows[1].id).unwrap(),
+        );
+        let _world = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+
+        let to = [10.5, 64.0, 0.5];
+        assert!(root.teleport_to(game, to, Some([90.0, 30.0])));
+        assert_eq!(root.position(game), Some(to));
+        assert_eq!(rider.position(game), Some(to));
+        assert_eq!(rider.rotation(game), Some([90.0, 30.0]));
+
+        let rider_to = [12.5, 64.0, 0.5];
+        assert!(rider.teleport_to(game, rider_to, None));
+        assert_eq!(rider.position(game), Some(rider_to));
+        assert_eq!(rider.vehicle(game), None);
+        assert_eq!(root.position(game), Some(to));
+    });
+}
+
 /// A tree travels between dimensions with its riders: the source ends with
 /// zero rows and stale ids, the destination holds the same tree — same
 /// UUIDs, same mount links — with fresh join identities, the root placed.

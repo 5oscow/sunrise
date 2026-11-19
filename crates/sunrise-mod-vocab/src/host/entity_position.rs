@@ -66,7 +66,8 @@ pub trait EntityPositionBackend {
 pub trait EntityPositionBackendMut {
     /// Side: server.
     /// Moves the entity to `pos` in its level (`Entity.teleportTo`), as
-    /// `/tp` does: a player is placed there and told, a rider gets off. With
+    /// `/tp` does: a player is placed there and told, a rider gets off, and a
+    /// vehicle (including a general entity) takes its riders with it. With
     /// `rotation` (yaw, pitch in degrees) it also turns. False for a position
     /// outside the world's bounds, for wall-mounted entities or dragon parts, or when the
     /// requested rotation cannot be stored.

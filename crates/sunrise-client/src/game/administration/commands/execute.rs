@@ -157,6 +157,11 @@ impl Game<'_> {
                 .iter()
                 .find(|o| o.id == id)
                 .map_or([0.0; 2], |o| [o.yaw, o.pitch]),
+            Target::General(id) => self
+                .resident_entities
+                .general
+                .row(id)
+                .map_or([0.0; 2], |row| row.rotation),
             _ => [0.0; 2],
         }
     }

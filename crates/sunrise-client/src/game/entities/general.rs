@@ -634,6 +634,23 @@ pub struct GeneralStore {
     pub mount_writes: u64,
 }
 
+impl GeneralStore {
+    pub(in crate::game) fn row(&self, id: u32) -> Option<&GeneralRow> {
+        self.rows.iter().find(|row| row.id == id)
+    }
+
+    pub(in crate::game) fn row_mut(&mut self, id: u32) -> Option<&mut GeneralRow> {
+        self.rows.iter_mut().find(|row| row.id == id)
+    }
+
+    pub(in crate::game) fn passenger_ids(&self, vehicle: u32) -> impl Iterator<Item = u32> + '_ {
+        self.rows
+            .iter()
+            .filter(move |row| row.mount == Some(vehicle))
+            .map(|row| row.id)
+    }
+}
+
 /// Root-to-rider adjacency of the general rows, as a first-child and
 /// next-sibling index over the rows' places: rebuilt in place, and only
 /// when the rows' storage changed or a mount was rewritten, so a stable

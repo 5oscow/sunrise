@@ -111,7 +111,11 @@ impl Game<'_> {
                 !r.iter().all(|v| v.is_finite())
                     || !matches!(
                         t,
-                        Target::Player | Target::Guest(_) | Target::Mob(_) | Target::Other(_)
+                        Target::Player
+                            | Target::Guest(_)
+                            | Target::Mob(_)
+                            | Target::Other(_)
+                            | Target::General(_)
                     )
             })
         {
