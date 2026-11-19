@@ -38,9 +38,10 @@ cargo sunrise-mod check target/sunrise-mod/my_mod.smod   # the registry's checks
   previous `<id>.smod` before running the reference checks. Earlier failures, such as a manifest or SDK error,
   can leave the previous package in place. Without `--wasm`, the build does not compile code. Native code requires
   both `Cargo.toml` and `[native]`; inconsistent declarations and a manifest without capability `registries` are refused.
-- `run` builds, then starts `sunrise-client` (on `PATH`, or `--game PATH`, or `SUNRISE_CLIENT`) with
-  `--dev-mod target/sunrise-mod/<id>.smod`, always on. Arguments after `--` go to the game. The game reads content once
-  at start, so rebuild and run again after an edit.
+- For content mods, `run` builds, then starts `sunrise-client` (on `PATH`, or `--game PATH`, or `SUNRISE_CLIENT`) with
+  `--dev-mod target/sunrise-mod/<id>.smod`, always on. Native projects use the pinned SDK's game. Use `--jars <dir>`
+  to choose a folder of [original Java jars](#java-jars-as-external-assets). Arguments after `--` go to the game.
+  The game reads content once at start, so run again after an edit.
 - `check` in a project folder runs the package rules, the render pipeline shader checks and offline reference checks.
   It checks references to IDs in namespaces the manifest owns, not to vanilla or other mods. It checks these forms:
   - Models in blockstate `variants` and `multipart`, model `parent` and `textures` fields, and model references in
@@ -65,7 +66,7 @@ cargo sunrise-mod check target/sunrise-mod/my_mod.smod   # the registry's checks
   with `--key <public key> --signature <file>.minisig`. It reads `.smod`, `.spack`, resource pack `.zip`
   and `.sshader` files.
 - `registry build|review|check|list|release|page` is the registry repository's CI ([the registry index](../reference/registry-index.md)).
-- `use-jar <path>` records an original Java jar as an external asset/data source, without copying it into the mod
+- `use-jar <path>` records and caches an original Java jar as an external asset/data source, without copying it into the mod
   ([Java jars as external assets](#java-jars-as-external-assets)).
 
 ## Vegetation behaviour is independent of the template
@@ -175,10 +176,16 @@ leaves the file byte-for-byte unchanged; a hash already listed with another ID o
 not another entry. Use `[[jar]]` tables rather than an inline `jar = [...]` array when adding further jars with the command.
 The list is ordered: new references are appended, not sorted.
 
-Jar bytes stay external. The launcher finds the exact hash locally or asks before downloading that exact file from
-Modrinth. Its `assets/` and `data/` are passive pack layers below the Sunrise mod's own files; a player-local runtime
-cache is not part of the mod package. Do not copy a jar or its extracted files into the mod's source or `.smod`.
-A jar reference supplies assets and data, not the original Java behavior: port that behavior through the mod API.
+`use-jar` stores the exact file as `<sha512>.jar` in the usual game home's `jars/` directory (`SUNRISE_HOME` if set,
+otherwise `sunrise` in your platform's data folder). Run `cargo sunrise-mod run` after adding the jar; `run` verifies
+and stages only the jars in your manifest in `target/sunrise-mod/run/home/jars/`. It uses links where possible and
+copies if it cannot link. The game reads the originals without modifying them. Leave the game's `--home` unset to
+use this development home. To read originals from a different folder, supply its `<sha512>.jar` files with
+`cargo sunrise-mod run --jars <dir>`. Neither command downloads jars.
+
+Jar bytes stay external. The original's `assets/` and `data/` are passive pack layers below the Sunrise mod's own
+files. Do not copy a jar or its extracted files into the mod's source or `.smod`. A jar reference supplies assets
+and data, not the original Java behavior: port that behavior through the mod API.
 
 ### Content mods (API 0.2)
 

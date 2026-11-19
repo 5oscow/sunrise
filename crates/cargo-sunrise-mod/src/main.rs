@@ -15,7 +15,7 @@
 //!   and `data/`; a native mod is then compiled too (`dev.rs`); with `--wasm`, a Rust mod built to `mod.wasm` first (`wasm.rs`).
 //! - `publish`: build, then write the registry entry, the staged file and the pull request text (`publish.rs`).
 //! - `wasm-std <out.wasm>`: the standard library member the game ships for wasm mods.
-//! - `run [--game <sunrise-client>] [--resources <folder>] [-- <game args>]`: build, then play with
+//! - `run [--game <sunrise-client>] [--resources <folder>] [--jars <dir>] [-- <game args>]`: build, then play with
 //!   the mod.
 //! - `check [--uses] [--wasm] [--native]` in a mod folder: the package rules, its render pipeline
 //!   shaders composed and validated as the game does, `cargo check` for the project's own target
@@ -659,12 +659,21 @@ impl std::fmt::Display for RunError {
 impl std::error::Error for RunError {}
 
 fn run(args: &[String]) -> Result<(), RunError> {
-    let extra: Vec<String> = args
+    let (args, extra) = args
         .iter()
-        .skip_while(|a| *a != "--")
-        .skip(1)
-        .cloned()
-        .collect();
+        .position(|a| a == "--")
+        .map_or((args, &[][..]), |i| (&args[..i], &args[i + 1..]));
+    let jars = if args.iter().any(|a| a == "--jars") {
+        Some(Path::new(
+            flag(args, "--jars")
+                .filter(|a| !a.is_empty() && !a.starts_with("--"))
+                .ok_or_else(|| {
+                    RunError::Build("pass a folder to `cargo sunrise-mod run --jars <dir>`".into())
+                })?,
+        ))
+    } else {
+        None
+    };
     if Path::new("Cargo.toml").is_file() {
         // Only a native mod starts here; a wasm mod is a package the game loads.
         if !dev::is_native(Path::new(".")).map_err(RunError::Build)? {
@@ -672,7 +681,7 @@ fn run(args: &[String]) -> Result<(), RunError> {
                 "a wasm mod is started with its package: `cargo sunrise-mod build --wasm`, then `sunrise-client --dev-mod target/sunrise-mod/<id>.smod`".into(),
             ));
         }
-        return dev::run(Path::new("."), flag(args, "--resources"), &extra)
+        return dev::run(Path::new("."), flag(args, "--resources"), jars, extra)
             .map_err(RunError::Build);
     }
     // A content mod carries no uses table.
@@ -681,8 +690,14 @@ fn run(args: &[String]) -> Result<(), RunError> {
         .map(str::to_string)
         .or_else(|| std::env::var("SUNRISE_CLIENT").ok())
         .unwrap_or_else(|| "sunrise-client".into());
+    let home = Path::new("target/sunrise-mod/run/home");
+    let manifest = Package::read(&path).map_err(RunError::Build)?.manifest;
+    let mut command = Command::new(&game);
+    if jar::stage_for_run(&manifest, home, jars, extra).map_err(RunError::Build)? {
+        command.env("SUNRISE_HOME", home);
+    }
     println!("Starting {game} with {}", path.display());
-    let status = Command::new(&game)
+    let status = command
         .arg("--dev-mod")
         .arg(&path)
         .args(extra)

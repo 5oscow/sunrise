@@ -371,11 +371,16 @@ fn copy(from: &Path, to: &Path) -> Result<(), String> {
 /// Builds the native mod in `project`, stages it beside the SDK's game under
 /// `target/sunrise-mod/run/` (`app/` is made afresh; `game/` and `home/` keep worlds and logs
 /// between runs, so nothing of a player's is touched) and starts it with `args`.
-pub(crate) fn run(project: &Path, resources: Option<&str>, args: &[String]) -> Result<(), String> {
+pub(crate) fn run(
+    project: &Path,
+    resources: Option<&str>,
+    jars: Option<&Path>,
+    args: &[String],
+) -> Result<(), String> {
     let resources = resources.map(PathBuf::from).ok_or_else(|| {
         "the game needs prepared resources made from your own Minecraft: pass --resources <folder>. \
          Make them with `sunrise-prepare --prepare --output <folder>` (it comes with the game's download; play \
-         Minecraft Java Edition 26.3 once in your launcher first; sunrise-prepare --help lists the other places it reads)"
+         Minecraft Java Edition 26.3 once first; sunrise-prepare --help lists the other places it reads)"
             .to_owned()
     })?;
     if !resources.is_dir() {
@@ -384,8 +389,11 @@ pub(crate) fn run(project: &Path, resources: Option<&str>, args: &[String]) -> R
             resources.display()
         ));
     }
-    let built = build(project, false)?;
     let stage = project.join("target/sunrise-mod").join(RUN);
+    let home = stage.join("home");
+    let mod_package = sunrise_mod_package::Package::read(project)?;
+    crate::jar::stage_for_run(&mod_package.manifest, &home, jars, args)?;
+    let built = build(project, false)?;
     let app = stage.join("app");
     match std::fs::remove_dir_all(&app) {
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
@@ -394,9 +402,8 @@ pub(crate) fn run(project: &Path, resources: Option<&str>, args: &[String]) -> R
         _ => {}
     }
     let package = app.join(sunrise_mod_package::mod_list::NATIVE_DIR);
-    let id = sunrise_mod_package::Package::read(project)?.manifest.id;
+    let id = &mod_package.manifest.id;
     let game = stage.join("game");
-    let home = stage.join("home");
     for folder in [&app, &game, &home] {
         std::fs::create_dir_all(folder).map_err(|e| format!("{}: {e}", folder.display()))?;
     }
@@ -416,9 +423,9 @@ pub(crate) fn run(project: &Path, resources: Option<&str>, args: &[String]) -> R
     let record_path = app.join("native-mods.json");
     std::fs::write(&record_path, record(&built.records)?)
         .map_err(|e| format!("{}: {e}", record_path.display()))?;
-    let files = sunrise_mod_package::Package::read(project)?.directory_files(project)?;
+    let files = mod_package.directory_files(project)?;
     for (name, bytes) in files {
-        let to = package.join(&id).join(&name);
+        let to = package.join(id).join(&name);
         std::fs::create_dir_all(to.parent().expect("a file in the package"))
             .map_err(|e| e.to_string())?;
         std::fs::write(&to, bytes).map_err(|e| format!("{}: {e}", to.display()))?;
