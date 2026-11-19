@@ -350,6 +350,26 @@ class SdkAssetTests(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "sunrise-mod-wasm"):
             prebuilt_game.slices(metadata, copied, ["bin/sunrise-client"])
 
+    def test_fixed_client_links_and_installs_official_layer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            out = Path(directory)
+            deps = out / "deps"
+            deps.mkdir()
+            for crate in ("sunrise_client", "mod_api", "sunrise_mod_package"):
+                (deps / f"lib{crate}.rmeta").touch()
+            host = deps / f"{prebuilt_game.dylib_prefix()}sunrise_mod_host{prebuilt_game.dylib_suffix()}"
+            official = deps / f"{prebuilt_game.dylib_prefix()}sunrise_official{prebuilt_game.dylib_suffix()}"
+            host.touch()
+            official.touch()
+            with patch.object(prebuilt_game, "run") as rustc:
+                files = prebuilt_game.api_route(out, [])
+            command = rustc.call_args.args[0]
+            self.assertIn('feature="official"', command)
+            self.assertIn(f"sunrise_official={official}", command)
+            metadata = {"packages": [{"id": "official", "name": "sunrise-official"}], "resolve": {"nodes": []}}
+            compiled = official.relative_to(out).as_posix()
+            self.assertIn(compiled, prebuilt_game.slices(metadata, {"official": [compiled]}, files)["runtime"])
+
     def test_a_server_leg_packs_the_tool_only_when_asked(self):
         for with_tool in (False, True):
             with self.subTest(with_tool=with_tool), tempfile.TemporaryDirectory() as directory, \
