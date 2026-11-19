@@ -187,62 +187,6 @@ pub(super) fn cached_user_by_id(id: u128) -> Option<NameAndId> {
     USER_CACHE.lock().unwrap().as_mut()?.get_by_id(id)
 }
 
-/// `server.toml`'s `[entities]` (docs/server.md): `villager_lobotomize` and its check interval. Off without
-/// the file or the section, and (with an error logged) when the section is wrong.
-fn load_entities() {
-    let text = std::fs::read_to_string("server.toml").unwrap_or_default();
-    match parse_entities(&text) {
-        Ok((on, interval)) => {
-            if on {
-                log(
-                    "INFO",
-                    &format!(
-                        "villagers that cannot move skip their brain, rechecked every {interval} ticks (server.toml [entities])"
-                    ),
-                );
-            }
-            sunrise_client::mobs::villager::lobotomy::configure(on, interval);
-        }
-        Err(e) => log(
-            "ERROR",
-            &format!("server.toml: {e}; villagers keep their brains"),
-        ),
-    }
-}
-
-/// The `[entities]` section of a `server.toml`: (`villager_lobotomize`, its check interval in ticks). The
-/// section's other keys (`dab`...) belong to other settings, so they are skipped here; `sunrise-server` refuses
-/// typos when it reads the file.
-fn parse_entities(text: &str) -> std::result::Result<(bool, u32), String> {
-    #[derive(serde::Deserialize)]
-    #[serde(default)]
-    struct Entities {
-        villager_lobotomize: bool,
-        villager_lobotomize_check_interval: u32,
-    }
-    impl Default for Entities {
-        fn default() -> Self {
-            Self {
-                villager_lobotomize: false,
-                villager_lobotomize_check_interval:
-                    sunrise_client::mobs::villager::lobotomy::DEFAULT_INTERVAL,
-            }
-        }
-    }
-    let mut table = toml::from_str::<toml::Table>(text).map_err(|e| e.to_string())?;
-    let Some(section) = table.remove("entities") else {
-        return Ok((
-            false,
-            Entities::default().villager_lobotomize_check_interval,
-        ));
-    };
-    let e: Entities = section.try_into().map_err(|e| format!("[entities]: {e}"))?;
-    if e.villager_lobotomize_check_interval == 0 {
-        return Err("[entities]: villager_lobotomize_check_interval must be at least 1".into());
-    }
-    Ok((e.villager_lobotomize, e.villager_lobotomize_check_interval))
-}
-
 /// What the start answers when the server folder still has a `forwarding.secret`.
 const FORWARDING_REMOVED: &str = "Velocity forwarding was removed from Sunrise; delete forwarding.secret from the \
      server folder (with online-mode=false, anyone who can reach the port then joins under any name)";
@@ -1240,7 +1184,6 @@ impl Game<'_> {
         }
         self.sync_ops(&lists);
         self.read_runtime_level_cap(|key| props.raw.get(key));
-        load_entities();
         // Sunrise's far ring (docs/hosting.md): server.toml's `max_view_distance`.
         let far = props
             .raw
@@ -2598,24 +2541,6 @@ mod tests {
         });
     }
     #[test]
-    fn entities_section_is_off_by_default_and_keeps_the_other_settings_keys() {
-        use super::parse_entities;
-        assert_eq!(parse_entities(""), Ok((false, 100)));
-        assert_eq!(
-            parse_entities(
-                "[entities]\nvillager_lobotomize = true\nvillager_lobotomize_check_interval = 40\n"
-            ),
-            Ok((true, 40))
-        );
-        assert_eq!(
-            parse_entities(
-                "[entities]\ndab = true\nmax_collisions = 8\nvillager_lobotomize = true\n"
-            ),
-            Ok((true, 100))
-        );
-        assert!(parse_entities("[entities]\nvillager_lobotomize_check_interval = 0\n").is_err());
-    }
-
     /// A server folder that still has the forwarding secret is told what to do.
     #[test]
     fn a_leftover_forwarding_secret_says_what_to_do() {
