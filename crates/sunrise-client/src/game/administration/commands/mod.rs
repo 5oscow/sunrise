@@ -2264,8 +2264,12 @@ impl Game<'_> {
             });
         }
         match t {
-            // Stage 3's insertion joins live rows; there is nothing to kill.
-            Target::General(_) => {}
+            Target::General(id) => {
+                let Some(entity) = self.entity(id) else {
+                    return;
+                };
+                self.remove_target_now(entity, t);
+            }
             Target::Guest(_) => {
                 self.for_player(t, |g| g.kill_target(Target::Player));
             }

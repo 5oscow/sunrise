@@ -1,1 +1,2 @@
 sunrise-client game::general::save_load_tests::a_same_level_teleport_places_the_general_tree_and_unseats_a_separately_moved_rider lib daily resources
+sunrise-client game::general::save_load_tests::killing_or_removing_a_general_row_keeps_its_passengers_in_the_level lib daily resources

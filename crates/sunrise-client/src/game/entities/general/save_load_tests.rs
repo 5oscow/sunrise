@@ -500,6 +500,38 @@ fn a_same_level_teleport_places_the_general_tree_and_unseats_a_separately_moved_
     });
 }
 
+#[test]
+#[ignore = "daily"]
+fn killing_or_removing_a_general_row_keeps_its_passengers_in_the_level() {
+    with_types(|game| {
+        for (word, by_command) in [(1, true), (2, false)] {
+            let rider = record_tag("mymod:robot", [word, 1, 0, 0], b"", Vec::new());
+            let root = record_tag("mymod:robot", [word, 0, 0, 0], b"", vec![rider]);
+            let start = game.resident_entities.general.rows.len();
+            game.load_listed("mymod:robot", None, None, root).unwrap();
+            let rows = &game.resident_entities.general.rows;
+            let (root, rider) = (
+                game.entity(rows[start].id).unwrap(),
+                game.entity(rows[start + 1].id).unwrap(),
+            );
+            let _world = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+
+            if by_command {
+                game.kill_target(Target::General(root.id()));
+            } else {
+                assert!(root.remove(game, mod_api::RemovalReason::Discarded));
+                assert_eq!(rider.vehicle(game), None);
+                game.native_removals_flush();
+            }
+            assert!(game.resident_entities.general.row(root.id()).is_none());
+            assert!(!game.persist.uuids.contains_key(&root.id()));
+            assert_eq!(root.position(game), None);
+            assert_eq!(rider.position(game), Some([0.5, 64.0, 0.5]));
+            assert_eq!(rider.vehicle(game), None);
+        }
+    });
+}
+
 /// A tree travels between dimensions with its riders: the source ends with
 /// zero rows and stale ids, the destination holds the same tree — same
 /// UUIDs, same mount links — with fresh join identities, the root placed.

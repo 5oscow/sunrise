@@ -651,6 +651,19 @@ impl GeneralStore {
     }
 }
 
+impl Game<'_> {
+    /// Clears direct general passenger links. A passenger keeps its own riders.
+    pub(in crate::game) fn eject_general_passengers(&mut self, vehicle: u32) {
+        let general = &mut self.resident_entities.general;
+        for row in &mut general.rows {
+            if row.mount == Some(vehicle) {
+                row.mount = None;
+                general.mount_writes += 1;
+            }
+        }
+    }
+}
+
 /// Root-to-rider adjacency of the general rows, as a first-child and
 /// next-sibling index over the rows' places: rebuilt in place, and only
 /// when the rows' storage changed or a mount was rewritten, so a stable

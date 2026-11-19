@@ -67,8 +67,10 @@ impl Game<'_> {
             .collect();
         // `Entity.setRemoved`: the reason first, so the hooks below see
         // it removed; then the passengers get off and the level is told.
-        // Only players and mobs ride, so this kind has no vehicle to leave.
         self.persist.removals.push(t);
+        if let Target::General(id) = t {
+            self.eject_general_passengers(id);
+        }
         self.retire_vehicle_registration(t);
         if vehicle_y.is_some() {
             self.persist.notified_vehicle_removals.insert(entity.id());
@@ -243,6 +245,15 @@ impl Game<'_> {
                     self.native_entity_left(id);
                 }
                 Target::Player | Target::Guest(_) | Target::Mob(_) => {}
+                // Both command kill and handle removal already notified this row's
+                // leave. Retire its owning slot so tracking drops the row too.
+                Target::General(id) => {
+                    let rows = &mut self.resident_entities.general.rows;
+                    if let Some(index) = rows.iter().position(|row| row.id == id) {
+                        rows.remove(index);
+                        self.forget_entity(id);
+                    }
+                }
                 // The remaining kinds `/kill` already removes with no death.
                 t => self.kill_target_in_level(t),
             }
