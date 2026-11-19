@@ -749,23 +749,34 @@ impl<'a> Catalog<'a> {
                 // They never add a target to the closure. Check the fixed installed owners
                 // only once no pending selection can replace them.
                 if needs.keys().all(|id| selected.contains_key(id)) {
+                    // Keep the first error, but record every installed target that would
+                    // need replacing for this assignment to work.
+                    let mut optional_failure = None;
                     for (&owner, c) in &selected {
                         for range in &c.optional {
                             let target = range.row.id.as_str();
-                            if let Some(need) = needs.get_mut(target) {
-                                range.parsed.as_ref().map_err(Clone::clone)?;
-                                need.ranges.push((owner, range));
-                            } else if let Some(row) = installed.get(target) {
-                                let req = range.parsed.as_ref().map_err(Clone::clone)?;
-                                if !row.number.as_ref().is_some_and(|n| req.matches(n)) {
-                                    replacements.insert(target);
-                                    return Err(format!(
-                                        "{target} {} is installed, but {owner} needs {}",
-                                        row.version, range.row.version
-                                    ));
+                            match (needs.get_mut(target), installed.get(target), &range.parsed) {
+                                (None, None, _) => {}
+                                (_, _, Err(reason)) => {
+                                    optional_failure.get_or_insert_with(|| reason.clone());
+                                }
+                                (Some(need), _, Ok(_)) => need.ranges.push((owner, range)),
+                                (None, Some(row), Ok(req)) => {
+                                    if !row.number.as_ref().is_some_and(|n| req.matches(n)) {
+                                        replacements.insert(target);
+                                        optional_failure.get_or_insert_with(|| {
+                                            format!(
+                                                "{target} {} is installed, but {owner} needs {}",
+                                                row.version, range.row.version
+                                            )
+                                        });
+                                    }
                                 }
                             }
                         }
+                    }
+                    if let Some(reason) = optional_failure {
+                        return Err(reason);
                     }
                     for (&owner, &c) in installed {
                         if !selected.contains_key(owner) {
