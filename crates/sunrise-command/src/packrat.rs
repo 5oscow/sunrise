@@ -285,10 +285,6 @@ impl<V: Value> Grammar<V> {
             None => Err(state.first_error()),
         }
     }
-    /// Grammar.parseForSuggestions.
-    pub fn parse_for_suggestions(&self, builder: &mut SuggestionsBuilder) {
-        self.parse_for_suggestions_with(builder, None)
-    }
     pub fn parse_for_suggestions_with(
         &self,
         builder: &mut SuggestionsBuilder,
