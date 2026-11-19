@@ -122,24 +122,26 @@ def phase_fixtures(sdk, identity, output, route_flags, extern, run, windows):
             "identity": f"{identity['commit']} {mod_id} 0.1.0 {release} unwind"}]}))
         folders[name] = folder
 
-    def mod_library(name, mod_id, source_extra="", flags=()):
+    def mod_library(name, mod_id, source_extra="", entry=template):
         work = root / f"{name}-build"
         work.mkdir(parents=True, exist_ok=True)
         (work / "mod_0.rs").write_text((FIXTURES / "phase_mod.rs").read_text() + source_extra)
-        (work / "main.rs").write_text(template.replace("/* MOD_ENTRIES */", f'        "{mod_id}" => mod_0::hooks,\n').replace(
+        (work / "main.rs").write_text(entry.replace("/* MOD_ENTRIES */", f'        "{mod_id}" => mod_0::hooks,\n').replace(
             "/* BUILT_MODS */",
             f'    mod_api::__private::native::BuiltMod {{ id: "{mod_id}", version: "0.1.0", side: mod_api::Side::Both }},\n').replace(
             "/* NATIVE_BUILD */", f"{identity['commit']} {mod_id} 0.1.0 {release}"))
-        base = [a for a in route_flags if a != "-L" and not str(a).startswith("dependency=" + str(output))] + ["-L", f"dependency={work}"]
-        run([*base, "--crate-type", "rlib", "--crate-name", "mod_0", *extern("mod_api"), "--out-dir", str(work), str(work / "mod_0.rs")])
+        base = [*route_flags, "-L", f"dependency={work}"]
+        run([*base, "--crate-type", "rlib", "--crate-name", "mod_0", *extern("mod_api"), "-o", str(work / "libmod_0.rlib"),
+             str(work / "mod_0.rs")])
         library = work / f"{prefix}phase_{name}{extension}"
-        run([*base, *flags, "--crate-type", "dylib", "--crate-name", f"phase_{name}", *extern("mod_api"),
+        run([*base, "--crate-type", "dylib", "--crate-name", f"phase_{name}", *extern("mod_api"),
              "--extern", f"mod_0={work / 'libmod_0.rlib'}", "-o", str(library), str(work / "main.rs")])
         record(name, library, mod_id)
 
     mod_library("ok", "phase_ok")
-    # A real `cfg!(panic = "abort")` library needs std built for it; the lint guards the cfg a build sets for itself.
-    mod_library("abort_identity", "phase_abort_identity", flags=["-A", "explicit-builtin-cfgs-in-flags", "--cfg", 'panic="abort"'])
+    # No real library can say `abort` with the shared std (rustc refuses the build), so the entry module of this
+    # one reports the strategy a `-C panic=abort` build would: it is loaded far enough to read its identity.
+    mod_library("abort_identity", "phase_abort_identity", entry=template.replace('cfg!(panic = "unwind")', "false"))
     mod_library("allocator", "phase_allocator", source_extra=(FIXTURES / "own_allocator.rs").read_text())
     work = root / "abort-build"
     work.mkdir(parents=True, exist_ok=True)
@@ -188,6 +190,9 @@ def main():
             copied = output / (source.parent.name + "-" + source.name)
             copied.write_text("".join(lines))
             command[index] = str(copied)
+            # The executable's `mod phase;` is read from beside its copy.
+            if (source.parent / "phase.rs").is_file():
+                (output / "phase.rs").write_text((source.parent / "phase.rs").read_text())
             command.extend(extern("sunrise_mod_host"))
         with (output / "commands.log").open("a") as log:
             log.write(json.dumps(list(map(str, command))) + "\n")

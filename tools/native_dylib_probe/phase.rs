@@ -23,9 +23,9 @@ impl ServerHost for NoHost {}
 mod_api::impl_server_host_areas!(NoHost);
 
 fn refused(folder: &Path, mod_id: &str, why: &str) {
-    let error = sunrise_mod_host::native_libraries::load(folder)
-        .err()
-        .expect("the library is refused at load");
+    let Err(error) = sunrise_mod_host::native_libraries::load(folder) else {
+        panic!("{mod_id} was loaded, not refused");
+    };
     assert!(
         error.contains(&format!("mod {mod_id}:")) && error.contains(why),
         "{mod_id}: {error}"
