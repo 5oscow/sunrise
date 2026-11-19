@@ -1,3 +1,3 @@
-ids = ["hook:item_tooltip"]
+ids = ["hook:item_tooltip", "hook:tooltip", "hook:add_attribute_tooltips", "hook:gather_skipped_attribute_tooltips"]
 why = "Build tooltip lines for ItemResource::tooltip queries with the same callbacks as inventory tooltips, including ItemTooltipEvent. Skip callbacks on reentrant tooltip queries."
-migrate = "Named injections request hook_version = 2. A line build need not be for drawing, so listeners should edit the lines without relying on a tooltip being displayed."
+migrate = "Rebuild against the updated hook contracts. A line build need not be for drawing; edit the lines without relying on a tooltip being displayed."
