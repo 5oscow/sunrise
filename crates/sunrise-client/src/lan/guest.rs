@@ -911,6 +911,14 @@ impl Guest {
             sunrise_protocol::collider_sync::CHANNEL,
         )
     }
+    /// Whether this connection reads general entity spawns (`sunrise:general_entity`): only
+    /// such a guest is paired with a mod's general row.
+    pub fn negotiated_general_entity(&self) -> bool {
+        crate::raw_payloads::negotiated(
+            self.sender.payload_transport(),
+            sunrise_protocol::general_entity::CHANNEL,
+        )
+    }
     /// Whether the guest's play epoch has attachment sync negotiated (a vanilla client never
     /// offers it).
     pub fn negotiated_attachment_sync(&self) -> bool {

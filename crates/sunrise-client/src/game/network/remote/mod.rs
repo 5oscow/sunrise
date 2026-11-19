@@ -13,6 +13,7 @@ mod attack_target;
 mod break_prediction;
 use break_prediction::Prediction;
 mod fall_sound;
+mod general;
 mod interaction_actions;
 mod interaction_prediction;
 mod level_format;
@@ -707,6 +708,8 @@ pub(super) struct Remote {
     /// Complete network riding graph, including invisible plugin seat entities.
     pub(super) passenger_vehicles: HashMap<u32, u32>,
     pub(super) lerps: HashMap<i32, Lerp>,
+    /// A native mod's general rows the server shows the window (`general.rs`).
+    pub(super) general: general::RemoteGenerals,
     /// The minecarts the server moves with `ClientboundMoveMinecartPacket`
     /// (`NewMinecartBehavior`), which have no interpolation handler.
     pub(super) cart_lerps: HashMap<i32, CartLerp>,
@@ -1283,6 +1286,7 @@ impl Game<'_> {
             tick_water_fx: Vec::new(),
             passenger_vehicles: HashMap::new(),
             lerps: HashMap::new(),
+            general: Default::default(),
             cart_lerps: HashMap::new(),
             stepped: HashMap::new(),
             head_lerps: HashMap::new(),
@@ -1529,6 +1533,7 @@ impl Game<'_> {
             tick_water_fx: Vec::new(),
             passenger_vehicles: HashMap::new(),
             lerps: HashMap::new(),
+            general: Default::default(),
             cart_lerps: HashMap::new(),
             stepped: HashMap::new(),
             head_lerps: HashMap::new(),
@@ -2475,6 +2480,7 @@ impl Game<'_> {
                 r.entities.clear();
                 r.passenger_vehicles.clear();
                 r.lerps.clear();
+                r.general.clear();
                 r.cart_lerps.clear();
                 r.stepped.clear();
                 r.head_lerps.clear();
@@ -3268,6 +3274,10 @@ impl Game<'_> {
             C::CustomPayload(p) if p.channel == sunrise_protocol::attachment_sync::CHANNEL => {
                 self.remote_attachment_sync(&p.data);
             }
+            // A native mod's general row the server starts showing the window.
+            C::CustomPayload(p) if p.channel == sunrise_protocol::general_entity::CHANNEL => {
+                self.remote_general_entity(&p.data);
+            }
             // The collider boxes of an entity the server shows the window.
             C::CustomPayload(p) if p.channel == sunrise_protocol::collider_sync::CHANNEL => {
                 self.remote_collider_sync(&p.data);
@@ -3645,6 +3655,7 @@ impl Game<'_> {
                         r.level_player_names.remove(&id);
                         r.level_player_textures.remove(&id);
                         r.attachments.remove(&Holder::Entity(id as u32));
+                        Self::forget_remote_general(r, id);
                     }
                 }
                 self.remove_entities(&p.ids);
@@ -7392,6 +7403,10 @@ impl Game<'_> {
                     (l.target, l.rotation.map(|r| r.0), steps)
                 });
             self.tick_remote_dragon(dragon_lerp);
+            // A mod's general rows: the non-living interpolation, and no mod code.
+            if let Some(r) = self.remote.as_mut() {
+                general::tick_remote_general(&mut r.general.rows, &mut lerps);
+            }
             // Armor stands: ClientLevel.tickNonPassenger's setOldPosAndRot,
             // then their SteppedInterpolationHandler's step, as the mobs'.
             if let Some(r) = self.remote.as_mut() {

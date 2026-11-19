@@ -1025,7 +1025,7 @@ mod escape_tests {
 
 #[cfg(test)]
 #[path = "tests/thrown_items_tests.rs"]
-mod thrown_items_tests;
+pub(in crate::game) mod thrown_items_tests;
 
 #[cfg(test)]
 mod bob_tests {

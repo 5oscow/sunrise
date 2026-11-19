@@ -127,6 +127,11 @@ impl GuestList {
         let mut viewers = Vec::new();
         for g in self.rows.iter_mut() {
             let (spectator, sunrise) = (g.spectator(), g.is_sunrise());
+            // A general row is shown by its spawn and its first attachment snapshot together,
+            // to a client in the level that reads both; a view of another level carries neither
+            // (`viewed_levels::entities`).
+            let general_entity =
+                visible(g) && g.negotiated_general_entity() && g.negotiated_attachment_sync();
             let (chunks, sources, tracker, out, gone, moved) = if visible(g) {
                 let Some((out, gone)) = outputs.next() else {
                     continue;
@@ -155,6 +160,7 @@ impl GuestList {
                 spectator,
                 permission: g.permission,
                 sunrise,
+                general_entity,
                 moved,
                 position: g.position,
                 view_distance: g.view_distance,
