@@ -8989,7 +8989,7 @@ impl Game<'_> {
         }
         let (attack, use_item) = (self.left, self.right);
         input.tick(&mut RemoteInputWorld(self), attack, use_item);
-        self.remote_queued_keys();
+        self.remote_count_miss_time();
         if let Some(r) = self.remote.as_mut() {
             input.merge_queued(std::mem::take(&mut r.input));
             r.input = input;
@@ -10071,6 +10071,9 @@ impl sunrise_client::interaction_input::TargetUseWorld for RemoteUseWorld<'_, '_
 impl sunrise_client::interaction_input::InteractionWorld for RemoteInputWorld<'_, '_> {
     fn pick_hit_result(&mut self) {
         self.0.pick_tick_targets();
+    }
+    fn handle_keys(&mut self) {
+        self.0.remote_queued_keys();
     }
     fn release_hit_result(&mut self) {
         self.0.release_tick_targets();
