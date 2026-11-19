@@ -292,11 +292,37 @@ mod tests {
             vec![mod_api::ItemStack::new(leather, 1).unwrap()]
         }
     }
+    /// A sheep whose part agrees to shear without a Host call, then reads the world in `on_sheared`:
+    /// the shearing starts and its performing is the refused call.
+    struct GatedSheep;
+    #[mod_api::sunrise_part]
+    impl mod_api::EntityPart for GatedSheep {
+        fn is_shearable(
+            &self,
+            _: &dyn mod_api::Host,
+            _: mod_api::EntityRef,
+            _: Option<PlayerRef>,
+            _: &mod_api::ItemStack,
+        ) -> Option<bool> {
+            Some(true)
+        }
+        fn on_sheared(
+            &self,
+            host: &mut dyn mod_api::ServerHost,
+            _: mod_api::EntityRef,
+            _: Option<PlayerRef>,
+            _: &mod_api::ItemStack,
+        ) -> Vec<mod_api::ItemStack> {
+            let _ = host.level("minecraft:overworld");
+            Vec::new()
+        }
+    }
     struct GatedMod;
     #[mod_api::__subscriptions]
     impl mod_api::Hooks for GatedMod {
         fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
             r.entity_part("minecraft:cow", GatedCow);
+            r.entity_part("minecraft:sheep", GatedSheep);
         }
     }
 
@@ -324,10 +350,13 @@ mod tests {
         .unwrap();
         with_game(|game| {
             game.resolve_parts().unwrap();
-            game.next_entity = game.next_entity.max(1);
+            game.next_entity = game.next_entity.max(2);
             let kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();
             game.mobs
                 .push(Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0));
+            let sheep = game.res.mob_types().get("minecraft:sheep").unwrap().clone();
+            game.mobs
+                .push(Mob::new(2, sheep, Vec3::new(4.5, 64.0, 0.5), 0.0));
             let shears = sunrise_client::items::ItemStack::new("minecraft:shears", 1);
             for reloading in [false, true] {
                 let setup = PhaseOwner::scope(ModPhase::Setup);
@@ -335,6 +364,12 @@ mod tests {
                 assert_eq!(game.part_shearable(0, None, &shears), None);
                 assert!(game.part_shear(0, 0, None, &shears).is_err());
                 assert!(game.dropped.is_empty(), "a refused part drops nothing");
+                // The dispenser's shearing is not a success when the part's performing is refused.
+                assert!(
+                    !game.shear_entity((4, 64, 0)).unwrap(),
+                    "a refused on_sheared shears nothing"
+                );
+                assert!(!game.mobs[1].extra.sheared);
             }
             assert_eq!(game.part_shearable(0, None, &shears), Some((0, true)));
         });
