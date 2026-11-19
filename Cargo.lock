@@ -4407,14 +4407,6 @@ name = "sunrise-addresses"
 version = "0.1.0"
 
 [[package]]
-name = "sunrise-anticheat"
-version = "0.1.0"
-dependencies = [
- "serde",
- "toml",
-]
-
-[[package]]
 name = "sunrise-assets"
 version = "0.1.0"
 dependencies = [
@@ -4485,7 +4477,6 @@ dependencies = [
  "sha1",
  "sha2",
  "socket2 0.6.5",
- "sunrise-anticheat",
  "sunrise-assets",
  "sunrise-bench",
  "sunrise-chat-filter",
@@ -4597,7 +4588,6 @@ dependencies = [
  "serde_json",
  "sha1",
  "sha2",
- "sunrise-anticheat",
  "sunrise-assets",
  "sunrise-bench",
  "sunrise-client-core",
@@ -5404,7 +5394,6 @@ dependencies = [
  "serde_json",
  "sha1",
  "sha2",
- "sunrise-anticheat",
  "sunrise-chat-filter",
  "sunrise-mcp",
  "sunrise-platform",
@@ -5438,7 +5427,6 @@ version = "0.1.0"
 dependencies = [
  "dunce",
  "serde",
- "sunrise-anticheat",
  "sunrise-chat-filter",
  "sunrise-core",
  "sunrise-platform",

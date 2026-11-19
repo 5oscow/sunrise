@@ -187,35 +187,6 @@ pub(super) fn cached_user_by_id(id: u128) -> Option<NameAndId> {
     USER_CACHE.lock().unwrap().as_mut()?.get_by_id(id)
 }
 
-/// `server.toml`'s `[anticheat]`, beside server.properties when sunrise-server runs the game; the
-/// default (on) without the file or the section, off (with an error logged) when the section is wrong.
-fn load_anticheat() -> sunrise_anticheat::Config {
-    let Ok(text) = std::fs::read_to_string("server.toml") else {
-        return Default::default();
-    };
-    match sunrise_anticheat::Config::from_server_toml(&text) {
-        Ok(config) => {
-            if config.enabled {
-                log(
-                    "INFO",
-                    "Anticheat on (server.toml [anticheat]; enabled = false turns it off)",
-                );
-            }
-            config
-        }
-        Err(e) => {
-            log(
-                "ERROR",
-                &format!("server.toml: {e}; the anticheat stays off"),
-            );
-            sunrise_anticheat::Config {
-                enabled: false,
-                ..Default::default()
-            }
-        }
-    }
-}
-
 /// `server.toml`'s `[chat_filter]` (docs/chat-filter.md), through the filter the executable installed
 /// (`sunrise_server_files::chat_guard`): none without one.
 fn load_chat_filter() -> Option<Box<dyn sunrise_server_files::chat_guard::ChatGuard>> {
@@ -1357,8 +1328,6 @@ impl Game<'_> {
             host.hub.transfers = Some(transfers);
         }
         self.sync_ops(&lists);
-        let anticheat = load_anticheat();
-        let anticheat_on = anticheat.enabled;
         let chat_filter = load_chat_filter();
         self.read_runtime_level_cap(|key| props.raw.get(key));
         load_entities();
@@ -1378,7 +1347,6 @@ impl Game<'_> {
                     &format!("Sending saved chunks up to {far} chunks away (max_view_distance)"),
                 );
             }
-            host.hub.set_anticheat(anticheat);
             host.hub.set_chat_filter(chat_filter);
             // The viewed areas' chunk caps (#3716): server.toml's `max_viewed_*` settings.
             let (caps, clamped) = viewed::ViewedCaps::from_properties(|key| props.raw.get(key));
@@ -1439,7 +1407,6 @@ impl Game<'_> {
                 sunrise_client::lod_net::distance_property(
                     props.raw.get(sunrise_client::lod_net::PROPERTY).as_deref(),
                 ),
-                anticheat_on,
             ),
             compression: props.network_compression_threshold,
             view: (
@@ -2466,53 +2433,6 @@ impl Game<'_> {
                 translatable("multiplayer.disconnect.not_whitelisted", &[]),
             );
         }
-    }
-
-    /// The anticheat bans a player (`HostEvent::Ban`): `banned-players.json` gets it as `/ban` adds it,
-    /// with the anticheat as its source, and the player is sent away with the ban's message.
-    pub(super) fn anticheat_ban(&mut self, uuid: u128, name: &str, reason: &str) {
-        let Some(host) = self.lan.as_mut() else {
-            return;
-        };
-        let hub = &mut host.hub;
-        let Some(lists) = &self.server_lists else {
-            // No ban list to add to: the anticheat's kick, so a flagged cheater still doesn't stay.
-            log(
-                "WARN",
-                &format!("Can't ban {name} ({reason}): no ban list; kicked"),
-            );
-            let conns: Vec<u32> = hub
-                .guests
-                .iter()
-                .filter(|g| g.uuid == uuid)
-                .map(|g| g.conn)
-                .collect();
-            for conn in conns {
-                hub.anticheat_kick(conn);
-            }
-            return;
-        };
-        let user = NameAndId {
-            id: uuid,
-            name: name.to_owned(),
-        };
-        lists.lock().unwrap().bans.add(BanEntry::new(
-            user,
-            Some("Sunrise anticheat".into()),
-            None,
-            Some(reason.to_owned()),
-        ));
-        log("INFO", &format!("Banned {name}: {reason}"));
-        let conns: Vec<u32> = hub
-            .guests
-            .iter()
-            .filter(|g| g.uuid == uuid)
-            .map(|g| g.conn)
-            .collect();
-        for conn in conns {
-            hub.kick(conn, translatable("multiplayer.disconnect.banned", &[]));
-        }
-        events::record("ban", name, uuid, serde_json::json!({ "reason": reason }));
     }
 
     pub(super) fn kick_uuid(&mut self, uuid: u128, reason: Tag) {

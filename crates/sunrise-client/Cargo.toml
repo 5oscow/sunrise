@@ -44,8 +44,6 @@ sunrise-protocol = { path = "../sunrise-protocol" }
 sunrise-server-files = { path = "../sunrise-server-files" }
 # The JDK's clock, for the LAN host's random seed and the probes.
 sunrise-java-properties = { path = "../sunrise-java-properties" }
-# The dedicated server's anticheat, off unless server.toml's [anticheat] turns it on (docs/anticheat.md).
-sunrise-anticheat = { path = "../sunrise-anticheat" }
 # The dedicated server's chat filter: [chat_filter], the slur list, mutes (docs/chat-filter.md);
 # `entry` installs it into the engine's hook (`sunrise_server_files::chat_guard`).
 sunrise-chat-filter = { path = "../sunrise-chat-filter" }

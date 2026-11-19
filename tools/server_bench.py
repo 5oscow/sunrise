@@ -379,15 +379,6 @@ def server_command(kind, directory, args):
     toml = directory / 'server.toml'
     # The same settings, without the web panel.
     toml.write_text(re.sub(r'(?m)^bind = "127\.0\.0\.1:8130"', 'bind = ""', toml.read_text()))
-    if args.anticheat:
-        # Every check on with its defaults (docs/anticheat.md), to measure what it costs. The bots move
-        # by their own rules, not vanilla's: the prediction plays every move again but, with this
-        # tolerance, flags none (an honest player's moves agree).
-        toml.write_text(toml.read_text()
-                        + '\n[anticheat]\nenabled = true\n[anticheat.prediction]\ntolerance = 1000.0\n')
-    else:
-        # The anticheat is on by default: off, to measure the server without it.
-        toml.write_text(toml.read_text() + '\n[anticheat]\nenabled = false\n')
     if args.dab:
         # Mob AI far from players (docs/hosting.md): the defaults of Pufferfish's DAB.
         toml.write_text(toml.read_text() + '\n[entities]\ndab = true\n')
@@ -431,12 +422,6 @@ def finish_profile(server, directory, result, run=subprocess.run):
         result['profile'] = str(capture)
     except (RuntimeError, subprocess.CalledProcessError, OSError) as e:
         result['profile_error'] = str(e)
-
-
-def flag_count(directory):
-    """The lines of Sunrise's anticheat log: one a flag (none when it is off)."""
-    log = directory / 'logs/anticheat.log'
-    return len(log.read_text().splitlines()) if log.exists() else 0
 
 
 def bots_command(args):
@@ -580,7 +565,6 @@ def run_once(kind, bots, behaviour, args, out):
             'resent': summary.get('resent'),
             'pulled_back': summary.get('pulled_back'),
             'moved_too_quickly': sum('moved too quickly!' in l for l in server.since(0)),
-            'anticheat_flags': flag_count(directory),
             'moved_wrongly': sum('moved wrongly!' in l for l in server.since(0)),
             'bots_joined': summary.get('joined'),
             # From the bot's first packet to its spawn position, in ms.
@@ -664,11 +648,8 @@ def main():
                         help="turn Sunrise's mob AI throttling on (server.toml [entities] dab); Sunrise only")
     parser.add_argument('--farm', type=int, default=0,
                         help='summon this many mobs ~100 blocks from the spawn, away from the bots (the DAB fixture)')
-    parser.add_argument('--anticheat', action='store_true',
-                        help="turn Sunrise's anticheat on (server.toml [anticheat]); its flags are counted")
     parser.add_argument('--ground', action='store_true',
-                        help='a flat survival world, the bots walking on its ground and saying so in every move '
-                             "(what the anticheat's ground check judges)")
+                        help='a flat survival world, the bots walking on its ground and saying so in every move')
     parser.add_argument('--bots-via', default='', help="a command prefix to run the bots elsewhere ('ssh host')")
     parser.add_argument('--bots-bin', default='', help='sunrise-bots (on the --bots-via machine)')
     parser.add_argument('--connect', default='127.0.0.1', help='the address the bots reach the server at')
