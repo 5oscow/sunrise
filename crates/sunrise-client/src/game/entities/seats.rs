@@ -39,8 +39,9 @@ impl Seat {
         sunrise_client::mobs::riders::seat(self.attachment, rider_offset, self.position, self.yaw)
     }
 
-    pub fn player_seat(&self, scale: f64) -> Vec3 {
-        self.passenger_position(PLAYER_VEHICLE_ATTACHMENT * scale)
+    /// `Entity.positionRider` for a player: its vehicle attachment below the passenger point.
+    pub fn player_seat(&self) -> Vec3 {
+        self.passenger_position(PLAYER_VEHICLE_ATTACHMENT)
     }
 
     pub(super) fn position_mob(&self, mob: &mut sunrise_client::mobs::Mob) {
@@ -82,6 +83,23 @@ fn other_height(kind: &str, tag: Option<&Tag>) -> (f64, f32) {
     }
 }
 
+/// `Entity.couldAcceptPassenger`: false for exactly `Marker` (`Marker.java:47`) and
+/// `OminousItemSpawner` (`OminousItemSpawner.java:134`), and not even a forced `startRiding` or `/ride`
+/// bypasses it. A marker armor stand is an ordinary armor stand and accepts.
+pub(in crate::game) fn could_accept_passenger(kind: &str) -> bool {
+    !matches!(
+        kind,
+        "minecraft:marker" | "marker" | "minecraft:ominous_item_spawner"
+    )
+}
+
+/// `EntityType.canSerialize`, which `Entity.startRiding` requires of a vehicle on the server and which a
+/// save requires of a root: false for the types built with `noSave()`, of which `Game::others` can hold
+/// the leash knot (`EntityTypes.java:614-618`).
+pub(in crate::game) fn saves_with_chunk(kind: &str) -> bool {
+    !matches!(kind, "minecraft:leash_knot")
+}
+
 impl Game<'_> {
     /// A non-steerable general row, armor stand or kept entity as a vehicle.
     pub(super) fn seat(&self, id: u32) -> Option<Seat> {
@@ -107,8 +125,7 @@ impl Game<'_> {
             });
         }
         let o = self.others.iter().find(|o| o.id == id)?;
-        // `couldAcceptPassenger` also gates `/ride`'s forced mount.
-        if !Self::other_takes_passengers(&o.kind) {
+        if !could_accept_passenger(&o.kind) {
             return None;
         }
         let (height, width) = other_height(&o.kind, self.persist_raw(id));
@@ -137,7 +154,7 @@ impl Game<'_> {
 
     /// Seats the player in place on such a vehicle (`ServerPlayer.startRiding`: at once, as a teleport).
     pub(super) fn board_seat(&mut self, id: u32, seat: Seat) {
-        let at = seat.player_seat(self.seat_player_scale(id));
+        let at = seat.player_seat();
         if let Some(player) = self.player.as_mut() {
             player.position = at;
             player.velocity = Vec3::ZERO;
@@ -179,7 +196,7 @@ impl Game<'_> {
             self.get_off_seat();
             return None;
         }
-        let at = seat.player_seat(self.seat_player_scale(vehicle));
+        let at = seat.player_seat();
         if let Some(p) = self.player.as_mut() {
             self.previous_position = p.position;
             p.position = at;
@@ -187,17 +204,6 @@ impl Game<'_> {
             p.fall_distance = 0.0;
         }
         Some(at)
-    }
-
-    pub(super) fn seat_player_scale(&self, vehicle: u32) -> f64 {
-        if self.general_seat(vehicle, false).is_none() {
-            return 1.0;
-        }
-        self.player.as_ref().map_or(1.0, |p| {
-            f64::from(
-                p.dimensions.width / sunrise_client::pose::Pose::Standing.dimensions(1.0).width,
-            )
-        })
     }
 
     /// `Entity.positionRider` for the mobs riding such a vehicle: its passenger attachment less the
@@ -229,7 +235,7 @@ mod tests {
             attachment: [0.0; 3],
             yaw: 0.0,
         };
-        assert_eq!(display.player_seat(1.0), Vec3::new(1.5, 63.4, -2.5));
+        assert_eq!(display.player_seat(), Vec3::new(1.5, 63.4, -2.5));
         assert_eq!(display.dismount(), Vec3::new(1.5, 64.0, -2.5));
         // An armor stand: its passenger point on top of its 1.975 box.
         let stand = Seat {
@@ -239,7 +245,7 @@ mod tests {
             attachment: [0.0, 1.975, 0.0],
             yaw: 0.0,
         };
-        assert!((stand.player_seat(1.0).y - 65.375).abs() < 1e-9);
+        assert!((stand.player_seat().y - 65.375).abs() < 1e-9);
         assert!((stand.dismount().y - 65.975).abs() < 1e-9);
     }
 

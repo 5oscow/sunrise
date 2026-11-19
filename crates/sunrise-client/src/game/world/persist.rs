@@ -1263,11 +1263,8 @@ impl Game<'_> {
         add_passengers(tag, riders);
     }
 
-    /// Non-player passengers in the order shared by NBT and transfer state.
+    /// Non-player passengers in `getPassengers` order, shared by NBT and transfer state.
     pub(super) fn vehicle_passenger_ids(&self, vehicle: u32) -> Vec<u32> {
-        if self.general_passengers(vehicle).next().is_none() {
-            return self.mob_passenger_ids(vehicle);
-        }
         self.seated_passengers(vehicle)
             .into_iter()
             .filter_map(|(_, id, player)| (!player).then_some(id))
@@ -1360,14 +1357,11 @@ impl Game<'_> {
         Some(id)
     }
 
+    /// A kept entity carries passengers in its save when it accepts and saves (quarantined records stay raw).
     pub(super) fn other_takes_passengers(kind: &str) -> bool {
-        !matches!(
-            kind,
-            "marker"
-                | "minecraft:marker"
-                | "minecraft:ominous_item_spawner"
-                | "minecraft:leash_knot"
-        ) && !super::general::quarantined_kind(kind)
+        super::seats::could_accept_passenger(kind)
+            && super::seats::saves_with_chunk(kind)
+            && !super::general::quarantined_kind(kind)
     }
 
     /// The compound of an entity Sunrise does not simulate, with its current

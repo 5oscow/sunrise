@@ -137,17 +137,17 @@ impl Game<'_> {
 
     /// A live portal root carries a direct or indirect mount through complete objects.
     pub(super) fn vehicle_tree_contains_mount(&self, root: u32, mount: u32) -> bool {
+        // A retained mob has no handle: its own object is its target.
+        let target = self
+            .entity(mount)
+            .and_then(|entity| self.native_entity_target(entity))
+            .or_else(|| {
+                self.mob_object(mount)
+                    .filter(|mob| !mob.removed)
+                    .map(|_| Target::Mob(mount))
+            });
         self.entity(root).is_some()
-            && (self.mob_object(mount).is_some_and(|mob| !mob.removed)
-                || self.entity(mount).is_some())
-            && self.native_root_vehicle_id(
-                mount,
-                if self.general_row(mount).is_some() {
-                    Target::General(mount)
-                } else {
-                    Target::Mob(mount)
-                },
-            ) == Some(root)
+            && target.is_some_and(|target| self.native_root_vehicle_id(mount, target) == Some(root))
     }
 
     /// The entities riding this one (`Entity.getPassengers`), in `addPassenger`'s order.

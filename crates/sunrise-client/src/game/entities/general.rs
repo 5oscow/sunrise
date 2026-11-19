@@ -767,16 +767,6 @@ impl Game<'_> {
         descendants_fit(self, rider, available)
     }
 
-    /// Whether the tracked list has a general passenger with a seat on `vehicle`.
-    pub(super) fn remote_general_passenger(&self, vehicle: u32) -> bool {
-        self.remote.as_ref().is_some_and(|remote| {
-            !remote.general.rows.is_empty()
-                && remote
-                    .passenger_seats(vehicle)
-                    .any(|(id, _)| remote.general.rows.contains_key(&(id as i32)))
-        })
-    }
-
     /// Change a general row's seat. The caller owns mount notifications.
     pub(super) fn set_general_mount(&mut self, id: u32, mount: Option<(u32, i64)>) -> bool {
         if self.persist.removals.contains(&Target::General(id)) {

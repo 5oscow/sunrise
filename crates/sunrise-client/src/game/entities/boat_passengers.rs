@@ -282,13 +282,8 @@ impl Game<'_> {
     pub(super) fn player_boat_seat(&self, i: usize) -> Vec3 {
         let b = &self.boats[i];
         let players = self.boat_players(b.id);
-        let count = if self.remote_general_passenger(b.id) {
-            self.remote.as_ref().unwrap().passenger_seats(b.id).count()
-        } else if self.persist.off_level.is_empty() {
-            players.max(1) + self.boat_mobs(b.id).len() + self.general_passengers(b.id).count()
-        } else {
-            self.boat_passengers(b.id) + usize::from(players == 0)
-        };
+        // The seated list, with the rider counted before its own link exists.
+        let count = self.passenger_order(b.id).len() + usize::from(players == 0);
         b.seat(0, count, false, PLAYER_RIDING_OFFSET, false)
     }
     /// `getRootVehicle` of mob `j`: the mob or boat at the bottom of what it
@@ -572,23 +567,8 @@ impl Game<'_> {
             if mobs.is_empty() {
                 continue;
             }
-            let players = self.boat_players(id);
-            let tracked = self
-                .remote
-                .as_ref()
-                .filter(|_| self.remote_general_passenger(id));
-            let retained_seats = (tracked.is_none()
-                && (!self.persist.off_level.is_empty()
-                    || self.general_passengers(id).next().is_some()))
-            .then(|| self.seated_passengers(id));
-            let count = tracked.map_or_else(
-                || {
-                    retained_seats
-                        .as_ref()
-                        .map_or(players + mobs.len(), Vec::len)
-                },
-                |remote| remote.passenger_seats(id).count(),
-            );
+            let order = self.passenger_order(id);
+            let count = order.len();
             let b = &self.boats[i];
             let full = count == b.max_passengers();
             let delta = b.delta_rotation;
@@ -606,16 +586,7 @@ impl Game<'_> {
                     // Another player's too, on a server's client.
                     // AbstractBoat's box is 1.375 wide.
                     let offset = riders::vehicle_attachment(m, 1.375);
-                    let index = tracked
-                        .and_then(|remote| {
-                            remote.passenger_vehicles.get(&m.id).map(|seat| seat.index)
-                        })
-                        .or_else(|| {
-                            retained_seats
-                                .as_ref()
-                                .and_then(|seats| seats.iter().position(|&(_, id, _)| id == m.id))
-                        })
-                        .unwrap_or(players + n);
+                    let index = order.iter().position(|&rider| rider == m.id).unwrap_or(n);
                     // calculatePassengerBodyYRot.
                     let turn = match (animal && full, m.id.is_multiple_of(2)) {
                         (false, _) => 0.0,

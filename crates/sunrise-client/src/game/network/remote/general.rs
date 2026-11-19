@@ -144,12 +144,8 @@ impl Game<'_> {
             Some((depth, id, seat.vehicle, seat.index))
         }));
         riders.sort_unstable();
-        for &(_, id, vehicle, seat) in &riders {
-            let count = self
-                .remote
-                .as_ref()
-                .map_or(0, |r| r.passenger_seats(vehicle).count());
-            if let Some(at) = self.general_passenger_position(vehicle, seat, count)
+        for &(_, id, vehicle, _) in &riders {
+            if let Some(at) = self.general_passenger_position(vehicle, id as u32)
                 && let Some(remote) = self.remote.as_mut()
                 && let Some(row) = remote.general.rows.get_mut(&id)
             {

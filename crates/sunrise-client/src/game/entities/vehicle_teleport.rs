@@ -271,7 +271,7 @@ impl Game<'_> {
             };
             let attachment = Self::mob_passenger_attachment(
                 self.mob_object(root).unwrap(),
-                m,
+                sunrise_client::mobs::drops::is_animal(m.species()),
                 seat,
                 children.len(),
             );

@@ -246,15 +246,7 @@ impl Game<'_> {
     fn position_general_row(&mut self, index: usize) {
         let row = &self.resident_entities.general.rows[index];
         let Some(vehicle) = row.mount else { return };
-        let at = if let Some(seat) = self.general_seat(vehicle, false) {
-            Some(seat.passenger_position(0.0))
-        } else {
-            let seats = self.seated_passengers(vehicle);
-            let Some(seat) = seats.iter().position(|&(_, id, _)| id == row.id) else {
-                return;
-            };
-            self.general_passenger_position(vehicle, seat, seats.len())
-        };
+        let at = self.general_passenger_position(vehicle, row.id);
         if let Some(at) = at {
             let row = &mut self.resident_entities.general.rows[index];
             let (id, before) = (row.id, row.position);
