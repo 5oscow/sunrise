@@ -32,6 +32,7 @@ use std::collections::{BTreeMap, HashMap};
 use sunrise_client::{items::ItemStack, world::BlockEntityExtras};
 use sunrise_core::position::BlockPos;
 use sunrise_mod_runtime::attachments::{Attachments, Holder};
+use sunrise_world::level::flags;
 
 #[path = "transactions/decision.rs"]
 pub(in crate::game) mod decision;
@@ -104,6 +105,32 @@ impl Drop for ClosingPhase<'_, '_> {
     }
 }
 
+struct KeptBlock {
+    state: BlockStateId,
+    flags: i32,
+    /// Replay LevelWriteHost writes through the direct host's block-entity creation path.
+    level_host: bool,
+    /// A level-host write only hid the entity from other reads. At commit
+    /// the real Level.setBlock still has to run its removal side effects.
+    replay_removal: bool,
+}
+
+/// Preserve requested updates, and suppress an effect only if every write
+/// suppressed it. Other bits describe the final write (e.g. moved by piston).
+fn merge_block_update_flags(earlier: i32, later: i32) -> i32 {
+    const REQUESTED: i32 =
+        flags::UPDATE_NEIGHBORS | flags::UPDATE_CLIENTS | flags::UPDATE_IMMEDIATE;
+    const SUPPRESSED: i32 = flags::UPDATE_INVISIBLE
+        | flags::UPDATE_KNOWN_SHAPE
+        | flags::UPDATE_SUPPRESS_DROPS
+        | flags::UPDATE_SKIP_SHAPE_UPDATE_ON_WIRE
+        | flags::UPDATE_SKIP_BLOCK_ENTITY_SIDEEFFECTS
+        | flags::UPDATE_SKIP_ON_PLACE;
+    ((earlier | later) & REQUESTED)
+        | ((earlier & later) & SUPPRESSED)
+        | (later & !(REQUESTED | SUPPRESSED))
+}
+
 /// One open transaction.
 #[derive(Default)]
 pub(super) struct Level {
@@ -123,8 +150,10 @@ pub(super) struct Level {
     /// transaction first wrote it, for a block entity not kept whole in `block_entities`: a
     /// move through a container keeps the slot it touches, not the entity's whole saved data.
     slots: HashMap<(Pos, usize), KeptSlot>,
-    /// Each block's state before this transaction first wrote it.
-    blocks: HashMap<Pos, BlockStateId>,
+    /// Each block's original state and the combined update flags of its writes.
+    blocks: HashMap<Pos, KeptBlock>,
+    /// Level.random before the first transactional level write drew from it.
+    level_random: Option<sunrise_core::random::LegacyRandom>,
     /// Composter-local random streams before this depth first evaluated their layers.
     composter_randoms: ComposterRandoms,
     /// Each quart cell before this transaction first wrote it.
@@ -298,8 +327,10 @@ pub(super) enum After {
 
     /// `ServerLevel.destroyBlockProgress`: breaker id, position, stage. Sent once, at the root commit.
     BreakProgress(i32, [i32; 3], i32),
-    /// The block's new state, set with its updates (`Level.setBlock`, `UPDATE_ALL`).
+    /// The block's final state, set with the combined update flags.
     Block(Pos),
+    /// A validated level write host effect; never published on abort.
+    LevelWrite(Box<super::journal_level_write::PendingWrite>),
     /// Save, remesh and resend a changed biome column.
     Biome((i32, i32)),
     /// Deferred interaction effects, replayed in the same root-commit order.
@@ -517,8 +548,19 @@ impl Game<'_> {
                 outer
                     .removed_block_entities
                     .extend(level.removed_block_entities);
-                for (pos, state) in level.blocks {
-                    outer.blocks.entry(pos).or_insert(state);
+                for (pos, block) in level.blocks {
+                    outer
+                        .blocks
+                        .entry(pos)
+                        .and_modify(|kept| {
+                            kept.flags = merge_block_update_flags(kept.flags, block.flags);
+                            kept.level_host = block.level_host;
+                            kept.replay_removal |= block.replay_removal;
+                        })
+                        .or_insert(block);
+                }
+                if outer.level_random.is_none() {
+                    outer.level_random = level.level_random;
                 }
                 for (chunk, randoms) in level.composter_randoms {
                     let kept = outer.composter_randoms.entry(chunk).or_default();
@@ -969,14 +1011,57 @@ impl Game<'_> {
     /// state, and set with its updates at the root commit; otherwise at once
     /// (`Level.setBlock`).
     pub(super) fn journal_set_block(&mut self, pos: [i32; 3], state: BlockStateId) -> bool {
+        self.journal_set_block_flags(pos, state, sunrise_world::level::flags::UPDATE_ALL, false)
+    }
+    /// The root commit replays one write per position with the combined update flags.
+    pub(super) fn journal_set_block_flags(
+        &mut self,
+        pos: [i32; 3],
+        state: BlockStateId,
+        flags: i32,
+        level_host: bool,
+    ) -> bool {
         let Some(level) = self.transactions.last_mut() else {
-            return self.level_set(pos, state).is_ok();
+            return self.level_set_with_flags(pos, state, flags).is_ok();
         };
         let key = (pos[0], pos[1], pos[2]);
         let old = self.world.block(pos[0], pos[1], pos[2]);
-        level.blocks.entry(key).or_insert(old);
+        level
+            .blocks
+            .entry(key)
+            .and_modify(|kept| {
+                kept.flags = merge_block_update_flags(kept.flags, flags);
+                kept.level_host = level_host;
+            })
+            .or_insert(KeptBlock {
+                state: old,
+                flags,
+                level_host,
+                replay_removal: false,
+            });
         level.after.push(After::Block(key));
         self.world.set_stored(pos[0], pos[1], pos[2], state)
+    }
+    /// Hide a replaced block entity from staged reads, without dropping its
+    /// contents until the real write. Fluid pickup/pour instead rolls its own
+    /// drops against the old entity before journalling the removal.
+    pub(super) fn journal_block_replacement(&mut self, pos: Pos) {
+        self.journal_remove_block_entity(pos);
+        if let Some(block) = self
+            .transactions
+            .last_mut()
+            .and_then(|level| level.blocks.get_mut(&pos))
+        {
+            block.replay_removal = true;
+        }
+    }
+    pub(super) fn journal_set_level_random(&mut self, random: sunrise_core::random::LegacyRandom) {
+        if let Some(level) = self.transactions.last_mut() {
+            level
+                .level_random
+                .get_or_insert_with(|| (*self.world.random).clone());
+        }
+        *self.world.random = random;
     }
     /// Keep the original cell without publishing the tentative write.
     pub(in crate::game) fn journal_biome(&mut self, pos: [i32; 3], old: u16) {
@@ -1006,6 +1091,7 @@ impl Game<'_> {
             After::Composter(effects) => self.commit_composter_effects(effects),
             After::FluidWrite(written) => self.commit_fluid_write(*written),
             After::FluidEffects(effects) => self.commit_fluid_effects(*effects),
+            After::LevelWrite(write) => self.commit_level_write(*write),
             After::Changed(pos) => self.container_changed(pos),
             After::Capabilities(pos) => self.world.capability_generations.invalidate(pos),
 
@@ -1105,12 +1191,17 @@ impl Game<'_> {
                         continue;
                     }
                     let now = self.world.block(pos.0, pos.1, pos.2);
-                    let was = level.blocks[&pos];
-                    // A block entity the transaction removed comes back where a later write
-                    // there put back a block of the kind that had it.
+                    let KeptBlock {
+                        state: was,
+                        flags,
+                        level_host,
+                        replay_removal,
+                    } = level.blocks[&pos];
+                    // Restore an entity that the real write must remove with its side effects,
+                    // or that survives because a later write returned it to the old block kind.
                     let b = self.res.behaviours();
                     if level.removed_block_entities.contains(&pos)
-                        && b.block(now) == b.block(was)
+                        && (replay_removal || b.block(now) == b.block(was))
                         && let Some(kept) = level.block_entities.get(&pos)
                     {
                         self.restore_removed_block_entity(pos, kept);
@@ -1118,7 +1209,15 @@ impl Game<'_> {
                     if now != was {
                         // The stored state back, so the one real write sees the change.
                         self.world.set_stored(pos.0, pos.1, pos.2, was);
-                        let _ = self.level_set([pos.0, pos.1, pos.2], now);
+                        let pos = [pos.0, pos.1, pos.2];
+                        if level_host {
+                            self.with_level(|_, level, ticks| {
+                                level.native_set_block(ticks, pos, now, flags);
+                            });
+                            let _ = self.process_level_events();
+                        } else {
+                            let _ = self.level_set_with_flags(pos, now, flags);
+                        }
                     }
                 }
                 After::Biome(key) if !biome_columns.insert(key) => {}
@@ -1269,8 +1368,11 @@ impl Game<'_> {
                 );
             }
         }
-        for (pos, state) in level.blocks {
-            self.world.set_stored(pos.0, pos.1, pos.2, state);
+        for (pos, block) in level.blocks {
+            self.world.set_stored(pos.0, pos.1, pos.2, block.state);
+        }
+        if let Some(random) = level.level_random {
+            *self.world.random = random;
         }
         // The shapes are back: the neighbours that read them (a fluid beside it) are told, as
         // the publish told them.

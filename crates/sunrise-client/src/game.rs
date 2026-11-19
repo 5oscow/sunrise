@@ -479,6 +479,8 @@ struct GameLevel<'w> {
     native_player: Option<u128>,
     /// The acting player's entity id, beside `native_player`.
     native_player_entity: Option<i32>,
+    /// Direct liquid part writes may not bypass an open Game transaction.
+    liquid_transaction_open: bool,
     /// `Level.isDebug`: `setBlock` changes nothing.
     debug: bool,
     native_sounds: &'w mut Vec<creatures::NativeSound>,
@@ -3040,6 +3042,7 @@ impl Game<'_> {
             golem_chests.extend(self.chest_other_half(key));
         }
         let native_authoritative = self.native_authoritative();
+        let liquid_transaction_open = self.transaction_current().is_some();
         let environment = self.res.environment_of(&self.dimension_type().id);
         let other_entities = entity::entity_lists_of!(self, without_carts);
         let mut level = GameLevel {
@@ -3118,6 +3121,7 @@ impl Game<'_> {
             native_authoritative,
             native_player: self.lan_acting_uuid,
             native_player_entity: self.lan_acting_entity.map(|id| id as i32),
+            liquid_transaction_open,
             debug: self.world_debug,
             native_sounds: &mut self.creatures.lan_sounds,
             loop_context: &self.loop_context,
@@ -7053,12 +7057,7 @@ impl Game<'_> {
             // non-air block under Shift) passes it to the block beside, where
             // Shift no longer counts.
             let sneaking = self.keys.held(Mapping::Sneak);
-            let creative = self.creative;
-            let emptied = self.with_level(|b, level, ticks| {
-                b.bucket_empty(
-                    level, ticks, pos, beside, content, sound, sneaking, creative,
-                )
-            });
+            let emptied = self.empty_player_bucket(pos, beside, content, sound, sneaking);
             self.process_level_events()?;
             let Some(emptied) = emptied else {
                 return Ok(UseResult::Fail);

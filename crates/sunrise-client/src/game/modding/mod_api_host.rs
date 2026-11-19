@@ -968,6 +968,7 @@ impl mod_api::HitHost for super::native_hooks::HitLevel<'_> {
 pub(in crate::game) struct LevelTicks<'b, L, T = &'b mut Ticks> {
     level: L,
     ticks: T,
+    unpack_container_loot: bool,
     /// The blocks a preview standing in for the level changed, which the reads see over it.
     preview: Option<&'b sunrise_world::level::PreviewBlocks>,
     /// The level's and the ticks' borrow, which the delegating reads below are bounded by.
@@ -979,10 +980,18 @@ impl<'b, L, T> LevelTicks<'b, L, T> {
         Self {
             level,
             ticks,
+            unpack_container_loot: true,
             preview: None,
             borrow: std::marker::PhantomData,
         }
     }
+
+    /// `place_liquid` reads stored slots whether it uses a direct or journalled host.
+    pub(in crate::game) fn without_container_loot(mut self) -> Self {
+        self.unpack_container_loot = false;
+        self
+    }
+
     /// This level as the preview that changed `preview` sees it (`None`: as it is).
     pub(in crate::game) fn previewing(
         mut self,
@@ -1156,7 +1165,12 @@ impl<'a: 'b, 'b, T: std::ops::Deref<Target = Ticks>> mod_api::LevelRandomHost
     for LevelTicks<'b, &mut super::GameLevel<'a>, T>
 {
     fn container_signal(&mut self, pos: [i32; 3]) -> Option<i32> {
-        mod_api::LevelRandomHost::container_signal(&mut *self.level, pos)
+        if self.unpack_container_loot {
+            return mod_api::LevelRandomHost::container_signal(&mut *self.level, pos);
+        }
+        let [x, y, z] = pos;
+        (self.level.native_authoritative && self.level.world.is_loaded_at(x, y, z))
+            .then(|| self.level.containers().stored_container_signal((x, y, z)))
     }
     fn attachments(&mut self) -> &mut dyn mod_api::AttachmentStore {
         mod_api::LevelRandomHost::attachments(&mut *self.level)
