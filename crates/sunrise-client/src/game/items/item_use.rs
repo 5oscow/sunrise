@@ -500,18 +500,17 @@ impl Game<'_> {
         if !mod_api::__private::enabled_listened(mod_api::HookId::CanEat) {
             return vanilla;
         }
+        // The shared resolver's guards: no fake actor, a placed online guest,
+        // the integrated player only on the serving side.
         let player = self.local_player().or_else(|| {
             let uuid = self.lan_acting_uuid.or_else(|| {
                 self.level
                     .player_uuid
                     .map(sunrise_client::lan::playerdata::ints_uuid)
             })?;
+            let entity = self.player_lookup_entity(uuid)?;
             Some(mod_api::__private::game::player_ref(
-                mod_api::EntityRef::new(
-                    self.native_lifecycle.epoch()?,
-                    self.lan_acting_entity
-                        .unwrap_or(self.player.as_ref()?.entity_id as u32),
-                ),
+                mod_api::EntityRef::new(self.native_lifecycle.epoch()?, entity),
                 uuid,
             ))
         });
