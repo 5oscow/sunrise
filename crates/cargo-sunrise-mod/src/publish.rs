@@ -258,8 +258,7 @@ pub fn run(entry_point: mod_surface::child::ChildEntry, args: &[String]) -> Resu
     let release_version = manifest.version.to_string();
     if !registry::plain_version(&release_version) {
         return Err(format!(
-            "{MANIFEST}: version {:?} cannot name a registry release: set `version` to at most 64 ASCII letters, digits, '.', '-' or '_', starting with a letter or digit",
-            manifest.version
+            "{MANIFEST}: version {release_version:?} cannot name a registry release: use SemVer without `+build` metadata and at most 64 characters"
         ));
     }
     let kind = if manifest.native.is_some() {
