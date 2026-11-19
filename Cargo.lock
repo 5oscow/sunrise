@@ -4726,6 +4726,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "sunrise-deflate"
+version = "0.1.0"
+dependencies = [
+ "crc32fast",
+ "simd-adler32",
+]
+
+[[package]]
 name = "sunrise-discord"
 version = "0.1.0"
 dependencies = [
