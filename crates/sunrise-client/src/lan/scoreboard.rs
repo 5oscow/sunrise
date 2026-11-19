@@ -138,10 +138,13 @@ impl View {
             if !seen.insert(objective) {
                 continue;
             }
+            let Some(display) = self.objectives.get(objective) else {
+                continue;
+            };
             out.push(C::SetObjective(SetObjective {
                 name: objective.clone(),
                 method: 0,
-                display: self.objectives.get(objective).cloned(),
+                display: Some(display.clone()),
             }));
             for (slot, _) in self.display.iter().filter(|(_, o)| *o == objective) {
                 out.push(C::SetDisplayObjective(SetDisplayObjective {
@@ -395,8 +398,15 @@ mod tests {
         board.set_display_objective("below_name", Some("zebra"));
         board.add_team("red");
         board.add_to_team("Alpha", "red");
+        let mut view = View::of(&board);
+        view.display.insert(3, "missing".into());
+        let mut trace = methods(&view.initial());
+        assert_eq!(trace.len(), 9);
+        // Score order within an objective is unspecified; the group stays between
+        // zebra's display packets and alpha's add.
+        trace[4..6].sort_unstable();
         assert_eq!(
-            methods(&View::of(&board).initial()),
+            trace,
             [
                 "team red 0 [\"Alpha\"]",
                 "objective zebra 0",
