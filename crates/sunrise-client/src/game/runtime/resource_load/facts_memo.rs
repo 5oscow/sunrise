@@ -2,22 +2,23 @@
 use super::*;
 use sha2::{Digest, Sha256};
 use std::{
-    collections::HashMap,
     path::PathBuf,
-    sync::{Mutex, OnceLock},
+    sync::{Mutex, MutexGuard, OnceLock},
 };
 use sunrise_items::blocks::GameplayProjection;
 use sunrise_world::registry::{BlockRegistry, BlockStateId};
 
 type Tables = (BlockFacts, Vec<GameplayProjection>);
-#[derive(Hash, PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
 struct Key {
     root: PathBuf,
     inputs: [u8; 32],
     parallel: bool,
 }
+/// The most recently used inputs, oldest first.
 #[derive(Default)]
-struct Memo(Mutex<HashMap<Key, Arc<Tables>>>);
+struct Memo(Mutex<Vec<(Key, Arc<Tables>)>>);
+const KEPT: usize = 8;
 static MEMO: OnceLock<Memo> = OnceLock::new();
 
 pub(super) fn load(
@@ -86,23 +87,42 @@ impl Memo {
             inputs: hash.finalize().into(),
             parallel,
         };
-        let mut memo = self
-            .0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(tables) = memo.get(&key) {
-            return Ok(tables.clone());
+        if let Some(tables) = hit(&mut self.entries(), &key) {
+            return Ok(tables);
         }
+        // Built outside the lock, so one test's miss never holds up another's hit; two tests
+        // missing the same key at once both build, and the first to finish is kept.
         let tables = Arc::new(
             BlockFacts::load_with_projection(root, registry, behaviours, parallel)
                 .map_err(|e| e.to_string())?,
         );
-        // Bound retention across temporary content roots without evicting the common root.
-        if memo.len() < 8 {
-            memo.insert(key, tables.clone());
+        let mut entries = self.entries();
+        if let Some(kept) = hit(&mut entries, &key) {
+            return Ok(kept);
         }
+        // Least recently used goes first: a run of temporary content roots can push the common
+        // root out, and its next load puts it back.
+        if entries.len() == KEPT {
+            entries.remove(0);
+        }
+        entries.push((key, tables.clone()));
         Ok(tables)
     }
+
+    fn entries(&self) -> MutexGuard<'_, Vec<(Key, Arc<Tables>)>> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+/// The entry for `key`, moved to most recently used.
+fn hit(entries: &mut Vec<(Key, Arc<Tables>)>, key: &Key) -> Option<Arc<Tables>> {
+    let index = entries.iter().position(|(k, _)| k == key)?;
+    let entry = entries.remove(index);
+    let tables = entry.1.clone();
+    entries.push(entry);
+    Some(tables)
 }
 
 #[test]
@@ -161,4 +181,32 @@ fn identical_inputs_hit_but_changed_behaviours_and_registries_reload() {
         .load(root, &property("true"), &behaviours, true)
         .unwrap();
     assert!(!Arc::ptr_eq(&dry, &wet));
+    // The least recently used input goes first: a root used again outlives a run of other roots,
+    // and a full memo still keeps a new input.
+    let others: Vec<_> = (0..KEPT)
+        .map(|_| {
+            let dir = tempfile::tempdir().unwrap();
+            for name in ["gameplay-facts.json", "block-behaviours.json"] {
+                std::fs::copy(root.join(name), dir.path().join(name)).unwrap();
+            }
+            dir
+        })
+        .collect();
+    let common = memo.load(root, &registry, &behaviours, true).unwrap();
+    for dir in &others[..KEPT - 1] {
+        memo.load(dir.path(), &registry, &behaviours, true).unwrap();
+    }
+    let again = memo.load(root, &registry, &behaviours, true).unwrap();
+    assert!(Arc::ptr_eq(&common, &again));
+    memo.load(others[KEPT - 1].path(), &registry, &behaviours, true)
+        .unwrap();
+    let again = memo.load(root, &registry, &behaviours, true).unwrap();
+    assert!(Arc::ptr_eq(&common, &again));
+    let late = memo
+        .load(root, &property("late"), &behaviours, true)
+        .unwrap();
+    let late_again = memo
+        .load(root, &property("late"), &behaviours, true)
+        .unwrap();
+    assert!(Arc::ptr_eq(&late, &late_again));
 }
