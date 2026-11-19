@@ -343,77 +343,83 @@ fn the_fast_path_answers_what_the_interpreter_does() {
     assert!(Program::compile(corpus[1]).unwrap().fast.is_some());
 }
 
-/// A pack's expression deep enough to overflow the parser's or the evaluator's stack is refused
-/// before it is parsed, by a pass over its tokens that doesn't recurse: brackets, unary
-/// operators, `?` and `^` each nest a level; a long expression is refused by its token count.
-/// The deepest and longest that pass still parse and run on a small stack.
+/// A pack's expression is refused before it can overflow the stack (which aborts the process):
+/// by its tokens before it is parsed, by the parser's own recursion, and by the height of the
+/// tree as each node is built, so no walk over a program (lowering, evaluation, drop) recurses
+/// past the bound. A group's subtree keeps its height when the group closes: chained and nested
+/// groups count. The highest and deepest programs that pass compile, run and drop on a small
+/// stack.
 #[test]
-fn a_program_too_deep_or_too_long_is_refused_before_it_is_parsed() {
-    use super::budget::{MAX_DEPTH, MAX_TOKENS, OverBudget};
+fn a_program_too_high_or_too_deep_is_refused_as_it_is_parsed() {
+    use super::budget::{MAX_HEIGHT, MAX_NESTING, MAX_TOKENS, OverBudget};
     let refused = |src: &str| Program::compile(src).unwrap_err();
-    let depth = OverBudget::Depth.to_string();
-    // A hundred thousand levels each way: refused without parsing them (by their length).
+    let (height, nesting) = (
+        OverBudget::Height.to_string(),
+        OverBudget::Nesting.to_string(),
+    );
+    // A hundred thousand levels each way: refused by their length, before parsing.
     let deep = 100_000;
     for src in [
         format!("{}1{}", "(".repeat(deep), ")".repeat(deep)),
         format!("{}1", "-".repeat(deep)),
-        format!("{}1", "!".repeat(deep)),
         format!("{}1", "1 ^ ".repeat(deep)),
     ] {
-        assert_eq!(
-            refused(&src),
-            OverBudget::Tokens(src.matches(['(', ')', '-', '!', '^', '1']).count()).to_string()
-        );
+        let count = src.matches(['(', ')', '-', '^', '1']).count();
+        assert_eq!(refused(&src), OverBudget::Tokens(count).to_string());
     }
-    // At the limit and one past it, for each kind of level.
-    let parens = |n: usize| format!("{}1{}", "(".repeat(n), ")".repeat(n));
-    assert!(Program::compile(&parens(MAX_DEPTH)).is_ok());
-    assert_eq!(refused(&parens(MAX_DEPTH + 1)), depth);
-    let negations = |n: usize| format!("{}1", "-".repeat(n));
-    assert!(Program::compile(&negations(MAX_DEPTH)).is_ok());
-    assert_eq!(refused(&negations(MAX_DEPTH + 1)), depth);
-    let ternaries = |n: usize| format!("{}0", "1 ? 0 : ".repeat(n));
-    assert!(Program::compile(&ternaries(MAX_DEPTH)).is_ok());
-    assert_eq!(refused(&ternaries(MAX_DEPTH + 1)), depth);
-    let powers = |n: usize| format!("{}1", "1 ^ ".repeat(n));
-    assert!(Program::compile(&powers(MAX_DEPTH)).is_ok());
-    assert_eq!(refused(&powers(MAX_DEPTH + 1)), depth);
-    // Statements and arguments don't nest: each starts its level's count again.
-    let siblings = format!(
-        "a = {0}; b = {0}; lerp({1}, {1}, 0.5)",
-        negations(MAX_DEPTH),
-        negations(MAX_DEPTH - 1)
-    );
-    assert!(
-        Program::compile(&siblings).is_ok(),
-        "{:?}",
-        Program::compile(&siblings).err()
-    );
-    // A chain of binary operators nests as deep as its operators; so do method calls.
-    let chain = |terms: usize| vec!["1"; terms].join(" + ");
-    let longest = Program::compile(&chain(MAX_DEPTH + 1)).unwrap();
-    assert_eq!(refused(&chain(MAX_DEPTH + 2)), depth);
-    // The most tokens, in statements that each nest little.
-    let statements = |n: usize| "a = 1 + 2; ".repeat(n) + "a";
-    let tokens = |n: usize| 6 * n + 1;
-    let fits = (MAX_TOKENS - 1) / 6;
-    assert!(Program::compile(&statements(fits)).is_ok());
     assert_eq!(
-        refused(&statements(fits + 1)),
-        OverBudget::Tokens(tokens(fits + 1)).to_string()
+        refused(&("a = 1; ".repeat(MAX_TOKENS / 4 + 1) + "a")),
+        OverBudget::Tokens(4 * (MAX_TOKENS / 4 + 1) + 1).to_string()
     );
-    // The deepest chain and nesting run, and drop, on a 256 KiB stack.
-    let deepest = Program::compile(&format!("{}1", "-".repeat(MAX_DEPTH))).unwrap();
+    // A chain of n terms is a tree n high.
+    let chain = |terms: usize| vec!["1"; terms].join(" + ");
+    assert!(Program::compile(&chain(MAX_HEIGHT)).is_ok());
+    assert_eq!(refused(&chain(MAX_HEIGHT + 1)), height);
+    // A group keeps its subtree's height: a group 58 high under six more additions is 64; 60
+    // under six is 66. (A count that forgot the group once it closed let this through.)
+    let wrapped = |inner: usize| format!("({}) + {}", chain(inner), chain(6));
+    assert!(Program::compile(&wrapped(MAX_HEIGHT - 6)).is_ok());
+    assert_eq!(refused(&wrapped(MAX_HEIGHT - 4)), height);
+    // Mixed: groups of products (each 3 high) added up, each counting under the sum.
+    let mixed = |groups: usize| {
+        let group = "(2 * 2 * 2)".to_owned();
+        vec![group; groups].join(" + ")
+    };
+    assert!(Program::compile(&mixed(MAX_HEIGHT - 2)).is_ok());
+    assert_eq!(refused(&mixed(MAX_HEIGHT - 1)), height);
+    // Nested groups, each one level higher (`((1 + 1) + 1) + 1`...), nest the parse too (each
+    // group, and the innermost addition's operand): the parser's bound comes first here.
+    let nested =
+        |levels: usize| (0..levels).fold("1".to_owned(), |inner, _| format!("({inner} + 1)"));
+    assert!(Program::compile(&nested(MAX_NESTING - 3)).is_ok());
+    assert_eq!(refused(&nested(MAX_NESTING - 2)), nesting);
+    // The parser's own recursion: brackets around one value build no height but nest the
+    // parse (a statement and its expression, then each bracket).
+    let parens = |n: usize| format!("{}1{}", "(".repeat(n), ")".repeat(n));
+    assert!(Program::compile(&parens(MAX_NESTING - 2)).is_ok());
+    assert_eq!(refused(&parens(MAX_NESTING - 1)), nesting);
+    // Unary operators nest the parse and the tree alike: the parser's bound comes first.
+    let negations = |n: usize| format!("{}1", "-".repeat(n));
+    assert!(Program::compile(&negations(MAX_NESTING - 2)).is_ok());
+    assert_eq!(refused(&negations(MAX_NESTING - 1)), nesting);
+    // The boundaries compile, run and drop on a 256 KiB stack.
+    let boundaries = [
+        (chain(MAX_HEIGHT), MAX_HEIGHT as f64),
+        (nested(MAX_NESTING - 3), (MAX_NESTING - 2) as f64),
+        (wrapped(MAX_HEIGHT - 6), MAX_HEIGHT as f64),
+        (mixed(MAX_HEIGHT - 2), (MAX_HEIGHT - 2) as f64 * 8.0),
+        (parens(MAX_NESTING - 2), 1.0),
+        (negations(MAX_NESTING - 2), 1.0),
+    ];
     std::thread::Builder::new()
         .stack_size(256 * 1024)
         .spawn(move || {
             let mut world = World::default();
-            assert_eq!(
-                longest.eval(&mut world).unwrap().num(),
-                (MAX_DEPTH + 1) as f64
-            );
-            assert_eq!(deepest.eval(&mut world).unwrap().num(), 1.0);
-            drop((longest, deepest));
+            for (src, value) in boundaries {
+                let program = Program::compile(&src).unwrap();
+                assert_eq!(program.eval(&mut world).unwrap().num(), value, "{src}");
+                drop(program);
+            }
         })
         .unwrap()
         .join()
