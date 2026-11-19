@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use sunrise_mod_package::Package;
 use sunrise_mod_package::index::{self, Facts, Kind};
-use sunrise_mod_package::manifest::{MANIFEST, MAX_MANIFEST, MAX_USES};
+use sunrise_mod_package::manifest::{MANIFEST, MAX_USES};
 use sunrise_shader_api::mod_pipeline;
 
 pub struct Report {
@@ -149,22 +149,19 @@ pub fn check(
     })
 }
 
-/// A native mod that no `[native.*]` table or internals list ties to one build carries the list
-/// of what it uses, made for the build it pins: without it the mod works on that one build only.
+/// A native mod carries the list of what it uses, made for the build it pins: without it the mod
+/// works on that one build only. A mod with rows no list can judge
+/// ([`sunrise_native_build::game_uses::unjudged`]) is made for one build by nature and needs none.
 fn uses_list(path: &Path) -> Result<(), String> {
     use sunrise_mod_package::mod_surface::uses::{USES_FILE, UsesTable};
-    let manifest =
-        Package::entry(path, MANIFEST, MAX_MANIFEST)?.ok_or_else(|| format!("no {MANIFEST}"))?;
-    let manifest = String::from_utf8(manifest).map_err(|e| format!("{MANIFEST}: {e}"))?;
-    let table: toml::Table = toml::from_str(&manifest).map_err(|e| format!("{MANIFEST}: {e}"))?;
-    if mod_source::mod_uses::exact(&table).is_some() {
+    let manifest = Package::read(path)?.manifest;
+    if sunrise_native_build::game_uses::unjudged(&manifest).is_some() {
         return Ok(());
     }
-    let pin = Package::read(path)?
-        .manifest
+    let pin = manifest
         .native
-        .map(|native| native.sunrise)
-        .unwrap_or_default();
+        .ok_or_else(|| format!("no [native] table in {MANIFEST}"))?
+        .sunrise;
     let repack = "Pack the mod with `cargo sunrise-mod build`, which writes the list; if it says it cannot read the mod's code, fix what it names first.";
     let Some(bytes) = Package::entry(path, USES_FILE, MAX_USES)? else {
         return Err(format!(

@@ -1182,7 +1182,26 @@ mod tests {
         // A list made for another build says nothing about the pinned one.
         assert!(pack(&"f".repeat(40)).is_err());
         let report = pack(commit).unwrap();
-        assert!(report.text().contains("machine_mod"), "{}", report.text());
+        assert_eq!(report.facts.id.as_deref(), Some("machine_mod"));
+        // A row no list can judge ties the mod to its build, so its file needs no list.
+        let project = path.join("sunrise-mod.toml");
+        let text = std::fs::read_to_string(&project).unwrap();
+        let row = "\n[[native.module]]\nid = \"m\"\nfile = \"game.rs\"\nname = \"m\"\nsource = \"src/m.rs\"\n";
+        std::fs::write(&project, format!("{text}{row}")).unwrap();
+        let exact = Package::read(&path).unwrap().manifest;
+        std::fs::write(path.join("src/m.rs"), "").unwrap();
+        let smod = pack_into(
+            &path,
+            &PackageOutput::in_project(&path).unwrap(),
+            &exact,
+            None,
+            None,
+            Some(rev),
+        )
+        .unwrap();
+        check::check(&smod, check::kind_of(&smod).unwrap(), None, None).unwrap();
+        std::fs::remove_file(path.join("src/m.rs")).unwrap();
+        std::fs::write(&project, text).unwrap();
         assert!(
             new(
                 &[

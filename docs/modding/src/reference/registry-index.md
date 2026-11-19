@@ -84,11 +84,15 @@ game; registry-built native binaries are not used.
 
 ## A native mod's list of what it uses
 
-`cargo sunrise-mod check <file>` and `registry check` refuse a new native mod file that has no `uses.json`, or one
-made for another build than the mod pins. Without the list the mod works on its pinned build only and stops at the
-next one ([SDK fit](sdk/04-fit.md)). `cargo sunrise-mod build` writes the list; a package made any other way has
-none. A mod with a `[native.*]` table or an `internals` list is tied to one build by nature and needs no list.
-Files already listed are not checked again.
+A native mod file carries `uses.json`, the list of what the mod uses, made for the build the mod pins; with it a
+newer build can tell whether the mod still fits ([SDK fit](sdk/04-fit.md)). `cargo sunrise-mod build` writes the list
+when it can read the mod's source against the pinned SDK, and says what stops it when it cannot.
+
+`cargo sunrise-mod check <file>` refuses a native mod file with no list, or with one made for another build than the
+mod pins; `publish` and `registry release` run the same check on the file they are given. `registry check` applies
+it to files whose hash is new in the pull request. `registry build` and installs do not apply it, so files already
+listed stay as they are. A mod with a `[[native.module]]`, `[[native.bridge]]` or `[[native.state]]` row is outside
+this rule: no list can describe those rows, so its file needs none.
 
 ## Dependency checks
 
