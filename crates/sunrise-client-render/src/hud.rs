@@ -114,6 +114,8 @@ pub struct HudAtlas {
     /// The packs' `core/sky` and `core/stars`, when a pack replaces them.
     pub sky_shader: Option<std::sync::Arc<crate::core_shader::CoreProgram>>,
     pub stars_shader: Option<std::sync::Arc<crate::core_shader::CoreProgram>>,
+    /// The packs' `core/lightmap` (with `core/screenquad`), when a pack replaces either stage.
+    pub lightmap_shader: Option<std::sync::Arc<crate::core_shader::CoreProgram>>,
     /// The packs' Polytone screen sprite modifiers.
     pub sprite_modifiers: std::sync::Arc<sprite_modifiers::SpriteModifiers>,
     /// The packs' OptiFine random entity textures, whose variants this atlas packs.
@@ -867,21 +869,24 @@ impl HudAtlas {
     /// The atlas of a resource root that layers packs over `defaults` (the
     /// game's own resources), whose textures give the sprites' GUI sizes.
     pub fn build_over(root: &ResourceSource, defaults: &ResourceSource) -> Result<Self> {
-        Self::build_over_with_dynamic_textures(root, defaults, false)
+        Self::build_over_with_dynamic_textures(root, defaults, defaults, false)
     }
     /// The atlas above, with the pool of slots for client mods' dynamic textures
     /// (`dynamic_textures::DYNAMIC_TEXTURE_SLOTS` of each class, 10.5 MiB of texels) only when
     /// `pool` says a client mod is loaded, native or wasm: a game without mods packs no slot
-    /// and its atlas does not grow.
+    /// and its atlas does not grow. `game` is the game's own resources, without the packs: a
+    /// pack's core shader (text, block outline, sky, stars, lightmap) is one that differs from
+    /// the game's, so a `root` given as its own `game` loads none.
     pub fn build_over_with_dynamic_textures(
         root: &ResourceSource,
         defaults: &ResourceSource,
+        game: &ResourceSource,
         pool: bool,
     ) -> Result<Self> {
         let mut atlas = Self::pack(root, defaults, WALKED_TEXTURE_FOLDERS, true, pool)?;
         atlas.dynamic_texture_pool =
             dynamic_textures::Pool::take(&mut atlas.sprites, atlas.width, atlas.height);
-        pack_text::load_shaders(&mut atlas, root, defaults);
+        pack_text::load_shaders(&mut atlas, root, game);
         atlas.sprite_modifiers = std::sync::Arc::new(sprite_modifiers::SpriteModifiers::read(
             root,
             atlas.sprites.keys(),
@@ -963,6 +968,7 @@ impl HudAtlas {
             lines_shader: None,
             sky_shader: None,
             stars_shader: None,
+            lightmap_shader: None,
             sprite_modifiers: Default::default(),
             random_textures: Default::default(),
             emissive: Arc::default(),
@@ -1033,6 +1039,7 @@ impl HudAtlas {
             lines_shader: None,
             sky_shader: None,
             stars_shader: None,
+            lightmap_shader: None,
             sprite_modifiers: Default::default(),
             random_textures: Default::default(),
             emissive: Default::default(),
@@ -1533,6 +1540,7 @@ impl HudAtlas {
             lines_shader: None,
             sky_shader: None,
             stars_shader: None,
+            lightmap_shader: None,
             sprite_modifiers: Default::default(),
             random_textures,
             emissive,
@@ -3124,10 +3132,11 @@ mod tests {
             Path::new("/nonexistent/sunrise-test-assets").to_path_buf(),
         );
         let plain = HudAtlas::build(&root).unwrap();
-        let without = HudAtlas::build_over_with_dynamic_textures(&root, &root, false).unwrap();
+        let without =
+            HudAtlas::build_over_with_dynamic_textures(&root, &root, &root, false).unwrap();
         assert!(plain.dynamic_texture_pool.is_none() && without.dynamic_texture_pool.is_none());
         assert_eq!((without.width, without.height), (plain.width, plain.height));
-        let with = HudAtlas::build_over_with_dynamic_textures(&root, &root, true).unwrap();
+        let with = HudAtlas::build_over_with_dynamic_textures(&root, &root, &root, true).unwrap();
         let pool = with.dynamic_texture_pool.as_ref().expect("the pool");
         assert_eq!(pool.slots(), dynamic_textures::DYNAMIC_TEXTURE_SLOTS);
         assert!(

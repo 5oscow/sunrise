@@ -737,7 +737,10 @@ pub(super) fn stage_pack(
     // the frame that applies the reload (about 20 ms of it).
     let (render, atlas, panorama, (sounds, ui_metadata, language)) = std::thread::scope(|s| {
         let atlas = super::resource_load::named_scope(s, "pack-assets", || {
-            HudAtlas::build_over_with_dynamic_textures(&source, &source, pool)
+            let game = sunrise_assets::resource_source::ResourceSource::directory(
+                vanilla_root.to_path_buf(),
+            );
+            HudAtlas::build_over_with_dynamic_textures(&source, &source, &game, pool)
                 .map_err(|e| e.to_string())
         });
         let panorama = super::resource_load::named_scope(s, "pack-assets", || {
