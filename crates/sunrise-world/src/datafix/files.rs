@@ -12,7 +12,7 @@ use super::{CURRENT, update};
 use crate::compression::Compression;
 use crate::region::{ChunkRecord, RegionFile, RegionWriter};
 use std::fs;
-use std::io;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -753,6 +753,22 @@ fn files_with_suffix(folder: &Path, suffix: &str) -> Vec<PathBuf> {
     out
 }
 
+fn same_sidecar_bytes(live: &Path, staged: &Path) -> io::Result<bool> {
+    const BUFFER_SIZE: usize = 8 * 1024;
+    let (mut live, mut staged) = (fs::File::open(live)?, fs::File::open(staged)?);
+    let (mut a, mut b) = ([0; BUFFER_SIZE], [0; BUFFER_SIZE]);
+    let mut equal = true;
+    loop {
+        let a_len = io::copy(&mut (&mut live).take(BUFFER_SIZE as u64), &mut &mut a[..])?;
+        let b_len = io::copy(&mut (&mut staged).take(BUFFER_SIZE as u64), &mut &mut b[..])?;
+        if a_len == 0 && b_len == 0 {
+            return Ok(equal);
+        }
+        // Finish both reads even after a mismatch, so an I/O error still propagates.
+        equal &= a[..a_len as usize] == b[..b_len as usize];
+    }
+}
+
 /// Rewrite every chunk of the region files of a folder with `fix`, the files
 /// spread over [`worker_threads`] workers. Each file is read, fixed and
 /// written whole by one worker, so its bytes do not depend on the thread count.
@@ -789,7 +805,7 @@ fn upgrade_regions_with_threads(
         let live = folder.join(name);
         if !live.try_exists()? {
             fs::rename(staged, live)?;
-        } else if live.is_file() && fs::read(&live)? == fs::read(&staged)? {
+        } else if live.is_file() && same_sidecar_bytes(&live, &staged)? {
             fs::remove_file(staged)?;
         } else {
             return Err(io::Error::other(format!(
