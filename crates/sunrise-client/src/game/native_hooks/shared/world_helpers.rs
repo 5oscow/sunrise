@@ -130,7 +130,11 @@ impl Game<'_> {
     /// vanilla layer that is not drawn this frame keeps its place: the mods' layers around it
     /// draw at the next layer that is. Nothing while the HUD is hidden, and nothing to look up
     /// when no mod registered a layer.
-    pub(in crate::game) fn draw_mod_gui_layers(&mut self, until: Option<&str>, batch: &mut HudBatch) {
+    pub(in crate::game) fn draw_mod_gui_layers(
+        &mut self,
+        until: Option<&str>,
+        batch: &mut HudBatch,
+    ) {
         let order = sunrise_client::gui_layers::order();
         let Some(next) = self.hud_layer_next.filter(|_| order.has_mod_layers()) else {
             return;

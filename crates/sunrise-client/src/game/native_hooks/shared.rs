@@ -3,19 +3,13 @@ mod book_screen;
 #[cfg(test)]
 #[path = "shared/item_fall_on_tests.rs"]
 mod item_fall_on_tests;
+#[path = "shared/level_helpers.rs"]
+mod level_helpers;
 #[cfg(test)]
 #[path = "shared/particle_count_tests.rs"]
 pub(super) mod particle_count_tests;
-#[path = "shared/level_helpers.rs"]
-mod level_helpers;
-use level_helpers::block_entity_for_block;
-#[path = "shared/world_helpers.rs"]
-mod world_helpers;
-#[path = "shared/system_helpers.rs"]
-mod system_helpers;
 #[cfg(test)]
-#[path = "shared/packet_tests.rs"]
-mod packet_tests;
+use level_helpers::block_entity_for_block;
 #[cfg(test)]
 #[path = "shared/audio_math_tests.rs"]
 mod audio_math_tests;

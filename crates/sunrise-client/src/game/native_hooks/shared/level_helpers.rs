@@ -26,17 +26,18 @@ impl GameLevel<'_> {
         let Some(seed) = self.sound_seeds.map(|hub| hub.next_sound_seed()) else {
             return false;
         };
-        self.native_sounds.push(crate::game::creatures::NativeSound {
-            dimension: dimension_id(self.dimension),
-            sound: sound.to_owned(),
-            at,
-            source: source as i32,
-            volume,
-            pitch,
-            seed,
-            except: None,
-            entity: None,
-        });
+        self.native_sounds
+            .push(crate::game::creatures::NativeSound {
+                dimension: dimension_id(self.dimension),
+                sound: sound.to_owned(),
+                at,
+                source: source as i32,
+                volume,
+                pitch,
+                seed,
+                except: None,
+                entity: None,
+            });
         true
     }
 
@@ -88,7 +89,10 @@ impl GameLevel<'_> {
     }
     /// Creates a declared state-aware block entity from its actual state. No answer
     /// means no entity; the registered declaration owns its type identity.
-    pub(in crate::game) fn new_block_entity_for_state(&self, state: BlockStateId) -> Option<BlockEntity> {
+    pub(in crate::game) fn new_block_entity_for_state(
+        &self,
+        state: BlockStateId,
+    ) -> Option<BlockEntity> {
         let name = &self.registry.state(state)?.name;
         if self.world.block_entities.stateful_entity(state.0) {
             let mut nbt = None;
@@ -213,7 +217,7 @@ impl GameLevel<'_> {
 /// `EntityBlock.newBlockEntity` of block `name`: a declared mod type starting
 /// with `initial` data, a mod's sign, else Sunrise's own. Shared by the
 /// Host's and a level hook's whole-block writes.
-pub(in super) fn block_entity_for_block(
+pub(super) fn block_entity_for_block(
     registry: &BlockRegistry,
     facts: &sunrise_client::blocks::BlockFacts,
     name: &str,
