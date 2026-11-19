@@ -1513,6 +1513,7 @@ sunrise-client game::native_hooks::level_tick_tests::tests::server_hook_resolves
 sunrise-client game::native_hooks::living_death_post::tests::living_death_post_fires_once_after_each_finished_death lib daily resources
 sunrise-client game::native_hooks::living_death_post::tests::living_death_post_hears_a_player_death_after_the_message_and_loot lib daily resources
 sunrise-client game::native_hooks::math::tests::game_host_math_profile_matches_platform_and_is_stable lib daily resources
+sunrise-client game::native_hooks::mod_block_entity_payload_tests::replacing_mod_block_entity_payload_keeps_its_type_and_saved_identity lib daily resources
 sunrise-client game::native_hooks::mod_mismatch::tests::a_resolved_missing_mod_is_not_asked_about lib daily resources
 sunrise-client game::native_hooks::mod_mismatch::tests::existing_lists_fire_on_client_and_dedicated_even_without_differences lib daily resources
 sunrise-client game::native_hooks::on_block_placed_by_tests::block_items_notify_after_setup_and_before_consumption lib daily resources
@@ -1552,7 +1553,6 @@ sunrise-client game::native_hooks::tests::declared_types_create_tick_and_reload_
 sunrise-client game::native_hooks::tests::generated_fire_matches_dispatch lib daily resources
 sunrise-client game::native_hooks::tests::mod_sign_constructor_prioritizes_templates_over_suffixes lib daily resources
 sunrise-client game::native_hooks::tests::no_item_is_hovered_without_a_window lib daily resources
-sunrise-client game::native_hooks::tests::replacing_mod_block_entity_payload_keeps_its_type_and_saved_identity lib daily resources
 sunrise-client game::native_hooks::tick_target_millis::tick_target_millis_tests::a_client_mod_sets_how_long_a_client_tick_lasts lib daily resources
 sunrise-client game::native_hooks::trident_family_tests::accepted_player_and_mob_tridents_keep_type_entities_position_and_full_weapon lib daily resources
 sunrise-client game::native_hooks::trident_family_tests::actual_arrows_still_bounce_off_powered_wither_and_closed_shulker lib daily resources
