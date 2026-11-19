@@ -158,7 +158,7 @@ impl Game<'_> {
                         // A title screen: told here, so the frame's observer
                         // doesn't announce it again.
                         self.screen_state.observed = self.observed_now();
-                        self.title_init_post();
+                        self.shown_init_post();
                     }
                     return;
                 }
@@ -218,7 +218,8 @@ impl Game<'_> {
                 ..
             }) => {
                 let opens = match title_target_id(target) {
-                    Some(_) => self.title.is_some(),
+                    // An overlay over the title would stay in front of it.
+                    Some(_) => self.title.is_some() && !self.screen_over_playing(),
                     None => self.title.is_none() && !self.mod_screen_blocked(),
                 };
                 if opens {
@@ -242,7 +243,6 @@ impl Game<'_> {
                 self.pause_focus = None;
                 self.set_screen(Screen::Paused);
                 self.pause_menu = true;
-                self.capture(false);
             }
             ScreenTarget::Options => self.open_options(false),
             ScreenTarget::Inventory => {
@@ -266,6 +266,9 @@ impl Game<'_> {
                 self.build_screen();
             }
         }
+        // Every target takes the pointer, even one opened in place of a
+        // request that grabbed none (a mod's screen asked for while playing).
+        self.capture(false);
         self.screen_state.replacing = false;
     }
     /// What `set_screen` does once the hooks have answered: `screen` opens,
@@ -323,25 +326,11 @@ impl Game<'_> {
             ),
             None => [0.0; 4],
         };
-        let none = screen == Screen::Playing;
-        // Only the inventory screen shows a server's menu: a menu staged for
-        // the screen asked for is not the current pause or chat screen's.
-        let menu_shown = screen == Screen::Inventory;
-        ScreenView::from(mod_api::__private::built::ScreenView {
-            id: screen.id(),
-            menu: self
-                .remote_menu_type()
-                .filter(|m| menu_shown && !m.is_empty()),
-            title: self
-                .remote
-                .as_ref()
-                .and_then(|r| r.menu_title_snapshot())
-                .filter(|_| menu_shown),
-            rect,
-            slots: if none { 0 } else { self.slot_count() },
-            mouse: self.cursor(),
-            partial_tick: self.clock.fraction() as f32,
-        })
+        let mut view = self.screen_view_at(screen, rect);
+        if screen == Screen::Playing {
+            view.slots = 0;
+        }
+        view
     }
     #[cfg(test)]
     pub(super) fn test_observed_title(&self) -> Option<std::sync::Arc<mod_api::Text>> {
@@ -404,6 +393,7 @@ impl Game<'_> {
             ScreenDecision::Vanilla(target) => {
                 self.open_screen_target(target);
                 self.screen_state.observed = self.observed_now();
+                self.shown_init_post();
                 return false;
             }
             ScreenDecision::Open => {}
@@ -481,11 +471,11 @@ impl Game<'_> {
             }
         }
         self.screen_state.observed = self.observed_now();
-        self.title_init_post();
+        self.shown_init_post();
     }
-    /// `screen_init_post` for what shows over the title now: its own screen,
-    /// or a mod's.
-    fn title_init_post(&self) {
+    /// `screen_init_post` for what shows now, once a change was told to the
+    /// frame's observer: a title screen, a mod's, or the game's own.
+    fn shown_init_post(&self) {
         let view = self.screen_change_view(self.screen);
         let id = match &self.title {
             Some(title) if self.screen == Screen::Playing => title.mode.id(),
@@ -1115,10 +1105,19 @@ impl Game<'_> {
     /// container build tells a mod the panel it is about to draw, not the one
     /// the previous frame drew.
     pub(super) fn screen_view_at(&self, screen: Screen, rect: [f32; 4]) -> ScreenView<'_> {
+        // Only the inventory screen shows a server's menu: a menu staged for
+        // a screen a mod replaced is not the pause or chat screen's.
+        let menu_shown = screen == Screen::Inventory;
         ScreenView::from(mod_api::__private::built::ScreenView {
             id: screen.id(),
-            menu: self.remote_menu_type().filter(|m| !m.is_empty()),
-            title: self.remote.as_ref().and_then(|r| r.menu_title_snapshot()),
+            menu: self
+                .remote_menu_type()
+                .filter(|m| menu_shown && !m.is_empty()),
+            title: self
+                .remote
+                .as_ref()
+                .and_then(|r| r.menu_title_snapshot())
+                .filter(|_| menu_shown),
             rect,
             slots: self.slot_count(),
             mouse: self.cursor(),

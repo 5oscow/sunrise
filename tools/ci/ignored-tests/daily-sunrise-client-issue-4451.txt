@@ -1418,6 +1418,7 @@ sunrise-client game::native_hooks::base::screen_open_tests::an_interaction_key_r
 sunrise-client game::native_hooks::base::screen_open_tests::an_overlay_fires_init_post_after_it_opens lib daily resources
 sunrise-client game::native_hooks::base::screen_open_tests::an_overlay_fires_opening_before_it_opens lib daily resources
 sunrise-client game::native_hooks::base::screen_open_tests::an_overlay_fires_opening_then_closing_through_the_observer lib daily resources
+sunrise-client game::native_hooks::base::screen_open_tests::an_overlay_replaced_by_a_vanilla_screen_fires_its_init_post lib daily resources
 sunrise-client game::native_hooks::base::screen_open_tests::cancelling_opening_keeps_an_overlay_shut lib daily resources
 sunrise-client game::native_hooks::base::screen_open_tests::cancelling_opening_keeps_the_current_screen lib daily resources
 sunrise-client game::native_hooks::base::screen_open_tests::client_gui_state_matches_screen_init_hook lib daily resources

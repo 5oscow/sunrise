@@ -458,7 +458,7 @@ fn replacing_opening_opens_another_vanilla_screen_where_it_can() {
 }
 
 /// `ModScreen` opens the mod's screen over the title's screens with no world,
-/// and Escape returns to the title screen.
+/// and Escape or the controller's Back returns to the title screen.
 #[test]
 #[ignore = "daily"]
 fn replacing_a_title_screen_opens_the_mods_screen_over_the_title() {
@@ -468,20 +468,27 @@ fn replacing_a_title_screen_opens_the_mods_screen_over_the_title() {
         game.player = None;
         game.title = Some(game.new_title(saves));
         game.settle_title_mode();
-        *answer.lock().unwrap() = Some(ScreenOpening::ModScreen);
-        game.title.as_mut().unwrap().set_mode(Mode::Select {
-            worlds: Vec::new(),
-            selected: None,
-        });
-        game.settle_title_mode();
-        assert_eq!(game.screen, Screen::Mod);
-        assert_eq!(game.mod_screen(), Some("screens"));
-        assert!(matches!(game.title.as_ref().unwrap().mode, Mode::Main));
-        assert_eq!(take(log), ["opening title->world_select", "closing title"]);
-        *answer.lock().unwrap() = None;
-        game.key_pressed(KeyCode::Escape, KeyCode::Escape).unwrap();
-        assert_eq!(game.screen, Screen::Playing);
-        assert!(matches!(game.title.as_ref().unwrap().mode, Mode::Main));
+        let back: [fn(&mut Game<'_>); 2] = [
+            |game| game.key_pressed(KeyCode::Escape, KeyCode::Escape).unwrap(),
+            |game| game.pad_back().unwrap(),
+        ];
+        for back in back {
+            *answer.lock().unwrap() = Some(ScreenOpening::ModScreen);
+            game.title.as_mut().unwrap().set_mode(Mode::Select {
+                worlds: Vec::new(),
+                selected: None,
+            });
+            game.settle_title_mode();
+            assert_eq!(game.screen, Screen::Mod);
+            assert_eq!(game.mod_screen(), Some("screens"));
+            assert!(matches!(game.title.as_ref().unwrap().mode, Mode::Main));
+            assert_eq!(take(log), ["opening title->world_select", "closing title"]);
+            *answer.lock().unwrap() = None;
+            back(game);
+            assert_eq!(game.screen, Screen::Playing);
+            assert!(matches!(game.title.as_ref().unwrap().mode, Mode::Main));
+            assert_eq!(take(log), ["opening mod->title", "closing mod"]);
+        }
     });
 }
 
@@ -542,6 +549,45 @@ fn an_overlay_fires_init_post_after_it_opens() {
     with_game_of(mods, |game| {
         game.open_sign_editor((0, 64, 0), true);
         assert_eq!(take(&log), ["opening sign_editor", "init sign_editor"]);
+    });
+}
+
+/// An overlay a mod's `Vanilla` answer replaced is followed by the screen
+/// that opened's `screen_init_post`, once, with no second Opening.
+#[test]
+#[ignore = "daily"]
+fn an_overlay_replaced_by_a_vanilla_screen_fires_its_init_post() {
+    use mod_api::{ScreenInitPostEvent, ScreenTarget};
+    /// Answers the pause screen for every opening; logs Opening and Init.Post.
+    struct ToPause(Arc<Mutex<Vec<String>>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for ToPause {
+        fn screen_opening(
+            &self,
+            _host: &dyn ClientHost,
+            event: &mut ScreenOpeningEvent<'_>,
+        ) -> Option<ScreenOpening> {
+            self.0
+                .lock()
+                .unwrap()
+                .push(format!("opening {}", event.new.id));
+            Some(ScreenOpening::Vanilla(ScreenTarget::Pause))
+        }
+        fn screen_init_post(&self, _host: &dyn ClientHost, event: &mut ScreenInitPostEvent<'_>) {
+            self.0
+                .lock()
+                .unwrap()
+                .push(format!("init {}", event.screen.id));
+        }
+    }
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let mods = vec![ModEntry::new("pause", Box::new(ToPause(log.clone())))].into();
+    with_game_of(mods, |game| {
+        game.title = None;
+        game.open_sign_editor((0, 64, 0), true);
+        assert!(game.sign_edit.is_none());
+        assert_eq!(game.screen, Screen::Paused);
+        assert_eq!(take(&log), ["opening sign_editor", "init paused"]);
     });
 }
 

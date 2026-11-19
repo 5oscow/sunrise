@@ -23,6 +23,6 @@ impl Game<'_> {
             ScreenDecision::Keep | ScreenDecision::Open => self.build_screen(),
         }
         self.screen_state.observed = self.observed_now();
-        self.title_init_post();
+        self.shown_init_post();
     }
 }
