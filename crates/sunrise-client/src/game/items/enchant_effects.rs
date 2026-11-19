@@ -474,7 +474,7 @@ impl Game<'_> {
         }
         if ignite > 0.0
             && let Some(m) = self.mobs.get_mut(mob)
-            && !m.kind.flags.fire_immune
+            && !m.fire_immune()
         {
             m.ignite_for_ticks((ignite * 20.0) as i32);
         }

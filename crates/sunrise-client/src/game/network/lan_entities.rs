@@ -393,7 +393,7 @@ impl Game<'_> {
             e.head_yaw = a.yaw;
             e.velocity = [a.velocity.x, a.velocity.y, a.velocity.z];
             let mut flags = 0i8;
-            if a.fire_ticks > 0 {
+            if a.is_on_fire() {
                 flags |= 1;
             }
             if a.invisible {

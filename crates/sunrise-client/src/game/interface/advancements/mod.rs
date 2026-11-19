@@ -642,8 +642,7 @@ impl Game<'_> {
         EntityView {
             kind: "minecraft:player".into(),
             position: [p.position.x, p.position.y, p.position.z],
-            // Entity.isOnFire on a server: remainingFireTicks (players aren't fire immune).
-            on_fire: p.fire_ticks > 0,
+            on_fire: p.is_on_fire(),
             sneaking: p.pose == sunrise_client::pose::Pose::Crouching,
             // Input.shift: the held key, as `BlockItem.place`'s sneaking reads it.
             input_sneak: self.keys.held(Action::Sneak),
@@ -783,7 +782,7 @@ impl Game<'_> {
             movement,
             kind: m.kind.id.clone(),
             position: [m.position.x, m.position.y, m.position.z],
-            on_fire: m.fire_ticks > 0,
+            on_fire: m.fire_ticks > 0 && !m.mod_fire_immune,
             baby: m.is_baby(),
             on_ground: m.on_ground,
             equipment,

@@ -1427,6 +1427,7 @@ impl PlayerMotion {
             invulnerable: hit.invulnerable,
             permanently_invulnerable: hit.permanently_invulnerable,
             invulnerable_time: hit.invulnerable_time,
+            fire_immune: self.mod_fire_immune,
             creative_source: hit.creative_source,
             client_loaded: self.client_loaded,
             rules,
@@ -1511,6 +1512,7 @@ pub(crate) struct Environment<'a> {
     pub(crate) permanently_invulnerable: bool,
     /// `Entity.invulnerableTime > 0` (#916): the entity-level window.
     pub(crate) invulnerable_time: bool,
+    pub(crate) fire_immune: bool,
     /// The hit is a creative player's (`DamageSource.isCreativePlayer`,
     /// #916): it passes the invulnerability below.
     pub(crate) creative_source: bool,
@@ -1870,7 +1872,7 @@ impl ImmunityWorld for Environment<'_> {
         Ok(self.creative_source)
     }
     fn fire_immune(&mut self) -> io::Result<bool> {
-        Ok(false)
+        Ok(self.fire_immune)
     }
     fn fall_immune(&mut self) -> io::Result<bool> {
         Ok(false)

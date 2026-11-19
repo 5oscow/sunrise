@@ -536,7 +536,7 @@ impl Game<'_> {
             riding,
             feet_in_water: p.fluids.was_touching_water,
             swimming: p.pose == sunrise_client::pose::Pose::Swimming,
-            burning: p.fire_ticks > 0 && !spectator,
+            burning: p.is_on_fire() && !spectator,
             hurt: p.health.hurt_animation_time > 0,
             invisible,
             sneaking: p.pose == sunrise_client::pose::Pose::Crouching,

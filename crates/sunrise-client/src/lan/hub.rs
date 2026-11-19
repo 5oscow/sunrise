@@ -5315,7 +5315,7 @@ pub fn guest_body(g: &Guest) -> BodyFlags {
         crawling: m.is_some_and(|m| m.pose == crate::pose::Pose::Swimming && !m.swimming),
         crouching: m.is_some_and(|m| m.pose == crate::pose::Pose::Crouching),
         spin_attack: m.is_some_and(|m| m.auto_spin_attack_ticks > 0),
-        on_fire: m.is_some_and(|m| m.fire_ticks > 0),
+        on_fire: m.is_some_and(crate::motion::PlayerMotion::is_on_fire),
         // ServerPlayer.updateInvisibilityStatus: a spectator is always invisible.
         invisible: g.effects.get("invisibility").is_some() || g.spectator(),
         glowing: g.effects.get("glowing").is_some(),

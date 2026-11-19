@@ -146,7 +146,10 @@ impl Game<'_> {
             .unwrap_or_default();
         let mut entity = player.map(|_| self.killer_loot_entity(None));
         if let Some(entity) = &mut entity {
-            entity.on_fire = self.player.as_ref().is_some_and(|p| p.fire_ticks > 0);
+            entity.on_fire = self
+                .player
+                .as_ref()
+                .is_some_and(sunrise_client::motion::PlayerMotion::is_on_fire);
         }
         let luck = if player.is_some() {
             self.player
