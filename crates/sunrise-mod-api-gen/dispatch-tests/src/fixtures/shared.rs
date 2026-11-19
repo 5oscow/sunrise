@@ -42,6 +42,9 @@ mod content {
         ) -> Option<&'static str> {
             Some("test:counter")
         }
+        pub(in crate::tests) fn entity_type_name(_: u32) -> Option<&'static str> {
+            Some("test:entity")
+        }
         pub(in crate::tests) fn item_id(key: super::super::ItemKey<'_>) -> Option<&str> {
             Some(key.0)
         }
@@ -330,6 +333,9 @@ impl Parts {
     fn menu<'k>(&self, _: impl FnOnce() -> Option<&'k str>) -> &[&'static dyn MenuPart] {
         &self.menus
     }
+    fn menu_screen(&self, _: &str, _: Option<&str>) -> &[&'static dyn MenuPart] {
+        &self.menus
+    }
     fn fluid<'k>(&self, _: impl FnOnce() -> Option<&'k str>) -> &[&'static dyn FluidPart] {
         &self.fluids
     }
@@ -482,7 +488,7 @@ fn inert_support_signals_that_the_simulation_decides() {
         let state = BlockState::new(key, 0);
         let (mut survives, mut inert) = (None, false);
         dispatch_can_survive(
-            &TestLevel,
+            LevelSide::Server(&TestLevel),
             LevelDimension,
             BlockPos,
             state,
@@ -493,7 +499,7 @@ fn inert_support_signals_that_the_simulation_decides() {
 
         let (mut may, mut inert) = (None, false);
         dispatch_may_place_on(
-            &TestLevel,
+            LevelSide::Server(&TestLevel),
             LevelDimension,
             state,
             other,
@@ -505,7 +511,7 @@ fn inert_support_signals_that_the_simulation_decides() {
 
         let (mut sustains, mut inert) = (None, false);
         dispatch_can_sustain_plant(
-            &TestLevel,
+            LevelSide::Server(&TestLevel),
             LevelDimension,
             other,
             state,

@@ -8,16 +8,11 @@ mod level_helpers;
 #[cfg(test)]
 #[path = "shared/particle_count_tests.rs"]
 pub(super) mod particle_count_tests;
+#[cfg(test)]
 use level_helpers::block_entity_for_block;
 #[cfg(test)]
 #[path = "shared/audio_math_tests.rs"]
 mod audio_math_tests;
-#[cfg(test)]
-#[path = "shared/block_property_tests.rs"]
-mod block_property_tests;
-#[cfg(test)]
-#[path = "shared/gameplay_hook_tests.rs"]
-mod gameplay_hook_tests;
 #[path = "shared/item_fallthrough.rs"]
 mod item_fallthrough;
 #[cfg(test)]
@@ -120,6 +115,12 @@ impl Game<'_> {
     /// again, a game with no mod listening to either, and a server's or a guest's `Game`
     /// are a plain assignment.
     pub(super) fn set_screen(&mut self, screen: Screen) {
+        self.set_screen_with(screen, |_| {});
+    }
+    /// `set_screen`, with `before` run once the hooks let the change go ahead and
+    /// before it applies: what a screen's own `onClose` does only when it really
+    /// closes (a container screen's close packet).
+    pub(super) fn set_screen_with(&mut self, screen: Screen, before: impl FnOnce(&mut Self)) {
         if self.screen == screen {
             return;
         }
@@ -143,6 +144,7 @@ impl Game<'_> {
         if self.screen == screen && owner.is_none() {
             return;
         }
+        before(self);
         if self.screen == Screen::Options {
             self.ui.options.discard_draw();
         }
@@ -537,7 +539,7 @@ fn shake_pose(shake: Shake) -> glam::Mat4 {
         * glam::Mat4::from_rotation_y(shake.yaw.to_radians())
 }
 
-/// The mod screen open on this client: the block it is for, the key its
+/// The mod screen open on this client: its menu type and block, the key its
 /// slots are under, the window id of its menu, the menu's data slots as
 /// the server sent them, and what the server sent before the menu opened
 /// (`sunrise:menu_extra`), when it did.
@@ -546,7 +548,10 @@ pub(super) struct OpenNativeScreen {
     slot_moves: SlotMoves,
     key: Pos,
     window: i32,
-    block: String,
+    /// The menu's type, which its screen hooks are keyed by.
+    menu: String,
+    /// The mod block whose menu it is; none for a menu opened without one.
+    block: Option<String>,
     screen: mod_api::Screen,
     data: Vec<i32>,
     extra: Option<sunrise_protocol::menu_extra::Message>,
@@ -1972,19 +1977,21 @@ impl Game<'_> {
         pos: BlockPos,
         state: BlockStateId,
         placed_against: BlockStateId,
-        companion: Option<(BlockPos, BlockStateId)>,
+        extra: impl IntoIterator<Item = (BlockPos, BlockStateId)>,
     ) -> bool {
-        let placement = match companion {
-            None => Placement::Single,
-            Some((at, extra)) => {
-                let (Ok(state), Ok(extra)) = (state.try_into_api(), extra.try_into_api()) else {
-                    return false;
-                };
-                Placement::Multi(Vec::from([
-                    BlockPlacement::new(pos, state),
-                    BlockPlacement::new(at, extra),
-                ]))
-            }
+        let mut extra = extra.into_iter();
+        let placement = if let Some(first) = extra.next() {
+            let Some(writes) = std::iter::once((pos, state))
+                .chain(std::iter::once(first))
+                .chain(extra)
+                .map(|(at, state)| Some(BlockPlacement::new(at, state.try_into_api().ok()?)))
+                .collect()
+            else {
+                return false;
+            };
+            Placement::Multi(writes)
+        } else {
+            Placement::Single
         };
         let mut canceled = false;
         self.native_entity_place(placer, pos, state, placed_against, placement, &mut canceled);
@@ -1996,44 +2003,69 @@ impl Game<'_> {
         &mut self,
         ctx: &PlaceContext,
         by_player: bool,
-    ) -> Option<(PlacementContext, BlockStateId)> {
-        if !mod_api::__private::listened(mod_api::HookId::EntityPlace) {
-            return self
-                .with_level(|b, level, ticks| b.place_block_with_context(level, ticks, ctx));
-        }
-        let (decision, preview) =
-            self.with_level(|b, level, ticks| b.decide_placement(level, ticks, ctx))?;
-        let against_pos = decision.placed_against_pos();
-        let block = |game: &Game<'_>, pos: BlockPos| game.world.block(pos.x, pos.y, pos.z);
-        let against = block(self, against_pos);
-        let target_before = block(self, preview.pos);
-        let companion_before = preview.companion.map(|(pos, _)| (pos, block(self, pos)));
-        let hand = if by_player {
-            self.held().cloned()
-        } else {
-            None
+        stack: &ItemStack,
+    ) -> crate::Result<Option<sunrise_world::level::AppliedPlacement>> {
+        let registry = self.pack.assets.registry;
+        let game_master = ctx.can_use_game_master_blocks;
+        let stack_state =
+            |state| crate::game::block_items::item_block_state(registry, state, stack, game_master);
+        let Some((decision, preview)) =
+            self.with_level(|b, level, ticks| b.decide_placement(level, ticks, ctx, stack_state))
+        else {
+            return Ok(None);
         };
-        let placer = by_player
-            .then(|| self.native_clicker().1.cast_unsigned())
-            .and_then(|entity| self.entity(entity));
-        // The existing block revision and journal epoch cover rule inputs such as
-        // supporting blocks and block-entity shapes without tracing ordinary reads.
-        let level = (self.dim, self.world.revision, self.transactions.writes());
-        if self.placement_canceled(
-            placer,
-            preview.pos,
-            preview.state,
-            against,
-            preview.companion,
-        ) || level != (self.dim, self.world.revision, self.transactions.writes())
-            || block(self, preview.pos) != target_before
-            || block(self, against_pos) != against
-            || companion_before.is_some_and(|(pos, state)| block(self, pos) != state)
-            || (by_player && self.held() != hand.as_ref())
-        {
-            return None;
+        let veto = mod_api::__private::listened(mod_api::HookId::EntityPlace);
+        if veto {
+            let against_pos = decision.placed_against_pos();
+            let block = |game: &Game<'_>, pos: BlockPos| game.world.block(pos.x, pos.y, pos.z);
+            let against = block(self, against_pos);
+            let target_before = block(self, preview.pos);
+            // One proposed state per affected cell. A companion at the pre-clear
+            // position supersedes the intermediate air or water write.
+            let extra = preview.companion.into_iter().chain(
+                preview
+                    .pre_clear
+                    .filter(|(pos, _)| preview.companion.is_none_or(|(at, _)| at != *pos)),
+            );
+            let hand = if by_player {
+                self.held().cloned()
+            } else {
+                None
+            };
+            let placer = by_player
+                .then(|| self.native_clicker().1.cast_unsigned())
+                .and_then(|entity| self.entity(entity));
+            // The block revision and journal epoch cover supporting blocks and
+            // block-entity shapes without tracing ordinary reads.
+            let level = (self.dim, self.world.revision, self.transactions.writes());
+            if self.placement_canceled(placer, preview.pos, preview.state, against, extra)
+                || level != (self.dim, self.world.revision, self.transactions.writes())
+                || block(self, preview.pos) != target_before
+                || block(self, against_pos) != against
+                || (by_player && self.held() != hand.as_ref())
+            {
+                return Ok(None);
+            }
         }
-        self.with_level(|b, level, ticks| b.apply_placement(level, ticks, decision))
+        let Some(placed) = self
+            .with_level(|b, level, ticks| b.apply_placement(level, ticks, decision, stack_state))
+        else {
+            return Ok(None);
+        };
+        if placed.matches_candidate {
+            let pos = placed.context.pos;
+            let target = [pos.x, pos.y, pos.z];
+            self.apply_block_item_data(target, placed.state, stack, game_master);
+            self.with_level(|b, level, ticks| b.placement_set_placed_by(level, ticks, &placed));
+            let placer = by_player.then(|| self.native_acting_player()).flatten();
+            self.set_placed_by(target, placer, Some(stack))?;
+            self.block_item_placed(stack, placer, &placed.context);
+            if by_player {
+                self.trigger_block("minecraft:placed_block", target, stack);
+            }
+        }
+        self.with_level(|b, level, ticks| b.report_placement(level, ticks, &placed));
+        Ok(Some(placed))
     }
     /// `MobEvent::PlaceBlock`: a mob sets `state` at `pos` unless a mod
     /// cancels `entity_place`. Enderman attempts use `enderman_place_block`.
@@ -2218,6 +2250,7 @@ impl Game<'_> {
 
     /// Tells the mods of the chunks that came into this level.
     pub(super) fn native_chunks_loaded(&mut self) {
+        self.fire_pending_block_entity_data_loads();
         let loaded = std::mem::take(&mut self.world.loaded_chunks);
         if self.remote.is_some() {
             return;
@@ -2527,25 +2560,33 @@ impl Game<'_> {
             .no_item_icon
             .as_deref()
     }
-    /// Where the open mod screen of `block` puts container slot `slot` from
-    /// the next frame: the mod's last move, else the screen's declaration;
-    /// None for a hidden slot, another block's screen or none.
-    pub(in crate::game) fn screen_slot(&self, block: &str, slot: usize) -> Option<[f32; 2]> {
-        let s = self.shown_native_screen().filter(|s| s.block == block)?;
+    /// Where the open screen of mod menu type `menu` puts container slot
+    /// `slot` from the next frame: the mod's last move, else the screen's
+    /// declaration; None for a hidden slot, another menu type's screen or none.
+    pub(in crate::game) fn screen_slot(&self, menu: &str, slot: usize) -> Option<[f32; 2]> {
+        let s = self.owned_native_screen(menu)?;
         s.slot_moves.latest(&s.screen.slots, slot)
     }
-    /// Moves container slot `slot` of the open mod screen of `block` to `pos`
+    /// The open screen of menu type `menu`, when the mod calling (if one is)
+    /// owns it: another mod's part on a shared vanilla type moves no slot of it.
+    fn owned_native_screen(&self, menu: &str) -> Option<&OpenNativeScreen> {
+        let s = self.shown_native_screen().filter(|s| s.menu == menu)?;
+        let owner = || mod_api::__private::menu_screen_owner(&s.menu, s.block.as_deref());
+        mod_api::content::crash::current_native_mod()
+            .is_none_or(|calling| owner() == Some(calling))
+            .then_some(s)
+    }
+    /// Moves container slot `slot` of the open screen of menu type `menu` to `pos`
     /// (relative to the screen's origin), or hides it with None, from the
     /// next frame (`SlotMoves::set`).
     pub(in crate::game) fn set_screen_slot(
         &self,
-        block: &str,
+        menu: &str,
         slot: usize,
         pos: Option<[f32; 2]>,
     ) -> Result<(), mod_api::ScreenSlotRefusal> {
         let s = self
-            .shown_native_screen()
-            .filter(|s| s.block == block)
+            .owned_native_screen(menu)
             .ok_or(mod_api::ScreenSlotRefusal::NoScreen)?;
         s.slot_moves.set(&s.screen.slots, slot, pos)
     }
@@ -2635,7 +2676,8 @@ impl Game<'_> {
             let gui_size = [batch.width as i32, batch.height as i32];
             let mut draw = crate::game::host::draw::GameDrawContext::new(self, batch);
             self.native_screen_draw(mod_api::__private::ScreenDrawCall {
-                block: &s.block,
+                menu: &s.menu,
+                block: s.block.as_deref(),
                 pos: s.pos(),
                 data: &s.data,
                 origin: [ox, oy],
@@ -2706,30 +2748,30 @@ impl Game<'_> {
         self.api_menu_button(&context, &mut taken, carried);
         self.put_back_mod_block_entity(pos, taken, &items);
     }
-    /// The cursor from the open mod screen's top left, with its block and
-    /// data, for its press and tooltip hooks.
-    fn native_screen_at(&self) -> Option<(String, Vec<i32>, [f32; 2])> {
-        let s = self.shown_native_screen()?;
-        let r = self.renderer.as_ref()?;
-        let batch = HudBatch::new(
-            [r.config.width, r.config.height],
-            self.settings.gui_scale_inputs(),
-        );
-        let (ox, oy) = self.inventory_origin(&batch);
-        let at = [self.cursor.0 - ox, self.cursor.1 - oy];
-        Some((s.block.clone(), s.data.clone(), at))
-    }
     /// A press on the open mod screen's own button (`native_screen_click`)
     /// goes to the server as a menu button click (true).
     pub(super) fn native_screen_press(&mut self, right: bool) -> bool {
         if self.inventory_target().0.is_some() {
             return false;
         }
-        let Some((block, data, at)) = self.native_screen_at() else {
+        let (Some(screen), Some(r)) = (self.shown_native_screen(), self.renderer.as_ref()) else {
             return false;
         };
+        let batch = HudBatch::new(
+            [r.config.width, r.config.height],
+            self.settings.gui_scale_inputs(),
+        );
+        let (ox, oy) = self.inventory_origin(&batch);
+        let at = [self.cursor.0 - ox, self.cursor.1 - oy];
         let mut button = None;
-        self.native_screen_click(&block, &data, at, right, &mut button);
+        self.native_screen_click(
+            &screen.menu,
+            screen.block.as_deref(),
+            &screen.data,
+            at,
+            right,
+            &mut button,
+        );
         let Some(button) = button else {
             return false;
         };
@@ -2778,7 +2820,8 @@ impl Game<'_> {
             return;
         };
         self.native_screen_tooltip(mod_api::__private::ScreenTooltipCall {
-            block: &screen.block,
+            menu: &screen.menu,
+            block: screen.block.as_deref(),
             data: &screen.data,
             at,
             slot: menu_slot,
@@ -2819,7 +2862,7 @@ impl Game<'_> {
                 .insert(m.id.clone(), sunrise_client::mod_list::ModInfo::of(m, None));
             Installed {
                 id: m.id.clone(),
-                title: [m.name.as_str(), " ", m.version.as_str()].concat(),
+                title: format!("{} {}", m.name, m.version),
                 description: m.description.clone(),
                 problem: None,
                 dev: false,
@@ -3393,131 +3436,163 @@ mod tests {
             ),
         ]);
         mod_platform::__private::install(mods.clone());
-        crate::game::api_values::install_parts(&mods).unwrap();
+        // `be_user` attaches a Part to the type `be_test` declares, which names `be_test`
+        // among its dependencies.
+        let package = |id: &str, depends_on: &[&str]| {
+            PackageInfo::new(
+                id.into(),
+                "1".into(),
+                PackageKind::Code,
+                Side::Both,
+                vec![id.into()],
+                depends_on
+                    .iter()
+                    .map(|owner| {
+                        PackageDependency::new(
+                            (*owner).into(),
+                            "*".into(),
+                            DependencyKind::Required,
+                            DependencyOrder::After,
+                            Side::Both,
+                            None,
+                            None,
+                        )
+                    })
+                    .collect(),
+            )
+        };
         let base = std::path::PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap());
-        let root = super::super::mods::content_root(&base, &Default::default());
-        if invalid {
-            let error = root.unwrap_err().to_string();
-            assert!(error.contains("be_test:shared"), "{error}");
-            assert!(error.contains("be_test:missing"), "{error}");
-            // A refused declaration builds no content root. The roots folder's own `.lock`
-            // is made by every start and never deleted, so it is not a root.
-            let built: Vec<_> = std::fs::read_dir(".sunrise-cache/mod-content")
-                .into_iter()
-                .flatten()
-                .map(|entry| entry.unwrap().file_name())
-                .filter(|name| name != ".lock")
-                .collect();
-            assert!(built.is_empty(), "{built:?}");
-            return;
-        }
-        if let Some(id) = unknown {
-            let error = root.unwrap_err().to_string();
-            assert!(error.contains("be_user"), "{error}");
-            assert!(error.contains("unknown block entity type"), "{error}");
-            assert!(error.contains(id), "{error}");
-            assert!(sunrise_client::block_entity_types::current().is_none());
-            return;
-        }
-        assert_eq!(keys.shared.get(), keys.own.get());
-        with_game_at(root.unwrap().prepared().to_path_buf(), |game| {
-            game.options.dedicated = Some(Vec::new());
-            game.world
-                .chunks
-                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
-            let level = game.level(game.dim.id()).unwrap();
-            let stone = game
-                .pack
-                .assets
-                .registry
-                .default_state("minecraft:stone")
-                .unwrap();
-            for (x, block) in [
-                (1, FIRST),
-                (2, SECOND),
-                (3, EMPTY),
-                (4, PLAIN),
-                (5, "minecraft:chest"),
-            ] {
-                let state = game.pack.assets.registry.default_state(block).unwrap();
-                assert_eq!(
-                    game.level_set_block(level, [x, 63, 0], stone, BlockUpdateFlags::NONE),
-                    Ok(true)
-                );
-                assert_eq!(
-                    game.level_set_block(level, [x, 64, 0], state, BlockUpdateFlags::NONE),
-                    Ok(true)
-                );
-                let pos = (x, 64, 0);
-                if block == PLAIN {
-                    // No declared type claims it, and no mod adds it to `minecraft:banner`'s
-                    // valid blocks, so its template creates no entity (`validateBlockState`).
-                    assert!(game.world.block_entities.get(&pos).is_none());
-                    assert!(game.block_entity(level, [x, 64, 0]).is_none());
-                    continue;
+        mod_platform::__private::with_test_package_inventory(
+            vec![package("be_test", &[]), package("be_user", &["be_test"])],
+            || {
+                crate::game::api_values::install_parts(&mods).unwrap();
+                let root = super::super::mods::content_root(&base, &Default::default());
+                if invalid {
+                    let error = root.unwrap_err().to_string();
+                    assert!(error.contains("be_test:shared"), "{error}");
+                    assert!(error.contains("be_test:missing"), "{error}");
+                    // A refused declaration builds no content root. The roots folder's own `.lock`
+                    // is made by every start and never deleted, so it is not a root.
+                    let built: Vec<_> = std::fs::read_dir(".sunrise-cache/mod-content")
+                        .into_iter()
+                        .flatten()
+                        .map(|entry| entry.unwrap().file_name())
+                        .filter(|name| name != ".lock")
+                        .collect();
+                    assert!(built.is_empty(), "{built:?}");
+                    return;
                 }
-                let handle = game.block_entity(level, [x, 64, 0]).unwrap();
-                if block == "minecraft:chest" {
-                    assert_eq!(handle.kind(game).as_ref(), keys.vanilla.get());
-                    let probe = level.capability(game, &PROBE, [x, 64, 0], None).unwrap();
-                    assert_eq!((probe.value(), probe.owner()), (26, "be_user".into()));
-                    continue;
+                if let Some(id) = unknown {
+                    let error = root.unwrap_err().to_string();
+                    assert!(error.contains("be_user"), "{error}");
+                    assert!(error.contains("unknown block entity type"), "{error}");
+                    assert!(error.contains(id), "{error}");
+                    assert!(sunrise_client::block_entity_types::current().is_none());
+                    return;
                 }
-                let Some(BlockEntity::Mod(entity)) = game.world.block_entities.get(&pos) else {
-                    panic!("declared type did not override its banner template");
-                };
-                if block == EMPTY {
-                    assert_eq!(entity.id(), "be_test:empty");
-                    assert!(entity.nbt.is_empty());
-                    continue;
-                }
-                assert_eq!(entity.id(), "be_test:shared");
-                assert_eq!(entity.nbt.get(&"energy".into()), Some(&Tag::Long(6300)));
-                assert_eq!(handle.kind(game).as_ref(), keys.shared.get());
-                let probe = level.capability(game, &PROBE, [x, 64, 0], None).unwrap();
-                assert_eq!((probe.value(), probe.owner()), (6300, "be_user".into()));
-                game.tick_mod_block_entity(pos);
-                let saved = save::block_entity_encode::encode(
-                    pos,
-                    game.world.block_entities.get(&pos).unwrap(),
-                    block,
-                    &Default::default(),
-                );
-                assert_eq!(saved.get("energy"), Some(&Tag::Long(6301)));
-                let (saved_pos, restored) =
-                    save::decode_block_entity_for_block(&saved, block).unwrap();
-                assert_eq!(saved_pos, pos);
-                assert_eq!(restored.id(), "be_test:shared");
-                assert!(save::decode_block_entity_for_block(&saved, EMPTY).is_none());
-                game.world.block_entities.insert(pos, restored);
-                game.tick_mod_block_entity(pos);
-                let saved = save::block_entity_encode::encode(
-                    pos,
-                    game.world.block_entities.get(&pos).unwrap(),
-                    block,
-                    &Default::default(),
-                );
-                assert_eq!(saved.get("energy"), Some(&Tag::Long(6302)));
-            }
+                assert_eq!(keys.shared.get(), keys.own.get());
+                with_game_at(root.unwrap().prepared().to_path_buf(), |game| {
+                    game.options.dedicated = Some(Vec::new());
+                    game.world
+                        .chunks
+                        .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+                    let level = game.level(game.dim.id()).unwrap();
+                    let stone = game
+                        .pack
+                        .assets
+                        .registry
+                        .default_state("minecraft:stone")
+                        .unwrap();
+                    for (x, block) in [
+                        (1, FIRST),
+                        (2, SECOND),
+                        (3, EMPTY),
+                        (4, PLAIN),
+                        (5, "minecraft:chest"),
+                    ] {
+                        let state = game.pack.assets.registry.default_state(block).unwrap();
+                        assert_eq!(
+                            game.level_set_block(level, [x, 63, 0], stone, BlockUpdateFlags::NONE),
+                            Ok(true)
+                        );
+                        assert_eq!(
+                            game.level_set_block(level, [x, 64, 0], state, BlockUpdateFlags::NONE),
+                            Ok(true)
+                        );
+                        let pos = (x, 64, 0);
+                        if block == PLAIN {
+                            // No declared type claims it, and no mod adds it to `minecraft:banner`'s
+                            // valid blocks, so its template creates no entity (`validateBlockState`).
+                            assert!(game.world.block_entities.get(&pos).is_none());
+                            assert!(game.block_entity(level, [x, 64, 0]).is_none());
+                            continue;
+                        }
+                        let handle = game.block_entity(level, [x, 64, 0]).unwrap();
+                        if block == "minecraft:chest" {
+                            assert_eq!(handle.kind(game).as_ref(), keys.vanilla.get());
+                            let probe = level.capability(game, &PROBE, [x, 64, 0], None).unwrap();
+                            assert_eq!((probe.value(), probe.owner()), (26, "be_user".into()));
+                            continue;
+                        }
+                        let Some(BlockEntity::Mod(entity)) = game.world.block_entities.get(&pos)
+                        else {
+                            panic!("declared type did not override its banner template");
+                        };
+                        if block == EMPTY {
+                            assert_eq!(entity.id(), "be_test:empty");
+                            assert!(entity.nbt.is_empty());
+                            continue;
+                        }
+                        assert_eq!(entity.id(), "be_test:shared");
+                        assert_eq!(entity.nbt.get(&"energy".into()), Some(&Tag::Long(6300)));
+                        assert_eq!(handle.kind(game).as_ref(), keys.shared.get());
+                        let probe = level.capability(game, &PROBE, [x, 64, 0], None).unwrap();
+                        assert_eq!((probe.value(), probe.owner()), (6300, "be_user".into()));
+                        game.tick_mod_block_entity(pos);
+                        let saved = save::block_entity_encode::encode(
+                            pos,
+                            game.world.block_entities.get(&pos).unwrap(),
+                            block,
+                            &Default::default(),
+                        );
+                        assert_eq!(saved.get("energy"), Some(&Tag::Long(6301)));
+                        let (saved_pos, restored) =
+                            save::decode_block_entity_for_block(&saved, block).unwrap();
+                        assert_eq!(saved_pos, pos);
+                        assert_eq!(restored.id(), "be_test:shared");
+                        assert!(save::decode_block_entity_for_block(&saved, EMPTY).is_none());
+                        game.world.block_entities.insert(pos, restored);
+                        game.tick_mod_block_entity(pos);
+                        let saved = save::block_entity_encode::encode(
+                            pos,
+                            game.world.block_entities.get(&pos).unwrap(),
+                            block,
+                            &Default::default(),
+                        );
+                        assert_eq!(saved.get("energy"), Some(&Tag::Long(6302)));
+                    }
 
-            // A level hook's `LevelWriteHost::set_block` fires the same hook in its write.
-            let first = game.pack.assets.registry.default_state(FIRST).unwrap();
-            use crate::game::api_values::TryIntoApi;
-            let written = game.with_level(|_, level, ticks| {
-                LevelWriteHost::set_block(
-                    &mut super::super::mod_api_host::LevelTicks::new(level, ticks),
-                    [5, 64, 0],
-                    first.try_into_api().unwrap(),
-                    BlockUpdateFlags::NONE,
-                )
-            });
-            assert!(written);
-            let Some(BlockEntity::Mod(entity)) = game.world.block_entities.get(&(5, 64, 0)) else {
-                panic!("a level write did not create the declared block entity");
-            };
-            assert_eq!(entity.id(), "be_test:shared");
-            assert_eq!(entity.nbt.get(&"energy".into()), Some(&Tag::Long(6300)));
-        });
+                    // A level hook's `LevelWriteHost::set_block` fires the same hook in its write.
+                    let first = game.pack.assets.registry.default_state(FIRST).unwrap();
+                    use crate::game::api_values::TryIntoApi;
+                    let written = game.with_level(|_, level, ticks| {
+                        LevelWriteHost::set_block(
+                            &mut super::super::mod_api_host::LevelTicks::new(level, ticks),
+                            [5, 64, 0],
+                            first.try_into_api().unwrap(),
+                            BlockUpdateFlags::NONE,
+                        )
+                    });
+                    assert!(written);
+                    let Some(BlockEntity::Mod(entity)) = game.world.block_entities.get(&(5, 64, 0))
+                    else {
+                        panic!("a level write did not create the declared block entity");
+                    };
+                    assert_eq!(entity.id(), "be_test:shared");
+                    assert_eq!(entity.nbt.get(&"energy".into()), Some(&Tag::Long(6300)));
+                });
+            },
+        );
     }
 
     #[test]
@@ -3563,6 +3638,22 @@ mod tests {
             assert_eq!(saved_pos, pos);
             assert_eq!(loaded.id(), "test:machine");
         });
+    }
+
+    #[test]
+    fn observed_overlay_prefers_first_open_screen() {
+        assert_eq!(
+            super::observed_overlay_id(&[(false, "sign"), (false, "book")]),
+            None
+        );
+        assert_eq!(
+            super::observed_overlay_id(&[(false, "sign"), (true, "book")]),
+            Some("book")
+        );
+        assert_eq!(
+            super::observed_overlay_id(&[(true, "sign"), (true, "book")]),
+            Some("sign")
+        );
     }
 
     /// Exercise the gameplay constructor, where name-based entities compete
@@ -3922,6 +4013,244 @@ mod tests {
                 f32::NEG_INFINITY
             ),
             (glam::DVec3::new(1.0, 5.0, 3.0), 10.0, 20.0)
+        );
+    }
+
+    /// A mod's property write: none for a key or value the block lacks, the
+    /// state itself when it already has the value, else the new state.
+    #[test]
+    fn with_property_finds_the_state() {
+        let facts = br#"{"defaults":{"minecraft:air":0,"test:crop":1},"states":[
+            ["air",true,false,"","minecraft:air"],
+            ["crop0",false,false,"",{"id":"test:crop","properties":{"age":"0"}}],
+            ["crop1",false,false,"",{"id":"test:crop","properties":{"age":"1"}}]
+        ]}"#;
+        let registry = sunrise_world::registry::BlockRegistry::from_facts_json(&facts[..]).unwrap();
+        use sunrise_world::registry::BlockStateId;
+        let (age0, age1) = (BlockStateId(1), BlockStateId(2));
+        assert_eq!(
+            super::with_property(&registry, age0, "age", "0"),
+            Some(age0)
+        );
+        assert_eq!(
+            super::with_property(&registry, age0, "age", "1"),
+            Some(age1)
+        );
+        assert_eq!(super::with_property(&registry, age0, "age", "9"), None);
+        assert_eq!(super::with_property(&registry, age0, "lit", "true"), None);
+        // What both property setters write: nothing (false) when the
+        // property already has the value, as `Level.setBlock`.
+        assert_eq!(super::property_change(&registry, age0, "age", "0"), None);
+        assert_eq!(
+            super::property_change(&registry, age0, "age", "1"),
+            Some(age1)
+        );
+        assert_eq!(super::property_change(&registry, age0, "age", "9"), None);
+        assert_eq!(super::property_change(&registry, age0, "lit", "true"), None);
+    }
+
+    /// The state a mod block is placed in is built from its own default state
+    /// and one of its properties, its declared ones (`state_properties` in its
+    /// block file) included, and keeps the properties it already had.
+    #[test]
+    fn a_placement_state_is_built_from_a_blocks_own_properties() {
+        let facts = br#"{"defaults":{"minecraft:air":0,"test:pipe":1},"states":[
+            ["air",true,false,"","minecraft:air"],
+            ["north_gas",false,false,"",{"id":"test:pipe","properties":{"carries":"gas","facing":"north"}}],
+            ["east_gas",false,false,"",{"id":"test:pipe","properties":{"carries":"gas","facing":"east"}}],
+            ["north_items",false,false,"",{"id":"test:pipe","properties":{"carries":"items","facing":"north"}}],
+            ["east_items",false,false,"",{"id":"test:pipe","properties":{"carries":"items","facing":"east"}}]
+        ]}"#;
+        let registry = sunrise_world::registry::BlockRegistry::from_facts_json(&facts[..]).unwrap();
+        use sunrise_world::registry::BlockStateId;
+        let (north_gas, east_gas, east_items) = (BlockStateId(1), BlockStateId(2), BlockStateId(4));
+        // The declared property changes, and `carries` stays as it was.
+        assert_eq!(
+            super::with_property(&registry, north_gas, "facing", "east"),
+            Some(east_gas)
+        );
+        assert_eq!(
+            super::with_property(&registry, east_gas, "carries", "items"),
+            Some(east_items)
+        );
+        // A value the property does not have builds nothing.
+        assert_eq!(
+            super::with_property(&registry, east_gas, "facing", "up"),
+            None
+        );
+    }
+    /// Both property setters return false for a write that changes nothing:
+    /// each goes through `property_change`, none returns true on its own.
+    #[test]
+    fn property_setters_refuse_no_change() {
+        // A Windows checkout has CRLF line ends: the searches below look for "\n".
+        let source = include_str!("base.rs").replace("\r\n", "\n");
+        let code = source.split("#[cfg(test)]").next().unwrap_or_default();
+        for head in [
+            "    pub(in crate::game) fn native_set_block_property(\n        &mut self,\n        ticks:",
+            "    pub(in crate::game) fn set_block_property_with(",
+        ] {
+            let body = code.split(head).nth(1).expect(head);
+            let body = &body[..body.find("\n    }\n").expect(head)];
+            assert!(body.contains("property_change("), "{head}");
+            assert!(!body.contains("return true"), "{head}");
+        }
+    }
+
+    #[test]
+    fn native_breathing_stays_hookable() {
+        let source = include_str!("../../breathing.rs").replace("\r\n", "\n");
+        let hook = source.find("pub fn native_living_breathe(").unwrap();
+        // From its doc comment's first line, so an attribute above it counts.
+        let start = source[..hook].find("/// An entity's breathing").unwrap();
+        let body = &source[start..hook + source[hook..].find("\n}\n").unwrap()];
+        assert!(body.contains("#[inline(never)]"));
+        for line in body.lines() {
+            assert!(!line.contains("cfg"), "a cfg in the breathing hook: {line}");
+            for mac in ["!(", "![", "! {", "!{"] {
+                assert!(!line.contains(mac), "a macro in the breathing hook: {line}");
+            }
+        }
+    }
+
+    #[test]
+    fn native_ingredient_stays_hookable() {
+        let source = include_str!("../../crafting/native_hooks.rs").replace("\r\n", "\n");
+        let at = source.find("pub fn native_ingredient(").unwrap();
+        let start = source[..at].rfind("///").unwrap();
+        let body = &source[start..start + source[start..].find("\n}\n").unwrap()];
+        for line in body.lines() {
+            assert!(
+                !line.contains("cfg"),
+                "a cfg in the ingredient hook: {line}"
+            );
+            for mac in ["!(", "![", "! {", "!{"] {
+                assert!(!line.contains(mac), "a macro: {line}");
+            }
+        }
+    }
+
+    #[test]
+    fn loot_table_load_stays_hookable() {
+        let source = include_str!("../../../../sunrise-world/src/loot.rs").replace("\r\n", "\n");
+        // From its doc comment's last line, so an attribute above it counts.
+        let hook = source.find("pub fn native_loot_table_load(").unwrap();
+        let start = source[..hook].rfind("///").unwrap();
+        let end = source[start..]
+            .find("\n}\n")
+            .or_else(|| source[start..].find("\r\n}\r\n"))
+            .unwrap();
+        let body = &source[start..start + end];
+        for line in body.lines() {
+            assert!(
+                !line.contains("cfg"),
+                "a cfg in the loot hook point: {line}"
+            );
+            for mac in ["!(", "![", "! {", "!{"] {
+                assert!(
+                    !line.contains(mac),
+                    "a macro in the loot hook point: {line}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn lifecycle_source_stays_hookable() {
+        let source = include_str!("../modding/native_lifecycle.rs");
+        let code = source.split("#[cfg(test)]").next().unwrap_or_default();
+        for line in code.lines().filter(|l| !l.trim_start().starts_with("//")) {
+            assert!(!line.contains("cfg"), "a cfg in lifecycle source: {line}");
+            for mac in ["!(", "![", "! {", "!{"] {
+                assert!(!line.contains(mac), "a macro in lifecycle source: {line}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_damage_hook_names_the_source() {
+        use super::{Attack, HurtSource, Hurting, hurt_server_args, mob_source};
+        use sunrise_client::health::NO_ATTACK;
+        use sunrise_client::mobs::{Damage, DamageKind as K, Who};
+        let source = |kind, attacker| {
+            let s = mob_source(
+                &Damage {
+                    kind,
+                    attacker,
+                    from: None,
+                    attacker_species: None,
+                },
+                &Attack {
+                    attacker: 7,
+                    projectile: None,
+                    direct: None,
+                    player_uuid: None,
+                    held: Default::default(),
+                    ..Default::default()
+                },
+            );
+            (s.damage_type, s.causing, s.direct)
+        };
+        let zombie = Some(Who::Mob(3));
+        // A registered type of a datapack reaches the hook under its own id.
+        let scorch = K::Named(sunrise_client::mobs::NamedDamage::new("demo:scorch", 0));
+        assert_eq!(source(scorch, None), ("demo:scorch", 0, 0));
+        assert_eq!(source(scorch, zombie), ("demo:scorch", 3, 0));
+        assert_eq!(source(K::MobAttack, zombie), ("minecraft:mob_attack", 3, 3));
+        assert_eq!(source(K::Thorns, zombie), ("minecraft:thorns", 3, 3));
+        assert_eq!(source(K::Arrow, zombie), ("minecraft:arrow", 3, 0));
+        let during = |kind| {
+            let s = mob_source(
+                &Damage {
+                    kind,
+                    attacker: zombie,
+                    from: None,
+                    attacker_species: None,
+                },
+                &Attack {
+                    attacker: 7,
+                    projectile: Some(912),
+                    direct: None,
+                    player_uuid: None,
+                    held: Default::default(),
+                    ..Default::default()
+                },
+            );
+            (s.damage_type, s.direct)
+        };
+        // The impact's projectile is the direct entity only when the type names it.
+        assert_eq!(during(K::Arrow), ("minecraft:arrow", 912));
+        assert_eq!(during(K::WitherSkull), ("minecraft:wither_skull", 912));
+        assert_eq!(during(K::IndirectMagic), ("minecraft:indirect_magic", 912));
+        // magic() and a blast do not, even while that projectile's attack is in scope.
+        assert_eq!(during(K::Magic), ("minecraft:magic", 0));
+        assert_eq!(during(K::Explosion), ("minecraft:player_explosion", 0));
+        let blast = source(K::Explosion, zombie);
+        assert_eq!(blast, ("minecraft:player_explosion", 3, 0));
+        // A player behind a mob's hit is the one whose attack the level lends; a fall has no
+        // source.
+        let hit = source(K::PlayerAttack, Some(Who::Player));
+        assert_eq!(hit, ("minecraft:player_attack", 7, 7));
+        assert_eq!(source(K::Fall, None), ("minecraft:fall", 0, 0));
+        let arrow = HurtSource {
+            damage_type: "minecraft:arrow",
+            causing: 4,
+            direct: 0,
+            position: None,
+        };
+        let player = (2, "minecraft:player", arrow);
+        assert_eq!(
+            hurt_server_args(Hurting::Player(2, arrow), &NO_ATTACK),
+            player
+        );
+        let dragon = (5, "minecraft:ender_dragon", arrow);
+        assert_eq!(
+            hurt_server_args(Hurting::Dragon(5, arrow), &NO_ATTACK),
+            dragon
+        );
+        assert_eq!(
+            hurt_server_args(Hurting::Entity(6, "minecraft:item", arrow), &NO_ATTACK),
+            (6, "minecraft:item", arrow)
         );
     }
 }
