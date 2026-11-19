@@ -18,6 +18,7 @@
 //! [`mod_rows`] for the rows it adds to the Mods screen.
 #![forbid(unsafe_code)]
 
+pub mod connection;
 pub mod containers;
 pub mod hud;
 pub mod lang;
@@ -109,6 +110,31 @@ pub trait Hooks: Sync {
     /// answers is used; none answering is [`ClientIdentity::vanilla`]. Unlike the other methods
     /// this runs on the network thread, once per join (a transfer is a new join).
     fn client_identity(&self, _server: &str) -> Option<ClientIdentity> {
+        None
+    }
+
+    /// The window starts a connection to `server` over the network, each attempt; never for its
+    /// own server thread (single player, a splitscreen player joining it). Each such connection
+    /// then closes in exactly one [`Hooks::left`] or [`Hooks::ended`] ([`connection`]).
+    fn connecting(&self, _server: &connection::Server) {}
+
+    /// The server the window is connecting to let the player in; at most once a connection.
+    fn joined(&self) {}
+
+    /// The window's connection closed without being lost: the player disconnected, the game
+    /// closed, or the server transferred the window elsewhere.
+    fn left(&self, _how: connection::Left) {}
+
+    /// The window's connection ended without the player leaving: lost, refused or kicked, or
+    /// dropped by this client ([`connection::By`]). The Disconnected screen shows next, and the
+    /// engine asks [`Hooks::retry`].
+    fn ended(&self, _end: &connection::Ended<'_>) {}
+
+    /// Whether to connect again: asked once right after [`Hooks::ended`], and the engine acts on
+    /// that answer; after [`connection::Retry::Wait`], asked again once a frame while the
+    /// Disconnected screen still offers it (the player can cancel or leave the screen). The
+    /// first hook that answers is used; with none the screen offers nothing, as vanilla's.
+    fn retry(&self) -> Option<connection::Retry> {
         None
     }
 }
@@ -332,6 +358,39 @@ pub mod engine {
             .find_map(|h| h.client_identity(server))
             .unwrap_or_else(ClientIdentity::vanilla)
     }
+
+    /// [`Hooks::connecting`].
+    pub fn connecting(server: &connection::Server) {
+        for hooks in all() {
+            hooks.connecting(server);
+        }
+    }
+
+    /// [`Hooks::joined`].
+    pub fn joined() {
+        for hooks in all() {
+            hooks.joined();
+        }
+    }
+
+    /// [`Hooks::left`].
+    pub fn left(how: connection::Left) {
+        for hooks in all() {
+            hooks.left(how);
+        }
+    }
+
+    /// [`Hooks::ended`].
+    pub fn ended(end: &connection::Ended<'_>) {
+        for hooks in all() {
+            hooks.ended(end);
+        }
+    }
+
+    /// [`Hooks::retry`]: the first registered hook's answer.
+    pub fn retry() -> Option<connection::Retry> {
+        all().iter().find_map(|hooks| hooks.retry())
+    }
 }
 
 #[cfg(test)]
@@ -358,6 +417,16 @@ mod tests {
         }
         fn activity(&self, now: Activity) {
             self.0.lock().unwrap().push(format!("{now:?}"));
+        }
+        fn connecting(&self, server: &connection::Server) {
+            let line = format!("connecting {}", server.address);
+            self.0.lock().unwrap().push(line);
+        }
+        fn ended(&self, end: &connection::Ended<'_>) {
+            self.0.lock().unwrap().push(format!("ended {}", end.reason));
+        }
+        fn retry(&self) -> Option<connection::Retry> {
+            Some(connection::Retry::Wait("in 5 s".into()))
         }
         fn get_the_game(&self) -> Option<GetTheGame> {
             Some(GetTheGame {
@@ -411,6 +480,15 @@ mod tests {
             engine::activity(now);
         }
         engine::shutdown();
+        engine::connecting(&connection::Server::new("a", "P", false));
+        engine::ended(&connection::Ended::new(
+            "Timed out",
+            None,
+            connection::By::Server,
+        ));
+        let wait = connection::Retry::Wait("in 5 s".into());
+        assert_eq!(engine::retry(), Some(wait));
+        assert!(engine::any());
         assert_eq!(
             engine::get_the_game().map(|g| g.address),
             Some("https://example.org")
@@ -432,7 +510,9 @@ mod tests {
                 "published false",
                 "Menus",
                 "World { play: Singleplayer, dimension: Nether, mode: Creative }",
-                "shutdown"
+                "shutdown",
+                "connecting a",
+                "ended Timed out",
             ]
         );
         assert!(

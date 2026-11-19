@@ -78,6 +78,7 @@ impl Game<'_> {
             if !quit {
                 return self.leave_server(None);
             }
+            self.connection_left(sunrise_hooks::connection::Left::Quit);
             self.client_logging_out();
             if let Some(mut remote) = self.remote.take() {
                 remote.session.disconnect();

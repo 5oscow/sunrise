@@ -25,6 +25,8 @@ pub(super) struct ExtrasState {
     cps: [Cps; 2],
     /// Auto-reconnect's attempts at the current server.
     reconnect: Tracker,
+    /// Its next attempt, which the Disconnected screen counts down to.
+    retry: Option<sunrise_client::reconnect::Retry>,
     /// Captured before pre listeners; shared by the draw and post listeners.
     pub(super) frame_partial_ticks: Option<(f32, f32)>,
 }
