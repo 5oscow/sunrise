@@ -1369,6 +1369,16 @@ impl TriState {
 /// }
 /// ```
 pub trait LevelHost {
+    /// The block-state facts service, as `host.block_states()` gives it on a game host: the
+    /// same tables and the same answers, so a part can ask a neighbour's `weathering_age`
+    /// inside `random_tick`. Read-only and allocation-free per read. A level view with no
+    /// tables answers every fact with `None` (or `BlockStateError::Unavailable`).
+    ///
+    /// Not on wasm: the service borrows the game's own tables, which a level frame lends no
+    /// import for; a wasm part reads these facts through the `Host` of its other hooks.
+    fn block_states(&self) -> crate::BlockStates<'_> {
+        crate::BlockStates::unavailable()
+    }
     /// `BlockState.isFaceSturdy`, through the same engine read as `LevelRef::block_face_sturdy`.
     /// `canSupportRigidBlock` is `(pos, Up, Rigid)`. `canSupportCenter` is `(pos, face, Center)`
     /// except that vanilla also refuses `Down` on blocks tagged `minecraft:unstable_bottom_center`.

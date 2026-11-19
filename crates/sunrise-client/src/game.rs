@@ -400,6 +400,8 @@ struct GameLevel<'w> {
     command_block_transition: Option<command_blocks::CommandBlockTransition>,
     redstone_experiments: bool,
     facts: &'w BlockFacts,
+    /// The block-state facts a part reads through `LevelHost::block_states`.
+    tables: native_block_tables::BlockTables<'w>,
     collision: &'w BlockCollisionRegistry<'w>,
     events: &'w mut Vec<LevelEvent>,
     dimension: LevelDimension,
@@ -3144,6 +3146,7 @@ impl Game<'_> {
             trigger_extras,
             world: &mut self.world,
             facts: self.res.facts(),
+            tables: native_block_tables::BlockTables::new(&self.res, &self.pack),
             collision: self.collision,
             events: &mut self.level_events,
             dimension,
