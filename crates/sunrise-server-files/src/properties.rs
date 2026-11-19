@@ -726,13 +726,21 @@ mod tests {
         assert_eq!(p.seed, 7);
     }
     #[test]
-    fn uuid_parsing_accepts_java_digits_but_rejects_signed_long_overflow() {
+    fn resource_pack_id_accepts_java_digits_but_rejects_signed_long_overflow() {
         // Temurin 25 UUID.fromString, including the non-canonical fallback.
-        assert_eq!(
-            parse_uuid("d2Acd4F-０ａ-adB1-ED8-fB5"),
-            Some(0x0d2acd4f000aadb10ed8000000000fb5)
-        );
-        assert_eq!(parse_uuid("ffffffffffffffff-0-0-0-0"), None);
+        for (id, expected) in [
+            (
+                "d2Acd4F-０ａ-adB1-ED8-fB5",
+                Some(0x0d2a_cd4f_000a_adb1_0ed8_0000_0000_0fb5),
+            ),
+            ("ffffffffffffffff-0-0-0-0", None),
+        ] {
+            let mut raw = Properties::default();
+            raw.put("resource-pack", "https://example.invalid/pack.zip".into());
+            raw.put("resource-pack-id", id.into());
+            let p = ServerProperties::new(raw, &mut Fixed).unwrap();
+            assert_eq!(p.resource_pack.map(|pack| pack.id), expected, "{id}");
+        }
     }
 
     #[test]

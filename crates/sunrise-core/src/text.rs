@@ -124,6 +124,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn canonical_uuid_accepts_mixed_case_hex_but_not_colon() {
+        assert_eq!(
+            parse_java_uuid("01234567-89Ab-cDeF-fEDc-bA9876543210"),
+            Some(0x0123_4567_89ab_cdef_fedc_ba98_7654_3210)
+        );
+        assert_eq!(
+            parse_java_uuid("01234567-89:b-cDeF-fEDc-bA9876543210"),
+            None
+        );
+    }
+
+    #[test]
     fn decimal_integer_and_long_boundaries_follow_java() {
         for (text, expected) in [
             ("2147483647", Some(i32::MAX)),
