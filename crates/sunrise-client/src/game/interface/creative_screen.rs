@@ -1,67 +1,7 @@
 //! The creative inventory screen (`CreativeModeInventoryScreen`): its tabs, pages, tooltips,
 //! trash slot, search box and clicks.
 use super::*;
-use sunrise_items::creative_catalog::{Holders, Parameters};
-
 impl Game<'_> {
-    /// `CreativeModeInventoryScreen.hasPermissions` (`canUseGameMasterBlocks`
-    /// and the Operator Items Tab option) given to `tryRefreshInvalidatedTabs`,
-    /// as the screen's constructor and `containerTick` do. When the tabs need
-    /// building, each item tab asks the mods for their stacks
-    /// (`BuildCreativeModeTabContentsEvent`) before the build takes them.
-    pub(super) fn refresh_creative_tabs(&mut self) {
-        let permissions = self.can_use_game_master_blocks() && self.settings.operator_items_tab;
-        let Some(tabs) = self
-            .creative_screen
-            .tabs_to_build(permissions, self.enabled_feature_ids())
-        else {
-            return;
-        };
-        let features = self.enabled_feature_ids().clone();
-        let added = tabs
-            .into_iter()
-            .map(|tab| {
-                let mut items = Vec::new();
-                self.native_build_creative_mode_tab_contents(&tab, permissions, &mut items);
-                (tab, items)
-            })
-            .collect();
-        let holders = self.creative_holders();
-        self.creative_screen.build(
-            Parameters {
-                features: &features,
-                operator: permissions,
-                holders: &holders,
-                items: world_items!(self),
-            },
-            added,
-            &self.pack.names,
-        );
-    }
-
-    fn creative_holders(&self) -> Holders {
-        self.remote
-            .as_ref()
-            .map_or_else(Holders::default, |remote| {
-                sunrise_client::creative::live_holders(&remote.builtin, &remote.registries)
-            })
-    }
-
-    /// Old client readers see the last built screen; when unopened they read the
-    /// same generator without firing the append-only client hook or seeding its cache.
-    pub(super) fn preview_creative(
-        &self,
-    ) -> Option<(Vec<sunrise_client::creative::Tab>, Vec<ItemStack>)> {
-        (!self.creative_screen.has_contents()).then(|| {
-            self.creative_screen.preview(Parameters {
-                features: self.enabled_feature_ids(),
-                operator: false,
-                holders: &self.creative_holders(),
-                items: self.items(),
-            })
-        })
-    }
-
     pub(super) fn creative_inventory_open(&self) -> bool {
         self.screen == Screen::Creative && self.creative_screen.tab().inventory
     }

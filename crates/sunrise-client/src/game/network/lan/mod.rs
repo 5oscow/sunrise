@@ -3624,7 +3624,43 @@ impl Game<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{EventTimings, OFFHAND_SLOT, equipment_slot_name, living_flags, mob_freeze_meta};
+    use super::{
+        EventTimings, Hub, LanHost, LanSettings, OFFHAND_SLOT, equipment_slot_name, living_flags,
+        mob_freeze_meta,
+    };
+
+    impl LanHost {
+        /// Install an already configured fixture hub without touching the process-wide sync cache.
+        pub(in crate::game) fn for_test(hub: Hub) -> Self {
+            Self {
+                settings: LanSettings {
+                    port: hub.lan.port,
+                    guest_commands: false,
+                    force_game_mode: false,
+                },
+                hub,
+                players_told_left: false,
+                play: Default::default(),
+                menus: Default::default(),
+                broken: Default::default(),
+                mob_state: Default::default(),
+                poses: Default::default(),
+                mob_players: Default::default(),
+                owner: None,
+                waypoints: Default::default(),
+                waypoint_dead: Default::default(),
+                border_sent: None,
+                commands: Default::default(),
+                quiet: Default::default(),
+                far: None,
+                native_commands_sent: None,
+                sleep_ignored: Default::default(),
+                states: Default::default(),
+                states_next_entity: None,
+                idle_states: Default::default(),
+            }
+        }
+    }
 
     #[test]
     fn a_burst_of_short_events_still_has_a_slow_tick_note() {
@@ -3765,33 +3801,7 @@ mod tests {
         guest.placed = true;
         guest.dimension = "minecraft:overworld".into();
         hub.guests.push(guest);
-        game.lan = Some(super::LanHost {
-            hub,
-            players_told_left: false,
-            settings: super::LanSettings {
-                port: 0,
-                guest_commands: false,
-                force_game_mode: false,
-            },
-            play: Default::default(),
-            menus: Default::default(),
-            broken: Default::default(),
-            mob_state: Default::default(),
-            poses: Default::default(),
-            mob_players: Default::default(),
-            owner: None,
-            waypoints: Default::default(),
-            waypoint_dead: Default::default(),
-            border_sent: None,
-            commands: Default::default(),
-            quiet: Default::default(),
-            far: None,
-            native_commands_sent: None,
-            sleep_ignored: Default::default(),
-            states: Default::default(),
-            states_next_entity: None,
-            idle_states: Default::default(),
-        });
+        game.lan = Some(LanHost::for_test(hub));
         for (block, expected) in [
             ("minecraft:ladder", false),
             ("minecraft:scaffolding", false),

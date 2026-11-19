@@ -160,6 +160,15 @@ impl Catalog {
         &self.tabs
     }
 
+    /// The canonical display order of the global search tab in this build.
+    pub fn search_display<'a>(&self, contents: &'a [Arc<TabContents>]) -> &'a [ItemStack] {
+        self.tabs
+            .iter()
+            .zip(contents)
+            .find(|(tab, _)| tab.kind == Kind::Search)
+            .map_or(&[], |(_, list)| list.display.as_slice())
+    }
+
     /// Rebuild in vanilla's two passes, retaining previous contents until a
     /// tab's turn. `edit` sees the partial build and the current tab's two
     /// generated lists before items disabled by flags are dropped. The

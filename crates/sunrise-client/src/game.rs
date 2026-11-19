@@ -1672,6 +1672,7 @@ struct Game<'a> {
     /// The `[[native.loop]]` slots' state, per published loop (`published_loops.rs`).
     loop_states: published_loops::LoopStates,
     creative_screen: Creative,
+    creative_contents: native_hooks::CreativeCache,
     /// `CreativeModeInventoryScreen.ignoreTextInput`: the chat key opened the
     /// search tab, so the letter it carries is not typed into the box.
     creative_ignore_text: bool,
@@ -6419,6 +6420,7 @@ impl Game<'_> {
         self.share_spawn_conditions();
         self.score = Default::default();
         reset_world_progress(&mut self.adv, &mut self.stats);
+        self.reset_creative_contents();
         let stack = self.open_world_datapacks(&level.enabled_features)?;
         let root = self.options.resources.clone();
         self.damage_tag_generation = self.damage_tag_generation.wrapping_add(1);
@@ -6583,6 +6585,7 @@ impl Game<'_> {
         }
         // The save screen has finished every write before releasing storage.
         self.ui.dispatcher = Default::default();
+        self.reset_creative_contents();
         self.server_loot.set(None);
         self.server_items = None;
         self.session_lock = None;
@@ -11062,6 +11065,7 @@ impl<'a> Game<'a> {
             trial_spawner_tick_positions: Vec::new(),
             loop_states: Default::default(),
             creative_screen: prepared.creative_screen,
+            creative_contents: Default::default(),
             creative_ignore_text: false,
             control: None,
             agent_control_on: false,

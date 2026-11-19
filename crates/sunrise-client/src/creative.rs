@@ -10,7 +10,7 @@ use std::{
     sync::{Arc, Mutex, OnceLock},
 };
 use sunrise_items::{
-    creative_catalog::{Catalog, Kind, Parameters, TabContents},
+    creative_catalog::{Catalog, Kind, TabContents},
     item_data::component_snapshot,
 };
 
@@ -81,10 +81,9 @@ pub struct Creative {
     /// The search tab's stacks, in its display order.
     search_items: Vec<ItemStack>,
     search_index: Vec<SearchEntry>,
-    /// Definitions from the build's holder provider. Their components are
-    /// rendered in the active language when computing the name index.
-    holders: sunrise_items::creative_catalog::Holders,
-    catalog: Catalog,
+    /// Definitions from the same catalog snapshot, rendered in the active language.
+    holders: Arc<sunrise_items::creative_catalog::Holders>,
+    catalog: Arc<Catalog>,
     headers: Vec<Tab>,
     /// Prepared search presentation only, keyed by item and exact components.
     metadata: HashMap<(Arc<str>, Option<sunrise_core::nbt::Tag>), SearchEntry>,
@@ -93,12 +92,6 @@ pub struct Creative {
     /// World item tags, inverted for search and Polytone presentation.
     item_tags: Option<HashMap<String, Vec<(String, String)>>>,
     contents: Option<Arc<[Arc<TabContents>]>>,
-    /// `hasPermissions` the tabs were last built with.
-    permissions: bool,
-    features: Arc<[String]>,
-    built: bool,
-    /// The append-only v1 contributions, in their original dispatch order.
-    added: Vec<(String, Vec<ItemStack>)>,
     /// ItemPickerMenu.items: what the grid shows, filled when the tab or the
     /// search changes (selectTab, refreshSearchResults), not on every frame.
     shown: Mutex<Option<Shown>>,
@@ -368,7 +361,7 @@ impl Creative {
     }
 
     pub fn from_json(raw: &Value) -> Result<Self> {
-        let catalog = Catalog::parse(raw)?;
+        let catalog = Arc::new(Catalog::parse(raw)?);
         let mut headers = Vec::new();
         let mut metadata = HashMap::new();
         let mut ungrouped = Vec::new();
@@ -450,10 +443,6 @@ impl Creative {
             ungrouped,
             item_tags: None,
             contents: None,
-            permissions: false,
-            features: Arc::from([]),
-            built: false,
-            added: Vec::new(),
             shown: Mutex::new(None),
             lines_cache: Mutex::new(None),
             pack: Vec::new(),
@@ -462,52 +451,41 @@ impl Creative {
         Ok(creative)
     }
 
-    pub fn catalog(&self) -> &Catalog {
+    pub fn catalog(&self) -> &Arc<Catalog> {
         &self.catalog
     }
 
-    /// Project the catalog and the v1 append-only hook onto the client UI.
-    /// The v1 hook adds stacks to each requested tab and, in dispatch order,
-    /// at the end of global search. It does not edit the catalog's lists.
+    /// Project the complete canonical lists onto the UI, retaining client-only presentation.
     fn project(&mut self) {
-        (self.tabs, self.search_items) = self.project_from(self.contents.as_deref(), &self.added);
-        self.index_search();
-    }
-
-    fn project_from(
-        &self,
-        contents: Option<&[Arc<TabContents>]>,
-        added: &[(String, Vec<ItemStack>)],
-    ) -> (Vec<Tab>, Vec<ItemStack>) {
         let mut search = Vec::new();
         let mut tabs = Vec::new();
         for (i, recipe) in self.catalog.tabs().iter().enumerate() {
             let mut tab = self.headers[i].header();
-            if let Some(contents) = contents {
+            if let Some(contents) = &self.contents {
                 tab.items.clone_from(&contents[i].display);
             }
-            if let Some((_, stacks)) = added.iter().find(|(tab, _)| *tab == recipe.id) {
-                append_unique(&mut tab.items, stacks);
-            }
             if tab.search {
-                search.clone_from(&tab.items);
-                append_unique(&mut search, &self.ungrouped);
-                for (_, stacks) in added {
-                    append_unique(&mut search, stacks);
-                }
+                search = self.with_ungrouped(&tab.items);
             }
             self.apply_pack(&mut tab);
-            if contents.is_none() || recipe.kind != Kind::Category || !tab.items.is_empty() {
+            if self.contents.is_none() || recipe.kind != Kind::Category || !tab.items.is_empty() {
                 tabs.push(tab);
             }
         }
-        (tabs, search)
+        self.tabs = tabs;
+        self.search_items = search;
+        self.index_search();
     }
 
-    /// The listener-free projection for old explicit readers before the first screen build.
-    pub fn preview(&self, params: Parameters<'_>) -> (Vec<Tab>, Vec<ItemStack>) {
-        let contents = self.catalog.build(params, None, |_, _, _| {});
-        self.project_from(Some(&contents), &[])
+    /// The built-in sorter keeps the creative UI's ranking for ungrouped items, too.
+    pub fn search_order_from(&self, contents: &[Arc<TabContents>]) -> Vec<ItemStack> {
+        self.with_ungrouped(self.catalog.search_display(contents))
+    }
+
+    fn with_ungrouped(&self, search: &[ItemStack]) -> Vec<ItemStack> {
+        let mut order = search.to_vec();
+        append_unique(&mut order, &self.ungrouped);
+        order
     }
 
     pub fn built_contents(&self) -> Option<&[Arc<TabContents>]> {
@@ -518,14 +496,10 @@ impl Creative {
         self.contents.is_some()
     }
 
-    /// Registries were replaced (including another world joining). Never carry its suffix
-    /// or the client hook's additions over to the next holder provider.
+    /// Drop the previous world's projection when its holder provider changes.
     pub fn reset_contents(&mut self) {
         self.contents = None;
-        self.holders = Default::default();
-        self.added.clear();
-        self.built = false;
-        self.permissions = false;
+        self.holders = Arc::default();
         self.project();
     }
 
@@ -627,62 +601,24 @@ impl Creative {
             }
         }
     }
-    /// `CreativeModeInventoryScreen.tryRefreshInvalidatedTabs`, which its
-    /// constructor and `containerTick` run with `hasPermissions`
-    /// (`Player.canUseGameMasterBlocks` and the Operator Items Tab option):
-    /// the item tabs to build, by id, when the tabs need building, the first
-    /// time since they loaded and whenever `permissions` changed; None when
-    /// they are current. The game asks the mods for each tab's stacks
-    /// (`BuildCreativeModeTabContentsEvent`) and hands them to `build`.
-    pub fn tabs_to_build(&self, permissions: bool, features: &[String]) -> Option<Vec<String>> {
-        if self.built
-            && permissions == self.permissions
-            && (features == &*self.features
-                || (features.iter().all(|flag| self.features.contains(flag))
-                    && self.features.iter().all(|flag| features.contains(flag))))
-        {
-            return None;
-        }
-        Some(
-            self.catalog
-                .tabs()
-                .iter()
-                .filter(|tab| tab.kind == Kind::Category)
-                .map(|tab| tab.id.clone())
-                .collect(),
-        )
-    }
-    /// The `hasPermissions` the tabs were last built with.
-    pub fn permissions(&self) -> bool {
-        self.permissions
-    }
-    /// Invalidate collected contents after client resources are published, even
-    /// when permissions have not changed. The next refresh recollects mod stacks.
-    pub fn invalidate_build(&mut self) {
-        self.built = false;
-        self.forget_items();
-    }
-    /// `CreativeModeTabs.buildAllTabContents` with `permissions` and the
-    /// stacks mods add (`added`, by tab id, for the tabs `tabs_to_build`
-    /// named). A selected tab left without stacks (the operator tab) gives
-    /// way to the default tab; any other keeps its first row
-    /// (`refreshCurrentTabContents`).
-    pub fn build(
+    /// Publish a complete build. Keep the selected tab's first row if the tab still exists;
+    /// otherwise select vanilla's default tab (`refreshCurrentTabContents`).
+    pub fn publish(
         &mut self,
-        params: Parameters<'_>,
-        added: Vec<(String, Vec<ItemStack>)>,
+        contents: Arc<[Arc<TabContents>]>,
+        holders: Arc<sunrise_items::creative_catalog::Holders>,
         names: &Names,
     ) {
+        if self
+            .contents
+            .as_ref()
+            .is_some_and(|prior| Arc::ptr_eq(prior, &contents))
+        {
+            return;
+        }
         let row = self.first_row(names);
-        self.permissions = params.operator;
-        self.features = Arc::from(params.features);
-        self.holders = params.holders.clone();
-        self.built = true;
-        self.added = added;
-        self.contents = Some(
-            self.catalog
-                .build(params, self.contents.as_deref(), |_, _, _| {}),
-        );
+        self.contents = Some(contents);
+        self.holders = holders;
         self.project();
         if !self.select_default_if_missing() {
             // ItemPickerMenu.getScrollForRowIndex.
@@ -1375,6 +1311,7 @@ pub fn click_display(
 mod tests {
     use super::*;
     use sunrise_core::nbt::Tag;
+    use sunrise_items::creative_catalog::Parameters;
 
     fn stack(item: &str, count: u32) -> ItemStack {
         ItemStack {
@@ -1587,16 +1524,17 @@ mod tests {
             };
             let holders = live_holders(&Builtin::default(), &dynamic);
             c.reset_contents();
-            c.build(
+            let lists = c.catalog().build(
                 Parameters {
                     features: &[],
                     operator: false,
                     holders: &holders,
                     items: &items,
                 },
-                Vec::new(),
-                &names,
+                None,
+                |_, _, _| {},
             );
+            c.publish(lists, Arc::new(holders), &names);
             assert_eq!(
                 c.search_items()[0].stored_enchantments(),
                 [(Arc::from("minecraft:sharpness"), 5)]
@@ -1614,7 +1552,7 @@ mod tests {
     fn tag_reload_updates_search_without_asking_for_new_tab_contents() {
         let mut c = tooltip_tabs();
         let names = Names::default();
-        assert!(refresh(&mut c, false, &names));
+        let previous = c.contents.clone().unwrap();
         assert_eq!(c.search_results("#oak_logs", &names), [0]);
         c.set_item_tags(Some(&HashMap::from([(
             "test:replacement".into(),
@@ -1622,7 +1560,7 @@ mod tests {
         )])));
         assert_eq!(c.search_results("#replacement", &names), [0]);
         assert!(c.search_results("#oak_logs", &names).is_empty());
-        assert!(!refresh(&mut c, false, &names));
+        assert!(Arc::ptr_eq(&previous, c.contents.as_ref().unwrap()));
     }
 
     #[test]
@@ -1960,39 +1898,31 @@ mod tests {
         c.tabs.iter().map(|t| t.id.as_str()).collect()
     }
 
-    /// The game's `refresh_creative_tabs`, with `mods` answering each tab
-    /// (`BuildCreativeModeTabContentsEvent`): true when the tabs were built.
-    fn refresh_with(
+    fn publish_with(
         c: &mut Creative,
         permissions: bool,
         names: &Names,
-        mods: &dyn Fn(&str, bool) -> Vec<ItemStack>,
-    ) -> bool {
-        let Some(tabs) = c.tabs_to_build(permissions, &[]) else {
-            return false;
-        };
-        let added = tabs
-            .into_iter()
-            .map(|tab| {
-                let items = mods(&tab, permissions);
-                (tab, items)
-            })
-            .collect();
-        c.build(
+        mods: impl Fn(&str, bool) -> Vec<ItemStack>,
+    ) {
+        let lists = c.catalog.build(
             Parameters {
                 operator: permissions,
                 features: &[],
                 holders: &Default::default(),
                 items: &crate::items::Items::empty(),
             },
-            added,
-            names,
+            c.built_contents(),
+            |tab, _, current| {
+                let stacks = mods(tab.id.as_str(), permissions);
+                append_unique(&mut current.display, &stacks);
+                append_unique(&mut current.search, &stacks);
+            },
         );
-        true
+        c.publish(lists, Arc::default(), names);
     }
 
-    fn refresh(c: &mut Creative, permissions: bool, names: &Names) -> bool {
-        refresh_with(c, permissions, names, &|_, _| Vec::new())
+    fn publish(c: &mut Creative, permissions: bool, names: &Names) {
+        publish_with(c, permissions, names, |_, _| Vec::new());
     }
 
     fn ids(items: &[ItemStack]) -> Vec<&str> {
@@ -2020,11 +1950,7 @@ mod tests {
     fn operator_tab_comes_and_goes_with_permissions() {
         let mut c = with_operator_tab();
         let names = Names::default();
-        // The first build after loading, then only when permissions change.
-        assert!(refresh(&mut c, false, &names));
-        assert!(!refresh(&mut c, false, &names));
-        assert!(refresh(&mut c, true, &names));
-        assert!(!refresh(&mut c, true, &names));
+        publish(&mut c, true, &names);
         assert_eq!(
             tab_ids(&c),
             [
@@ -2041,69 +1967,21 @@ mod tests {
         // The search tab keeps its place across the rebuild.
         c.select(2);
         c.search.set_value("block");
-        assert!(refresh(&mut c, false, &names));
+        publish(&mut c, false, &names);
         assert!(c.tab().search);
         assert_eq!(c.search.value, "block");
         assert!(c.items(&names).is_empty());
         c.reset_contents(); // the operator header now precedes Search again
-        assert!(refresh(&mut c, false, &names));
+        publish(&mut c, false, &names);
         assert!(c.tab().search);
         assert_eq!(c.search.value, "block");
         // The selected operator tab is left empty: the default tab instead.
-        refresh(&mut c, true, &names);
+        publish(&mut c, true, &names);
         c.select(1);
         assert_eq!(c.items(&names).len(), 2);
-        refresh(&mut c, false, &names);
+        publish(&mut c, false, &names);
         assert_eq!(c.tab().id, "minecraft:building_blocks");
         assert_eq!(c.items(&names)[0].item.as_ref(), "minecraft:stone");
-    }
-
-    #[test]
-    fn reordered_features_keep_the_build() {
-        let mut c = with_operator_tab();
-        c.build(
-            Parameters {
-                operator: false,
-                features: &[
-                    "minecraft:vanilla".into(),
-                    "minecraft:redstone_experiments".into(),
-                ],
-                holders: &Default::default(),
-                items: &crate::items::Items::empty(),
-            },
-            Vec::new(),
-            &Names::default(),
-        );
-        assert!(
-            c.tabs_to_build(
-                false,
-                &[
-                    "minecraft:redstone_experiments".into(),
-                    "minecraft:vanilla".into()
-                ]
-            )
-            .is_none()
-        );
-    }
-
-    #[test]
-    fn mods_are_asked_for_each_item_tab_only() {
-        let mut c = with_operator_tab();
-        let names = Names::default();
-        let asked = std::cell::RefCell::new(Vec::new());
-        refresh_with(&mut c, false, &names, &|tab, permissions| {
-            asked.borrow_mut().push((tab.to_owned(), permissions));
-            Vec::new()
-        });
-        // Not the search or survival inventory tabs; the operator tab even
-        // without permissions, as vanilla builds it (and leaves it empty).
-        assert_eq!(
-            *asked.borrow(),
-            [
-                ("minecraft:building_blocks".to_owned(), false),
-                ("minecraft:op_blocks".to_owned(), false)
-            ]
-        );
     }
 
     #[test]
@@ -2123,7 +2001,7 @@ mod tests {
             ],
             _ => Vec::new(),
         };
-        assert!(refresh_with(&mut c, false, &names, &mods));
+        publish_with(&mut c, false, &names, mods);
         assert_eq!(
             ids(&c.tabs[0].items),
             ["minecraft:stone", "ae2:sky_stone_block"]
@@ -2143,22 +2021,6 @@ mod tests {
     }
 
     #[test]
-    fn resource_reload_recollects_with_unchanged_permissions() {
-        let mut c = with_operator_tab();
-        let names = Names::default();
-        refresh_with(&mut c, false, &names, &|_, _| {
-            vec![ItemStack::new("example:old", 1)]
-        });
-        assert!(c.tabs_to_build(false, &[]).is_none());
-        c.invalidate_build();
-        refresh_with(&mut c, false, &names, &|_, _| {
-            vec![ItemStack::new("example:new", 1)]
-        });
-        assert_eq!(ids(c.search_items()), ["minecraft:stone", "example:new"]);
-        assert!(c.tabs_to_build(false, &[]).is_none());
-    }
-
-    #[test]
     fn a_rebuild_asks_the_mods_again() {
         let mut c = with_operator_tab();
         let names = Names::default();
@@ -2170,7 +2032,7 @@ mod tests {
                 Vec::new()
             }
         };
-        refresh_with(&mut c, false, &names, &mods);
+        publish_with(&mut c, false, &names, mods);
         assert_eq!(
             tab_ids(&c),
             [
@@ -2179,7 +2041,7 @@ mod tests {
                 "minecraft:inventory"
             ]
         );
-        refresh_with(&mut c, true, &names, &mods);
+        publish_with(&mut c, true, &names, mods);
         assert_eq!(
             ids(&c.tabs[1].items),
             [
@@ -2198,7 +2060,7 @@ mod tests {
             ]
         );
         // Without permissions the mod's stack goes with the tab.
-        refresh_with(&mut c, false, &names, &mods);
+        publish_with(&mut c, false, &names, mods);
         assert_eq!(ids(c.search_items()), ["minecraft:stone"]);
     }
 
@@ -2207,7 +2069,7 @@ mod tests {
         let mut c = with_operator_tab();
         let names = Names::default();
         // `shouldDisplay`: a category tab with a stack is shown, whoever added it.
-        refresh_with(&mut c, false, &names, &|tab, _| {
+        publish_with(&mut c, false, &names, |tab, _| {
             if tab == "minecraft:op_blocks" {
                 vec![ItemStack::new("ae2:creative_energy_cell", 1)]
             } else {

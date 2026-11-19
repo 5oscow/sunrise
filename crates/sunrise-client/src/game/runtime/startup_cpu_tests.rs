@@ -91,15 +91,17 @@ fn worker_prepares_owned_models_and_inventory_before_handoff() {
     assert!(prepared.trident_model.is_some());
     assert!(prepared.armor_stand_assets.main.is_some());
     assert!(!prepared.creative_screen.has_contents());
-    let (tabs, _) = prepared
-        .creative_screen
-        .preview(sunrise_items::creative_catalog::Parameters {
+    let contents = prepared.creative_screen.catalog().build(
+        sunrise_items::creative_catalog::Parameters {
             operator: false,
             features: &[],
             holders: &Default::default(),
             items: &sunrise_items::items::Items::empty(),
-        });
-    assert_eq!(tabs[0].items[0].item.as_ref(), "minecraft:stone");
+        },
+        None,
+        |_, _, _| {},
+    );
+    assert_eq!(contents[0].display[0].item.as_ref(), "minecraft:stone");
     // No documents from the old generation remain available to reload.
     assert!(
         GameCpuResources::load(

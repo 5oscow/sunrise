@@ -138,13 +138,10 @@ impl Game<'_> {
             return;
         }
         let views: Vec<Option<ItemStack>> = slots.iter().map(|&s| self.slot_view(s)).collect();
-        let preview = self.preview_creative();
-        let order = preview
-            .as_ref()
-            .map_or_else(|| self.creative_screen.search_items(), |(_, items)| items);
+        let order = self.stock_sort_order();
         let clicks = {
             let rank = |s: &ItemStack| {
-                let order = Creative::order_of(order, s).unwrap_or(usize::MAX);
+                let order = Creative::order_of(&order, s).unwrap_or(usize::MAX);
                 (order, hover_name(&self.pack.names, s))
             };
             let max = |s: &ItemStack| self.max_stack(s);

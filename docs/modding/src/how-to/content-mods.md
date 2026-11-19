@@ -752,12 +752,34 @@ lang file's `itemGroup.<mod id>.<file name>` (`creative_tab/gems.json` →
 `itemGroup.ruby.gems`) translates any title. A mod's items join the search tab
 under their names.
 
-A file only makes new tabs. To put items into a tab the mod doesn't own, such as
-vanilla's `minecraft:ingredients` or another mod's, a native mod listens to the
-client hook `build_creative_mode_tab_contents` (NeoForge's
-`BuildCreativeModeTabContentsEvent`) and pushes its stacks for that `tab`.
-It only appends to category tabs; the screen asks again on a rebuild after the
-world or holder provider, feature flags, client resources, or operator permission changes.
+A file only makes new tabs. To edit a registered tab's contents, listen to
+`build_creative_mode_tab_contents` (NeoForge's `BuildCreativeModeTabContentsEvent`,
+`hook_version = 2` for named injections). It fires for every tab on the
+logical side building its catalog. Match the tab id (for example,
+`minecraft:ingredients`) and use the event's `edit` handle with that side's
+Host. To append a count-one stack to both lists, pass
+`CreativeTabPlacement::Last` and `CreativeTabVisibility::Both` to `edit.insert`.
+You can also insert first, before or after a matching stack, read the current
+entries, remove a stack, or remove matching entries with a mod-side predicate.
+Matching ignores counts and uses exact item and components. Edits to both lists
+change parent first; a search error does not undo the parent edit. Feature
+filtering happens after listeners finish. An editor retained outside its active
+callback returns `CreativeTabEditError::Stale`, including during setup and reload.
+
+From either side of an open world, call
+`host.creative_tabs(CreativeTabPermissions::Normal)` to read the catalog for
+ordinary players, or request `Operator` explicitly to include operator
+generator output. The choice does not grant permission. During setup and reload,
+the read returns `CreativeTabReadError::Unavailable`. The returned snapshot includes
+every registered tab, even empty or special tabs. Use
+`tab.contains(host, &stack)` for exact membership in that tab's search list and
+`snapshot.tabs_showing(host, &stack)` for category tabs that display it. Use the
+originating world's Host so redundant component patches compare against its
+item prototypes. The game
+builds only on demand, keeps one complete snapshot per side, and does not
+rebuild just because tags changed. A same-parameter read from a build listener
+sees completed tabs and the previous contents of the remaining tabs;
+a different-parameter read returns `CreativeTabReadError::Reentrant`.
 
 Unknown component types fail content loading unless a code mod registers them.
 Item-id-specific behaviour does not follow a template: a copy of the trident does not throw.
