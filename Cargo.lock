@@ -5238,7 +5238,6 @@ dependencies = [
  "log",
  "regex",
  "sunrise-assets",
- "sunrise-core",
  "sunrise-system",
  "zip",
 ]
