@@ -87,7 +87,7 @@ impl Compression {
                 output.extend_from_slice(bytes);
                 Ok(())
             }
-            Self::Gzip => gzip_into(bytes, max_output, output),
+            Self::Gzip => gzip_into(bytes, max_output, output, GzipStream::Java),
             Self::Zlib => zlib_into(bytes, max_output, output),
             Self::Lz4 => {
                 LZ4_BUFFER.with_borrow_mut(|buffer| decode_lz4(bytes, max_output, output, buffer))
@@ -121,6 +121,20 @@ thread_local! {
     static LZ4_BUFFER: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
+/// Decode one complete gzip member, refusing any compressed suffix, including a second member.
+/// For internal file formats that require an exact envelope; Java-format reads use [`Compression::Gzip`].
+pub fn decode_single_gzip_member(bytes: &[u8], max_output: usize) -> io::Result<Vec<u8>> {
+    let mut output = Vec::new();
+    gzip_into(bytes, max_output, &mut output, GzipStream::SingleMember)?;
+    Ok(output)
+}
+
+#[derive(Clone, Copy)]
+enum GzipStream {
+    Java,
+    SingleMember,
+}
+
 /// `GZIPInputStream` recognizes optional fields and verifies FHCRC, but does
 /// not reject reserved FLG bits. Return the raw DEFLATE input, if recognized.
 fn gzip_body(bytes: &[u8]) -> Option<&[u8]> {
@@ -150,7 +164,12 @@ fn gzip_body(bytes: &[u8]) -> Option<&[u8]> {
     Some(body)
 }
 
-fn gzip_into(bytes: &[u8], max_output: usize, output: &mut Vec<u8>) -> io::Result<()> {
+fn gzip_into(
+    bytes: &[u8],
+    max_output: usize,
+    output: &mut Vec<u8>,
+    stream: GzipStream,
+) -> io::Result<()> {
     let mut body = gzip_body(bytes).ok_or_else(|| invalid("invalid gzip header"))?;
     if output.len() > max_output {
         return Err(invalid("decompression limit exceeded"));
@@ -180,8 +199,15 @@ fn gzip_into(bytes: &[u8], max_output: usize, output: &mut Vec<u8>) -> io::Resul
                         decoder.decompress(input, &mut output[before_out..], FlushDecompress::None);
                     output.truncate(start + decoder.total_out() as usize);
                     status
-                }
-                .map_err(|e| invalid(e.to_string()))?;
+                };
+                let status = match status {
+                    Ok(status) => status,
+                    Err(e) => {
+                        // A stream reader does not deliver the failed call's bytes.
+                        output.truncate(before_out);
+                        return Err(invalid(e.to_string()));
+                    }
+                };
                 if output.len() > max_output {
                     return Err(invalid("decompression limit exceeded"));
                 }
@@ -200,7 +226,14 @@ fn gzip_into(bytes: &[u8], max_output: usize, output: &mut Vec<u8>) -> io::Resul
             if crc != crc32fast::hash(&output[start..]) || size != (output.len() - start) as u32 {
                 return Err(invalid("invalid gzip trailer"));
             }
-            // A bad next header ends the stream. Once a header is recognized,
+            if matches!(stream, GzipStream::SingleMember) {
+                return if remaining.is_empty() {
+                    Ok(())
+                } else {
+                    Err(invalid("bytes follow the gzip member"))
+                };
+            }
+            // A bad next header ends the Java stream. Once a header is recognized,
             // a damaged or missing block/trailer remains an error.
             let Some(next) = gzip_body(remaining) else {
                 return Ok(());
@@ -507,16 +540,15 @@ mod tests {
         let first = [
             0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 0xff, 0xd3, 4, 0, 0xe1, 0x77, 0xb0, 0x90, 1, 0, 0, 0,
         ];
+        assert_eq!(decode_single_gzip_member(&first, 2).unwrap(), [41]);
         for junk in [&[0, 0, 0][..], &first[..3], &[7; 20]] {
-            assert_eq!(
-                Compression::Gzip
-                    .decode(&[&first[..], junk].concat(), 2)
-                    .unwrap(),
-                [41]
-            );
+            let input = [&first[..], junk].concat();
+            assert_eq!(Compression::Gzip.decode(&input, 2).unwrap(), [41]);
+            assert!(decode_single_gzip_member(&input, 2).is_err());
         }
         let mut two = [first, first].concat();
         assert_eq!(Compression::Gzip.decode(&two, 2).unwrap(), [41, 41]);
+        assert!(decode_single_gzip_member(&two, 2).is_err());
         two[2 * first.len() - 8] ^= 1;
         assert!(Compression::Gzip.decode(&two, 2).is_err());
         assert!(Compression::Gzip.decode(&first[..3], 2).is_err());
@@ -553,6 +585,32 @@ mod tests {
                 .decode(&[&member[..], &member[..27]].concat(), 2)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn gzip_keeps_only_bytes_from_successful_inflate_calls() {
+        // One non-final stored block, then an invalid block type (BTYPE=3).
+        // The stored block fills one output window and produces another 256
+        // bytes in the same call that encounters the invalid block type.
+        const WINDOW: usize = 8192;
+        let len = (WINDOW + 256) as u16;
+        let mut gzip = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 0xff, 0];
+        gzip.extend_from_slice(&len.to_le_bytes());
+        gzip.extend_from_slice(&(!len).to_le_bytes());
+        gzip.resize(gzip.len() + WINDOW, b'a');
+        gzip.resize(gzip.len() + 256, b'b');
+        gzip.push(0x07);
+        for capacity in [WINDOW, 4 * WINDOW] {
+            // The second buffer already has more spare capacity than the
+            // decode budget, so this also exercises the capped-output path.
+            let mut raw = Vec::with_capacity(capacity);
+            assert!(
+                Compression::Gzip
+                    .decode_into(&gzip, 2 * WINDOW, &mut raw)
+                    .is_err()
+            );
+            assert_eq!(raw, [b'a'; WINDOW]);
+        }
     }
 
     #[test]
