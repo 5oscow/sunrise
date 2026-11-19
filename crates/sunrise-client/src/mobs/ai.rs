@@ -1859,7 +1859,7 @@ pub(super) fn in_rain(m: &Mob, w: &MobWorld) -> bool {
 /// axolotl dries out.
 fn axolotl_air_supply(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>) {
     if m.no_ai {
-        m.air = (m.air + 4).min(super::axolotl::MAX_AIR);
+        refill_air(m, super::axolotl::MAX_AIR);
         return;
     }
     let breathes = m.fluids.in_water || in_rain(m, w);
@@ -1874,9 +1874,7 @@ fn axolotl_air_supply(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>) {
 fn nautilus_air_supply(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>) {
     const MAX_AIR: i32 = 300;
     if m.no_ai {
-        if m.alive() {
-            m.air = (m.air + 4).min(MAX_AIR);
-        }
+        refill_air(m, MAX_AIR);
         return;
     }
     if !m.alive() {
@@ -1886,6 +1884,13 @@ fn nautilus_air_supply(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>) {
     let (cx, wet) = (w.loop_context, m.fluids.in_water);
     if let Some(damage) = own_air(cx, m.id, &m.kind.id, &mut m.air, wet, MAX_AIR) {
         m.damage(level, damage, Damage::of(DamageKind::DryOut));
+    }
+}
+/// `LivingEntity.baseTick`'s refill for a living water breather: four a tick, only while below
+/// `max`, so air loaded above it is kept.
+fn refill_air(m: &mut Mob, max: i32) {
+    if m.alive() && m.air < max {
+        m.air = (m.air + 4).min(max);
     }
 }
 /// The thin box at a body's eyes `Entity.isInWall` tests: 0.8 of the width wide (a float
@@ -7222,11 +7227,15 @@ mod dolphin_noai_air_tests {
 }
 
 #[cfg(test)]
-mod nautilus_noai_air_tests {
+mod noai_breather_air_tests {
     use super::*;
     use std::sync::Arc;
 
     fn check(water: bool, no_ai: bool, initial: i32, expected: [i32; 2]) {
+        check_species("minecraft:nautilus", water, no_ai, initial, expected);
+    }
+
+    fn check_species(id: &str, water: bool, no_ai: bool, initial: i32, expected: [i32; 2]) {
         let build = |world: &mut crate::world::World,
                      registry: &sunrise_world::registry::BlockRegistry| {
             world
@@ -7244,8 +7253,7 @@ mod nautilus_noai_air_tests {
             }
         };
         let ran = crate::mobs::world::with_built_test_world(&[], build, |w, types| {
-            let kind = Arc::new(types.types["minecraft:nautilus"].clone());
-            assert!(kind.flags.needs_water && kind.flags.breathes_water);
+            let kind = Arc::new(types.types[id].clone());
             let mut mob = Mob::new(1, kind, Vec3::new(2.5, 3.0, 2.5), 0.0);
             mob.no_ai = no_ai;
             mob.no_gravity = true;
@@ -7264,13 +7272,13 @@ mod nautilus_noai_air_tests {
                 assert_eq!(
                     mob.air,
                     expected,
-                    "water={water}, NoAI={no_ai}, initial={initial}, tick={}",
+                    "{id} water={water}, NoAI={no_ai}, initial={initial}, tick={}",
                     index + 1
                 );
             }
         });
         if !ran {
-            eprintln!("Prepared mob data unavailable; Nautilus full-tick coverage did not run");
+            eprintln!("Prepared mob data unavailable; {id} full-tick coverage did not run");
         }
     }
 
@@ -7282,6 +7290,20 @@ mod nautilus_noai_air_tests {
         for water in [false, true] {
             check(water, true, 300, [300, 300]);
             check(water, true, 100, [104, 108]);
+        }
+    }
+
+    /// `LivingEntity.baseTick` refills only while the air is below the maximum, so a NoAI
+    /// axolotl or nautilus loaded above it keeps its air, and one just below tops up to it.
+    #[test]
+    #[ignore = "daily"]
+    fn noai_breathers_keep_air_above_their_maximum() {
+        for (id, max) in [("minecraft:axolotl", 6000), ("minecraft:nautilus", 300)] {
+            for water in [false, true] {
+                check_species(id, water, true, max + 1, [max + 1, max + 1]);
+                check_species(id, water, true, 32767, [32767, 32767]);
+                check_species(id, water, true, max - 6, [max - 2, max]);
+            }
         }
     }
 
