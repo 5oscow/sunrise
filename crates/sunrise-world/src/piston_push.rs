@@ -234,17 +234,6 @@ pub fn bounce_velocity(movement: Direction, velocity: Vec3) -> Vec3 {
     velocity
 }
 
-/// `Entity.getPistonPushReaction() == PushReaction.IGNORE_ENTITY`.
-///
-/// `Marker`, `Interaction`, `Display`, `AreaEffectCloud` and
-/// `OminousItemSpawner` return `IGNORE_ENTITY`, and an armor stand does when it
-/// is a marker. Sunrise gives those kinds no pushed body, so a caller that has
-/// no box to push never reaches the maths above; this names the predicate for
-/// the kinds that do have one.
-pub fn ignores_push(marker: bool) -> bool {
-    marker
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
