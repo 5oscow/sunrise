@@ -28,6 +28,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use sunrise_client_render::auth::{self, AuthSession};
+use sunrise_core::{java_number::format_fixed, jmath};
 
 const HEADER_HEIGHT: f32 = 44.0;
 const CONTENT_WIDTH: f32 = 308.0;
@@ -1664,23 +1665,48 @@ fn reset_tile(cx: f32, top: f32, i: usize) -> (f32, f32) {
     (cx - 122.0 + column * 92.0, top + row * 85.0)
 }
 
-/// `Unit.humanReadable`: binary units, a tenth at GB (`mco.upload.failed.too_big`).
-fn human_readable(bytes: u64) -> String {
-    const UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
+/// `Unit.humanReadable`: binary units without carrying a rounded 1024.0 to
+/// the next unit. Also used by the server resource-pack download toast.
+pub fn human_readable(bytes: u64) -> String {
     if bytes < 1024 {
         return format!("{bytes} B");
     }
-    let mut value = bytes as f64;
-    let mut unit = 0;
-    while value >= 1024.0 && unit + 1 < UNITS.len() {
-        value /= 1024.0;
-        unit += 1;
-    }
-    if unit == UNITS.len() - 1 {
-        format!("{value:.1} {}", UNITS[unit])
+    byte_size(bytes, unit_exponent(bytes), 1)
+}
+
+/// `Unit.getLargest` has no units above GB, and the size limit uses a decimal
+/// place only for GB (normal transfer rates always use one).
+fn upload_limit_size(bytes: u64) -> String {
+    let exp = unit_exponent(bytes).min(3);
+    byte_size(bytes, exp, usize::from(exp == 3))
+}
+
+fn unit_exponent(bytes: u64) -> u32 {
+    if bytes < 1024 {
+        0
     } else {
-        format!("{value:.0} {}", UNITS[unit])
+        (jmath::log(bytes as f64) / jmath::log(1024.0)) as u32
     }
+}
+
+fn byte_size(bytes: u64, exp: u32, decimals: usize) -> String {
+    let unit = ["B", "KB", "MB", "GB", "TB", "PB", "EB"][exp as usize];
+    let value = bytes as f64 / ((1u64 << (10 * exp)) as f64);
+    format!("{} {unit}", format_fixed(value, decimals))
+}
+
+fn transfer_percentage(written: u64, total: u64) -> f64 {
+    let ratio = written as f64 / total as f64;
+    // Java's Math.min retains NaN for an empty transfer (0 / 0).
+    if ratio > 1.0 { 1.0 } else { ratio }
+}
+
+fn transfer_bar_width(percentage: f64) -> f32 {
+    jmath::round(200.0 * percentage) as f32
+}
+
+fn percent_label(percentage: f64) -> String {
+    format_fixed(percentage * 100.0, 1)
 }
 
 /// The row `y` falls on in a list that starts at `top` and has scrolled `offset` pixels.
@@ -8478,7 +8504,7 @@ impl Screen {
                 if progress.written() != 0 && !progress.is_cancelled() {
                     let percentage = progress.percentage();
                     let left = (w - 200.0) / 2.0;
-                    let right = left + (200.0 * percentage as f32).round();
+                    let right = left + transfer_bar_width(percentage);
                     batch.fill(atlas, left - 1.0, 79.0, right - left + 2.0, 17.0, u32::MAX);
                     batch.fill(
                         atlas,
@@ -8488,7 +8514,7 @@ impl Screen {
                         15.0,
                         0xFF80_8080,
                     );
-                    let percent = format!("{:.1}", percentage * 100.0);
+                    let percent = percent_label(percentage);
                     centered(
                         batch,
                         atlas,
@@ -10981,7 +11007,7 @@ impl Screen {
                 ..
             } => {
                 // `RealmsUploadScreen.extractRenderState`: the status, dots, the bar and the
-                // error lines; the upload speed is not shown (the port keeps no rate).
+                // error lines and the upload rate.
                 let running = if progress.completed() {
                     t("mco.upload.verifying")
                 } else if progress.started() {
@@ -11010,7 +11036,7 @@ impl Screen {
                 if progress.started() && !progress.is_cancelled() {
                     let percentage = progress.percentage();
                     let left = (w - 200.0) / 2.0;
-                    let right = left + (200.0 * percentage as f32).round();
+                    let right = left + transfer_bar_width(percentage);
                     batch.fill(atlas, left - 1.0, 79.0, right - left + 2.0, 17.0, u32::MAX);
                     batch.fill(
                         atlas,
@@ -11020,7 +11046,7 @@ impl Screen {
                         15.0,
                         0xFF80_8080,
                     );
-                    let percent = format!("{:.1}", percentage * 100.0);
+                    let percent = percent_label(percentage);
                     centered(
                         batch,
                         atlas,
@@ -11060,7 +11086,7 @@ impl Screen {
                         110.0,
                         RED,
                     );
-                    let size = human_readable(upload::SIZE_LIMIT);
+                    let size = upload_limit_size(upload::SIZE_LIMIT);
                     centered(
                         batch,
                         atlas,
@@ -11730,6 +11756,45 @@ fn task_stack_top((_, h): (f32, f32)) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sizes_read_as_realms_unit_human_readable() {
+        // com.mojang.realmsclient.Unit.humanReadable, run on the 26.3 jar.
+        for (bytes, text) in [
+            (0, "0 B"),
+            (1023, "1023 B"),
+            (1024, "1.0 KB"),
+            (1280, "1.3 KB"),
+            (1535, "1.5 KB"),
+            (10_000, "9.8 KB"),
+            (1_048_575, "1024.0 KB"),
+            (1_048_576, "1.0 MB"),
+            (52_428_800, "50.0 MB"),
+            (262_144_000, "250.0 MB"),
+            (1_073_741_824, "1.0 GB"),
+            ((1 << 50) - 1, "1.0 PB"),
+            (i64::MAX as u64, "8.0 EB"),
+        ] {
+            assert_eq!(human_readable(bytes), text, "{bytes}");
+        }
+    }
+
+    #[test]
+    fn java_upload_limit_uses_only_gigabytes_and_one_decimal() {
+        assert_eq!(upload_limit_size(1536), "2 KB");
+        assert_eq!(upload_limit_size(1 << 40), "1024.0 GB");
+    }
+
+    #[test]
+    fn transfer_percent_and_bar_keep_double_precision() {
+        assert_eq!(percent_label(transfer_percentage(7, 2000)), "0.4");
+        assert_eq!(percent_label(transfer_percentage(0, 0)), "NaN");
+        assert_eq!(percent_label(transfer_percentage(1, 0)), "100.0");
+        // JDK 25 Math.round(200 * NaN) and the double just below 1/400.
+        assert_eq!(transfer_bar_width(f64::NAN), 0.0);
+        assert_eq!(transfer_bar_width(0.0025_f64.next_down()), 0.0);
+        assert_eq!(transfer_bar_width(0.0025), 1.0);
+    }
 
     fn server(id: i64, owner_uuid: Option<&str>) -> RealmServer {
         RealmServer {
