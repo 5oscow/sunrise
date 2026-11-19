@@ -110,14 +110,126 @@ fn share_blocks(
     Arc::new(blocks)
 }
 
-/// Retain one copy of equal tables across test installations; see [`share_blocks`].
+/// Retain one copy of equal key tables across test installations, as [`share_blocks`] does for
+/// definitions: equality is full, never a hash alone. The comparisons run outside the lock, so
+/// parallel installs queue only for the snapshot and the push; two that race may both push an
+/// equal table, which costs a copy and nothing else.
+#[cfg(any(test, feature = "testing"))]
+pub(crate) fn share_names(
+    names: sunrise_mod_runtime::registry_keys::Names,
+) -> sunrise_mod_runtime::registry_keys::Names {
+    use sunrise_mod_runtime::registry_keys::{Names, Table};
+    static SHARED: std::sync::Mutex<Vec<Arc<Table>>> = std::sync::Mutex::new(Vec::new());
+    let shared = SHARED
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone();
+    if let Some(equal) = shared.iter().find(|shared| ***shared == *names.0) {
+        return Names(equal.clone());
+    }
+    SHARED
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .push(names.0.clone());
+    names
+}
+#[cfg(not(any(test, feature = "testing")))]
 fn share_names(
     names: sunrise_mod_runtime::registry_keys::Names,
 ) -> sunrise_mod_runtime::registry_keys::Names {
-    #[cfg(any(test, feature = "testing"))]
-    return names.interned();
-    #[cfg(not(any(test, feature = "testing")))]
     names
+}
+
+/// [`share_names`] for every table a finished registration holds.
+#[cfg(any(test, feature = "testing"))]
+pub(crate) fn share_requests(
+    mut requests: sunrise_mod_runtime::registry_keys::Requests,
+) -> sunrise_mod_runtime::registry_keys::Requests {
+    for names in [
+        &mut requests.game_rules,
+        &mut requests.blocks,
+        &mut requests.fluids,
+        &mut requests.items,
+        &mut requests.effects,
+        &mut requests.particles,
+        &mut requests.block_entity_types,
+        &mut requests.entity_types,
+        &mut requests.game_events,
+    ] {
+        *names = share_names(std::mem::take(names));
+    }
+    requests
+}
+
+#[cfg(test)]
+mod share_tests {
+    use super::{share_names, share_requests};
+    use std::sync::Arc;
+    use sunrise_mod_runtime::registry_keys::{Names, Requests};
+
+    fn build(mod_id: &'static str, ids: &[&str]) -> Names {
+        let mut names = Names::default();
+        for id in ids {
+            names.request(mod_id, id).unwrap();
+        }
+        names
+    }
+
+    #[test]
+    fn equal_tables_are_held_once_and_a_changed_one_leaves_the_others() {
+        let first = share_names(build("mod", &["share_a:a", "share_a:b"]));
+        let mut second = share_names(build("mod", &["share_a:a", "share_a:b"]));
+        assert!(Arc::ptr_eq(&first.0, &second.0));
+        // A table that differs in the requesting mod is not equal, however alike its ids.
+        let mut other = build("mod", &["share_a:a", "share_a:b"]);
+        other.request("another", "share_a:a").unwrap();
+        assert!(!Arc::ptr_eq(&first.0, &share_names(other).0));
+        // Writing through one handle copies; the shared table is unchanged.
+        second.request("mod", "share_a:c").unwrap();
+        assert_eq!(first.entries.len(), 2);
+        assert_eq!(second.entries.len(), 3);
+    }
+
+    #[test]
+    fn equal_registrations_share_every_table() {
+        let requests = || {
+            let mut requests = Requests::default();
+            for (index, names) in [
+                &mut requests.game_rules,
+                &mut requests.blocks,
+                &mut requests.fluids,
+                &mut requests.items,
+                &mut requests.effects,
+                &mut requests.particles,
+                &mut requests.block_entity_types,
+                &mut requests.entity_types,
+                &mut requests.game_events,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                *names = build("mod", &[format!("share_b:table_{index}").as_str()]);
+            }
+            requests
+        };
+        let (first, second) = (share_requests(requests()), share_requests(requests()));
+        let tables = |requests: &Requests| {
+            [
+                requests.game_rules.0.clone(),
+                requests.blocks.0.clone(),
+                requests.fluids.0.clone(),
+                requests.items.0.clone(),
+                requests.effects.0.clone(),
+                requests.particles.0.clone(),
+                requests.block_entity_types.0.clone(),
+                requests.entity_types.0.clone(),
+                requests.game_events.0.clone(),
+            ]
+        };
+        for (first, second) in tables(&first).iter().zip(tables(&second).iter()) {
+            assert!(Arc::ptr_eq(first, second));
+        }
+    }
 }
 
 /// Publish completed identities and immutable definitions together before constructing mesh tables.

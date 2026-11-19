@@ -17,10 +17,11 @@ pub struct Requests {
 }
 
 /// The slots and identities of one registry's keys. Cloning shares the tables until one side
-/// changes them, so equal tables can be held once ([`Names::interned`]).
+/// changes them, so a test process can hold equal tables of its many installations once.
 #[derive(Clone, Default, PartialEq)]
-pub struct Names(std::sync::Arc<Table>);
+pub struct Names(pub std::sync::Arc<Table>);
 
+/// The shared payload of [`Names`]: a registry's requested keys and their resolved slots.
 #[derive(Clone, Default, PartialEq)]
 pub struct Table {
     pub entries: Vec<Request>,
@@ -44,43 +45,6 @@ impl std::ops::Deref for Names {
 impl std::ops::DerefMut for Names {
     fn deref_mut(&mut self) -> &mut Table {
         std::sync::Arc::make_mut(&mut self.0)
-    }
-}
-
-impl Names {
-    /// One shared copy of every equal table across installations. A test installs the same
-    /// declarations for each game it builds and each install keeps its tables for the life of
-    /// the process; equality is full, never a hash alone. A production process installs once and
-    /// does not call this.
-    pub fn interned(self) -> Self {
-        static POOL: std::sync::Mutex<Vec<std::sync::Arc<Table>>> =
-            std::sync::Mutex::new(Vec::new());
-        let mut pool = POOL.lock().unwrap_or_else(|error| error.into_inner());
-        if let Some(equal) = pool.iter().find(|pooled| ***pooled == *self.0) {
-            return Self(equal.clone());
-        }
-        pool.push(self.0.clone());
-        self
-    }
-}
-
-impl Requests {
-    /// Share the tables a finished registration holds with equal ones of earlier installations.
-    pub fn interned(mut self) -> Self {
-        for names in [
-            &mut self.game_rules,
-            &mut self.blocks,
-            &mut self.fluids,
-            &mut self.items,
-            &mut self.effects,
-            &mut self.particles,
-            &mut self.block_entity_types,
-            &mut self.entity_types,
-            &mut self.game_events,
-        ] {
-            *names = std::mem::take(names).interned();
-        }
-        self
     }
 }
 
@@ -425,27 +389,6 @@ mod item_tag_tests {
         assert_eq!(names.identifiers.get(&identifier), Some(&slot));
         assert!(names.request("bad", "Not valid").is_err());
         assert_eq!(names.entries.len(), 1);
-    }
-    #[test]
-    fn equal_tables_are_held_once_and_a_changed_one_leaves_the_others() {
-        let build = |ids: &[&str]| {
-            let mut names = Names::default();
-            for id in ids {
-                names.request("mod", id).unwrap();
-            }
-            names
-        };
-        let first = build(&["test:a", "test:b"]).interned();
-        let mut second = build(&["test:a", "test:b"]).interned();
-        assert!(std::sync::Arc::ptr_eq(&first.0, &second.0));
-        // A table that differs in the requesting mod is not equal, however alike its ids.
-        let mut other = build(&["test:a", "test:b"]);
-        other.request("another", "test:a").unwrap();
-        assert!(!std::sync::Arc::ptr_eq(&first.0, &other.interned().0));
-        // Writing through one handle copies; the shared table is unchanged.
-        second.request("mod", "test:c").unwrap();
-        assert_eq!(first.entries.len(), 2);
-        assert_eq!(second.entries.len(), 3);
     }
     #[test]
     fn completion_records_the_input_order_once_per_name() {
