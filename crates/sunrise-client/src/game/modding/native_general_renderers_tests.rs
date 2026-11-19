@@ -440,7 +440,9 @@ fn general_submission_keeps_lookup_order_across_removal_and_reentry() {
             }
             let submitted = |game: &mut Game<'_>| {
                 frame(game, 1.0)
-                    .chunks_exact(4)
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
                     .map(|quad| quad.iter().map(|v| v.pos[0]).fold(f32::INFINITY, f32::min))
                     .collect::<Vec<_>>()
             };
