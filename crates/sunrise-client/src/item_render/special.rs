@@ -4,7 +4,7 @@
 //! as vanilla's `submit` does (no block-entity placement transform) and
 //! reports `getExtents` over the same posed parts.
 use super::{Foil, ItemQuad, ItemRenderer, ItemSink, SpecialHost, argb};
-use crate::{block_entity_render::ModelPart, hud::Rect, mobs::EntityModelDocument};
+use crate::{block_entity_render::ModelPart, camera::joml, hud::Rect, mobs::EntityModelDocument};
 use glam::{Mat4, Quat, Vec3};
 use serde_json::Value;
 use std::{collections::HashMap, f32::consts::PI, path::Path};
@@ -160,24 +160,38 @@ fn draw(
         draw(child, child_name, m, adjust, sprite, color, foil, sink);
     }
 }
-/// `ModelPart.getExtentsForGui` from an identity pose.
-fn extents_of(part: &ModelPart, name: &str, parent: Mat4, adjust: Adjust, out: &mut Vec<Vec3>) {
+/// `ModelPart.getExtentsForGui` from an identity pose, posed and transformed as JOML does
+/// (`translateAndRotate`: the rotation only when one is set, the scale only when not 1).
+fn extents_of(
+    part: &ModelPart,
+    name: &str,
+    parent: &joml::Mat4,
+    adjust: Adjust,
+    out: &mut Vec<Vec3>,
+) {
     if part.polygons.is_empty() && part.children.is_empty() {
         return;
     }
     let mut p = part.pose;
     adjust(name, &mut p);
-    let m = part_matrix(parent, &p);
+    let mut m = *parent;
+    m.translate(p[0] / 16.0, p[1] / 16.0, p[2] / 16.0);
+    if p[3] != 0.0 || p[4] != 0.0 || p[5] != 0.0 {
+        m.rotate(joml::Quat::rotation_zyx(p[5], p[4], p[3]));
+    }
+    if p[6] != 1.0 || p[7] != 1.0 || p[8] != 1.0 {
+        m.scale(p[6], p[7], p[8]);
+    }
     for poly in &part.polygons {
         for v in poly {
-            let q = m.transform_point3(Vec3::new(v[0], v[1], v[2]) / 16.0);
+            let q = Vec3::from_array(m.transform_position([v[0] / 16.0, v[1] / 16.0, v[2] / 16.0]));
             if !out.contains(&q) {
                 out.push(q);
             }
         }
     }
     for (child_name, child) in &part.children {
-        extents_of(child, child_name, m, adjust, out);
+        extents_of(child, child_name, &m, adjust, out);
     }
 }
 fn child<'a>(part: &'a ModelPart, name: &str) -> Option<&'a ModelPart> {
@@ -324,10 +338,10 @@ fn statue_layer(pose: &str) -> &'static str {
 /// `SpecialModelRenderer.getExtents`.
 pub(super) fn extents(renderer: &ItemRenderer, model: &SpecialModel) -> Vec<Vec3> {
     let mut out = Vec::new();
-    let id = Mat4::IDENTITY;
+    let id = joml::Mat4::IDENTITY;
     let mut add = |key: &str, adjust: Adjust| {
         if let Some(part) = renderer.part(key) {
-            extents_of(part, "root", id, adjust, &mut out);
+            extents_of(part, "root", &id, adjust, &mut out);
         }
     };
     match &model.kind {
@@ -357,7 +371,7 @@ pub(super) fn extents(renderer: &ItemRenderer, model: &SpecialModel) -> Vec<Vec3
                 // `neck`, `top` and `bottom` are posed from an identity stack.
                 for name in ["neck", "top", "bottom"] {
                     if let Some(part) = child(base, name) {
-                        extents_of(part, name, id, &none, &mut out);
+                        extents_of(part, name, &id, &none, &mut out);
                     }
                 }
             }
