@@ -10,7 +10,7 @@ use std::sync::{
 use sunrise_client::{
     chunk::Chunk,
     containers::{BlockEntity, ModMenuType},
-    lan::menu::{Menu, Slots, VEHICLE_KEY_Y, asks_still_valid},
+    lan::menu::{Menu, NativeMenuEvent, Slots, VEHICLE_KEY_Y, asks_still_valid},
 };
 use sunrise_protocol::packets::play::{ContainerClick, Serverbound};
 
@@ -47,12 +47,19 @@ impl Hooks for Mod {
     }
 }
 
+fn scoped_dispatch() -> impl Drop {
+    sunrise_client::native_client_hooks::scoped_menu_validity_hooks(
+        crate::game::api_values::menu_still_valid,
+        |menu| mod_api::__private::menu_listens(mod_api::HookId::MenuStillValid, menu),
+    )
+}
+
 #[test]
 #[ignore = "daily"]
 fn a_mod_menu_part_decides_whether_its_menu_stays_open() {
     let mods: Mods = vec![ModEntry::new("shell", Box::new(Mod))].into();
     crate::game::api_values::install_parts(&mods).unwrap();
-    crate::entry::install_client_hooks();
+    let _callbacks = scoped_dispatch();
     let shell: &'static ModMenuType = Box::leak(Box::new(ModMenuType {
         id: "test:shell",
         slots: 27,
@@ -215,7 +222,12 @@ fn a_mod_menu_part_decides_whether_its_menu_stays_open() {
 fn a_blockless_mod_menu_closes_when_its_part_answers_false() {
     // Use a prepared registry slot for a synthetic mod menu definition.
     const MENU: &str = "minecraft:generic_9x1";
-    struct Blockless(Arc<AtomicBool>);
+    #[derive(Default)]
+    struct Answer {
+        keep: AtomicBool,
+        asks: AtomicUsize,
+    }
+    struct Blockless(Arc<Answer>);
     #[mod_api::sunrise_part]
     impl MenuPart for Blockless {
         fn menu_still_valid(
@@ -229,11 +241,12 @@ fn a_blockless_mod_menu_closes_when_its_part_answers_false() {
                 "the screen position is not a backing block"
             );
             assert!(event.valid, "a blockless menu starts valid");
-            event.valid = self.0.load(Ordering::Relaxed);
+            self.0.asks.fetch_add(1, Ordering::Relaxed);
+            event.valid = self.0.keep.load(Ordering::Relaxed);
         }
     }
 
-    struct BlocklessMod(Arc<AtomicBool>);
+    struct BlocklessMod(Arc<Answer>);
     #[mod_api::__subscriptions]
     impl Hooks for BlocklessMod {
         fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
@@ -241,20 +254,22 @@ fn a_blockless_mod_menu_closes_when_its_part_answers_false() {
         }
     }
 
-    let keep = Arc::new(AtomicBool::new(true));
+    let answer = Arc::new(Answer::default());
+    answer.keep.store(true, Ordering::Relaxed);
     let mods: Mods = vec![ModEntry::new(
         "blockless",
-        Box::new(BlocklessMod(keep.clone())),
+        Box::new(BlocklessMod(answer.clone())),
     )]
     .into();
     mod_platform::testing::with_mods(mods.clone(), || {
         crate::game::api_values::install_parts(&mods).unwrap();
-        crate::entry::install_client_hooks();
+        let _callbacks = scoped_dispatch();
         sunrise_client::containers::with_mod_menu_types(
             [(MENU.into(), 9, 0, Vec::new(), None, None)],
             || {
                 super::super::native_guest_turn_tests::with_guests(|game| {
-                    let pos = Some((0, 100, 100)); // Only a screen position, far beyond reach.
+                    // A screen position is not a vehicle key, even at this reserved Y.
+                    let pos = Some((0, crate::game::minecarts::CART_KEY_Y, 100));
                     let open = |game: &mut crate::game::Game<'_>| {
                         game.lan
                             .as_mut()
@@ -277,28 +292,65 @@ fn a_blockless_mod_menu_closes_when_its_part_answers_false() {
                             .as_ref()
                             .map(|menu| menu.window)
                     };
-                    let window = open(game);
+                    let old_window = open(game);
                     game.lan_containers_tick();
+                    assert_eq!(window_of_guest(game), Some(old_window));
+
+                    answer.keep.store(false, Ordering::Relaxed);
+                    game.lan_containers_tick();
+                    assert_eq!(window_of_guest(game), None);
+
+                    let click = |game: &mut crate::game::Game<'_>, container| {
+                        game.lan_guest_packet(
+                            12,
+                            Serverbound::ContainerClick(ContainerClick {
+                                container,
+                                state: 0,
+                                slot: -999,
+                                button: 0,
+                                input: 0,
+                                changed: Vec::new(),
+                                carried: None,
+                            }),
+                        );
+                    };
+                    let window = open(game);
+                    let before = answer.asks.load(Ordering::Relaxed);
+                    for stale in [0, old_window] {
+                        click(game, stale);
+                        assert_eq!(window_of_guest(game), Some(window));
+                        assert_eq!(answer.asks.load(Ordering::Relaxed), before);
+                    }
+
+                    game.lan
+                        .as_mut()
+                        .unwrap()
+                        .hub
+                        .guests
+                        .update(0, |g| g.game_mode = 3);
+                    click(game, window);
                     assert_eq!(window_of_guest(game), Some(window));
+                    assert_eq!(answer.asks.load(Ordering::Relaxed), before);
 
-                    keep.store(false, Ordering::Relaxed);
-                    game.lan_containers_tick();
+                    game.lan
+                        .as_mut()
+                        .unwrap()
+                        .hub
+                        .guests
+                        .update(0, |g| g.game_mode = 0);
+                    click(game, window);
                     assert_eq!(window_of_guest(game), None);
-
-                    let window = open(game);
-                    game.lan_guest_packet(
-                        12,
-                        Serverbound::ContainerClick(ContainerClick {
-                            container: window,
-                            state: 0,
-                            slot: -999,
-                            button: 0,
-                            input: 0,
-                            changed: Vec::new(),
-                            carried: None,
-                        }),
+                    assert_eq!(answer.asks.load(Ordering::Relaxed), before + 1);
+                    assert!(
+                        !game
+                            .lan
+                            .as_ref()
+                            .unwrap()
+                            .hub
+                            .native_menu_events
+                            .iter()
+                            .any(|event| matches!(event, NativeMenuEvent::Click { .. }))
                     );
-                    assert_eq!(window_of_guest(game), None);
                 });
             },
         );

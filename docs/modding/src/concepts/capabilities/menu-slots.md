@@ -175,7 +175,7 @@ impl mod_api::MenuPart for ShellReach {
 
 Vanilla menu types keep their own check. A part that leaves `valid` alone keeps the game's answer, and a menu
 whose block entity is gone closes without asking. Answer from the event and `LoopContext` alone; this
-callback has no `Host`. Named injections request `hook_version = 2`.
+callback has no `Host`.
 
 
 ## Reading and clicking

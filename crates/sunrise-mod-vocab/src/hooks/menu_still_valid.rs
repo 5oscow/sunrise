@@ -10,7 +10,6 @@ pub trait Hooks {
     /// each backing block. Set it to keep the menu open or close it. Vanilla
     /// menu types are never asked, and a menu whose block entity is gone
     /// closes without asking. Answer from the event and loop context alone.
-    /// Named injections request `hook_version = 2`.
     #[notes = r##"### Keeping a mod menu open
 
 `menu_still_valid` is vanilla's `AbstractContainerMenu.stillValid(Player)`, the method a Java menu overrides to
@@ -37,6 +36,7 @@ when the menu opens: a menu with none does no work for this hook."##]
         key = "menu",
         context = "loop",
         version = 2,
+        non_exhaustive = true,
         target = "sunrise_client_lib::lan::menu::native_menu_still_valid",
         neoforge = "none (vanilla AbstractContainerMenu.stillValid, which each menu overrides)"
     )]
