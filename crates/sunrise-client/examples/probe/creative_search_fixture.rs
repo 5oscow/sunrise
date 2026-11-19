@@ -34,16 +34,17 @@ pub fn main() -> sunrise_client::Result<()> {
     let vanilla: Value = serde_json::from_slice(&fs::read(args.get(3).ok_or(usage)?)?)?;
     let holders: Holders = serde_json::from_value(vanilla["holders"].clone())?;
     let features: Vec<String> = serde_json::from_value(vanilla["features"].clone())?;
-    creative.build(
+    let lists = creative.catalog().build(
         Parameters {
             features: &features,
             operator: permissions,
             holders: &holders,
             items: &items,
         },
-        Vec::new(),
-        &names,
+        None,
+        |_, _, _| {},
     );
+    creative.publish(lists, holders.into(), &names);
     let tabs: Vec<Value> = creative
         .tabs
         .iter()

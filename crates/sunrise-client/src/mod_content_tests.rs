@@ -4044,14 +4044,19 @@ fn creative_tabs_come_on_their_own_page() {
     )
     .unwrap();
     let mut creative = crate::creative::Creative::load(&root).unwrap();
-    creative.build(
+    let lists = creative.catalog().build(
         sunrise_items::creative_catalog::Parameters {
             operator: false,
             features: &["minecraft:vanilla".into()],
             holders: &Default::default(),
             items: &crate::items::Items::empty(),
         },
-        Vec::new(),
+        None,
+        |_, _, _| {},
+    );
+    creative.publish(
+        lists,
+        Default::default(),
         &crate::creative::Names::default(),
     );
     assert_eq!(creative.pages(), 2);

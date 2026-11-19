@@ -1577,7 +1577,7 @@ impl Game<'_> {
         self.native_net.holds.borrow_mut().clear();
         if let Some(mut r) = self.remote.take() {
             r.session.disconnect();
-            self.creative_screen.reset_contents();
+            self.reset_creative_contents();
             self.refresh_creative_search_tags();
         }
         super::lan::sync::forget_sync_data();
@@ -2231,7 +2231,7 @@ impl Game<'_> {
             self.command_block_server_suggestions(id, range, list);
         }
     }
-    fn set_registries(&mut self, registries: Arc<Dynamic>) {
+    pub(in crate::game) fn set_registries(&mut self, registries: Arc<Dynamic>) {
         let entries: Vec<(&str, serde_json::Value)> = registries
             .registries
             .get("minecraft:enchantment")
@@ -2290,7 +2290,7 @@ impl Game<'_> {
                 Arc::new(ChunkFormat::new(&r.dimension, biomes, bits).in_column(column));
             r.registries = registries;
             r.resolve_clocks();
-            self.creative_screen.reset_contents();
+            self.reset_creative_contents();
             self.refresh_creative_search_tags();
         }
     }

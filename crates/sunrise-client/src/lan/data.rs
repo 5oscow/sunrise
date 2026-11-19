@@ -719,6 +719,43 @@ impl SyncData {
         Self::merge_pack_tags(&mut self.tags, &root, overlay, &self.builtin, &self.dynamic);
     }
 
+    /// The creative builder's server view: the same ordered entries and current tags a
+    /// joining client receives. The network's name-only index omits the decoded payloads.
+    pub fn creative_holders(&self) -> sunrise_items::creative_catalog::Holders {
+        let mut holders = Dynamic::default();
+        for (key, entries) in &self.registries {
+            if matches!(
+                key.as_str(),
+                "minecraft:enchantment"
+                    | "minecraft:painting_variant"
+                    | "minecraft:instrument"
+                    | "minecraft:banner_pattern"
+            ) {
+                holders.registries.insert(
+                    key.clone(),
+                    entries
+                        .names
+                        .iter()
+                        .cloned()
+                        .zip(entries.data.iter().cloned().map(Some))
+                        .collect(),
+                );
+            }
+        }
+        for tags in &self.tags.registries {
+            if holders.registries.contains_key(&tags.registry) {
+                holders.tags.insert(
+                    tags.registry.clone(),
+                    tags.tags
+                        .iter()
+                        .map(|tag| (tag.name.clone(), tag.ids.clone()))
+                        .collect(),
+                );
+            }
+        }
+        crate::creative::live_holders(&self.builtin, &holders)
+    }
+
     /// Whether a synchronized registry holds an entry from a world's pack.
     pub fn has_pack_entries(&self) -> bool {
         self.registries

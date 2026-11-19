@@ -137,14 +137,16 @@ impl Game<'_> {
         if self.carried.is_some() {
             return;
         }
+        let menu = (self.screen, self.container, self.remote_menu_id());
+        let order = self.creative_search_items();
+        // The build hook may close the screen or change its carried stack.
+        if self.carried.is_some() || menu != (self.screen, self.container, self.remote_menu_id()) {
+            return;
+        }
         let views: Vec<Option<ItemStack>> = slots.iter().map(|&s| self.slot_view(s)).collect();
-        let preview = self.preview_creative();
-        let order = preview
-            .as_ref()
-            .map_or_else(|| self.creative_screen.search_items(), |(_, items)| items);
         let clicks = {
             let rank = |s: &ItemStack| {
-                let order = Creative::order_of(order, s).unwrap_or(usize::MAX);
+                let order = Creative::order_of(&order, s).unwrap_or(usize::MAX);
                 (order, hover_name(&self.pack.names, s))
             };
             let max = |s: &ItemStack| self.max_stack(s);

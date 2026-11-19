@@ -199,21 +199,11 @@ These read the local player as the client sees it. They take no mod-controlled n
 - `ClientHost::hover_name(&stack)` is `ItemStack.getHoverName()` as plain text: the custom name, else
   a written book's non-blank title, else the item's name in the client's language, without rarity
   colour or italics. An invalid stack reads an empty string.
-- `ClientHost::creative_search_items()` is the creative search tab's stacks, in the order the screen
-  lists them, once per item and components. Mod additions from `build_creative_mode_tab_contents`
-  join when the tabs are built, and the operator tab's items only with the last build's permissions.
-  Before the first screen build (and after a holder reset until the next build), it reads a Normal
-  preview without calling the hook or filling the screen cache. Empty before resources load; the
-  same on native and wasm.
-- `ClientHost::creative_tabs()` is the creative inventory's item tabs in `CreativeModeTabs.tabs()` order
-  (not the search, saved toolbars or survival inventory tabs), each a `CreativeModeTabInfo` with its
-  registry id and `display_items` (`CreativeModeTab.getDisplayItems`, components kept), and the build's
-  `has_permissions`. Mod stacks from `build_creative_mode_tab_contents` follow a tab's own, so this is
-  the read for "which tab shows this stack": `tabs_showing(&stack)` matches by item and components. The
-  operator tab is listed only when the last build had permissions. The builder uses the world's
-  registry holders and enabled feature flags. Before the first screen build (and after a holder
-  reset until the next build), it reads a Normal preview without calling the hook or filling the
-  screen cache. Empty before resources load; the same on native and wasm.
+- `ClientHost::creative_search_items()` returns the built creative search tab's display order,
+  for ranking stacks in inventory sorters. It requests the catalog with the local player's permission
+  and Operator Items Tab option. A cache miss can fire the creative build hook, so this read needs a
+  mutable world Host. It excludes client-only presentation additions. For membership reads on either
+  side, see [creative tab contents](../content-mods.md).
 - `ClientHost::item_uses_block_light(&stack, context)` is `ItemStackRenderState.usesBlockLight` of the
   stack's model resolved for an `ItemDisplayContext` (no owner or level): true for a model lit like a
   block from the side (`gui_light: side`), false for a flat item lit from the front. It is what
