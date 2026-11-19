@@ -5065,7 +5065,6 @@ dependencies = [
 name = "sunrise-mod-render"
 version = "0.1.0"
 dependencies = [
- "bytemuck",
  "glam",
  "sunrise-client-render",
  "sunrise-engine-slots",
