@@ -106,8 +106,8 @@ impl Names {
     /// its number and an id another mod requested stays requested; with no requester left,
     /// resolution has nothing to refuse (and returns no value at that position).
     pub fn withdraw(&mut self, mod_id: &'static str, id: &str) {
-        if let Some(slot) = self.slots.get(id) {
-            self.entries[*slot as usize].mods.retain(|m| *m != mod_id);
+        if let Some(&slot) = self.slots.get(id) {
+            self.entries[slot as usize].mods.retain(|m| *m != mod_id);
         }
     }
 
