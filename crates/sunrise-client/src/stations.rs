@@ -1817,6 +1817,93 @@ mod tests {
         });
     }
 
+    /// `ItemStack.getHoverName`'s branches, each by what it renders to in a language holding only
+    /// the keys vanilla's rules name. The expected values are written from those rules
+    /// (`PotionItem.getName`, `ShieldItem.getName`, `CompassItem.getName`,
+    /// `PlayerHeadItem.getName`, `ItemStack.getCustomName`), not derived from the code.
+    #[test]
+    fn hover_name_component_of_each_branch() {
+        use sunrise_core::nbt::Tag;
+        let names = crate::creative::Names::default();
+        let parse = |snbt: &str| item_data::parse_stack(snbt).unwrap().unwrap();
+        let mut head = ItemStack::new("minecraft:player_head", 1);
+        head.data_mut()
+            .set_other("minecraft:profile", Some(Tag::String("Notch".into())));
+        let mut compass = ItemStack::new("minecraft:compass", 1);
+        compass.data_mut().set_other(
+            "minecraft:lodestone_tracker",
+            Some(Tag::compound(Vec::<(&str, Tag)>::new())),
+        );
+        let mut named = ItemStack::new("minecraft:diamond", 1);
+        named.data_mut().set_other(
+            "minecraft:item_name",
+            Some(Tag::compound([(
+                "translate",
+                Tag::String("custom.key".into()),
+            )])),
+        );
+        let mut removed = ItemStack::new("minecraft:diamond", 1);
+        removed.data_mut().set_other(
+            "!minecraft:item_name",
+            Some(Tag::compound(Vec::<(&str, Tag)>::new())),
+        );
+        let cases = [
+            (
+                "potion",
+                parse(
+                    r#"{id:"minecraft:potion",count:1,components:{"minecraft:potion_contents":{potion:"minecraft:water"}}}"#,
+                ),
+                "Water Bottle",
+            ),
+            (
+                "written book",
+                parse(
+                    r#"{id:"minecraft:written_book",count:1,components:{"minecraft:written_book_content":{title:"Log",author:"A"}}}"#,
+                ),
+                "Log",
+            ),
+            (
+                "shield",
+                parse(
+                    r#"{id:"minecraft:shield",count:1,components:{"minecraft:base_color":"red"}}"#,
+                ),
+                "Red Shield",
+            ),
+            ("lodestone compass", compass, "Lodestone Compass"),
+            ("player head", head, "Notch's Head"),
+            (
+                "ominous banner",
+                parse(
+                    r#"{id:"minecraft:white_banner",count:1,components:{"minecraft:item_name":{translate:"block.minecraft.ominous_banner"}}}"#,
+                ),
+                "Ominous Banner",
+            ),
+            ("item_name", named, "Custom"),
+            ("removed item_name", removed, ""),
+        ];
+        let lang = crate::lang::Language::of(
+            "en_us",
+            [
+                ("item.minecraft.potion.effect.water", "Water Bottle"),
+                ("item.minecraft.shield.red", "Red Shield"),
+                ("item.minecraft.lodestone_compass", "Lodestone Compass"),
+                ("block.minecraft.player_head.named", "%s's Head"),
+                ("block.minecraft.ominous_banner", "Ominous Banner"),
+                ("custom.key", "Custom"),
+            ]
+            .map(|(k, v)| (k.to_owned(), v.to_owned())),
+        );
+        crate::lang::scoped(lang, || {
+            for (branch, stack, expected) in cases {
+                assert_eq!(
+                    hover_name_text(&names, &stack).plain(),
+                    expected,
+                    "{branch}"
+                );
+            }
+        });
+    }
+
     /// `ItemStack.getHoverName` falls back to `getOrDefault(ITEM_NAME, EMPTY)`,
     /// so a removed item name is the empty string, not the localized item.
     #[test]
