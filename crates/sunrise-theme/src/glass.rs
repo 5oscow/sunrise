@@ -200,19 +200,6 @@ pub fn mix_oklab(a: u32, b: u32, p: f32) -> u32 {
     from_oklab([0, 1, 2].map(|i| x[i] * p + y[i] * (1. - p)))
 }
 
-/// WCAG relative luminance, as the mockup's `luminance` picks the label colour on the accent.
-pub fn luminance(c: u32) -> f32 {
-    let [r, g, b] = [16, 8, 0].map(|s| {
-        let v = ((c >> s) & 255) as f32 / 255.;
-        if v <= 0.03928 {
-            v / 12.92
-        } else {
-            ((v + 0.055) / 1.055).powf(2.4)
-        }
-    });
-    0.2126 * r + 0.7152 * g + 0.0722 * b
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
