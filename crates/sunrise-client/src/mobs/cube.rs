@@ -55,10 +55,12 @@ pub fn register(m: &mut Mob) {
 }
 /// AbstractCubeMob.setSize(size, true): the max health (size^2), movement
 /// speed (0.2 + 0.1 * size, in floats) and attack damage (size) bases, a
-/// magma cube's armor (size * 3), then the health back to the max.
-pub fn set_size(m: &mut Mob, size: i32) {
+/// magma cube's armor, then the health back to the max. The size is clamped
+/// to [`SIZES`] for all but the armor: `MagmaCube.setSize` sets it to the
+/// requested size * 3, unclamped.
+pub fn set_size(m: &mut Mob, requested: i32) {
     use super::finalize::{Attr, set_base};
-    let size = size.clamp(*SIZES.start(), *SIZES.end());
+    let size = requested.clamp(*SIZES.start(), *SIZES.end());
     m.extra.size = size;
     set_base(m, Attr::MaxHealth, f64::from(size * size));
     set_base(
@@ -68,7 +70,7 @@ pub fn set_size(m: &mut Mob, size: i32) {
     );
     set_base(m, Attr::AttackDamage, f64::from(size));
     if m.species() == super::Species::MagmaCube {
-        set_base(m, Attr::Armor, f64::from(size * 3));
+        set_base(m, Attr::Armor, f64::from(requested.wrapping_mul(3)));
     }
     m.health = super::finalize::max_health(m);
 }
@@ -776,6 +778,46 @@ mod keep_jumping_tests {
         });
         if ran {
             assert_eq!(result, Some(true));
+        }
+    }
+}
+
+#[cfg(test)]
+mod set_size_tests {
+    use super::*;
+    use crate::mobs::finalize::{Attr, base_value};
+    use std::sync::Arc;
+
+    /// #2675: `AbstractCubeMob.readAdditionalSaveData` passes `Size + 1`;
+    /// the size, max health, speed and attack damage use it clamped to
+    /// 1..=127, while `MagmaCube.setSize` sets the armor from it unclamped.
+    #[test]
+    fn magma_cube_armor_follows_the_requested_size() {
+        let mut kind = crate::mobs::sensor_scan_tests::kind();
+        let ty = Arc::make_mut(&mut kind);
+        ty.id = "minecraft:magma_cube".into();
+        ty.species = Species::MagmaCube;
+        // (saved Size, clamped size, armor base)
+        for (saved, clamped, armor) in [(-1, 1, 0.0), (-5, 1, -12.0), (199, 127, 600.0)] {
+            let mut m = Mob::new(1, kind.clone(), Vec3::ZERO, 0.0);
+            set_size(&mut m, saved + 1);
+            assert_eq!(m.extra.size, clamped, "Size {saved}");
+            assert_eq!(base_value(&m, Attr::Armor), armor, "Size {saved}");
+            assert_eq!(
+                base_value(&m, Attr::MaxHealth),
+                f64::from(clamped * clamped),
+                "Size {saved}"
+            );
+            assert_eq!(
+                base_value(&m, Attr::MovementSpeed),
+                f64::from(0.2f32 + 0.1f32 * clamped as f32),
+                "Size {saved}"
+            );
+            assert_eq!(
+                base_value(&m, Attr::AttackDamage),
+                f64::from(clamped),
+                "Size {saved}"
+            );
         }
     }
 }
