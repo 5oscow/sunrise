@@ -8446,6 +8446,9 @@ impl Game<'_> {
         if self.composter_takes(hit.pos, held) {
             return (InteractionResult::Success, DryUse::default());
         }
+        if self.vault_takes_click(hit.pos, held) {
+            return (InteractionResult::Consume, DryUse::default());
+        }
         self.remote_block_template(hit, held, false, asks_mods)
     }
 
