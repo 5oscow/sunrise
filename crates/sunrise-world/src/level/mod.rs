@@ -1143,6 +1143,14 @@ pub trait LevelAccess: BlockEntityNeighbors {
     fn has_weak_power_hook(&self) -> bool {
         false
     }
+    /// Whether a block's signal can come from a mod part
+    /// (`BlockSignal` or `IsSignalSource`) rather than from its state alone.
+    /// Such a part can read the wire's own state, so a wire's neighbour signal
+    /// is not fixed while a run is propagating and must not be cached across
+    /// it. The default is vanilla-only.
+    fn has_signal_hook(&self) -> bool {
+        false
+    }
     /// Override `SignalGetter.getSignal`'s conductor check for a block.
     fn adjust_should_check_weak_power(
         &self,
@@ -2090,18 +2098,33 @@ pub struct Signals<'a, L: signal_access::SignalAccess + ?Sized> {
     /// `RedstoneWireBlock.shouldSignal` is false while a wire samples its
     /// neighbours (`getBlockSignal`).
     pub(crate) wire_signal_off: bool,
+    /// This view's wire-shape cache id; see [`redstone::WireConnections`].
+    pub(crate) view: u64,
     /// Set when a read needed a comparator output `ticks` doesn't hold.
     pub(crate) unknown_output: std::cell::Cell<bool>,
 }
 impl<'a, L: LevelAccess + ?Sized> Sim<'a, L> {
-    /// This simulation's level, read-only.
+    /// This simulation's level, read-only. The view caches nothing: single
+    /// reads do not repeat, and the shape paths pass states that are not the
+    /// one at `pos` (a cross for a wire, a default state for a placement).
+    /// Signal trees, which ask a wire's shape from every direction they probe,
+    /// start at [`Self::query_signals`].
     pub(crate) fn signals(&self) -> Signals<'_, L> {
         Signals {
             b: self.b,
             level: &*self.level,
             ticks: &*self.ticks,
             wire_signal_off: self.wire_signal_off.get(),
+            view: 0,
             unknown_output: std::cell::Cell::new(false),
+        }
+    }
+    /// A view for one signal tree: the wire shapes it computes are memoized for
+    /// as long as it lives. See [`redstone::WireConnections`].
+    pub(crate) fn query_signals(&self) -> Signals<'_, L> {
+        Signals {
+            view: self.ticks.wire_connections.next_view(),
+            ..self.signals()
         }
     }
 }
@@ -2117,6 +2140,7 @@ impl Behaviours {
             level,
             ticks,
             wire_signal_off: false,
+            view: ticks.wire_connections.next_view(),
             unknown_output: std::cell::Cell::new(false),
         }
     }
