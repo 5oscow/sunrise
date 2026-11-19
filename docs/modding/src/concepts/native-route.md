@@ -58,14 +58,14 @@ the game's own types, such as `Game` and its fields, and these change between bu
 
 ## Building
 
-Build as for any native mod: the launcher's **Build**, or
-`sunrise-launcher native-build path/to/mod --trust-native-code`. The flag says you trust the mod's code to
-run with your rights.
+Build as for any native mod, with `cargo sunrise-mod build`
+([Your first native mod](../start/first-mod.md#5-build-against-the-prebuilt-game)). A player's launcher builds it
+the same way from the package ([What the launcher does](../how-to/native-mods/04-what-the-launcher-does.md)).
 
 A build with a `[[native.mixin]]` row obtains the horizon-mixins tool for your `mixins` commit.
 
 The prebuilt tool is checked against its release's `SHA256SUMS` and against the commit, patch and platform the
-launcher pins. Where no prebuilt exists for your platform or pin, the launcher builds the tool from source.
+build pins. Where no prebuilt exists for your platform or pin, the build compiles the tool from source.
 
 Read the launcher's [build log](../how-to/native-mods/05-build-log.md) (`native/build.log`,
 also available through **Build log**) for the number of patched functions and mixin rows.

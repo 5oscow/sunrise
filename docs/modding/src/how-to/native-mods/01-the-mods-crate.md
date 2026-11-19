@@ -1,7 +1,7 @@
 # The mod's crate
 
 The root `Cargo.toml` and `src/` form the mod's crate. It depends on `sunrise-mod-api` (lib
-`mod_api`), never directly on the game. The launcher supplies the pinned SDK and declared
+`mod_api`), never directly on the game. The build supplies the pinned SDK and declared
 [mod dependencies](../../concepts/dependencies.md).
 
 **Registry dependencies belong to the mod.** A mod may use crates.io packages that the game does
@@ -10,28 +10,31 @@ and SHA-256 checksum in the mod's registry dependency lock, stored as `Cargo.loc
 `Cargo.toml`. Keep this file in version control and include it in the mod package. Changing it
 changes the native build's cache identity.
 
-Generate it explicitly after choosing your registry dependencies:
+`cargo sunrise-mod build` writes it the first time a mod with registry dependencies is built. After
+you change `Cargo.toml`, resolve again on purpose:
 
 ```sh
-sunrise-launcher native-lock path/to/mod
-# To deliberately resolve fresh pins and replace an existing lock:
-sunrise-launcher native-lock path/to/mod --update-lock
+cargo sunrise-mod build --update-lock
 ```
 
-The launcher consumes this **registry dependency lock** during staging. Ordinary Cargo may not
-resolve the original pinned SDK declaration offline. The command creates an inert copy
+A build server writes the lock with the `native-lock` command of the
+[`native-build` contract](../../reference/sdk/08-native-build.md).
+
+Every build consumes this **registry dependency lock** during staging. Ordinary Cargo may not
+resolve the original pinned SDK declaration offline. Writing the lock creates an inert copy
 of the manifests, removes only SDK dependencies naming the exact pinned Sunrise repository and
 revision, and resolves registry metadata. It does not copy or execute mod sources, build scripts
 or proc macros. It does not modify the original manifests or Cargo configuration. Existing pins
 are not replaced without `--update-lock`; a refused input leaves the existing lock untouched.
-A starter that uses only the launcher-owned SDK does not need registry pins until it adds a
+A starter that uses only the SDK does not need registry pins until it adds a
 registry dependency.
 
-Builds consume an existing lock; they never silently generate it or repin a missing dependency.
-The launcher may resolve registry **index metadata** online using an inert manifest whose
+A build never repins a dependency the lock already pins, and a player's build never writes a lock:
+it refuses a package the mod's lock doesn't pin.
+A build may resolve registry **index metadata** online using an inert manifest whose
 requirements are exact pins. Before fetching crate archives, every resulting identity and
 checksum must match a supplied lock. Cargo checks downloaded archives against those checksums.
-Only after this fetch does the launcher resolve the actual staged workspace **offline**.
+Only after this fetch does the build resolve the actual staged workspace **offline**.
 
 The game's own packages never change because of a mod. The game ships prebuilt, and a mod's registry
 packages are compiled for the mod and linked into the mod's library, so a package both use exists
