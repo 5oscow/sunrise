@@ -64,10 +64,7 @@ impl Page for Section {
         Place::Extras
     }
     fn rows(&self, rows: &mut Vec<Row>) {
-        rows.push(Row::Toggle {
-            label: LABEL,
-            on: ON.load(Ordering::Relaxed),
-        });
+        rows.push(Row::toggle(LABEL, ON.load(Ordering::Relaxed)));
     }
     fn act(&self, row: usize, act: Act) {
         if row == 0 && matches!(act, Act::Press | Act::PressBack) {
