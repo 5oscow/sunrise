@@ -594,33 +594,14 @@ impl FileSprites {
             known(self).unwrap_or(false)
         })
     }
-    fn image(&self, file: &str) -> Option<(usize, usize, Vec<u32>)> {
-        let (w, h, rgba) = crate::hud::decode_bytes(&self.root.read(file).ok()?).ok()?;
-        Some((w as usize, h as usize, argb_pixels(&rgba)))
-    }
     fn load(&self, sprite: &str) -> Option<SpriteMask> {
-        use crate::atlas_sources::{SpriteOrigin, generate, texture_resource};
-        // The resource that gives the sprite its pixels and `.mcmeta`; a cut or palette has none.
-        let (png, (iw, ih, argb)) =
-            if self.materials.is_bare() || sprite.starts_with("sunrise_cit:") {
-                let png = texture_resource(sprite, "textures");
-                (Some(png.clone()), self.image(&png)?)
-            } else {
-                self.materials.resolve(sprite, |origin| match origin {
-                    SpriteOrigin::File(resource) => {
-                        let png = texture_resource(resource, "textures");
-                        let image = self.image(&png)?;
-                        Some((Some(png), image))
-                    }
-                    generated => {
-                        let (w, h, rgba) = generate(generated, &|texture| {
-                            let file = texture_resource(texture, "textures");
-                            crate::hud::decode_bytes(&self.root.read(&file).ok()?).ok()
-                        })?;
-                        Some((None, (w as usize, h as usize, argb_pixels(&rgba))))
-                    }
-                })?
-            };
+        // The finished model material: the pixels and the resource whose `.mcmeta` describes
+        // them, a candidate whose frames don't fit already left to the next atlas.
+        let crate::atlas_sources::Material {
+            image: (iw, ih, rgba),
+            resource: png,
+        } = self.materials.finish(&self.root, sprite)?;
+        let (iw, ih, argb) = (iw as usize, ih as usize, argb_pixels(&rgba));
         let translucent = argb.iter().any(|p| matches!(p >> 24, 1..=254));
         if let Ok(mut cache) = self.translucent.lock() {
             cache.insert(sprite.to_owned(), translucent);
@@ -1595,6 +1576,55 @@ mod tests {
     /// Item definitions are read again on every load: a node of a registered type keeps its
     /// `models` as the packs now give them, and a definition with a type no mod registered isn't
     /// loaded, so its item draws the missing model.
+    /// A renamed file whose animation frames can't tile it is no candidate: the blocks atlas's
+    /// sprite of the id is the mask, and nothing divides by zero.
+    #[test]
+    fn a_renamed_file_with_unfitting_frames_leaves_the_blocks_sprite() {
+        let root = std::env::temp_dir().join(format!("sunrise-mask-frames-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let textures = root.join("assets/demo/textures/item");
+        let atlases = root.join("assets/minecraft/atlases");
+        fs::create_dir_all(&textures).unwrap();
+        fs::create_dir_all(&atlases).unwrap();
+        let write = |name: &str, width: u32, height: u32, pixels: &[u8]| {
+            let mut encoder = png::Encoder::new(
+                fs::File::create(textures.join(name)).unwrap(),
+                width,
+                height,
+            );
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder
+                .write_header()
+                .unwrap()
+                .write_image_data(pixels)
+                .unwrap();
+        };
+        // A 1 x 1 file declaring frames 2 wide, and a 2 x 1 sheet: opaque, then transparent.
+        write("tiny.png", 1, 1, &[255; 4]);
+        fs::write(
+            textures.join("tiny.png.mcmeta"),
+            r#"{"animation":{"width":2}}"#,
+        )
+        .unwrap();
+        write("sheet.png", 2, 1, &[255, 0, 0, 255, 0, 255, 0, 0]);
+        fs::write(
+            atlases.join("items.json"),
+            r#"{"sources":[{"type":"minecraft:single","resource":"demo:item/tiny","sprite":"demo:item/target"}]}"#,
+        )
+        .unwrap();
+        fs::write(
+            atlases.join("blocks.json"),
+            r#"{"sources":[{"type":"minecraft:unstitch","resource":"demo:item/sheet","divisor_x":2,
+                "regions":[{"sprite":"demo:item/target","x":1,"y":0,"width":1,"height":1}]}]}"#,
+        )
+        .unwrap();
+        let sprites = FileSprites::new(ResourceSource::directory(root.clone()));
+        let mask = sprites.mask("demo:item/target").unwrap();
+        assert_eq!((mask.width, mask.height), (1, 1));
+        assert_eq!(mask.frames, vec![vec![true]]);
+        fs::remove_dir_all(&root).unwrap();
+    }
     /// The items atlas's cut of an id is the mask, not the blocks atlas's; a sprite only an
     /// atlas cut makes has one at all.
     #[test]

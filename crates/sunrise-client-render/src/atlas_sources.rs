@@ -565,23 +565,77 @@ pub fn listed(
 /// The blocks and items atlases as a model material sees them: a material names no atlas, and
 /// the baker looks in the items atlas first, then the blocks atlas, then uses the missing sprite.
 pub struct Materials {
-    /// The items atlas's, then the blocks atlas's sprites; an atlas with no definition is absent.
-    atlases: Vec<BTreeMap<String, SpriteOrigin>>,
+    items: BTreeMap<String, SpriteOrigin>,
+    blocks: BTreeMap<String, SpriteOrigin>,
+    /// Whether either atlas has a definition file, however it decodes.
+    defined: bool,
+}
+
+/// A finished sprite: its pixels, and the texture file whose `.mcmeta` describes them (a cut or
+/// a palette has none).
+pub struct Material {
+    pub image: Image,
+    pub resource: Option<String>,
+}
+
+/// The finished sprite of one origin: a file whose frames fit its size, with the resource it was
+/// read from, or the pixels a cut, a palette or a mod made. None where it can't be finished.
+pub fn finish_origin(
+    source: &crate::resource_source::ResourceSource,
+    origin: &SpriteOrigin,
+) -> Option<Material> {
+    let decode = |texture: &str| {
+        crate::hud::decode_resource(source, &texture_resource(texture, "textures")).ok()
+    };
+    match origin {
+        SpriteOrigin::File(texture) => {
+            let resource = texture_resource(texture, "textures");
+            let image = decode(texture)?;
+            let mcmeta = source.read_to_string(&format!("{resource}.mcmeta")).ok();
+            let animation = crate::hud::animation_of(mcmeta.as_deref());
+            let [frame_width, frame_height] = animation
+                .map_or([image.0 as i32, image.1 as i32], |animation| {
+                    animation.frame_size(image.0 as i32, image.1 as i32)
+                });
+            // The frames must tile the image, or the sprite is no sprite.
+            let fits = u32::try_from(frame_width)
+                .ok()
+                .zip(u32::try_from(frame_height).ok())
+                .is_some_and(|(w, h)| w > 0 && h > 0 && image.0 % w == 0 && image.1 % h == 0);
+            fits.then_some(Material {
+                image,
+                resource: Some(resource),
+            })
+        }
+        generated => Some(Material {
+            image: generate(generated, &decode)?,
+            resource: None,
+        }),
+    }
 }
 
 impl Materials {
     pub fn new(source: &crate::resource_source::ResourceSource) -> Self {
         let mut listed: BTreeMap<_, _> = listed(source).into_iter().collect();
         Self {
-            atlases: ["minecraft:items", "minecraft:blocks"]
-                .into_iter()
-                .filter_map(|atlas| listed.remove(atlas))
-                .collect(),
+            items: listed.remove("minecraft:items").unwrap_or_default(),
+            blocks: listed.remove("minecraft:blocks").unwrap_or_default(),
+            defined: ["blocks", "items"]
+                .iter()
+                .any(|atlas| source.contains(&format!("assets/minecraft/atlases/{atlas}.json"))),
         }
     }
     /// Whether neither atlas has a definition: a bare resource tree, whose sprites are its files.
     pub fn is_bare(&self) -> bool {
-        self.atlases.is_empty()
+        !self.defined
+    }
+    /// Every id either atlas lists.
+    pub fn ids(&self) -> std::collections::BTreeSet<&str> {
+        self.items
+            .keys()
+            .chain(self.blocks.keys())
+            .map(String::as_str)
+            .collect()
     }
     /// `finish` of the first atlas's origin for `id` that gives a sprite, items first: an
     /// origin that fails (a cut outside its sheet, a missing palette) leaves the blocks atlas's
@@ -591,10 +645,29 @@ impl Materials {
         id: &str,
         finish: impl FnMut(&SpriteOrigin) -> Option<T>,
     ) -> Option<T> {
-        self.atlases
-            .iter()
+        [&self.items, &self.blocks]
+            .into_iter()
             .filter_map(|atlas| atlas.get(id))
             .find_map(finish)
+    }
+    /// The same, for what names the blocks atlas itself (the fluid renderer).
+    pub fn resolve_in_blocks<T>(
+        &self,
+        id: &str,
+        finish: impl FnMut(&SpriteOrigin) -> Option<T>,
+    ) -> Option<T> {
+        self.blocks.get(id).and_then(finish)
+    }
+    /// The finished model material `id`: a bare tree reads it as a file.
+    pub fn finish(
+        &self,
+        source: &crate::resource_source::ResourceSource,
+        id: &str,
+    ) -> Option<Material> {
+        if self.is_bare() || id.starts_with("sunrise_cit:") {
+            return finish_origin(source, &SpriteOrigin::File(id.to_owned()));
+        }
+        self.resolve(id, |origin| finish_origin(source, origin))
     }
 }
 

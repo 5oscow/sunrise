@@ -357,7 +357,7 @@ fn walk(source: &ResourceSource, directory: &str, out: &mut Vec<String>) {
             .filter(|name| name.ends_with(".png")),
     );
 }
-fn decode_resource(source: &ResourceSource, name: &str) -> Result<(u32, u32, Vec<u8>)> {
+pub(crate) fn decode_resource(source: &ResourceSource, name: &str) -> Result<(u32, u32, Vec<u8>)> {
     decode_bytes(&source.read(name)?)
 }
 /// A packed atlas image: sprite name, size and RGBA pixels.
@@ -378,7 +378,7 @@ fn strip_frame(pixels: &[u8], stride: u32, x: u32, y: u32, w: u32, h: u32) -> Ve
     out
 }
 /// The `animation` section of a texture's `.mcmeta`.
-fn animation_of(mcmeta: Option<&str>) -> Option<AnimationMetadata> {
+pub(crate) fn animation_of(mcmeta: Option<&str>) -> Option<AnimationMetadata> {
     let meta: serde_json::Value = crate::packs::first_json(mcmeta?.as_bytes()).ok()?;
     AnimationMetadata::from_json(&meta.get("animation")?.to_string()).ok()
 }
