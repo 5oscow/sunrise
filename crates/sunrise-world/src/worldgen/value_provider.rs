@@ -131,39 +131,62 @@ pub enum IntProvider {
     },
 }
 impl IntProvider {
-    /// Encode the decoded provider using vanilla's integer or dispatched object form.
-    pub(crate) fn to_json(&self) -> serde_json::Value {
-        use serde_json::json;
-        let range = |kind, min, max| json!({"type":kind,"min_inclusive":min,"max_inclusive":max});
-        match self {
-            Self::Constant(value) => json!(value),
-            Self::Weighted(list) => {
-                let distribution: Vec<_> = list
-                    .entries()
-                    .iter()
-                    .map(|(provider, weight)| json!({"data":provider.to_json(),"weight":weight}))
-                    .collect();
-                json!({"type":"minecraft:weighted_list","distribution":distribution})
+    /// Encode the decoded provider in the registry's NBT form. Mean and deviation
+    /// use `Codec.FLOAT`, whose accepted values need not fit in a JSON number.
+    pub(crate) fn to_nbt(&self) -> sunrise_core::nbt::Tag {
+        use sunrise_core::nbt::Tag;
+        let kind = |value: &str| Tag::String(value.into());
+        let range = |name, min, max| {
+            Tag::compound([
+                ("type", kind(name)),
+                ("min_inclusive", Tag::Int(min)),
+                ("max_inclusive", Tag::Int(max)),
+            ])
+        };
+        match *self {
+            Self::Constant(value) => Tag::Int(value),
+            Self::Weighted(ref list) => {
+                let distribution = list.entries().iter().map(|(provider, weight)| {
+                    Tag::compound([("data", provider.to_nbt()), ("weight", Tag::Int(*weight))])
+                });
+                Tag::compound([
+                    ("type", kind("minecraft:weighted_list")),
+                    ("distribution", Tag::List(distribution.collect())),
+                ])
             }
             Self::Uniform { min, max } => range("minecraft:uniform", min, max),
             Self::BiasedToBottom { min, max } => range("minecraft:biased_to_bottom", min, max),
             Self::VeryBiasedToBottom { min, max } => {
                 range("minecraft:very_biased_to_bottom", min, max)
             }
-            Self::Trapezoid { min, max, plateau } => {
-                json!({"type":"minecraft:trapezoid","min":min,"max":max,"plateau":plateau})
-            }
-            Self::Clamped { source, min, max } => json!({
-                "type":"minecraft:clamped","source":source.to_json(),"min_inclusive":min,"max_inclusive":max
-            }),
+            Self::Trapezoid { min, max, plateau } => Tag::compound([
+                ("type", kind("minecraft:trapezoid")),
+                ("min", Tag::Int(min)),
+                ("max", Tag::Int(max)),
+                ("plateau", Tag::Int(plateau)),
+            ]),
+            Self::Clamped {
+                ref source,
+                min,
+                max,
+            } => Tag::compound([
+                ("type", kind("minecraft:clamped")),
+                ("source", source.to_nbt()),
+                ("min_inclusive", Tag::Int(min)),
+                ("max_inclusive", Tag::Int(max)),
+            ]),
             Self::ClampedNormal {
                 mean,
                 deviation,
                 min,
                 max,
-            } => json!({
-                "type":"minecraft:clamped_normal","mean":mean,"deviation":deviation,"min_inclusive":min,"max_inclusive":max
-            }),
+            } => Tag::compound([
+                ("type", kind("minecraft:clamped_normal")),
+                ("mean", Tag::Float(mean.to_bits())),
+                ("deviation", Tag::Float(deviation.to_bits())),
+                ("min_inclusive", Tag::Int(min)),
+                ("max_inclusive", Tag::Int(max)),
+            ]),
         }
     }
 

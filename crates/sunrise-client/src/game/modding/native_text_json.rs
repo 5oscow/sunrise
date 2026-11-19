@@ -276,6 +276,14 @@ mod tests {
             content(r#"{"translate":"k","fallback":5}"#),
             TextContent::Translatable { key, fallback: None, .. } if key == "k"
         ));
+        assert!(matches!(
+            content(r#"{"sprite":"test:icon","player":{"name":"Steve"}}"#),
+            TextContent::Object(mod_api::text::TextObject::Atlas { sprite, .. }) if sprite == "test:icon"
+        ));
+        assert!(matches!(
+            content(r#"{"atlas":7,"sprite":"test:icon","player":{"name":"Steve"}}"#),
+            TextContent::Object(mod_api::text::TextObject::Player { .. })
+        ));
         // `{"text":1}` fails the text kind, so the next kind that decodes is used.
         assert_eq!(
             content(r#"{"text":1,"keybind":"key.use"}"#),
@@ -368,6 +376,10 @@ mod tests {
         with_game(|game| {
             let host: &dyn mod_api::Host = game;
             let read = |json: &str| host.text_from_json(json).unwrap().map(|t| t.content);
+            assert_eq!(
+                read(r#"{"text":"Click","click_event":{"action":"run_command","value":"/help"}}"#),
+                None
+            );
             assert_eq!(
                 read(r#"{"text":"Hi"}"#),
                 Some(TextContent::Literal("Hi".into()))

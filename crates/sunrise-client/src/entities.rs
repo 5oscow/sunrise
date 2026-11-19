@@ -1558,8 +1558,9 @@ impl PaintingVariant {
                 .ok_or_else(|| format!("{field} must be an integer in 1..=16"))
         };
         let asset = value["asset_id"].as_str().ok_or("asset_id is required")?;
-        sunrise_core::identifier::Identifier::parse(asset)
-            .map_err(|error| format!("asset_id: {error}"))?;
+        let asset = sunrise_core::identifier::Identifier::parse(asset)
+            .map_err(|error| format!("asset_id: {error}"))?
+            .to_string();
         Ok(Self {
             id: id.into(),
             asset: asset.trim_start_matches("minecraft:").to_owned(),

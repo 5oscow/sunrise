@@ -167,7 +167,7 @@ fn object_style<'a>(
 ) -> Style {
     let mut style = Style::default();
     if let Some(c) = o.get("color").and_then(Value::as_str) {
-        style.color = named_color(c).or_else(|| hex_color(c));
+        style.color = parse_color(c);
     }
     style.shadow_color = o.get("shadow_color").and_then(shadow_color);
     style.bold = style_flag(o.get("bold"));
@@ -218,8 +218,8 @@ pub(crate) fn hex_color(c: &str) -> Option<u32> {
 }
 
 /// Whether `c` is a style `color` (`TextColor.parseColor`): a named colour or `#` and hex.
-pub fn is_color(c: &str) -> bool {
-    named_color(c).is_some() || hex_color(c).is_some()
+pub fn parse_color(c: &str) -> Option<u32> {
+    named_color(c).or_else(|| hex_color(c))
 }
 
 /// `Style.shadow_color`: a packed ARGB int or normalized RGBA array.

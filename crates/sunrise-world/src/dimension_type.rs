@@ -315,66 +315,124 @@ impl DimensionFacts {
         &VANILLA[0]
     }
 
-    /// Decode a synchronized pack definition with the same field codecs as gameplay, then
-    /// encode the decoded values. Registry holder syntax and the other environment attributes
-    /// stay intact for their own readers; in particular this does not bind the infiniburn set.
-    pub fn decode_pack_definition(id: &str, json: &Value) -> Result<Value, String> {
-        use serde_json::json;
+    /// Decode the complete pack definition with the gameplay field codecs; emit
+    /// NBT from the decoded fields, before binding registry-aware holder sets.
+    pub fn decode_pack_definition(
+        id: &str,
+        json: &Value,
+    ) -> Result<sunrise_core::nbt::Tag, String> {
+        use crate::environment_attributes::AttributeMap;
+        use sunrise_core::{
+            identifier::Identifier,
+            json_nbt,
+            nbt::{Compound, Tag},
+        };
+
         let facts = Self::decode_patch(Self::base_for_type(id), id, json, true)?;
-        let mut wire = json!({
-            "min_y": facts.height.min_y,
-            "height": facts.height.height,
-            "logical_height": facts.height.logical_height,
-            "has_skylight": facts.height.has_skylight,
-            "has_ceiling": facts.height.has_ceiling,
-            "has_ender_dragon_fight": facts.has_ender_dragon_fight,
-            "coordinate_scale": facts.coordinate_scale,
-            "ambient_light": facts.ambient_light,
-            "monster_spawn_light_level": facts.monster_spawn_light_level.to_json(),
-            "monster_spawn_block_light_limit": facts.monster_spawn_block_light_limit,
-            "infiniburn": json["infiniburn"],
-        });
+        let flag = |value| Tag::Byte(i8::from(value));
+        let string = |value: &str| Tag::String(value.into());
+        let mut wire: Compound = [
+            ("min_y", Tag::Int(facts.height.min_y)),
+            ("height", Tag::Int(facts.height.height)),
+            ("logical_height", Tag::Int(facts.height.logical_height)),
+            ("has_skylight", flag(facts.height.has_skylight)),
+            ("has_ceiling", flag(facts.height.has_ceiling)),
+            ("has_ender_dragon_fight", flag(facts.has_ender_dragon_fight)),
+            (
+                "coordinate_scale",
+                Tag::Double(facts.coordinate_scale.to_bits()),
+            ),
+            ("ambient_light", Tag::Float(facts.ambient_light.to_bits())),
+            (
+                "monster_spawn_light_level",
+                facts.monster_spawn_light_level.to_nbt(),
+            ),
+            (
+                "monster_spawn_block_light_limit",
+                Tag::Int(facts.monster_spawn_block_light_limit),
+            ),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.into(), value))
+        .collect();
         if facts.has_fixed_time {
-            wire["has_fixed_time"] = true.into();
+            wire.insert("has_fixed_time".into(), flag(true));
         }
-        if facts.skybox != Skybox::Overworld && !json["skybox"].is_null() {
-            wire["skybox"] = match facts.skybox {
-                Skybox::None => "none",
-                Skybox::Overworld => "overworld",
-                Skybox::End => "end",
+        match facts.skybox {
+            Skybox::Overworld => {}
+            skybox => {
+                wire.insert(
+                    "skybox".into(),
+                    string(if skybox == Skybox::None {
+                        "none"
+                    } else {
+                        "end"
+                    }),
+                );
             }
-            .into();
         }
-        if facts.cardinal_light == CardinalLight::Nether && !json["cardinal_light"].is_null() {
-            wire["cardinal_light"] = "nether".into();
+        if facts.cardinal_light == CardinalLight::Nether {
+            wire.insert("cardinal_light".into(), string("nether"));
         }
-        if let Some(attrs) = json["attributes"].as_object() {
-            let mut attrs = attrs.clone();
-            for (key, rule) in [
-                ("minecraft:gameplay/bed_rule", facts.bed_rule),
-                ("minecraft:gameplay/straw_bed_rule", facts.straw_bed_rule),
-            ] {
-                if attrs.get(key).is_some_and(|value| !value.is_null()) {
-                    let mut value = json!({"can_sleep":rule.can_sleep.name(),"can_set_spawn":rule.can_set_spawn.name()});
+        if let Some(attributes) = json.get("attributes").filter(|v| !v.is_null()) {
+            let mut encoded = AttributeMap::parse(attributes)
+                .and_then(AttributeMap::into_nbt)
+                .map_err(|error| format!("attributes: {error}"))?;
+            for path in ["gameplay/bed_rule", "gameplay/straw_bed_rule"] {
+                let key = format!("minecraft:{path}");
+                if let Some(value) = attributes
+                    .get(&key)
+                    .or_else(|| attributes.get(path))
+                    .filter(|value| !value.is_null())
+                {
+                    let rule =
+                        BedRule::from_json(value).map_err(|error| format!("{key}: {error}"))?;
+                    let mut fields = Compound::from([
+                        ("can_sleep".into(), string(rule.can_sleep.name())),
+                        ("can_set_spawn".into(), string(rule.can_set_spawn.name())),
+                    ]);
                     if rule.destroy_on_use {
-                        value["destroy_on_use"] = true.into();
+                        fields.insert("destroy_on_use".into(), flag(true));
                     }
                     if rule.destroy_on_leave {
-                        value["destroy_on_leave"] = true.into();
+                        fields.insert("destroy_on_leave".into(), flag(true));
                     }
-                    attrs.insert(key.into(), value);
+                    encoded.insert(key.as_str().into(), Tag::Compound(fields));
                 }
             }
-            if !attrs.is_empty() {
-                wire["attributes"] = attrs.into();
+            if !encoded.is_empty() {
+                wire.insert("attributes".into(), Tag::Compound(encoded));
             }
         }
-        for field in ["timelines", "default_clock"] {
-            if !json[field].is_null() {
-                wire[field] = json[field].clone();
-            }
+        let holder = |field: &str, id: &str, tag: bool| -> Result<Tag, String> {
+            let is_tag = tag && id.starts_with('#');
+            let id = Identifier::parse(if is_tag { &id[1..] } else { id })
+                .map_err(|e| format!("{field}: {e}"))?;
+            Ok(string(&format!("{}{id}", if is_tag { "#" } else { "" })))
+        };
+        for field in ["infiniburn", "timelines", "default_clock"] {
+            let opaque =
+                |value: &Value| json_nbt::json_to_tag(value).map_err(|e| format!("{field}: {e}"));
+            let value = match &json[field] {
+                Value::Null => continue,
+                Value::String(id) => holder(field, id, field != "default_clock")?,
+                Value::Array(values) => Tag::List(
+                    values
+                        .iter()
+                        .map(|value| match value {
+                            Value::String(id) => holder(field, id, false),
+                            Value::Object(_) if field == "timelines" => opaque(value),
+                            _ => Err(format!("{field}: invalid holder list entry")),
+                        })
+                        .collect::<Result<_, _>>()?,
+                ),
+                // Registry-aware set binding is separate from definition admission.
+                value @ Value::Object(_) => opaque(value)?,
+                _ => return Err(format!("{field}: invalid holder")),
+            };
+            wire.insert(field.into(), value);
         }
-        Ok(wire)
+        Ok(Tag::Compound(wire))
     }
 
     /// Reads a dimension type's JSON; `timeline_tag` expands a timeline tag id to its timelines.
@@ -533,6 +591,15 @@ impl DimensionFacts {
             out.monster_spawn_light_level =
                 IntProvider::from_json(&json["monster_spawn_light_level"].to_string())
                     .map_err(|e| format!("{id} monster_spawn_light_level: {e:?}"))?;
+            if complete
+                && out
+                    .monster_spawn_light_level
+                    .bounds()
+                    .into_iter()
+                    .any(|n| !(0..=15).contains(&n))
+            {
+                return Err(bad("monster_spawn_light_level"));
+            }
         }
         match json["monster_spawn_block_light_limit"]
             .as_i64()
@@ -618,13 +685,15 @@ impl DimensionFacts {
         if let Some(v) = attribute("sky_light_level").as_f64() {
             out.sky_light_level = v as f32;
         }
-        for (key, rule) in [
-            ("bed_rule", &mut out.bed_rule),
-            ("straw_bed_rule", &mut out.straw_bed_rule),
-        ] {
-            if !attribute(key).is_null() {
-                *rule = BedRule::from_json(attribute(key))
-                    .map_err(|error| format!("{key}: {error}"))?;
+        if !complete {
+            for (key, rule) in [
+                ("bed_rule", &mut out.bed_rule),
+                ("straw_bed_rule", &mut out.straw_bed_rule),
+            ] {
+                if !attribute(key).is_null() {
+                    *rule = BedRule::from_json(attribute(key))
+                        .map_err(|error| format!("{key}: {error}"))?;
+                }
             }
         }
         Ok(out)

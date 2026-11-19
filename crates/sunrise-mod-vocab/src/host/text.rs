@@ -11,7 +11,9 @@ pub trait TextHost {
     /// (Paper's `GsonComponentSerializer.deserialize`). None when it does not parse as one component:
     /// an object needs one content key (a `type` binds alone, a null `type` counts as absent),
     /// `text` must be a string, `extra` a non-empty list, and a style field that is present and
-    /// wrong refuses the whole component. An object whose only content key is `index` is refused,
+    /// wrong refuses the whole component. Command, URL and page click actions use `command`, `url`
+    /// and `page`, respectively; a legacy `value`-only click for those actions is refused.
+    /// An object whose only content key is `index` is refused,
     /// as in vanilla's codec; Sunrise follows vanilla there.
     #[access(Metadata)]
     fn text_from_json(&self, json: &str) -> Result<Option<Text>, TextFormError>;

@@ -25,8 +25,9 @@ impl Pattern {
     /// `BannerPattern.DIRECT_CODEC`.
     pub fn decode(id: &str, value: &Value) -> Result<Self, String> {
         let asset = value["asset_id"].as_str().ok_or("asset_id is required")?;
-        sunrise_core::identifier::Identifier::parse(asset)
-            .map_err(|error| format!("asset_id: {error}"))?;
+        let asset = sunrise_core::identifier::Identifier::parse(asset)
+            .map_err(|error| format!("asset_id: {error}"))?
+            .to_string();
         let translation_key = value["translation_key"]
             .as_str()
             .ok_or("translation_key is required")?;

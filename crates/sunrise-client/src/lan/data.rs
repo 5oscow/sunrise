@@ -565,10 +565,10 @@ impl SyncData {
                 overlay.conditions,
                 path,
             );
-            if let Some(packed) = packed {
-                packed.append(key, &mut entries);
-            }
             if *key == "minecraft:enchantment" {
+                if let Some(packed) = packed {
+                    packed.append_enchantments(&mut entries);
+                }
                 holder_sets::expand_enchantments(&mut entries, resources, overlay, defaults)?;
             }
             // A biome the mods' modifiers changed is not the client's own file any more:
@@ -603,6 +603,9 @@ impl SyncData {
                     .map(|(key, value, packed)| (key, json_to_nbt(&value), packed))
                     .collect()
             });
+            if let Some(packed) = packed {
+                packed.append_encoded(key, &mut entries);
+            }
             file_order(&mut entries);
             let mut e = Entries {
                 names: Vec::new(),
@@ -1148,14 +1151,22 @@ mod tests {
     fn pack_entries(
         key: &str,
         overlay: &sunrise_world::loot::PackOverlay,
-        entries: &mut Vec<((String, String), Value, bool)>,
-    ) {
+        mut entries: Vec<((String, String), Value, bool)>,
+    ) -> Vec<((String, String), Tag, bool)> {
         let registries =
             PackRegistryDefinitions::load(overlay, &BTreeMap::new(), &Default::default(), |_| true)
                 .unwrap();
         let key = format!("minecraft:{key}");
-        registries.discard_replaced(&key, entries);
-        registries.append(&key, entries);
+        registries.discard_replaced(&key, &mut entries);
+        if key == "minecraft:enchantment" {
+            registries.append_enchantments(&mut entries);
+        }
+        let mut entries = entries
+            .into_iter()
+            .map(|(key, value, packed)| (key, json_to_nbt(&value), packed))
+            .collect();
+        registries.append_encoded(&key, &mut entries);
+        entries
     }
 
     #[test]
@@ -1381,7 +1392,7 @@ mod tests {
             "enchantment/harvestmod:scythe".to_owned(),
             vec![br#"{"description":"Scythe","max_level":5,"weight":1,"anvil_cost":1,"supported_items":"minecraft:iron_hoe","slots":["mainhand"],"min_cost":{"base":1,"per_level_above_first":1},"max_cost":{"base":5,"per_level_above_first":1}}"#.to_vec()],
         )];
-        pack_entries("enchantment", &PackOverlay::new(&files), &mut found);
+        let mut found = pack_entries("enchantment", &PackOverlay::new(&files), found);
         file_order(&mut found);
         let names: Vec<String> = found
             .iter()
@@ -1397,16 +1408,17 @@ mod tests {
         );
         assert!(!found[0].2, "vanilla's entry stays the known pack's");
         assert!(found[1].2 && found[2].2, "a mod's entries carry their data");
-        assert_eq!(found[1].1["max_level"], 5, "a pack overrides a mod's entry");
+        assert_eq!(
+            found[1].1.get("max_level"),
+            Some(&Tag::Int(5)),
+            "a pack overrides a mod's entry"
+        );
         let mut sync = SyncData::empty();
         sync.registries.push((
             "minecraft:enchantment".into(),
             Entries {
                 names: names.clone(),
-                data: found
-                    .iter()
-                    .map(|(_, value, _)| json_to_nbt(value))
-                    .collect(),
+                data: found.iter().map(|(_, value, _)| value.clone()).collect(),
                 from_pack: found.iter().map(|(_, _, packed)| *packed).collect(),
             },
         ));
@@ -1445,7 +1457,7 @@ mod tests {
                 false,
             )
         };
-        let mut found = vec![vanilla("quick_actions"), vanilla("server_links")];
+        let found = vec![vanilla("quick_actions"), vanilla("server_links")];
         let files = vec![
             (
                 "dialog/test:menu".to_owned(),
@@ -1465,7 +1477,7 @@ mod tests {
             ),
         ];
         let overlay = PackOverlay::new(&files);
-        pack_entries("dialog", &overlay, &mut found);
+        let mut found = pack_entries("dialog", &overlay, found);
         file_order(&mut found);
         let names: Vec<String> = found
             .iter()
@@ -1480,7 +1492,11 @@ mod tests {
                 "minecraft:server_links"
             ]
         );
-        assert_eq!(found[1].1["title"], "Quick", "a pack overrides an entry");
+        assert_eq!(
+            found[1].1.get("title"),
+            Some(&Tag::String("Quick".into())),
+            "a pack overrides an entry"
+        );
         let dynamic = Dynamic {
             registries: HashMap::from([(
                 "minecraft:dialog".to_owned(),
@@ -1842,23 +1858,44 @@ mod tests {
         );
         let files = [(
             "dimension_type/test:packed".to_owned(),
-            vec![br##"{"min_y":0,"height":64,"logical_height":64,"has_ceiling":false,"has_skylight":true,"has_ender_dragon_fight":false,"ambient_light":0.1,"coordinate_scale":1.0,"infiniburn":"#minecraft:infiniburn_overworld","monster_spawn_light_level":0,"monster_spawn_block_light_limit":0}"##.to_vec()],
+            vec![br##"{"min_y":0,"height":64,"logical_height":64,"has_ceiling":false,"has_skylight":true,"has_ender_dragon_fight":false,"ambient_light":1e39,"coordinate_scale":1.0,"infiniburn":"#minecraft:infiniburn_overworld","monster_spawn_light_level":{"type":"clamped_normal","mean":1e39,"deviation":-1e39,"min_inclusive":0,"max_inclusive":15},"monster_spawn_block_light_limit":0,"attributes":{"visual/sky_color":"#ff0000"}}"##.to_vec()],
         )];
-        pack_entries("dimension_type", &PackOverlay::new(&files), &mut entries);
+        let entries = pack_entries("dimension_type", &PackOverlay::new(&files), entries);
 
         let entry = |path: &str| entries.iter().find(|((_, p), ..)| p == path).unwrap();
         let (_, pocket, sent) = entry("pocket");
         assert!(*sent, "no client knows a mod's type");
         assert_eq!(
             *pocket,
-            serde_json::json!({
+            json_to_nbt(&serde_json::json!({
                 "min_y":-128,"height":448,"ambient_light":0.0,
                 "attributes":{"minecraft:visual/sky_color":"#78a7ff","minecraft:gameplay/fast_lava":true}
-            })
+            }))
         );
-        assert_eq!(entry("packed").1["min_y"], 0);
-        assert_eq!(entry("packed").1["height"], 64);
-        assert_eq!(entry("packed").1["ambient_light"], f64::from(0.1_f32));
+        assert_eq!(entry("packed").1.get("min_y"), Some(&Tag::Int(0)));
+        assert_eq!(entry("packed").1.get("height"), Some(&Tag::Int(64)));
+        assert_eq!(
+            entry("packed").1.get("ambient_light"),
+            Some(&Tag::Float(f32::INFINITY.to_bits()))
+        );
+        let provider = entry("packed").1.get("monster_spawn_light_level").unwrap();
+        assert_eq!(
+            provider.get("mean"),
+            Some(&Tag::Float(f32::INFINITY.to_bits()))
+        );
+        assert_eq!(
+            provider.get("deviation"),
+            Some(&Tag::Float(f32::NEG_INFINITY.to_bits()))
+        );
+        let attrs = entry("packed").1.get("attributes").unwrap();
+        assert_eq!(
+            attrs.get("minecraft:visual/sky_color"),
+            Some(&Tag::List(vec![
+                Tag::Float(1.0_f32.to_bits()),
+                Tag::Float(0),
+                Tag::Float(0)
+            ]))
+        );
         assert!(!entry("overworld").2);
     }
 

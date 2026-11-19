@@ -685,10 +685,13 @@ impl Song {
 #[derive(Clone, Debug)]
 pub struct Instrument {
     pub sound: String,
+    /// `None` names a registry holder; `Some` keeps an inline sound's optional fixed range.
+    pub inline_sound_range: Option<Option<f32>>,
     /// Seconds the horn stays up, and its cooldown.
     pub use_duration: f32,
     /// How far it carries, in blocks (`range / 16` is its volume).
     pub range: f32,
+    pub durability_damage: i32,
 }
 impl Instrument {
     /// `InstrumentItem.getUseDuration`: `Mth.floor(useDuration * 20)`.
@@ -728,33 +731,41 @@ impl Instrument {
     /// `Instrument.DIRECT_CODEC`: a sound holder or inline sound, duration,
     /// audible range, and optional durability cost used by instrument gameplay.
     pub fn decode(v: &Value) -> std::result::Result<Self, String> {
-        let sound = &v["sound_event"];
-        let sound = sound
-            .as_str()
-            .or_else(|| sound["sound_id"].as_str())
-            .ok_or("sound_event must be a sound id or definition")?;
+        let event = &v["sound_event"];
+        let (sound, inline_sound_range) = if let Some(id) = event.as_str() {
+            (id, None)
+        } else {
+            let id = event["sound_id"]
+                .as_str()
+                .ok_or("sound_event must be a sound id or definition")?;
+            (id, Some(event["range"].as_f64().map(|n| n as f32)))
+        };
         let sound = sunrise_core::identifier::Identifier::parse(sound)
             .map_err(|error| format!("sound_event: {error}"))?
             .to_string();
         let use_duration = v["use_duration"]
             .as_f64()
             .map(|n| n as f32)
-            .filter(|n| *n >= 0.0)
-            .ok_or("use_duration must be non-negative")?;
+            .filter(|n| (0.0..=f32::MAX).contains(n))
+            .ok_or("use_duration must be non-negative and finite")?;
         let range = v["range"]
             .as_f64()
             .map(|n| n as f32)
-            .filter(|n| *n > 0.0)
-            .ok_or("range must be positive")?;
-        if v.get("durability_damage")
-            .is_some_and(|n| !n.as_u64().is_some_and(|n| i32::try_from(n).is_ok()))
-        {
-            return Err("durability_damage must be a non-negative integer".into());
-        }
+            .filter(|n| *n > 0.0 && *n <= f32::MAX)
+            .ok_or("range must be positive and finite")?;
+        let durability_damage = match &v["durability_damage"] {
+            Value::Null => 0,
+            n => n
+                .as_u64()
+                .and_then(|n| i32::try_from(n).ok())
+                .ok_or("durability_damage must be a non-negative integer")?,
+        };
         Ok(Self {
             sound,
+            inline_sound_range,
             use_duration,
             range,
+            durability_damage,
         })
     }
 }

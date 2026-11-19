@@ -138,10 +138,16 @@ pub struct Cost {
     pub per_level: i32,
 }
 impl Cost {
+    fn decoded_fields(v: &Value) -> (Option<i32>, Option<i32>) {
+        let int = |name| v[name].as_i64().and_then(|n| i32::try_from(n).ok());
+        (int("base"), int("per_level_above_first"))
+    }
+
     fn parse(v: &Value) -> Self {
+        let (base, per_level) = Self::decoded_fields(v);
         Self {
-            base: v["base"].as_i64().unwrap_or(1) as i32,
-            per_level: v["per_level_above_first"].as_i64().unwrap_or(0) as i32,
+            base: base.unwrap_or(1),
+            per_level: per_level.unwrap_or(0),
         }
     }
     pub fn calculate(self, level: u32) -> i32 {
@@ -294,15 +300,11 @@ pub fn decode_pack_definition(mut value: Value) -> Result<Value, String> {
         let cost = fields
             .get(name)
             .ok_or_else(|| format!("{name} is required"))?;
-        let int = |field: &str| {
-            cost[field]
-                .as_i64()
-                .and_then(|n| i32::try_from(n).ok())
-                .ok_or_else(|| format!("{name}.{field} must be an integer"))
-        };
+        let (base, per_level) = Cost::decoded_fields(cost);
         let cost = Cost {
-            base: int("base")?,
-            per_level: int("per_level_above_first")?,
+            base: base.ok_or_else(|| format!("{name}.base must be an integer"))?,
+            per_level: per_level
+                .ok_or_else(|| format!("{name}.per_level_above_first must be an integer"))?,
         };
         fields.insert(
             name.into(),
@@ -349,6 +351,22 @@ pub fn decode_pack_definition(mut value: Value) -> Result<Value, String> {
         Some(Value::Object(_)) | None => {}
         _ => return Err("effects must be a component map".into()),
     }
+    fields.retain(|name, _| {
+        matches!(
+            name.as_str(),
+            "description"
+                | "max_level"
+                | "weight"
+                | "anvil_cost"
+                | "min_cost"
+                | "max_cost"
+                | "supported_items"
+                | "primary_items"
+                | "exclusive_set"
+                | "slots"
+                | "effects"
+        )
+    });
     Ok(value)
 }
 

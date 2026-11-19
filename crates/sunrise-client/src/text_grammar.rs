@@ -3,7 +3,8 @@
 //! the value the codec would have decoded, never a partial or ambiguous one.
 use crate::command::Registries;
 use crate::component;
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
+use sunrise_core::identifier::Identifier;
 
 /// Content kinds in the order the codec tries them without a `type`.
 const KINDS: [&str; 7] = [
@@ -53,36 +54,44 @@ fn build_object(
         Some(Value::String(kind)) => content(kind, fields, reg, snbt)?,
         Some(_) => return None,
     };
+    let boolean = |value: &Value| {
+        if snbt {
+            component::style_flag(Some(value))
+        } else {
+            value.as_bool()
+        }
+    };
     for flag in STYLE_FLAGS {
         if let Some(v) = present(fields, flag) {
-            if snbt {
-                component::style_flag(Some(v))?;
-            } else {
-                v.as_bool()?;
-            }
-            out.insert(flag.into(), v.clone());
+            out.insert(flag.into(), boolean(v)?.into());
         }
     }
     if let Some(v) = present(fields, "color") {
-        component::is_color(v.as_str()?).then_some(())?;
-        out.insert("color".into(), v.clone());
+        let name = v.as_str()?;
+        let color = if name.starts_with('#') {
+            let rgb = component::parse_color(name)?;
+            format!("#{rgb:06X}")
+        } else {
+            crate::text::named_color(name)?;
+            name.to_owned()
+        };
+        out.insert("color".into(), color.into());
     }
     if let Some(v) = present(fields, "shadow_color") {
-        component::shadow_color(v)?;
-        out.insert("shadow_color".into(), v.clone());
+        out.insert(
+            "shadow_color".into(),
+            Value::from(component::shadow_color(v)? as i32),
+        );
     }
     if let Some(v) = present(fields, "font") {
-        crate::text::font_id(v)?;
-        out.insert("font".into(), v.clone());
+        out.insert("font".into(), crate::text::font_id(v)?.into());
     }
     if let Some(v) = present(fields, "insertion") {
-        v.as_str()?;
-        out.insert("insertion".into(), v.clone());
+        out.insert("insertion".into(), v.as_str()?.into());
     }
     if let Some(v) = present(fields, "click_event") {
         let event = v.as_object()?;
         use crate::text::ClickEvent;
-        use serde_json::json;
         let decoded = match component::parse_click_event(event).ok()?? {
             ClickEvent::OpenUrl(url) => json!({"action":"open_url","url":url}),
             ClickEvent::ChangePage(page) => json!({"action":"change_page","page":page}),
@@ -128,41 +137,67 @@ fn present<'a>(fields: &'a Map<String, Value>, key: &str) -> Option<&'a Value> {
 
 /// `HoverEvent.CODEC`'s three actions; a `show_text` value is itself a component.
 fn hover(event: &Map<String, Value>, reg: &Registries, snbt: bool) -> Option<Value> {
-    // Recursive component slots are rebuilt below, never cloned before checking.
-    let mut out: Map<String, Value> = event
-        .iter()
-        .filter(|(key, _)| !matches!(key.as_str(), "value" | "name"))
-        .map(|(key, value)| (key.clone(), value.clone()))
-        .collect();
-    match event.get("action")?.as_str()? {
-        "show_text" => {
-            out.insert("value".into(), build(event.get("value")?, reg, snbt)?);
-        }
+    let action = event.get("action")?.as_str()?;
+    let out = match action {
+        "show_text" => json!({"action":action,"value":build(event.get("value")?, reg, snbt)?}),
         "show_item" => {
-            event.get("id")?.as_str()?;
-        }
-        "show_entity" => {
-            sunrise_core::identifier::Identifier::parse(event.get("id")?.as_str()?).ok()?;
-            match event.get("uuid")? {
-                Value::String(id) => {
-                    sunrise_client_core::uuid::uuid_from_text(id)?;
+            let id = Identifier::parse(event.get("id")?.as_str()?)
+                .ok()?
+                .to_string();
+            if !reg.items.is_empty() && !reg.items.contains(&id) {
+                return None;
+            }
+            let mut out = json!({"action":action,"id":id});
+            if let Some(v) = present(event, "count") {
+                let count = v.as_i64().filter(|n| (1..=99).contains(n))?;
+                if count != 1 {
+                    out["count"] = count.into();
                 }
-                Value::Array(words) if words.len() == 4 => {
-                    for word in words {
-                        i32::try_from(word.as_i64()?).ok()?;
+            }
+            if let Some(v) = present(event, "components") {
+                let patch = v.as_object()?;
+                let mut normalized = Map::new();
+                for (key, value) in patch {
+                    let id = Identifier::parse(key.strip_prefix('!').unwrap_or(key)).ok()?;
+                    if key.starts_with('!') {
+                        normalized.insert(format!("!{id}"), json!({}));
+                    } else {
+                        normalized.insert(id.to_string(), value.clone());
                     }
                 }
+                if !normalized.is_empty() {
+                    out["components"] = normalized.into();
+                }
+            }
+            out
+        }
+        "show_entity" => {
+            let id = Identifier::parse(event.get("id")?.as_str()?)
+                .ok()?
+                .to_string();
+            if !reg.entity_types.is_empty() && !reg.entity_types.contains(&id) {
+                return None;
+            }
+            let uuid = match event.get("uuid")? {
+                Value::String(id) => sunrise_client_core::uuid::uuid_from_text(id)?,
+                Value::Array(words) if words.len() == 4 => {
+                    let mut out = [0; 4];
+                    for (slot, word) in out.iter_mut().zip(words) {
+                        *slot = i32::try_from(word.as_i64()?).ok()?;
+                    }
+                    out
+                }
                 _ => return None,
-            }
+            };
+            let mut out = json!({"action":action,"id":id,"uuid":uuid});
             if let Some(name) = present(event, "name") {
-                out.insert("name".into(), build(name, reg, snbt)?);
-            } else {
-                out.remove("name");
+                out["name"] = build(name, reg, snbt)?;
             }
+            out
         }
         _ => return None,
-    }
-    Some(Value::Object(out))
+    };
+    Some(out)
 }
 
 /// One content kind of `fields` alone, as its `MapCodec` decodes it: None when it does not.
@@ -208,9 +243,13 @@ fn content(
         }
         "score" => {
             let score = fields.get("score")?.as_object()?;
-            score.get("name")?.as_str()?;
-            score.get("objective")?.as_str()?;
-            keep(&mut out, "score");
+            out.insert(
+                "score".into(),
+                json!({
+                    "name": score.get("name")?.as_str()?,
+                    "objective": score.get("objective")?.as_str()?,
+                }),
+            );
         }
         "selector" => {
             selector_parses(string("selector")?, reg).then_some(())?;
@@ -224,24 +263,32 @@ fn content(
             path_parses(string("nbt")?).then_some(())?;
             keep(&mut out, "nbt");
             let source = match present(fields, "source") {
-                Some(Value::String(source)) => {
-                    data_source(source, fields, reg).map(|key| (key, fields[key].clone()))?
-                }
+                Some(Value::String(source)) => data_source(source, fields, reg)?,
                 Some(_) => return None,
-                None => ["entity", "block", "storage"].into_iter().find_map(|key| {
-                    data_source(key, fields, reg).map(|k| (k, fields[k].clone()))
-                })?,
+                None => ["entity", "block", "storage"]
+                    .into_iter()
+                    .find_map(|key| data_source(key, fields, reg))?,
             };
-            out.insert(source.0.into(), source.1);
+            out.insert(source.0.into(), source.1.into());
             // `interpret`, `plain` and `separator` are lenient: a wrong kind is dropped.
-            let flag =
-                |key: &str| present(fields, key).and_then(|v| component::style_flag(Some(v)));
-            if flag("interpret") == Some(true) && flag("plain") == Some(true) {
+            let flag = |key: &str| {
+                present(fields, key)
+                    .and_then(|v| {
+                        if snbt {
+                            component::style_flag(Some(v))
+                        } else {
+                            v.as_bool()
+                        }
+                    })
+                    .unwrap_or(false)
+            };
+            let (interpret, plain) = (flag("interpret"), flag("plain"));
+            if interpret && plain {
                 return None;
             }
-            for key in ["interpret", "plain"] {
-                if flag(key).is_some() {
-                    keep(&mut out, key);
+            for (key, value) in [("interpret", interpret), ("plain", plain)] {
+                if value {
+                    out.insert(key.into(), true.into());
                 }
             }
             if let Some(separator) = present(fields, "separator").and_then(|s| build(s, reg, snbt))
@@ -250,28 +297,46 @@ fn content(
             }
         }
         "object" => {
-            present(fields, "object")
-                .map(Value::is_string)
-                .unwrap_or(true)
-                .then_some(())?;
-            use component::InlineObjectFields;
-            match component::inline_object_fields(fields)? {
-                InlineObjectFields::Player { profile, hat } => {
-                    out.insert("object".into(), "player".into());
-                    out.insert("player".into(), profile.clone());
-                    if !hat {
-                        out.insert("hat".into(), Value::Bool(hat));
-                    }
-                }
-                InlineObjectFields::Atlas { atlas, sprite } => {
-                    let id = sunrise_core::identifier::Identifier::parse;
-                    out.insert("object".into(), "atlas".into());
+            let atlas = || {
+                let sprite = Identifier::parse(string("sprite")?).ok()?.to_string();
+                let mut out = Map::from_iter([
+                    ("object".into(), "atlas".into()),
+                    ("sprite".into(), sprite.into()),
+                ]);
+                if let Some(value) = present(fields, "atlas") {
+                    let atlas = Identifier::parse(value.as_str()?).ok()?.to_string();
                     if atlas != "minecraft:blocks" {
-                        out.insert("atlas".into(), id(atlas).ok()?.to_string().into());
+                        out.insert("atlas".into(), atlas.into());
                     }
-                    out.insert("sprite".into(), id(sprite).ok()?.to_string().into());
                 }
-            }
+                Some(out)
+            };
+            let player = || {
+                let profile = crate::api_text::decoded_profile_json(fields.get("player")?)?;
+                let mut out = Map::from_iter([
+                    ("object".into(), "player".into()),
+                    ("player".into(), profile),
+                ]);
+                if let Some(hat) = present(fields, "hat") {
+                    let hat = if snbt {
+                        component::style_flag(Some(hat))
+                    } else {
+                        hat.as_bool()
+                    }?;
+                    if !hat {
+                        out.insert("hat".into(), false.into());
+                    }
+                }
+                Some(out)
+            };
+            out = match present(fields, "object") {
+                None => atlas().or_else(player),
+                Some(value) => match value.as_str()? {
+                    "atlas" => atlas(),
+                    "player" => player(),
+                    _ => return None,
+                },
+            }?;
             if let Some(fallback) = present(fields, "fallback") {
                 out.insert("fallback".into(), build(fallback, reg, snbt)?);
             }
@@ -287,14 +352,16 @@ fn data_source(
     source: &str,
     fields: &Map<String, Value>,
     reg: &Registries,
-) -> Option<&'static str> {
+) -> Option<(&'static str, String)> {
     let value = fields.get(source)?.as_str()?;
     match source {
-        "entity" => selector_parses(value, reg).then_some("entity"),
-        "block" => Some("block"),
-        "storage" => sunrise_core::identifier::Identifier::parse(value)
-            .ok()
-            .map(|_| "storage"),
+        "entity" => selector_parses(value, reg).then(|| ("entity", value.into())),
+        "block" => {
+            let mut r = crate::command::Reader::new(value);
+            (crate::command::ArgType::BlockPos.parse(&mut r, reg).is_ok() && !r.can_read())
+                .then(|| ("block", value.into()))
+        }
+        "storage" => Some(("storage", Identifier::parse(value).ok()?.to_string())),
         _ => None,
     }
 }
