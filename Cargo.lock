@@ -5053,14 +5053,11 @@ dependencies = [
 name = "sunrise-mod-points"
 version = "0.1.0"
 dependencies = [
- "quote",
- "serde_json",
  "sunrise-engine-slots",
  "sunrise-mod-api",
  "sunrise-mod-api-gen",
  "sunrise-mod-api-macros",
  "sunrise-mod-call",
- "sunrise-mod-point-shape",
  "syn 2.0.119",
 ]
 
