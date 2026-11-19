@@ -1360,9 +1360,11 @@ fn merge(kind: Merge, layers: &[Vec<u8>]) -> Option<Vec<u8>> {
         // appended to its own, from the bottom up. A layer whose sources
         // are not a list is skipped, as vanilla logs and skips the file.
         Merge::Atlas => {
-            let mut layers = parsed
-                .into_iter()
-                .filter(|l| l.get("sources").is_none_or(Value::is_array));
+            // Each definition stands or falls on its own: one whose sources don't decode is
+            // dropped whole, and the others' sources still run.
+            let mut layers = parsed.into_iter().filter(|l| {
+                crate::atlas_sources::decode(&Value::Object(l.clone()).to_string()).is_ok()
+            });
             let mut doc = layers.next()?;
             let added = layers
                 .filter_map(|l| l.get("sources").and_then(Value::as_array).cloned())
@@ -2201,16 +2203,34 @@ mod tests {
         );
         // SpriteSourceList: sources from the bottom pack up, and the bottom
         // file keeps the fields a merge must not drop.
+        let directory =
+            |source: &str| serde_json::json!({"type": "directory", "source": source, "prefix": ""});
         let atlas = merge(
             Merge::Atlas,
             &[
-                json(r#"{"sources":[1],"unseen":true}"#),
-                json(r#"{"sources":[2]}"#),
+                json(
+                    r#"{"sources":[{"type":"directory","source":"a","prefix":""}],"unseen":true}"#,
+                ),
+                json(r#"{"sources":[{"type":"directory","source":"b","prefix":""}]}"#),
             ],
         );
         assert_eq!(
             parse(atlas.unwrap()),
-            serde_json::json!({"sources":[1,2],"unseen":true})
+            serde_json::json!({"sources":[directory("a"), directory("b")],"unseen":true})
+        );
+        // A definition that does not decode is skipped alone: the sources of the packs
+        // below and above it still run.
+        let atlas = merge(
+            Merge::Atlas,
+            &[
+                json(r#"{"sources":[{"type":"directory","source":"low","prefix":""}]}"#),
+                json(r#"{"sources":[{"type":"nobody:such_source"}]}"#),
+                json(r#"{"sources":[{"type":"directory","source":"high","prefix":""}]}"#),
+            ],
+        );
+        assert_eq!(
+            parse(atlas.unwrap()),
+            serde_json::json!({"sources":[directory("low"), directory("high")]})
         );
         // BlockStateModelLoader: every definition kept, bottom first, for the
         // catalog to bind one by one; one that does not parse is skipped.
