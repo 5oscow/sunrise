@@ -124,11 +124,15 @@ review and history; it is not a candidate for installation.
    supplies eligibility for each version: `native-1/<sunrise>/<mixins>` says what it was made for, not whether
    the used SDK surface is unchanged on this build. Try another eligible version if a later range rules out a
    choice. Do not change a dependency to a version that breaks an installed mod's known range.
-4. Try each request on its own. If an installed version blocks it and the batch also requests a change to that mod,
-   try those requests together before refusing. Plan feasible requests together when their selections share a mod or
-   activate a dependency constraint across requests. If a group can't be resolved, report the refusal for that group;
-   an independent group can still install. A plan gives each request's outcome and version or refusal reason,
-   lists what to install, keep or update, and identifies which requests need each dependency. Lists are ordered by id.
+4. Try the entire batch against the final versions. A replacement can come from a request or from another mod's
+   required dependencies. If the whole batch cannot install, group requests whose selections share a mod or activate
+   a dependency constraint across requests, and check each group together. An installed version can block a request
+   on its own but not as part of a group that replaces that version; a different candidate version may need a
+   different replacement. If a group still fails, retry by omitting requests blocked by installed versions, trying
+   larger subgroups first. If the retry search hits its limit, the unresolved requests report that limit and the
+   previously validated groups can still be planned separately. A plan gives each request's outcome and version or
+   refusal reason, lists what to install, keep or update, and identifies which requests need each dependency. Lists
+   are ordered by id.
    An update with `downgrade: true` moves to a lower SemVer; the installer names that downgrade in its status line
    (for example, “Downgraded Sunrise Creatures from 0.2.0 to 0.1.3”).
 5. Before removing a mod, use its id and the installed artifacts to find the known installed mods that require
