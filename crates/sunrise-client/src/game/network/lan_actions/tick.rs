@@ -176,6 +176,7 @@ impl Game<'_> {
             .map(|g| g.conn)
             .collect();
         let mut active_level = None;
+        let mut collision = None;
         for conn in conns {
             let Some(dim) = self
                 .lan
@@ -191,13 +192,13 @@ impl Game<'_> {
             if active_level != Some(dim) {
                 if across_levels {
                     if active_level.is_some() {
-                        self.flush_guest_connection_effects();
-                        self.flush_attachment_sync();
-                        self.flush_native_sounds();
+                        self.finish_guest_connection_level();
+                        drop(collision.take());
                     }
                     if self.dim != dim {
                         self.enter_level(dim)?;
                     }
+                    collision = Some((self.placed_moving_colliders(), self.collision_parts()));
                 }
                 active_level = Some(dim);
                 // Most players aren't in any of the columns items reach.
@@ -210,10 +211,8 @@ impl Game<'_> {
                     self.refresh_hook_targets();
                 }
             }
-            if across_levels {
-                let colliders = self.placed_moving_colliders();
-                let _parts = self.collision_parts();
-                sunrise_client_render::moving_colliders::in_level(colliders, || {
+            if let Some((colliders, _parts)) = &collision {
+                sunrise_client_render::moving_colliders::in_level(colliders.clone(), || {
                     sunrise_client::block_contact::in_level(self.tick, Some(dim.id()), || {
                         self.tick_guest_connection(conn);
                     });
@@ -227,11 +226,15 @@ impl Game<'_> {
             }
         }
         if across_levels && active_level.is_some() {
-            self.flush_guest_connection_effects();
-            self.flush_attachment_sync();
-            self.flush_native_sounds();
+            self.finish_guest_connection_level();
         }
         Ok(())
+    }
+
+    fn finish_guest_connection_level(&mut self) {
+        self.flush_guest_connection_effects();
+        self.flush_attachment_sync();
+        self.flush_native_sounds();
     }
 
     fn tick_guest_connection(&mut self, conn: u32) {

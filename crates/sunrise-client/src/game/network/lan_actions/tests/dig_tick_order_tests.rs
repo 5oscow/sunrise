@@ -129,6 +129,7 @@ fn player_tick_hooks_observe_advanced_dig_progress_and_skipped_body_still_ticks_
         .into(),
         || {
             with_game(|game| {
+                game.world_root = game.options.game_dir.clone().unwrap();
                 open_to_lan(game);
                 game.build_registries();
                 let stone = game
