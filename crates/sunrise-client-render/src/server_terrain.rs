@@ -204,7 +204,7 @@ impl Bobby {
 
 /// One level's stored terrain, shared by the far-terrain threads. A chunk
 /// it doesn't have comes from Bobby's cache, else the server's BlueMap, if
-/// the player named it or Find BlueMap found it.
+/// the player named it.
 pub struct ServerTerrain {
     dir: PathBuf,
     blue_map: Option<Arc<BlueMap>>,
