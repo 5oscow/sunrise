@@ -405,7 +405,6 @@ mod tests {
         assert!(super::set_engine(GuestEngine::Interpreter).is_err());
     }
 
-
     #[test]
     fn the_thread_structure_allowance_covers_a_few_kib_and_no_more() {
         let required = 136 * 1024 * 1024;
