@@ -64,8 +64,8 @@ A registry or a release page can tell which builds a published package fits from
 `surface.json` alone: `cargo sunrise-mod fits <file.smod> --build <name>`. For a current list nothing from the build
 the mod was made for is needed, so pruning that build's compiled files never strands the mod. `fits` first checks
 that the list was made for the build the package pins (a native mod's `[native] sunrise`, a wasm mod's
-`[package.metadata.sunrise] sdk` in its packed `Cargo.toml`), and says so when it was not or when the package names
-no pin.
+`[package.metadata.sunrise] sdk` in its packed `Cargo.toml`). If the pin is missing, is not a full commit SHA,
+or does not match `made_for`, the list cannot show which other builds the package fits.
 
 The version promise covers the hooks in the list. A hook entry that holds no version cannot be shown to mean what
 the mod was written for, whatever the target's version is: when nothing else changed, the answer is "not known",
@@ -75,11 +75,11 @@ naming the hooks, never "fits". `native-check` reports it as `no-list` with `why
 
 A schema 1 list differs in two ways, and packing the mod again with `cargo sunrise-mod build` removes both:
 
-- **It holds no hook versions.** `cargo sunrise-mod fits` compares the list with the target first, so a removed or
-  changed item is named whatever else is known. Only when nothing else changed does it fetch `surface.json` of the
-  build the list was made for and take the versions from there; that file is small and stays published when a
-  build's compiled files are pruned. If it cannot be fetched, the answer is the "not known" above, with the reason.
-  `native-check` and `sunrise-stage fits` are not given that build, so there the answer is always "not known".
+- **It holds no hook versions.** `cargo sunrise-mod fits` fetches the `surface.json` of the build the list was
+  made for only when a comparison with another build would otherwise be "not known" because a required hook
+  version is missing. That file stays published when a build's compiled files are pruned. If it cannot be fetched,
+  the answer is still "not known", with the reason. `native-check` and `sunrise-stage fits` do not fetch that file:
+  both still report definite misfits and otherwise report "not known" when a required hook version is missing.
 - **It recorded a struct as built wherever the scan was in doubt**, with nothing to tell a doubt from a literal the
   scan had placed. A reader does not read how such a list says a struct is built. This is a chosen trade-off: a
   struct the mod really builds field by field, which gained a field, is judged to fit and then fails the compile,
