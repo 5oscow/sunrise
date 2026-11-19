@@ -218,17 +218,15 @@ impl Game<'_> {
         self.with_level(|b, level, ticks| {
             b.set_placed_by_state(level, ticks, BlockPos::new(x, y, z), placed);
         });
-        let _ = self.set_placed_by(pos, placed, None, stack);
+        let _ = self.set_placed_by(pos, None, stack);
         let _ = self.process_level_events();
     }
 
     /// The game-level part of `Block.setPlacedBy`, once the state-only part has run.
-    /// `state` is the state the callback began with, before its writes or neighbour updates.
     /// A supplied player is already the acting player. A supplied stack is read only.
     pub(super) fn set_placed_by(
         &mut self,
         pos: [i32; 3],
-        state: BlockStateId,
         placer: Option<PlayerRef>,
         stack: Option<&ItemStack>,
     ) -> crate::Result<()> {
@@ -260,10 +258,10 @@ impl Game<'_> {
         }
         self.check_wither_spawn(pos)?;
         if self.is_logical_server()
-            && block_listens(HookId::SetPlacedBy, state)
+            && block_listens(HookId::SetPlacedBy, placed)
             && let Some(level) = self.level(self.dim.id())
         {
-            self.native_set_placed_by(level, pos, state, placer.map(PlayerRef::entity), stack);
+            self.native_set_placed_by(level, pos, placed, placer.map(PlayerRef::entity), stack);
         }
         Ok(())
     }
