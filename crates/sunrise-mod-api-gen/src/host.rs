@@ -645,9 +645,7 @@ fn access_refusal_impls(source: &str) -> Result<Vec<String>, String> {
                 // A test-only impl never reaches the generated forwarders.
                 (!item.attrs.iter().any(|a| {
                     a.path().is_ident("cfg")
-                        && quote::ToTokens::to_token_stream(a)
-                            .to_string()
-                            .contains("test")
+                        && a.parse_args::<syn::Ident>().is_ok_and(|i| i == "test")
                 }))
                 .then_some(())?;
                 let (_, path, _) = item.trait_.as_ref()?;
@@ -1300,8 +1298,8 @@ mod state_write_tests;
 mod tests {
     #[test]
     fn only_non_test_impls_of_the_marker_name_a_refusal() {
-        let source = "impl AccessRefusal for A {}\n#[cfg(test)]\nimpl AccessRefusal for B {}\nimpl Other for C {}";
-        assert_eq!(access_refusal_impls(source).unwrap(), ["A"]);
+        let source = "impl AccessRefusal for A {}\n#[cfg(test)]\nimpl AccessRefusal for B {}\n#[cfg(not(test))]\nimpl AccessRefusal for D {}\nimpl Other for C {}";
+        assert_eq!(access_refusal_impls(source).unwrap(), ["A", "D"]);
     }
 
     use super::*;

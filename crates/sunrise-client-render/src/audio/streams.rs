@@ -726,7 +726,7 @@ mod tests {
         assert_eq!(stream.state(), AudioStreamState::Buffering);
         assert_eq!(stream.push(&half(1)), 1);
         let out = rig.play(8);
-        assert!(out.iter().all(|s| (*s - 0.5).abs() < 1e-6), "{out:?}");
+        assert!(out.iter().all(|s| *s == 0.5), "{out:?}");
         assert_eq!(stream.state(), AudioStreamState::Playing);
     }
 
@@ -1045,6 +1045,41 @@ mod tests {
     }
 
     #[test]
+    fn entity_streams_are_followed_again_before_they_are_heard_after_mod_audio_returns() {
+        let mut audio = Audio::silent(&sunrise_assets::resource_source::ResourceSource::directory(
+            std::path::PathBuf::from("/nonexistent/sunrise-test-audio"),
+        ));
+        audio.backend_live_for_bench();
+        let entity = mod_api::EntityRef::new(mod_api::WorldEpoch::new(1), 7);
+        let _stream = audio
+            .open_stream(
+                "mod",
+                &spec().with_placement(StreamPlacement::Entity(entity)),
+            )
+            .unwrap();
+        let heard = |audio: &Audio| {
+            audio.backend.mixer.lock().unwrap().stream_gain[SoundSource::Voice.index()]
+        };
+        let mut asked = 0;
+        // Off: nothing is followed, and when it is back the mixer still hears nothing...
+        audio.follow_entities_at(0.0, |_| {
+            asked += 1;
+            None
+        });
+        assert_eq!(asked, 0);
+        audio.sync_stream_gain(1.0);
+        assert_eq!(heard(&audio), 0.0);
+        // ...until a frame has followed the entities.
+        audio.follow_entities_at(1.0, |_| {
+            asked += 1;
+            Some([0.0, 0.0, 1.0])
+        });
+        assert_eq!(asked, 1);
+        audio.sync_stream_gain(1.0);
+        assert!(heard(&audio) > 0.0);
+    }
+
+    #[test]
     fn a_lost_output_stops_every_stream_and_refuses_new_ones_until_it_is_back() {
         let rig = Rig::new();
         let stream = rig.open("mod", &spec()).unwrap();
@@ -1071,7 +1106,7 @@ mod tests {
             mixer.muffle.target = [1.0, 0.0];
             mixer.muffle.current = [1.0, 0.0];
         }
-        assert!(rig.play(64).iter().all(|s| s.abs() < 1e-6));
+        assert!(rig.play(64).iter().all(|s| *s == 0.0));
     }
 
     /// 24 kHz mono, so one source frame plays for exactly two output frames: no rounding.
@@ -1123,12 +1158,12 @@ mod tests {
         let stream = rig.open("mod", &spec()).unwrap();
         stream.push(&half(960));
         // Exactly the audio there is: the buffer ends where it does, nothing has run dry.
-        assert!(rig.play(960).iter().all(|s| (*s - 0.5).abs() < 1e-6));
+        assert!(rig.play(960).iter().all(|s| *s == 0.5));
         assert_eq!(stream.state(), AudioStreamState::Playing);
         // A chunk much smaller than the prebuffer arrives before the next buffer: it plays.
         stream.push(&half(100));
         let out = rig.play(100);
-        assert!(out.iter().all(|s| (*s - 0.5).abs() < 1e-6), "{out:?}");
+        assert!(out.iter().all(|s| *s == 0.5), "{out:?}");
         assert_eq!(stream.state(), AudioStreamState::Playing);
         // Only now that the output needs a frame and none is there does it run dry.
         rig.play(1);
@@ -1271,7 +1306,7 @@ mod tests {
             tick_paced_underruns(150),
         );
         eprintln!("tick-paced underruns in 30 s: 50 ms {a}, 100 ms {b}, 150 ms {c}");
-        assert!(a >= b && b >= c, "{a} {b} {c}");
-        assert_eq!(c, 0, "a 150 ms prebuffer rides out 50 ms of jitter");
+        // The book's table: these exact counts, on the virtual clock.
+        assert_eq!((a, b, c), (2, 0, 0));
     }
 }

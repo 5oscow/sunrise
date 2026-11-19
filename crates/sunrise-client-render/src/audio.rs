@@ -401,6 +401,9 @@ pub struct Audio {
     preview: crate::sound_preview::SoundPreview,
     /// A mod's muffle fading out (`muffle`), advanced by `tick`.
     muffle: Option<MuffleFade>,
+    /// A frame skipped following entities while mod streams were off: their positions are stale
+    /// until one is followed again, so the mixer plays none of them before then.
+    entities_stale: std::sync::atomic::AtomicBool,
     /// The `stream_gain` the mixer was last given: it is locked again only when this changes.
     stream_gain_sent: [f32; 11],
     /// `SoundEngine.lastSeenDevices`: the system default output last seen.
@@ -1369,6 +1372,7 @@ impl Audio {
             preview: Default::default(),
             muffle: None,
             stream_gain_sent: [f32::NAN; 11],
+            entities_stale: Default::default(),
             #[cfg(feature = "audio")]
             default_seen: if live { default_output_name() } else { None },
             #[cfg(feature = "audio")]
@@ -1549,6 +1553,7 @@ impl Audio {
             preview: Default::default(),
             muffle: None,
             stream_gain_sent: [f32::NAN; 11],
+            entities_stale: Default::default(),
             // The primary backend owns and maintains the output device.
             #[cfg(feature = "audio")]
             default_seen: self.default_seen.clone(),
@@ -1708,14 +1713,24 @@ impl Audio {
     }
     /// Places each entity-placed stream at its entity's position as `resolve` finds it now, or
     /// leaves it unplaced where it finds none. Called once a frame; it does nothing, and locks
-    /// nothing the output callback takes, with no stream open or while their gain is zero.
+    /// nothing the output callback takes, with no stream open. While mod audio is off it follows
+    /// nothing, and the first frame after it is back follows before any stream is heard.
     pub fn follow_stream_entities(
         &self,
         resolve: impl FnMut(mod_api::EntityRef) -> Option<[f64; 3]>,
     ) {
-        if sunrise_hooks::sound::engine::mod_stream_gain() > 0.0 {
+        self.follow_entities_at(sunrise_hooks::sound::engine::mod_stream_gain(), resolve);
+    }
+    fn follow_entities_at(
+        &self,
+        mod_gain: f32,
+        resolve: impl FnMut(mod_api::EntityRef) -> Option<[f64; 3]>,
+    ) {
+        if mod_gain > 0.0 {
             self.backend.streams.follow_entities(resolve);
         }
+        self.entities_stale
+            .store(mod_gain <= 0.0, std::sync::atomic::Ordering::Relaxed);
     }
     /// The listener left its level (`updateLevelInEngines(null)`): every vanilla sound stops, and
     /// every positional mod stream is unplaced until its mod places it again; flat streams play
@@ -1738,18 +1753,7 @@ impl Audio {
         }
         self.sync_volumes();
         self.backend.streams.reap(&self.backend.mixer);
-        // The volume a stream plays at is the sound's own, times the gain a crate above sets for
-        // mods' audio; the mixer is locked only when one of them changed.
-        let mod_gain = sunrise_hooks::sound::engine::mod_stream_gain();
-        let gain = std::array::from_fn(|source| {
-            self.engine.final_source_volume(source).clamp(0.0, 1.0) * mod_gain
-        });
-        if gain != self.stream_gain_sent
-            && let Ok(mut m) = self.backend.mixer.lock()
-        {
-            m.stream_gain = gain;
-            self.stream_gain_sent = gain;
-        }
+        self.sync_stream_gain(sunrise_hooks::sound::engine::mod_stream_gain());
         self.engine.tick(paused, ctx, &mut self.backend);
         // A paused game holds a mod's muffle where it is, as it holds the sounds.
         if !paused && let Some(fade) = &mut self.muffle {
@@ -1760,6 +1764,28 @@ impl Audio {
                 self.engine.set_unmuffled(Vec::new(), &mut self.backend);
             }
             self.set_muffle_level(level);
+        }
+    }
+    /// Gives the mixer the volume each stream plays at: the sound's own times `mod_gain`, held at
+    /// zero while entity-placed streams have stale positions. The mixer is locked only when the
+    /// volumes changed.
+    fn sync_stream_gain(&mut self, mod_gain: f32) {
+        let mod_gain = if self
+            .entities_stale
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            0.0
+        } else {
+            mod_gain
+        };
+        let gain = std::array::from_fn(|source| {
+            self.engine.final_source_volume(source).clamp(0.0, 1.0) * mod_gain
+        });
+        if gain != self.stream_gain_sent
+            && let Ok(mut m) = self.backend.mixer.lock()
+        {
+            m.stream_gain = gain;
+            self.stream_gain_sent = gain;
         }
     }
     /// A mod's muffle (`native_muffle_sounds`): `amount` (0 to 1) of every sound's volume taken

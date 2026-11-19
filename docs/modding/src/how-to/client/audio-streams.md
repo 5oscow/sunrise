@@ -76,7 +76,7 @@ A simulation of that pacing runs in the game's tests (`tick_paced_underruns` in 
 
 | `prebuffer_ms` | Underruns in 30 s |
 |---|---|
-| 50 | 113 |
+| 50 | 2 |
 | 100 | 0 |
 | 150 | 0 |
 
