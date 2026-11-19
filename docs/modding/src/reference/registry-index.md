@@ -91,7 +91,7 @@ when it can read the mod's source against the pinned SDK, and says what stops it
 `cargo sunrise-mod check <file>` refuses a native mod file with no list, or with one made for another build than the
 mod pins; `publish` and `registry release` run the same check on the file they are given. `registry check` applies
 it to files whose hash is new in the pull request. `registry build` and installs do not apply it, so files already
-listed stay as they are. A mod with a `[[native.module]]`, `[[native.bridge]]` or `[[native.state]]` row is outside
+listed stay as they are. A mod with a `[[native.module]]` or `[[native.bridge]]` row is outside
 this rule: no list can describe those rows, so its file needs none.
 
 ## Dependency checks
