@@ -495,14 +495,19 @@ impl Game<'_> {
 
     /// The level a player leaving the End goes to, and the respawn point it
     /// resolves there: the point's own level
-    /// (`ServerPlayer.RespawnConfig.getDimensionOrDefault`), else the world
-    /// spawn's (`TeleportTransition.createDefault`, `findRespawnDimension`).
+    /// (`ServerPlayer.RespawnConfig.getDimensionOrDefault`): the Overworld for a
+    /// bed there (the guest's `spawn`), else the world spawn's
+    /// (`TeleportTransition.createDefault`, `findRespawnDimension`).
     fn end_departure(&mut self, conn: u32) -> (Dim, Option<RespawnConfig>) {
-        let config = self.as_guest(conn, |g| g.respawn_config).flatten();
-        (
-            config.map_or_else(|| self.world_spawn_level(), |c| c.dim),
-            config,
-        )
+        let (config, bed) = self
+            .as_guest(conn, |g| (g.respawn_config, g.spawn.is_some()))
+            .unwrap_or((None, false));
+        let level = match config {
+            Some(c) => c.dim,
+            None if bed => Dim::Overworld,
+            None => self.world_spawn_level(),
+        };
+        (level, config)
     }
 
     /// The respawn point of the trip a player has just started: its block is
@@ -933,14 +938,18 @@ impl Game<'_> {
             )
         };
         self.end_portal_travel = end;
+        // Out of the End when the trip starts there, wherever it leads (the world spawn
+        // may be in the End too).
+        let entering = source != Dim::End;
         // Leaving the End: the player's own respawn point.
         let own = if end {
-            self.as_guest(conn, |g| g.end_destination(target)).flatten()
+            self.as_guest(conn, |g| g.end_destination(entering, target))
+                .flatten()
         } else {
             None
         };
         let scaled = own
-            .or_else(|| self.end_destination(target))
+            .or_else(|| self.end_destination(entering, target))
             .unwrap_or(Vec3::new(from.x * scale, from.y, from.z * scale));
         self.end_portal_travel = false;
         if let Err(e) = self.enter_level(target) {
@@ -1290,16 +1299,23 @@ impl Game<'_> {
                     }
                 }
             } else if trip.end {
-                let guest_arrival =
-                    self.as_guest(trip.conn, |g| g.end_arrival(trip.target, &mut trip.finder));
+                let entering = trip.source != Dim::End;
+                let guest_arrival = self.as_guest(trip.conn, |g| {
+                    g.end_arrival(entering, trip.target, &mut trip.finder)
+                });
                 let arrival = match guest_arrival {
                     Some(arrival) => arrival,
-                    None => self.end_arrival(trip.target, &mut trip.finder),
+                    None => self.end_arrival(entering, trip.target, &mut trip.finder),
                 };
                 match arrival {
-                    Ok(Some((at, turned))) => {
+                    Ok(Some((at, [turned, tilted]))) => {
                         // EndPortalBlock.getPortalDestination: PLACE_PORTAL_TICKET.
                         self.place_portal_ticket(Self::chunk_of(at));
+                        if let Some(pitch) = tilted
+                            && let Some(host) = self.lan.as_mut()
+                        {
+                            host.hub.guests.update(i, |guest| guest.pitch = pitch);
+                        }
                         (at, turned.unwrap_or(yaw))
                     }
                     Ok(None) => {

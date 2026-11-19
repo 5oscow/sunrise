@@ -55,7 +55,7 @@ impl Game<'_> {
         let own = host.hub.guests[i]
             .respawn_elsewhere
             .as_ref()
-            .map(RespawnConfig::from_saved);
+            .and_then(RespawnConfig::from_saved);
         let elsewhere = own.filter(|_| server);
         // In the window's world a guest has no level of its own to wait in:
         // its bed is resolved at once when its chunk is there, else it
@@ -68,8 +68,15 @@ impl Game<'_> {
                 f64::from(c.pos[2]) + 0.5,
             ]
         });
-        // Without a point of its own: the world spawn's level (findRespawnDimension).
-        let level = elsewhere.map_or(spawn_level, |c| c.dim);
+        // An Overworld point of its own (`spawn`, or the bed above) is there; without any
+        // point, the world spawn's level (findRespawnDimension).
+        let level = match elsewhere {
+            Some(c) => c.dim,
+            None if host.hub.guests[i].spawn.is_some() || in_frame_bed.is_some() => {
+                crate::game::Dim::Overworld
+            }
+            None => spawn_level,
+        };
         let spawn = elsewhere.map_or(spawn, |c| {
             [
                 f64::from(c.pos[0]) + 0.5,

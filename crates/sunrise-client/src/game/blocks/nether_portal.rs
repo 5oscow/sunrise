@@ -87,17 +87,27 @@ pub(super) struct Plan {
     width: f32,
     height: f32,
     /// Through an End portal: `approximate` is the End's spawn point, or the
-    /// Overworld's shared spawn.
+    /// world spawn in its level.
     pub(super) end: bool,
+    /// Through an End portal out of the End, to the world spawn's level, which may be the End
+    /// itself: no platform is built there.
+    pub(super) from_end: bool,
 }
 
 impl Plan {
     /// `EndPortalBlock.getPortalDestination` for an entity other than a
     /// player in `from`: the End's spawn point, or out of the End the
-    /// Overworld's shared spawn `world_spawn`.
-    fn end_portal(from: Dim, world_spawn: BlockPos, width: f32, height: f32) -> Self {
-        let (dim, approximate) = if from == Dim::End {
-            (Dim::Overworld, world_spawn)
+    /// world spawn `world_spawn` in its level `spawn_level` (`respawnData.dimension()`).
+    fn end_portal(
+        from: Dim,
+        spawn_level: Dim,
+        world_spawn: BlockPos,
+        width: f32,
+        height: f32,
+    ) -> Self {
+        let from_end = from == Dim::End;
+        let (dim, approximate) = if from_end {
+            (spawn_level, world_spawn)
         } else {
             let [x, y, z] = super::end::END_SPAWN;
             (Dim::End, BlockPos::new(x, y, z))
@@ -110,6 +120,7 @@ impl Plan {
             width,
             height,
             end: true,
+            from_end,
         }
     }
 }
@@ -317,6 +328,7 @@ fn arrival_tag(a: &Arrival) -> Tag {
         ("width", Tag::Float(p.width.to_bits())),
         ("height", Tag::Float(p.height.to_bits())),
         ("end", Tag::Int(i32::from(p.end))),
+        ("from_end", Tag::Int(i32::from(p.from_end))),
         ("entity", a.tag.clone()),
     ])
 }
@@ -354,6 +366,8 @@ fn arrival_from_tag(a: &Tag) -> Option<Arrival> {
             width: float("width").unwrap_or(0.25),
             height: float("height").unwrap_or(0.25),
             end: int("end").unwrap_or(0) != 0,
+            // An End portal's entry always leads into the End.
+            from_end: int("from_end").map_or(dim != Dim::End, |v| v != 0),
         },
         tag: tag.clone(),
     })
@@ -483,6 +497,7 @@ impl Game<'_> {
             width,
             height,
             end: false,
+            from_end: false,
         }
     }
     /// Whether entity `id` may take `plan`'s portal: the rule on entering its
@@ -515,6 +530,7 @@ impl Game<'_> {
         });
         Plan::end_portal(
             self.dim,
+            self.world_spawn_level(),
             BlockPos::new(spawn[0], spawn[1], spawn[2]),
             width,
             height,
@@ -526,14 +542,14 @@ impl Game<'_> {
     /// Where an item or mob through an End portal lands once `plan`'s level
     /// has loaded around it: the bottom centre of the End's spawn point,
     /// above the platform built below it (`EndPlatformFeature.createEndPlatform`);
-    /// out of the End, the top of the shared spawn's column
+    /// out of the End, the top of the world spawn's column in its level
     /// (`Entity.adjustSpawnLocation`).
     fn end_portal_exit(&mut self, plan: &Plan) -> Vec3 {
         let p = plan.approximate;
         let centre = Vec3::new(f64::from(p.x) + 0.5, f64::from(p.y), f64::from(p.z) + 0.5);
-        if plan.dim == Dim::End {
+        if !plan.from_end {
             // In the End the arrival only builds the platform: no spawn search.
-            if let Err(e) = self.end_arrival(centre, &mut None) {
+            if let Err(e) = self.end_arrival(true, centre, &mut None) {
                 log::error!("End platform: {e}");
             }
             return centre;
@@ -1729,9 +1745,8 @@ impl Game<'_> {
                 let at = self.end_portal_exit(&plan);
                 // EndPortalBlock.getPortalDestination: PLACE_PORTAL_TICKET.
                 self.place_portal_ticket(Self::chunk_of(at));
-                let into_end = plan.dim == Dim::End;
                 let turn =
-                    end_portal_rotation(into_end, [yaw, pitch], self.level.world_spawn_angle);
+                    end_portal_rotation(!plan.from_end, [yaw, pitch], self.level.world_spawn_angle);
                 (at, motion, turn)
             } else {
                 let exit =
@@ -2031,8 +2046,13 @@ mod tests {
             assert!(game.mob_object(child).is_none());
             assert!(game.mob_object(leaf).is_none());
             // Land the queued payload through the real arrival transform/adoption path.
-            game.portals.arrivals[0].plan =
-                Plan::end_portal(Dim::Overworld, BlockPos::new(0, 64, 0), 0.9, 0.9);
+            game.portals.arrivals[0].plan = Plan::end_portal(
+                Dim::Overworld,
+                Dim::Overworld,
+                BlockPos::new(0, 64, 0),
+                0.9,
+                0.9,
+            );
             assert_eq!(game.dim, Dim::Overworld);
             game.enter_level(Dim::End).unwrap();
             assert_eq!(game.dim, Dim::End);
@@ -2486,7 +2506,13 @@ mod tests {
     #[test]
     fn portal_transfer_pending_arrival_does_not_save_transient_tnt_immunity() {
         let arrival = Arrival {
-            plan: Plan::end_portal(Dim::End, BlockPos::new(0, 64, 0), 0.98, 0.98),
+            plan: Plan::end_portal(
+                Dim::End,
+                Dim::Overworld,
+                BlockPos::new(0, 64, 0),
+                0.98,
+                0.98,
+            ),
             tag: Tag::compound([("id", Tag::String("minecraft:tnt".into()))]),
             tnt_used_portal: true,
             transferred: None,
@@ -2502,14 +2528,18 @@ mod tests {
     fn end_portals_lead_to_the_end_spawn_and_back_to_the_world_spawn() {
         let spawn = BlockPos::new(-7, 70, 12);
         for from in [Dim::Overworld, Dim::Nether] {
-            let plan = Plan::end_portal(from, spawn, 0.9, 1.4);
+            let plan = Plan::end_portal(from, Dim::Nether, spawn, 0.9, 1.4);
             assert_eq!(plan.dim, Dim::End);
             assert_eq!(plan.approximate, BlockPos::new(100, 50, 0));
-            assert!(plan.end);
+            assert!(plan.end && !plan.from_end);
         }
-        let plan = Plan::end_portal(Dim::End, spawn, 0.25, 0.25);
-        assert_eq!(plan.dim, Dim::Overworld);
-        assert_eq!(plan.approximate, spawn);
+        // Out of the End: to the world spawn, in the level it was set in, the End's own too.
+        for level in [Dim::Overworld, Dim::Nether, Dim::End] {
+            let plan = Plan::end_portal(Dim::End, level, spawn, 0.25, 0.25);
+            assert_eq!(plan.dim, level);
+            assert_eq!(plan.approximate, spawn);
+            assert!(plan.from_end);
+        }
     }
 
     #[test]
@@ -2576,7 +2606,13 @@ mod tests {
             preserve_arrival_cooldown(&mut tag);
             let arrival = Arrival {
                 transferred: None,
-                plan: Plan::end_portal(Dim::Overworld, BlockPos::new(0, 64, 0), 1.375, 0.5625),
+                plan: Plan::end_portal(
+                    Dim::Overworld,
+                    Dim::Overworld,
+                    BlockPos::new(0, 64, 0),
+                    1.375,
+                    0.5625,
+                ),
                 tag,
                 tnt_used_portal: false,
             };
@@ -2592,15 +2628,21 @@ mod tests {
     #[test]
     fn waiting_arrivals_keep_their_end_destination_when_saved() {
         let tag = Tag::compound([("id", Tag::String("minecraft:cow".into()))]);
-        for (from, dim) in [(Dim::Overworld, Dim::End), (Dim::End, Dim::Overworld)] {
+        // An exit to a world spawn set in the End stays an exit: no platform there.
+        for (from, level) in [
+            (Dim::Overworld, Dim::Overworld),
+            (Dim::End, Dim::Overworld),
+            (Dim::End, Dim::End),
+        ] {
             let arrival = Arrival {
                 tnt_used_portal: false,
                 transferred: None,
-                plan: Plan::end_portal(from, BlockPos::new(3, 64, -5), 0.9, 1.4),
+                plan: Plan::end_portal(from, level, BlockPos::new(3, 64, -5), 0.9, 1.4),
                 tag: tag.clone(),
             };
             let back = arrival_from_tag(&arrival_tag(&arrival)).unwrap();
-            assert_eq!(back.plan.dim, dim);
+            assert_eq!(back.plan.dim, arrival.plan.dim);
+            assert_eq!(back.plan.from_end, from == Dim::End);
             assert_eq!(back.plan.approximate, arrival.plan.approximate);
             assert!(back.plan.end);
             assert_eq!(back.tag, tag);
@@ -2609,7 +2651,13 @@ mod tests {
         let mut old = arrival_tag(&Arrival {
             tnt_used_portal: false,
             transferred: None,
-            plan: Plan::end_portal(Dim::End, BlockPos::new(0, 64, 0), 0.25, 0.25),
+            plan: Plan::end_portal(
+                Dim::End,
+                Dim::Overworld,
+                BlockPos::new(0, 64, 0),
+                0.25,
+                0.25,
+            ),
             tag,
         });
         if let Tag::Compound(c) = &mut old {

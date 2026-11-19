@@ -2957,6 +2957,7 @@ impl Game<'_> {
         entities: &[EntityState],
         spawn: [f64; 3],
     ) {
+        let spawn_level = self.world_spawn_level();
         let Some(host) = self.lan.as_mut() else {
             return;
         };
@@ -2973,9 +2974,11 @@ impl Game<'_> {
                 Some(o) => playerdata::load_owner(g, &root, o.saved.take().as_deref()),
                 None => playerdata::load(g, &root),
             };
-            // `PlayerList.placeNewPlayer`: a saved level the world no longer has is the Overworld.
+            // `PrepareSpawnTask.start`: a saved level the world no longer has is the world
+            // spawn's (the Overworld when that one is gone too); the saved position and
+            // rotation stay.
             if !levels.has(&g.dimension) {
-                g.dimension = "minecraft:overworld".to_owned();
+                g.dimension = spawn_level.id().to_owned();
             }
             // PlayerEvent.LoadFromFile: the player's data is read and applied,
             // the player not yet placed.
@@ -3008,13 +3011,23 @@ impl Game<'_> {
             // ServerPlayer.adjustSpawnLocation: a player new to the world
             // stands where PlayerSpawnFinder puts them, not all on one spot
             // (it reads the loaded level, which holds the spawn when it is
-            // the world spawn's). PrepareSpawnTask puts them in that level.
-            let spawn_level = self.world_spawn_level();
+            // the world spawn's). PrepareSpawnTask puts them in that level, so
+            // the search reads that one, opened for it.
+            let back = self.dim;
+            let opened = back != spawn_level
+                && self
+                    .enter_level(spawn_level)
+                    .inspect_err(|e| log::error!("could not open {}: {e}", spawn_level.id()))
+                    .is_ok();
             let feet = if self.dim == spawn_level {
                 self.server_player_spawn(spawn)
             } else {
                 spawn
             };
+            if opened && let Err(e) = self.enter_level(back) {
+                log::error!("could not reopen {}: {e}", back.id());
+                return;
+            }
             let Some(host) = self.lan.as_mut() else {
                 return;
             };
@@ -3055,15 +3068,20 @@ impl Game<'_> {
         self.prepare_recipe_join(conn);
         // A level that will not open, its generator gone with a mod, is one the
         // world no longer has: left in it, the player would fail the next tick.
+        // It goes to the world spawn's, as one missing from the world does.
         if elsewhere && let Err(e) = self.enter_level(level) {
             log::error!("could not open {}: {e}", level.id());
-            let overworld = super::Dim::Overworld;
+            let fallback = if spawn_level == level {
+                super::Dim::Overworld
+            } else {
+                spawn_level
+            };
             let moved = self.lan.as_mut().and_then(|host| {
                 host.hub
-                    .update_guest(conn, |g| g.dimension = overworld.id().to_owned())
+                    .update_guest(conn, |g| g.dimension = fallback.id().to_owned())
             });
-            elsewhere = back != overworld;
-            if moved.is_none() || (elsewhere && self.enter_level(overworld).is_err()) {
+            elsewhere = back != fallback;
+            if moved.is_none() || (elsewhere && self.enter_level(fallback).is_err()) {
                 return;
             }
         }
@@ -5237,14 +5255,17 @@ pub(crate) mod world_spawn_sync_tests {
                 "unchanged respawn data is not broadcast again"
             );
             // SetWorldSpawnCommand keeps the level it runs in (RespawnData.of(level.dimension(), ..)):
-            // a world spawn in another dimension reaches the guests with that dimension.
+            // the same block in another dimension is changed respawn data, and reaches the guests
+            // with that dimension.
             game.as_console(|game| {
-                assert!(game.run_command("execute in minecraft:the_end run setworldspawn 9 70 -4"))
+                assert!(
+                    game.run_command("execute in minecraft:the_end run setworldspawn 100 140 -20")
+                )
             });
             let sent = spawns(&rx);
             assert_eq!(sent.len(), 1);
             assert_eq!(sent[0].pos.dimension, "minecraft:the_end");
-            assert_eq!(sent[0].pos.pos, [9, 70, -4]);
+            assert_eq!(sent[0].pos.pos, [100, 140, -20]);
             println!(
                 "world-spawn\tother_dimension\t{}\t{}\t{}\t{}",
                 sent[0].pos.dimension, sent[0].pos.pos[0], sent[0].pos.pos[1], sent[0].pos.pos[2]
