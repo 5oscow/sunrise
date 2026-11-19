@@ -81,15 +81,22 @@ impl Queue {
                 for job in job_rx {
                     let commands = job.encoder.finish();
                     let submission = queue.submit([commands]);
-                    // A loss this submission found (the callback has run by now): the surface
-                    // texture goes back unpresented, and the next frame's poll reports it.
-                    if !job.lost.is_some_and(|lost| lost.load(Ordering::Relaxed)) {
-                        if let Some(after) = job.after {
-                            after();
-                        }
-                        if let Some(surface) = job.surface {
-                            queue.present(surface);
-                        }
+                    let lost = || {
+                        job.lost
+                            .as_ref()
+                            .is_some_and(|lost| lost.load(Ordering::Relaxed))
+                    };
+                    if !lost()
+                        && let Some(after) = job.after
+                    {
+                        after();
+                    }
+                    // A readback can find the loss too. Drop the unpresented texture before
+                    // telling the render thread this submission has landed.
+                    if let Some(surface) = job.surface
+                        && !lost()
+                    {
+                        queue.present(surface);
                     }
                     if done_tx.send(submission).is_err() {
                         break;
