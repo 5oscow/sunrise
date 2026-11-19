@@ -60,6 +60,11 @@ UNFINISHED = " did not complete"
 DISCLOSURE = "> 🤖 Filed by Aria's agent swarm, Dyna, not by Aria."
 # daily.yml's leg jobs (each a called workflow), and the called workflows' own routing jobs, which test nothing.
 PARITY = "parity"
+# The parity steps whose failure is the harness result the verdict already reports: a run that found a red
+# harness, and the job that turns the shares' verdicts into the run's one answer. Every other failed step in a
+# parity job is infrastructure — a share that wrote its verdict and then died still has to be visible beside a
+# harness failure from another share.
+PARITY_RESULT_STEPS = ("Run every automatic harness", "Fail unless every share reported and no harness failed")
 LEGS = ("shards", "wasm-mods", "fn-replace-check", "windows-runtime-leases", "machine-sample", "sdk", PARITY)
 # The legs sdk-publish waits for (output sdk_green) until a runner with prepared data exists (owner, 2026-11-16).
 SDK_LEGS = ("sdk", "machine-sample", "fn-replace-check")
@@ -369,19 +374,26 @@ def verdicts(jobs, reports, results, legs, parity_report):
             failures = parity_report["failed"] if parity_report else []
             tests.extend({"package": PARITY, "test": name, "leg": PARITY, "kind": PARITY,
                           "panic": None, "policy": None} for name in failures)
-            # A completed harness failure is not an infrastructure failure. The two can also coexist.
+            # A completed harness failure is not an infrastructure failure. The two can also coexist: a share
+            # can write a complete verdict, fail while saving its private logs, and still upload, while another
+            # share reports a red harness.
+            inside = [f"{job['name']}: {step}" for job in parity_jobs
+                      for step in failed_steps(job) if step in PARITY_RESULT_STEPS]
+            outside = [f"{job['name']}: {step}" for job in parity_jobs
+                       for step in failed_steps(job) if step not in PARITY_RESULT_STEPS]
             if not parity_jobs or not parity_report:
                 reason = "no verdict from this run attempt"
             elif not parity_report["complete"]:
                 reason = "the harness run did not finish"
-            elif result != ("failure" if failures else "success") or any(j["conclusion"] != result for j in parity_jobs):
+            elif result != ("failure" if failures else "success"):
                 reason = "the parity call did not finish with the reported harness result"
+            elif outside:
+                reason = "failed outside its harness results"
             else:
                 passed |= {(PARITY, name) for name in parity_report["passed"]}
                 green_legs.add(leg)  # the harness run completed; close any infrastructure issue
                 continue
-            steps = [f"{job['name']}: {step}" for job in parity_jobs for step in failed_steps(job)]
-            unfinished.append((leg, result, steps, reason))
+            unfinished.append((leg, result, outside or inside, reason))
         elif leg in helpers:
             unfinished.append((leg, result, [], "did not complete: " + ", ".join(f"`{name}`" for name in helpers[leg])
                                + " failed, so its jobs did not run"))

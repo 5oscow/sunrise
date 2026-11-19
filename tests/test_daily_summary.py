@@ -171,7 +171,7 @@ class DailySummaryTests(unittest.TestCase):
         return self.run_summary(api, results=dict(LEGS, parity={"result": result}), parity=verdict, run=run, merged=merged)
 
     def test_a_failing_harness_files_one_issue_with_the_suspects_and_its_pass_closes_it(self):
-        api = Api([job(PARITY_JOB, "failure", ["Every harness"])])
+        api = Api([job(PARITY_JOB, "failure", ["Run every automatic harness"])])
         log = ("PASS loot_a 3s\nFAIL boat_rider 884s  (log)\nPASS sculk#1 2s\nFAIL sculk#2 4s\n"
                "RETRIED sculk#2: failed, then failed again on its one retry\n2 passed, 2 failed in 300.2 min.\n")
         _, out = self.run_parity(api, "failure", log, ["loot_a", "boat_rider", "sculk#1", "sculk#2"])
@@ -253,6 +253,59 @@ class DailySummaryTests(unittest.TestCase):
         log += "PASS loot_a#2 4s\n2 passed, 0 failed in 0.1 min.\n"
         report, _ = parity_verdict.verdict(log, {"loot_a#1", "loot_a#2"}, "0")
         self.assertEqual(report, {"passed": ["loot_a"], "failed": [], "complete": True})
+
+    def test_merged_share_verdicts_report_one_run(self):
+        scope = {"run_id": "77", "run_attempt": "2", "commit": COMMIT}
+
+        def share(index, selected, passed=(), failed=(), complete=True, run=None):
+            return {"bucket": index, "of": 2, "selected": list(selected), "passed": list(passed),
+                    "failed": list(failed), "complete": complete, "scope": run or scope}
+        plan = ["loot_a", "loot_b"]
+        first, second = share(0, ["loot_a"], passed=["loot_a"]), share(1, ["loot_b"], failed=["loot_b"])
+        merged = parity_verdict.merge([first, second], 2, plan)
+        self.assertEqual((merged["passed"], merged["failed"], merged["complete"], merged["problems"]),
+                         (["loot_a"], ["loot_b"], True, []))
+        self.assertEqual(merged["scope"], scope)
+        # A share that never reported leaves the run unfinished, and an unfinished run proves no pass.
+        missing = parity_verdict.merge([first], 2, plan)
+        self.assertEqual((missing["passed"], missing["complete"]), ([], False))
+        self.assertIn("shares [0] reported, not 0..1", missing["problems"])
+        # The same share twice is not a run.
+        self.assertIn("share 0 reported twice", parity_verdict.merge([first, share(0, ["loot_b"])], 2, plan)["problems"])
+        # Two attempts' verdicts never merge into one run.
+        foreign = parity_verdict.merge([first, share(1, ["loot_b"], run={"run_id": "78"})], 2, plan)
+        self.assertIn("the shares do not agree on the run", foreign["problems"])
+        # Two shares that ran the same entries and left others to nobody are not a run either.
+        overlapping = parity_verdict.merge([share(0, ["loot_a"]), share(1, ["loot_a"])], 2, plan)
+        self.assertFalse(overlapping["complete"])
+        self.assertIn("two shares ran the same harness", overlapping["problems"])
+        self.assertIn("1 planned harnesses ran in no share, 0 ran outside the plan", overlapping["problems"])
+        # A share that did not finish keeps the failures it saw, and proves no pass.
+        partial = parity_verdict.merge([first, share(1, ["loot_b"], failed=["loot_b"], complete=False)], 2, plan)
+        self.assertEqual((partial["passed"], partial["failed"], partial["complete"]), ([], ["loot_b"], False))
+
+    def test_a_red_share_files_its_harness_and_no_infrastructure_issue(self):
+        api = Api([job("parity / vanilla-parity (0/2)", "success", ["Run every automatic harness"]),
+                   job("parity / vanilla-parity (1/2)", "failure", ["Run every automatic harness"]),
+                   job("parity / verdict", "failure", ["Fail unless every share reported and no harness failed"])])
+        _, out = self.run_parity(api, "failure", "PASS loot_a 3s\nFAIL boat_rider 9s\n1 passed, 1 failed in 1.0 min.\n",
+                                 ["loot_a", "boat_rider"])
+        self.assertIn("green=false", out)
+        self.assertEqual([body["title"] for method, path, body in api.writes if path == "issues"],
+                         ["Daily: parity boat_rider"])
+
+    def test_a_share_that_dies_after_its_verdict_stays_visible_beside_a_red_harness(self):
+        api = Api([job("parity / vanilla-parity (0/2)", "failure", ["Upload the harnesses' verdict"]),
+                   job("parity / vanilla-parity (1/2)", "failure", ["Run every automatic harness"]),
+                   job("parity / verdict", "failure", ["Fail unless every share reported and no harness failed"])],
+                  issues=[{"number": 7, "title": "Daily: parity did not complete"}])
+        _, out = self.run_parity(api, "failure", "PASS loot_a 3s\nFAIL boat_rider 9s\n1 passed, 1 failed in 1.0 min.\n",
+                                 ["loot_a", "boat_rider"])
+        self.assertIn("green=false", out)
+        self.assertEqual([body["title"] for method, path, body in api.writes if path == "issues"],
+                         ["Daily: parity boat_rider"])
+        self.assertIn(("POST", "issues/7/comments"),
+                      [(method, path) for method, path, _ in api.writes])
 
     def test_an_incomplete_parity_run_files_failures_but_closes_nothing(self):
         api = Api([job(PARITY_JOB, "failure")],

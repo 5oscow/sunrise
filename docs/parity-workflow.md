@@ -54,7 +54,7 @@ python3 tools/parity.py --changed origin/main      # those a branch's changes ca
 python3 tools/parity.py --changed-files paths.txt  # the same for listed paths, in a copy without Git (tools/pr_ready.py)
 ```
 
-CI runs the automatic harnesses only in the [daily on main's head](release-flow.md#parity-on-main), not on pull requests or rollups. The daily posts harness names and outcomes; its logs stay private on the runner.
+CI runs the automatic harnesses only in the [daily on main's head](release-flow.md#parity-on-main), not on pull requests or rollups. The daily posts harness names and outcomes; its logs stay private on the runner. One selection, several shares: the plan job computes the selection once from the tested commit and splits it (`tools/ci/parity_shards.py` names the count), each runner runs exactly its share (`tools/parity.py --harness-file`), and `tools/ci/parity_verdict.py --merge` turns the shares into the one file the daily summary reads, refusing a run whose shares miss a planned harness or run one twice. A commit of main from before the shares runs as one job, as it did then.
 
 Each harness runs unmodified under a tracer that records the files it depended on: its Python modules, its Java oracle and the oracle sources javac pulled in, other repository files it read, and the Rust sources of the probes it ran (from Cargo's `.d` dep-info files). A pass stands until one of those files, the pinned vanilla artifacts, `Cargo.lock` or the Rust/Java toolchains change. State and logs are in `.local/parity-runner/`; each harness's own outputs stay in its `.local/<name>/` directory.
 
