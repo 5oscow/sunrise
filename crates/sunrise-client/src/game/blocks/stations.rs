@@ -1897,8 +1897,14 @@ impl Game<'_> {
         }
         details.start("minecraft:attribute_modifiers", lines.len());
         let shown = display.shows("minecraft:attribute_modifiers");
-        let (modifier_lines, added) =
-            self.stack_attribute_tooltip(stack, shown, nested, advanced, creative, mod_callbacks);
+        let (modifier_lines, added) = self.stack_attribute_tooltip(
+            stack,
+            shown,
+            nested,
+            advanced,
+            creative,
+            mod_callbacks && display.name_visible(creative),
+        );
         for (text, c) in modifier_lines {
             push(&mut lines, text, c);
         }
@@ -2605,12 +2611,24 @@ mod tests {
     #[ignore = "daily"]
     fn resource_tooltip_uses_inventory_lines_and_explicit_flags() {
         use mod_api::{
-            ClientHost, Hooks, ItemResource, ItemTooltipEvent, ModEntry, Mods, TooltipElement,
+            AddAttributeTooltipsEvent, ClientHost, Hooks, ItemResource, ItemTooltipEvent, ModEntry,
+            Mods, TooltipElement,
         };
+        use sunrise_core::nbt::Tag;
 
         struct Listener;
         #[mod_api::__subscriptions]
         impl Hooks for Listener {
+            fn add_attribute_tooltips(
+                &self,
+                _: &dyn ClientHost,
+                event: &mut AddAttributeTooltipsEvent<'_>,
+            ) {
+                event
+                    .lines
+                    .push((mod_api::Text::literal("attribute listener"), u32::MAX));
+            }
+
             fn item_tooltip(&self, host: &dyn ClientHost, event: &mut ItemTooltipEvent<'_>) {
                 // Asking for the same stack must return base lines, not enter another listener.
                 let nested = ItemResource::of(event.stack)
@@ -2642,6 +2660,21 @@ mod tests {
                     .collect();
                 let advanced = game.options_advanced_tooltips();
                 assert!(resource.tooltip(game, advanced, false).unwrap() == inventory);
+                let attribute_line =
+                    TooltipElement::Text(mod_api::Text::literal("attribute listener"), u32::MAX);
+                assert!(inventory.contains(&attribute_line));
+                let mut hidden = stack.clone();
+                hidden.data_mut().set_other(
+                    "minecraft:tooltip_display",
+                    Some(Tag::compound([("hide_tooltip", Tag::Byte(1))])),
+                );
+                let hidden = ItemResource::of(&crate::game::api_values::test_snapshot(&hidden));
+                assert!(
+                    !hidden
+                        .tooltip(game, false, false)
+                        .unwrap()
+                        .contains(&attribute_line)
+                );
                 for advanced in [false, true] {
                     let lines = resource.tooltip(game, advanced, false).unwrap();
                     assert!(lines.last().is_some_and(|line| {
