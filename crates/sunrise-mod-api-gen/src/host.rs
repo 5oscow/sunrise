@@ -517,15 +517,21 @@ pub(super) fn game_forwarders(root: &Path) -> Result<String, String> {
                     call
                 };
                 let typed_access_error = result_error(&entry.sig.output).filter(|error| {
-                    outer_type(error, "LevelReadError") || outer_type(error, "LevelWriteError")
+                    ["LevelReadError", "LevelWriteError", "PhaseRefusal"]
+                        .iter()
+                        .any(|refusal| outer_type(error, refusal))
                 });
                 if typed_access_error.is_none() {
                     unwinding.insert(format!("{}::{name}", area.stem));
                 }
                 let access = if let Some(error) = typed_access_error {
-                    let error = error.to_token_stream();
+                    let refusal = if outer_type(error, "PhaseRefusal") {
+                        format!("mod_api::__private::PhaseRefusal::unavailable({name:?})")
+                    } else {
+                        format!("{}::Unavailable", error.to_token_stream())
+                    };
                     format!(
-                        "if !mod_api::__private::access_allowed({name:?}, mod_api::__private::LoadAccess::{level}) {{ return Err({error}::Unavailable); }}"
+                        "if !mod_api::__private::access_allowed({name:?}, mod_api::__private::LoadAccess::{level}) {{ return Err({refusal}); }}"
                     )
                 } else {
                     format!(
@@ -605,8 +611,8 @@ pub(super) fn game_forwarders(root: &Path) -> Result<String, String> {
 const UNWINDING_METHODS: &str = "crates/sunrise-mod-api-gen/unwinding-methods.txt";
 
 /// A gated method that returns no `Result` with a refusal error (`LevelReadError` or
-/// `LevelWriteError`, whose `Unavailable` the forwarder returns) can only refuse a wrong-phase
-/// call by unwinding. A new one is refused unless it is listed; a listed one that has gained a
+/// `LevelWriteError`, whose `Unavailable` the forwarder returns, or `PhaseRefusal`, which it
+/// builds) can only refuse a wrong-phase call by unwinding. A new one is refused unless it is listed; a listed one that has gained a
 /// refusal, or is gone, must leave the list.
 fn check_unwinding(
     root: &Path,
@@ -623,7 +629,7 @@ fn check_unwinding(
     let added: Vec<_> = unwinding.difference(&listed).cloned().collect();
     if !added.is_empty() {
         return Err(format!(
-            "gated methods without a refusal-shaped Result: return `Result<_, LevelReadError>` or `Result<_, LevelWriteError>` so a wrong-phase call refuses instead of unwinding; the list in {UNWINDING_METHODS} only shrinks:\n{}",
+            "gated methods without a refusal-shaped Result: return `Result<_, LevelReadError>`, `Result<_, LevelWriteError>` or `Result<_, PhaseRefusal>` so a wrong-phase call refuses instead of unwinding; the list in {UNWINDING_METHODS} only shrinks:\n{}",
             added.join("\n")
         ));
     }

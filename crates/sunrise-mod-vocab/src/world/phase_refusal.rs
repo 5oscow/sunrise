@@ -33,6 +33,18 @@ impl std::fmt::Display for PhaseRefusal {
 }
 
 impl PhaseRefusal {
+    /// The refusal of `operation` in this thread's current phase, for a gated method that
+    /// returns it in its `Result` instead of unwinding.
+    // hidden: called by generated forwarders only.
+    #[doc(hidden)]
+    pub fn unavailable(operation: &'static str) -> Self {
+        Self {
+            mod_id: crate::content::crash::current_native_mod().unwrap_or("unknown"),
+            operation,
+            phase: super::phase::current_phase(),
+        }
+    }
+
     /// Logs the refusal the first time this mod's operation is refused, in the wording of a
     /// refused wasm call (`wasm refusal: <mod> hook <hook>: ...`).
     pub fn report(&self) {
@@ -110,7 +122,12 @@ pub fn latched() -> bool {
 pub fn refuse(operation: &'static str, phase: ModPhase) -> ! {
     let named = format!("mod API {operation} is unavailable during {phase:?}");
     if std::thread::panicking() {
-        log::error!("{named}, called while the thread was already unwinding; the process aborts");
+        let call = crate::content::crash::current_native_call();
+        log::error!(
+            "native refusal: {} hook {}: {named}, called while the thread was already unwinding; the process aborts",
+            call.map_or("unknown", |call| call.id),
+            call.map_or("unknown", |call| call.hook)
+        );
         panic!("{named}");
     }
     let Some(mut scope) = SCOPE.get() else {
