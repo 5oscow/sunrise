@@ -148,7 +148,7 @@ Part methods run elsewhere, and each one's own documentation says where:
 
 - **Worldgen workers.** While chunks generate, the methods of a structure type, feature type, biome source or chunk
   generator that place or sample the world, and the hooks fired while a feature generates, run on the worldgen
-  worker threads, several chunks at once. The same code also runs on the server thread when the game places a
+  worker threads, several chunks at once. Feature placement also runs on the server thread when the game places a
   feature there: a sapling growing, a command, `LevelRef::place_feature`. A query asked once at start, such as
   `BiomeSource::possible_biomes`, is not a worker call. They get a `WorldgenHost` or no host at all, never a `Host`.
 - **Meshing workers.** `add_section_geometry` itself runs once at client start, to register renderers; each
@@ -170,7 +170,7 @@ What follows for a mod's state:
 - A worker's call can run at the same moment as a tick hook. Data a worker reads belongs in an immutable value
   swapped as a whole, or behind a read-write lock. A lock makes the access safe, not the result right: worldgen
   must give the same chunk for the same seed whatever the order of calls, and a section geometry renderer or tint
-  source must answer from its arguments alone, as their own documentation requires. Mutable state does not belong in them.
+  source must answer from its arguments and immutable data fixed at registration, as their own documentation requires. Mutable state does not belong in them.
 
 `Hooks` contains global hooks. Scoped hooks belong to `BlockPart`, `BlockEntityPart`,
 `ItemPart`, `MenuPart` or `FluidPart` and run for the registered object.
