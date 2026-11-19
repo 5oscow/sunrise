@@ -128,19 +128,13 @@ else
     [ "$GOT" = "$DIGEST" ] || die "$ASSET doesn't match its SHA-256 (got $GOT, expected $DIGEST): not installed"
   else
     # The verifier: the pinned version's binary for this platform, run only when its SHA-256 is the pinned one. The
-    # pin is the trust anchor (tools/ci/pin_verifier.py). Tests may replace it, only with their own root as --dir.
+    # pin is the trust anchor (tools/ci/pin_verifier.py); nothing outside this file can change it.
     case "$PLATFORM" in
       linux-x86_64) PIN=$VERIFIER_SHA256_linux_x86_64 ;;
       macos-arm64) PIN=$VERIFIER_SHA256_macos_arm64 ;;
       macos-x64) PIN=$VERIFIER_SHA256_macos_x64 ;;
     esac
     VERIFIER_FROM=$VERIFIER_VERSION
-    if [ -n "${SUNRISE_INSTALL_TEST_ROOT:-}" ]; then
-      case "$DIR/" in "$SUNRISE_INSTALL_TEST_ROOT"/*)
-        PIN=${SUNRISE_INSTALL_TEST_VERIFIER_SHA256-$PIN}
-        VERIFIER_FROM=${SUNRISE_INSTALL_TEST_VERIFIER_VERSION-$VERIFIER_FROM} ;;
-      esac
-    fi
     [ "$VERIFIER_FROM" != unpinned ] && [ -n "$VERIFIER_FROM" ] || die "this script has no pinned sunrise-verify yet, so it can't check the release signature: not installed. Use the install.sh from Sunrise's main branch."
     [ -n "$PIN" ] && [ "$PIN" != unpinned ] || die "there is no sunrise-verify for $PLATFORM (the signature check needs it): not installed"
     VERIFIER="$TMP/sunrise-verify"
@@ -152,10 +146,12 @@ else
 
     SUMS_URL=$(asset_url SHA256SUMS)
     SIG_URL=$(asset_url "$SIGFILE")
-    if [ -n "$NAME" ] && { [ -z "$SUMS_URL" ] || [ -z "$SIG_URL" ]; }; then
+    if [ -z "$SUMS_URL" ]; then
+      die "release $TAG has no SHA256SUMS (its checksum list), so it can't be checked: not installed"
+    elif [ -z "$SIG_URL" ] && [ -n "$NAME" ]; then
       die "$TAG has no $SIGFILE (its signature for this exact build): it was published before Nightlies were signed for their own version, so it can't be checked: not installed. Install the current Nightly (--version latest) instead."
-    elif [ -z "$SUMS_URL" ] || [ -z "$SIG_URL" ]; then
-      die "release $TAG has no signed checksums ($SIGFILE), so it can't be checked: not installed"
+    elif [ -z "$SIG_URL" ]; then
+      die "release $TAG has no $SIGFILE (the signature of its checksum list), so it can't be checked: not installed"
     fi
     curl -fsSL -o "$TMP/files/SHA256SUMS" "$SUMS_URL" || die "could not download SHA256SUMS: not installed"
     curl -fsSL -o "$TMP/files/$SIGFILE" "$SIG_URL" || die "could not download $SIGFILE: not installed"
@@ -163,7 +159,7 @@ else
     curl -fL --progress-bar -o "$TMP/files/$ASSET" "$URL" || die "could not download $ASSET: not installed"
     # The same check the launcher and `sunrise-server update` make, with the keys built into the verifier.
     "$VERIFIER" verify --tag "$SIGTAG" --signature "$SIGFILE" --only "$ASSET" "$TMP/files" > "$TMP/verify.out" 2>&1 \
-      || die "the release check failed, so $TAG was not installed: $(cat "$TMP/verify.out"). The download may have been tampered with; please report it on Discord or GitHub."
+      || die "the release check failed ($SIGFILE for $SIGTAG), so $TAG was not installed: $(cat "$TMP/verify.out"). The download may have been tampered with; please report it on Discord or GitHub."
     echo "Release signature OK (Sunrise release key)."
   fi
   mv "$TMP/files/$ASSET" "$TMP/$ASSET"
