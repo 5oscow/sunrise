@@ -13,7 +13,9 @@ resolved and no dev- or build-dependencies, and, for a crate whose build script 
 that copies `generated/` into `OUT_DIR`. The generated files name source files by absolute path; the checkout's
 root is written as ROOT_TOKEN and the build script puts the API source's own root in its place. `build` runs on a
 POSIX host (CI's Linux leg): it relocates `/`-separated paths only. `Cargo.lock` pins
-the versions the game's lockfile has. Same commit, same bytes.
+the versions the game's lockfile has, and each manifest asks for the resolved features the game's build has —
+a transitive package is named when the game's other crates, not the API's, unify its features. Same commit,
+same bytes.
 """
 
 import argparse
@@ -180,11 +182,13 @@ def resolve_workspace(value, inherited: dict, what: str):
 
 
 def normalise_manifest(manifest: dict, workspace: dict, crate: Crate, crates: dict[str, Crate],
-                       features: dict[str, list[str]], resolved: dict[str, tuple[set[str], bool]]) -> str:
+                       features: dict[str, list[str]], resolved: dict[str, tuple[set[str], bool]],
+                       pins: dict | None = None) -> str:
     """The crate's manifest as the API source carries it: workspace keys resolved, path dependencies pointing
     inside the API source, no dev- or build-dependencies, no targets but the library. A registry dependency named
     in `resolved` (its resolved features, and whether its defaults are on) asks for exactly the features the game's
-    build resolves for it, so an author compiles the API as the player's prebuilt game does."""
+    build resolves for it, so an author compiles the API as the player's prebuilt game does. `pins` names
+    transitive packages the same way, for the feature unification the game's other crates perform."""
     inherited_package = workspace.get("workspace", {}).get("package", {})
     inherited_dependencies = workspace.get("workspace", {}).get("dependencies", {})
     package = {key: resolve_workspace(manifest["package"][key], inherited_package, key)
@@ -221,7 +225,7 @@ def normalise_manifest(manifest: dict, workspace: dict, crate: Crate, crates: di
             written[name] = spec
         return written
 
-    out.append(table("dependencies", dependencies(manifest.get("dependencies", {}))))
+    out.append(table("dependencies", dependencies({**manifest.get("dependencies", {}), **(pins or {})})))
     for platform, entries in sorted(manifest.get("target", {}).items()):
         if entries.get("dependencies"):
             out.append(table(f"target.{json.dumps(platform)}.dependencies", dependencies(entries["dependencies"])))
@@ -368,6 +372,39 @@ def lock_disagreements(slice_lock: dict, game_lock: dict) -> list[str]:
                   if (package["name"], package["version"], package.get("source"), package.get("checksum")) not in game)
 
 
+def closure_pins(metadata: dict, ours_features: dict[str, set[str]], game: dict[str, set[str]],
+                 declared: set[str], root: str = API) -> tuple[dict[str, dict], dict[str, dict]]:
+    """The registry packages of the game's `root` runtime closure that the staged API source does not resolve
+    with the game's features, as `(missing, drifted)` direct-dependency specs. Cargo unifies features over the
+    whole workspace: crates the API source does not have can turn on features of a package the API reaches only
+    transitively (the game's `digest` and `crypto-common` on `md-5` and `crc-fast`). A pin names the package at
+    the game's version and asks for exactly the features the game resolves, so the slice can never enable more
+    than the game does. Packages in `missing` are absent from the slice's resolution entirely: normally a drift
+    pin pulls them in, so they are only worth naming once the drift is pinned."""
+    packages = {package["id"]: package for package in metadata["packages"]}
+    missing, drifted = {}, {}
+    for package_id in prebuilt_game.runtime_packages(metadata, root):
+        package = packages[package_id]
+        if package["source"] is None or package["name"] in declared:
+            continue
+        key = f"{package['name']} {package['version']}"
+        want = game.get(key, set())
+        have = ours_features.get(key)
+        spec = {"version": f"={package['version']}"}
+        if "default" not in want:
+            spec["default-features"] = False
+        if want - {"default"}:
+            spec["features"] = sorted(want - {"default"})
+        if have is None:
+            # A package for another target only (wasi on a POSIX host) has no resolved features to ask for: a
+            # pinned parent's edge brings it in.
+            if key in game:
+                missing[package["name"]] = spec
+        elif want - have:
+            drifted[package["name"]] = spec
+    return missing, drifted
+
+
 def build_messages(arguments: list[str], target_dir: Path, packages: tuple[str, ...] = (API, WASMTIME)) -> list[dict]:
     output = run(["cargo", "check", "--locked", *(f"-p{package}" for package in packages), "--message-format", "json",
                   *arguments], cwd=ROOT,
@@ -477,12 +514,29 @@ def build(out: Path) -> dict[str, bytes]:
     out.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=out.parent, prefix=f".{out.name}.") as staging:
         staged = Path(staging) / "api"
-        for path, data in files.items():
-            (staged / path).parent.mkdir(parents=True, exist_ok=True)
-            (staged / path).write_bytes(data)
-        # Cargo keeps the game's pins and drops the packages the API does not use.
-        shutil.copyfile(workspace_root / "Cargo.lock", staged / "Cargo.lock")
-        run(["cargo", "metadata", "--format-version", "1"], cwd=staged, env=isolated())
+        api_manifest = f"{by_name[API].directory}/Cargo.toml"
+        pins: dict[str, dict] = {}
+        for _ in range(5):
+            for path, data in files.items():
+                (staged / path).parent.mkdir(parents=True, exist_ok=True)
+                (staged / path).write_bytes(data)
+            # Cargo keeps the game's pins and drops the packages the API does not use.
+            shutil.copyfile(workspace_root / "Cargo.lock", staged / "Cargo.lock")
+            run(["cargo", "metadata", "--format-version", "1"], cwd=staged, env=isolated())
+            ours_features = target_features(tree(staged, API, isolated()))
+            missing, drifted = closure_pins(metadata, ours_features, game,
+                                            set(normal_dependencies(manifests[API])))
+            if not missing and not drifted:
+                break
+            # Feature unification spans the game's whole workspace: drift pins ask for the features its other
+            # crates turn on; only once the drift is pinned are packages still missing named directly.
+            pins.update(drifted or missing)
+            files[api_manifest] = normalise_manifest(
+                manifests[API], workspace, by_name[API], by_name, features[API],
+                requested_features(metadata, by_name[API], manifests[API], game), pins).encode()
+        else:
+            raise Refusal("E_CLOSURE", "the API source cannot resolve the game's closure: "
+                          + ", ".join(sorted(pins)))
         files["Cargo.lock"] = (staged / "Cargo.lock").read_bytes()
         disagreeing = lock_disagreements(tomllib.loads(files["Cargo.lock"].decode()),
                                          tomllib.loads((workspace_root / "Cargo.lock").read_text()))
