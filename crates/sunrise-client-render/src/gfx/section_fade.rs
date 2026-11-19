@@ -2,9 +2,8 @@
 use crate::fast_hash::FxHashMap;
 use std::time::Instant;
 
-pub use sunrise_render_core::{
-    CHUNK_VISIBILITY_THRESHOLD, chunk_visibility, fade_millis, section_instance,
-};
+pub(super) use sunrise_render_core::section_instance;
+pub use sunrise_render_core::{CHUNK_VISIBILITY_THRESHOLD, chunk_visibility, fade_millis};
 /// `chunk_visibility` at `now` of a section first uploaded at `uploaded`
 /// (`Renderer::section_uploaded`; none: one that fades in over far terrain, or
 /// whose column left), with the chunk fade-in `fade_ms`.

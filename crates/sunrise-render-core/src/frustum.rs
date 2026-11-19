@@ -120,6 +120,7 @@ pub struct Frusta(pub Frustum, pub Option<Frustum>);
 pub trait Cull {
     fn intersects(&self, min: Vec3, max: Vec3) -> bool;
     fn contains(&self, min: Vec3, max: Vec3) -> bool;
+    /// Whether a section is tested by the box around its geometry, not its whole 16 blocks.
     fn tight(&self) -> bool {
         true
     }
@@ -152,6 +153,7 @@ pub struct JoinedFrusta {
 }
 
 impl JoinedFrusta {
+    /// Join the camera's frustum to the first [`MAX_WORLD_VIEWS`] alternate views.
     pub fn new(camera: Frustum, views: impl IntoIterator<Item = Frustum>) -> Self {
         let mut joined = Self {
             camera,
@@ -165,16 +167,13 @@ impl JoinedFrusta {
         joined
     }
 
+    /// The same views with the camera's frustum `camera` (TAA's wider one).
     pub fn with_camera(self, camera: Frustum) -> Self {
         Self { camera, ..self }
     }
 
-    pub fn views(&self) -> &[Frustum] {
+    fn views(&self) -> &[Frustum] {
         &self.views[..self.len]
-    }
-
-    pub fn camera(&self) -> Frustum {
-        self.camera
     }
 
     pub fn intersects(&self, min: Vec3, max: Vec3) -> bool {

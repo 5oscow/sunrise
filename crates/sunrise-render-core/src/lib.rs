@@ -1,4 +1,4 @@
-//! Core rendering types, GPU layouts, and geometric primitives for Sunrise.
+//! Frustum geometry and terrain instance and fade helpers for Sunrise.
 
 pub mod frustum;
 pub mod terrain;

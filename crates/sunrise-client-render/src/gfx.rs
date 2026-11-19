@@ -116,6 +116,7 @@ pub use frustum::{Cull, Frusta, JoinedFrusta, ShadowCull};
 use frustum::{block_entities_within_reach, frustum, shadow_casters, taa_frustum};
 pub use section_fade::{CHUNK_VISIBILITY_THRESHOLD, chunk_visibility, fade_millis};
 use section_fade::{FadeInputs, compiled_and_visible, section_instance, section_visibility};
+pub use sunrise_render_core::SectionKey;
 pub use view::{View, ViewSet};
 
 /// Whether Translucent Batching is offered (`graphics::offer_translucent_batching`): where
@@ -304,7 +305,6 @@ fn next_block_entity_revision() -> u64 {
     NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
-pub type SectionKey = (i32, i32, i32);
 const MAX_OUTLINE_EDGES: u64 = 256;
 /// Staging buffer size for section meshes: a frame of uploads while
 /// exploring fits in a few.

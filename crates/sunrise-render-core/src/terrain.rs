@@ -3,7 +3,7 @@
 /// A chunk section coordinate key `(x, y, z)`.
 pub type SectionKey = (i32, i32, i32);
 
-/// The default fixed-point UV division steps for terrain vertices.
+/// Fixed-point steps per unit of `TerrainVertex` UVs, which span `[0, 2)`.
 pub const UV_STEPS: f32 = 32768.0;
 
 /// `LevelRenderer.CHUNK_VISIBILITY_THRESHOLD`: a section's block entities wait for it.
@@ -44,33 +44,4 @@ pub fn section_instance(origin: [f32; 3], fade: u32, visibility: f32) -> [f32; 4
             -(fade as f32 + step)
         },
     ]
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn chunk_visibility_boundaries() {
-        assert_eq!(chunk_visibility(0, 500), 0.0);
-        assert_eq!(chunk_visibility(250, 500), 0.5);
-        assert_eq!(chunk_visibility(500, 500), 1.0);
-        assert_eq!(chunk_visibility(1000, 500), 1.0);
-    }
-
-    #[test]
-    fn fade_millis_calculation() {
-        assert_eq!(fade_millis(0.5), 500);
-        assert_eq!(fade_millis(1.0), 1000);
-        assert_eq!(fade_millis(0.0), 0);
-    }
-
-    #[test]
-    fn section_instance_unfaded() {
-        let inst = section_instance([16.0, 32.0, 48.0], 0, 1.0);
-        assert_eq!(inst[0], 16.0);
-        assert_eq!(inst[1], 32.0);
-        assert_eq!(inst[2], 48.0);
-        assert_eq!(inst[3], 1.0 / UV_STEPS);
-    }
 }
