@@ -388,3 +388,52 @@ fn the_lightmap_chart_never_shows_a_stale_sample() {
     chart.forget_pack();
     assert_eq!(chart.shown(native), Some(&[255; 16 * 16 * 4]));
 }
+
+/// Fullbright stops a pack's shader with copies mapped or still in flight: once it draws again,
+/// those copies are dropped as they land, and the chart reads only a copy made after.
+#[test]
+#[ignore = "daily"]
+fn copies_from_before_fullbright_are_never_read() {
+    let _gpu = crate::gfx::test_gpu::lock();
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let program = crate::core_shader::translate_core_with(
+        SCREENQUAD_VSH,
+        PROBE_FSH,
+        &[],
+        &|_| None,
+        &GLUE,
+        &|b| b == INFO_BLOCK,
+    )
+    .expect("the shaders translate");
+    let mut core = CoreLightmap::new(&device, &program).expect("the lightmap pipeline");
+    core.set_readback(&device, true);
+    let frame = |core: &mut CoreLightmap, info: &LightmapInfo, poll: bool| {
+        queue.write_buffer(&core.uniform, 0, &CoreLightmap::uniforms([0; 48], info));
+        let mut encoder = device.create_command_encoder(&Default::default());
+        let target = target(&device);
+        core.draw(
+            &mut encoder,
+            &target,
+            &target.create_view(&Default::default()),
+        );
+        queue.submit([encoder.finish()]);
+        (core.submitted().expect("a readback"))();
+        if poll {
+            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        }
+    };
+    // One copy mapped, one in flight, when fullbright starts.
+    frame(&mut core, &PROBE, true);
+    frame(&mut core, &PROBE, false);
+    core.forget_copies();
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    let mut pixels = [7u8; 16 * 16 * 4];
+    assert!(!core.collect(&mut pixels), "both dropped");
+    assert_eq!(pixels, [7; 16 * 16 * 4]);
+    // The pack draws again: its next copy is read (STATES[0]'s SkyFactor, 0, in blue).
+    frame(&mut core, &STATES[0], true);
+    assert!(core.collect(&mut pixels));
+    assert_eq!(pixels[2], 0);
+}
