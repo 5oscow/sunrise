@@ -1176,6 +1176,8 @@ struct Game<'a> {
     /// Runs of `entity_vertices` by entity, for a shader pack's per-entity draws; recorded only
     /// while `pack_ids` is set (game/interface/shader_packs.rs).
     entity_spans: std::cell::RefCell<Vec<sunrise_client::gfx::pack_draw::EntitySpan>>,
+    // Extracted general rows; keep the capacity between frames.
+    general_render_states: std::cell::RefCell<Vec<general_draw::ExtractedGeneral>>,
     /// Which entity this frame's entity vertices belong to (`Frame::entity_motion`).
     entity_motion: std::cell::RefCell<Vec<(u32, u64)>>,
     /// The GPU-posed vertex count at each of `entity_motion`'s marks (`Frame::entity_motion_posed`).
@@ -6049,6 +6051,7 @@ impl Game<'_> {
                         orb_value: Some(o.value),
                         painting: None,
                         item_frame: None,
+                        attachments: None,
                     }
                     .into();
                 let light = self.world.light(
@@ -8040,6 +8043,9 @@ impl Game<'_> {
                 && let Some(renderer) = &mut self.renderer
             {
                 renderer.wait_submissions();
+                if renderer.device_lost() {
+                    return Ok(false);
+                }
             }
             self.native_flip_frame();
         }
@@ -10590,20 +10596,6 @@ impl Game<'_> {
         }
     }
 }
-/// clouds.png as filled cells (`CloudRenderer.prepare`: alpha 10 or more).
-fn load_clouds(root: &sunrise_assets::resource_source::ResourceSource) -> (u32, u32, Vec<bool>) {
-    root.read("assets/minecraft/textures/environment/clouds.png")
-        .map_err(Into::into)
-        .and_then(|bytes| sunrise_client::hud::decode_bytes(&bytes))
-        .map(|(w, h, px)| {
-            (
-                w,
-                h,
-                px.as_chunks::<4>().0.iter().map(|p| p[3] >= 10).collect(),
-            )
-        })
-        .unwrap_or((1, 1, vec![false]))
-}
 /// misc/forcefield.png for the world border wall (square, power of two).
 fn load_forcefield(root: &sunrise_assets::resource_source::ResourceSource) -> (u32, u32, Vec<u8>) {
     root.read("assets/minecraft/textures/misc/forcefield.png")
@@ -10814,6 +10806,7 @@ impl<'a> Game<'a> {
             see_through_vertices: Vec::new(),
             shadow_only_vertices: Default::default(),
             entity_spans: Default::default(),
+            general_render_states: Default::default(),
             entity_motion: Default::default(),
             entity_motion_posed: Default::default(),
             skin_models: Default::default(),

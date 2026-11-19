@@ -594,12 +594,7 @@ impl Game<'_> {
                 } else {
                     "button"
                 };
-                batch.sprite(
-                    atlas,
-                    &format!("gui/sprites/container/beacon/{sprite}"),
-                    bx + x,
-                    by + y,
-                );
+                batch.sprite(atlas, &format!("container/beacon/{sprite}"), bx + x, by + y);
                 batch.sprite_scaled(
                     atlas,
                     icon,
@@ -636,16 +631,9 @@ impl Game<'_> {
             107.0,
             paid && sel[0].is_some(),
             false,
-            "gui/sprites/container/beacon/confirm",
+            "container/beacon/confirm",
         );
-        button(
-            batch,
-            190.0,
-            107.0,
-            true,
-            false,
-            "gui/sprites/container/beacon/cancel",
-        );
+        button(batch, 190.0, 107.0, true, false, "container/beacon/cancel");
         let slots: Vec<usize> = (0..36).chain([INPUT]).collect();
         self.draw_hovered_slot_highlight(batch, false, ox, oy);
         for i in slots {
