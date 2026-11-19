@@ -744,3 +744,42 @@ fn a_prediction_asks_the_live_level_over_its_writes() {
     guess.asks_mods = false;
     assert_eq!(ask(&guess), None);
 }
+
+#[test]
+#[ignore = "daily"]
+fn an_active_vault_ends_a_held_item_s_click_on_the_client() {
+    on_a_client(Vec::new().into(), |game| {
+        let registry = game.pack.assets.registry;
+        let vault = |state: &str| {
+            registry
+                .resolve(&sunrise_world::chunk::BlockState {
+                    name: "minecraft:vault".into(),
+                    properties: [
+                        ("facing", "north"),
+                        ("ominous", "false"),
+                        ("vault_state", state),
+                    ]
+                    .into_iter()
+                    .map(|(key, value)| (key.into(), value.into()))
+                    .collect(),
+                })
+                .unwrap()
+        };
+        let key = ItemStack::new("minecraft:trial_key", 1);
+        let stick = ItemStack::new("minecraft:stick", 1);
+        // VaultBlock.useItemOn: SUCCESS_SERVER for any held item on an ACTIVE vault, so the
+        // click ends with UseItemOn and the hand swings only when the server says so.
+        game.world.set(0, 64, 0, vault("active")).unwrap();
+        for held in [&key, &stick] {
+            let (result, _) = game.remote_block_reacts(&top_of(0, 0), Some(held), true);
+            assert!(result.consumes_action(), "{}", held.item);
+            assert!(!result.should_swing(), "{}", held.item);
+        }
+        // TRY_WITH_EMPTY_HAND otherwise: the vault has no useWithoutItem, so the click goes on.
+        let (empty, _) = game.remote_block_reacts(&top_of(0, 0), None, true);
+        assert!(!empty.consumes_action());
+        game.world.set(0, 64, 0, vault("unlocking")).unwrap();
+        let (unlocking, _) = game.remote_block_reacts(&top_of(0, 0), Some(&key), true);
+        assert!(!unlocking.consumes_action());
+    });
+}
