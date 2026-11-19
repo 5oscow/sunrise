@@ -330,3 +330,46 @@ fn a_creative_drop_sends_no_creative_slot() {
         );
     });
 }
+
+/// A creative toolbar load and Q in one tick (`handleKeybinds`: the number keys' loop, then
+/// key.drop): the load sends the new stack at once (`handleCreativeModeItemAdd`), so the drop
+/// that follows drops what the server now holds, and the end of the tick sends nothing more.
+#[test]
+#[ignore = "daily"]
+fn a_toolbar_load_goes_out_before_a_drop_in_its_tick() {
+    with_pressing_game(|game, packets, _| {
+        game.set_mode_id(1);
+        game.forced_hit = None;
+        game.inventory[game.selected] = Some(ItemStack::new("minecraft:stone", 16));
+        game.remote_synced();
+        // handleHotbarLoadOrSave puts the saved stack in the slot and sends it.
+        game.inventory[game.selected] = Some(ItemStack::new("minecraft:dirt", 16));
+        game.remote_creative_slot_add(game.selected);
+        game.key_pressed(
+            winit::keyboard::KeyCode::KeyQ,
+            winit::keyboard::KeyCode::KeyQ,
+        )
+        .unwrap();
+        game.remote_handle_input();
+        game.remote_send_state(0);
+        let sent = sent(packets);
+        let at = |id: &str| sent.iter().position(|p| p == id);
+        assert_eq!(
+            sent.iter()
+                .filter(|p| *p == "minecraft:set_creative_mode_slot")
+                .count(),
+            1,
+            "{sent:?}"
+        );
+        assert!(
+            at("minecraft:set_creative_mode_slot") < at("minecraft:player_action"),
+            "{sent:?}"
+        );
+        assert_eq!(
+            game.inventory[game.selected]
+                .as_ref()
+                .map(|s| (s.item.as_ref(), s.count)),
+            Some(("minecraft:dirt", 15))
+        );
+    });
+}
