@@ -3296,30 +3296,63 @@ fn write_dat_as(path: &Path, tag: Tag, durable: bool) -> Result<()> {
 }
 mod saved_data;
 use saved_data::{read_saved_data, saved_data_path, write_saved_data};
-fn world_gen_seed(settings: &Tag) -> Option<i64> {
-    number(settings.get("seed"))
+/// The generator settings used for this world session. A replacement from
+/// enabled packs is kept in memory until the first save.
+#[derive(Clone, Debug)]
+pub struct WorldGenerator {
+    data: Tag,
+    recovered: bool,
 }
 
-/// The world's generator settings: world_gen_settings.dat (26.3) or
-/// level.dat's Data.WorldGenSettings. Settings without a seed are unusable;
-/// do not start terrain with their dimensions and switch to another layout on save.
-pub fn world_gen_settings(world: &Path) -> Option<Tag> {
-    // A world still to be file-fixed has them in level.dat in an older shape: they are read as
-    // the fixes would leave them, so the questions on opening it are the same ones.
-    if let Ok(Some(settings)) = sunrise_world::datafix::files::current_world_gen_settings(world)
-        && world_gen_seed(&settings).is_some()
-    {
-        return Some(settings);
+impl WorldGenerator {
+    pub fn settings(&self) -> &Tag {
+        &self.data
     }
-    read_saved_data(world, "world_gen_settings")
-        .filter(|settings| world_gen_seed(settings).is_some())
-        .or_else(|| {
-            read_dat(&world.join("level.dat"))?
-                .get("Data")?
-                .get("WorldGenSettings")
-                .filter(|settings| world_gen_seed(settings).is_some())
-                .cloned()
-        })
+
+    fn read(world: &Path, level_data: Option<&Tag>) -> (Option<Self>, i64) {
+        use sunrise_world::datafix::{files, schema::Ty, update_saved_data};
+        // Before file fixes (world previews), project the old settings into the
+        // current layout. During startup the migration has already run.
+        let old = level_data
+            .and_then(|data| number(data.get("DataVersion")))
+            .and_then(|version| i32::try_from(version).ok())
+            .is_some_and(files::requires_file_fixing);
+        let settings = old
+            .then(|| files::current_world_gen_settings(world).ok().flatten())
+            .flatten()
+            .or_else(|| {
+                let mut root = read_dat(&saved_data_path(world, "world_gen_settings"))?;
+                update_saved_data(Ty::SavedWorldGenSettings, &mut root);
+                root.get("data").cloned()
+            })
+            .or_else(|| level_data?.get("WorldGenSettings").cloned());
+        let seed = settings.as_ref().and_then(|s| number(s.get("seed")));
+        let generator = settings
+            .filter(|s| {
+                seed.is_some() && s.get("dimensions").is_some_and(valid_world_gen_dimensions)
+            })
+            .map(|data| Self {
+                data,
+                recovered: false,
+            });
+        // Old summaries may still display a seed from level.dat even if its
+        // settings are unusable. A dedicated world only uses a validated generator.
+        (generator, seed.unwrap_or(0))
+    }
+
+    /// Read the prepared settings for a newly created world, which does not
+    /// have level.dat yet.
+    pub fn read_new(world: &Path) -> Option<Self> {
+        Self::read(world, None).0
+    }
+}
+
+/// The world's usable generator settings, for previews outside the world session.
+pub fn world_gen_settings(world: &Path) -> Option<Tag> {
+    let root = read_level_dat(world);
+    WorldGenerator::read(world, root.as_ref().and_then(|r| r.get("Data")))
+        .0
+        .map(|generator| generator.data)
 }
 include!("save/preset_saved.rs");
 pub use sunrise_client_core::uuid::uuid_from_text;
@@ -3513,27 +3546,29 @@ pub struct WorldGen {
 impl WorldGen {
     /// A saved world's choices, from its `world_gen_settings`.
     pub fn read(world: &Path) -> Option<Self> {
-        let settings = world_gen_settings(world)?;
+        world_gen_settings(world).as_ref().map(Self::from_settings)
+    }
+
+    /// Options of the generator selected by the world loader.
+    pub fn from_settings(settings: &Tag) -> Self {
         let flag = |key: &str, default: bool| number(settings.get(key)).map_or(default, |v| v != 0);
         let generator = settings
             .get("dimensions")
             .and_then(|d| d.get("minecraft:overworld"))
             .and_then(|o| o.get("generator"));
-        Some(Self {
+        Self {
             preset: generator.map_or(WorldPreset::Normal, WorldPreset::of_generator),
             structures: flag("generate_structures", true),
             bonus_chest: flag("bonus_chest", false),
-        })
+        }
     }
     /// The bundled world preset a saved world's overworld was generated
     /// with, from its generator: `minecraft:amplified` and
     /// `minecraft:large_biomes` by their noise settings, and
     /// `minecraft:single_biome_surface` by a fixed biome source. Anything
     /// else (and any world without settings) is `minecraft:normal`.
-    pub fn preset(world: &Path) -> &'static str {
-        let settings = world_gen_settings(world);
+    pub fn noise_preset(settings: Option<&Tag>) -> &'static str {
         let generator = settings
-            .as_ref()
             .and_then(|s| s.get("dimensions"))
             .and_then(|d| d.get("minecraft:overworld"))
             .and_then(|o| o.get("generator"));
@@ -3568,9 +3603,9 @@ include!("save/preset_generation.rs");
 pub struct Level {
     pub name: String,
     pub seed: i64,
-    /// Replacement generator settings to persist on the first save after recovery.
+    /// The generator selected for the session, including any replacement settings.
     #[doc(hidden)]
-    pub recovered_world_gen: Option<Tag>,
+    pub generator: Option<WorldGenerator>,
     pub creative: bool,
     /// The game mode id (0 survival, 1 creative, 2 adventure, 3 spectator);
     /// `creative` wins when the two disagree.
@@ -3743,50 +3778,51 @@ impl Level {
         dir: &Path,
         registry: std::sync::Arc<crate::gamerules::RuleRegistry>,
     ) -> Option<Self> {
-        Self::read_root(dir, read_level_dat(dir)?, registry, None)
+        Self::read_root(dir, read_level_dat(dir)?, registry)
     }
-    /// Open a dedicated world. If its saved generator cannot supply a seed, recover
-    /// with the default world options and a new seed, never the server properties.
-    pub fn read_for_dedicated(
-        dir: &Path,
-        registry: std::sync::Arc<crate::gamerules::RuleRegistry>,
-        random_seed: fn() -> i64,
-    ) -> Option<Self> {
-        Self::read_root(dir, read_level_dat(dir)?, registry, Some(random_seed))
-    }
-    /// Use enabled pack stems over the default stems when saving recovered generator settings.
-    pub fn recover_world_gen_dimensions(
+    /// Select a generator for an existing dedicated world with unusable settings.
+    pub fn recover_world_generator(
         &mut self,
         overrides: &sunrise_world::worldgen::overrides::WorldgenOverrides,
-    ) {
+        random_seed: impl FnOnce() -> i64,
+    ) -> Result<()> {
         use sunrise_world::worldgen::overrides::DIMENSIONS;
-        if let Some(Tag::Compound(dimensions)) = self
-            .recovered_world_gen
-            .as_mut()
-            .and_then(|settings| settings.get_mut("dimensions"))
-        {
-            for (id, stem) in overrides.entries(DIMENSIONS) {
-                if let Ok(stem) = serde_json::from_str(stem) {
-                    dimensions.insert(id.into(), crate::scoreboard::json_to_tag(&stem));
-                }
-            }
+        if self.generator.is_some() {
+            return Ok(());
         }
+        log::warn!(
+            "Sunrise: world generator settings do not read; using a random world seed and datapack dimensions"
+        );
+        self.seed = random_seed();
+        let mut data = new_world_gen_settings(self.seed, WorldGen::default(), None, None);
+        let dimensions = data.get_mut("dimensions").expect("default dimension map");
+        let Tag::Compound(stems) = dimensions else {
+            unreachable!()
+        };
+        for (id, stem) in overrides.entries(DIMENSIONS) {
+            stems.insert(
+                id.into(),
+                crate::scoreboard::json_to_tag(&serde_json::from_str(stem)?),
+            );
+        }
+        if !valid_world_gen_dimensions(dimensions) {
+            return Err("invalid datapack dimensions for generator recovery".into());
+        }
+        self.generator = Some(WorldGenerator {
+            data,
+            recovered: true,
+        });
+        Ok(())
     }
     /// `read` from level.dat alone, without the level.dat_old fallback: what
     /// `LevelStorageSource.readLevelSummary` reads for the world list.
     pub fn read_summary(dir: &Path) -> Option<Self> {
-        Self::read_root(
-            dir,
-            read_dat(&dir.join("level.dat"))?,
-            Default::default(),
-            None,
-        )
+        Self::read_root(dir, read_dat(&dir.join("level.dat"))?, Default::default())
     }
     fn read_root(
         dir: &Path,
         root: Tag,
         registry: std::sync::Arc<crate::gamerules::RuleRegistry>,
-        random_seed: Option<fn() -> i64>,
     ) -> Option<Self> {
         let data = root.get("Data")?;
         let n = |t: Option<&Tag>| number(t).unwrap_or(0);
@@ -3887,25 +3923,7 @@ impl Level {
             rules.remove(&minecart_rule.name);
         }
         level.game_rules = rules;
-        // Seed: world_gen_settings.dat (26.3) or Data.WorldGenSettings.
-        let saved_seed = read_saved_data(dir, "world_gen_settings")
-            .as_ref()
-            .and_then(world_gen_seed)
-            .or_else(|| data.get("WorldGenSettings").and_then(world_gen_seed));
-        if let Some(seed) = saved_seed {
-            level.seed = seed;
-        } else if let Some(random_seed) = random_seed {
-            log::warn!(
-                "Sunrise: world generator settings do not read; using a random world seed and datapack dimensions"
-            );
-            level.seed = random_seed();
-            level.recovered_world_gen = Some(new_world_gen_settings(
-                level.seed,
-                WorldGen::default(),
-                None,
-                None,
-            ));
-        }
+        (level.generator, level.seed) = WorldGenerator::read(dir, Some(data));
         // Day time: the overworld clock (26.3) or Data.DayTime.
         level.day_time = read_saved_data(dir, "world_clocks")
             .and_then(|c| {
@@ -4603,9 +4621,9 @@ impl Level {
             put(&mut clocks, "minecraft:the_end", end);
             write_saved_data(dir, "world_clocks", clocks)?;
         }
-        if let Some(settings) = &self.recovered_world_gen {
-            write_saved_data(dir, "world_gen_settings", settings.clone())?;
-            self.recovered_world_gen = None;
+        if let Some(generator) = self.generator.as_mut().filter(|g| g.recovered) {
+            write_saved_data(dir, "world_gen_settings", generator.data.clone())?;
+            generator.recovered = false;
         } else if legacy || !saved_data_path(dir, "world_gen_settings").exists() {
             write_world_gen_settings(dir, self.seed, WorldGen::default())?;
         }
@@ -5360,8 +5378,9 @@ mod tests {
         }));
         write_world_gen_settings_with(&dir, 1, WorldGen::default(), None, None, Some(dimensions))
             .unwrap();
+        let generator = WorldGenerator::read_new(&dir).unwrap();
         let mut overrides = WorldgenOverrides::default();
-        merge_saved_world_gen_dimensions(&dir, &mut overrides);
+        generator.merge_dimensions(&mut overrides);
         let overworld = overrides.level_height("minecraft:overworld").unwrap();
         assert_eq!((overworld.min_y, overworld.height), (0, 256));
         assert!(overworld.has_ceiling && !overworld.has_skylight);
@@ -5380,7 +5399,7 @@ mod tests {
         );
         let pack_stem = r#"{"type":"minecraft:overworld","generator":{"type":"minecraft:debug"}}"#;
         overrides.set(DIMENSIONS, "minecraft:overworld", pack_stem.into());
-        merge_saved_world_gen_dimensions(&dir, &mut overrides);
+        generator.merge_dimensions(&mut overrides);
         assert_eq!(
             overrides
                 .entries(DIMENSIONS)
@@ -5481,27 +5500,34 @@ mod tests {
             r#"{"type":"test:tall","generator":{"type":"minecraft:noise","settings":"minecraft:overworld","biome_source":{"type":"minecraft:fixed","biome":"minecraft:plains"}}}"#.to_owned(),
         );
 
-        for case in ["missing", "unreadable", "seedless"] {
+        for case in ["missing", "unreadable", "seedless", "no-dimensions"] {
             match case {
                 "missing" => fs::remove_file(&settings).unwrap(),
                 "unreadable" => fs::write(&settings, b"unreadable generator settings").unwrap(),
-                "seedless" => {
-                    let Tag::Compound(mut seedless) =
+                "seedless" | "no-dimensions" => {
+                    let Tag::Compound(mut invalid) =
                         read_saved_data(world, "world_gen_settings").unwrap()
                     else {
                         panic!("expected saved settings")
                     };
-                    seedless.remove(&"seed".into());
-                    write_saved_data(world, "world_gen_settings", Tag::Compound(seedless)).unwrap();
+                    let missing = if case == "seedless" {
+                        "seed"
+                    } else {
+                        invalid.insert("seed".into(), Tag::Long(13_579));
+                        "dimensions"
+                    };
+                    invalid.remove(&missing.into());
+                    write_saved_data(world, "world_gen_settings", Tag::Compound(invalid)).unwrap();
                 }
                 _ => unreachable!(),
             }
             let before = fs::read(&settings).ok();
-            let mut recovered =
-                Level::read_for_dedicated(world, Default::default(), || RECOVERY_SEED).unwrap();
+            let mut recovered = Level::read(world).unwrap();
+            recovered
+                .recover_world_generator(&overrides, || RECOVERY_SEED)
+                .unwrap();
             assert_eq!(recovered.seed, RECOVERY_SEED, "{case}");
             assert!(world_gen_settings(world).is_none(), "{case}");
-            recovered.recover_world_gen_dimensions(&overrides);
             assert_eq!(fs::read(&settings).ok(), before, "{case}");
             recovered.write_without_player(world).unwrap();
             let saved = read_saved_data(world, "world_gen_settings").unwrap();
@@ -5516,10 +5542,12 @@ mod tests {
         }
 
         write_world_gen_settings(world, 0, WorldGen::default()).unwrap();
-        let valid = Level::read_for_dedicated(world, Default::default(), || {
-            panic!("a valid saved zero must not draw a new seed")
-        })
-        .unwrap();
+        let mut valid = Level::read(world).unwrap();
+        valid
+            .recover_world_generator(&overrides, || {
+                panic!("a valid saved zero must not draw a new seed")
+            })
+            .unwrap();
         assert_eq!(valid.seed, 0);
     }
 

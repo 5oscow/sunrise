@@ -158,13 +158,7 @@ impl WorldRequest {
         let session_lock = sunrise_client::save::SessionLock::acquire(&save_root)?;
         // RandomSequences: the world's data/minecraft/random_sequences.dat.
         let rand_sequences = super::trading::read_random_sequences(&save_root);
-        let existing = if options.execution_role.is_dedicated_server() {
-            Level::read_for_dedicated(&save_root, rule_registry.clone(), || {
-                sunrise_client::random_source::create().next_long()
-            })
-        } else {
-            Level::read_with_registry(&save_root, rule_registry.clone())
-        };
+        let existing = Level::read_with_registry(&save_root, rule_registry.clone());
         let created = existing.is_none();
         let level = existing.unwrap_or_else(|| Level {
             name: name.unwrap_or(&folder).to_owned(),
@@ -279,24 +273,25 @@ impl WorldRequest {
             &level.enabled_features,
             &pack.additional_data,
         );
-        level.recover_world_gen_dimensions(&overrides);
+        if created {
+            level.generator = sunrise_client::save::WorldGenerator::read_new(&save_root);
+        } else if options.execution_role.is_dedicated_server() {
+            level.recover_world_generator(&overrides, || {
+                sunrise_client::random_source::create().next_long()
+            })?;
+        }
         growth::install_live_features(res, pack, options, &overrides);
-        let shapes = level_shapes(
-            &save_root,
-            &options.resources,
-            res.biomes(),
-            &pack.additional_data,
-        );
-        Dim::set_extra(shapes.extra.iter().map(|level| level.id));
-        // The bounded registry-loader leaf slice: fail world preparation before streaming,
-        // rather than letting the flat-generator fallback swallow a selected pack's codec error.
-        let (overrides, _) = worldgen_overrides_of(
+        let (mut overrides, _) = worldgen_overrides_of(
             &save_root,
             &options.resources,
             res.biomes(),
             &level.enabled_features,
             &pack.additional_data,
         );
+        let shapes = level_shapes(&mut overrides, &options.resources, &level);
+        Dim::set_extra(shapes.extra.iter().map(|level| level.id));
+        // The bounded registry-loader leaf slice: fail world preparation before streaming,
+        // rather than letting the flat-generator fallback swallow a selected pack's codec error.
         overrides.validate_fill_layers(pack.assets.registry)?;
         let dim = Dim::from_id(&level.dimension);
         let shape = shapes.get(dim.id());
@@ -318,7 +313,7 @@ impl WorldRequest {
             dim,
             shape,
             level.seed,
-            &level.enabled_features,
+            &level,
             biomes.clone(),
             None,
         )?;
@@ -513,14 +508,15 @@ pub(super) fn preload_launch_world(
             let started = std::time::Instant::now();
             // Errors are left for the world opening to report. The world's
             // flags from its level.dat: the feature packs a flag forces on.
-            let enabled_features = sunrise_client::save::Level::read(&world_root)
-                .map(|l| l.enabled_features)
-                .unwrap_or_default();
+            let level = Level::read(&world_root);
+            let enabled_features = level
+                .as_ref()
+                .map_or(&[][..], |l| l.enabled_features.as_ref());
             let (overrides, _) = worldgen_overrides_of(
                 &world_root,
                 &resources,
                 &biomes,
-                &enabled_features,
+                enabled_features,
                 &additional,
             );
             if let Ok(data) = sunrise_client::vanillagen::shared_data_from(
@@ -529,7 +525,11 @@ pub(super) fn preload_launch_world(
                 registry,
                 &data_source,
             ) {
-                let preset = sunrise_client::save::WorldGen::preset(&world_root);
+                let generator = level
+                    .as_ref()
+                    .and_then(|l| l.generator.as_ref())
+                    .map(|g| g.settings());
+                let preset = sunrise_client::save::WorldGen::noise_preset(generator);
                 let _ = data.prepare_decoration(preset, "minecraft:overworld");
             }
             log::info!(
@@ -656,28 +656,17 @@ fn worldgen_overrides_of(
 /// The shapes of the world's levels: their dimension types, the world's
 /// enabled packs' stems, then saved preset/editor stems, over vanilla's. A refused type keeps the
 /// vanilla shape, with a warning.
-pub(super) fn level_shapes(
-    world_root: &std::path::Path,
+fn level_shapes(
+    overrides: &mut sunrise_world::worldgen::overrides::WorldgenOverrides,
     resources: &std::path::Path,
-    biomes: &sunrise_client::biome::Biomes,
-    additional: &[Arc<sunrise_client::datapack::DataPack>],
+    level: &Level,
 ) -> sunrise_client::chunk::LevelShapes {
-    let packs = super::pack_finders::data_repository(world_root, resources, additional);
-    let enabled_features = sunrise_client::save::Level::read(world_root)
-        .map(|l| l.enabled_features)
-        .unwrap_or_default();
-    let enabled = sunrise_client::datapack::enabled_ids(world_root, &packs, &enabled_features);
-    let enabled: Vec<_> = enabled
-        .iter()
-        .filter_map(|id| packs.iter().find(|p| &p.id == id))
-        .collect();
-    // What the packs leave out is logged when the generator reads them.
-    let (mut overrides, _) =
-        sunrise_client::datapack::worldgen_overrides(&enabled, |b| biomes.contains(b));
-    sunrise_client::save::merge_saved_world_gen_dimensions(world_root, &mut overrides);
-    let shapes = shapes_of(&overrides);
+    if let Some(generator) = &level.generator {
+        generator.merge_dimensions(overrides);
+    }
+    let shapes = shapes_of(overrides);
     set_level_sea_levels(
-        &overrides,
+        overrides,
         sunrise_world::worldgen::overrides::mod_dimensions(),
         resources,
     );
@@ -883,6 +872,7 @@ fn mod_terrain(
     seed: i64,
     structures: bool,
     runtime_stem: Option<&serde_json::Value>,
+    saved_stem: Option<&sunrise_core::nbt::Tag>,
 ) -> Option<std::result::Result<ModLevel, String>> {
     use sunrise_world::worldgen::{
         mod_biome_sources::mod_biome_sources, mod_generators::mod_chunk_generators,
@@ -899,11 +889,7 @@ fn mod_terrain(
             .entries(DIMENSIONS)
             .find(|(level, _)| *level == dim.id())
             .and_then(|(_, stem)| serde_json::from_str(stem).ok())
-            .or_else(|| {
-                sunrise_client::save::world_gen_settings(world_root)
-                    .and_then(|s| s.get("dimensions")?.get(dim.id()).cloned())
-                    .map(|stem| sunrise_client::scoreboard::tag_to_json(&stem))
-            })
+            .or_else(|| saved_stem.map(sunrise_client::scoreboard::tag_to_json))
     })?;
     if let Some(generator) = stem["generator"]["type"]
         .as_str()
@@ -974,10 +960,14 @@ pub(super) fn make_streaming(
     dim: Dim,
     shape: sunrise_client::chunk::LevelShape,
     seed: i64,
-    enabled_features: &[String],
+    level: &Level,
     biomes: Arc<Biomes>,
     runtime: Option<&super::runtime_levels::Generate>,
 ) -> Result<(Streaming, Arc<SaveDir>, Option<Arc<VanillaTerrain>>)> {
+    use sunrise_client::save::WorldGen;
+    let enabled_features = &level.enabled_features;
+    let generator = level.generator.as_ref().map(|g| g.settings());
+    let saved_stem = generator.and_then(|s| s.get("dimensions")?.get(dim.id()));
     let mut save = SaveDir::new(
         sunrise_client::save::dimension_dir(world_root, dim.id()),
         shape,
@@ -1001,38 +991,30 @@ pub(super) fn make_streaming(
         item_data: &res.core.item_data,
     };
     let mut locator = None;
-    let flat = (dim == Dim::Overworld)
-        .then(|| sunrise_client::save::world_gen_settings(world_root))
-        .flatten()
-        .and_then(|s| {
-            sunrise_client::flatgen::FlatTerrain::from_settings(
-                &s,
-                pack.assets.registry,
-                res.biomes(),
-                shape,
-            )
-        });
+    let overworld_settings = generator.filter(|_| dim == Dim::Overworld);
+    let flat = overworld_settings.and_then(|s| {
+        sunrise_client::flatgen::FlatTerrain::from_settings(
+            s,
+            pack.assets.registry,
+            res.biomes(),
+            shape,
+        )
+    });
     // `DebugLevelSource`: the overworld of the Debug preset.
-    let debug = (dim == Dim::Overworld)
-        .then(|| sunrise_client::save::world_gen_settings(world_root))
-        .flatten()
-        .and_then(|s| {
-            sunrise_client::debugworld::DebugTerrain::from_settings(
-                &s,
-                pack.assets.registry,
-                res.biomes(),
-                shape,
-            )
-        });
+    let debug = overworld_settings.and_then(|s| {
+        sunrise_client::debugworld::DebugTerrain::from_settings(
+            s,
+            pack.assets.registry,
+            res.biomes(),
+            shape,
+        )
+    });
     // PlaceCommand.placeJigsaw/placeStructure generate directly, independently
     // of WorldOptions.generateStructures. Keep their flat locator available
     // even when automatic structure starts are disabled.
-    let automatic_structures =
-        sunrise_client::save::WorldGen::read(world_root).is_none_or(|w| w.structures);
-    let flat_settings = (dim == Dim::Overworld)
-        .then(|| sunrise_client::save::world_gen_settings(world_root))
-        .flatten()
-        .and_then(|s| sunrise_client::flatgen::FlatTerrain::pipeline_settings(&s));
+    let automatic_structures = generator.is_none_or(|s| WorldGen::from_settings(s).structures);
+    let flat_settings =
+        overworld_settings.and_then(sunrise_client::flatgen::FlatTerrain::pipeline_settings);
     // `adjustGenerationSettings`: a superflat world with features or lakes is decorated
     // whether or not its structures generate.
     let flat_decorates = flat_settings
@@ -1171,6 +1153,7 @@ pub(super) fn make_streaming(
             Some(super::runtime_levels::Generate::Stem(stem)) => Some(stem),
             _ => None,
         },
+        saved_stem,
     )
     .transpose()?
     {
@@ -1209,9 +1192,8 @@ pub(super) fn make_streaming(
             return Err(format!("{}: no generator builds this runtime level", dim.id()).into());
         }
         // WorldOptions.generateStructures, from the world's settings.
-        let structures =
-            sunrise_client::save::WorldGen::read(world_root).is_none_or(|w| w.structures);
-        let preset = sunrise_client::save::WorldGen::preset(world_root);
+        let structures = automatic_structures;
+        let preset = WorldGen::noise_preset(generator);
         let overrides = world_worldgen_overrides(
             world_root,
             &options.resources,
@@ -1219,9 +1201,7 @@ pub(super) fn make_streaming(
             enabled_features,
             &pack.additional_data,
         );
-        let saved_stem = sunrise_client::save::world_gen_settings(world_root)
-            .and_then(|s| s.get("dimensions")?.get(dim.id()).cloned())
-            .map(|stem| sunrise_client::scoreboard::tag_to_json(&stem));
+        let saved_stem = saved_stem.map(sunrise_client::scoreboard::tag_to_json);
         let regions = sunrise_client::save::biome_regions::layout(world_root, dim.id())
             .map_err(|e| format!("Failed to read the world's biome regions: {e}"))?;
         let mut inner = VanillaTerrain::for_world_with_settings(terrain_resources, &overrides, seed, preset, dim.id(), structures, saved_stem.as_ref(), regions).map_err(|e| {
@@ -1344,8 +1324,8 @@ mod tests {
         assert!(save::biome_regions::adoptable(&world));
         let before = std::fs::read(&record).unwrap();
         let role = execution_role::ExecutionRole::DedicatedServer;
-        let refused = prepare_level_data(role, &world, "world", game.path()).unwrap_err();
-        assert!(refused.to_string().contains("its level data does not read"));
+        assert!(prepare_level_data(role, &world, "world", game.path()).is_err());
+        assert!(!world.join("level.dat").exists());
         assert_eq!(std::fs::read(&record).unwrap(), before);
         assert_eq!(std::fs::read(&backup).unwrap(), b"unreadable backup");
 
@@ -1357,6 +1337,88 @@ mod tests {
         .unwrap();
         prepare_level_data(role, &world, "world", game.path()).unwrap();
         assert_ne!(std::fs::read(&record).unwrap(), before);
+    }
+
+    #[test]
+    #[ignore = "daily"]
+    fn recovered_world_uses_the_pack_flat_generator_before_its_first_save() {
+        use execution_role::ExecutionRole::DedicatedServer;
+        use std::fs;
+        use sunrise_client::save;
+
+        let scratch = tempfile::tempdir().unwrap();
+        let world = scratch.path();
+        Level::default().write_without_player(world).unwrap();
+        fs::rename(world.join("level.dat"), world.join("level.dat_old")).unwrap();
+        let settings_path = world.join("data/minecraft/world_gen_settings.dat");
+        fs::write(&settings_path, b"unreadable generator settings").unwrap();
+        let pack = world.join("datapacks/recovery");
+        let dimensions = pack.join("data/minecraft/dimension");
+        fs::create_dir_all(&dimensions).unwrap();
+        fs::write(
+            pack.join("pack.mcmeta"),
+            r#"{"pack":{"description":"Recovery test","min_format":[121,0],"max_format":[121,0]}}"#,
+        )
+        .unwrap();
+        fs::write(
+            world.join("datapacks.json"),
+            r#"{"enabled":["vanilla","file/recovery"],"disabled":[]}"#,
+        )
+        .unwrap();
+        fs::write(
+            dimensions.join("overworld.json"),
+            r#"{"type":"minecraft:overworld","generator":{"type":"minecraft:flat","settings":{
+                "biome":"minecraft:plains","features":false,"lakes":false,"structure_overrides":[],
+                "layers":[{"height":1,"block":"minecraft:bedrock"},{"height":2,"block":"minecraft:diamond_block"}]}}}"#,
+        ).unwrap();
+
+        let resources = std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap().into();
+        crate::game::native_entity_refs::tests::with_game_role(
+            resources,
+            DedicatedServer,
+            |game| {
+                let mut request = WorldRequest::new(
+                    "recovery",
+                    None,
+                    Some(54_321),
+                    false,
+                    None,
+                    Level::default().rule_registry,
+                )
+                .unwrap();
+                request.save_root = world.to_owned();
+                let mut prepared = game.prepare_world_and_rules(request).unwrap();
+                assert_eq!(
+                    fs::read(&settings_path).unwrap(),
+                    b"unreadable generator settings"
+                );
+                let y = prepared.world.shape.min_y + 1;
+                assert!(
+                    prepared
+                        .streaming
+                        .set_forced_loaded(&mut prepared.world, 32, 32, true)
+                );
+                let chunk = &prepared.world.chunks[&(32, 32)];
+                assert_eq!(
+                    Some(chunk.get(0, y, 0)),
+                    game.pack
+                        .assets
+                        .registry
+                        .default_state("minecraft:diamond_block")
+                        .map(|id| id.0)
+                );
+
+                prepared.level.write_without_player(world).unwrap();
+                assert_eq!(
+                    save::world_gen_settings(world).as_ref(),
+                    prepared
+                        .level
+                        .generator
+                        .as_ref()
+                        .map(|generator| generator.settings()),
+                );
+            },
+        );
     }
 
     /// A world whose level.dat does not read but whose level.dat_old does: only the
@@ -1847,6 +1909,7 @@ mod tests {
                 shape,
                 0,
                 true,
+                None,
                 None,
             )
         };
