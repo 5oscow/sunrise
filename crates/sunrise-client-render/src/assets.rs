@@ -408,7 +408,7 @@ impl RenderAssets {
             "lava_still",
             "lava_flow",
         ] {
-            sprites.insert(&format!("minecraft:block/{name}"))?;
+            sprites.insert_in_blocks(&format!("minecraft:block/{name}"))?;
         }
         for model in crate::fluid_models::resolved() {
             for name in [
@@ -419,7 +419,7 @@ impl RenderAssets {
             .into_iter()
             .flatten()
             {
-                sprites.insert(name)?;
+                sprites.insert_in_blocks(name)?;
             }
         }
         for stage in 0..10 {
