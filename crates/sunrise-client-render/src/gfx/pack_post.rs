@@ -5217,7 +5217,8 @@ impl PackPost {
         window: [u32; 2],
         pages: &[TerrainPage],
         terrain: &mut TerrainDraw<'_>,
-    ) {
+        lost: &std::sync::atomic::AtomicBool,
+    ) -> Result<(), String> {
         self.resize(device, size);
         // Last frame's water patches (or a new texture's zeros) out: depth 1 is no patch.
         if self.water_mask_dirty
@@ -5295,7 +5296,7 @@ impl PackPost {
             }
         }
         if let Some(t) = &mut self.timing {
-            t.begin(device, queue);
+            t.begin(device, queue, lost)?;
         }
         self.uniforms.center_depth_raw = self
             .center_depth
@@ -5306,11 +5307,11 @@ impl PackPost {
         self.custom.world_frame(inputs.biome_known);
         self.uniforms.eval_custom(&mut self.custom);
         if self.targets.is_none() {
-            return;
+            return Ok(());
         }
         // Images start the frame cleared, before the shadow pass writes them.
         if let Some(dump) = &mut self.dump {
-            dump.read(device);
+            dump.read(device, lost)?;
             dump.copy(device, encoder, &self.images);
         }
         pack_images::clear(
@@ -5320,7 +5321,9 @@ impl PackPost {
             self.gpu.clear,
             &mut self.zeros,
         );
-        let Some(targets) = &self.targets else { return };
+        let Some(targets) = &self.targets else {
+            return Ok(());
+        };
         // Every frame starts on A. A buffer that isn't cleared and ended the last frame on B has B
         // copied back to A, and B keeps what was last written into it: a model that fits Iris 1.11.7's
         // values in probe packs of our own (#9009), not a documented Iris rule. colortex0's A is
@@ -5706,6 +5709,7 @@ impl PackPost {
             rp.set_bind_group(0, &group, &[]);
             rp.draw(0..3, 0..1);
         }
+        Ok(())
     }
 }
 

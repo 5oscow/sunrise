@@ -208,7 +208,9 @@ impl Renderer {
                 indices: self.indices.clone(),
                 quads: cloud_quads,
             }));
-            post.run(
+            // Fails only on a device lost under its waits: the frame stops in `draw_frame`
+            // right after the passes.
+            let ran = post.run(
                 &self.device,
                 &self.queue,
                 &mut encoder,
@@ -221,7 +223,13 @@ impl Renderer {
                 [self.config.width, self.config.height],
                 pages,
                 &mut terrain,
+                &self.device_lost,
             );
+            if let Err(error) = ran
+                && !self.device_lost()
+            {
+                log::warn!("Sunrise renderer: the shader pack's frame stopped early: {error}");
+            }
             // Keep the capacity, not the buffers: a page the arena frees must not stay alive
             // here until the next shader-pack frame (or forever once the pack is off).
             self.pack_pages.clear();

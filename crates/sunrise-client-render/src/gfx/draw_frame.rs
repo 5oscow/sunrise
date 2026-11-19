@@ -37,7 +37,7 @@ impl Renderer {
         let polled =
             super::in_flight::poll_live(&self.device, &self.device_lost, wgpu::PollType::Poll);
         if self.device_lost() {
-            return Err("the graphics device was lost".into());
+            return Err(super::in_flight::LOST.into());
         }
         if polled.is_ok()
             && let Some(timer) = &mut self.gpu_timer
@@ -109,7 +109,10 @@ impl Renderer {
             t.gap = self.pass_timing_gap;
             t.keep_frames(self.keep_timed_frames);
             t.set_detail(self.pass_detail);
-            t.begin(&self.device, &self.queue);
+            // The calibration draw's wait is the one that can find a loss here; the acquired
+            // surface texture goes back undrawn and unpresented (`render` leaves recovery to
+            // its caller).
+            t.begin(&self.device, &self.queue, &self.device_lost)?;
         }
         if self.animated_textures {
             self.hud.animate(
@@ -2112,7 +2115,7 @@ impl Renderer {
                 self.light_revision,
             );
             if let Some(t) = &mut native.timing {
-                t.begin(&self.device, &self.queue);
+                t.begin(&self.device, &self.queue, &self.device_lost)?;
                 native_sky_pass =
                     native.sky.is_some() && t.recording() && sky_visible && frame.skybox;
             }
@@ -3429,6 +3432,10 @@ impl Renderer {
             },
         );
         laps.lap("r_passes");
+        // A loss the passes' waits found (a shader pack's timing, its image dump): no submit.
+        if self.device_lost() {
+            return Err(super::in_flight::LOST.into());
+        }
         self.submit_and_present_frame(
             encoder,
             SubmitFrameArgs {

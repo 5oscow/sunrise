@@ -185,7 +185,7 @@ impl Renderer {
         // A loss found since the frame began (by its submission, or another thread's poll):
         // no screenshot wait and no present on the lost device.
         if self.device_lost() {
-            return Err("the graphics device was lost".into());
+            return Err(super::in_flight::LOST.into());
         }
         let failed = checks.and_then(GpuChecks::pop);
         if let Some((request, buffer)) = readback {
@@ -223,6 +223,10 @@ impl Renderer {
         }
         if self.screenshot_result.is_none() {
             self.screenshot_result = self.screenshot_readbacks.poll();
+        }
+        // The screenshot's synchronous wait can itself find the loss: nothing is presented.
+        if self.device_lost() {
+            return Err(super::in_flight::LOST.into());
         }
         // The frame's own waits for the submit thread (its queue writes and passes).
         self.last_wait += self.queue.take_waited();

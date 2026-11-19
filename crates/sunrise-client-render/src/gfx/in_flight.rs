@@ -4,6 +4,9 @@
 use super::{Renderer, ScreenshotRequest, copy_frame, submit};
 use std::sync::atomic::{AtomicBool, Ordering};
 
+/// The error of a wait that found the device lost.
+pub(super) const LOST: &str = "the graphics device was lost";
+
 /// `Device::poll`, unless the device is lost (`lost`, set by its loss callback). wgpu has no
 /// error result for a poll that finds the device lost (it panics), so that panic is contained;
 /// the callback has set `lost` by then. Any other panic goes on.
@@ -12,12 +15,22 @@ pub(super) fn poll_live(
     lost: &AtomicBool,
     poll: wgpu::PollType,
 ) -> Result<(), String> {
-    const LOST: &str = "the graphics device was lost";
+    contain_loss(lost, || {
+        device.poll(poll).map(|_| ()).map_err(|e| e.to_string())
+    })
+}
+
+/// `wait`, unless `lost` is set; a panic in it while `lost` is set is the loss, a panic with
+/// `lost` clear goes on.
+fn contain_loss(
+    lost: &AtomicBool,
+    wait: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
     if lost.load(Ordering::Relaxed) {
         return Err(LOST.into());
     }
-    match crate::crash::contain(|| device.poll(poll)) {
-        Ok(polled) => polled.map(|_| ()).map_err(|e| e.to_string()),
+    match crate::crash::contain(wait) {
+        Ok(waited) => waited,
         Err(_) if lost.load(Ordering::Relaxed) => Err(LOST.into()),
         Err(message) => panic!("{message}"),
     }
@@ -177,5 +190,44 @@ mod chain_tests {
         chain(None, read(4)).expect("the second")();
         assert!(chain(None, None).is_none());
         assert_eq!(*ran.lock().unwrap(), [1, 2, 3, 4]);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_lost_device_is_not_waited_on() {
+        let lost = AtomicBool::new(true);
+        let result = contain_loss(&lost, || unreachable!("waited on a lost device"));
+        assert_eq!(result, Err(LOST.into()));
+    }
+
+    #[test]
+    fn a_panic_that_comes_with_the_loss_is_the_loss() {
+        let lost = AtomicBool::new(false);
+        let result = contain_loss(&lost, || {
+            lost.store(true, Ordering::Relaxed);
+            panic!("device lost")
+        });
+        assert_eq!(result, Err(LOST.into()));
+    }
+
+    #[test]
+    #[should_panic(expected = "not a loss")]
+    fn a_panic_on_a_live_device_goes_on() {
+        let lost = AtomicBool::new(false);
+        let _ = contain_loss(&lost, || panic!("not a loss"));
+    }
+
+    #[test]
+    fn a_wait_on_a_live_device_returns_its_result() {
+        let lost = AtomicBool::new(false);
+        assert_eq!(contain_loss(&lost, || Ok(())), Ok(()));
+        assert_eq!(
+            contain_loss(&lost, || Err("timed out".into())),
+            Err("timed out".into())
+        );
     }
 }
