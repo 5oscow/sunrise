@@ -307,6 +307,7 @@ impl Game<'_> {
             self.options.resources = root.prepared().to_owned();
             self.pack.data_source = root.data().clone();
             self.pack.data_changes = root.data_changes().clone();
+            self.pack.mod_layers = root.mod_layers().clone();
             self.mods.data_switched = true;
         }
         self.install_loop_context(context);

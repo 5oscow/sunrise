@@ -3038,9 +3038,9 @@ registration path.
   restricted level hook, `with_random` on the `LevelRandomHost` draws from the same stream.
 
 - Server lifecycle hooks run once per start, on both the single-player server thread and a dedicated server.
-  `server_about_to_start(dedicated)` runs before worlds load (`ServerAboutToStartEvent`), immediately followed by
-  `server_starting(dedicated)` (`ServerStartingEvent`), before the server accepts play. `server_started(dedicated)`
-  keeps its existing firing point: every level loaded and the first tick not yet run (`ServerStartedEvent`).
+  `server_about_to_start(dedicated)` runs before worlds load (`ServerAboutToStartEvent`).
+  `server_starting(dedicated)` (`ServerStartingEvent`) follows world and pack loading and spawn preparation on dedicated servers, or immediately follows about-to-start on integrated servers. Both precede accepting play.
+  `server_started(dedicated)` runs after every level loads but before the first tick (`ServerStartedEvent`).
   On every exit after startup began, including a failed open, failed tick, or caught panic,
   `server_stopping(dedicated)` (`ServerStoppingEvent`) runs before player cleanup and the final world save attempt.
   `server_stopped(dedicated)` (`ServerStoppedEvent`) runs last, after network teardown, flushing saves and releasing

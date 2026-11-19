@@ -49,6 +49,9 @@ pub(super) mod report;
 mod status;
 mod transfer;
 
+#[cfg(test)]
+mod language_tests;
+
 /// What the tick loop tells `ServerWatchdog`: when the tick in progress was
 /// due (`getNextTickTime`), how long a tick is, and whether the server runs.
 struct Watchdog {
@@ -742,6 +745,28 @@ impl std::fmt::Display for DatapacksRefused {
 impl std::error::Error for DatapacksRefused {}
 
 impl Game<'_> {
+    /// Add the adopted packs' English at the dedicated server-starting notice.
+    /// World and registry-load listeners still see only the built-in language.
+    fn start_loaded_dedicated_world(&mut self, packs: &super::functions::PackStack) {
+        use sunrise_client::lang::{self, Language, ResourceSource};
+
+        let layers = self
+            .pack
+            .mod_layers
+            .iter()
+            .chain(
+                packs
+                    .enabled_packs()
+                    .map(sunrise_client::datapack::DataPack::source),
+            )
+            .map(|source| source as &dyn ResourceSource);
+        let language = Language::load_server(&self.ui.vanilla_root, layers, |value| {
+            super::native_text_grammar::build(value, &self.ui.registries, false)
+        });
+        lang::set(language);
+        self.native_server_starting(true);
+    }
+
     /// DedicatedServerProperties.createDimensions for a world that doesn't
     /// exist yet: `level-type`'s preset, a flat world's `generator-settings`
     /// and `generate-structures`, written before the world opens so that
@@ -1115,11 +1140,10 @@ impl Game<'_> {
         )?)?;
         *startup_began = true;
         self.native_server_about_to_start(true);
-        self.native_server_starting(true);
         self.native_lifecycle_open_started();
         // The registries the server sends are read while the world prepares.
         let sync = super::lan::sync::preload_sync_data(&self.res.core.item_data);
-        self.finish_open_world(prepared)?;
+        let opened_packs = self.finish_open_world(prepared)?;
         // WorldLoader: the world's packs must load before the server starts. The data store is read
         // now rather than at the first tick (reading parses functions; it runs none), and a broken
         // predicate graph stops the start before anything listens (a partial check: predicate_graph.rs).
@@ -1213,6 +1237,7 @@ impl Game<'_> {
                  turn on Velocity forwarding (forwarding.secret, docs/velocity-forwarding.md) or turn [transfer] off"
                 .into());
         }
+        self.start_loaded_dedicated_world(&opened_packs);
         let net = NetConfig {
             bind: (!props.server_ip.is_empty())
                 .then(|| props.server_ip.parse().ok())

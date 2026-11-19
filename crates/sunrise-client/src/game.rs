@@ -814,6 +814,7 @@ pub struct PackResources {
     data_source: sunrise_assets::resource_source::ResourceSource,
     data_changes: sunrise_assets::resource_source::ResourceSource,
     additional_data: Arc<[Arc<sunrise_client::datapack::DataPack>]>,
+    mod_layers: Arc<[sunrise_assets::resource_source::ResourceSource]>,
     assets: Arc<Assets>,
     block_registries: Arc<sunrise_client::command::args::Registries>,
     render: Arc<RenderAssets>,
@@ -6361,7 +6362,10 @@ impl Game<'_> {
         })
         .collect()
     }
-    fn finish_open_world(&mut self, prepared: world_loading::PreparedWorld) -> Result<()> {
+    fn finish_open_world(
+        &mut self,
+        prepared: world_loading::PreparedWorld,
+    ) -> Result<functions::PackStack> {
         self.reset_tutorial();
         // Another world: its generator, not the last one's Density line.
         self.debug_density.borrow_mut().clear();
@@ -6547,7 +6551,8 @@ impl Game<'_> {
             facts.cardinal_light == sunrise_world::dimension_type::CardinalLight::Nether;
         self.load_world_state()?;
         self.native_world_opened(dim);
-        self.open_saved_portal_levels()
+        self.open_saved_portal_levels()?;
+        Ok(stack)
     }
     fn finish_close_world(&mut self) -> Result<()> {
         self.ambience.clear(&mut self.audio);
@@ -11424,17 +11429,22 @@ pub(crate) fn run_with(
         return run_loading(options, early_settings, vanilla_root, None, started);
     }
     let mut pack_error = None;
-    let selected_root = packs::startup_root(
-        &vanilla_root,
-        &early_settings.resource_packs,
-        &[],
-        &options.mods,
-    )
-    .or_else(|e| {
-        log::warn!("Sunrise: resource packs not applied: {e}");
-        pack_error = Some(e.to_string());
-        mods::content_root(&vanilla_root, &options.mods)
-    })?;
+    let selected_root = if options.execution_role.is_dedicated_server() {
+        // Dedicated startup sees enabled mod assets but no client's resource packs.
+        mods::content_root(&vanilla_root, &options.mods)?
+    } else {
+        packs::startup_root(
+            &vanilla_root,
+            &early_settings.resource_packs,
+            &[],
+            &options.mods,
+        )
+        .or_else(|e| {
+            log::warn!("Sunrise: resource packs not applied: {e}");
+            pack_error = Some(e.to_string());
+            mods::content_root(&vanilla_root, &options.mods)
+        })?
+    };
     let mut loaded = load_resources_for_mods(
         selected_root,
         pack_finders::data_packs(&options.mods),

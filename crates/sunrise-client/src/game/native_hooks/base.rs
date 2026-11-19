@@ -592,7 +592,8 @@ impl Game<'_> {
     pub(in crate::game) fn native_server_about_to_start(&mut self, dedicated: bool) {
         self.fire_server_about_to_start(dedicated);
     }
-    /// Server startup has begun, before play can be accepted.
+    /// Before play can be accepted: after the dedicated world loads or at
+    /// the integrated server's early startup notice.
     pub(in crate::game) fn native_server_starting(&mut self, dedicated: bool) {
         self.fire_server_starting(dedicated);
     }
