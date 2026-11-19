@@ -659,19 +659,28 @@ pub(super) fn load_resources_for_mods(
             let ui = load_ui(resolved.source()).map(|ui| offer(ui, &root));
             (ui, core.join())
         });
+        // A cloud texture vanilla would read past fails its reload (`CloudRenderer.prepare`),
+        // and so this load: checked here, where the packs can still be dropped, before the
+        // pack tables read it again. A server draws no clouds.
+        let clouds = match headless {
+            true => Ok(()),
+            false => sunrise_client::clouds::load(resolved.source()).map(drop),
+        };
         // Core data is provisional: a selected world pack may replace an entry.
-        let failure = match (ui, core) {
-            (Ok(gui), Ok(Ok(core))) => break (core, gui, resolved, conditions),
-            (Err(e), _) if can_rollback => e.to_string(),
-            (_, Ok(Err(e))) if can_rollback => e,
-            (_, Ok(Err(e))) => {
+        let failure = match (ui, core, clouds) {
+            (Ok(gui), Ok(Ok(core)), Ok(())) => break (core, gui, resolved, conditions),
+            (Err(e), _, _) if can_rollback => e.to_string(),
+            (_, Ok(Err(e)), _) if can_rollback => e,
+            (_, _, Err(e)) if can_rollback => e.to_string(),
+            (_, Ok(Err(e)), _) => {
                 return Err(format!(
                     "{e}\nPrepare resources with the launcher, or: sunrise-prepare --prepare"
                 )
                 .into());
             }
-            (_, Err(e)) => return Err(e.into()),
-            (Err(e), Ok(Ok(_))) => return Err(e),
+            (_, Err(e), _) => return Err(e.into()),
+            (Err(e), Ok(Ok(_)), _) => return Err(e),
+            (Ok(_), Ok(Ok(_)), Err(e)) => return Err(e.into()),
         };
         log::warn!(
             "Sunrise: resource packs failed to load ({failure}); using the default resources"
@@ -755,7 +764,7 @@ pub(super) fn load_resources_for_mods(
         item_renderer,
         biomes.clone(),
         Arc::new(light),
-    );
+    )?;
     pack.additional_data = additional_data.into();
     drop(pack_step);
     log::info!("load pack tables: {:.2}s", started.elapsed().as_secs_f32());

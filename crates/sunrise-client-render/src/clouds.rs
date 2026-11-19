@@ -465,39 +465,45 @@ pub fn outside_image(texture: &(u32, u32, Vec<bool>)) -> Option<OutsideImage> {
     None
 }
 
-/// The cloud texture (`textures/environment/clouds.png`) as filled cells (alpha 10 or more,
-/// `CloudRenderer.isCellEmpty`), from the selected packs' `root`. One vanilla would read past
-/// ([`outside_image`]) is refused, named, and the game's own (`game`) is used: in vanilla the
-/// reload fails, every selected pack is dropped, and the game's clouds draw.
+/// Where the cloud texture is read from.
+pub const TEXTURE: &str = "assets/minecraft/textures/environment/clouds.png";
+
+/// A cloud texture vanilla 26.3 would read past ([`outside_image`]): the pixel, named as
+/// `NativeImage.getPixel` names it, as the reload's error.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Refused(pub OutsideImage);
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{TEXTURE}: {}", self.0)
+    }
+}
+
+impl std::error::Error for Refused {}
+
+/// The cloud texture (`textures/environment/clouds.png`) of the resources at `root` as filled
+/// cells (alpha 10 or more, `CloudRenderer.isCellEmpty`); one with no such file, or that doesn't
+/// decode, has none. One vanilla would read past ([`outside_image`]) is refused: in vanilla
+/// `CloudRenderer.prepare` throws, the reload fails and the selected packs are dropped, and the
+/// caller's reload fails the same way.
 pub fn load(
     root: &crate::resource_source::ResourceSource,
-    game: &crate::resource_source::ResourceSource,
-) -> (u32, u32, Vec<bool>) {
-    const PATH: &str = "assets/minecraft/textures/environment/clouds.png";
-    let decode = |source: &crate::resource_source::ResourceSource| {
-        source
-            .read(PATH)
-            .map_err(Into::into)
-            .and_then(|bytes| crate::hud::decode_bytes(&bytes))
-            .map(|(w, h, px)| {
-                (
-                    w,
-                    h,
-                    px.as_chunks::<4>().0.iter().map(|p| p[3] >= 10).collect(),
-                )
-            })
-            .unwrap_or((1, 1, vec![false]))
-    };
-    let texture = decode(root);
+) -> Result<(u32, u32, Vec<bool>), Refused> {
+    let texture = root
+        .read(TEXTURE)
+        .map_err(Into::into)
+        .and_then(|bytes| crate::hud::decode_bytes(&bytes))
+        .map(|(w, h, px)| {
+            (
+                w,
+                h,
+                px.as_chunks::<4>().0.iter().map(|p| p[3] >= 10).collect(),
+            )
+        })
+        .unwrap_or((1, 1, vec![false]));
     match outside_image(&texture) {
-        None => texture,
-        Some(pixel) => {
-            log::warn!(
-                "{PATH} is not used: the clouds would read {pixel}, which vanilla 26.3 refuses \
-                 (dropping the selected packs); the game's own clouds draw"
-            );
-            decode(game)
-        }
+        None => Ok(texture),
+        Some(pixel) => Err(Refused(pixel)),
     }
 }
 

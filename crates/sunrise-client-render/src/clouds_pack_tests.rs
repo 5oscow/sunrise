@@ -142,11 +142,13 @@ fn a_texture_vanilla_reads_past_is_named_by_the_pixel_it_asks_for() {
     }
 }
 
-/// A pack's tall cloud texture vanilla refuses is not used: the game's own clouds are, as when
-/// vanilla's reload fails and drops the packs. One it accepts is the pack's.
+/// A tall cloud texture vanilla reads past fails the load with vanilla's message, for the
+/// reload to fail as vanilla's does; a tall one read inside, a wide one and a square one load,
+/// their cells filled from alpha 10 (`CloudRenderer.isCellEmpty`).
 #[test]
-fn a_refused_cloud_texture_leaves_the_games_own() {
+fn a_cloud_texture_vanilla_reads_past_fails_the_load() {
     use crate::resource_source::{Resource, ResourceSource};
+    let source_none = ResourceSource::default;
     // Pixels as x, y and alpha; the rest are transparent.
     let png = |w: u32, h: u32, cells: &[[u32; 3]]| {
         let mut rgba = vec![0u8; (w * h * 4) as usize];
@@ -174,19 +176,27 @@ fn a_refused_cloud_texture_leaves_the_games_own() {
             .collect(),
         )
     };
-    // `CloudRenderer.isCellEmpty`: a cell with alpha under 10 is empty.
-    let game = source(png(2, 2, &[[0, 0, 10], [1, 0, 9]]));
     let refused = source(png(4, 6, &[[0, 2, 255]]));
     assert_eq!(
-        load(&refused, &game),
-        (2, 2, vec![true, false, false, false])
+        load(&refused).map_err(|e| e.to_string()),
+        Err(
+            "assets/minecraft/textures/environment/clouds.png: (5, 2) outside of image bounds (4, 6)"
+                .to_owned()
+        )
     );
-    let accepted = source(png(4, 6, &[[1, 0, 255]]));
-    let (w, h, filled) = load(&accepted, &game);
+    let tall_inner = source(png(4, 6, &[[1, 0, 255]]));
+    let (w, h, filled) = load(&tall_inner).unwrap();
     assert_eq!(
         (w, h, filled.iter().filter(|f| **f).count(), filled[1]),
         (4, 6, 1, true)
     );
+    let wide = source(png(6, 4, &[[0, 2, 255], [5, 1, 255]]));
+    assert_eq!(load(&wide).unwrap().2.iter().filter(|f| **f).count(), 2);
+    // A cell with alpha under 10 is empty.
+    let square = source(png(2, 2, &[[0, 0, 10], [1, 0, 9]]));
+    assert_eq!(load(&square), Ok((2, 2, vec![true, false, false, false])));
+    // No texture: no cloud.
+    assert_eq!(load(&source_none()), Ok((1, 1, vec![false])));
 }
 
 /// Faces kept while `faces_key` holds are the ones built afresh: along a path through cells and

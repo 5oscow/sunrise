@@ -72,7 +72,7 @@ harness named checks that loader against vanilla).
 | Armour trims on items | `atlases/items.json`, `textures/trims/items/` | works | `paletted_permutations` (`atlas_sources.rs` tests) |
 | Armour trims on worn armour | `textures/trims/entity/`, `textures/palettes/`, `palette` metadata | works | `trims.rs` (`PalettedTextureManager`), drawn by `game/armor_stands.rs` and the mob renderer |
 | Particles | `particles/`, `textures/particle/` | works | `test_particle_providers_parity` |
-| Sky: sun, moon phases, stars, end sky, clouds, rain and snow | `atlases/celestials.json`, `textures/environment/` | works | `test_environment_render_parity`, `test_cloud_render_parity`, `test_weather_render_parity` |
+| Sky: sun, moon phases, stars, end sky, clouds, rain and snow | `atlases/celestials.json`, `textures/environment/` | works | `test_environment_render_parity`, `test_cloud_render_parity`, `test_weather_render_parity`; a `clouds.png` vanilla reads past (taller than wide, with a cell in its first or last column: `NativeImage.getPixel` throws) fails the load as vanilla's does, dropping every selected pack (`clouds::load`, `packs::clouds_reload_tests`) |
 | Title panorama | `textures/gui/title/background/` | works | `gfx/panorama.rs` loads it from the overlay |
 | Screen overlays: vignette, pumpkin, powder snow, nausea, underwater, world border | `textures/misc/` | works | `test_world_border_render_parity`, `test_hud_parity`; loaded from the overlay |
 | Enchantment glint | `textures/misc/enchanted_glint_*` | works | `item_render/gui.rs`, `hud/cit_glint.rs`, `entity.wgsl` |
