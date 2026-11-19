@@ -246,6 +246,10 @@ impl Game<'_> {
             Target::Painting(id) => self.paintings.iter().find(|p| p.id == id)?.bounds(),
             _ => return None,
         };
+        // A position that came off the wire can be NaN or infinite: no box.
+        if lo.iter().chain(&hi).any(|v| !v.is_finite()) {
+            return None;
+        }
         Some([lo, hi])
     }
     /// The height of the entity's eyes above its feet (`Entity.getEyeHeight`).

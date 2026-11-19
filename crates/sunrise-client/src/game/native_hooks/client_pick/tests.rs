@@ -370,6 +370,7 @@ fn sent_actions(
             S::Interact(hit) => actions.push(("interact", hit.id)),
             S::UseItem(_) => actions.push(("item", 0)),
             S::UseItemOn(hit) => actions.push(("block", hit.pos[0])),
+            S::Punch(_) => actions.push(("swing", 0)),
             S::Pong(ping) if ping.id == i32::MIN => return actions,
             _ => {}
         }
@@ -540,6 +541,57 @@ fn attack_range_pick_outside_interact_range_falls_through_to_item_use() {
             })
         });
     }
+}
+
+/// A cushion the stored pick selected, spawned where `with_pick_game` puts an
+/// entity and raised to the player's eye so the look ray crosses it.
+fn with_picked_cushion(
+    run: impl FnOnce(&mut Game<'_>, &mut sunrise_protocol::connection::Connection, CrosshairTarget),
+) {
+    let selected = Arc::new(Mutex::new(None));
+    let mods = vec![mod_api::ModEntry::new(
+        "pick",
+        Box::new(SelectedPick(selected.clone())),
+    )]
+    .into();
+    mod_platform::testing::with_mods(mods, || {
+        with_pick_game("minecraft:cushion", 2.5, |game, server| {
+            game.cushions.update(0, |c| c.position.y = 2.5);
+            game.inventory[0] = Some(sunrise_client::items::ItemStack::new("minecraft:stick", 1));
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            game.world.set(3, 2, 0, stone).unwrap();
+            let target = CrosshairTarget::Entity {
+                entity: game.entity(31).unwrap(),
+                point: [2.5, 2.6, 0.5],
+            };
+            *selected.lock().unwrap() = Some(target);
+            run(game, server, target)
+        })
+    });
+}
+
+/// The cushion's position comes off the wire as raw doubles. A NaN there
+/// leaves it no box: the click is refused, never a panic in the reach check.
+#[test]
+#[ignore = "daily"]
+fn a_click_on_a_cushion_at_a_non_finite_position_is_refused() {
+    with_picked_cushion(|game, server, target| {
+        game.cushions.update(0, |c| c.position.x = f64::NAN);
+        game.refresh_client_pick(1.0);
+        assert_eq!(game.crosshair_target(), Some(target));
+        game.remote_use(mod_api::InteractionAttempt::Press);
+        assert!(
+            !sent_actions(game, server)
+                .iter()
+                .any(|(kind, _)| *kind == "interact"),
+            "a cushion without a box is not interacted with"
+        );
+    });
 }
 
 struct CountPicks(Arc<Mutex<Vec<f32>>>);
