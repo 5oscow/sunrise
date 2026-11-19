@@ -4057,6 +4057,7 @@ fn creative_tabs_come_on_their_own_page() {
     creative.publish(
         lists,
         Default::default(),
+        Default::default(),
         &crate::creative::Names::default(),
     );
     assert_eq!(creative.pages(), 2);

@@ -167,6 +167,8 @@ impl AttributeFilter {
 /// the tooltip's `TooltipFlag`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AttributeTooltipContext {
+    /// Recipe search gathers skips even when the modifiers won't be shown.
+    pub gather_when_hidden: bool,
     /// The local player's base attack damage and attack speed; none without a player.
     pub player_base: Option<[f64; 2]>,
     /// F3+H advanced tooltips.
@@ -209,9 +211,8 @@ pub struct NoAttributeListener;
 impl AttributeTooltipListener for NoAttributeListener {}
 
 /// The one attribute tooltip builder both routes use (the ordinary item tooltip and the recipe
-/// book's search text): the filtered modifier lines when `shown`, then the lines listeners add,
-/// even when the display hides the modifiers (`AddAttributeTooltipsEvent.shouldShow`). Returns the
-/// modifier lines and the added ones, in order.
+/// book's search text): gather the filter, emit filtered modifier lines when `shown`, then ask
+/// listeners for added lines regardless of modifier visibility (`AddAttributeTooltipsEvent.shouldShow`).
 pub fn attribute_tooltip(
     stack: &ItemStack,
     modifiers: &[sunrise_items::item_data::ModifierRow],
@@ -221,8 +222,12 @@ pub fn attribute_tooltip(
     translate: &dyn Fn(&str) -> Option<String>,
     style: &dyn Fn(&str) -> Option<AttributeStyle>,
 ) -> (Vec<(String, u32)>, Vec<(Text, u32)>) {
+    let filter = if shown || ctx.gather_when_hidden {
+        listener.skipped(stack, ctx)
+    } else {
+        AttributeFilter::default()
+    };
     let lines = if shown {
-        let filter = listener.skipped(stack, ctx);
         attribute_lines_filtered(
             modifiers,
             ctx.player_base,
@@ -522,8 +527,7 @@ pub fn painting_lines<'a>(
 pub fn instrument_line(
     stack: &ItemStack,
     display: &TooltipDisplay,
-    holders: TooltipHolders,
-    translate: &dyn Fn(&str) -> Option<String>,
+    description: impl FnOnce(&str) -> Option<String>,
 ) -> Option<String> {
     if !display.shows("minecraft:instrument") {
         return None;
@@ -539,7 +543,7 @@ pub fn instrument_line(
         None if &*stack.item == "minecraft:goat_horn" => "minecraft:ponder_goat_horn".to_owned(),
         None => return None,
     };
-    holders.instrument_description(&id, translate)
+    description(&id)
 }
 
 /// `TropicalFish.COMMON_VARIANTS`: pattern, base colour and pattern colour of
@@ -1259,24 +1263,15 @@ impl<'a> TooltipHolders<'a> {
         }
     }
 
-    fn instrument_description(
-        self,
-        id: &str,
-        translate: &dyn Fn(&str) -> Option<String>,
-    ) -> Option<String> {
-        match self {
-            Self::Live(holders) => {
-                let id = sunrise_world::datafix::dynamic::namespaced(id);
-                holders
-                    .instrument_descriptions
-                    .get(&id)
-                    .map(|description| crate::scoreboard::comp_text(description).plain())
-            }
-            Self::Definitions(_) => {
-                let key = format!("instrument.{}", id.replacen(':', ".", 1));
-                Some(translate(&key).unwrap_or(key))
-            }
-        }
+    fn instrument_description(self, id: &str) -> Option<String> {
+        let Self::Live(holders) = self else {
+            return None;
+        };
+        let id = sunrise_world::datafix::dynamic::namespaced(id);
+        holders
+            .instrument_descriptions
+            .get(&id)
+            .map(|description| crate::scoreboard::comp_text(description).plain())
     }
 
     fn painting(self, id: &str) -> Option<PaintingTooltip<'a>> {
@@ -1358,7 +1353,11 @@ pub fn detail_lines(
         .into_iter()
         .map(|text| text.plain()),
     );
-    lines.extend(instrument_line(stack, &display, holders, translate));
+    if creative {
+        lines.extend(instrument_line(stack, &display, |id| {
+            holders.instrument_description(id)
+        }));
+    }
     lines.extend(bees_line(stack, &display, translate));
     lines.extend(honey_line(stack, &display, translate));
     let data = stack.data();
@@ -1421,16 +1420,10 @@ pub fn detail_lines(
     lines.extend(dyed_line(stack, &display, false, translate).map(|l| l.0));
     let modifiers =
         crate::item_attributes::attribute_modifiers_or(stack, info.map_or(&[], |i| &i.modifiers));
-    // Search has no player, no advanced flag and no hovered creative slot.
-    let ctx = AttributeTooltipContext {
-        player_base: None,
-        advanced: false,
-        creative: false,
-    };
     let (modifier_lines, added) = attribute_tooltip(
         stack,
         &modifiers,
-        &ctx,
+        &SEARCH_ATTRIBUTES,
         display.shows("minecraft:attribute_modifiers"),
         attributes,
         translate,
@@ -1438,6 +1431,7 @@ pub fn detail_lines(
     );
     lines.extend(modifier_lines.into_iter().map(|(line, _)| line));
     lines.extend(added.into_iter().map(|(text, _)| text.plain()));
+    lines.extend(unbreakable_line(stack, &display, translate));
     lines.extend(ominous_bottle_line(stack, &display, translate).map(|l| l.0));
     lines
 }
@@ -1566,6 +1560,14 @@ pub fn container_lines(
     lines
 }
 
+// Search has no player, no advanced flag and no hovered creative slot.
+const SEARCH_ATTRIBUTES: AttributeTooltipContext = AttributeTooltipContext {
+    gather_when_hidden: true,
+    player_base: None,
+    advanced: false,
+    creative: false,
+};
+
 /// Every line of `stack`'s tooltip, name first. `style` is as [`detail_lines`]'s.
 pub fn lines(
     stack: &ItemStack,
@@ -1576,8 +1578,22 @@ pub fn lines(
     translate: &dyn Fn(&str) -> Option<String>,
     style: &dyn Fn(&str) -> Option<AttributeStyle>,
 ) -> Vec<String> {
+    let display = tooltip_display(stack);
+    if !display.name_visible(creative) {
+        // Recipe search still asks listeners, but a hidden tooltip contributes no text.
+        attribute_tooltip(
+            stack,
+            &[],
+            &SEARCH_ATTRIBUTES,
+            false,
+            attributes,
+            translate,
+            style,
+        );
+        return Vec::new();
+    }
     let mut lines = vec![name_line(stack, translate)];
-    if tooltip_display(stack).shows("minecraft:lore") {
+    if display.shows("minecraft:lore") {
         lines.extend(lore_texts(stack).into_iter().map(|t| t.plain()));
     }
     lines.extend(detail_lines(
@@ -2576,6 +2592,85 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_wholly_hidden_tooltip_keeps_only_the_creative_name() {
+        let mut stack = ItemStack::new("minecraft:stick", 1);
+        stack.data_mut().custom_name = Some(Tag::String("Named result".into()));
+        stack.data_mut().set_other(
+            "minecraft:tooltip_display",
+            Some(Tag::compound([("hide_tooltip", Tag::Byte(1))])),
+        );
+        let enchantments = Enchantments::default();
+        let tooltip = |creative| {
+            lines(
+                &stack,
+                None,
+                &NoAttributeListener,
+                TooltipHolders::Definitions(&enchantments),
+                creative,
+                &|_| None,
+                &|_| None,
+            )
+        };
+        assert!(tooltip(false).is_empty());
+        assert_eq!(tooltip(true), ["Named result"]);
+    }
+
+    #[test]
+    fn recipe_search_gathers_attribute_skips_even_when_the_display_hides_them() {
+        #[derive(Default)]
+        struct Listener(std::cell::RefCell<Vec<(&'static str, bool)>>);
+        impl AttributeTooltipListener for Listener {
+            fn skipped(&self, _: &ItemStack, _: &AttributeTooltipContext) -> AttributeFilter {
+                self.0.borrow_mut().push(("gather", false));
+                AttributeFilter::default()
+            }
+
+            fn extra(
+                &self,
+                _: &ItemStack,
+                _: &AttributeTooltipContext,
+                shown: bool,
+            ) -> Vec<(Text, u32)> {
+                self.0.borrow_mut().push(("append", shown));
+                vec![(Text::literal("Appended line"), u32::MAX)]
+            }
+        }
+        let mut stack = ItemStack::new("minecraft:stick", 1);
+        let enchantments = Enchantments::default();
+        for (display, expected) in [
+            (
+                Tag::compound([(
+                    "hidden_components",
+                    Tag::List(vec![Tag::String("minecraft:attribute_modifiers".into())]),
+                )]),
+                &["stick", "Appended line"][..],
+            ),
+            (Tag::compound([("hide_tooltip", Tag::Byte(1))]), &[][..]),
+        ] {
+            stack
+                .data_mut()
+                .set_other("minecraft:tooltip_display", Some(display));
+            let listener = Listener::default();
+            assert_eq!(
+                lines(
+                    &stack,
+                    None,
+                    &listener,
+                    TooltipHolders::Definitions(&enchantments),
+                    false,
+                    &|_| None,
+                    &|_| None,
+                ),
+                expected,
+            );
+            assert_eq!(
+                listener.0.into_inner(),
+                [("gather", false), ("append", false)]
+            );
+        }
+    }
+
     fn sword_rows() -> Vec<sunrise_items::item_data::ModifierRow> {
         use sunrise_items::item_data::ModifierRow;
         vec![
@@ -2675,6 +2770,7 @@ mod tests {
         let lang = |key: &str| Some(key.to_owned());
         let stack = ItemStack::new("minecraft:diamond_sword", 1);
         let ctx = AttributeTooltipContext {
+            gather_when_hidden: false,
             player_base: None,
             advanced: false,
             creative: false,

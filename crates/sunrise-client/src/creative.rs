@@ -1,7 +1,12 @@
 //! Creative inventory (CreativeModeInventoryScreen): vanilla's tabs and their
 //! contents as built by the game's own display generators
 //! (`creative-inventory.json`), a 9x5 scrolling grid and the search tab.
-use crate::{Result, item_tooltip, items::ItemStack, lang, ui::EditBox};
+use crate::{
+    Result, item_tooltip,
+    items::{ItemStack, Items},
+    lang,
+    ui::EditBox,
+};
 use serde_json::Value;
 use std::{
     collections::HashMap,
@@ -83,6 +88,7 @@ pub struct Creative {
     search_index: Vec<SearchEntry>,
     /// Definitions from the same catalog snapshot, rendered in the active language.
     holders: Arc<sunrise_items::creative_catalog::Holders>,
+    items: Arc<Items>,
     catalog: Arc<Catalog>,
     headers: Vec<Tab>,
     /// Prepared search presentation only, keyed by item and exact components.
@@ -437,6 +443,7 @@ impl Creative {
             search_items: Vec::new(),
             search_index: Vec::new(),
             holders: Default::default(),
+            items: Default::default(),
             catalog,
             headers,
             metadata,
@@ -500,6 +507,7 @@ impl Creative {
     pub fn reset_contents(&mut self) {
         self.contents = None;
         self.holders = Arc::default();
+        self.items = Arc::default();
         self.project();
     }
 
@@ -611,6 +619,7 @@ impl Creative {
         &mut self,
         contents: Arc<[Arc<TabContents>]>,
         holders: Arc<sunrise_items::creative_catalog::Holders>,
+        items: Arc<Items>,
         names: &Names,
     ) {
         if self
@@ -623,6 +632,7 @@ impl Creative {
         let row = self.first_row(names);
         self.contents = Some(contents);
         self.holders = holders;
+        self.items = items;
         self.project();
         if !self.select_default_if_missing() {
             // ItemPickerMenu.getScrollForRowIndex.
@@ -802,7 +812,7 @@ impl Creative {
             .map(|stack| {
                 let lines = item_tooltip::lines(
                     stack,
-                    None,
+                    self.items.get(&stack.item),
                     &item_tooltip::NoAttributeListener,
                     item_tooltip::TooltipHolders::Live(&self.holders),
                     true,
@@ -1428,7 +1438,7 @@ mod tests {
             ]
         });
         let mut c = Creative::from_json(&raw).unwrap();
-        let items = crate::items::Items::empty();
+        let items = Arc::new(Items::empty());
         let names = Names::default();
         let mut rebuild = |description: &str| {
             let dynamic = Dynamic {
@@ -1456,7 +1466,7 @@ mod tests {
                 None,
                 |_, _, _| {},
             );
-            c.publish(lists, Arc::new(holders), &names);
+            c.publish(lists, Arc::new(holders), items.clone(), &names);
             assert_eq!(
                 c.search_items()[0].stored_enchantments(),
                 [(Arc::from("minecraft:sharpness"), 5)]
@@ -1535,7 +1545,7 @@ mod tests {
     #[test]
     fn search_uses_the_active_language_for_an_applied_enchantment() {
         use sunrise_items::creative_catalog::{Enchantment, Holders};
-        let tool = r#"{id:"minecraft:wooden_pickaxe",count:1,components:{"minecraft:enchantments":{"test:veins":2}}}"#;
+        let tool = r#"{id:"minecraft:wooden_pickaxe",count:1,components:{"minecraft:enchantments":{"test:veins":2},"minecraft:unbreakable":{}}}"#;
         let mut creative = Creative::from_json(&serde_json::json!({
             "schema":4, "item_features":{}, "potion_features":{}, "tabs":[
                 {"id":"minecraft:ingredients", "type":"CATEGORY", "build":[row(tool)]},
@@ -1553,27 +1563,50 @@ mod tests {
             }],
             ..Default::default()
         };
+        let fixture = tempfile::tempdir().unwrap();
+        let root = fixture.path();
+        fs::create_dir_all(root.join("data/minecraft/loot_table")).unwrap();
+        fs::write(
+            root.join("items.json"),
+            r#"{"minecraft:wooden_pickaxe":{"minecraft:attribute_modifiers":[{
+                "type":"minecraft:attack_damage","id":"minecraft:base_attack_damage",
+                "amount":3.0,"operation":"add_value","slot":"mainhand"
+            }]}}"#,
+        )
+        .unwrap();
+        let defaults = sunrise_world::item_defaults::read(root).unwrap();
+        let items = Arc::new(
+            Items::catalog(root, &sunrise_world::loot::PackOverlay::NONE, &defaults).unwrap(),
+        );
         let lists = creative.catalog().build(
             Parameters {
                 features: &[],
                 operator: false,
                 holders: &holders,
-                items: &crate::items::Items::empty(),
+                items: &items,
             },
             None,
             |_, _, _| {},
         );
         let names = Names::default();
-        creative.publish(lists, Arc::new(holders), &names);
+        creative.publish(lists, Arc::new(holders), items, &names);
         let language = lang::Language::of(
             "en_us",
             [
                 ("test.enchantment.veins".into(), "Ore Sense".into()),
                 ("enchantment.level.2".into(), "II".into()),
+                (
+                    "attribute.name.attack_damage".into(),
+                    "Attack Damage".into(),
+                ),
+                ("attribute.modifier.plus.0".into(), "+%s %s".into()),
+                ("item.unbreakable".into(), "Unbreakable".into()),
             ],
         );
         lang::scoped(language, || {
             assert_eq!(creative.search_results("ore sense ii", &names), [0]);
+            assert_eq!(creative.search_results("+3 attack damage", &names), [0]);
+            assert_eq!(creative.search_results("unbreakable", &names), [0]);
             assert!(
                 creative
                     .search_results("stale vein finder", &names)
@@ -1953,7 +1986,7 @@ mod tests {
                 append_unique(&mut current.search, &stacks);
             },
         );
-        c.publish(lists, Arc::default(), names);
+        c.publish(lists, Arc::default(), Arc::default(), names);
     }
 
     fn publish(c: &mut Creative, permissions: bool, names: &Names) {
