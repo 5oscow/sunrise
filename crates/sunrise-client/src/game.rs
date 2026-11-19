@@ -2944,120 +2944,171 @@ impl Game<'_> {
         f: impl FnOnce(&Behaviours, &mut GameLevel<'_>, &mut Ticks) -> R,
     ) -> R {
         self.ensure_stateful_entity_table();
+        let result = self.with_level_access(false, f);
+        self.flush_spill();
+        if self.lan.is_some() {
+            self.flush_lan_particles();
+            self.flush_native_sounds();
+        }
+        result
+    }
+
+    /// Placement queries need neither trigger snapshots nor live factory setup or effect drains.
+    fn with_placement_preview_level<R>(
+        &mut self,
+        f: impl FnOnce(&Behaviours, &GameLevel<'_>, &Ticks) -> R,
+    ) -> R {
+        self.with_level_access(true, |behaviours, level, ticks| f(behaviours, level, ticks))
+    }
+
+    fn with_level_access<R>(
+        &mut self,
+        placement_preview: bool,
+        f: impl FnOnce(&Behaviours, &mut GameLevel<'_>, &mut Ticks) -> R,
+    ) -> R {
         let darken = self.sky_darken();
         let (rain, thunder) = self.weather_levels(1.0);
-        // Spectators ignore block triggers (Entity.isIgnoringBlockTriggers).
-        let spectator = self.spectator();
-        let player_box = self.player.as_ref().filter(|_| !spectator).map(|p| {
-            let w = f64::from(p.dimensions.width) / 2.0;
-            (
-                [p.position.x - w, p.position.y, p.position.z - w],
-                [
-                    p.position.x + w,
-                    p.position.y + f64::from(p.dimensions.height),
-                    p.position.z + w,
-                ],
-            )
-        });
-        let player_collision = self.player.as_ref().filter(|_| !spectator).map(|p| {
-            let main_hand = self.inventory.get(self.selected).and_then(Option::as_ref);
-            PlayerCollision {
-                y: p.position.y,
-                descending: p.velocity.y < 0.0,
-                fall_distance: p.fall_distance,
-                main_hand_item: main_hand.map_or_else(
-                    || Arc::from("minecraft:air"),
-                    |stack| Arc::clone(&stack.item),
-                ),
-                main_hand_count: main_hand.map_or(0, |stack| stack.count as i32),
-                leather_boots: worn_boots::leather_boots(&self.armor),
-            }
-        });
-        let cart_boxes = self
-            .carts
-            .iter()
-            .map(|c| {
-                let p = c.position;
+        let (
+            player_box,
+            player_collision,
+            cart_boxes,
+            arrow_boxes,
+            guest_boxes,
+            building_player_boxes,
+            fire_players,
+            trigger_hooks,
+            trigger_extras,
+            open_containers,
+            golem_chests,
+        ) = if placement_preview {
+            Default::default()
+        } else {
+            // Spectators ignore block triggers (Entity.isIgnoringBlockTriggers).
+            let spectator = self.spectator();
+            let player_box = self.player.as_ref().filter(|_| !spectator).map(|p| {
+                let w = f64::from(p.dimensions.width) / 2.0;
                 (
-                    [p.x - 0.49, p.y, p.z - 0.49],
-                    [p.x + 0.49, p.y + 0.7, p.z + 0.49],
+                    [p.position.x - w, p.position.y, p.position.z - w],
+                    [
+                        p.position.x + w,
+                        p.position.y + f64::from(p.dimensions.height),
+                        p.position.z + w,
+                    ],
                 )
-            })
-            .collect();
-        let arrow_boxes = self
-            .creatures
-            .projectiles
-            .iter()
-            .filter(|p| p.arrow.is_some())
-            .map(|p| p.position)
-            .chain(self.tridents.iter().map(|t| t.position))
-            .map(|at| {
-                let b = sunrise_client::arrows::arrow_bounds(at);
-                (b.min_position().components(), b.max_position().components())
-            })
-            .collect();
-        let guest_boxes = self.lan_block_trigger_boxes();
-        let building_player_boxes = self
-            .lan_acting
-            .is_some()
-            .then(|| self.lan_building_boxes.boxes(self.dim));
-        let dimension = self.dim.level();
-        let rules = self.level_rules();
-        let fire_players: Vec<[f64; 3]> = self
-            .player
-            .iter()
-            .filter(|_| !spectator)
-            .map(|p| [p.position.x, p.position.y, p.position.z])
-            .chain(self.lan.iter().flat_map(|h| {
-                h.hub
-                    .guests
-                    .simulation_iter()
-                    .filter(|g| h.hub.here(g) && !g.spectator())
-                    .map(|g| g.position)
-            }))
-            .collect();
-        let mut trigger_hooks: Vec<(Aabb, bool)> = self
-            .hook
-            .iter()
-            .map(|h| (h.bounds(), h.applies_block_effects()))
-            .collect();
-        self.lan_hook_triggers(&mut trigger_hooks);
-        // EntityType.LIGHTNING_BOLT: 0 x 0.
-        let trigger_extras: Vec<Aabb> = self
-            .bolts
-            .iter()
-            .map(|b| {
-                let at = Vec3::new(b.at[0], b.at[1], b.at[2]);
-                Aabb::new(at, at)
-            })
-            .collect();
-        // `ContainerOpenersCounter.getEntitiesWithContainerOpen`: the players
-        // whose menu still holds a container of the block at a position. A
-        // double chest answers for both halves (`ChestBlockEntity$1` takes a
-        // `CompoundContainer`), and a spectator's menu counts for nothing.
-        let mut open_containers: Vec<(i32, i32, i32)> = Vec::new();
-        for key in self.container.into_iter().filter(|_| !spectator).chain(
-            self.lan
+            });
+            let player_collision = self.player.as_ref().filter(|_| !spectator).map(|p| {
+                let main_hand = self.inventory.get(self.selected).and_then(Option::as_ref);
+                PlayerCollision {
+                    y: p.position.y,
+                    descending: p.velocity.y < 0.0,
+                    fall_distance: p.fall_distance,
+                    main_hand_item: main_hand.map_or_else(
+                        || Arc::from("minecraft:air"),
+                        |stack| Arc::clone(&stack.item),
+                    ),
+                    main_hand_count: main_hand.map_or(0, |stack| stack.count as i32),
+                    leather_boots: worn_boots::leather_boots(&self.armor),
+                }
+            });
+            let cart_boxes = self
+                .carts
                 .iter()
-                .flat_map(|h| {
+                .map(|c| {
+                    let p = c.position;
+                    (
+                        [p.x - 0.49, p.y, p.z - 0.49],
+                        [p.x + 0.49, p.y + 0.7, p.z + 0.49],
+                    )
+                })
+                .collect();
+            let arrow_boxes = self
+                .creatures
+                .projectiles
+                .iter()
+                .filter(|p| p.arrow.is_some())
+                .map(|p| p.position)
+                .chain(self.tridents.iter().map(|t| t.position))
+                .map(|at| {
+                    let b = sunrise_client::arrows::arrow_bounds(at);
+                    (b.min_position().components(), b.max_position().components())
+                })
+                .collect();
+            let guest_boxes = self.lan_block_trigger_boxes();
+            let building_player_boxes = self
+                .lan_acting
+                .is_some()
+                .then(|| self.lan_building_boxes.boxes(self.dim));
+            let fire_players: Vec<[f64; 3]> = self
+                .player
+                .iter()
+                .filter(|_| !spectator)
+                .map(|p| [p.position.x, p.position.y, p.position.z])
+                .chain(self.lan.iter().flat_map(|h| {
                     h.hub
                         .guests
                         .simulation_iter()
                         .filter(|g| h.hub.here(g) && !g.spectator())
+                        .map(|g| g.position)
+                }))
+                .collect();
+            let mut trigger_hooks: Vec<(Aabb, bool)> = self
+                .hook
+                .iter()
+                .map(|h| (h.bounds(), h.applies_block_effects()))
+                .collect();
+            self.lan_hook_triggers(&mut trigger_hooks);
+            // EntityType.LIGHTNING_BOLT: 0 x 0.
+            let trigger_extras: Vec<Aabb> = self
+                .bolts
+                .iter()
+                .map(|b| {
+                    let at = Vec3::new(b.at[0], b.at[1], b.at[2]);
+                    Aabb::new(at, at)
                 })
-                .filter_map(|g| g.menu.as_ref().and_then(|m| m.pos)),
-        ) {
-            open_containers.push(key);
-            if let Some(other) = self.chest_other_half(key) {
-                open_containers.push(other);
+                .collect();
+            // `ContainerOpenersCounter.getEntitiesWithContainerOpen`: the players
+            // whose menu still holds a container of the block at a position. A
+            // double chest answers for both halves (`ChestBlockEntity$1` takes a
+            // `CompoundContainer`), and a spectator's menu counts for nothing.
+            let mut open_containers: Vec<(i32, i32, i32)> = Vec::new();
+            for key in self.container.into_iter().filter(|_| !spectator).chain(
+                self.lan
+                    .iter()
+                    .flat_map(|h| {
+                        h.hub
+                            .guests
+                            .simulation_iter()
+                            .filter(|g| h.hub.here(g) && !g.spectator())
+                    })
+                    .filter_map(|g| g.menu.as_ref().and_then(|m| m.pos)),
+            ) {
+                open_containers.push(key);
+                if let Some(other) = self.chest_other_half(key) {
+                    open_containers.push(other);
+                }
             }
-        }
-        // CopperGolem.hasContainerOpen: the chest a golem opened, and its other half.
-        let mut golem_chests: Vec<(i32, i32, i32)> = Vec::new();
-        for &key in self.world.chest_openers.keys() {
-            golem_chests.push(key);
-            golem_chests.extend(self.chest_other_half(key));
-        }
+            // CopperGolem.hasContainerOpen: the chest a golem opened, and its other half.
+            let mut golem_chests: Vec<(i32, i32, i32)> = Vec::new();
+            for &key in self.world.chest_openers.keys() {
+                golem_chests.push(key);
+                golem_chests.extend(self.chest_other_half(key));
+            }
+            (
+                player_box,
+                player_collision,
+                cart_boxes,
+                arrow_boxes,
+                guest_boxes,
+                building_player_boxes,
+                fire_players,
+                trigger_hooks,
+                trigger_extras,
+                open_containers,
+                golem_chests,
+            )
+        };
+        let dimension = self.dim.level();
+        let rules = self.level_rules();
         let native_authoritative = self.native_authoritative();
         let liquid_transaction_open = self.transaction_current().is_some();
         let environment = self.res.environment_of(&self.dimension_type().id);
@@ -3149,13 +3200,7 @@ impl Game<'_> {
             drop_breaker_at: None,
             drop_into: None,
         };
-        let result = f(self.res.behaviours(), &mut level, &mut self.block_ticks);
-        self.flush_spill();
-        if self.lan.is_some() {
-            self.flush_lan_particles();
-            self.flush_native_sounds();
-        }
-        result
+        f(self.res.behaviours(), &mut level, &mut self.block_ticks)
     }
     pub(super) fn native_block_ignite_allowed(
         &mut self,

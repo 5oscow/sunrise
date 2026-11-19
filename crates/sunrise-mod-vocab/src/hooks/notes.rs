@@ -2310,7 +2310,7 @@ registration path.
 
 - `native_server_event(name, uuid, message)` posts an `announce` event to a dedicated server's event stream (`GET /api/v1/events`); sunrise-server's Discord bridge relays it, in gold, when `[discord] events` lists `announce` (off by default). False elsewhere and for an empty message.
 
-- `native_state_block(state)` names the block a state belongs to (`BlockState.getBlock()`), on a hook's level and on the game: `state_for_placement` is asked for every block placed, so a mod compares it with its own block to answer only for it.
+- `native_state_block(state)` names the block a state belongs to (`BlockState.getBlock()`); a `state_for_placement` part compares it with its own block. On the server, `LevelRef::state_for_placement(host, block, &context)` asks those parts with an already-resolved context, without placing the candidate.
 
 - The helper `native_physical_window_size()`, which returns the window's width and height in physical pixels, independent of GUI scale. It returns no size on a server or when no window exists.
 
