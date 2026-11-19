@@ -155,7 +155,8 @@ fn decode_definition(
         "minecraft:dialog" => {
             use crate::dialog::{AfterAction, Dialog, Kind};
             let source = json_to_nbt(&value);
-            let dialog = Dialog::parse(&source).ok_or("invalid dialog definition")?;
+            let dialog = Dialog::decode_pack(&source, &value)
+                .map_err(|field| format!("invalid dialog field {field}"))?;
             let mut fields = Compound::from([(
                 "title".into(),
                 json_to_nbt(&decode_text("title", &value["title"])?),
@@ -228,7 +229,10 @@ fn decode_definition(
             };
             fields.insert("type".into(), string(&format!("minecraft:{kind}")));
             for (name, value) in [
-                ("columns", columns.filter(|n| *n != 2)),
+                (
+                    "columns",
+                    columns.map(|n| n.get() as i32).filter(|n| *n != 2),
+                ),
                 ("button_width", width.filter(|n| *n != 150)),
             ] {
                 if let Some(value) = value {
@@ -311,6 +315,13 @@ fn decode_definition(
                 ("translation_key", string(&pattern.translation_key)),
             ])
         }
+        // WorldClock.DIRECT_CODEC is a unit map codec: extra keys are permitted.
+        "minecraft:world_clock" => {
+            if !value.is_object() {
+                return Err("not a map".into());
+            }
+            json_to_nbt(&value)
+        }
         _ => unreachable!("only selected registry families are decoded"),
     };
     Ok(Definition::Encoded(encoded))
@@ -329,6 +340,26 @@ mod tests {
                     br#"{"type":"notice","title":"Lower"}"#.to_vec(),
                     b"{".to_vec(),
                 ],
+            ),
+            (
+                "dialog/test:negative_columns".into(),
+                vec![br#"{"type":"multi_action","title":"Buttons","actions":[{"label":"OK"}],"columns":-1}"#.to_vec()],
+            ),
+            (
+                "dialog/test:wrong_columns".into(),
+                vec![br#"{"type":"dialog_list","title":"Buttons","dialogs":[],"columns":true}"#.to_vec()],
+            ),
+            (
+                "dialog/test:wide_button".into(),
+                vec![br#"{"type":"server_links","title":"Links","button_width":1025}"#.to_vec()],
+            ),
+            (
+                "dialog/test:wrong_pause".into(),
+                vec![br#"{"type":"notice","title":"Pause","pause":1}"#.to_vec()],
+            ),
+            (
+                "dialog/test:wrong_action".into(),
+                vec![br#"{"type":"notice","title":"Action","after_action":"stay"}"#.to_vec()],
             ),
             (
                 "dialog/test:condition_false".into(),
@@ -375,7 +406,17 @@ mod tests {
             panic!("world registry load accepted invalid entries");
         };
         for (registry, defs) in [
-            ("dialog", &[("broken", "")][..]),
+            (
+                "dialog",
+                &[
+                    ("broken", ""),
+                    ("negative_columns", "columns"),
+                    ("wrong_columns", "columns"),
+                    ("wide_button", "button_width"),
+                    ("wrong_pause", "pause"),
+                    ("wrong_action", "after_action"),
+                ][..],
+            ),
             (
                 "dimension_type",
                 &[
