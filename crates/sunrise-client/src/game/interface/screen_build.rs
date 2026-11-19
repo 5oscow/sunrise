@@ -303,6 +303,13 @@ impl ScreenBuild {
 pub(super) struct ScreenState {
     pub(super) observed: Option<ObservedScreen>,
     pub(super) build: ScreenBuildState,
+    /// A mod's `ScreenOpening::Vanilla` answer is opening its screen: that
+    /// change fires no screen hook again.
+    pub(super) replacing: bool,
+    /// The last change the screen hooks decided went another way than asked
+    /// (a mod's `Cancel`, `ModScreen` or `Vanilla`): a caller's grab after it
+    /// leaves the screen that shows its pointer. Never set with no listener.
+    pub(super) answered: std::cell::Cell<bool>,
 }
 
 /// One frame's `RenderInventoryMobEffects` answer and what it was taken for.
