@@ -5384,6 +5384,36 @@ pub(crate) mod world_spawn_sync_tests {
             );
         });
     }
+
+    /// `PrepareSpawnTask.start`: a returning player whose saved level the world no longer has
+    /// joins in the world spawn's level (`respawnData.dimension()`), at its saved position and
+    /// rotation, not in the Overworld.
+    #[test]
+    #[ignore = "daily"]
+    fn a_returning_player_from_a_missing_level_joins_in_the_world_spawn_level() {
+        crate::game::native_guest_turn_tests::with_guests(|game| {
+            game.world_root = game.save.root.clone();
+            game.level.world_spawn_dimension = Some("minecraft:the_nether".into());
+            let guests = &mut game.lan.as_mut().unwrap().hub.guests;
+            guests.update(0, |g| {
+                g.dimension = "example:gone".into();
+                g.position = [40.5, 70.0, -12.5];
+                g.yaw = 135.0;
+                g.pitch = -20.0;
+            });
+            sunrise_client::lan::playerdata::save(
+                &guests[0],
+                &game.world_root,
+                &Default::default(),
+            );
+            guests.update(0, |g| g.placed = false);
+            game.lan_guest_joined(12, &[], [0.5, 64.0, 0.5]);
+            let g = &game.lan.as_ref().unwrap().hub.guests[0];
+            assert_eq!(g.dimension, "minecraft:the_nether");
+            assert_eq!(g.position, [40.5, 70.0, -12.5]);
+            assert_eq!((g.yaw, g.pitch), (135.0, -20.0));
+        });
+    }
 }
 
 #[cfg(test)]

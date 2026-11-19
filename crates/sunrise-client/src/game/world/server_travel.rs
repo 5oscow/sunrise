@@ -59,6 +59,10 @@ pub(super) struct Trip {
     target: Vec3,
     /// Through an End portal.
     end: bool,
+    /// Into the End through its portal, building its platform
+    /// (`EndPortalBlock.getPortalDestination` from another level); else an
+    /// exit, the credits respawn's too.
+    entering: bool,
     /// The Nether portal plan, whose exit is found or built on arrival.
     plan: Option<Plan>,
     /// The vehicle the player rides, which travels with it
@@ -272,6 +276,7 @@ impl Game<'_> {
             source: self.dim,
             target,
             end: false,
+            entering: false,
             plan: None,
             vehicle: None,
             gateway: None,
@@ -939,8 +944,8 @@ impl Game<'_> {
         };
         self.end_portal_travel = end;
         // Out of the End when the trip starts there, wherever it leads (the world spawn
-        // may be in the End too).
-        let entering = source != Dim::End;
+        // may be in the End too); the credits respawn is always a way out.
+        let entering = end && !credits_respawn && source != Dim::End;
         // Leaving the End: the player's own respawn point.
         let own = if end {
             self.as_guest(conn, |g| g.end_destination(entering, target))
@@ -998,6 +1003,7 @@ impl Game<'_> {
             source,
             target: destination,
             end,
+            entering,
             plan,
             vehicle,
             gateway: None,
@@ -1025,6 +1031,7 @@ impl Game<'_> {
             source: self.dim,
             target: Vec3::new(f64::from(x) + 0.5, f64::from(y), f64::from(z) + 0.5),
             end: false,
+            entering: false,
             plan: None,
             vehicle: None,
             gateway: None,
@@ -1097,6 +1104,7 @@ impl Game<'_> {
             source: self.dim,
             target: Vec3::new(f64::from(x) + 0.5, f64::from(y), f64::from(z) + 0.5),
             end: false,
+            entering: false,
             plan: None,
             vehicle: None,
             gateway: None,
@@ -1157,6 +1165,7 @@ impl Game<'_> {
             source: self.dim,
             target: destination,
             end: false,
+            entering: false,
             plan: None,
             vehicle: None,
             gateway: Some(job),
@@ -1299,7 +1308,7 @@ impl Game<'_> {
                     }
                 }
             } else if trip.end {
-                let entering = trip.source != Dim::End;
+                let entering = trip.entering;
                 let guest_arrival = self.as_guest(trip.conn, |g| {
                     g.end_arrival(entering, trip.target, &mut trip.finder)
                 });
@@ -1570,6 +1579,7 @@ impl Game<'_> {
                 source,
                 target: Vec3::new(t.at[0], t.at[1], t.at[2]),
                 end: false,
+                entering: false,
                 plan: None,
                 // A command teleports the player alone: it is not a
                 // passenger any more (`ServerPlayer.teleport`).
