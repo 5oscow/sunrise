@@ -1,18 +1,18 @@
 //! `cargo sunrise-mod registry build|review|check|list`: the registry repository's CI
-//! (`horizon-rust/horizon-mods`, docs/modding/src/reference/registry-index.md). Network-free: the
+//! (`sunrise-org/sunrise-mods`, docs/modding/src/reference/registry-index.md). Network-free: the
 //! workflow downloads the files and publishes what this writes.
 use std::path::Path;
 
 #[cfg(test)]
 mod tests;
 use sunrise_mod_package::index::{
-    FILE_HOST,
     registry::{self, Sources},
     resolve::uninstallable_versions,
 };
 
-/// Where the registry's site is published (its icons).
-const SITE: &str = "https://horizon-rust.github.io/horizon-mods/";
+/// Where this registry publishes its release assets and its site (icons and screenshots).
+const RELEASE: &str = "https://github.com/sunrise-org/sunrise-mods/releases/download/";
+const SITE: &str = "https://sunrise-org.github.io/sunrise-mods/";
 
 const USAGE: &str = "usage: cargo sunrise-mod registry build <checkout> --files <dir> --out <index.json> [--release <url>] [--site <url>] [--generated <time>] [--counts <counts.json>]
        cargo sunrise-mod registry review <base checkout> <head checkout> --author <login> [--files <dir>] [--json]
@@ -64,7 +64,7 @@ pub fn main(args: &[String]) -> Result<(), String> {
             let mut index = registry::build(&Sources {
                 registry: Path::new(checkout),
                 files: Path::new(files),
-                release: flag(rest, "--release").unwrap_or(FILE_HOST),
+                release: flag(rest, "--release").unwrap_or(RELEASE),
                 site: flag(rest, "--site").unwrap_or(SITE),
                 generated,
             })
@@ -101,7 +101,7 @@ pub fn main(args: &[String]) -> Result<(), String> {
             let sources = Sources {
                 registry: checkout,
                 files: files.unwrap_or(checkout),
-                release: FILE_HOST,
+                release: RELEASE,
                 site: SITE,
                 generated: String::new(),
             };
@@ -183,7 +183,7 @@ pub fn main(args: &[String]) -> Result<(), String> {
                 &Sources {
                     registry: checkout,
                     files,
-                    release: FILE_HOST,
+                    release: RELEASE,
                     site: SITE,
                     generated: String::new(),
                 },

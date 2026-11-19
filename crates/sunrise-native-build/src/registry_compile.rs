@@ -15,6 +15,7 @@ use std::{
 pub struct Options<'a> {
     pub consent: Option<&'a dyn Fn(&super::RegistryInventory) -> bool>,
     pub adapter: &'a Path,
+    pub mixins: &'a super::MixinsIdentity,
 }
 
 fn compiler_plan(
@@ -318,7 +319,8 @@ pub fn compile(
     }
     // `[[native.mixin]]` rows: the patched crates join the workspace beside the mods, whose
     // crates their helpers call, and compile against the SDK like a mod.
-    let patch = super::patch::prepare(rust, game, &out.join("fnr"), projects, &sdk)?;
+    let patch =
+        super::patch::prepare(rust, game, &out.join("fnr"), projects, &sdk, options.mixins)?;
     if let Some(patch) = &patch {
         for name in &patch.names {
             let dir = patch.dir.join(name);
@@ -493,7 +495,7 @@ pub fn compile(
     super::crates::check_game_graph_names(out, &super::read_lock(out)?, &game_names)?;
     let inventory = metadata.inventory(&super::registry_lock::RegistryLock::default(), links)?;
     if inventory.added_crates > 0 && !options.consent.is_some_and(|ask| ask(&inventory)) {
-        return Err(crate::host::tr("Registry dependency compilation was not approved").into());
+        return Err(crate::host::tr("The mods' crates.io dependencies were not compiled: the plan's \"registry\" field is false or the question was declined. \"registry\": true approves compiling them; their build scripts and proc macros then run on this computer").into());
     }
     let mut externs = prebuilt::wrapper_externs(&deps)?;
     externs.insert("mod_vocab".into(), prebuilt::library(&deps, "mod_vocab")?);
@@ -938,6 +940,7 @@ mod tests {
                     approve
                 }),
                 adapter: &adapter,
+                mixins: &crate::MixinsIdentity::resolve([&bundle], None).unwrap(),
             },
         );
         if approve {
@@ -945,7 +948,7 @@ mod tests {
             assert!(binary.is_file());
             eprintln!("compiled wrapper {}", binary.display());
         } else {
-            assert!(result.unwrap_err().contains("not approved"));
+            assert!(result.unwrap_err().contains("\"registry\": true"));
             assert!(!out.join("cargo-messages.jsonl").exists());
             assert!(!out.join("target").exists());
             eprintln!(
