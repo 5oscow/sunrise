@@ -608,7 +608,10 @@ fn atlas_sprites(root: &ResourceSource, packed: &[PackedImage]) -> (Vec<PackedIm
     let mut names: Vec<(String, Vec<(usize, SpriteOrigin)>)> = Vec::new();
     let mut slots = std::collections::HashMap::new();
     let mut order = 0;
-    for (atlas, listed) in atlas_sources::listed(root) {
+    // A model's material looks in the items atlas first, then the blocks atlas.
+    let mut listed = atlas_sources::listed(root);
+    listed.sort_by_key(|(atlas, _)| atlas != "minecraft:items");
+    for (atlas, listed) in listed {
         // The other atlases' renamed files (GUI sprites, particles...) are
         // looked up by their texture paths here.
         let item_models = atlas == "minecraft:blocks" || atlas == "minecraft:items";
@@ -617,7 +620,11 @@ fn atlas_sprites(root: &ResourceSource, packed: &[PackedImage]) -> (Vec<PackedIm
                 continue;
             }
             let name = id.strip_prefix("minecraft:").unwrap_or(&id).to_owned();
-            if have.contains(name.as_str()) {
+            // A texture file packed under its own name is the sprite; any other origin of
+            // the id (a rename, a cut, a palette) replaces it.
+            if have.contains(name.as_str())
+                && matches!(&origin, SpriteOrigin::File(texture) if *texture == id)
+            {
                 continue;
             }
             // A file under a walked folder is packed under its own name already:
@@ -3074,6 +3081,46 @@ mod coverage_tests;
 
 #[cfg(test)]
 mod tests {
+    /// A model's material looks in the items atlas first: its cut of `demo:item/cut` replaces
+    /// both the blocks atlas's cut and a texture file packed under that name.
+    #[test]
+    fn the_items_atlas_cut_replaces_a_packed_file_and_the_blocks_cut() {
+        let root =
+            std::env::temp_dir().join(format!("sunrise-hud-items-first-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let textures = root.join("assets/demo/textures/item");
+        let atlases = root.join("assets/minecraft/atlases");
+        std::fs::create_dir_all(&textures).unwrap();
+        std::fs::create_dir_all(&atlases).unwrap();
+        // 2 x 1 sheet: an opaque red texel, then a transparent green one.
+        let mut encoder = png::Encoder::new(
+            std::fs::File::create(textures.join("sheet.png")).unwrap(),
+            2,
+            1,
+        );
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder
+            .write_header()
+            .unwrap()
+            .write_image_data(&[255, 0, 0, 255, 0, 255, 0, 0])
+            .unwrap();
+        let cut = |x: u8| {
+            format!(
+                r#"{{"sources":[{{"type":"minecraft:unstitch","resource":"demo:item/sheet","divisor_x":2,
+                "regions":[{{"sprite":"demo:item/cut","x":{x},"y":0,"width":1,"height":1}}]}}]}}"#
+            )
+        };
+        std::fs::write(atlases.join("items.json"), cut(1)).unwrap();
+        std::fs::write(atlases.join("blocks.json"), cut(0)).unwrap();
+        let packed = vec![("demo:item/cut".to_owned(), 1, 1, vec![9, 9, 9, 9])];
+        let (images, _) = atlas_sprites(&ResourceSource::directory(root.clone()), &packed);
+        assert_eq!(
+            images,
+            [("demo:item/cut".to_owned(), 1, 1, vec![0, 255, 0, 0])]
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
     use super::*;
 
     #[test]
