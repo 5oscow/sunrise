@@ -193,14 +193,21 @@ let options = FluidBoxOptions::new(false, 4.0 / 1024.0);
 draw.fluid_box(&tank.stack, [0.125, 0.0625, 0.125, 0.875, level, 0.875], options)?;
 ```
 
-- The stack is `minecraft:water` or `minecraft:lava` with no components. Any other fluid,
-  an unresolved one or a component patch is `FluidBoxError::UnsupportedFluid`.
-- Each face tiles the fluid's animated still sprite once per block, cut at whole-block lines.
+- The stack's fluid is `minecraft:water`, `minecraft:lava` or any fluid with a look
+  (`data/<mod>/sunrise/fluid/<name>.json`: `sprite`, `tint`; [fluid looks](../content-mods/fluid-container-models.md)
+  holds the format). A stack with components is drawn like one without: they change neither the
+  sprite nor the tint, so a mod colours a potion-like stack with `with_argb` from its own
+  components. A registered fluid with no look is `FluidBoxError::MissingSprite`; an unresolved
+  fluid and the empty fluid are `FluidBoxError::UnsupportedFluid`.
+- Each face tiles the fluid's animated still sprite (a look's `sprite`; a look with no sprite
+  draws its tint as a flat colour) once per block, cut at whole-block lines.
   Each tile keeps its place in the sprite. The box is not inset. `uv_shrink_ratio` is the
   sprite's `TextureAtlasSprite.uvShrinkRatio` (`0.0..=1.0`), and `render_bottom` adds the bottom face.
-- The colour is the stack's tint (plain water `0xFF3F76E4`, lava white), never the biome's
-  water colour. `with_argb` replaces it, alpha included. Faces have no directional shading.
-  Sky light is the draw's own, and block light rises to the fluid's (lava 15).
+- The colour is the fluid's tint (water `0xFF3F76E4`, lava white, a mod fluid's look `tint`, opaque
+  white when it has none), never the biome's water colour. `with_argb` replaces it, alpha
+  included. Faces have no directional shading. Sky light is the draw's own, and block light
+  rises to the fluid's `light_level` (lava 15, water 0, a mod fluid's block's).
+- Each fluid's look is resolved once per resource load; a box does one indexed read.
 - The faces use a material of their own: sorted far to near, alpha blended, culled from behind,
   and depth-writing. They draw with the block entities, before the level's translucent terrain,
   under shader packs too.

@@ -472,12 +472,15 @@ pub trait BlockEntityDrawContext {
         unimplemented!("BlockEntityDrawContext::draw_model_part")
     }
     /// Draws `stack` as a still fluid filling `bounds` (`[x0, y0, z0, x1, y1, z1]` in blocks
-    /// under `draw`'s pose), as a tank's contents: `minecraft:water` or `minecraft:lava` with no
-    /// components. Each face tiles the fluid's animated still sprite (`block/water_still`), one
-    /// tile per block, cut at whole-block lines and keeping each part's place in its tile, with
-    /// no inset of the box. The tint is the stack's, not the biome's water colour, unless
-    /// `options.argb` replaces it. Sky light stays as `draw.light`; block light rises to the
-    /// fluid's own (15 for lava). No face is shaded by direction. Faces are sorted far to
+    /// under `draw`'s pose), as a tank's contents: `minecraft:water`, `minecraft:lava` or any
+    /// fluid with a look (`data/<mod>/sunrise/fluid/<name>.json`). A stack's components change
+    /// nothing: pass `options.argb` to colour a potion-like stack. Each face tiles the fluid's
+    /// animated still sprite (`block/water_still`, a look's `sprite`; a look with no sprite draws
+    /// its tint flat), one tile per block, cut at whole-block lines and keeping each part's
+    /// place in its tile, with no inset of the box. The tint is the fluid's (water `0xFF3F76E4`,
+    /// lava white, a look's `tint`, opaque white when it has none), not the biome's water
+    /// colour, unless `options.argb` replaces it. Sky light stays as `draw.light`; block light
+    /// rises to the fluid's `light_level` (15 for lava). No face is shaded by direction. Faces are sorted far to
     /// near, alpha blended, culled from behind and write depth, drawn with the block entities
     /// before the level's translucent terrain. A stack of 0 draws nothing and is `Ok` without
     /// checking `bounds`; a refusal draws nothing.

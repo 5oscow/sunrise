@@ -429,6 +429,9 @@ impl RenderAssets {
                 sprites.insert_in_blocks(name)?;
             }
         }
+        if crate::fluid_models::any_flat_look() {
+            sprites.insert_flat(crate::fluid_models::FLAT_SPRITE)?;
+        }
         for stage in 0..10 {
             sprites.insert(&format!("minecraft:block/destroy_stage_{stage}"))?;
             sprites.insert(&format!("minecraft:block/destroy_oit_stage_{stage}"))?;
