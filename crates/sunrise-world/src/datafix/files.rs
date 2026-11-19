@@ -1416,7 +1416,7 @@ mod upgrade_tests {
         fs::create_dir_all(&dir).unwrap();
         let mut tag = old_chunk(0, 0);
         // Stored uncompressed, so the record is over 256 sectors.
-        set(&mut tag, "Big", Tag::ByteArray(vec![0; 1_100_000]));
+        put(&mut tag, "Big", Tag::ByteArray(vec![0; 1_100_000]));
         let root = NamedTag {
             name: "".into(),
             tag,
@@ -1472,7 +1472,7 @@ mod upgrade_tests {
         drop(region);
         let grow = |tag: &mut Tag| {
             fix_overworld_chunk(tag);
-            set(tag, "Big", Tag::ByteArray(vec![0; 1_100_000]));
+            put(tag, "Big", Tag::ByteArray(vec![0; 1_100_000]));
         };
         // A folder where the `.mcc` goes makes its move fail once.
         fs::create_dir_all(dir.join("c.0.0.mcc")).unwrap();
@@ -1493,7 +1493,7 @@ mod upgrade_tests {
     fn published_stub_with_staged_mcc(dir: &Path) {
         let _ = fs::remove_dir_all(dir);
         let mut tag = old_chunk(0, 0);
-        set(&mut tag, "Big", Tag::ByteArray(vec![0; 1_100_000]));
+        put(&mut tag, "Big", Tag::ByteArray(vec![0; 1_100_000]));
         let root = NamedTag {
             name: "".into(),
             tag,
@@ -1638,7 +1638,7 @@ mod upgrade_tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let mut tag = old_chunk(0, 0);
-        set(&mut tag, "Items", Tag::List(vec![Tag::Byte(1); 1_000_001]));
+        put(&mut tag, "Items", Tag::List(vec![Tag::Byte(1); 1_000_001]));
         let root = NamedTag {
             name: "".into(),
             tag,
@@ -1682,7 +1682,7 @@ mod upgrade_tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let mut tag = old_chunk(0, 0);
-        set(&mut tag, "Items", over_old_cap());
+        put(&mut tag, "Items", over_old_cap());
         let root = NamedTag {
             name: "".into(),
             tag,
