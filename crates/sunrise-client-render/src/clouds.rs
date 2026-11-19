@@ -175,7 +175,9 @@ pub fn drift(time: i64, partial_tick: f64, width: u32) -> f64 {
 }
 
 impl Input<'_> {
-    fn state(&self) -> (MeshKey, Uniform) {
+    /// The mesh around the camera's cell snapped to `snap` cells (1: vanilla's own mesh, which a
+    /// pack's `core/clouds` shader reads).
+    fn state(&self, snap: i64) -> (MeshKey, Uniform) {
         let (w, h, _) = self.texture;
         let offset = drift(self.time, self.partial_tick, *w);
         let mut x = self.camera.x + offset * 0.030_000_001;
@@ -183,8 +185,8 @@ impl Input<'_> {
         let (tw, th) = (f64::from(*w) * 12.0, f64::from(*h) * 12.0);
         x -= (x / tw).floor() * tw;
         z -= (z / th).floor() * th;
-        let cell_x = (x / 12.0).floor() as i64 / SNAP_CELLS * SNAP_CELLS;
-        let cell_z = (z / 12.0).floor() as i64 / SNAP_CELLS * SNAP_CELLS;
+        let cell_x = (x / 12.0).floor() as i64 / snap * snap;
+        let cell_z = (z / 12.0).floor() as i64 / snap * snap;
         let bottom = (CLOUD_HEIGHT - self.camera.y) as f32;
         // The inward faces of the 3x3 cells around the camera are only seen from inside the
         // layer; outside it they are back-facing, so the mesh need not follow the camera there.
@@ -201,7 +203,7 @@ impl Input<'_> {
             cell_x,
             cell_z,
             // One more ring than the range, for the cells the snapped origin can uncover.
-            radius: radius_cells(self.range) + SNAP_CELLS as i32,
+            radius: radius_cells(self.range) + if snap > 1 { snap as i32 } else { 0 },
             fast: self.fast,
             top: bottom <= 0.0,
             bottom: bottom + 4.0 >= 0.0,
@@ -354,7 +356,7 @@ impl Mesh {
     /// Returns true only when vertices must be uploaded. Sub-cell motion and
     /// color changes update only the uniform, as in CloudRenderer.prepare.
     pub fn prepare(&mut self, input: &Input<'_>) -> (bool, Uniform) {
-        let (key, uniform) = input.state();
+        let (key, uniform) = input.state(SNAP_CELLS);
         if self.key.as_ref() == Some(&key) {
             return (false, uniform);
         }
@@ -406,6 +408,133 @@ impl Mesh {
         (true, uniform)
     }
 }
+
+/// What a pack's `core/clouds` shader reads (`CloudRenderer.prepare` and `buildMesh`): the faces
+/// it reads from `CloudFaces` and its `CloudInfo` block.
+pub mod pack {
+    use super::{Input, MeshKey};
+
+    /// `encodeFace`'s flags beside the direction (`clouds.vsh`'s `FLAG_INSIDE_FACE`,
+    /// `FLAG_USE_TOP_COLOR`), and `Direction.get3DDataValue`.
+    const INSIDE_FACE: i32 = 16;
+    const USE_TOP_COLOR: i32 = 32;
+    const DOWN: i32 = 0;
+    const UP: i32 = 1;
+    const NORTH: i32 = 2;
+    const SOUTH: i32 = 3;
+    const WEST: i32 = 4;
+    const EAST: i32 = 5;
+
+    /// What [`faces`] depends on: the camera's cell and side of the layer, the range and the
+    /// style, and the cloud texture. `CloudRenderer.prepare` builds its mesh again only when the
+    /// cell, the side or the style change.
+    #[derive(Debug, PartialEq, Eq)]
+    pub struct FacesKey(MeshKey, usize, u32, u32);
+
+    /// The key [`faces`] gives the same faces for.
+    pub fn faces_key(input: &Input<'_>) -> FacesKey {
+        let (w, h, filled) = input.texture;
+        FacesKey(input.state(1).0, filled.as_ptr() as usize, *w, *h)
+    }
+
+    /// `CloudInfo` (std140: `CloudColor`, then `CloudOffset`, the camera's place in its cell
+    /// negated with the layer's bottom relative to it, then `CellSize`), which follows the
+    /// camera every frame. The colour goes through 8 bits a channel, as vanilla's ARGB int.
+    pub fn info(input: &Input<'_>) -> [u8; 48] {
+        let (_, uniform) = input.state(1);
+        let mut info = [0f32; 12];
+        info[..4].copy_from_slice(
+            &input
+                .color
+                .map(|v| (v.clamp(0.0, 1.0) * 255.0) as u8 as f32 / 255.0),
+        );
+        info[4..7].copy_from_slice(&uniform.offset[..3]);
+        info[8..11].copy_from_slice(&[12.0, 4.0, 12.0]);
+        let mut bytes = [0u8; 48];
+        bytes.copy_from_slice(bytemuck::cast_slice(&info));
+        bytes
+    }
+
+    /// `buildMesh`'s faces, three `R8_SINT` texels each (here one `i32` a texel): the cell's
+    /// relative x and z halved, then the direction with its flags, the halves' lost bits in
+    /// bits 7 (x) and 6 (z). Cells in `buildMesh`'s rings, nearest first.
+    pub fn faces(input: &Input<'_>) -> Vec<i32> {
+        let (key, uniform) = input.state(1);
+        let (w, h, filled) = input.texture;
+        let (w, h) = (*w as i32, *h as i32);
+        let empty = |x: i32, y: i32| !filled[(y * w + x) as usize];
+        // RelativeCameraPos: above the layer's top, below its bottom, or inside it.
+        let bottom = uniform.offset[1];
+        let above = bottom + 4.0 < 0.0;
+        let below = bottom > 0.0;
+        let fancy = !input.fast;
+        let radius = key.radius;
+        let mut faces = Vec::new();
+        let mut encode = |x: i32, z: i32, direction: i32, flags: i32| {
+            let dir_and_flags = direction | flags | (x & 1) << 7 | (z & 1) << 6;
+            // `(byte)` casts, read back as signed 8-bit texels.
+            faces.extend([(x >> 1) as i8, (z >> 1) as i8, dir_and_flags as i8].map(i32::from));
+        };
+        // tryBuildCell.
+        let mut cell = |x: i32, z: i32| {
+            let ix = (key.cell_x as i32 + x).rem_euclid(w);
+            let iy = (key.cell_z as i32 + z).rem_euclid(h);
+            if empty(ix, iy) {
+                return;
+            }
+            if !fancy {
+                encode(x, z, DOWN, USE_TOP_COLOR);
+                return;
+            }
+            // The neighbours `CloudRenderer.prepare` packs into a cell, east and west wrapping
+            // by the texture's height as vanilla's do.
+            let north = empty(ix, (iy - 1).rem_euclid(h));
+            let east = empty((ix + 1).rem_euclid(h), iy);
+            let south = empty(ix, (iy + 1).rem_euclid(h));
+            let west = empty((ix - 1).rem_euclid(h), iy);
+            // buildExtrudedCell.
+            if !below {
+                encode(x, z, UP, 0);
+            }
+            if !above {
+                encode(x, z, DOWN, 0);
+            }
+            if north && z > 0 {
+                encode(x, z, NORTH, 0);
+            }
+            if south && z < 0 {
+                encode(x, z, SOUTH, 0);
+            }
+            if west && x > 0 {
+                encode(x, z, WEST, 0);
+            }
+            if east && x < 0 {
+                encode(x, z, EAST, 0);
+            }
+            if x.abs() <= 1 && z.abs() <= 1 {
+                for direction in [DOWN, UP, NORTH, SOUTH, WEST, EAST] {
+                    encode(x, z, direction, INSIDE_FACE);
+                }
+            }
+        };
+        for ring in 0..=2 * radius {
+            for x in -ring..=ring {
+                let z = ring - x.abs();
+                if z >= 0 && z <= radius && x * x + z * z <= radius * radius {
+                    if z != 0 {
+                        cell(x, -z);
+                    }
+                    cell(x, z);
+                }
+            }
+        }
+        faces
+    }
+}
+
+#[cfg(test)]
+#[path = "clouds_pack_tests.rs"]
+mod pack_tests;
 
 #[cfg(test)]
 mod tests {

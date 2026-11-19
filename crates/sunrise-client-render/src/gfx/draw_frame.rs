@@ -1404,7 +1404,55 @@ impl Renderer {
             - native_cutout_quads
             - native_cutout_mipped_quads;
         let native_clouds = self.native.as_ref().is_none_or(|n| n.vanilla_clouds);
-        let cloud_quads = if let Some(input) = frame.clouds.as_ref().filter(|_| native_clouds) {
+        // A pack's core/clouds, decided before either mesh is prepared: its faces, or none and
+        // the native mesh in this same frame.
+        let pack_clouds = core_clouds::CloudsFrame {
+            pack_shader: self.core_clouds.is_some(),
+            clouds: frame.clouds.is_some(),
+            native_clouds,
+            improved_transparency: oit_on,
+            shader_pack: self.pack_post.as_ref().is_some_and(|p| p.1.is_some()),
+            title: frame.title,
+            cloud_marks: light_marks(self.output.frame.format, self.hdr.is_some())
+                && self.hdr.as_ref().is_some_and(|h| h.lighting),
+        }
+        .pack_draws();
+        let pack_cloud_quads = match (self.core_clouds.as_mut(), frame.clouds.as_ref()) {
+            (Some(core), Some(input)) if pack_clouds => {
+                let view = views.primary();
+                let vanilla = core_lines::uniforms(
+                    pack.globals,
+                    view,
+                    pose,
+                    jitter,
+                    1.0,
+                    fog_color,
+                    pack.fog,
+                );
+                core.prepare(
+                    &self.device,
+                    &mut self.uploads,
+                    &mut encoder,
+                    &vanilla,
+                    input,
+                )
+                .map_err(|e| {
+                    log::warn!(
+                        "the resource pack's clouds are drawn natively this frame: their faces \
+                             take {} bytes, more than the {} this device binds",
+                        e.bytes,
+                        e.limit
+                    )
+                })
+                .ok()
+            }
+            _ => None,
+        };
+        let native_input = frame
+            .clouds
+            .as_ref()
+            .filter(|_| native_clouds && pack_cloud_quads.is_none());
+        let cloud_quads = if let Some(input) = native_input {
             let (rebuilt, uniform) =
                 crate::spans::time("clouds", || self.cloud_mesh.prepare(input));
             let vertices = self.cloud_mesh.vertices.len() as u64;
@@ -1722,6 +1770,7 @@ impl Renderer {
         let max_quads =
             (world_quads + additive_quads + hand_quads + see_through_quads + shadow_only_quads)
                 .max(cloud_quads)
+                .max(pack_cloud_quads.unwrap_or(0))
                 .max(if frame.lightning.bolts.is_empty() {
                     0
                 } else {
@@ -3268,6 +3317,14 @@ impl Renderer {
                     ((entity_quads + text_quads + crumbling_quads) * 4) as i32,
                     0..1,
                 );
+            }
+            if let (Some(core), Some(input)) = (&self.core_clouds, frame.clouds.as_ref())
+                && pack_cloud_quads.is_some_and(|quads| quads > 0)
+                && !pack_draws_clouds
+            {
+                pass.stage(self.own_timing.as_mut(), "clouds");
+                core.draw(&mut pass, !input.fast, &self.indices);
+                pass.set_bind_group(0, &self.group, &[]);
             }
             if cloud_quads > 0 && !pack_draws_clouds && !oit_on {
                 pass.stage(self.own_timing.as_mut(), "clouds");

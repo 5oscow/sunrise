@@ -172,6 +172,7 @@ pub mod capture;
 mod celestial;
 mod census;
 pub mod compositor;
+pub(crate) mod core_clouds;
 pub(crate) mod core_lightmap;
 pub(crate) mod core_lines;
 mod core_particles;
@@ -430,6 +431,8 @@ pub struct Renderer {
     /// A resource pack's `core/lightmap`, which draws the light texture in place of the native
     /// one.
     core_lightmap: Option<core_lightmap::CoreLightmap>,
+    /// A resource pack's `core/clouds`, which draws the clouds in place of the native ones.
+    core_clouds: Option<core_clouds::CoreClouds>,
     /// Polytone GPU particle types with their own shader, and this frame's batches of them.
     core_particles: core_particles::CoreParticles,
     /// Gizmo lines: opaque ones (`RenderTypes.lines`, which writes depth),

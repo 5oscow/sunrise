@@ -221,7 +221,26 @@ fn load_lightmap(root: &ResourceSource, defaults: &ResourceSource) -> Option<Arc
     )
 }
 
-/// The packs' core shaders the atlas carries (text, block outline, sky, stars, lightmap).
+/// The packs' `core/clouds`, when a pack replaces either stage: the pass gives it `CloudInfo`
+/// and the `CloudFaces` texel buffer besides vanilla's blocks.
+fn load_clouds(root: &ResourceSource, defaults: &ResourceSource) -> Option<Arc<CoreProgram>> {
+    load_pair(
+        root,
+        defaults,
+        ("clouds", "clouds"),
+        &[],
+        &crate::gfx::core_clouds::GLUE,
+        &|block| {
+            matches!(
+                block,
+                crate::gfx::core_clouds::INFO_BLOCK | crate::gfx::core_clouds::FACES
+            )
+        },
+    )
+}
+
+/// The packs' core shaders the atlas carries (text, block outline, sky, stars, lightmap,
+/// clouds).
 pub(super) fn load_shaders(
     atlas: &mut super::HudAtlas,
     root: &ResourceSource,
@@ -239,6 +258,7 @@ pub(super) fn load_shaders(
     atlas.sky_shader = sky("sky");
     atlas.stars_shader = sky("stars");
     atlas.lightmap_shader = load_lightmap(root, defaults);
+    atlas.clouds_shader = load_clouds(root, defaults);
     let world = |defines: &[&str], glue| load_core(root, defaults, "text", defines, glue);
     atlas.text_shaders.world = world(&[], &crate::gfx::core_text::WORLD_GLUE);
     atlas.text_shaders.see_through = world(
@@ -765,3 +785,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "pack_text_clouds_tests.rs"]
+mod clouds_tests;
