@@ -4485,6 +4485,7 @@ dependencies = [
  "fs4",
  "gilrs",
  "glam",
+ "indexmap",
  "libc",
  "log",
  "naga",

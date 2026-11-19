@@ -8225,8 +8225,9 @@ impl Game<'_> {
         for mob in &self.mobs {
             self.living_geometry::<PRECHECK>(mob, &frame, out);
         }
-        // What follows isn't a tracked mob: close the last one's span.
+        // Close the last tracked mob's span before the remaining world entities.
         self.mark_motion(out.len(), 0);
+        self.general_entity_geometry(camera, alpha, out);
         self.elder_apparition_geometry(alpha, out);
         self.spawner_geometry(camera, alpha, out);
         let live = self.creatures.projectiles.iter().map(|a| {
@@ -8238,7 +8239,6 @@ impl Game<'_> {
             (a, at)
         });
         self.projectile_geometry(camera, alpha, live, out);
-        self.general_entity_geometry(camera, alpha, out);
     }
 
     pub(super) fn pickup_arrow_geometry(
