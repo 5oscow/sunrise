@@ -1458,7 +1458,10 @@ impl HudAtlas {
             } else {
                 format!("minecraft:{name}")
             };
-            let Ok(layer) = loaded.insert(&id) else {
+            // A block or item sprite as its atlas finishes it; the other atlases' are files.
+            let Ok(layer) = loaded.try_insert(&id).or_else(|_| {
+                loaded.insert_file(&crate::atlas_sources::texture_resource(&id, "textures"))
+            }) else {
                 continue;
             };
             let Some(animation) = loaded.animations.iter().find(|a| a.layer == layer).cloned()

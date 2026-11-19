@@ -559,6 +559,42 @@ pub fn listed(
         .collect()
 }
 
+/// The blocks and items atlases as a model material sees them: a material names no atlas, and
+/// the baker looks in the items atlas first, then the blocks atlas, then uses the missing sprite.
+pub struct Materials {
+    /// The items atlas's, then the blocks atlas's sprites; an atlas with no definition is absent.
+    atlases: Vec<BTreeMap<String, SpriteOrigin>>,
+}
+
+impl Materials {
+    pub fn new(source: &crate::resource_source::ResourceSource) -> Self {
+        let mut listed: BTreeMap<_, _> = listed(source).into_iter().collect();
+        Self {
+            atlases: ["minecraft:items", "minecraft:blocks"]
+                .into_iter()
+                .filter_map(|atlas| listed.remove(atlas))
+                .collect(),
+        }
+    }
+    /// Whether neither atlas has a definition: a bare resource tree, whose sprites are its files.
+    pub fn is_bare(&self) -> bool {
+        self.atlases.is_empty()
+    }
+    /// `finish` of the first atlas's origin for `id` that gives a sprite, items first: an
+    /// origin that fails (a cut outside its sheet, a missing palette) leaves the blocks atlas's
+    /// sprite of that id to be found. None where no atlas lists `id`, or none finishes.
+    pub fn resolve<T>(
+        &self,
+        id: &str,
+        mut finish: impl FnMut(&SpriteOrigin) -> Option<T>,
+    ) -> Option<T> {
+        self.atlases
+            .iter()
+            .filter_map(|atlas| atlas.get(id))
+            .find_map(|origin| finish(origin))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
