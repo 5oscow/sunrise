@@ -136,14 +136,56 @@ impl Game<'_> {
 }
 
 #[cfg(test)]
+fn with_headless_game(run: impl FnOnce(&mut Game<'_>)) {
+    use crate::game::{
+        Audio, Options, Progress, Settings, execution_role::ExecutionRole, load_resources,
+    };
+
+    let root = std::path::PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap());
+    let save = tempfile::tempdir().unwrap();
+    let settings = Settings::default();
+    let loaded = load_resources(
+        sunrise_assets::resource_source::ResourceRoot::directory(root.clone()),
+        Vec::new(),
+        None,
+        &root,
+        &settings,
+        std::time::Instant::now(),
+        false,
+        ExecutionRole::IntegratedServer,
+        &Progress::new(),
+        &mut |_, _| unreachable!(),
+    )
+    .unwrap();
+    let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+    options.resources = root.clone();
+    options.game_dir = Some(save.path().into());
+    options.execution_role = ExecutionRole::IntegratedServer;
+    let mut game = Game::new(
+        &loaded.resources,
+        loaded.pack,
+        loaded.gui.unwrap(),
+        options,
+        settings,
+        Audio::silent(&sunrise_assets::resource_source::ResourceSource::directory(
+            root,
+        )),
+        None,
+    )
+    .unwrap();
+    run(&mut game);
+}
+
+#[cfg(test)]
 mod hatch_tests {
-    use crate::game::{LevelEvent, native_entity_refs::tests::with_game};
+    use super::with_headless_game;
+    use crate::game::LevelEvent;
     use sunrise_core::{nbt::Tag, position::BlockPos};
 
     #[test]
     #[ignore = "daily"]
     fn ghastling_and_tadpole_hatches_match_vanilla_persistence() {
-        with_game(|game| {
+        with_headless_game(|game| {
             for (block, kind) in [
                 ("minecraft:dried_ghast", "spawn_ghastling"),
                 ("minecraft:frogspawn", "hatch"),
@@ -174,7 +216,7 @@ mod hatch_tests {
 
 #[cfg(test)]
 mod item_collision_tests {
-    use crate::game::{Audio, Game, Options, Progress, Settings, load_resources};
+    use super::with_headless_game;
     use std::sync::Arc;
     use sunrise_client::chunk::Chunk;
     use sunrise_core::position::ChunkPos;
@@ -184,79 +226,48 @@ mod item_collision_tests {
     #[test]
     #[ignore = "daily"]
     fn a_dropped_item_rests_on_a_boat_but_falls_through_a_minecart() {
-        let root = std::path::PathBuf::from(std::env::var_os("SUNRISE_TEST_RESOURCES").unwrap());
-        let settings = Settings::default();
-        let loaded = load_resources(
-            sunrise_assets::resource_source::ResourceRoot::directory(root.clone()),
-            Vec::new(),
-            None,
-            &root,
-            &settings,
-            std::time::Instant::now(),
-            false,
-            crate::game::execution_role::ExecutionRole::IntegratedServer,
-            &Progress::new(),
-            &mut |_, _| unreachable!(),
-        )
-        .unwrap();
-        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
-        options.resources = root.clone();
-        options.game_dir = Some(
-            std::env::temp_dir().join(format!("sunrise-item-cart-unit-{}", std::process::id())),
-        );
-        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
-        let mut game = Game::new(
-            &loaded.resources,
-            loaded.pack,
-            loaded.gui.unwrap(),
-            options,
-            settings,
-            Audio::silent(&sunrise_assets::resource_source::ResourceSource::directory(
-                root.clone(),
-            )),
-            None,
-        )
-        .unwrap();
-        game.build_registries();
-        game.set_allow_commands(true);
-        let stone = game
-            .pack
-            .assets
-            .registry
-            .default_state("minecraft:stone")
-            .unwrap()
-            .0;
-        let mut chunk = Chunk::empty(0, 0);
-        for x in 0..16 {
-            for z in 0..16 {
-                chunk.set(x, 199, z, stone);
+        with_headless_game(|game| {
+            game.build_registries();
+            game.set_allow_commands(true);
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap()
+                .0;
+            let mut chunk = Chunk::empty(0, 0);
+            for x in 0..16 {
+                for z in 0..16 {
+                    chunk.set(x, 199, z, stone);
+                }
             }
-        }
-        game.world.chunks.insert((0, 0), Arc::new(chunk));
-        game.block_ticks
-            .add_empty_chunk(ChunkPos::new(0, 0))
-            .unwrap();
-        game.load_ticking_neighbourhood(0, 0);
-        assert!(game.run_command("forceload add 0 0"));
-        assert!(game.run_command("summon minecart 4.5 200 4.5"));
-        assert!(game.run_command("summon oak_boat 10.5 200 10.5"));
-        for (x, z) in [(4.5, 4.5), (10.5, 10.5)] {
-            assert!(game.run_command(&format!(
+            game.world.chunks.insert((0, 0), Arc::new(chunk));
+            game.block_ticks
+                .add_empty_chunk(ChunkPos::new(0, 0))
+                .unwrap();
+            game.load_ticking_neighbourhood(0, 0);
+            assert!(game.run_command("forceload add 0 0"));
+            assert!(game.run_command("summon minecart 4.5 200 4.5"));
+            assert!(game.run_command("summon oak_boat 10.5 200 10.5"));
+            for (x, z) in [(4.5, 4.5), (10.5, 10.5)] {
+                assert!(game.run_command(&format!(
                 "summon item {x} 201.5 {z} {{Item:{{id:\"minecraft:stick\",count:1}},Motion:[0.0d,0.0d,0.0d]}}"
             )));
-        }
-        for _ in 0..60 {
-            game.tick_world(true).unwrap();
-        }
-        let rest = |x: f64| {
-            game.dropped
-                .iter()
-                .find(|d| (d.position.x - x).abs() < 0.5)
-                .map(|d| d.position.y)
-                .unwrap()
-        };
-        assert_eq!(rest(4.5), 200.0, "through the minecart to the stone");
-        let boat_top = game.boats[0].bounds().max_position().y;
-        assert_eq!(rest(10.5), boat_top, "on the boat");
+            }
+            for _ in 0..60 {
+                game.tick_world(true).unwrap();
+            }
+            let rest = |x: f64| {
+                game.dropped
+                    .iter()
+                    .find(|d| (d.position.x - x).abs() < 0.5)
+                    .map(|d| d.position.y)
+                    .unwrap()
+            };
+            assert_eq!(rest(4.5), 200.0, "through the minecart to the stone");
+            let boat_top = game.boats[0].bounds().max_position().y;
+            assert_eq!(rest(10.5), boat_top, "on the boat");
+        });
     }
 }
