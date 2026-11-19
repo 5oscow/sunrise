@@ -231,6 +231,10 @@ struct Area {
     stem: String,
     camel: String,
     tiers: BTreeMap<Tier, Vec<Entry>>,
+    /// The backend tiers the game answers from a borrowed view of its read-only tables, not
+    /// from `Game`, declared by `#[table_backend("path")]` on the trait: the view carries the
+    /// reads and implements the trait once, and `Game` forwards to it.
+    tables: BTreeMap<Tier, String>,
 }
 
 impl Area {
@@ -312,6 +316,31 @@ fn area_tiers(camel: &str, file: syn::File) -> Result<BTreeMap<Tier, Vec<Entry>>
     Ok(tiers)
 }
 
+/// The `#[table_backend("path")]` declarations of an area file: only a `Backend` trait may carry
+/// one, since the game answers only its reads from a view.
+fn table_backends(camel: &str, file: &syn::File) -> Result<BTreeMap<Tier, String>, String> {
+    let mut tables = BTreeMap::new();
+    for item in &file.items {
+        let Item::Trait(item) = item else { continue };
+        for attr in &item.attrs {
+            if !attr.path().is_ident("table_backend") {
+                continue;
+            }
+            if item.ident != format!("{camel}Backend") {
+                return Err(format!(
+                    "`#[table_backend]` belongs on `{camel}Backend`, not `{}`",
+                    item.ident
+                ));
+            }
+            let path = attr
+                .parse_args::<syn::LitStr>()
+                .map_err(|e| format!("`#[table_backend]` takes a path string: {e}"))?;
+            tables.insert(Tier::Backend, path.value());
+        }
+    }
+    Ok(tables)
+}
+
 /// The area files, `base` first and then by name, as the catalog's are.
 fn load(root: &Path) -> Result<Vec<Area>, String> {
     let dir = root.join(DIRECTORY);
@@ -322,8 +351,15 @@ fn load(root: &Path) -> Result<Vec<Area>, String> {
         let source = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         let file = syn::parse_file(&source).map_err(|e| format!("{}: {e}", path.display()))?;
         let camel = stem.to_upper_camel_case();
+        let tables =
+            table_backends(&camel, &file).map_err(|e| format!("{}: {e}", path.display()))?;
         let tiers = area_tiers(&camel, file).map_err(|e| format!("{}: {e}", path.display()))?;
-        areas.push(Area { stem, camel, tiers });
+        areas.push(Area {
+            stem,
+            camel,
+            tiers,
+            tables,
+        });
     }
     crate::rerun_if_changed(&dir.display());
     Ok(areas)
@@ -405,14 +441,6 @@ pub(super) fn areas_source(root: &Path) -> Result<String, String> {
     ))
 }
 
-/// The backend tiers the game answers from a borrowed view of its read-only tables, not from
-/// `Game`: `(area file, the view's path)`. The view carries the area's inherent reads and
-/// implements the trait once; `Game` and the level views both hand it out.
-const TABLE_BACKENDS: &[(&str, &str)] = &[(
-    "block_states",
-    "crate::game::native_block_tables::BlockTables",
-)];
-
 /// Generate every area impl explicitly. Full-path calls plus a hard recursion lint
 /// refuse a missing inherent implementation instead of inheriting a trait default.
 pub(super) fn game_forwarders(root: &Path) -> Result<String, String> {
@@ -424,10 +452,7 @@ pub(super) fn game_forwarders(root: &Path) -> Result<String, String> {
     );
     for area in load(root)? {
         for (tier, entries) in &area.tiers {
-            let table = TABLE_BACKENDS
-                .iter()
-                .find(|(stem, _)| *tier == Tier::Backend && *stem == area.stem)
-                .map(|(_, table)| *table);
+            let table = area.tables.get(tier).map(String::as_str);
             // A table-backed area is implemented by its view, and by `Game`, which hands the
             // view out: both forward the same reads, so neither keeps a copy of them.
             let targets: &[&str] = match table {
