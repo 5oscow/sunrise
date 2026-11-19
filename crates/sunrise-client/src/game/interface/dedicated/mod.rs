@@ -2540,7 +2540,7 @@ mod tests {
             assert_eq!(game.ip_ban_players("127.0.0.1"), [13]);
         });
     }
-    #[test]
+
     /// A server folder that still has the forwarding secret is told what to do.
     #[test]
     fn a_leftover_forwarding_secret_says_what_to_do() {
