@@ -19,6 +19,10 @@ impl Game<'_> {
     ) -> Result<(), DynamicTextureError> {
         let owner = mod_api::content::crash::current_native_mod();
         let atlas = &mut self.gui.atlas;
+        // An id the GUI atlas's own list has a sprite for is that sprite's.
+        if atlas.gui_owns(&id.to_string()) {
+            return Err(DynamicTextureError::NameTaken);
+        }
         self.dynamic_textures.create(
             atlas.dynamic_texture_pool.as_ref(),
             &mut atlas.sprites,

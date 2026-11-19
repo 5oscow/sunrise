@@ -61,32 +61,63 @@ pub struct UiMetadata(HashMap<String, NineSlice>);
 pub fn set_metadata(metadata: UiMetadata) {
     *NINE_SLICE.write().unwrap_or_else(|e| e.into_inner()) = Some(metadata.0);
 }
-/// Reads the metadata [`load_metadata`] puts in use, without putting it in use. Another
-/// namespace's sprites are named with it (`lobby:gui/sprites/...`), as the GUI atlas packs them.
+/// Reads the metadata [`load_metadata`] puts in use, without putting it in use: each GUI atlas
+/// sprite's, by its id (`container/slot`, a mod's `mymod:panel`), from the `.png.mcmeta` of the
+/// file its winning origin is. A sprite that is generated (mod pixels, an unstitch region, a
+/// palette) has none: it carries no file's metadata, and a replaced file's is not its own.
 pub fn read_metadata(root: &ResourceSource) -> UiMetadata {
+    let listing = crate::atlas_sources::listing(root);
+    // The files whose metadata each id has: its winning origin's, or where the tree has no GUI
+    // definition (no atlases loaded), the files the GUI folder holds, by the id the definition
+    // would give them.
+    let files: Vec<(String, String)> = if listing.defines("minecraft:gui") {
+        listing
+            .sprites("minecraft:gui")
+            .iter()
+            .filter_map(|(id, origin)| match origin {
+                crate::atlas_sources::SpriteOrigin::File(texture) => Some((
+                    id.strip_prefix("minecraft:").unwrap_or(id).to_owned(),
+                    crate::atlas_sources::texture_resource(texture, "textures"),
+                )),
+                _ => None,
+            })
+            .collect()
+    } else {
+        root.namespaces("assets")
+            .iter()
+            .flat_map(|namespace| {
+                let base = format!("assets/{namespace}/textures/gui/sprites/");
+                let prefix = if namespace == "minecraft" {
+                    String::new()
+                } else {
+                    format!("{namespace}:")
+                };
+                root.list(&base)
+                    .into_iter()
+                    .filter_map(|name| {
+                        let id = name
+                            .strip_suffix(".png.mcmeta")?
+                            .strip_prefix(base.as_str())?;
+                        Some((
+                            format!("{prefix}{id}"),
+                            name.strip_suffix(".mcmeta")?.to_owned(),
+                        ))
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    };
     let mut map = HashMap::new();
-    for namespace in root.namespaces("assets") {
-        let base = format!("assets/{namespace}/textures/");
-        let prefix = match namespace.as_str() {
-            "minecraft" => String::new(),
-            namespace => format!("{namespace}:"),
+    for (id, file) in files {
+        let Ok(text) = root.read_to_string(&format!("{file}.mcmeta")) else {
+            continue;
         };
-        for name in root.list(&format!("{base}gui/sprites/")) {
-            let Some(stripped) = name.strip_suffix(".png.mcmeta") else {
-                continue;
-            };
-            let Ok(text) = root.read_to_string(&name) else {
-                continue;
-            };
-            let Some(nine_slice) = crate::packs::first_json(text.as_bytes())
-                .ok()
-                .as_ref()
-                .and_then(parse_nine_slice)
-            else {
-                continue;
-            };
-            let key = stripped.strip_prefix(base.as_str()).unwrap_or_default();
-            map.insert(format!("{prefix}{key}"), nine_slice);
+        if let Some(nine_slice) = crate::packs::first_json(text.as_bytes())
+            .ok()
+            .as_ref()
+            .and_then(parse_nine_slice)
+        {
+            map.insert(id, nine_slice);
         }
     }
     UiMetadata(map)
