@@ -189,7 +189,7 @@ pub(super) fn apply(
             // SulfurCube.MAX_FUSE: onSyncedDataUpdated copies it into the fuse
             // the client ticks for swell / white flash (#4548); -1 is not primed.
             (Species::SulfurCube, 19, Value::Int(fuse)) => {
-                m.extra.counter2 = (*fuse).max(-1) + 1;
+                m.extra.counter2 = *fuse + 1;
             }
             (Species::SulfurCube, 20, Value::Bool(from_bucket)) => {
                 m.extra.scratch[3] = i32::from(*from_bucket);

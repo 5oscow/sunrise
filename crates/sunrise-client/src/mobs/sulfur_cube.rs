@@ -1539,10 +1539,8 @@ pub fn from_nbt(m: &mut Mob, tag: &sunrise_core::nbt::Tag) {
     m.extra.flag2 = int("wasOnGround").unwrap_or(0) != 0;
     m.extra.ints[3] = int("pickup_timer").unwrap_or(0);
     m.extra.scratch[3] = int("from_bucket").unwrap_or(0);
-    m.extra.counter2 = int("fuse").unwrap_or(-1).max(-1) + 1;
-    if primed(m) {
-        m.invulnerable_flag = true;
-    }
+    // `setFuse` stores any value, and the load leaves `Invulnerable` as `Entity.load` read it.
+    m.extra.counter2 = int("fuse").unwrap_or(-1) + 1;
 }
 
 #[cfg(test)]
@@ -1559,6 +1557,28 @@ mod tnt_rule_tests {
         let mut m = Mob::new(1, Arc::new(kind), Vec3::ZERO, 0.0);
         m.extra.set_body(Some("minecraft:tnt".into()));
         m
+    }
+
+    /// `SulfurCube.readAdditionalSaveData` is a plain `setFuse`: a loaded fuse, even 0 or one
+    /// below -1, keeps the `Invulnerable` the entity load read, and is saved back unchanged.
+    #[test]
+    fn a_loaded_fuse_is_kept_as_it_is_and_leaves_invulnerable_alone() {
+        use sunrise_core::nbt::Tag;
+        for (fuse_tag, is_primed) in [(0, true), (40, true), (-5, false)] {
+            let mut m = tnt_cube();
+            m.invulnerable_flag = false;
+            let tag = Tag::Compound([("fuse".into(), Tag::Int(fuse_tag))].into_iter().collect());
+            from_nbt(&mut m, &tag);
+            assert_eq!(fuse(&m), fuse_tag);
+            assert_eq!(primed(&m), is_primed, "fuse:{fuse_tag}");
+            assert!(!m.invulnerable_flag, "fuse:{fuse_tag}");
+            let mut saved = sunrise_core::nbt::Compound::default();
+            to_nbt(&m, &mut saved);
+            assert_eq!(
+                saved.get(&sunrise_core::nbt::JavaString::from("fuse")),
+                Some(&Tag::Int(fuse_tag))
+            );
+        }
     }
 
     #[test]
