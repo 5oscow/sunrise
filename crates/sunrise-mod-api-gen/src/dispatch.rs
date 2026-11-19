@@ -1280,12 +1280,12 @@ pub(super) fn emit<'a>(
             let params = dispatch_params[1..].join(", ");
             let (host, _) = host.as_ref().unwrap();
             dispatch.push_str(&format!(
-                "#[doc(hidden)] pub fn dispatch_{name}({dispatch_signature}) {{ dispatch_{name}_with({args}, |part, event| part.{name}(&mut *{host}, event)); }}\n\
-                 #[doc(hidden)] pub fn dispatch_{name}_with({params}, mut {invoke_part}: impl FnMut(&dyn {part_trait}, &mut {event_type}{elided}){result}) {{ {unpack}{early_return}\n{body} }}\n"
+                "#[doc(hidden)] #[allow(clippy::clone_on_copy, clippy::unnecessary_lazy_evaluations)] pub fn dispatch_{name}({dispatch_signature}) {{ dispatch_{name}_with({args}, |part, event| part.{name}(&mut *{host}, event)); }}\n\
+                 #[doc(hidden)] #[allow(clippy::clone_on_copy, clippy::unnecessary_lazy_evaluations)] pub fn dispatch_{name}_with({params}, mut {invoke_part}: impl FnMut(&dyn {part_trait}, &mut {event_type}{elided}){result}) {{ {unpack}{early_return}\n{body} }}\n"
             ));
         } else {
             dispatch.push_str(&format!(
-                "#[doc(hidden)] pub fn dispatch_{name}({dispatch_signature}) {{ {unpack}{early_return}\n{body} }}\n"
+                "#[doc(hidden)] #[allow(clippy::clone_on_copy, clippy::unnecessary_lazy_evaluations)] pub fn dispatch_{name}({dispatch_signature}) {{ {unpack}{early_return}\n{body} }}\n"
             ));
         }
     }
