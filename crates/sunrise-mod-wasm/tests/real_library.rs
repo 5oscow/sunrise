@@ -43,6 +43,30 @@ fn real_library_dependency() {
                 module: Package::read_wasm(path).unwrap(),
             });
         }
+        // The library implements no Part: its artifact imports its hooks and no `part:` name.
+        let mut library_imports = Vec::new();
+        for payload in wasmparser::Parser::new(0).parse_all(&packages[0].module) {
+            if let wasmparser::Payload::ImportSection(section) = payload.unwrap() {
+                library_imports.extend(
+                    section
+                        .into_imports()
+                        .map(|import| import.unwrap())
+                        .filter(|import| import.module == "sunrise")
+                        .map(|import| import.name.to_owned()),
+                );
+                break;
+            }
+        }
+        assert!(
+            library_imports
+                .iter()
+                .any(|name| name.starts_with("hook:Hooks::subscribed#")),
+            "{library_imports:?}"
+        );
+        assert!(
+            !library_imports.iter().any(|name| name.starts_with("part:")),
+            "{library_imports:?}"
+        );
         let mut replaced: Vec<_> = packages
             .iter()
             .map(|p| WasmPackage {
