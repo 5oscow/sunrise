@@ -3246,7 +3246,7 @@ impl Game<'_> {
     /// server does), so answer from the stack and the player alone.
     pub(in crate::game) fn native_can_eat(
         &self,
-        player: mod_api::PlayerRef,
+        player: PlayerRef,
         stack: Option<&ItemStack>,
         vanilla_can_eat: bool,
         can_eat: &mut Option<bool>,
