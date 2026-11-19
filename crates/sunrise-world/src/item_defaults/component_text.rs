@@ -464,15 +464,15 @@ fn strip_item_predicate_tag(value: &mut Tag) {
     strip_stack_tag(value);
     if let Some(Tag::Compound(predicates)) = value.get_mut("predicates") {
         let mut scratch = [0u8; 128];
-        for (name, predicate) in predicates {
+        predicates.for_each_mut(|name, predicate| {
             let Some(name) = super::ascii_name(name, &mut scratch) else {
-                continue;
+                return;
             };
             if !matches!(
                 name.strip_prefix("minecraft:").unwrap_or(name),
                 "container" | "bundle_contents" | "charged_projectiles"
             ) {
-                continue;
+                return;
             }
             if let Some(items) = predicate.get_mut("items") {
                 if let Some(contains) = items.get_mut("contains") {
@@ -488,7 +488,7 @@ fn strip_item_predicate_tag(value: &mut Tag) {
                     }
                 }
             }
-        }
+        });
     }
 }
 
