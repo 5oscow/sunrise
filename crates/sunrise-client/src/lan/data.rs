@@ -113,6 +113,19 @@ const PACK_REGISTRIES: &[&str] = &[
     "minecraft:enchantment",
 ];
 
+#[path = "data_pack_registries.rs"]
+mod pack_registries;
+pub use pack_registries::PackRegistryDefinitions;
+
+/// World overlays key definition files by `registry/id`.
+pub fn is_pack_registry_file(key: &str) -> bool {
+    key.split_once('/').is_some_and(|(kind, _)| {
+        PACK_REGISTRIES
+            .iter()
+            .any(|registry| registry.strip_prefix("minecraft:") == Some(kind))
+    })
+}
+
 /// A registry's entries from the resource root's namespaces other than
 /// `minecraft` (`data/<ns>/<dir>/`): content mods' own, marked as no client's.
 fn mod_entries(resources: &Path, dir: &str, entries: &mut Vec<((String, String), Value, bool)>) {
@@ -202,37 +215,6 @@ fn walk(dir: &Path, out: &mut BTreeMap<String, Value>, enchantment: bool) {
         };
         if let Some(value) = value {
             out.insert(file.name.clone(), value);
-        }
-    }
-}
-
-/// A synchronized registry's entries from the world's data packs (`<dir>/`
-/// files, the top pack's for each id) over the game's own. Each entry is
-/// ((namespace, path), JSON, from a pack); `file_order` sorts them.
-fn pack_entries(
-    dir: &str,
-    overlay: &sunrise_world::loot::PackOverlay,
-    entries: &mut Vec<((String, String), Value, bool)>,
-) {
-    for (id, files) in overlay.kind(dir) {
-        let Some((ns, path)) = id.split_once(':') else {
-            continue;
-        };
-        let top = sunrise_world::loot::PackOverlay::top(files);
-        let value = match serde_json::from_slice::<Value>(top) {
-            Ok(value) => value,
-            Err(e) => {
-                log::warn!("Sunrise: data pack {dir} {id} is not read: {e}");
-                continue;
-            }
-        };
-        let key = (ns.to_owned(), path.to_owned());
-        match entries.iter_mut().find(|(k, ..)| *k == key) {
-            Some(entry) => {
-                entry.1 = value;
-                entry.2 = true;
-            }
-            None => entries.push((key, value, true)),
         }
     }
 }
@@ -378,7 +360,7 @@ impl SyncData {
         sources: &crate::crafting::ResolvedSources,
     ) -> Result<Self, String> {
         Self::load_with_frozen(
-            resources, overlay, biomes, kept, None, false, defaults, sources,
+            resources, overlay, biomes, kept, None, None, false, defaults, sources,
         )
     }
 
@@ -399,6 +381,7 @@ impl SyncData {
             biomes,
             Some(kept),
             None,
+            None,
             true,
             defaults,
             sources,
@@ -411,6 +394,7 @@ impl SyncData {
         resources: &Path,
         overlay: &sunrise_world::loot::PackOverlay,
         damage: &FrozenDamage,
+        packed: Option<&PackRegistryDefinitions>,
         defaults: &sunrise_world::item_defaults::ItemDefaults,
         sources: &crate::crafting::ResolvedSources,
     ) -> Result<Self, String> {
@@ -420,6 +404,7 @@ impl SyncData {
             None,
             None,
             Some(damage),
+            packed,
             false,
             defaults,
             sources,
@@ -432,11 +417,19 @@ impl SyncData {
         biomes: Option<&crate::biome::Biomes>,
         kept: Option<&Self>,
         damage: Option<&FrozenDamage>,
+        packed: Option<&PackRegistryDefinitions>,
         same_files: bool,
         defaults: &sunrise_world::item_defaults::ItemDefaults,
         sources: &crate::crafting::ResolvedSources,
     ) -> Result<Self, String> {
         use crate::spans::startup;
+        let loaded;
+        let packed = if kept.is_none() && packed.is_none() {
+            loaded = PackRegistryDefinitions::load(overlay, &BTreeMap::new())?;
+            Some(&loaded)
+        } else {
+            packed
+        };
         // The recipe book, the recipe sync and the advancements read the
         // recipe folder: held here, they share one read of it.
         let _recipe_files = startup::time("sync.recipe_folder", || {
@@ -535,14 +528,11 @@ impl SyncData {
                     ));
                 }
                 damage_entries = Some(decoded);
-            } else if PACK_REGISTRIES.contains(key) {
-                if *key == "minecraft:dimension_type" {
-                    mod_dimension_types(
-                        sunrise_world::worldgen::overrides::mod_dimensions(),
-                        &mut entries,
-                    );
-                }
-                pack_entries(path, overlay, &mut entries);
+            } else if *key == "minecraft:dimension_type" {
+                mod_dimension_types(
+                    sunrise_world::worldgen::overrides::mod_dimensions(),
+                    &mut entries,
+                );
             }
             if *key == BIOME_REGISTRY {
                 // A content mod's own biomes: no client has their files, so their data is sent.
@@ -551,12 +541,18 @@ impl SyncData {
                     entries.push(((ns.to_owned(), p.to_owned()), v, true));
                 }
             }
+            if let Some(packed) = packed {
+                packed.discard_replaced(key, &mut entries);
+            }
             condition_filter::filter(
                 &mut entries,
                 damage_entries.is_some(),
                 overlay.conditions,
                 path,
             );
+            if let Some(packed) = packed {
+                packed.append(key, &mut entries);
+            }
             if *key == "minecraft:enchantment" {
                 holder_sets::expand_enchantments(&mut entries, resources, overlay, defaults)?;
             }
@@ -1134,6 +1130,17 @@ fn changed_dimension_type(name: &str, data: &Tag, levels: &LevelShapes) -> Optio
 mod tests {
     use super::*;
 
+    fn pack_entries(
+        key: &str,
+        overlay: &sunrise_world::loot::PackOverlay,
+        entries: &mut Vec<((String, String), Value, bool)>,
+    ) {
+        let registries = PackRegistryDefinitions::load(overlay, &BTreeMap::new()).unwrap();
+        let key = format!("minecraft:{key}");
+        registries.discard_replaced(&key, entries);
+        registries.append(&key, entries);
+    }
+
     #[test]
     fn false_conditions_do_not_suppress_lan_tag_operations() {
         let root = tempfile::tempdir().unwrap();
@@ -1355,7 +1362,7 @@ mod tests {
         mod_entries(&root, "enchantment", &mut found);
         let files = vec![(
             "enchantment/harvestmod:scythe".to_owned(),
-            vec![br#"{"max_level":5}"#.to_vec()],
+            vec![br#"{"description":"Scythe","max_level":5,"weight":1,"anvil_cost":1,"supported_items":"minecraft:iron_hoe","slots":["mainhand"],"min_cost":{"base":1,"per_level_above_first":1},"max_cost":{"base":5,"per_level_above_first":1}}"#.to_vec()],
         )];
         pack_entries("enchantment", &PackOverlay::new(&files), &mut found);
         file_order(&mut found);
@@ -1401,8 +1408,11 @@ mod tests {
         );
         assert!(packets[0].entries[0].data.is_none());
         assert_eq!(
-            packets[0].entries[1].data,
-            Some(json_to_nbt(&serde_json::json!({"max_level": 5})))
+            packets[0].entries[1]
+                .data
+                .as_ref()
+                .and_then(|data| data.get("max_level")),
+            Some(&Tag::Int(5)),
         );
         assert!(packets[0].entries[2].data.is_some());
         std::fs::remove_dir_all(root).unwrap();
@@ -1422,11 +1432,11 @@ mod tests {
         let files = vec![
             (
                 "dialog/test:menu".to_owned(),
-                vec![br#"{"type":"minecraft:multi_action","title":"Menu"}"#.to_vec()],
+                vec![br#"{"type":"minecraft:multi_action","title":"Menu","actions":[{"label":"OK"}]}"#.to_vec()],
             ),
             (
                 "dialog/minecraft:quick_actions".to_owned(),
-                vec![br#"{"type":"minecraft:dialog_list","title":"Quick"}"#.to_vec()],
+                vec![br#"{"type":"minecraft:notice","title":"Quick"}"#.to_vec()],
             ),
             (
                 "tags/minecraft:dialog/quick_actions".to_owned(),
@@ -1670,7 +1680,7 @@ mod tests {
         );
         let files = [(
             "dimension_type/test:packed".to_owned(),
-            vec![br#"{"min_y":0,"height":64}"#.to_vec()],
+            vec![br##"{"min_y":0,"height":64,"logical_height":64,"has_ceiling":false,"has_skylight":true,"has_ender_dragon_fight":false,"ambient_light":0.1,"coordinate_scale":1.0,"infiniburn":"#minecraft:infiniburn_overworld","monster_spawn_light_level":0,"monster_spawn_block_light_limit":0}"##.to_vec()],
         )];
         pack_entries("dimension_type", &PackOverlay::new(&files), &mut entries);
 
@@ -1684,10 +1694,9 @@ mod tests {
                 "attributes":{"minecraft:visual/sky_color":"#78a7ff","minecraft:gameplay/fast_lava":true}
             })
         );
-        assert_eq!(
-            entry("packed").1,
-            serde_json::json!({"min_y":0,"height":64})
-        );
+        assert_eq!(entry("packed").1["min_y"], 0);
+        assert_eq!(entry("packed").1["height"], 64);
+        assert_eq!(entry("packed").1["ambient_light"], 0.1);
         assert!(!entry("overworld").2);
     }
 

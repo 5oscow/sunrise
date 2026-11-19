@@ -722,6 +722,8 @@ pub struct DataStore {
     /// `<kind-dir>/<ns>:<path>`, each id's files in pack order. The tables
     /// merge them over what they read from the resource root.
     pub files: BTreeMap<String, Vec<Vec<u8>>>,
+    /// Failed reads of the highest-priority resources, keyed like `files`.
+    pub file_errors: BTreeMap<String, String>,
     /// Functions that failed to parse (id, message), for logging.
     pub errors: Vec<(String, String)>,
 }
@@ -890,11 +892,16 @@ impl DataStore {
                 // Preserve JSON stacks independently of the command views
                 // below. World-table readers evaluate the winning resource's
                 // conditions using their captured server inventory.
-                if !builtin
-                    && let Some(id) = content_id(&f)
-                    && let Some(bytes) = pack.read(&f)
-                {
-                    s.files.entry(id).or_default().push(bytes);
+                if !builtin && let Some(id) = content_id(&f) {
+                    match pack.source().read(&f) {
+                        Ok(bytes) => {
+                            s.file_errors.remove(&id);
+                            s.files.entry(id).or_default().push(bytes);
+                        }
+                        Err(error) => {
+                            s.file_errors.insert(id, format!("{}: {error}", pack.id));
+                        }
+                    }
                 }
                 if let Some(id) = resource_id(&f, "function", ".mcfunction")
                     && let Some(bytes) = pack.read(&f)

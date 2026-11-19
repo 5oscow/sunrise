@@ -740,6 +740,7 @@ struct WorldTables {
     /// The pack files the tables were built from (a native mod's among
     /// them), for the advancement tree reload and the loot data.
     files: Vec<(String, Vec<Vec<u8>>)>,
+    packed_registry_definitions: Option<Arc<sunrise_client::lan::data::PackRegistryDefinitions>>,
     items: Arc<Items>,
     loot: Arc<sunrise_world::loot::LootData>,
     loot_modifier_manager: Arc<mod_api::GlobalLootModifierManager>,
@@ -6336,11 +6337,16 @@ impl Game<'_> {
         self.refresh_recipe_property_context();
         // Keep the no-pack preload; a world's packs replace it atomically.
         // A later /reload keeps this session's synchronized registries.
+        let packed_registry_definitions = self
+            .world_tables
+            .as_mut()
+            .and_then(|tables| tables.packed_registry_definitions.take());
         lan::sync::open_world_sync_data(
             &self.options.resources,
             &self.res.core.item_data,
             &pack_files(&self.world_tables),
             &self.health_resources.damage,
+            packed_registry_definitions,
         )
         .map_err(|e| format!("world registries: {e}"))?;
         // Warm this world's pack-aware loot data before gameplay can unpack

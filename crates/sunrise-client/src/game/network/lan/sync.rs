@@ -3,7 +3,7 @@ use super::Game;
 use std::sync::{Arc, Mutex};
 use sunrise_client::{
     crafting::ResolvedSources,
-    lan::data::{FrozenDamage, SyncData},
+    lan::data::{FrozenDamage, PackRegistryDefinitions, SyncData},
 };
 use sunrise_world::item_defaults::ItemData;
 
@@ -180,12 +180,14 @@ pub(super) struct Synced {
 pub(super) struct SyncCache {
     pub(super) data: Option<Synced>,
     pub(super) damage: Option<FrozenDamage>,
+    pub(super) packed_registries: Option<Arc<PackRegistryDefinitions>>,
     pub(super) world_packs: bool,
 }
 
 static SYNC: Mutex<SyncCache> = Mutex::new(SyncCache {
     data: None,
     damage: None,
+    packed_registries: None,
     world_packs: false,
 });
 
@@ -222,6 +224,7 @@ pub(super) fn cached_sync_data(
                 root,
                 overlay,
                 damage,
+                sync.packed_registries.as_deref(),
                 item_data.defaults(),
                 &sources,
             ),
@@ -249,8 +252,10 @@ pub(in crate::game) fn open_world_sync_data(
     item_data: &ItemData,
     overlay: &sunrise_world::loot::PackOverlay,
     damage: &sunrise_world::damage_source::Catalog,
+    packed: Option<Arc<PackRegistryDefinitions>>,
 ) -> std::result::Result<(), String> {
     let mut sync = SYNC.lock().unwrap_or_else(|e| e.into_inner());
+    sync.packed_registries = packed;
     initialize_world_sync_data(&mut sync, root, overlay, damage, item_data)
 }
 

@@ -272,6 +272,12 @@ pub fn level_name(level: u32) -> String {
         .map_or_else(|| level.to_string(), |s| (*s).to_owned())
 }
 
+/// Run the existing definition decoder before binding holder sets. Binding
+/// and effect resolution still belong to the world enchantment loader.
+pub fn decode_definition(id: &str, value: &Value) -> crate::Result<()> {
+    decode_entry(id, value, &HashMap::new(), &HashMap::new()).map(|_| ())
+}
+
 /// One registry entry from its definition (`Enchantment.DIRECT_CODEC`).
 fn parse_entry(
     id: &str,
@@ -288,6 +294,15 @@ fn parse_entry(
         )
         .into());
     }
+    decode_entry(id, v, tags, lang)
+}
+
+fn decode_entry(
+    id: &str,
+    v: &Value,
+    tags: &HashMap<String, Vec<Arc<str>>>,
+    lang: &HashMap<String, String>,
+) -> crate::Result<Enchantment> {
     let native_post_attack = v["effects"]["minecraft:post_attack"]
         .as_array()
         .into_iter()

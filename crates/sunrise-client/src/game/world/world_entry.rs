@@ -240,7 +240,7 @@ impl Game<'_> {
         let mut contributed = Vec::new();
         self.native_data_pack_files(&mut contributed);
         let modifier_files = global_loot_modifiers::contributed(&contributed);
-        let files = functions::overlay_files(
+        let (files, read_errors) = functions::overlay_files(
             stack,
             contributed
                 .into_iter()
@@ -252,6 +252,17 @@ impl Game<'_> {
         let overlay = sunrise_world::loot::PackOverlay {
             conditions: &conditions,
             files: &files,
+        };
+        let packed_registry_definitions = if !reload && self.is_logical_server() {
+            Some(Arc::new(
+                sunrise_client::lan::data::PackRegistryDefinitions::load(&overlay, &read_errors)
+                    .map_err(|error| {
+                        log::error!("{error}");
+                        std::io::Error::other(error)
+                    })?,
+            ))
+        } else {
+            None
         };
         let mut data_map_types = Vec::new();
         self.native_data_map_types(&mut data_map_types);
@@ -460,6 +471,7 @@ impl Game<'_> {
                 conditions,
                 suffocation,
                 files,
+                packed_registry_definitions,
                 items: Arc::new(items),
                 loot,
                 loot_modifier_manager,
