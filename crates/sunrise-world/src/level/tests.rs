@@ -499,6 +499,7 @@ macro_rules! world {
     }};
 }
 #[test]
+#[ignore = "daily"]
 fn block_observation_follows_successful_commits_only() {
     use std::cell::RefCell;
     #[derive(Debug, PartialEq)]
@@ -551,7 +552,7 @@ fn block_observation_follows_successful_commits_only() {
             self.seen.borrow_mut().push(Observation::Neighbor);
         }
     }
-    let Some(f) = fixture() else { return };
+    let f = fixture().expect("prepared resources for the block observation test");
     let b = &f.behaviours;
     let mut level = Observer {
         inner: TestLevel::new(b),
