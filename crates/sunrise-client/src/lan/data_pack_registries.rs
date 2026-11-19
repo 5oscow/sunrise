@@ -315,6 +315,13 @@ fn decode_definition(
                 ("translation_key", string(&pattern.translation_key)),
             ])
         }
+        // WorldClock.DIRECT_CODEC is a unit map codec: extra keys are permitted.
+        "minecraft:world_clock" => {
+            if !value.is_object() {
+                return Err("not a map".into());
+            }
+            json_to_nbt(&value)
+        }
         _ => unreachable!("only selected registry families are decoded"),
     };
     Ok(Definition::Encoded(encoded))

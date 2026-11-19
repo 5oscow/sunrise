@@ -23,7 +23,7 @@ pub(crate) fn is_native(dir: &Path) -> Result<bool, String> {
 }
 
 /// The per-user cache folder: `SUNRISE_MOD_CACHE`, else the platform's cache folder.
-fn cache_dir() -> Result<PathBuf, String> {
+pub(crate) fn cache_dir() -> Result<PathBuf, String> {
     let env = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty());
     cache_in(
         &env,
@@ -179,11 +179,53 @@ fn toolchain(want: &str, target: &str, cargo_home: PathBuf) -> Result<Unpacked, 
     })
 }
 
+/// Verified SDK metadata and the compiler it pins, shared by native builds and source discovery.
+pub(crate) struct NativeSdk {
+    pub index: Index,
+    pub rust: Unpacked,
+    base: Base,
+    dir: PathBuf,
+}
+
+impl NativeSdk {
+    fn slices(&self) -> Result<sunrise_native_build::prebuilt::Package, String> {
+        sdk_fetch::fetch_slices(
+            &self.base,
+            &self.index,
+            &self.rust.target,
+            &self.dir,
+            &|line| println!("{line}"),
+        )
+    }
+}
+
+pub(crate) fn native_sdk(cache: &Path, build: &str) -> Result<NativeSdk, String> {
+    let target = computer()?;
+    let base = Base::from_env();
+    let dir = cache.join("sdk").join(build);
+    sdk_fetch::fetch(&base, &sdk_fetch::keys(), build, &dir, false)?;
+    let index = Index::read(
+        &std::fs::read(dir.join(sunrise_mod_package::sdk::INDEX))
+            .map_err(|e| format!("{}: {e}", dir.display()))?,
+        build,
+    )
+    .map_err(|e| format!("sdk-{build}: {e}"))?;
+    let rust = toolchain(&index.toolchain.rust, target, cache.join("cargo-home"))?;
+    Ok(NativeSdk {
+        index,
+        rust,
+        base,
+        dir,
+    })
+}
+
 /// What a native build made.
 pub(crate) struct Built {
     binary: PathBuf,
     libraries: Vec<PathBuf>,
     records: Vec<Library>,
+    /// Revision for the package manifest: checked for mixins, inherited when they are unused.
+    pub(crate) mixins: String,
 }
 
 /// Turns the build's event lines into the lines a developer reads, and keeps its result.
@@ -223,19 +265,20 @@ pub(crate) fn build(project: &Path, update_lock: bool) -> Result<Built, String> 
         .ok_or_else(|| format!("{} is not a native mod", project.display()))?;
     let id = bundle.manifest.id.clone();
     let cache = cache_dir()?;
-    let target = computer()?;
-    let base = Base::from_env();
-    let sdk_dir = cache.join("sdk").join(&build);
-    sdk_fetch::fetch(&base, &sdk_fetch::keys(), &build, &sdk_dir, false)?;
-    let index = Index::read(
-        &std::fs::read(sdk_dir.join(sunrise_mod_package::sdk::INDEX))
-            .map_err(|e| format!("{}: {e}", sdk_dir.display()))?,
-        &build,
-    )
-    .map_err(|e| format!("sdk-{build}: {e}"))?;
-    let rust = toolchain(&index.toolchain.rust, target, cache.join("cargo-home"))?;
-    let package =
-        sdk_fetch::fetch_slices(&base, &index, target, &sdk_dir, &|line| println!("{line}"))?;
+    let sdk = native_sdk(&cache, &build)?;
+    let mixins = if bundle.needs_mixins() {
+        sunrise_native_build::MixinsIdentity::resolve([&bundle], Some(&sdk.index.mixins))?
+            .revision()
+    } else {
+        bundle
+            .native()
+            .mixins
+            .as_deref()
+            .unwrap_or(&sdk.index.mixins.rev)
+    }
+    .to_owned();
+    let package = sdk.slices()?;
+    let rust = sdk.rust;
 
     let work = cache.join("work").join(&id);
     std::fs::create_dir_all(&work).map_err(|e| format!("{}: {e}", work.display()))?;
@@ -309,6 +352,7 @@ pub(crate) fn build(project: &Path, update_lock: bool) -> Result<Built, String> 
         binary,
         libraries,
         records,
+        mixins,
     })
 }
 
@@ -387,7 +431,9 @@ pub(crate) fn run(project: &Path, resources: Option<&str>, args: &[String]) -> R
         .arg("--resources")
         .arg(&resources)
         .args(args)
-        .env("SUNRISE_HOME", &home);
+        .env("SUNRISE_HOME", &home)
+        // A session file handed to this process is the caller's: the game would read and delete it.
+        .env_remove("SUNRISE_SESSION_FILE");
     #[cfg(target_os = "linux")]
     command.env("LD_LIBRARY_PATH", &app);
     let status = command
