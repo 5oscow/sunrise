@@ -2129,9 +2129,9 @@ impl Hub {
     /// (its body is at `target`; `Guest::position` is set here), told to its client as a
     /// relative teleport: the client adds `by` to where it is now (`Relative.X/Y/Z`), keeps its motion and look
     /// (`DELTA_*`, `ROTATE_DELTA`, `Y_ROT`, `X_ROT`), and nothing snaps back by what it
-    /// walked while the packet was on its way. Its confirmation puts the server copy where it
-    /// has been since, the awaited target, and its reports until then are dropped as for any
-    /// teleport.
+    /// walked while the packet was on its way. On confirmation, the server snaps to the awaited
+    /// target, then validates the client's reported landing as an ordinary move. Until
+    /// confirmation, the server drops the position in the player's own reports as for any teleport.
     ///
     /// A player a moving collider carries stays carried when the target is still on the
     /// collider as the server places it now, with the place on the collider re-derived from the
@@ -2369,7 +2369,6 @@ impl Hub {
                 carried,
             }));
             g.menu_sent = items;
-            g.sent_selected = g.selected;
         })
     }
 
@@ -4860,12 +4859,6 @@ impl Hub {
             .get("minecraft:item")?
             .name(id)
             .map(std::sync::Arc::from)
-    }
-    pub fn enchantment_name(&self, id: i32) -> Option<String> {
-        self.sync
-            .dynamic
-            .name("minecraft:enchantment", id)
-            .map(str::to_owned)
     }
     /// A stack a client sent (`SetCreativeModeSlot`), read with this
     /// server's registries.
