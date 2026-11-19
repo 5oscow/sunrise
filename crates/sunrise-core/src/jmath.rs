@@ -15,7 +15,7 @@
 //!   usual range), so `log` and `log10` are [`exact`]'s, which glibc's miss
 //!   by far more. `exp` is the stub's own algorithm
 //!   ([`hotspot_exp`]), whose results are not always correctly rounded.
-//!   `sin`, `cos` and `tan` are the stubs' own algorithms ([`intel_trig`]),
+//!   `sin`, `cos` and `tan` are the stubs' own algorithms (`intel_trig`),
 //!   whose results are not always correctly rounded either. `pow` uses the
 //!   platform libm, which rounds like the stub for nearly every argument.
 //! - On AArch64 only `sin` and `cos` are intrinsics, which compute fdlibm's

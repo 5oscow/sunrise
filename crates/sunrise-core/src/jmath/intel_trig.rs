@@ -39,7 +39,7 @@
 //! sin and cos: x = N pi/32 + r with |r| <= pi/64, then sin(B + r) or cos(B + r) from a table of B = (N mod 64) pi/32
 //! and two short polynomials (sin r - r and cos r - 1), for 2^-252 <= |x| < 90112. tan: x = N pi/32 + r likewise,
 //! with a degree-15 polynomial for each of 32 table entries and, near the poles, a reciprocal of the distance to the
-//! nearest one, for 0.1 < |x| < 12800. Every other argument goes to a cold function with the stubs' other paths:
+//! nearest one, for 0.1015625 <= |x| < 12800. Every other argument goes to a cold function with the stubs' other paths:
 //! larger arguments are first reduced modulo pi/4 (pi/2 for tan) with 224 bits of 2/pi, then go through the same
 //! kernel; smaller ones take a short path of their own.
 
@@ -100,7 +100,7 @@ const TP3: [f64; 2] = [
 const QQ_2: f64 = f64::from_bits(0x3d32_e7b9_6767_33af);
 /// Keeps a double's sign, exponent and top 34 significand bits.
 const MASK_35: u64 = 0xffff_ffff_fffc_0000;
-/// tan x - x = x^3 (Q3 + Q5 x^2 + ... + Q11 x^8) for 2^-29 <= |x| < 0.1.
+/// tan x - x = x^3 (Q3 + Q5 x^2 + ... + Q11 x^8) for 2^-29 <= |x| < 0.1015625.
 const Q3: f64 = f64::from_bits(0x3fd5_5555_5555_5612);
 const Q5: f64 = f64::from_bits(0x3fc1_1111_1109_2746);
 const Q7: f64 = f64::from_bits(0x3fab_a1ba_52c4_c8ab);
@@ -1742,7 +1742,7 @@ mod tests {
     }
 
     /// `Math.tan` on HotSpot 25.0.4.1 (x86-64), as for `sin_is_hotspots`, with the small-argument paths: the
-    /// polynomial below 0.1, the one below 2^-29 and subnormals.
+    /// polynomial below 0.1015625, the one below 2^-29 and subnormals.
     #[test]
     fn tan_is_hotspots() {
         check(
@@ -1762,6 +1762,310 @@ mod tests {
                 (0x8000_0000_0000_0000, 0x8000_0000_0000_0000),
             ],
         );
+    }
+
+    /// Independent expected bits at dispatch and argument-reduction boundaries.
+    #[test]
+    fn trig_boundaries_match_expected_bits() {
+        let cases: &[(u64, u64, u64, u64)] = &[
+            // Zero and subnormals.
+            (
+                0x0000_0000_0000_0000,
+                0x0000_0000_0000_0000,
+                0x3ff0_0000_0000_0000,
+                0x0000_0000_0000_0000,
+            ),
+            (
+                0x8000_0000_0000_0000,
+                0x8000_0000_0000_0000,
+                0x3ff0_0000_0000_0000,
+                0x8000_0000_0000_0000,
+            ),
+            (
+                0x0000_0000_0000_0001,
+                0x0000_0000_0000_0001,
+                0x3ff0_0000_0000_0000,
+                0x0000_0000_0000_0001,
+            ),
+            (
+                0x8000_0000_0000_0001,
+                0x8000_0000_0000_0001,
+                0x3ff0_0000_0000_0000,
+                0x8000_0000_0000_0001,
+            ),
+            (
+                0x000f_ffff_ffff_ffff,
+                0x000f_ffff_ffff_ffff,
+                0x3ff0_0000_0000_0000,
+                0x000f_ffff_ffff_ffff,
+            ),
+            (
+                0x800f_ffff_ffff_ffff,
+                0x800f_ffff_ffff_ffff,
+                0x3ff0_0000_0000_0000,
+                0x800f_ffff_ffff_ffff,
+            ),
+            // Near nonzero multiples of π/2.
+            (
+                0x3ff9_21fb_5444_2d17,
+                0x3ff0_0000_0000_0000,
+                0x3cb4_6989_8cc5_1702,
+                0x4329_153d_9443_ed0b,
+            ),
+            (
+                0x3ff9_21fb_5444_2d18,
+                0x3ff0_0000_0000_0000,
+                0x3c91_a626_3314_5c07,
+                0x434d_0296_7c31_cdb5,
+            ),
+            (
+                0x3ff9_21fb_5444_2d19,
+                0x3ff0_0000_0000_0000,
+                0xbca7_2cec_e675_d1fd,
+                0xc336_17a1_5494_767a,
+            ),
+            (
+                0x4009_21fb_5444_2d17,
+                0x3cc4_6989_8cc5_1702,
+                0xbff0_0000_0000_0000,
+                0xbcc4_6989_8cc5_1702,
+            ),
+            (
+                0x4009_21fb_5444_2d18,
+                0x3ca1_a626_3314_5c07,
+                0xbff0_0000_0000_0000,
+                0xbca1_a626_3314_5c07,
+            ),
+            (
+                0x4009_21fb_5444_2d19,
+                0xbcb7_2cec_e675_d1fd,
+                0xbff0_0000_0000_0000,
+                0x3cb7_2cec_e675_d1fd,
+            ),
+            (
+                0x4012_d97c_7f33_21d1,
+                0xbff0_0000_0000_0000,
+                0xbcd3_4f27_2993_d141,
+                0x430a_8410_0872_62e4,
+            ),
+            (
+                0x4012_d97c_7f33_21d2,
+                0xbff0_0000_0000_0000,
+                0xbcaa_7939_4c9e_8a0a,
+                0x4333_570e_fd76_8923,
+            ),
+            (
+                0x4012_d97c_7f33_21d3,
+                0xbff0_0000_0000_0000,
+                0x3cc9_61b1_acd8_5d7d,
+                0xc314_2c0d_64d5_de51,
+            ),
+            (
+                0x4019_21fb_5444_2d17,
+                0xbcd4_6989_8cc5_1702,
+                0x3ff0_0000_0000_0000,
+                0xbcd4_6989_8cc5_1702,
+            ),
+            (
+                0x4019_21fb_5444_2d18,
+                0xbcb1_a626_3314_5c07,
+                0x3ff0_0000_0000_0000,
+                0xbcb1_a626_3314_5c07,
+            ),
+            (
+                0x4019_21fb_5444_2d19,
+                0x3cc7_2cec_e675_d1fd,
+                0x3ff0_0000_0000_0000,
+                0x3cc7_2cec_e675_d1fd,
+            ),
+            (
+                0x4063_a28c_59d5_433a,
+                0xbd1e_e4e6_ebf3_f3f3,
+                0x3ff0_0000_0000_0000,
+                0xbd1e_e4e6_ebf3_f3f3,
+            ),
+            (
+                0x4063_a28c_59d5_433b,
+                0x3cd1_b191_40c0_c0d5,
+                0x3ff0_0000_0000_0000,
+                0x3cd1_b191_40c0_c0d5,
+            ),
+            (
+                0x4063_a28c_59d5_433c,
+                0x3d20_8d8c_8a06_0607,
+                0x3ff0_0000_0000_0000,
+                0x3d20_8d8c_8a06_0607,
+            ),
+            (
+                0x4139_21fb_5444_2d17,
+                0xbdf4_6989_8cc5_1702,
+                0x3ff0_0000_0000_0000,
+                0xbdf4_6989_8cc5_1702,
+            ),
+            (
+                0x4139_21fb_5444_2d18,
+                0xbdd1_a626_3314_5c07,
+                0x3ff0_0000_0000_0000,
+                0xbdd1_a626_3314_5c07,
+            ),
+            (
+                0x4139_21fb_5444_2d19,
+                0x3de7_2cec_e675_d1fd,
+                0x3ff0_0000_0000_0000,
+                0x3de7_2cec_e675_d1fd,
+            ),
+            // Dispatch boundaries.
+            (
+                0x0010_0000_0000_0000,
+                0x0010_0000_0000_0000,
+                0x3ff0_0000_0000_0000,
+                0x0010_0000_0000_0000,
+            ),
+            (
+                0x0010_0000_0000_0001,
+                0x0010_0000_0000_0001,
+                0x3ff0_0000_0000_0000,
+                0x0010_0000_0000_0001,
+            ),
+            (
+                0x302f_ffff_ffff_ffff,
+                0x302f_ffff_ffff_ffff,
+                0x3ff0_0000_0000_0000,
+                0x302f_ffff_ffff_ffff,
+            ),
+            (
+                0x3030_0000_0000_0000,
+                0x3030_0000_0000_0000,
+                0x3ff0_0000_0000_0000,
+                0x3030_0000_0000_0000,
+            ),
+            (
+                0x3030_0000_0000_0001,
+                0x3030_0000_0000_0001,
+                0x3ff0_0000_0000_0000,
+                0x3030_0000_0000_0001,
+            ),
+            (
+                0x3e1f_ffff_ffff_ffff,
+                0x3e1f_ffff_ffff_ffff,
+                0x3ff0_0000_0000_0000,
+                0x3e1f_ffff_ffff_ffff,
+            ),
+            (
+                0x3e20_0000_0000_0000,
+                0x3e20_0000_0000_0000,
+                0x3ff0_0000_0000_0000,
+                0x3e20_0000_0000_0000,
+            ),
+            (
+                0x3e20_0000_0000_0001,
+                0x3e20_0000_0000_0001,
+                0x3ff0_0000_0000_0000,
+                0x3e20_0000_0000_0001,
+            ),
+            (
+                0x3fb9_ffff_ffff_ffff,
+                0x3fb9_f490_2d55_d1f8,
+                0x3fef_d5c9_4b43_e000,
+                0x3fba_16fa_f0d4_0346,
+            ),
+            (
+                0x3fba_0000_0000_0000,
+                0x3fb9_f490_2d55_d1f9,
+                0x3fef_d5c9_4b43_e000,
+                0x3fba_16fa_f0d4_0347,
+            ),
+            (
+                0x3fba_0000_0000_0001,
+                0x3fb9_f490_2d55_d1fa,
+                0x3fef_d5c9_4b43_e000,
+                0x3fba_16fa_f0d4_0348,
+            ),
+            (
+                0x40c8_ffff_ffff_ffff,
+                0x3fed_3a78_8da1_2a1b,
+                0x3fda_0dc7_d085_0a09,
+                0x4001_f315_77f0_d5f5,
+            ),
+            (
+                0x40c9_0000_0000_0000,
+                0x3fed_3a78_8da1_4429,
+                0x3fda_0dc7_d084_951f,
+                0x4001_f315_77f1_3681,
+            ),
+            (
+                0x40c9_0000_0000_0001,
+                0x3fed_3a78_8da1_5e36,
+                0x3fda_0dc7_d084_2035,
+                0x4001_f315_77f1_970d,
+            ),
+            (
+                0x40f5_ffff_ffff_ffff,
+                0xbfef_bde6_256f_48ce,
+                0x3fc0_3a48_7efe_c87f,
+                0xc01f_4be5_3892_ac68,
+            ),
+            (
+                0x40f6_0000_0000_0000,
+                0xbfef_bde6_256f_07e5,
+                0x3fc0_3a48_7f06_b7f8,
+                0xc01f_4be5_3883_1e88,
+            ),
+            (
+                0x40f6_0000_0000_0001,
+                0xbfef_bde6_256e_c6fc,
+                0x3fc0_3a48_7f0e_a772,
+                0xc01f_4be5_3873_90a8,
+            ),
+            (
+                0xbfba_0000_0000_0000,
+                0xbfb9_f490_2d55_d1f9,
+                0x3fef_d5c9_4b43_e000,
+                0xbfba_16fa_f0d4_0347,
+            ),
+            (
+                0xc0c9_0000_0000_0000,
+                0xbfed_3a78_8da1_4429,
+                0x3fda_0dc7_d084_951f,
+                0xc001_f315_77f1_3681,
+            ),
+            (
+                0xc0f6_0000_0000_0000,
+                0x3fef_bde6_256f_07e5,
+                0x3fc0_3a48_7f06_b7f8,
+                0x401f_4be5_3883_1e88,
+            ),
+            // Large reduction.
+            (
+                0x4340_0000_0000_0000,
+                0xbfeb_2a66_c8f3_5586,
+                0xbfe0_e991_8bb3_5aac,
+                0x3ff9_b33a_f5ae_241f,
+            ),
+            (
+                0xc340_0000_0000_0000,
+                0x3feb_2a66_c8f3_5586,
+                0xbfe0_e991_8bb3_5aac,
+                0xbff9_b33a_f5ae_241f,
+            ),
+            (
+                0x4480_f0cf_064d_d592,
+                0xbfeb_453a_b76b_f397,
+                0x3fe0_be2c_ef01_c8f4,
+                0xbffa_0f79_c1b6_b257,
+            ),
+            (
+                0xc480_f0cf_064d_d592,
+                0x3feb_453a_b76b_f397,
+                0x3fe0_be2c_ef01_c8f4,
+                0x3ffa_0f79_c1b6_b257,
+            ),
+        ];
+        for &(x, sin, cos, tan) in cases {
+            check("sin", super::sin, &[(x, sin)]);
+            check("cos", super::cos, &[(x, cos)]);
+            check("tan", super::tan, &[(x, tan)]);
+        }
     }
 
     /// Infinities give x86-64's default NaN and a NaN comes back quiet, as `x * -0.0` does in the stubs.
