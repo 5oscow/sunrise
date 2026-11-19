@@ -143,7 +143,7 @@ mod texture_atlas_stitched_tests {
                     kept.stone = host.texture_sprites(&["minecraft:block/stone"])[0];
                 }
                 TextureAtlas::Gui => {
-                    kept.slot = host.gui_sprite(&id("gui/sprites/container/slot"));
+                    kept.slot = host.gui_sprite(&id("container/slot"));
                 }
                 _ => {}
             }
@@ -178,7 +178,7 @@ mod texture_atlas_stitched_tests {
                 }
                 // A mod's namespace is part of the name; one the atlas lacks is none.
                 assert_eq!(
-                    game.gui_sprite(&id("mymod:gui/sprites/container/slot")),
+                    game.gui_sprite(&id("mymod:container/slot")),
                     None
                 );
                 assert_eq!(game.gui_sprite(&id("gui/no_such_sprite")), None);

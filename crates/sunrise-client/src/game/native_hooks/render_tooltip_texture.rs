@@ -90,7 +90,7 @@ mod render_tooltip_texture_tests {
         with_mods(mods, || {
             crate::game::native_entity_refs::tests::with_game(|game| {
                 let names = ["background", "frame"]
-                    .map(|part| format!("lobby:gui/sprites/tooltip/gold_{part}"));
+                    .map(|part| format!("lobby:tooltip/gold_{part}"));
                 // No pack has the style: the stick keeps the fills.
                 assert_eq!(drawn(game, Some(&stick)), unheard[1]);
                 for (first, then) in [(0.0, 0.5), (0.25, 0.75)] {

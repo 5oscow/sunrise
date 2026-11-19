@@ -311,9 +311,9 @@ impl Game<'_> {
     /// 16 x 16 item box), the `_front` one over its item.
     pub(super) fn draw_slot_highlight(&self, batch: &mut HudBatch, front: bool, x: f32, y: f32) {
         let sprite = if front {
-            "gui/sprites/container/slot_highlight_front"
+            "container/slot_highlight_front"
         } else {
-            "gui/sprites/container/slot_highlight_back"
+            "container/slot_highlight_back"
         };
         sunrise_client::ui::blit_sprite(
             batch,
@@ -421,7 +421,7 @@ impl Game<'_> {
             if i == 504 && self.offhand.is_none() {
                 batch.sprite(
                     &self.gui.atlas,
-                    "gui/sprites/container/slot/shield",
+                    "container/slot/shield",
                     ox + sx,
                     oy + sy,
                 );
@@ -430,7 +430,7 @@ impl Game<'_> {
                 let icon = ["helmet", "chestplate", "leggings", "boots"][i - 500];
                 batch.sprite(
                     &self.gui.atlas,
-                    &format!("gui/sprites/container/slot/{icon}"),
+                    &format!("container/slot/{icon}"),
                     ox + sx,
                     oy + sy,
                 );
@@ -518,7 +518,7 @@ impl Game<'_> {
                         let h = ((f.lit_remaining as f32 / total as f32) * 13.0).ceil() + 1.0;
                         part(
                             batch,
-                            "gui/sprites/container/furnace/lit_progress",
+                            "container/furnace/lit_progress",
                             0.0,
                             14.0 - h,
                             14.0,
@@ -531,7 +531,7 @@ impl Game<'_> {
                         let w = ((f.cooking_timer as f32 / f.cooking_total as f32) * 24.0).ceil();
                         part(
                             batch,
-                            "gui/sprites/container/furnace/burn_progress",
+                            "container/furnace/burn_progress",
                             0.0,
                             0.0,
                             w,

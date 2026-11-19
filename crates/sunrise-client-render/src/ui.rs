@@ -145,10 +145,10 @@ fn scaling(sprite: &str, r: &Rect) -> NineSlice {
             "sunrise/jei/recipe_preview_background_v2" => [16; 4],
             "sunrise/jei/scrollbar_background_v2" => [6; 4],
             "sunrise/jei/scrollbar_marker_v2" => [2, 2, 2, 1],
-            "gui/sprites/widget/button"
-            | "gui/sprites/widget/button_highlighted"
-            | "gui/sprites/widget/button_disabled" => [3; 4],
-            "gui/sprites/widget/slider_handle" | "gui/sprites/widget/slider_handle_highlighted" => {
+            "widget/button"
+            | "widget/button_highlighted"
+            | "widget/button_disabled" => [3; 4],
+            "widget/slider_handle" | "widget/slider_handle_highlighted" => {
                 [2, 2, 2, 3]
             }
             _ => [1; 4],
@@ -705,11 +705,11 @@ fn button_with_room(
     crate::widgets::narratable(|| narration([x, y, w, h]).hovered(hover || focused));
     crate::widgets::widget_cursor(hover, active);
     let sprite = if !active {
-        "gui/sprites/widget/button_disabled"
+        "widget/button_disabled"
     } else if hover || focused {
-        "gui/sprites/widget/button_highlighted"
+        "widget/button_highlighted"
     } else {
-        "gui/sprites/widget/button"
+        "widget/button"
     };
     nine_slice(batch, atlas, sprite, x, y, w, h, u32::MAX);
     let color = if active {
@@ -830,14 +830,14 @@ fn slider_sprites_ext(
 ) -> (&'static str, &'static str) {
     let can_change_value = can_change_value || dragging;
     let track = if active && focused && !can_change_value {
-        "gui/sprites/widget/slider_highlighted"
+        "widget/slider_highlighted"
     } else {
-        "gui/sprites/widget/slider"
+        "widget/slider"
     };
     let handle = if active && (hover || can_change_value) {
-        "gui/sprites/widget/slider_handle_highlighted"
+        "widget/slider_handle_highlighted"
     } else {
-        "gui/sprites/widget/slider_handle"
+        "widget/slider_handle"
     };
     (track, handle)
 }
@@ -1050,7 +1050,7 @@ pub fn scrollbar_sprites(
     nine_slice(
         batch,
         atlas,
-        "gui/sprites/widget/scroller_background",
+        "widget/scroller_background",
         x,
         top,
         6.0,
@@ -1060,7 +1060,7 @@ pub fn scrollbar_sprites(
     nine_slice(
         batch,
         atlas,
-        "gui/sprites/widget/scroller",
+        "widget/scroller",
         x,
         y,
         6.0,
@@ -1266,8 +1266,8 @@ fn tooltip_box(
         batch,
         atlas,
         [
-            "gui/sprites/tooltip/background",
-            "gui/sprites/tooltip/frame",
+            "tooltip/background",
+            "tooltip/frame",
         ],
         [x, y, w, h],
     );
@@ -1819,9 +1819,9 @@ impl EditBox {
         });
         if self.bordered {
             let sprite = skin.unwrap_or(if self.focused {
-                "gui/sprites/widget/text_field_highlighted"
+                "widget/text_field_highlighted"
             } else {
-                "gui/sprites/widget/text_field"
+                "widget/text_field"
             });
             nine_slice(
                 batch,
@@ -1966,7 +1966,7 @@ mod tests {
         .unwrap();
         let metadata = read_metadata(&ResourceSource::directory(root.clone()));
         std::fs::remove_dir_all(&root).unwrap();
-        let slice = metadata.0["gui/sprites/widget/button_highlighted"];
+        let slice = metadata.0["widget/button_highlighted"];
         assert_eq!(
             (slice.width, slice.height, slice.border),
             (80, 20, [34, 8, 34, 8])
@@ -2234,31 +2234,31 @@ mod tests {
     fn slider_sprites_follow_focus_and_the_drag() {
         // Hovered, at rest: plain track, lit handle.
         let (track, handle) = slider_sprites(true, true, false);
-        assert_eq!(track, "gui/sprites/widget/slider");
-        assert_eq!(handle, "gui/sprites/widget/slider_handle_highlighted");
+        assert_eq!(track, "widget/slider");
+        assert_eq!(handle, "widget/slider_handle_highlighted");
         // Dragged: still a plain track, lit handle.
         let (track, handle) = slider_sprites(true, true, true);
-        assert_eq!(track, "gui/sprites/widget/slider");
-        assert_eq!(handle, "gui/sprites/widget/slider_handle_highlighted");
+        assert_eq!(track, "widget/slider");
+        assert_eq!(handle, "widget/slider_handle_highlighted");
         // Focused with the arrow keys: the value can't change, the track lights.
         let (track, handle) = slider_sprites_ext(false, true, true, false, false);
-        assert_eq!(track, "gui/sprites/widget/slider_highlighted");
-        assert_eq!(handle, "gui/sprites/widget/slider_handle");
+        assert_eq!(track, "widget/slider_highlighted");
+        assert_eq!(handle, "widget/slider_handle");
         // Focused with Tab, or Enter pressed on it: the value can change, the handle lights.
         let (track, handle) = slider_sprites_ext(false, true, true, true, false);
-        assert_eq!(track, "gui/sprites/widget/slider");
-        assert_eq!(handle, "gui/sprites/widget/slider_handle_highlighted");
+        assert_eq!(track, "widget/slider");
+        assert_eq!(handle, "widget/slider_handle_highlighted");
         // Focused while the mouse drags: the track stays plain.
         let (track, _) = slider_sprites_ext(true, true, true, false, true);
-        assert_eq!(track, "gui/sprites/widget/slider");
+        assert_eq!(track, "widget/slider");
         // Not hovered, not dragged: nothing is lit.
         let (track, handle) = slider_sprites(false, true, false);
-        assert_eq!(track, "gui/sprites/widget/slider");
-        assert_eq!(handle, "gui/sprites/widget/slider_handle");
+        assert_eq!(track, "widget/slider");
+        assert_eq!(handle, "widget/slider_handle");
         // An inactive slider highlights neither, even when focused.
         let (track, handle) = slider_sprites_ext(true, false, true, true, true);
-        assert_eq!(track, "gui/sprites/widget/slider");
-        assert_eq!(handle, "gui/sprites/widget/slider_handle");
+        assert_eq!(track, "widget/slider");
+        assert_eq!(handle, "widget/slider_handle");
     }
     #[test]
     fn separator_tiles_sample_both_rows_and_clip_the_last_column() {
@@ -2719,7 +2719,7 @@ mod tests {
         ]));
         let metadata = read_metadata(&source);
         assert_eq!(metadata.0.len(), 2);
-        let button = metadata.0.get("gui/sprites/widget/button").unwrap();
+        let button = metadata.0.get("widget/button").unwrap();
         assert_eq!(
             (button.width, button.height, button.border),
             (20, 12, [3; 4])
@@ -2727,7 +2727,7 @@ mod tests {
         // Another namespace's sprite is named with it, as the GUI atlas packs it.
         let frame = metadata
             .0
-            .get("lobby:gui/sprites/tooltip/gold_frame")
+            .get("lobby:tooltip/gold_frame")
             .unwrap();
         assert_eq!((frame.width, frame.border), (40, [6; 4]));
     }
@@ -2740,16 +2740,16 @@ mod tests {
         assert_eq!(
             tooltip_style_sprites("minecraft", "fancy"),
             [
-                "gui/sprites/tooltip/fancy_background",
-                "gui/sprites/tooltip/fancy_frame"
+                "tooltip/fancy_background",
+                "tooltip/fancy_frame"
             ]
         );
         let [background, frame] = tooltip_style_sprites("lobby", "gold");
         assert_eq!(
             [background.as_str(), frame.as_str()],
             [
-                "lobby:gui/sprites/tooltip/gold_background",
-                "lobby:gui/sprites/tooltip/gold_frame"
+                "lobby:tooltip/gold_background",
+                "lobby:tooltip/gold_frame"
             ]
         );
         let mut atlas = atlas();

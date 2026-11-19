@@ -93,7 +93,7 @@ fn refusal(atlas: &HudAtlas, draw: &GuiDraw, name: &mut String) -> Option<Undraw
                     .is_some_and(|(_, path)| path.starts_with("mob_effect/"));
             name.clear();
             if !effect {
-                name.push_str("gui/sprites/");
+                name.push_str("");
             }
             name.push_str(sprite);
             let known = atlas.sprites.contains_key(name.as_str());

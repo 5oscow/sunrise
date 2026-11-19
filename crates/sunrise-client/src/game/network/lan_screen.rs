@@ -835,7 +835,7 @@ impl Game<'_> {
         ui::nine_slice(
             batch,
             atlas,
-            "gui/sprites/popup/background",
+            "popup/background",
             fx,
             fy,
             fw,
@@ -1000,7 +1000,7 @@ impl Game<'_> {
                     (true, true) => "_highlighted",
                     (true, false) => "",
                 };
-                let sprite = format!("gui/sprites/widget/{lock}_button{state}");
+                let sprite = format!("widget/{lock}_button{state}");
                 batch.sprite_scaled(atlas, &sprite, bx, by, 20.0, 20.0, u32::MAX);
                 continue;
             }

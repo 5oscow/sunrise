@@ -28,7 +28,7 @@ use crate::pad_glyph::{self, Glyph};
 /// The size, in GUI px, item models draw at before any scaling.
 pub const ITEM_SIZE: f32 = 16.0;
 /// Where GUI sprites sit in the atlas: `Icon::Sprite` names drop this prefix.
-pub const SPRITES: &str = "gui/sprites/";
+pub const SPRITES: &str = "";
 
 /// A small picture.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -2309,7 +2309,7 @@ impl Game<'_> {
     ) {
         for (i, (at, stack)) in layout.slots.iter().enumerate() {
             let selected = layout.selected == Some(i);
-            let sprite = |name: &str| format!("gui/sprites/container/bundle/{name}");
+            let sprite = |name: &str| format!("container/bundle/{name}");
             // Each draw takes the atlas on its own: the item's needs `&mut self`.
             sunrise_client::ui::nine_slice(
                 batch,
@@ -2367,9 +2367,9 @@ impl Game<'_> {
         }
         let [bx, by] = layout.bar;
         let fill_sprite = if layout.full {
-            "gui/sprites/container/bundle/bundle_progressbar_full"
+            "container/bundle/bundle_progressbar_full"
         } else {
-            "gui/sprites/container/bundle/bundle_progressbar_fill"
+            "container/bundle/bundle_progressbar_fill"
         };
         sunrise_client::ui::nine_slice(
             batch,
@@ -2384,7 +2384,7 @@ impl Game<'_> {
         sunrise_client::ui::nine_slice(
             batch,
             atlas,
-            "gui/sprites/container/bundle/bundle_progressbar_border",
+            "container/bundle/bundle_progressbar_border",
             bx,
             by,
             96.0,

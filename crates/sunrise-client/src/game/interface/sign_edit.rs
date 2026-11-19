@@ -1007,7 +1007,7 @@ impl Game<'_> {
         });
         batch.sprite_scaled(
             atlas,
-            "gui/sprites/widget/button",
+            "widget/button",
             bx,
             by,
             200.0,

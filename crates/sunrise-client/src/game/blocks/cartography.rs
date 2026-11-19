@@ -105,7 +105,7 @@ impl Game<'_> {
         let id = map.as_ref().and_then(map_id);
         let state = id.and_then(|id| self.map(id).map(|m| (m.locked, m.scale)));
         let mut locked = false;
-        let error = "gui/sprites/container/cartography_table/error";
+        let error = "container/cartography_table/error";
         if let Some((is_locked, scale)) = state {
             if is_locked {
                 locked = true;
@@ -121,7 +121,7 @@ impl Game<'_> {
         let sprite = |batch: &mut HudBatch, game: &Self, name: &str, x: f32, y: f32| {
             batch.sprite(
                 &game.gui.atlas,
-                &format!("gui/sprites/container/cartography_table/{name}"),
+                &format!("container/cartography_table/{name}"),
                 ox + x,
                 oy + y,
             );

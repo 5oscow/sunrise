@@ -469,9 +469,9 @@ impl Game<'_> {
         let hover = inside(cursor, back);
         sunrise_client::widgets::declare_action(sunrise_client::widgets::Action::Back, back, true);
         let sprite = if hover {
-            "gui/sprites/widget/button_highlighted"
+            "widget/button_highlighted"
         } else {
-            "gui/sprites/widget/button"
+            "widget/button"
         };
         sunrise_client::ui::nine_slice(
             batch,
@@ -526,7 +526,7 @@ impl Game<'_> {
                 };
                 batch.sprite(
                     atlas,
-                    &format!("gui/sprites/recipe_book/{name}{suffix}"),
+                    &format!("recipe_book/{name}{suffix}"),
                     x,
                     y,
                 );
@@ -549,19 +549,19 @@ impl Game<'_> {
             let (wells_in, wells_out, wells_h) = r.fluid_places(layout.width());
             let atlas = &self.gui.atlas;
             for &(sx, sy) in at.iter().filter(|p| p.0.is_finite()) {
-                batch.sprite(atlas, "gui/sprites/container/slot", x + sx, y + sy);
+                batch.sprite(atlas, "container/slot", x + sx, y + sy);
             }
             if cooking {
                 batch.sprite(
                     atlas,
-                    "gui/sprites/container/furnace/lit_progress",
+                    "container/furnace/lit_progress",
                     x + 2.0,
                     y + SLOT + 2.0,
                 );
             }
             batch.sprite(
                 atlas,
-                "gui/sprites/container/furnace/burn_progress",
+                "container/furnace/burn_progress",
                 x + arrow.0,
                 y + arrow.1,
             );
@@ -570,9 +570,9 @@ impl Game<'_> {
             {
                 let rect = [x + action.0, y + action.1, 12.0, 12.0];
                 let sprite = match (enabled, inside(cursor, rect)) {
-                    (false, _) => "gui/sprites/widget/button_disabled",
-                    (true, true) => "gui/sprites/widget/button_highlighted",
-                    (true, false) => "gui/sprites/widget/button",
+                    (false, _) => "widget/button_disabled",
+                    (true, true) => "widget/button_highlighted",
+                    (true, false) => "widget/button",
                 };
                 sunrise_client::ui::nine_slice(
                     batch,
@@ -668,7 +668,7 @@ impl Game<'_> {
     /// its amount under it.
     fn draw_fluid_well(&self, batch: &mut HudBatch, well: &Well, x: f32, y: f32) {
         let atlas = &self.gui.atlas;
-        batch.sprite(atlas, "gui/sprites/container/slot", x, y);
+        batch.sprite(atlas, "container/slot", x, y);
         let dst = [x + 1.0, y + 1.0, 16.0, 16.0];
         let sprite = well
             .sprite
@@ -715,7 +715,7 @@ impl Game<'_> {
         let selected = pages.tab;
         for (i, (&(x, y), stack)) in places.iter().zip(tabs).enumerate() {
             let atlas = &self.gui.atlas;
-            batch.sprite(atlas, "gui/sprites/container/slot", x, y);
+            batch.sprite(atlas, "container/slot", x, y);
             let Some(stack) = stack else {
                 continue;
             };

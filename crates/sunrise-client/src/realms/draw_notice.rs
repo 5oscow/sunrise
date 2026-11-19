@@ -35,7 +35,7 @@ impl Screen {
         crate::ui::blit_sprite(
             batch,
             atlas,
-            "gui/sprites/icon/info",
+            "icon/info",
             content_x + 7.0,
             y + 7.0,
             20.0,
@@ -75,9 +75,9 @@ impl Screen {
             let hovered =
                 crate::ui::hovered(cursor, dismiss[0], dismiss[1], dismiss[2], dismiss[3]);
             let sprite = if hovered {
-                "gui/sprites/widget/cross_button_highlighted"
+                "widget/cross_button_highlighted"
             } else {
-                "gui/sprites/widget/cross_button"
+                "widget/cross_button"
             };
             crate::ui::blit_sprite(
                 batch,

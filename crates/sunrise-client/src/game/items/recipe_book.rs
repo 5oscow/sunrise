@@ -190,7 +190,7 @@ fn inside(p: (f32, f32), x: f32, y: f32, w: f32, h: f32) -> bool {
     p.0 >= x && p.1 >= y && p.0 < x + w && p.1 < y + h
 }
 fn sprite(name: &str) -> String {
-    format!("gui/sprites/recipe_book/{name}")
+    format!("recipe_book/{name}")
 }
 
 impl Game<'_> {

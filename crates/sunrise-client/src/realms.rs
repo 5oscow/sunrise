@@ -1319,12 +1319,12 @@ impl Screen {
         let cx = (w / 2.0).floor();
         let badge = |count: u32| match count {
             0 => None,
-            1 => Some("gui/sprites/notification/1"),
-            2 => Some("gui/sprites/notification/2"),
-            3 => Some("gui/sprites/notification/3"),
-            4 => Some("gui/sprites/notification/4"),
-            5 => Some("gui/sprites/notification/5"),
-            _ => Some("gui/sprites/notification/more"),
+            1 => Some("notification/1"),
+            2 => Some("notification/2"),
+            3 => Some("notification/3"),
+            4 => Some("notification/4"),
+            5 => Some("notification/5"),
+            _ => Some("notification/more"),
         };
         if self.news_unread
             && let Some(sprite) = badge(u32::MAX)
@@ -7630,10 +7630,10 @@ impl Screen {
                         crate::widgets::Kind::Tab(selected),
                     );
                     let sprite = match (selected, hover) {
-                        (true, true) => "gui/sprites/widget/tab_selected_highlighted",
-                        (true, false) => "gui/sprites/widget/tab_selected",
-                        (false, true) => "gui/sprites/widget/tab_highlighted",
-                        (false, false) => "gui/sprites/widget/tab",
+                        (true, true) => "widget/tab_selected_highlighted",
+                        (true, false) => "widget/tab_selected",
+                        (false, true) => "widget/tab_highlighted",
+                        (false, false) => "widget/tab",
                     };
                     crate::ui::nine_slice(
                         batch,
@@ -7913,7 +7913,7 @@ impl Screen {
                                 crate::ui::blit_sprite(
                                     batch,
                                     atlas,
-                                    "gui/sprites/widget/slot_frame",
+                                    "widget/slot_frame",
                                     x,
                                     y,
                                     size,
@@ -7925,12 +7925,12 @@ impl Screen {
                                 if hardcore
                                     && atlas
                                         .sprites
-                                        .contains_key("gui/sprites/hud/heart/hardcore_full")
+                                        .contains_key("hud/heart/hardcore_full")
                                 {
                                     crate::ui::blit_sprite(
                                         batch,
                                         atlas,
-                                        "gui/sprites/hud/heart/hardcore_full",
+                                        "hud/heart/hardcore_full",
                                         x + 3.0,
                                         y + 4.0,
                                         9.0,
@@ -8271,11 +8271,11 @@ impl Screen {
                                     })
                                     .map_or(5, |region| region.service_quality);
                                 let icon = match quality {
-                                    1 => "gui/sprites/icon/ping_5",
-                                    2 => "gui/sprites/icon/ping_4",
-                                    3 => "gui/sprites/icon/ping_3",
-                                    4 => "gui/sprites/icon/ping_2",
-                                    _ => "gui/sprites/icon/ping_unknown",
+                                    1 => "icon/ping_5",
+                                    2 => "icon/ping_4",
+                                    3 => "icon/ping_3",
+                                    4 => "icon/ping_2",
+                                    _ => "icon/ping_unknown",
                                 };
                                 crate::ui::blit_sprite(
                                     batch,
@@ -8427,11 +8427,11 @@ impl Screen {
                             .map(|data| data.service_quality)
                     {
                         let icon = match quality {
-                            1 => "gui/sprites/icon/ping_5",
-                            2 => "gui/sprites/icon/ping_4",
-                            3 => "gui/sprites/icon/ping_3",
-                            4 => "gui/sprites/icon/ping_2",
-                            _ => "gui/sprites/icon/ping_unknown",
+                            1 => "icon/ping_5",
+                            2 => "icon/ping_4",
+                            3 => "icon/ping_3",
+                            4 => "icon/ping_2",
+                            _ => "icon/ping_unknown",
                         };
                         if atlas.sprites.contains_key(icon) {
                             crate::ui::blit_sprite(
@@ -8986,7 +8986,7 @@ impl Screen {
                                 crate::ui::blit_sprite(
                                     batch,
                                     atlas,
-                                    "gui/sprites/icon/trial_available",
+                                    "icon/trial_available",
                                     x - 12.0,
                                     text_y + 1.0,
                                     8.0,
@@ -9056,11 +9056,11 @@ impl Screen {
                 }
                 let top = ((h - height) / 2.0).floor();
                 let left = ((w - 214.0) / 2.0).floor();
-                if atlas.sprites.contains_key("gui/sprites/popup/background") {
+                if atlas.sprites.contains_key("popup/background") {
                     crate::ui::blit_sprite(
                         batch,
                         atlas,
-                        "gui/sprites/popup/background",
+                        "popup/background",
                         left - 18.0,
                         top - 18.0,
                         214.0 + 36.0,
@@ -9304,11 +9304,11 @@ impl Screen {
                 let height = 9.0 + 12.0 + lines.len() as f32 * 9.0 + 12.0 + 20.0;
                 let top = ((h - height) / 2.0).floor();
                 let left = ((w - 214.0) / 2.0).floor();
-                if atlas.sprites.contains_key("gui/sprites/popup/background") {
+                if atlas.sprites.contains_key("popup/background") {
                     crate::ui::blit_sprite(
                         batch,
                         atlas,
-                        "gui/sprites/popup/background",
+                        "popup/background",
                         left - 18.0,
                         top - 18.0,
                         214.0 + 36.0,
@@ -9465,7 +9465,7 @@ impl Screen {
                         crate::ui::blit_sprite(
                             batch,
                             atlas,
-                            "gui/sprites/widget/slot_frame",
+                            "widget/slot_frame",
                             x,
                             y,
                             60.0,
@@ -9623,7 +9623,7 @@ impl Screen {
                         crate::ui::blit_sprite(
                             batch,
                             atlas,
-                            "gui/sprites/widget/slot_frame",
+                            "widget/slot_frame",
                             rx + 2.0,
                             y + 3.0,
                             40.0,
@@ -9654,10 +9654,10 @@ impl Screen {
                             let (x, icon_y) = (rx + 298.0 - version - 15.0 - offset, y + 2.0);
                             let hovered = crate::ui::hovered(cursor, x, icon_y, 15.0, 15.0);
                             let sprite = match (trailer, hovered) {
-                                (false, false) => "gui/sprites/icon/link",
-                                (false, true) => "gui/sprites/icon/link_highlighted",
-                                (true, false) => "gui/sprites/icon/video_link",
-                                (true, true) => "gui/sprites/icon/video_link_highlighted",
+                                (false, false) => "icon/link",
+                                (false, true) => "icon/link_highlighted",
+                                (true, false) => "icon/video_link",
+                                (true, true) => "icon/video_link_highlighted",
                             };
                             crate::ui::blit_sprite(
                                 batch,
@@ -9988,7 +9988,7 @@ impl Screen {
                         crate::ui::blit_sprite(
                             batch,
                             atlas,
-                            "gui/sprites/icon/new_realm",
+                            "icon/new_realm",
                             rx + 2.0 - 5.0,
                             y + ROW_HEIGHT / 2.0 - 10.0,
                             40.0,
@@ -10092,12 +10092,12 @@ impl Screen {
                             && let Some(mode_x) = mode_x
                             && atlas
                                 .sprites
-                                .contains_key("gui/sprites/hud/heart/hardcore_full")
+                                .contains_key("hud/heart/hardcore_full")
                         {
                             crate::ui::blit_sprite(
                                 batch,
                                 atlas,
-                                "gui/sprites/hud/heart/hardcore_full",
+                                "hud/heart/hardcore_full",
                                 mode_x - 10.0,
                                 second_y,
                                 8.0,
@@ -10135,13 +10135,13 @@ impl Screen {
                     // a week left, or open; their tooltips hang off the light in
                     // [`Screen::draw_tooltip`].
                     let light = if server.expired {
-                        Some("gui/sprites/realm_status/expired")
+                        Some("realm_status/expired")
                     } else if server.state == "CLOSED" {
-                        Some("gui/sprites/realm_status/closed")
+                        Some("realm_status/closed")
                     } else if self_owned && server.days_left < 7 {
-                        Some("gui/sprites/realm_status/expires_soon")
+                        Some("realm_status/expires_soon")
                     } else if server.is_open() {
-                        Some("gui/sprites/realm_status/open")
+                        Some("realm_status/open")
                     } else {
                         None
                     };

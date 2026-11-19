@@ -212,7 +212,7 @@ impl Game<'_> {
         ui::nine_slice(
             batch,
             atlas,
-            "gui/sprites/widget/text_field",
+            "widget/text_field",
             ax,
             ay,
             aw,
@@ -245,10 +245,10 @@ impl Game<'_> {
             .hovered(hover)
         });
         let sprite = match (prompt.stop_showing, hover) {
-            (true, true) => "gui/sprites/widget/checkbox_selected_highlighted",
-            (true, false) => "gui/sprites/widget/checkbox_selected",
-            (false, true) => "gui/sprites/widget/checkbox_highlighted",
-            (false, false) => "gui/sprites/widget/checkbox",
+            (true, true) => "widget/checkbox_selected_highlighted",
+            (true, false) => "widget/checkbox_selected",
+            (false, true) => "widget/checkbox_highlighted",
+            (false, false) => "widget/checkbox",
         };
         batch.sprite_scaled(atlas, sprite, x, y, BOX, BOX, u32::MAX);
         batch.text_styled(

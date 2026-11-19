@@ -249,7 +249,7 @@ impl Game<'_> {
                 }
                 ScreenDraw::Sprite { id, x, y, .. } => batch.sprite(
                     atlas,
-                    &format!("gui/sprites/{id}"),
+                    &format!("{id}"),
                     ox + *x as f32,
                     oy + *y as f32,
                 ),

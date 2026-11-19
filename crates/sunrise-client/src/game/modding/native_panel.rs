@@ -622,7 +622,7 @@ impl Game<'_> {
                 let suffix = if hovered { "_highlighted" } else { "" };
                 batch.sprite(
                     atlas,
-                    &format!("gui/sprites/recipe_book/{name}{suffix}"),
+                    &format!("recipe_book/{name}{suffix}"),
                     x,
                     y,
                 );
@@ -777,9 +777,9 @@ impl Game<'_> {
                 batch.sprite_scaled(atlas, icon, x + 2.0, y + 2.0, 16.0, 16.0, u32::MAX);
             } else {
                 let sprite = if hovered {
-                    "gui/sprites/widget/button_highlighted"
+                    "widget/button_highlighted"
                 } else {
-                    "gui/sprites/widget/button"
+                    "widget/button"
                 };
                 sunrise_client::ui::nine_slice(batch, atlas, sprite, x, y, width, height, u32::MAX);
                 batch.sprite_scaled(

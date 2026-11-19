@@ -297,7 +297,7 @@ pub fn draw_background(batch: &mut HudBatch, atlas: &HudAtlas, in_world: bool) {
     ui::blit_sprite(
         batch,
         atlas,
-        "gui/sprites/social_interactions/background",
+        "social_interactions/background",
         mx,
         64.0,
         236.0,
@@ -306,7 +306,7 @@ pub fn draw_background(batch: &mut HudBatch, atlas: &HudAtlas, in_world: bool) {
     );
     batch.sprite_scaled(
         atlas,
-        "gui/sprites/icon/search",
+        "icon/search",
         mx + 10.0,
         76.0,
         12.0,
@@ -416,7 +416,7 @@ pub fn draw_contents(
             let (hide, report) = row_buttons(w, y);
             let sprite = |base: &str, hover: bool| {
                 format!(
-                    "gui/sprites/social_interactions/{base}{}",
+                    "social_interactions/{base}{}",
                     if hover { "_highlighted" } else { "" }
                 )
             };
@@ -448,7 +448,7 @@ pub fn draw_contents(
             );
             batch.sprite_scaled(
                 atlas,
-                "gui/sprites/social_interactions/report_button_disabled",
+                "social_interactions/report_button_disabled",
                 report[0],
                 report[1],
                 20.0,

@@ -1129,7 +1129,7 @@ impl ModsScreen {
 }
 
 /// The atlas sprite of the main menu's Mods button, as the icons beside it are named.
-pub const ICON_SPRITE: &str = "gui/sprites/icon/mods";
+pub const ICON_SPRITE: &str = "icon/mods";
 /// A cube, drawn in three greys for its top and two sides: `#` light, `o` middle, `x` dark.
 const ICON_ART: [&str; 15] = [
     ".......#.......",

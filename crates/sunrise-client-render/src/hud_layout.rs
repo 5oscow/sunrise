@@ -826,7 +826,7 @@ fn paint_with(
                         .split_once(':')
                         .is_some_and(|(_, path)| path.starts_with("mob_effect/"));
                 if !effect {
-                    name.push_str("gui/sprites/");
+                    name.push_str("");
                 }
                 name.push_str(sprite);
                 let found = match effect {

@@ -125,9 +125,9 @@ pub fn panels<'a>(
 /// its height stays 32, only horizontal slicing/tiling is needed.
 fn background(batch: &mut HudBatch, atlas: &HudAtlas, panel: &EffectPanel) {
     let name = if panel.icon.ambient {
-        "gui/sprites/container/inventory/effect_background_ambient"
+        "container/inventory/effect_background_ambient"
     } else {
-        "gui/sprites/container/inventory/effect_background"
+        "container/inventory/effect_background"
     };
     let Some(rect) = atlas.sprites.get(name).copied() else {
         return;
