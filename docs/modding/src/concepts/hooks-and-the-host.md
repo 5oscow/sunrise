@@ -140,6 +140,32 @@ the same mod: for example, `LevelRef::set_block` fires `block_changed`. Mods kee
 state with interior mutability so these calls can share the instance safely. Data-load
 hooks can run on any loading thread; item default changes must be identical on every side.
 
+## Which thread runs a hook
+
+Most hooks run on the thread that ticks their side: the server thread for a server hook, the window's thread for a
+client hook. Single player has both in one process, so one mod instance is called from two threads. Some hooks and
+Part methods run elsewhere, and each one's own documentation says where:
+
+- **Worldgen workers.** Worldgen Part methods (a structure type, feature type, biome source or chunk generator)
+  and the hooks fired while a feature generates run on the worldgen worker threads, several chunks at once (and on
+  the server thread when a sapling grows). They get a `WorldgenHost` or no host at all, never a `Host`.
+- **Meshing workers.** `add_section_geometry` and block tint sources run on the renderer's meshing workers each time
+  a section is meshed, with no host.
+- **Chunk workers.** `chunk_data_load` and `chunk_data_save` run where a chunk's record is decoded or encoded, with a
+  restricted host.
+- **Loading threads.** Data-load hooks run on whichever thread loads the data.
+
+What follows for a mod's state:
+
+- A `thread_local!` holds one value per thread, not per game or per world. A value written on the server thread is
+  not there on a worldgen worker, and the window's thread has its own. Keep shared state in the mod's own fields
+  behind a lock or an atomic, or on the object it belongs to as an [attachment](attachments.md).
+- Do not hold a lock across a host call. A write through the host can fire another hook of the same mod on the same
+  thread (`LevelRef::set_block` fires `block_changed`), and that hook then waits for the lock its caller holds.
+  Copy what you need out, release the lock, then call the host.
+- A worker's hook can run at the same moment as a tick hook. Read-mostly data shared with workers belongs behind a
+  read-write lock or in an immutable value swapped as a whole.
+
 `Hooks` contains global hooks. Scoped hooks belong to `BlockPart`, `BlockEntityPart`,
 `ItemPart`, `MenuPart` or `FluidPart` and run for the registered object.
 
