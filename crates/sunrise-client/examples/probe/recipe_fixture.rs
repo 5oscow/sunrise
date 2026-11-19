@@ -5,7 +5,7 @@
 //! usage: recipe_fixture RESOURCES INPUT OUTPUT
 use std::{fs, path::Path};
 use sunrise_client::{
-    crafting::Recipes,
+    crafting::{RecipeLoadRefusals, Recipes},
     enchant::Enchantments,
     item_data::{canon_stack, parse_stack},
     items::Items,
@@ -115,14 +115,22 @@ pub fn main() -> sunrise_client::Result<()> {
                 // The oracle decodes the one recipe with SmithingTransformRecipe's
                 // codec and answers none when it doesn't decode; here the load of
                 // that one file refuses instead.
-                let Ok(stations) = StationRecipes::load(
+                let stations = match StationRecipes::load(
                     root,
                     &items,
                     &PackOverlay::new(&files),
                     &crate::test_resources::server_load(),
-                ) else {
-                    out.push_str("none\n");
-                    continue;
+                ) {
+                    Ok(stations) => stations,
+                    Err(error)
+                        if error
+                            .downcast_ref::<RecipeLoadRefusals>()
+                            .is_some_and(|refusals| refusals.only_recipe("test:transform")) =>
+                    {
+                        out.push_str("none\n");
+                        continue;
+                    }
+                    Err(error) => return Err(error),
                 };
                 let (t, b, a) = (stack(2)?, stack(3)?, stack(4)?);
                 match stations.smithing_result(
