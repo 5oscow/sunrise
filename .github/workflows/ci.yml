@@ -28,9 +28,8 @@ env:
   SUNRISE_TELEMETRY_URL: "off"
 jobs:
   # Which jobs a maintainer-requested fork check needs, from the complete base/head diff
-  # (tools/ci/rust_changes.py, the selection dyna-checks makes): a job whose inputs it didn't change skips at once
-  # instead of cloning the history. The trigger itself has no path filter: GitHub matches one against only the
-  # first 300 changed files. A selection that fails or can't diff leaves its outputs empty, and every job runs.
+  # (tools/ci/rust_changes.py). Every verification part uses this one decision. Missing event commits, an
+  # unavailable diff, or a failed selection keep all parts. Scheduled and manual verification stay full.
   changes:
     if: github.event.label.name == 'ci:verify' && github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-24.04

@@ -22,8 +22,9 @@ head. A dispatch without `verify` runs only its by-hand jobs (Windows ARM64 and 
 | --- | --- | --- | --- |
 | `verify` | Scheduled runs on main, dispatches with `verify` and pull requests labelled `ci:verify`, on GitHub's `ubuntu-24.04` | Three jobs side by side: the public-tree check and Python tests (`verify (tree and tools)`), rustfmt and clippy with warnings denied (`verify (format and lint)`), the Rust tests of the whole workspace (`verify (Rust tests)`); `verify` waits for them and passes when each passed. Dependencies and the workspace build come from a cache saved by scheduled runs on main | ~8 min |
 
-`verify` runs even in a cancelled run of `checks`, so it fails there instead of being skipped. Its public-tree check
-reads every ref's history.
+A maintainer-requested check on a fork may skip individual parts only when a complete diff of the pull request's
+base and head rules them out. Scheduled runs and manual verification run every part. `verify` still reports the
+combined result even if the run is cancelled. Its public-tree check reads every ref's history.
 
 ## Merging
 
