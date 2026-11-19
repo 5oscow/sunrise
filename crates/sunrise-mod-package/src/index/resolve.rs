@@ -4,7 +4,10 @@ use crate::dependencies::parse_version;
 use mod_vocab::Side;
 use semver::{Comparator, Op, VersionReq};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+
+// Share the search budget across retries instead of multiplying it by the number of root subsets.
+const MAX_STATES: usize = 20_000;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModVersion {
@@ -131,10 +134,58 @@ pub fn install(
         roots.entry(&r.id).or_default().extend(r.version.as_deref());
     }
     let mut groups = Vec::new();
-    for (id, pins) in roots {
-        let roots = Roots::from([(id, pins)]);
-        match catalog.solve(&roots, &present, &installed_edges) {
-            Ok(selected) => groups.push((roots, selected)),
+    let mut blocked = Vec::new();
+    for (&id, pins) in &roots {
+        let single = Roots::from([(id, pins.clone())]);
+        let mut budget = MAX_STATES;
+        match catalog.solve(&single, &present, &installed_edges, &mut budget) {
+            Ok(selected) => groups.push((single, selected)),
+            Err(failure) => blocked.push((id, failure, budget)),
+        }
+    }
+    for (id, failure, mut budget) in blocked {
+        if groups.iter().any(|(r, _)| r.contains_key(id)) {
+            continue; // A joint solve for another blocked request has already found a plan.
+        }
+        // Retry only the requested replacements that could change a failed assignment. Try
+        // each one separately first so a broken pin on another branch cannot poison the plan.
+        let mut ids = BTreeSet::from([id]);
+        let mut tried = BTreeSet::from([ids.clone()]);
+        let mut pending = VecDeque::new();
+        let mut replacements = failure.replacements;
+        let solved = loop {
+            for replacement in replacements {
+                if !roots.contains_key(replacement) || ids.contains(replacement) {
+                    continue;
+                }
+                let mut joint = ids.clone();
+                match groups.iter().find(|(r, _)| r.contains_key(replacement)) {
+                    Some((group, _)) => joint.extend(group.keys().copied()),
+                    None => {
+                        joint.insert(replacement);
+                    }
+                }
+                if tried.insert(joint.clone()) {
+                    pending.push_back(joint);
+                }
+            }
+            let Some(next) = pending.pop_front() else {
+                break Err(failure.reason);
+            };
+            ids = next;
+            let joint = ids.iter().map(|&id| (id, roots[id].clone())).collect();
+            match catalog.solve(&joint, &present, &installed_edges, &mut budget) {
+                Ok(selected) => break Ok((joint, selected)),
+                Err(retry) if budget == 0 => break Err(retry.reason),
+                Err(retry) => replacements = retry.replacements,
+            }
+        };
+        match solved {
+            Ok((joint, selected)) => {
+                // The retry includes every root of any group it absorbed.
+                groups.retain(|(r, _)| !r.keys().any(|id| joint.contains_key(id)));
+                groups.push((joint, selected));
+            }
             Err(reason) => {
                 plan.requested
                     .insert(id.to_owned(), RequestResult::Refused { reason });
@@ -170,11 +221,12 @@ pub fn install(
         let (other, _) = groups.remove(j);
         groups[i].0.extend(other);
         let roots = &groups[i].0;
-        match catalog.solve(roots, &present, &installed_edges) {
+        let mut budget = MAX_STATES;
+        match catalog.solve(roots, &present, &installed_edges, &mut budget) {
             Ok(selected) => groups[i].1 = selected,
-            Err(reason) => {
+            Err(failure) => {
                 let ids = roots.keys().copied().collect::<Vec<_>>().join(", ");
-                let reason = format!("{ids} cannot be installed together: {reason}");
+                let reason = format!("{ids} cannot be installed together: {}", failure.reason);
                 for &id in roots.keys() {
                     plan.requested.insert(
                         id.to_owned(),
@@ -344,6 +396,12 @@ struct Catalog<'a> {
 
 type Roots<'a> = BTreeMap<&'a str, Vec<&'a str>>;
 type Selected<'a> = BTreeMap<&'a str, &'a Candidate<'a>>;
+
+struct SolveFailure<'a> {
+    reason: String,
+    /// Installed artifacts whose replacement may make a failed choice viable.
+    replacements: BTreeSet<&'a str>,
+}
 
 struct Need<'a> {
     pins: &'a [&'a str],
@@ -534,16 +592,17 @@ impl<'a> Catalog<'a> {
         roots: &Roots<'s>,
         present: &Present<'_>,
         installed: &Selected<'s>,
-    ) -> Result<Selected<'s>, String>
+        budget: &mut usize,
+    ) -> Result<Selected<'s>, SolveFailure<'s>>
     where
         'a: 's,
     {
         let mut selected = Selected::new();
         let mut stack = Vec::<(&str, std::vec::IntoIter<&Candidate<'_>>)>::new();
-        // An index is external data. Bound search even if many versions combine pathologically.
-        const MAX_STATES: usize = 20_000;
         let mut failure = None;
-        for _ in 0..MAX_STATES {
+        let mut replacements = BTreeSet::new();
+        while *budget > 0 {
+            *budget -= 1;
             let step = (|| {
                 let mut needs: BTreeMap<_, _> = roots
                     .iter()
@@ -583,6 +642,7 @@ impl<'a> Catalog<'a> {
                             } else if let Some(row) = present.get(target) {
                                 let req = range.parsed.as_ref().map_err(Clone::clone)?;
                                 if !parse_version(&row.version).is_ok_and(|n| req.matches(&n)) {
+                                    replacements.insert(target);
                                     return Err(format!(
                                         "{target} {} is installed, but {owner} needs {}",
                                         row.version, range.row.version
@@ -594,8 +654,16 @@ impl<'a> Catalog<'a> {
                     for (&owner, &c) in installed {
                         if !selected.contains_key(owner) {
                             for range in c.required.iter().chain(&c.optional) {
-                                if let Some(need) = needs.get_mut(range.row.id.as_str()) {
-                                    range.parsed.as_ref().map_err(Clone::clone)?;
+                                let target = range.row.id.as_str();
+                                if let Some(need) = needs.get_mut(target) {
+                                    let req = range.parsed.as_ref().map_err(Clone::clone)?;
+                                    if !selected[target]
+                                        .number
+                                        .as_ref()
+                                        .is_some_and(|n| req.matches(n))
+                                    {
+                                        replacements.insert(owner);
+                                    }
                                     need.ranges.push((owner, range));
                                 }
                             }
@@ -661,14 +729,20 @@ impl<'a> Catalog<'a> {
                 stack.pop();
             }
             if stack.is_empty() {
-                return Err(failure
-                    .unwrap_or_else(|| "no consistent versions for the requested mods".into()));
+                return Err(SolveFailure {
+                    reason: failure
+                        .unwrap_or_else(|| "no consistent versions for the requested mods".into()),
+                    replacements,
+                });
             }
         }
-        Err(format!(
-            "{}: dependency resolution limit reached; try fewer requests or pin a version",
-            roots.keys().copied().collect::<Vec<_>>().join(", ")
-        ))
+        Err(SolveFailure {
+            reason: format!(
+                "{}: dependency resolution limit reached; try fewer requests or pin a version",
+                roots.keys().copied().collect::<Vec<_>>().join(", ")
+            ),
+            replacements,
+        })
     }
 }
 
@@ -693,8 +767,9 @@ pub fn uninstallable_versions(index: &Index, include: impl Fn(&Version) -> bool)
             let catalog = Catalog::new(index, game, side, |_, _| true, &present);
             for &(id, version) in &versions {
                 let roots = Roots::from([(id, vec![version])]);
-                if let Err(reason) = catalog.solve(&roots, &present, &installed) {
-                    problems.push(format!("{id} {version} ({label}): {reason}"));
+                let mut budget = MAX_STATES;
+                if let Err(failure) = catalog.solve(&roots, &present, &installed, &mut budget) {
+                    problems.push(format!("{id} {version} ({label}): {}", failure.reason));
                 }
             }
         }

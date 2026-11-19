@@ -8,6 +8,10 @@
         {"api": "0.2", "file": {"name": "extra.smod", "url": "https://example.test/extra/1.0.0", "size": 1, "sha256": "0000000000000000000000000000000000000000000000000000000000000002"}, "version": "1.0.0", "game": "26.3"},
         {"api": "0.2", "file": {"name": "extra.smod", "url": "https://example.test/extra/2.0.0", "size": 1, "sha256": "0000000000000000000000000000000000000000000000000000000000000003"}, "version": "2.0.0", "game": "26.3"}
       ]},
+      {"id": "requires_extra", "kind": "mod", "name": "Requires Extra", "summary": "A dependency-resolution fixture.", "license": "MIT", "source": "https://example.test/mods", "versions": [
+        {"api": "0.2", "file": {"name": "requires_extra.smod", "url": "https://example.test/requires_extra/1.0.0", "size": 1, "sha256": "000000000000000000000000000000000000000000000000000000000000000c"}, "version": "1.0.0", "game": "26.3", "dependencies": [{"id": "extra", "version": "^1"}]},
+        {"api": "0.2", "file": {"name": "requires_extra.smod", "url": "https://example.test/requires_extra/2.0.0", "size": 1, "sha256": "000000000000000000000000000000000000000000000000000000000000000d"}, "version": "2.0.0", "game": "26.3", "dependencies": [{"id": "extra", "version": "^2"}]}
+      ]},
       {"id": "a", "kind": "mod", "name": "A", "summary": "A dependency-resolution fixture.", "license": "MIT", "source": "https://example.test/mods", "versions": [
         {"api": "0.2", "file": {"name": "a.smod", "url": "https://example.test/a/1.0.0", "size": 1, "sha256": "0000000000000000000000000000000000000000000000000000000000000004"}, "version": "1.0.0", "game": "26.3", "dependencies": [{"id": "lib", "version": "^1"}]}
       ]},
@@ -73,6 +77,24 @@
       "native_fits": {},
       "expected": {},
       "refusals": {"add_on": ["add_on", "extra", "^2"], "extra": ["add_on", "extra", "^2"]}
+    },
+    {
+      "name": "a new owner can install with an explicitly requested upgrade of its optional target",
+      "requests": [{"id": "add_on"}, {"id": "extra", "version": "2.0.0"}],
+      "installed": [{"id": "extra", "version": "1.0.0", "sha256": "0000000000000000000000000000000000000000000000000000000000000002"}],
+      "side": "client",
+      "native_fits": {},
+      "expected": {"requested": {"add_on": {"status": "installable", "version": "1.0.0"}, "extra": {"status": "installable", "version": "2.0.0"}}, "install": [{"id": "add_on", "version": "1.0.0"}], "update": [{"id": "extra", "from": "1.0.0", "to": "2.0.0"}], "optional": [{"from": {"id": "add_on", "version": "1.0.0"}, "dependency": {"id": "extra", "version": "^2", "optional": true}}]},
+      "refusals": {}
+    },
+    {
+      "name": "an upgrade and its installed required owner are planned against their final ranges",
+      "requests": [{"id": "extra", "version": "2.0.0"}, {"id": "requires_extra", "version": "2.0.0"}],
+      "installed": [{"id": "extra", "version": "1.0.0", "sha256": "0000000000000000000000000000000000000000000000000000000000000002"}, {"id": "requires_extra", "version": "1.0.0", "sha256": "000000000000000000000000000000000000000000000000000000000000000c"}],
+      "side": "client",
+      "native_fits": {},
+      "expected": {"requested": {"extra": {"status": "installable", "version": "2.0.0"}, "requires_extra": {"status": "installable", "version": "2.0.0"}}, "update": [{"id": "extra", "from": "1.0.0", "to": "2.0.0"}, {"id": "requires_extra", "from": "1.0.0", "to": "2.0.0"}], "required_by": {"extra": ["requires_extra"]}},
+      "refusals": {}
     },
     {
       "name": "an impossible b pin does not follow an out of range library candidate into a",
