@@ -283,15 +283,6 @@ struct PlacementEntity {
     snapshot: Option<mod_api::ModBlockEntity>,
 }
 
-#[derive(Clone, Copy)]
-enum Insertion {
-    Automation(Option<Pos>),
-    /// A hopper received one item from a capability. Journal the destination slot before writing.
-    Pull,
-    /// A capability write observes the container's slot limit and journals before writing.
-    Capability,
-}
-
 impl PlacementAttempt {
     fn ask(
         &mut self,
@@ -649,9 +640,6 @@ impl Containers<'_> {
         if !self.accepts(view, slot, stack) {
             return 0;
         }
-        self.slot_stack_limit(view, slot, stack)
-    }
-    fn slot_stack_limit(&self, view: &View, slot: usize, stack: &ItemStack) -> u32 {
         let capacity = view.slot_limit().min(self.max_stack(stack));
         view.locate(slot)
             .and_then(|(pos, _)| self.world.container_stack_limit(pos))
@@ -669,8 +657,12 @@ impl Containers<'_> {
         if !self.can_place(view, slot, stack, attempt) {
             return 0;
         }
+        self.insertion_room(view, slot, stack)
+    }
+    /// Room for the stack in a slot, apart from the per-slot `can_place` decision.
+    fn insertion_room(&self, view: &View, slot: usize, stack: &ItemStack) -> u32 {
         room(
-            self.slot_stack_limit(view, slot, stack),
+            self.capacity(view, slot, stack),
             self.get(view, slot),
             stack,
         )
@@ -1031,13 +1023,13 @@ impl Game<'_> {
     /// `HopperBlockEntity.tryMoveInItem`.
     fn try_move_in_item(
         &mut self,
-        insertion: Insertion,
+        from_hopper: Option<Pos>,
         view: &View,
         stack: ItemStack,
         slot: usize,
         attempt: &mut PlacementAttempt,
     ) -> Option<ItemStack> {
-        let (rest, moved) = self.move_in_item(insertion, view, stack, slot, attempt);
+        let (rest, moved) = self.move_in_item(from_hopper, view, stack, slot, attempt);
         if moved {
             self.view_changed(view);
             // JukeboxBlockEntity.setTheItem through a hopper's or a dropper's
@@ -1052,7 +1044,7 @@ impl Game<'_> {
     /// `tryMoveInItem` before `setChanged`: the remainder and whether anything moved.
     fn move_in_item(
         &mut self,
-        insertion: Insertion,
+        from_hopper: Option<Pos>,
         view: &View,
         mut stack: ItemStack,
         slot: usize,
@@ -1062,37 +1054,15 @@ impl Game<'_> {
         if !c.can_place(view, slot, &stack, attempt) {
             return (Some(stack), false);
         }
-        let (from_hopper, slot_limit) = match insertion {
-            Insertion::Automation(from_hopper) => (from_hopper, None),
-            Insertion::Pull | Insertion::Capability => {
-                let limit = c.slot_stack_limit(view, slot, &stack);
-                if room(limit, c.get(view, slot), &stack) == 0 {
-                    return (Some(stack), false);
-                }
-                if matches!(insertion, Insertion::Pull) {
-                    let Some((pos, index)) = view.locate(slot) else {
-                        return (Some(stack), false);
-                    };
-                    self.journal_block_entity_slot(pos, index);
-                } else {
-                    self.journal_view_slot(view, slot);
-                }
-                (None, Some(limit))
-            }
-        };
         self.unpack_inventory_slot(view, slot);
         let was_empty = self.inventory_is_empty(view);
-        let (max, restricted) = if let Some(limit) = slot_limit {
-            (limit, true)
-        } else {
-            let c = self.containers();
-            let vanilla_max = c.max_stack(&stack);
-            let max = view
-                .locate(slot)
-                .and_then(|(pos, _)| c.world.container_stack_limit(pos))
-                .map_or(vanilla_max, |limit| vanilla_max.min(limit));
-            (max, max < vanilla_max)
-        };
+        let c = self.containers();
+        let vanilla_max = c.max_stack(&stack);
+        let override_limit = view
+            .locate(slot)
+            .and_then(|(pos, _)| c.world.container_stack_limit(pos));
+        let restricted = override_limit.is_some_and(|limit| limit < vanilla_max);
+        let max = override_limit.map_or(vanilla_max, |limit| vanilla_max.min(limit));
         if restricted && max == 0 {
             return (Some(stack), false);
         }
@@ -1125,8 +1095,8 @@ impl Game<'_> {
         }
         match target {
             None => {
-                // Vanilla hopper insertion consumes the input even when setItem clamps it.
-                // Capabilities and explicit stack limits return the excess instead.
+                // HopperBlockEntity.setItem limits the accepted stack, then
+                // tryMoveInItem consumes the input even when it exceeded that limit.
                 *target = Some(ItemStack {
                     count: stack.count.min(max),
                     ..stack.clone()
@@ -1200,13 +1170,7 @@ impl Game<'_> {
         let mut rest = Some(stack);
         for slot in view.slots_to_add_iter(face) {
             let Some(stack) = rest.take() else { break };
-            rest = self.try_move_in_item(
-                Insertion::Automation(from_hopper),
-                view,
-                stack,
-                slot,
-                &mut attempt,
-            );
+            rest = self.try_move_in_item(from_hopper, view, stack, slot, &mut attempt);
         }
         rest
     }
@@ -1587,8 +1551,13 @@ impl Game<'_> {
                 let mut attempt = PlacementAttempt::default();
                 let mut rest = one;
                 for target in 0..hopper.len() {
+                    if game.containers().insertion_room(hopper, target, &rest) == 0 {
+                        continue;
+                    }
+                    let (pos, slot) = hopper.locate(target).ok_or(())?;
+                    game.journal_block_entity_slot(pos, slot);
                     let Some(remainder) =
-                        game.try_move_in_item(Insertion::Pull, hopper, rest, target, &mut attempt)
+                        game.try_move_in_item(None, hopper, rest, target, &mut attempt)
                     else {
                         return Ok(());
                     };
