@@ -243,6 +243,13 @@ fn threshold_for(capacity: usize) -> usize {
 }
 
 impl<K: JavaKey, V> JavaHashMap<K, V> {
+    /// Reserve physical entry storage without changing the Java table's initial capacity,
+    /// growth thresholds or traversal order. An excessive size hint is ignored.
+    pub fn with_reserved_nodes(entries: usize) -> Self {
+        let mut map = Self::default();
+        let _ = map.nodes.try_reserve_exact(entries);
+        map
+    }
     /// Preserve map state while cloning values in slab order. Only structural
     /// ownership cloning uses this order; observable traversal uses `entries`.
     pub(crate) fn clone_with(&self, mut clone_value: impl FnMut(&V) -> V) -> Self
@@ -1214,6 +1221,19 @@ mod tests {
         // Three nodes, still a tree bin: 18 goes after its tree parent 11, then root 12 moves first.
         map.put(key(18, 512), 18);
         assert_eq!(order(&map), [12, 11, 18, 13, 1, 0, 2]);
+    }
+
+    #[test]
+    fn physical_reservation_does_not_change_small_table_growth_or_tree_order() {
+        let mut regular = JavaHashMap::default();
+        let mut reserved = JavaHashMap::with_reserved_nodes(64);
+        for (key, id) in [(key(0, 17), 0), (key(1, 2), 1), (key(2, 33), 2)]
+            .into_iter()
+            .chain((3..=13).map(|id| (collider(id), id)))
+        {
+            assert_eq!(regular.put(key, id), reserved.put(key, id));
+            assert_eq!(order(&regular), order(&reserved));
+        }
     }
 
     #[test]

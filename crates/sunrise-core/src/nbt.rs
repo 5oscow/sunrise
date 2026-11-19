@@ -246,9 +246,22 @@ impl Extend<(JavaString, Tag)> for Compound {
 }
 impl FromIterator<(JavaString, Tag)> for Compound {
     fn from_iter<T: IntoIterator<Item = (JavaString, Tag)>>(entries: T) -> Self {
-        let mut map = Self::new();
-        map.extend(entries);
-        map
+        let mut entries = entries.into_iter();
+        let Some((first_key, first_value)) = entries.next() else {
+            return Self::new();
+        };
+        let (lower, upper) = entries.size_hint();
+        let capacity = if upper == Some(lower) {
+            lower.saturating_add(1)
+        } else {
+            0
+        };
+        let mut map = Box::new(JavaHashMap::with_reserved_nodes(capacity));
+        map.put(first_key, first_value);
+        for (key, value) in entries {
+            map.put(key, value);
+        }
+        Self(Some(map))
     }
 }
 impl<const N: usize> From<[(JavaString, Tag); N]> for Compound {
