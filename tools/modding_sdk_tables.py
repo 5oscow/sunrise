@@ -55,6 +55,7 @@ TARGETS = {
 ROUTES = {
     "api": "Every enabled mod uses the mod API alone.",
     "engine": "A mod has a `[native.*]` table, names game internals, or depends on a registry (crates.io) crate.",
+    "tool": "Before either: the native build tool, which tells the caller the route and then compiles.",
 }
 
 # `surface.json`'s record kinds by id prefix (`sunrise_mod_surface`, "Ids"); a member's id has a `.` after its owner.
@@ -72,6 +73,7 @@ RECORDS = {
     "part": "Part kind",
     "capability": "Capability",
     "behaviour": "Behaviour: a promise that is no type or signature",
+    "extension_tag": "Tag extension point (registry/id in `extension_tags`)",
 }
 ID_FORMS = {
     "hook": "hook:<name>",
@@ -87,6 +89,7 @@ ID_FORMS = {
     "part": "part:<kind>",
     "capability": "capability:<key>",
     "behaviour": "behaviour:<name>",
+    "extension_tag": "extension_tag:<registry>/<namespace>:<path>",
 }
 
 
@@ -161,15 +164,17 @@ def ids(value):
     if isinstance(value, dict):
         if isinstance(value.get("id"), str):
             yield value["id"]
-        for child in value.values():
-            yield from ids(child)
+        for key, child in value.items():
+            # These IDs are namespace-scoped tag names, not API record prefixes.
+            if key != "extension_tags":
+                yield from ids(child)
     elif isinstance(value, list):
         for child in value:
             yield from ids(child)
 
 
 def surface(document):
-    counts = {}
+    counts = {"extension_tag": len(document.get("extension_tags", []))}
     for record in ids(document):
         prefix, _, rest = record.partition(":")
         key = f"{prefix} member" if prefix in ("hook", "type") and "." in rest else prefix

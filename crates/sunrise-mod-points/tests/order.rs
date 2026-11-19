@@ -1,5 +1,5 @@
 // Generated fixtures exercise every shape; TODO(#2273): make the generator emit clippy-clean code.
-#![allow(clippy::all, unused_comparisons, unreachable_patterns, dead_code)]
+#![allow(clippy::all, unused_comparisons, unreachable_patterns)]
 use mod_api::__private::points::register;
 use mod_points::{
     __private::{ApiKind, Forward, PointHost, SlotListener, TABLE, seal},
@@ -38,7 +38,7 @@ fn point_priority_preserves_dependency_order_and_orders_injects_within_a_mod() {
     fn native() {}
     struct Endpoint;
     impl Forward for Endpoint {
-        fn forward(&self, _: u32, _: PointHost<'_>, _: &mut dyn mod_api::wire::Record) {}
+        fn forward(&self, _: u64, _: PointHost<'_>, _: &mut dyn mod_api::wire::Record) {}
     }
     static ENDPOINT: Endpoint = Endpoint;
     for row in &rows {

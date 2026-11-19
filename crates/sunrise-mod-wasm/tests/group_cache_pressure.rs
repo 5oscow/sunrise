@@ -1,7 +1,7 @@
 //! Cache admission failure must not change the static-string API's result.
 //! Separate process: exhausting the shared native budget must not race other fixtures.
 // Generated fixtures exercise every shape; TODO(#2273): make the generator emit clippy-clean code.
-#![allow(clippy::all, unused_comparisons, unreachable_patterns, dead_code)]
+#![allow(clippy::all, unused_comparisons, unreachable_patterns)]
 #[path = "support/no_hooks.rs"]
 mod no_hooks;
 use mod_api::wire::{Writer, guest};
@@ -18,7 +18,7 @@ fn full_group_budget_leaves_static_replies_usable_without_acknowledging_unknown_
         }
         let encoded = encoded.into_bytes();
         guest::set_transport(Some(std::rc::Rc::new(move |_, _| encoded.clone())));
-        let result = guest::host(0, guest::begin())
+        let result = guest::host_named("test", guest::begin())
             .take_static::<()>()
             .map(|(value, ())| value);
         guest::set_transport(None);

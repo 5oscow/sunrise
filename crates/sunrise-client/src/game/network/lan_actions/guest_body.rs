@@ -54,8 +54,8 @@ pub(super) fn initialize(resources: &MotionResources, guest: &mut Guest) -> bool
 }
 
 impl Game<'_> {
-    /// The guest's body on the server each tick: ServerPlayer.tick's damage
-    /// clock and Entity.baseTick's fluid phase (burning), then for each move
+    /// The guest's connection-path body: Entity.baseTick's fluid phase
+    /// (burning), then for each move
     /// ServerPlayer.doCheckFallDamage (the fall distance grows while they go
     /// down and hurts them where they land, as the host's own landing does;
     /// water resets it, lava halves it) and checkMovementStatistics (the
@@ -64,7 +64,6 @@ impl Game<'_> {
     /// regeneration and the food tick (ServerPlayer.doTick). Their hurt
     /// sounds are heard at the guest.
     pub(super) fn guest_server_tick(&mut self, conn: u32, body: bool) {
-        self.guest_replay(conn);
         self.guest_vehicle_tick(conn);
         // The last move's fall stands in for the server's delta movement.
         let Some(host) = self.lan.as_mut() else {
@@ -114,8 +113,7 @@ impl Game<'_> {
                 let Some(player) = game.player.as_mut() else {
                     return;
                 };
-                // Entity.baseTick's clocks (hurtTime, invulnerableTime) run too.
-                player.health.advance_clock();
+                player.health.advance_body_clock();
                 let _ = player.peaceful_regeneration(&game.loop_context, rules);
                 let _ = player.food_tick(
                     &game.loop_context,
@@ -156,6 +154,8 @@ impl Game<'_> {
                 return (Vec::new(), None);
             };
             player.fluids.boat = boat;
+            // The supporting-block scan for this tick's moves reads the boots.
+            player.leather_boots = leather_boots;
             let mut w = MotionWorld {
                 entities: &[],
                 player,
@@ -169,7 +169,7 @@ impl Game<'_> {
                 damage_hooks: &game.damage_hooks,
                 block_registries: Some(&game.pack.block_registries),
             };
-            w.player.health.advance_clock();
+            w.player.health.advance_body_clock();
             let _ = w.fluid_base_tick();
             w.player.ground.on_ground = from_ground;
             // Player.aiStep: a flying player that isn't riding starts every tick
@@ -248,7 +248,6 @@ impl Game<'_> {
             // lit campfires and grown sweet berry bushes hurt (#1305).
             w.player.shift_key_down = sneaking;
             let _ = w.player.set_sleeping(sleeping);
-            w.player.leather_boots = leather_boots;
             w.player.freeze_immune = freeze_immune;
             w.player.burn_from_stepping_immune = burn_immune;
             let _ = w.server_block_damage(start);

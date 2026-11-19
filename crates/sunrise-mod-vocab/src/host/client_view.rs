@@ -13,6 +13,11 @@ pub trait ClientViewHost {
 #[sunrise_mod_api_macros::host_area]
 pub trait ClientViewClientHost {
     /// Side: client.
+    /// The HUD tick counter (`Hud.getGuiTicks`): advances once per unpaused client tick,
+    /// including on the title screen, independently of server tick freeze. Wraps as a Java int.
+    #[access(ClientSetup)]
+    fn gui_ticks(&self) -> i32;
+    /// Side: client.
     /// Read effective HUD visibility independently of first-person hands.
     #[access(ClientSetup)]
     fn hud_mode(&self) -> HudMode;

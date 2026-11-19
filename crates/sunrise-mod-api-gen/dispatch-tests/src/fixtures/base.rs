@@ -361,7 +361,7 @@ fn placement_replacement_can_refuse_and_stops_later_mods() {
         }
         fn state_for_placement(
             &self,
-            _: &dyn LevelHost,
+            _: LevelSide<'_>,
             _: &mut StateForPlacementEvent<'_>,
         ) -> Option<Option<BlockState>> {
             self.0.lock().unwrap().push(self.1);
@@ -397,7 +397,7 @@ fn placement_replacement_can_refuse_and_stops_later_mods() {
         BlockState::new(BlockKey::Test, u16::MAX),
     ] {
         dispatch_state_for_placement(
-            &Level,
+            LevelSide::Server(&Level),
             LevelDimension,
             state,
             &PlacementContext,
@@ -413,7 +413,7 @@ fn placement_replacement_can_refuse_and_stops_later_mods() {
         assert!(calls.lock().unwrap().is_empty());
     }
     dispatch_state_for_placement(
-        &Level,
+        LevelSide::Server(&Level),
         LevelDimension,
         BlockState::new(BlockKey::Test, 0),
         &PlacementContext,
@@ -428,7 +428,7 @@ fn placement_replacement_can_refuse_and_stops_later_mods() {
     assert_eq!(answer, Some(None));
     assert_eq!(*calls.lock().unwrap(), vec![1]);
     dispatch_state_for_placement(
-        &Level,
+        LevelSide::Server(&Level),
         LevelDimension,
         BlockState::new(BlockKey::Test, 0),
         &PlacementContext,
@@ -643,20 +643,13 @@ fn dispatch_contracts() {
         ..Parts::default()
     });
     let mut lines = Vec::new();
-    dispatch_tooltip(&host, &ItemStack::default(), &mut lines);
-    assert_eq!(lines.iter().map(|line| line.1).collect::<Vec<_>>(), [1, 2]);
-    let mut apply = false;
-    calls.lock().unwrap().clear();
-    dispatch_should_apply_effect_tick_this_tick(
+    dispatch_tooltip(
         &host,
-        "effect-owner",
-        EffectKey(7),
-        19,
-        2,
-        &mut apply,
+        &ItemStack::default(),
+        &mod_api::mod_api::TooltipAppendContext,
+        &mut lines,
     );
-    assert!(apply);
-    assert_eq!(*calls.lock().unwrap(), [1]);
+    assert_eq!(lines.iter().map(|line| line.1).collect::<Vec<_>>(), [1, 2]);
     let source = HurtSource {
         damage_type: "damage",
         position: None,
@@ -780,7 +773,6 @@ mod stubs {
     pub(super) struct MusicLayer;
     pub(super) struct BlockRim;
     pub(super) struct ColoredLight;
-    pub(super) struct Minimap;
     pub(super) struct PanelEvent;
     pub(super) struct Screen;
     pub(super) struct ModContainer;

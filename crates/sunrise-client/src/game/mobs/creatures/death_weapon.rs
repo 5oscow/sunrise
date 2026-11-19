@@ -231,8 +231,8 @@ impl Game<'_> {
                 Some(Who::Mob(id)) => self
                     .mobs
                     .iter()
-                    .find(|o| o.id == id)
-                    .map(|o| drops::loot_entity(o, None))
+                    .any(|mob| mob.id == id)
+                    .then(|| self.target_loot_entity(crate::game::commands::Target::Mob(id)))
                     // A charged creeper's blast kills after the creeper left the list.
                     .or_else(|| {
                         self.combat
@@ -277,6 +277,12 @@ impl Game<'_> {
             .map(|o| LootEntity::new(&o.kind.id));
         let kind = crate::game::native_hooks::mob_kind(m);
         let death = drops::Death {
+            this_nbt: if loot.copies_entity_nbt() {
+                self.command_target_nbt(crate::game::commands::Target::Mob(m.id))
+                    .map(std::sync::Arc::new)
+            } else {
+                None
+            },
             loot: &loot,
             damage,
             player: player_uuid.is_some().then(player),

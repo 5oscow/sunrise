@@ -281,6 +281,7 @@ struct ItemRules<'a>(
     &'a sunrise_client::enchant::Enchantments,
     Option<&'a dyn sunrise_client::menu::SlotRules>,
     Option<&'a sunrise_client::menu::StackedOutcome>,
+    Vec<sunrise_client::containers::ModContainerInsertRule>,
 );
 impl Rules for ItemRules<'_> {
     fn items(&self) -> &sunrise_client::items::Items {
@@ -297,6 +298,18 @@ impl Rules for ItemRules<'_> {
     }
     fn stacked(&self) -> Option<&sunrise_client::menu::StackedOutcome> {
         self.3
+    }
+    fn mod_container_insert_rule(
+        &self,
+        slot: usize,
+        current: Option<&sunrise_client::items::ItemStack>,
+        offered: &sunrise_client::items::ItemStack,
+    ) -> bool {
+        sunrise_client::containers::mod_container_insert_allowed(
+            self.4.get(slot).copied().unwrap_or_default(),
+            current,
+            offered,
+        )
     }
 }
 
@@ -344,20 +357,19 @@ thread_local! {
 /// The hub's current bodies, across dimensions. A borrowed ancestor's
 /// live body takes precedence over this saved state until its turn returns.
 fn building_players(host: &LanHost) -> HubBodies {
-    let guests: Vec<_> = host.hub.guests.simulation_iter().collect();
     let kept = BUILDING_CACHE.with(|c| {
         c.borrow()
             .as_ref()
             .filter(|list| {
-                list.len() == guests.len()
-                    && list
-                        .iter()
-                        .zip(&guests)
-                        .all(|(p, g)| p.get().conn == Some(g.conn))
+                list.iter().map(|p| p.get().conn).eq(host
+                    .hub
+                    .guests
+                    .simulation_iter()
+                    .map(|g| Some(g.conn)))
             })
             .cloned()
     });
-    kept.unwrap_or_else(|| shared(guests.into_iter().map(building_player)))
+    kept.unwrap_or_else(|| shared(host.hub.guests.simulation_iter().map(building_player)))
 }
 
 /// Builds the hub's bodies once for the turns to come (`Some`), or drops them.
@@ -3312,6 +3324,10 @@ mod crack_feedback_tests;
 #[cfg(test)]
 #[path = "tests/menu_still_valid_tests.rs"]
 mod menu_still_valid_tests;
+
+#[cfg(test)]
+#[path = "tests/player_entity_tick_tests.rs"]
+mod player_entity_tick_tests;
 
 #[cfg(test)]
 #[path = "tests/projectile_lifecycle_tests.rs"]

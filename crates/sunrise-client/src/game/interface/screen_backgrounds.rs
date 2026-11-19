@@ -235,12 +235,21 @@ impl Game<'_> {
 impl Game<'_> {
     /// Dispatch at the boundary reported by the screen that owns the drawing.
     /// No view or layout is built unless this particular phase has a listener.
+    /// A mod's own screen: all of it is what the mods draw in its phases.
+    pub(super) fn draw_mod_screen(&self, batch: &mut HudBatch) {
+        use sunrise_client::screen_draw::RenderPhase;
+        self.draw_screen_phase(batch, RenderPhase::Background);
+        self.draw_screen_phase(batch, RenderPhase::Foreground);
+    }
     pub(super) fn draw_screen_phase(
         &self,
         batch: &mut HudBatch,
         phase: sunrise_client::screen_draw::RenderPhase,
     ) {
         use sunrise_client::screen_draw::RenderPhase;
+        if matches!(phase, RenderPhase::Foreground) {
+            self.draw_container_hooks(batch);
+        }
         let hook = match phase {
             RenderPhase::Background => mod_api::HookId::ScreenRenderBackground,
             RenderPhase::Foreground => mod_api::HookId::ScreenRenderForeground,
