@@ -159,7 +159,9 @@ window around the expected age.
 
 Each Host method says in which load phases it may be called (`#[access(...)]`): outside the running world only
 the settings read, the registry and metadata reads, the client setup reads and the published resource queries are
-open, and a world read or write is open only once the world runs. A native mod that calls one in a phase that does
+open, and a world read or write is open only once the world runs. Two phases open a little more: Config adds
+the mod's own config files, and Setup adds the client setup calls, some of which have
+presentation effects (a sound, a narrator line, a HUD mode) that stand even if the hook is refused afterwards. A native mod that calls one in a phase that does
 not admit it is **refused, not crashed**, as a wasm mod's call is:
 
 - The call ends the mod's hook call (it unwinds out of the listener; the game makes no panic report). The game logs
