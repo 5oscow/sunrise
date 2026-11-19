@@ -2,7 +2,9 @@
 //! its names in: fastutil's `Object2ObjectOpenHashMap<String, _>` (open
 //! addressing with linear probing, backward-shift deletion and rehashing at
 //! the load factor) and `java.util.HashSet<String>` (chained buckets split on
-//! resize). Commands list, and `scoreboard.dat` saves, in these orders.
+//! resize). `/team list` walks team names in fastutil iterator order;
+//! `scoreboard.dat` saves them in fastutil's forward stream order and saves
+//! team members in Java HashSet order. `/team list <team>` sorts the members.
 
 use sunrise_core::{java_hash_set::JavaHashSet, random::java_string_hash};
 
