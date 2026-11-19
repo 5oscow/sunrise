@@ -818,6 +818,7 @@ impl Sprites {
             png_height,
             width,
             height,
+            side,
             crate::hud::MAX_IMAGE_BYTES,
         )?;
         let texture = texture_section(metadata.as_ref());
@@ -1019,36 +1020,43 @@ fn pbr_map(
         map_height,
         w,
         h,
+        output_side,
         crate::hud::MAX_IMAGE_BYTES,
     )
-    .ok()?
-    .iter()
-    .map(|frame| resample(frame, side, output_side))
-    .collect();
+    .ok()?;
     Some((output_side, frames))
 }
-/// Each `width` x `height` frame of a `png_width` x `png_height` image, row by
-/// row, nearest-resampled to a square of its longer side. A narrow frame
-/// widens, so all of the squares together are held to `budget` bytes before
-/// any is made.
+/// Each `width` x `height` frame of a `png_width` x `png_height` image, in
+/// row-major order, sampled to `output_side`. The table and all its pixels
+/// must fit `budget` before any frame is made.
 fn square_frames(
     pixels: &[u8],
     png_width: u32,
     png_height: u32,
     width: u32,
     height: u32,
+    output_side: u32,
     budget: usize,
 ) -> Result<Vec<Vec<u8>>> {
     let columns = png_width / width;
     let count = columns * (png_height / height);
-    let side = width.max(height) as usize;
-    crate::hud::image_bytes(&[side, side, 4, count as usize], budget)?;
-    (0..count)
-        .map(|index| {
-            let (x, y) = (index % columns * width, index / columns * height);
-            crate::hud::strip_frame(pixels, png_width, x, y, width, height, budget)
-        })
-        .collect()
+    let side = output_side as usize;
+    let pixel_bytes = crate::hud::image_bytes(&[side, side, 4, count as usize], budget)?;
+    let mut frames = crate::hud::image_buffer(&[count as usize], budget - pixel_bytes)?;
+    for index in 0..count {
+        let (x, y) = (index % columns * width, index / columns * height);
+        frames.push(crate::hud::strip_frame(
+            pixels,
+            png_width,
+            x,
+            y,
+            width,
+            height,
+            output_side,
+            budget,
+        )?);
+    }
+    Ok(frames)
 }
 /// SpriteContents: the `.mcmeta` `texture` section (TextureMetadataSection's
 /// mipmap strategy and alpha cutoff bias).
@@ -1125,11 +1133,22 @@ mod tests {
     #[test]
     fn square_frames_of_a_narrow_strip_are_held_to_the_budget() {
         let pixels = vec![5; 64 * 2 * 4];
-        let frames = |budget| square_frames(&pixels, 64, 2, 64, 1, budget);
-        let made = frames(2 * 64 * 64 * 4).unwrap();
+        let frames = |budget| square_frames(&pixels, 64, 2, 64, 1, 64, budget);
+        let budget = 2 * (64 * 64 * 4 + size_of::<Vec<u8>>());
+        let made = frames(budget).unwrap();
         assert_eq!(made.len(), 2);
         assert!(made.iter().all(|frame| frame.len() == 64 * 64 * 4));
-        assert!(frames(2 * 64 * 64 * 4 - 1).is_err_and(|e| e.is::<crate::hud::OverSizeLimit>()));
+        assert!(frames(budget - 1).is_err_and(|e| e.is::<crate::hud::OverSizeLimit>()));
+    }
+
+    #[test]
+    fn shrinking_rectangular_frames_keeps_the_squared_frames_sampling() {
+        let pixels: Vec<u8> = (0..20).flat_map(|n| [n, 0, 0, 255]).collect();
+        let frames = square_frames(&pixels, 5, 4, 5, 4, 2, 16 + size_of::<Vec<u8>>()).unwrap();
+        assert_eq!(
+            frames,
+            [vec![0, 0, 0, 255, 2, 0, 0, 255, 5, 0, 0, 255, 7, 0, 0, 255]]
+        );
     }
     #[test]
     fn archive_sprites_keep_deferred_reads_and_cache_on_their_reload_snapshot() -> Result<()> {

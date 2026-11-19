@@ -445,9 +445,8 @@ pub(crate) fn decode_resource(source: &ResourceSource, name: &str) -> Result<(u3
 }
 /// A packed atlas image: sprite name, size and RGBA pixels.
 type PackedImage = (String, u32, u32, Vec<u8>);
-/// A frame of an animated strip at `x, y`, nearest-resampled to the longer
-/// side of the frame: array layers are square, as `Sprites::load` keeps them
-/// for the world's sprite arrays. A narrow frame widens, so the square is held
+/// A frame at `x, y`, sampled as if squared to its longer side and then resized
+/// to `output_side`, without making the intermediate square. The output is held
 /// to `budget` bytes before it is made.
 pub(crate) fn strip_frame(
     pixels: &[u8],
@@ -456,14 +455,23 @@ pub(crate) fn strip_frame(
     y: u32,
     w: u32,
     h: u32,
+    output_side: u32,
     budget: usize,
 ) -> Result<Vec<u8>> {
     let side = w.max(h);
-    let mut out = image_buffer(&[side as usize, side as usize, 4], budget)?;
-    for row in 0..side {
-        let source_row = y + row * h / side;
-        for column in 0..side {
-            let at = ((source_row * stride + x + column * w / side) * 4) as usize;
+    let mut out = image_buffer(&[output_side as usize, output_side as usize, 4], budget)?;
+    // Keep the two nearest-neighbour roundings when shrinking a rectangular frame.
+    let index = |i| {
+        if output_side == side {
+            i
+        } else {
+            i * side / output_side
+        }
+    };
+    for row in 0..output_side {
+        let source_row = y + index(row) * h / side;
+        for column in 0..output_side {
+            let at = ((source_row * stride + x + index(column) * w / side) * 4) as usize;
             out.extend_from_slice(&pixels[at..at + 4]);
         }
     }
@@ -489,7 +497,7 @@ fn first_frame(
             if fw > 0 && fh > 0 && w % fw == 0 && h % fh == 0 && (fw, fh) != (w, h) =>
         {
             let side = fw.max(fh);
-            let frame = strip_frame(&pixels, w, 0, 0, fw, fh, MAX_IMAGE_BYTES)?;
+            let frame = strip_frame(&pixels, w, 0, 0, fw, fh, side, MAX_IMAGE_BYTES)?;
             Ok((side, side, frame))
         }
         _ => Ok((w, h, pixels)),
@@ -3660,10 +3668,10 @@ mod tests {
     fn a_strip_frame_made_square_is_held_to_the_budget() {
         let pixels = vec![9; 64 * 2 * 4];
         let over = |w, budget| {
-            strip_frame(&pixels, 64, 0, 0, w, 1, budget).is_err_and(|e| e.is::<OverSizeLimit>())
+            strip_frame(&pixels, 64, 0, 0, w, 1, w, budget).is_err_and(|e| e.is::<OverSizeLimit>())
         };
         assert_eq!(
-            strip_frame(&pixels, 64, 0, 0, 64, 1, 64 * 64 * 4)
+            strip_frame(&pixels, 64, 0, 0, 64, 1, 64, 64 * 64 * 4)
                 .unwrap()
                 .len(),
             64 * 64 * 4
