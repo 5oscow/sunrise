@@ -424,8 +424,12 @@ fn run_checked(
             return Ok(());
         }
         let tail: Vec<String> = tail.into();
-        let error =
-            diagnostics::with_internals_hint(failure(what, &status.to_string(), &errors, &tail));
+        let error = system_libraries(diagnostics::with_internals_hint(failure(
+            what,
+            &status.to_string(),
+            &errors,
+            &tail,
+        )));
         Err(Ran {
             error: match blocked {
                 true => with_app_control(error),
@@ -483,6 +487,14 @@ fn app_control(error: String) -> String {
 
 fn with_app_control(error: String) -> String {
     format!("{}\n\n{error}", rust::smart_app_control())
+}
+
+/// `error` led by what to install when its link could not find udev or ALSA.
+fn system_libraries(error: String) -> String {
+    match rust::missing_system_libraries(&error) {
+        true => format!("{}\n\n{error}", rust::system_libraries()),
+        false => error,
+    }
 }
 
 /// [`run`]'s error: the `errors` lines not already among the last ones (`tail`), then those.
@@ -1041,6 +1053,30 @@ mod tests {
         // An error still among the last lines isn't said twice.
         let e = failure("horizon-mixins", "exit status: 1", &errors, &errors);
         assert!(e.contains("The end of its output") && e.matches("alsa-sys").count() == 1);
+    }
+
+    #[test]
+    fn a_link_missing_udev_or_alsa_leads_with_what_to_install() {
+        // rustc's output linking a native mod's patch library in a shell without either library
+        // (Rust 1.99.1 with rust-lld, 2026-11-19).
+        let errors = ["error: linking with `cc` failed: exit status: 1".to_owned()];
+        let tail: Vec<String> = [
+            "  = note: rust-lld: error: unable to find library -ludev",
+            "          rust-lld: error: unable to find library -lasound",
+            "          collect2: error: ld returned 1 exit status",
+            "error: could not compile `sunrise_patch` (lib) due to 1 previous error",
+        ]
+        .map(str::to_owned)
+        .into();
+        let plain = failure("Compiling the mod", "exit status: 101", &errors, &tail);
+        let e = system_libraries(plain.clone());
+        assert_eq!(e, format!("{}\n\n{plain}", rust::system_libraries()));
+        // GNU ld's wording, and a failure that names neither library.
+        assert!(rust::missing_system_libraries(
+            "/usr/bin/ld: cannot find -lasound: No such file or directory"
+        ));
+        let other = failure("Compiling the mod", "exit status: 101", &errors, &errors);
+        assert_eq!(system_libraries(other.clone()), other);
     }
 
     /// Smart App Control refusing a build script (#5911): cargo names the crate, Windows' reason
