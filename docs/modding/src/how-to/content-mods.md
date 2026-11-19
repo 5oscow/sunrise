@@ -34,7 +34,8 @@ cargo sunrise-mod check target/sunrise-mod/my_mod.smod   # the registry's checks
   ([writing hooks](../start/writing-hooks.md)). Any other `--template` is refused.
 - `build` packs the checked project into `target/sunrise-mod/<id>.smod`: `sunrise-mod.toml`, `assets/`,
   `data/`, optional `icon.png` and, for code, the root Cargo project. It reads content with the game's own package
-  rules and runs the reference checks of `check` below. Once the build reaches output cleanup, it removes the
+  rules and runs the reference checks of `check` below. If `target/` or `target/sunrise-mod/` is a symlink, the build
+  refuses it without touching the previous package. Otherwise, once the build reaches output cleanup, it removes the
   previous `<id>.smod` before running the reference checks. Earlier failures, such as a manifest or SDK error,
   can leave the previous package in place. Without `--wasm`, the build does not compile code. Native code requires
   both `Cargo.toml` and `[native]`; inconsistent declarations and a manifest without capability `registries` are refused.
