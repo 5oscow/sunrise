@@ -358,6 +358,15 @@ fn sent_actions(
     game: &Game<'_>,
     server: &mut sunrise_protocol::connection::Connection,
 ) -> Vec<(&'static str, i32)> {
+    let mut actions = sent_packets(game, server);
+    actions.retain(|(kind, _)| *kind != "swing");
+    actions
+}
+
+fn sent_packets(
+    game: &Game<'_>,
+    server: &mut sunrise_protocol::connection::Connection,
+) -> Vec<(&'static str, i32)> {
     use sunrise_protocol::packets::{configuration::Ping, play::Serverbound as S};
     // An attack can already have queued Punch. Fence with a distinct packet so
     // that attack's swing cannot terminate observation before the following use.
@@ -367,7 +376,8 @@ fn sent_actions(
         let (id, payload) = server.recv().unwrap();
         match S::decode(id, &payload).unwrap() {
             S::Attack(hit) => actions.push(("attack", hit.id)),
-            S::Interact(hit) => actions.push(("interact", hit.id)),
+            S::Interact(hit) if hit.hand == 0 => actions.push(("interact", hit.id)),
+            S::Interact(hit) => actions.push(("interact_off", hit.id)),
             S::UseItem(_) => actions.push(("item", 0)),
             S::UseItemOn(hit) => actions.push(("block", hit.pos[0])),
             S::Punch(_) => actions.push(("swing", 0)),
@@ -591,6 +601,21 @@ fn a_click_on_a_cushion_at_a_non_finite_position_is_refused() {
                 .any(|(kind, _)| *kind == "interact"),
             "a cushion without a box is not interacted with"
         );
+    });
+}
+
+/// `Minecraft.startUseItem` on a free cushion in the crosshair: the click is
+/// the cushion's (`Cushion.interact` answers CONSUME on a client), so exactly
+/// one main-hand Interact goes out and nothing reaches the block behind it, the
+/// held item or the arm.
+#[test]
+#[ignore = "daily"]
+fn a_free_cushion_takes_the_click_and_sends_one_interact() {
+    with_picked_cushion(|game, server, target| {
+        game.refresh_client_pick(1.0);
+        assert_eq!(game.crosshair_target(), Some(target));
+        game.remote_use(mod_api::InteractionAttempt::Press);
+        assert_eq!(sent_packets(game, server), [("interact", 31)]);
     });
 }
 
