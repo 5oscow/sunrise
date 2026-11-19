@@ -25,17 +25,19 @@ def nested_workspaces(root=ROOT):
 
 
 def main(root=ROOT):
-    stale = []
+    failed = False
     for manifest in nested_workspaces(root):
         result = subprocess.run(["cargo", "update", "--workspace", "--locked", "--quiet", "--manifest-path", str(manifest)],
                                 cwd=root, capture_output=True, text=True)
         if result.returncode:
-            stale.append(manifest.relative_to(root))
+            failed = True
+            folder = manifest.parent.relative_to(root)
+            # Cargo's own words say why: a stale lock, or a manifest or network error.
             print(result.stderr.strip(), file=sys.stderr)
-    for manifest in stale:
-        print(f"::error file={manifest.parent / 'Cargo.lock'}::{manifest.parent}/Cargo.lock no longer matches its manifests;"
-              f" run: cargo update --workspace --manifest-path {manifest}")
-    return 1 if stale else 0
+            print(f"::error file={folder / 'Cargo.lock'}::{folder}/Cargo.lock could not be validated (cargo exited"
+                  f" {result.returncode}). If the lock needs updating, run: cargo update --workspace --manifest-path"
+                  f" {folder / 'Cargo.toml'}")
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

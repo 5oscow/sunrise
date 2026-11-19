@@ -5,14 +5,11 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
-import sys
 import tempfile
 import unittest
 from unittest import mock
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "tools/ci"))
-import check_nested_locks  # noqa: E402
+from tools.ci import check_nested_locks
 
 
 def package(folder, name, extra=""):
@@ -56,7 +53,7 @@ class NestedLockTests(unittest.TestCase):
         lock = (self.server / "Cargo.lock").read_text()
         status, output = self.run_check()
         self.assertEqual(status, 1)
-        self.assertIn("crates/server/Cargo.lock no longer matches", output)
+        self.assertIn("::error file=crates/server/Cargo.lock::", output)
         self.assertIn("cargo update --workspace --manifest-path crates/server/Cargo.toml", output)
         self.assertNotIn("tools/copied", output)
         self.assertEqual((self.server / "Cargo.lock").read_text(), lock)
