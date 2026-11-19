@@ -351,11 +351,18 @@ impl Settings {
         let (extras_text, keep_extras) = path
             .parent()
             .map_or((String::new(), false), crate::extras::Extras::read_text);
+        let graphics_text = path.parent().and_then(|dir| {
+            sunrise_hooks::settings::engine::read(&dir.join(crate::graphics::FILE))
+                .ok()
+                .flatten()
+                .map(|read| read.text)
+        });
         // The settings stores of the crates above the engine: their lines of `sunrise-extras.txt`
         // and `sunrise-graphics.txt`, or of their own files (docs/layers.md, "Platform
         // registries"). First, as the graphics settings below may be saved again with them.
         sunrise_hooks::settings::engine::load(&mut |file| match path.parent() {
             _ if file == crate::extras::FILE => Some(extras_text.clone()),
+            _ if file == crate::graphics::FILE => graphics_text.clone(),
             Some(dir) => sunrise_hooks::settings::engine::read(&dir.join(file))
                 .ok()
                 .flatten()
@@ -364,7 +371,12 @@ impl Settings {
         });
         let mut sunrise = path
             .parent()
-            .map(crate::graphics::Graphics::load)
+            .map(|dir| {
+                crate::graphics::Graphics::load_text(
+                    dir,
+                    graphics_text.as_deref().unwrap_or_default(),
+                )
+            })
             .unwrap_or_default();
         crate::mipmap::set_dither_cutouts(sunrise.dither_cutout_mips);
         if let Some(dir) = path.parent() {

@@ -794,6 +794,8 @@ impl Graphics {
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Graphics {
+    /// Records no engine setting recognized; a registered store may replace them on save.
+    pub(crate) unclaimed: Vec<(String, String)>,
     pub preset: Preset,
     /// Distant surface terrain range, in chunks; 0 disables LODs.
     pub lod_distance: u32,
@@ -929,6 +931,7 @@ pub struct Graphics {
 impl Default for Graphics {
     fn default() -> Self {
         Self {
+            unclaimed: Vec::new(),
             preset: Preset::Custom,
             lod_distance: 0,
             far_detail: FarDetail::Full,
@@ -990,9 +993,13 @@ fn bool_text(v: bool) -> &'static str {
 }
 impl Graphics {
     pub fn load(dir: &Path) -> Self {
-        let mut g: Self = fs::read_to_string(dir.join(FILE))
-            .map(|t| Self::parse(&t))
-            .unwrap_or_default();
+        let text = fs::read_to_string(dir.join(FILE)).unwrap_or_default();
+        Self::load_text(dir, &text)
+    }
+
+    /// Load the shared settings text already read for the registered stores.
+    pub(super) fn load_text(dir: &Path, text: &str) -> Self {
+        let mut g = Self::parse(text);
         g.blue_map.servers = match fs::read_to_string(dir.join(crate::bluemap::SERVERS_FILE)) {
             Ok(text) => crate::bluemap::Settings::parse_servers(&text),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
@@ -1158,7 +1165,7 @@ impl Graphics {
                 "hdrSmoothGradients" => g.hdr_smooth_gradients = flag(g.hdr_smooth_gradients),
                 "graphicsApi" => g.api = GraphicsApi::from_name(value).unwrap_or_default(),
                 "pickedShaderPack" => g.shader_pack = value.to_owned(),
-                _ => {}
+                key => g.unclaimed.push((key.to_owned(), value.to_owned())),
             }
         }
         // The share was 25 to 100% of Paper White. 100% is Auto, and so is any share of an
@@ -1237,8 +1244,20 @@ impl Graphics {
     }
     /// The settings stores of this file follow these lines (`sunrise_hooks::settings`).
     pub fn save(&self, dir: &Path) {
+        use sunrise_hooks::settings::engine;
         let mut text = self.serialize();
-        sunrise_hooks::settings::engine::append(FILE, &mut text);
+        let mut stores = String::new();
+        engine::append(FILE, &mut stores);
+        let written = engine::keys(&stores);
+        for (key, value) in &self.unclaimed {
+            if !written.contains(&key.as_str()) {
+                text.push_str(key);
+                text.push(':');
+                text.push_str(value);
+                text.push('\n');
+            }
+        }
+        text.push_str(&stores);
         let _ = fs::write(dir.join(FILE), text);
     }
     /// Paper white, in nits: the player's, or on Auto the desktop's SDR white as the
@@ -1442,6 +1461,25 @@ mod tests {
         dir
     }
 
+    #[test]
+    fn saving_without_a_store_preserves_its_setting() {
+        let dir = scratch("graphics-unclaimed");
+        fs::write(dir.join(FILE), "overlay:graph\n").unwrap();
+        let mut graphics = Graphics::load(&dir);
+        graphics.lod_distance = 12;
+        graphics.save(&dir);
+        let saved = fs::read_to_string(dir.join(FILE)).unwrap();
+        assert_eq!(Graphics::parse(&saved).lod_distance, 12);
+        assert_eq!(
+            saved
+                .lines()
+                .filter(|line| *line == "overlay:graph")
+                .count(),
+            1
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
     /// A start that finds the marker (HDR output took the last one down) keeps the mode the
     /// player chose and saves the driver the marker names; HDR Off saves nothing.
     #[test]
@@ -1513,6 +1551,7 @@ mod tests {
     #[test]
     fn round_trips() {
         let g = Graphics {
+            unclaimed: Vec::new(),
             preset: Preset::Balanced,
             lod_distance: 256,
             far_detail: FarDetail::Reduced,

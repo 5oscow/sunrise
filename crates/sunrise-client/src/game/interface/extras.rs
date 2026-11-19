@@ -9,8 +9,8 @@ mod sorting;
 use super::{Game, Screen};
 use std::time::Duration;
 use sunrise_client::{
-    extras::{Cps, FpsCounter, fov_target},
-    extras_hud::Corners,
+    extras::{Corner, Cps, FpsCounter, fov_target},
+    extras_hud::{self, Corners},
     hud::HudBatch,
 };
 use winit::event::MouseButton;

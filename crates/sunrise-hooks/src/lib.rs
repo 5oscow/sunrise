@@ -87,7 +87,7 @@ pub trait Hooks: Sync {
         None
     }
 
-    /// Once a frame the window rendered, after it was shown: how long it took
+    /// Once a rendered frame is handed off for submission: how long it took
     /// ([`perf::FrameTimes`]), with the [`seat`] of the `Game` that drew it.
     fn frame_timed(&self, _times: &perf::FrameTimes) {}
 

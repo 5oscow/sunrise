@@ -29,6 +29,7 @@ const PARTS: &[&dyn Hooks] = &[
     #[cfg(feature = "sunrise-extras")]
     &sunrise_reconnect::HOOKS,
     // Frames per second and frame times over the game.
+    #[cfg(feature = "sunrise-extras")]
     &sunrise_perf_overlay::HOOKS,
 ];
 /// The game started by hand without its prepared files: start it from the launcher, downloaded
@@ -104,6 +105,7 @@ const STORES: &[&dyn settings::Store] = &[
     #[cfg(feature = "sunrise-extras")]
     &sunrise_reconnect::SETTING,
     &sunrise_discord::SETTING,
+    #[cfg(feature = "sunrise-extras")]
     &sunrise_perf_overlay::SETTING,
 ];
 /// Their rows and pages in the options screens, in order: auto-reconnect's row above Discord's.
@@ -111,10 +113,14 @@ const PAGES: &[&dyn pages::Page] = &[
     #[cfg(feature = "sunrise-extras")]
     &sunrise_reconnect::SECTION,
     &sunrise_discord::SECTION,
+    #[cfg(feature = "sunrise-extras")]
     &sunrise_perf_overlay::SECTION,
 ];
 /// What they draw on the HUD.
-const LAYERS: [&dyn hud::Layer; 1] = [&sunrise_perf_overlay::LAYER];
+const LAYERS: &[&dyn hud::Layer] = &[
+    #[cfg(feature = "sunrise-extras")]
+    &sunrise_perf_overlay::LAYER,
+];
 
 /// The text of Sunrise's own rows, loaded with the game's.
 static LANG: &lang::Files = &[("en_us", include_str!("../assets/lang/en_us.json"))];
@@ -129,7 +135,7 @@ pub fn register() {
     #[cfg(feature = "sunrise-extras")]
     let late = late.chain(std::iter::once(lang::register(sunrise_reconnect::LANG)));
     let late = late.chain(PAGES.iter().copied().map(pages::register));
-    for result in late.chain(LAYERS.into_iter().map(hud::register)) {
+    for result in late.chain(LAYERS.iter().copied().map(hud::register)) {
         if let Err(e) = result {
             // The executable registered after starting the game: a bug, not a player's problem.
             log::warn!("Sunrise: an in-game part did not register: {e}");

@@ -60,7 +60,7 @@ impl Page {
             Page::Quality => "The sky and weather, lighting, textures and the image.",
             Page::Performance => "Chunk loading, culling and power use.",
             Page::Shaders => "Shader packs, Sunrise's and shaders/ folder ones, and their options.",
-            Page::Advanced => "How frames reach the screen, and the performance overlay.",
+            Page::Advanced => "How frames reach the screen.",
             Page::Hdr => "Brighter-than-white output on an HDR display.",
         }
     }

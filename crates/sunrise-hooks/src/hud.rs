@@ -27,7 +27,7 @@ pub trait Canvas {
     /// A filled rectangle.
     fn fill(&mut self, x: f32, y: f32, w: f32, h: f32, argb: u32);
     /// Where a `w` × `h` box goes in `corner`: below (or above) what the corner holds already,
-    /// the PvP widgets and mods' boxes. `None` while the corner is hidden (the debug
+    /// then any earlier layer in that corner. `None` while the corner is hidden (the debug
     /// screen covers the top left): draw nothing there then.
     fn place(&mut self, corner: Corner, w: f32, h: f32) -> Option<(f32, f32)>;
 }
@@ -36,11 +36,11 @@ pub trait Canvas {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Stage {
     /// With the HUD, every frame it is drawn (not with F1, nor under a screen that hides it),
-    /// stacked in the corners with the extras.
+    /// stacked around occupied corners.
     #[default]
     Hud,
-    /// Last, over everything: after the debug screen, over menus, toasts and the title screen,
-    /// F1 included (vanilla's `Gui` draws the debug screen last). Nothing is stacked there:
+    /// After the debug screen and before foreground GUI overlays such as input feedback. Drawn
+    /// over menus, toasts and the title screen, F1 included. Nothing is stacked there:
     /// [`Canvas::place`] is `None`.
     Top,
 }
@@ -56,7 +56,7 @@ pub trait Layer: Sync {
 
 static LAYERS: Registry<dyn Layer> = Registry::new();
 
-/// Adds `layer` to the HUD, above the layers registered before it. Before the game starts, as
+/// Adds `layer` to the HUD, after the layers registered before it in the same stage. Before the game starts, as
 /// [`crate::register`].
 pub fn register(layer: &'static dyn Layer) -> Result<(), TooLate> {
     LAYERS.register(layer)
