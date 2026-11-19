@@ -77,20 +77,11 @@ impl Game<'_> {
             .own_attribute("minecraft:attack_knockback")
             .map_or(0.0, |v| v as f32);
         let sprinting = self.player.as_ref().is_some_and(|p| p.sprinting);
-        if !sunrise_client::attack_strength::attacker_slows_after_hit(
+        if sunrise_client::attack_strength::attacker_slows_after_hit(
             damage, knockback, strength, sprinting,
         ) {
-            return;
+            self.attacker_slowdown();
         }
-        if let Some(p) = self.player.as_mut() {
-            let slowdown = sunrise_client::attack_strength::ATTACKER_SLOWDOWN;
-            p.velocity = Vec3::new(
-                p.velocity.x * slowdown,
-                p.velocity.y,
-                p.velocity.z * slowdown,
-            );
-        }
-        self.stop_sprint_after_extra_knockback();
     }
     /// A hit on a boat, minecart, End crystal or shulker bullet: their
     /// `hurtClient` is true (`VehicleEntity`, `EndCrystal` for any source but
@@ -105,39 +96,94 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use crate::game::boats::Boat;
+    use crate::game::dragon::Crystal;
+    use crate::game::minecarts::{CartKind, Minecart};
     use crate::game::native_entity_refs::tests::with_client_game;
     use crate::game::native_hotbar_slot::hotbar_slot_tests::{logged_in, sent};
     use std::sync::Arc;
+    use sunrise_client::projectiles::{Projectile, ProjectileKind};
     use sunrise_core::geometry::Vec3;
     use sunrise_protocol::packets::play::Serverbound as S;
 
     #[test]
     #[ignore = "daily"]
-    fn a_sprint_hit_on_a_boat_slows_the_attacker_and_stops_its_sprint() {
+    fn a_sprint_hit_on_a_boat_minecart_crystal_or_bullet_slows_the_attacker_and_stops_its_sprint() {
+        // The resource loader sets process-wide tables (the cauldron interactions): own process.
+        crate::game::in_own_process(
+            "game::remote::attack_target::tests::a_sprint_hit_on_a_boat_minecart_crystal_or_bullet_slows_the_attacker_and_stops_its_sprint",
+            sprint_hits_isolated,
+        );
+    }
+
+    /// Each target, sprinting at full strength (knockback 0.5): the horizontal motion times 0.6,
+    /// the vertical kept, the sprint stopped, and STOP_SPRINTING after the Attack on the wire.
+    /// Walking, the same hit on a boat has no knockback and changes nothing.
+    fn sprint_hits_isolated() {
         with_client_game(|game| {
             let mut reader = logged_in(game);
-            game.boats.push(Boat::new(
-                101,
-                Arc::from("oak"),
-                Vec3::new(0.5, 65.0, 2.5),
-                0.0,
-            ));
-            // Full strength (getAttackStrengthScale above 0.9) while sprinting:
-            // Player.attack's knockback is 0.5, and VehicleEntity.hurtClient is true.
-            game.hand_strength.ticker = 100;
-            let p = game.player.as_mut().unwrap();
-            let _ = p.set_sprinting(true);
-            p.velocity = Vec3::new(0.0, 0.0, 0.25);
-            assert!(game.remote_attack_entity(101, 2.0));
-            let p = game.player.as_ref().unwrap();
-            assert!(!p.sprinting, "causeExtraKnockback stops the sprint");
-            assert_eq!(p.velocity, Vec3::new(0.0, 0.0, 0.25 * 0.6));
-            assert!(
-                sent(&mut reader)
+            let at = Vec3::new(0.5, 65.0, 2.5);
+            game.boats.push(Boat::new(101, Arc::from("oak"), at, 0.0));
+            game.carts.push(Minecart::new(102, CartKind::Rideable, at));
+            game.crystals.push(Crystal {
+                attachment_lifetime: Default::default(),
+                join: Default::default(),
+                id: 103,
+                position: at,
+                show_bottom: false,
+                time: 0,
+                beam: None,
+                invulnerable: false,
+                fall: (false, 0.0),
+            });
+            let bullet = ProjectileKind::ShulkerBullet {
+                target: None,
+                dir: None,
+                steps: 0,
+                delta: [0.0; 3],
+                seed: 0,
+            };
+            let mut bullet = Projectile::new(bullet, at, None);
+            bullet.id = 104;
+            game.creatures.projectiles.push(bullet);
+            let start = Vec3::new(0.1, -0.08, 0.25);
+            for (id, sprinting) in [
+                (101, true),
+                (102, true),
+                (103, true),
+                (104, true),
+                (101, false),
+            ] {
+                game.hand_strength.ticker = 100;
+                let p = game.player.as_mut().unwrap();
+                let _ = p.set_sprinting(sprinting);
+                p.velocity = start;
+                // The server has heard of the sprint.
+                game.remote_send_state(0);
+                sent(&mut reader);
+                assert!(game.remote_attack_entity(id, 2.0), "entity {id}");
+                game.remote_send_state(0);
+                let packets = sent(&mut reader);
+                let p = game.player.as_ref().unwrap();
+                let attack = packets
                     .iter()
-                    .any(|packet| matches!(packet, S::Attack(a) if a.id == 101)),
-                "the attack goes out"
-            );
+                    .position(|q| matches!(q, S::Attack(a) if a.id == id));
+                let stop = packets
+                    .iter()
+                    .position(|q| matches!(q, S::PlayerCommand(c) if c.action == 2));
+                assert!(attack.is_some(), "entity {id}: {packets:?}");
+                if sprinting {
+                    assert!(!p.sprinting, "entity {id}");
+                    assert_eq!(
+                        p.velocity,
+                        Vec3::new(0.1 * 0.6, -0.08, 0.25 * 0.6),
+                        "entity {id}"
+                    );
+                    assert!(stop.is_some() && attack < stop, "entity {id}: {packets:?}");
+                } else {
+                    assert_eq!(p.velocity, start, "a walking hit has no knockback");
+                    assert_eq!(stop, None, "{packets:?}");
+                }
+            }
         });
     }
 }
