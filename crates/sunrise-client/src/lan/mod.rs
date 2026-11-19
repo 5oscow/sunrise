@@ -30,7 +30,6 @@ mod effect_meta;
 pub mod entity;
 pub mod equipment_cache;
 pub mod far;
-pub mod forwarding;
 pub mod guest;
 pub mod guest_list;
 pub mod handoff;
@@ -273,9 +272,6 @@ pub struct NetConfig {
     pub gate: Option<LoginGate>,
     /// Online mode: players are authenticated (a LAN world's when its host is signed in).
     pub online: Option<Arc<OnlineMode>>,
-    /// Behind a Velocity proxy: the secret its forwarded player information is signed with. Only an offline
-    /// server (the proxy authenticates) uses it; without it a login is the plain offline one.
-    pub forwarding_secret: Option<Vec<u8>>,
     /// `[transfer]` on: the players a proxy said would arrive
     /// (`arrivals::Transfers`), shared with the hub. A login uses its
     /// expectation up as it starts, once the bans and the whitelist let it in.
@@ -353,7 +349,6 @@ impl NetConfig {
             bypasses_limit: None,
             gate: None,
             online: None,
-            forwarding_secret: None,
             arrivals: None,
             log: None,
             resource_pack: None,

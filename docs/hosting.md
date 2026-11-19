@@ -298,28 +298,6 @@ export folder, set `engine.path` to it, restart, and keep the old folder for man
 not auto-update or rebuild a pinned engine path, and there is no compatibility handshake yet (follow-up #6304).
 Native mods run unsandboxed: only build code you have read and trust.
 
-### Behind a Velocity proxy
-
-A network can put one Velocity proxy in front of several servers: the proxy signs the players in with their
-Microsoft accounts, and the servers behind it trust what it forwards. To run Sunrise as one of them:
-
-1. Set `online_mode = false` in `server.toml` and keep the server's port reachable only from the proxy (bind it
-   to `127.0.0.1` or put it on a private network).
-2. Put the proxy's forwarding secret, the one in Velocity's `forwarding.secret`, into a file `forwarding.secret`
-   in the server folder, and set `player-info-forwarding-mode = "modern"` in `velocity.toml`.
-3. Restart the server. The log says `Velocity player information forwarding is on`.
-
-Players then join with the UUID, name, skin and address the proxy forwards. Anyone who connects without going
-through the proxy is refused, and so is a login signed with another secret. With the file in place but
-`online_mode = true` the file is ignored (with a warning), and an empty file stops the start, because an empty
-secret could be signed by anyone. How the exchange works: [velocity-forwarding.md](velocity-forwarding.md).
-
-Bedrock players that join through Geyser and Floodgate arrive with a Floodgate UUID (`00000000-0000-0000-0009-` and
-the Xbox id), which is never on `whitelist.json`. With `white-list=true`, list that prefix in a file
-`whitelist-bypass.txt` beside server.properties (one UUID prefix per line, `#` comments, at least 8 characters) and
-everyone whose UUID starts with it passes the whitelist. Bans and the player limit still apply. The log says
-`whitelist-bypass.txt: 1 UUID prefix(es) skip the whitelist`.
-
 ## 5. Commands
 
 ```text
