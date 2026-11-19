@@ -210,7 +210,8 @@ pub enum LandingWrite {
 pub use interact::{InteractionResult, PlayerContext, PlayerEffect, UseBranch, hit_slot};
 pub use pistons::{BlockEventData, MovingPiston};
 pub use place::{
-    PlaceContext, PlaceOutcome, PlacementContext, PlacementPreview, ResolvedPlacement,
+    AppliedPlacement, PlaceContext, PlaceOutcome, PlacementContext, PlacementPreview,
+    ResolvedPlacement,
 };
 pub use portal::PortalShape;
 pub use states::{BlockId, PropKey, StateTable};
@@ -782,8 +783,8 @@ pub trait LevelAccess: BlockEntityNeighbors {
     /// faces the player, sits on the clicked face, or comes waterlogged).
     /// `context` is vanilla's `BlockPlaceContext`, `fluid` the fluid in the
     /// position the block would go in. `answer` starts empty: `Some(Some(s))`
-    /// places `s`, a state of the block's own, `Some(None)` refuses the
-    /// placement (vanilla's `null` return: the block goes nowhere and nothing
+    /// selects the valid state `s`, which may be from another block. `Some(None)`
+    /// refuses placement (vanilla's `null` return: the block goes nowhere and nothing
     /// is consumed), and `None` leaves the block's own `getStateForPlacement`
     /// to run. `ticks` is the simulation's own, which a signal read of the level needs
     /// (comparator outputs, moving pistons). `preview` is set when a preview standing in for

@@ -1780,8 +1780,9 @@ still go on each event or registrar.
 
 - `state_for_placement(state, context, fluid, answer)`: the state a block is about to be placed in
   (`Block.getStateForPlacement(BlockPlaceContext)`), `state` the block's own default state. Answer only for your own
-  blocks: `answer` set to `Some(Some(state))` places that state (a state of that block, as vanilla sets properties on its own
-  `defaultBlockState`; another block's is ignored), `Some(None)` refuses the placement (vanilla's `null`:
+  blocks: `Some(Some(state))` selects a registered placement candidate, which may belong to another block.
+  That block's placement-state method is not run; the mod is responsible for its companion cells. Sunrise
+  checks creative-operator permission on a selected game-master block. An unknown state delegates to ordinary placement. `Some(None)` refuses the placement (vanilla's `null`:
   the block goes nowhere and the stack is kept), and left empty the block's own placement runs. `context` is vanilla's
   `BlockPlaceContext`: the clicked face, the placer's rotation, the clicked position, whether the clicked block is
   being replaced and the item in hand. `fluid` is the fluid in the position the block would go in, which a

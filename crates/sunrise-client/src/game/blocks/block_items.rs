@@ -4,14 +4,56 @@
 //! placed item gives its block entity.
 use super::Game;
 use sunrise_client::{
-    Result, block_entity_item, block_entity_nbt, containers::BlockEntity, item_data,
-    items::ItemStack, save,
+    block_entity_item, block_entity_nbt, containers::BlockEntity, item_data, items::ItemStack, save,
 };
 use sunrise_core::nbt::{Compound, JavaString, Tag};
 use sunrise_world::{
-    level::{Behaviours, classes::Class, flags},
-    registry::BlockStateId,
+    level::{Behaviours, classes::Class},
+    registry::{BlockRegistry, BlockStateId},
 };
+
+/// The state to write and the state after the BlockItem's property tag, shared with prediction.
+pub(super) fn item_block_state(
+    registry: &BlockRegistry,
+    mut state: BlockStateId,
+    stack: &ItemStack,
+    game_master: bool,
+) -> (BlockStateId, BlockStateId) {
+    let Some(current) = registry.state(state) else {
+        return (state, state);
+    };
+    let saved = stack.data().and_then(|d| d.other("minecraft:block_state"));
+    let book = game_master
+        && current.name == "minecraft:lectern"
+        && block_entity_item::carries_book(stack);
+    if !book && saved.is_none() {
+        return (state, state);
+    }
+    let mut changed = current.clone();
+    if book {
+        // LecternBlock.getStateForPlacement applies this before the item tag.
+        changed.properties.insert("has_book".into(), "true".into());
+        state = registry.id(&changed).unwrap_or(state);
+    }
+    let Some(Tag::Compound(saved)) = saved else {
+        return (state, state);
+    };
+    let mut tagged = state;
+    for (key, value) in saved {
+        let key = key.to_string_lossy();
+        if let Tag::String(value) = value
+            && let Some(property) = changed.properties.get_mut(&key)
+        {
+            let previous = std::mem::replace(property, value.to_string_lossy());
+            if let Some(next) = registry.id(&changed) {
+                tagged = next;
+            } else {
+                changed.properties.insert(key, previous);
+            }
+        }
+    }
+    (state, tagged)
+}
 
 /// The component patch of `stack`.
 fn components(stack: &ItemStack) -> Compound {
@@ -273,43 +315,6 @@ impl Game<'_> {
         self.spawn_item_own(stack, pos.map(|v| f64::from(v) + 0.5), 10);
     }
 
-    /// `BlockItem.updateBlockStateFromTag`: the properties of the item's
-    /// `block_state` component (a hive's honey level, a statue's pose) set on
-    /// the block just placed at `pos`. Returns the state it has now.
-    pub(super) fn apply_item_block_state(
-        &mut self,
-        pos: [i32; 3],
-        state: BlockStateId,
-        stack: &ItemStack,
-    ) -> Result<BlockStateId> {
-        let Some(Tag::Compound(saved)) =
-            stack.data().and_then(|d| d.other("minecraft:block_state"))
-        else {
-            return Ok(state);
-        };
-        let Some(current) = self.pack.assets.registry.state(state) else {
-            return Ok(state);
-        };
-        // Only the properties the block has.
-        let props: Vec<(String, String)> = saved
-            .iter()
-            .filter_map(|(k, v)| match v {
-                Tag::String(v) => Some((k.to_string_lossy(), v.to_string_lossy())),
-                _ => None,
-            })
-            .filter(|(k, v)| current.properties.get(k).is_some_and(|old| old != v))
-            .collect();
-        let props: Vec<(&str, &str)> = props.iter().map(|(k, v)| (&**k, &**v)).collect();
-        match self.with_props(state, &props) {
-            Some(new) if !props.is_empty() && new != state => {
-                // `level.setBlock(pos, modifiedState, 2)`: no neighbour pass.
-                self.level_set_with_flags(pos, new, flags::UPDATE_CLIENTS)?;
-                Ok(new)
-            }
-            _ => Ok(state),
-        }
-    }
-
     /// `BlockItem.updateBlockEntityComponents` on a client's level, for the
     /// block it predicts at `pos`: the block entity takes the stack's
     /// components but not its `block_entity_data` (`updateCustomBlockEntityTag`
@@ -322,6 +327,25 @@ impl Game<'_> {
                 .set_other(block_entity_item::BLOCK_ENTITY_DATA, None);
         }
         self.apply_placed_item(pos, &stack, false);
+    }
+
+    /// Ensure the selected block's entity exists before applying the original stack's data.
+    pub(super) fn apply_block_item_data(
+        &mut self,
+        pos: [i32; 3],
+        state: BlockStateId,
+        stack: &ItemStack,
+        game_master: bool,
+    ) {
+        let key = (pos[0], pos[1], pos[2]);
+        if !self.world.block_entities.stateful_entity(state.0)
+            && let Some(entity) = self.new_block_entity_for_state(state)
+        {
+            self.world.block_entities.insert(key, entity);
+        }
+        if self.world.block_entities.get(&key).is_some() {
+            self.apply_placed_item(pos, stack, game_master);
+        }
     }
 
     /// `BlockItem.updateCustomBlockEntityTag` and `updateBlockEntityComponents`
