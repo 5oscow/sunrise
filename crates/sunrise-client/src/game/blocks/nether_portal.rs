@@ -494,6 +494,7 @@ impl Game<'_> {
                 plan.dim,
                 super::server_travel::TravelCause::of_plan(plan),
             )
+            && !self.general_transfer_conflicts(id, plan.dim)
     }
     /// The plan of an item or mob going through the portal block at `entry`:
     /// an End portal's fixed destination, else the Nether portal's.
@@ -1336,14 +1337,9 @@ impl Game<'_> {
     /// `Entity.teleportCrossDimension` away from the loaded dimension: the
     /// entity is saved and removed, and waits for its dimension to load.
     fn remove_portal_vehicle_tree(&mut self, root: u32) {
-        let mounts: Vec<_> = self.mob_objects().map(|m| (m.id, m.extra.mount)).collect();
-        let tree = super::persist::vehicle_tree(root, &mounts);
-        self.mobs.retain(|m| !tree.contains(&m.id));
-        self.persist.off_level.retain(|id, _| !tree.contains(id));
-        self.boats.retain(|b| !tree.contains(&b.id));
-        self.carts.retain(|c| !tree.contains(&c.id));
+        let tree = self.vehicle_tree_ids(root);
+        self.remove_vehicle_rows(&tree);
         for id in tree {
-            self.release_vehicle_container(id);
             self.detach_entity(id);
         }
     }
@@ -1586,7 +1582,7 @@ impl Game<'_> {
             if !self.may_travel_through(id, &plan) {
                 return;
             }
-            let Some(mut tag) = self.vehicle_tree_nbt(id) else {
+            let Some(mut tag) = self.vehicle_tree_nbt_for(id, true) else {
                 return;
             };
             // Entity.removeAfterChangingDimensions drops the leash.
@@ -1612,7 +1608,7 @@ impl Game<'_> {
                 return;
             }
             self.release_vehicle_container(id);
-            let Some(tag) = self.vehicle_tree_nbt(id) else {
+            let Some(tag) = self.vehicle_tree_nbt_for(id, true) else {
                 return;
             };
             let Some(state) = self.capture_vehicle_tree_state(id) else {
@@ -1637,7 +1633,7 @@ impl Game<'_> {
                 return;
             }
             self.release_vehicle_container(id);
-            let Some(mut tag) = self.vehicle_tree_nbt(id) else {
+            let Some(mut tag) = self.vehicle_tree_nbt_for(id, true) else {
                 return;
             };
             // `PositionMoveRotation.of(this)` takes the cart's `getKnownMovement`.

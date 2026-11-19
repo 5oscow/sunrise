@@ -35,6 +35,8 @@ pub(in crate::game) struct RemoteGenerals {
     unknown: std::collections::HashSet<String>,
     /// Whether a spawn for an id already held was refused before, warned about once.
     duplicate: bool,
+    // Reuse the parent-before-child placement order while the window ticks.
+    riders: Vec<(usize, i32, u32, usize)>,
 }
 
 impl RemoteGenerals {
@@ -120,6 +122,45 @@ impl Game<'_> {
         }
     }
 
+    /// `ClientLevel.tickPassenger` for the general rows in an applied passenger
+    /// list. Seat a nested general vehicle before its own general passengers.
+    pub(in crate::game) fn position_remote_general_passengers(&mut self) {
+        let Some(remote) = self.remote.as_mut() else {
+            return;
+        };
+        if remote.general.rows.is_empty() || remote.passenger_vehicles.is_empty() {
+            return;
+        }
+        let mut riders = std::mem::take(&mut remote.general.riders);
+        riders.clear();
+        riders.extend(remote.passenger_vehicles.iter().filter_map(|(&id, seat)| {
+            let id = id as i32;
+            if !remote.general.rows.contains_key(&id) {
+                return None;
+            }
+            let depth = std::iter::successors(Some(seat.vehicle), |&v| remote.passenger_vehicle(v))
+                .take(remote.passenger_vehicles.len() + 1)
+                .count();
+            Some((depth, id, seat.vehicle, seat.index))
+        }));
+        riders.sort_unstable();
+        for &(_, id, vehicle, seat) in &riders {
+            let count = self
+                .remote
+                .as_ref()
+                .map_or(0, |r| r.passenger_seats(vehicle).count());
+            if let Some(at) = self.general_passenger_position(vehicle, seat, count)
+                && let Some(remote) = self.remote.as_mut()
+                && let Some(row) = remote.general.rows.get_mut(&id)
+            {
+                row.position = [at.x, at.y, at.z];
+            }
+        }
+        if let Some(remote) = self.remote.as_mut() {
+            remote.general.riders = riders;
+        }
+    }
+
     /// The server removed general row `id` from the window.
     pub(super) fn forget_remote_general(r: &mut Remote, id: i32) {
         r.general.rows.remove(&id);
@@ -202,6 +243,7 @@ mod tests {
                 mod_api::GeneralEntityCategory::Misc,
                 0.5,
                 0.5,
+                Some([1.0, 1.25, 0.0]),
                 mod_api::GeneralSavePolicy::Save,
                 true,
                 8,
@@ -214,6 +256,10 @@ mod tests {
     }
 
     fn spawn(id: i32, key: &str, at: [f64; 3]) -> C {
+        spawn_facing(id, key, at, 0.0)
+    }
+
+    fn spawn_facing(id: i32, key: &str, at: [f64; 3], yaw: f32) -> C {
         C::CustomPayload(sunrise_protocol::packets::configuration::CustomPayload {
             channel: general_entity::CHANNEL.into(),
             data: general_entity::encode(&Message::Spawn {
@@ -221,7 +267,7 @@ mod tests {
                 uuid: 0x77,
                 type_key: key.into(),
                 position: at,
-                rotation: [0.0, 0.0],
+                rotation: [yaw, 0.0],
                 velocity: [0.0; 3],
             })
             .unwrap(),
@@ -329,10 +375,12 @@ mod tests {
                 game.handle_packet(position(1)).unwrap();
                 let _world =
                     mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+                game.handle_packet(spawn_facing(9, "mymod:missile", [2.5, 70.0, 0.5], 90.0))
+                    .unwrap();
+                game.handle_packet(spawn(12, "mymod:missile", [0.5, 70.0, 0.5]))
+                    .unwrap();
                 for id in [9, 12] {
-                    game.handle_packet(spawn(id, "mymod:missile", [0.5, 70.0, 0.5]))
-                        .unwrap();
-                    game.handle_packet(snapshot(id as u32, None)).unwrap();
+                    game.handle_packet(snapshot(id, None)).unwrap();
                 }
                 game.spawn_entity(4, "minecraft:area_effect_cloud", [0.5, 70.0, 0.5], [0.0; 3]);
                 game.spawn_entity(5, "minecraft:marker", [0.5, 70.0, 0.5], [0.0; 3]);
@@ -364,6 +412,8 @@ mod tests {
 
                 game.handle_packet(set(9, vec![12, 99, 7])).unwrap();
                 game.handle_packet(set(12, vec![4])).unwrap();
+                game.position_riders();
+                assert_eq!(row.position(game), Some([2.5, 71.25, 1.5]));
                 let host: &dyn ClientHost = game;
                 assert_eq!(vehicle.passengers(host), Some(vec![row, me]));
                 assert_eq!(vehicle.is_vehicle(host), Some(true));
@@ -402,7 +452,10 @@ mod tests {
 
                 game.spawn_entity(20, "minecraft:happy_ghast", [2.5, 70.0, 0.5], [0.0; 3]);
                 let ghast = game.entity(20).unwrap();
-                game.handle_packet(set(20, vec![7])).unwrap();
+                game.handle_packet(set(20, vec![7, 12])).unwrap();
+                game.position_riders();
+                assert_eq!(row.position(game), Some([2.5 - 1.7, 74.0, 0.5]));
+                game.handle_packet(set(9, vec![12])).unwrap();
                 assert_eq!(me.vehicle(game), Some(ghast));
                 game.handle_packet(set(7, vec![99])).unwrap();
                 assert_eq!(late.vehicle(game), Some(me));

@@ -34,6 +34,7 @@ impl Game<'_> {
         if self.riding == Some(id)
             || self.ridden_by_guest(id)
             || self.mob_objects().any(|mob| mob.extra.mount == Some(id))
+            || self.general_passengers(id).next().is_some()
         {
             vehicle.retire_attachment_registration();
             self.persist.removed_vehicles.insert(id, vehicle);
@@ -46,6 +47,7 @@ impl Game<'_> {
             && self.riding != Some(id)
             && !self.ridden_by_guest(id)
             && !self.mob_objects().any(|mob| mob.extra.mount == Some(id))
+            && self.general_passengers(id).next().is_none()
         {
             self.persist.removed_vehicles.remove(&id);
             self.forget_entity(id);
@@ -256,6 +258,7 @@ impl Game<'_> {
         self.seat_cart_mobs(&riders);
         self.seat_tnt_mobs(&riders);
         self.seat_cushion_mobs(&riders);
+        self.position_remote_general_passengers();
         self.seat_static_mobs(&riders);
         let index: HashMap<u32, usize> = self
             .mobs
@@ -277,7 +280,7 @@ impl Game<'_> {
                     // riders above, each in its own seat and from the
                     // vehicle's drawn position; re-seating them here from the
                     // shared seat 0 yanked boat riders between two places.
-                    if self.seats_own_riders(v) {
+                    if self.seats_own_riders(v) || self.general_seat(v, false).is_some() {
                         continue;
                     }
                     // A mob a mod seated on a server player (`native_ride_player.rs`).
@@ -349,7 +352,18 @@ impl Game<'_> {
                         let seat = aboard.iter().position(|&k| k == i).unwrap_or(0);
                         (seat, aboard.len())
                     };
-                    let (seat, count) = if self.persist.off_level.is_empty() {
+                    let (seat, count) = if self.remote_general_passenger(v) {
+                        let remote = self.remote.as_ref().unwrap();
+                        (
+                            remote
+                                .passenger_vehicles
+                                .get(&self.mobs[i].id)
+                                .map_or(seat, |s| s.index),
+                            remote.passenger_seats(v).count(),
+                        )
+                    } else if self.persist.off_level.is_empty()
+                        && self.general_passengers(v).next().is_none()
+                    {
                         (seat, count)
                     } else {
                         let seats = self.seated_passengers(v);
@@ -376,7 +390,16 @@ impl Game<'_> {
                             .iter()
                             .filter(|r| r.extra.mount == Some(v))
                             .count();
-                    let seat = if self.persist.off_level.is_empty() {
+                    let seat = if self.remote_general_passenger(v) {
+                        self.remote
+                            .as_ref()
+                            .unwrap()
+                            .passenger_vehicles
+                            .get(&self.mobs[i].id)
+                            .map_or(seat, |s| s.index)
+                    } else if self.persist.off_level.is_empty()
+                        && self.general_passengers(v).next().is_none()
+                    {
                         seat
                     } else {
                         self.seated_passengers(v)
@@ -534,6 +557,48 @@ impl Game<'_> {
             || self.tnts.iter().any(|t| t.id == vehicle && t.id != 0)
     }
 
+    /// `Entity.positionRider` for a general passenger, whose own vehicle
+    /// attachment is zero. The index/count come from `getPassengers` on the
+    /// server and the applied SetPassengers list on the client.
+    pub(super) fn general_passenger_position(
+        &self,
+        vehicle: u32,
+        index: usize,
+        count: usize,
+    ) -> Option<Vec3> {
+        if let Some(seat) = self.seat(vehicle) {
+            return Some(seat.passenger_position(0.0));
+        }
+        if let Some(b) = self.boats.iter().find(|b| b.id == vehicle) {
+            return Some(b.seat(index, count, false, 0.0, false));
+        }
+        if let Some(c) = self.carts.iter().find(|c| c.id == vehicle) {
+            return Some(
+                c.position
+                    .add_vector(Vec3::new(0.0, super::minecarts::SEAT, 0.0)),
+            );
+        }
+        if let Some(v) = self.mobs.iter().find(|m| m.id == vehicle && !m.removed) {
+            let position = v
+                .extra
+                .mount
+                .and_then(|parent| self.general_seat(parent, false))
+                .map_or(v.position, |seat| {
+                    seat.passenger_position(riders::vehicle_attachment(v, seat.width))
+                });
+            let attachment = if sunrise_client::mobs::camel::is_camel(v.species()) {
+                sunrise_client::mobs::camel::passenger_attachment_at(v, index, count, false)
+            } else if v.species() == Species::HappyGhast {
+                riders::happy_ghast_attachment(index)
+            } else {
+                riders::passenger_attachment_at(v, index)
+            };
+            return Some(riders::seat(attachment, 0.0, position, v.yaw));
+        }
+        let at = self.passenger_riding_position(vehicle, None, None, &HashMap::new())?;
+        Some(Vec3::new(at.x, at.y, at.z))
+    }
+
     /// `Entity.getPassengerRidingPosition` of a vehicle: where the feet of a
     /// passenger whose own vehicle attachment is 0 land.
     pub(super) fn passenger_riding_position(
@@ -621,6 +686,10 @@ impl Game<'_> {
                 glam::DVec3::new(a.position.x, a.position.y, a.position.z)
             };
             return Some(at + glam::DVec3::Y * height);
+        }
+        if let Some(seat) = self.general_seat(vehicle, false) {
+            let at = seat.passenger_position(0.0);
+            return Some(glam::DVec3::new(at.x, at.y, at.z));
         }
         // Any other tracked entity sits on its feet; an area effect cloud is
         // 0.5 tall, and ModelEngine parks a model's pivot half a block below

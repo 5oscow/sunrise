@@ -294,6 +294,9 @@ impl Game<'_> {
         // Forced client startRiding still respects Entity.couldAcceptPassenger.
         if remote.tracked(vehicle).is_some_and(|(kind, _)| {
             matches!(kind, "minecraft:marker" | "minecraft:ominous_item_spawner")
+        }) || remote.general.rows.get(&vehicle).is_some_and(|row| {
+            super::general::general_type_catalog().save_policy(row.type_slot)
+                == mod_api::GeneralSavePolicy::NoSave
         }) {
             return;
         }
@@ -530,6 +533,26 @@ impl Game<'_> {
             // Another animal moves on the server with the rider's input
             // (PlayerInput); the rider sits where `positionRider` puts it.
             self.position_rider();
+            return Ok(true);
+        }
+        if let Some(seat) = self.general_seat(id, false) {
+            let scale = self.seat_player_scale(id);
+            let at = seat.player_seat(scale);
+            let before = self
+                .general_seat(id, true)
+                .unwrap_or(seat)
+                .player_seat(scale);
+            if let Some(p) = self.player.as_mut() {
+                self.previous_position = if self.posed_rider == self.riding {
+                    before
+                } else {
+                    at
+                };
+                self.posed_rider = self.riding;
+                p.position = at;
+                p.velocity = Vec3::ZERO;
+                p.fall_distance = 0.0;
+            }
             return Ok(true);
         }
         // Generic entities are valid vehicles too (plugins use displays as seats).

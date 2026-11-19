@@ -351,7 +351,15 @@ pub(super) fn nbt_size(tag: &Tag) -> u64 {
 /// The record's own data must nest no deeper than [`limits::MAX_NESTING`];
 /// shape faults refuse with [`GeneralRecordError::InvalidEnvelope`], and
 /// nothing is read from a record that refused.
+#[cfg(test)]
 fn record_from_compound(tag: &Tag) -> Result<GeneralEntityRecord, GeneralRecordError> {
+    read_general_record(tag, &|_| false)
+}
+
+fn read_general_record(
+    tag: &Tag,
+    loads_as_mob: &impl Fn(&Tag) -> bool,
+) -> Result<GeneralEntityRecord, GeneralRecordError> {
     let passengers_key = sunrise_core::nbt::JavaString::from(format::PASSENGERS);
     let nesting = data_nesting(tag, &passengers_key);
     if nesting > limits::MAX_NESTING {
@@ -432,7 +440,8 @@ fn record_from_compound(tag: &Tag) -> Result<GeneralEntityRecord, GeneralRecordE
         Some(Tag::List(values)) if values.iter().all(|value| matches!(value, Tag::Compound(_))) => {
             values
                 .iter()
-                .map(record_from_compound)
+                .filter(|tag| !loads_as_mob(tag))
+                .map(|tag| read_general_record(tag, loads_as_mob))
                 .collect::<Result<Vec<_>, _>>()?
         }
         Some(_) => {
@@ -515,6 +524,14 @@ impl GeneralTypeCatalog {
         (entry.width, entry.height)
     }
 
+    /// The type's local passenger point, defaulting to the top center of its box.
+    pub(super) fn passenger_attachment(&self, slot: usize) -> [f64; 3] {
+        let entry = &self.entries[slot];
+        entry
+            .passenger_attachment
+            .unwrap_or([0.0, entry.height, 0.0])
+    }
+
     /// The type's declared payload schema version, the one a fresh row starts at.
     pub fn payload_version(&self, slot: usize) -> u16 {
         self.entries[slot].payload_version
@@ -593,9 +610,13 @@ pub struct GeneralRow {
     pub payload_version: u16,
     /// The record's payload bytes, held as loaded and written back unchanged.
     pub payload_bytes: Vec<u8>,
-    /// The row whose vehicle this one rides (`None` for a root): a rider
-    /// saves inside its root's record, never as its own.
+    /// The entity this row rides (`None` for a root). Riders save inside the
+    /// vehicle's `Passengers`, never as their own root records.
     pub mount: Option<u32>,
+    /// This row's seat order on its current vehicle.
+    pub vehicle_order: i64,
+    /// `Entity.boardingCooldown`, set on dismount and counted down by ticks.
+    pub boarding_cooldown: i32,
     /// The entity-owned attachment registration lifetime (#796: the sole
     /// Part-data store; there is no parallel entity data map).
     pub attachment_lifetime: sunrise_mod_runtime::attachments::AttachmentLifetime,
@@ -618,19 +639,16 @@ pub struct GeneralStore {
     /// The rows' rider adjacency, reused across the level's entity passes
     /// (`tick.rs` refreshes it).
     pub riders: RiderIndex,
-    /// How many times a live row's mount was rewritten (`entity_stop_riding`
-    /// is the only path): each change retires the rider adjacency, which the
-    /// rows' own write stamp does not see.
+    /// Each mount rewrite retires the rider adjacency, independently of the
+    /// join list's structural write stamp.
     pub mount_writes: u64,
 }
 
 /// Root-to-rider adjacency of the general rows, as a first-child and
 /// next-sibling index over the rows' places: rebuilt in place, and only
 /// when the rows' storage changed or a mount was rewritten, so a stable
-/// world's pass allocates nothing and visits each edge once. The sibling
-/// chains keep the storage's own order, which is the join order — a
-/// vehicle's riders ride in the order their tree loaded, as
-/// `addPassenger`'s list does.
+/// world's pass reuses its allocations. Sibling chains use board order,
+/// which is independent of when the entities themselves joined the level.
 #[derive(Default)]
 pub struct RiderIndex {
     stamp: Option<sunrise_client::join_seq::ListStamp>,
@@ -644,6 +662,11 @@ pub struct RiderIndex {
     last_child: Vec<Option<usize>>,
     /// Each row's place by id, for the rebuild's edge pass.
     places: FxHashMap<u32, usize>,
+    boarded: Vec<usize>,
+    pub(super) ticked: Vec<bool>,
+    pub(super) pending: Vec<(usize, Option<u32>)>,
+    pub(super) foreign_parents: Vec<(usize, i64, usize)>,
+    pub(super) mob_vehicles: sunrise_client::fast_hash::FxHashSet<u32>,
 }
 
 impl RiderIndex {
@@ -672,13 +695,17 @@ impl RiderIndex {
         for (place, row) in rows.iter().enumerate() {
             self.places.insert(row.id, place);
         }
-        for (place, row) in rows.iter().enumerate() {
-            let Some(vehicle) = row.mount else {
-                continue;
-            };
-            let Some(&vehicle_place) = self.places.get(&vehicle) else {
-                continue;
-            };
+        self.boarded.clear();
+        self.boarded
+            .extend(rows.iter().enumerate().filter_map(|(place, row)| {
+                row.mount
+                    .is_some_and(|vehicle| self.places.contains_key(&vehicle))
+                    .then_some(place)
+            }));
+        self.boarded
+            .sort_unstable_by_key(|&place| (rows[place].vehicle_order, rows[place].id));
+        for &place in &self.boarded {
+            let vehicle_place = self.places[&rows[place].mount.unwrap()];
             match self.last_child[vehicle_place] {
                 // The chain's tail takes the new rider; the head opens it.
                 Some(tail) => self.next_sibling[tail] = Some(place),
@@ -690,23 +717,95 @@ impl RiderIndex {
 }
 
 impl Game<'_> {
-    /// One general row as a record: its own state, and its riders' records
-    /// collected from their mount links — a rider is a row like its root and
-    /// saves inside the root's record, never on its own. `visited` keeps a
-    /// degenerate mount graph (not a tree) from recursing into itself.
-    fn general_row_record(
-        &self,
-        id: u32,
-        visited: &mut HashSet<u32>,
-    ) -> Option<GeneralEntityRecord> {
-        let rows = &self.resident_entities.general.rows;
-        let row = rows.iter().find(|row| row.id == id)?;
-        if general_type_catalog().save_policy(row.type_slot) == mod_api::GeneralSavePolicy::NoSave
-            || !visited.insert(row.id)
+    /// A general entity row in the active level. Removal hides it before the sweep.
+    pub(super) fn general_row(&self, id: u32) -> Option<&GeneralRow> {
+        if self.persist.removals.contains(&Target::General(id)) {
+            return None;
+        }
+        self.general_object(id)
+    }
+
+    /// The owning row through its removal callback, before the physical sweep.
+    pub(super) fn general_object(&self, id: u32) -> Option<&GeneralRow> {
+        self.resident_entities
+            .general
+            .rows
+            .iter()
+            .find(|row| row.id == id)
+    }
+
+    pub(super) fn general_passengers(&self, vehicle: u32) -> impl Iterator<Item = &GeneralRow> {
+        self.resident_entities
+            .general
+            .rows
+            .iter()
+            .filter(move |row| {
+                row.mount == Some(vehicle)
+                    && !self.persist.removals.contains(&Target::General(row.id))
+            })
+    }
+
+    /// Keep a live general branch representable by the same bounded record
+    /// reader that will load it back. A vanilla intermediate has its own record.
+    pub(super) fn general_boarding_depth_fits(&self, rider: u32, vehicle: u32) -> bool {
+        let mut available = limits::MAX_PASSENGER_DEPTH;
+        let mut next = Some(vehicle);
+        while let Some(parent) = next.and_then(|id| self.general_row(id)) {
+            let Some(left) = available.checked_sub(1) else {
+                return false;
+            };
+            available = left;
+            next = parent.mount;
+        }
+        fn descendants_fit(game: &Game<'_>, parent: u32, available: u32) -> bool {
+            game.general_passengers(parent).all(|rider| {
+                available
+                    .checked_sub(1)
+                    .is_some_and(|left| descendants_fit(game, rider.id, left))
+            })
+        }
+        descendants_fit(self, rider, available)
+    }
+
+    /// Whether the tracked list has a general passenger with a seat on `vehicle`.
+    pub(super) fn remote_general_passenger(&self, vehicle: u32) -> bool {
+        self.remote.as_ref().is_some_and(|remote| {
+            !remote.general.rows.is_empty()
+                && remote
+                    .passenger_seats(vehicle)
+                    .any(|(id, _)| remote.general.rows.contains_key(&(id as i32)))
+        })
+    }
+
+    /// Change a general row's seat. The caller owns mount notifications.
+    pub(super) fn set_general_mount(&mut self, id: u32, mount: Option<(u32, i64)>) -> bool {
+        if self.persist.removals.contains(&Target::General(id)) {
+            return false;
+        }
+        let store = &mut self.resident_entities.general;
+        let Some(row) = store.rows.iter_mut().find(|row| row.id == id) else {
+            return false;
+        };
+        let (vehicle, order) = mount.map_or((None, 0), |(v, place)| (Some(v), place));
+        if vehicle.is_none() && row.mount.is_some() {
+            row.boarding_cooldown = super::boat_passengers::BOARDING_COOLDOWN;
+        }
+        row.mount = vehicle;
+        row.vehicle_order = order;
+        store.mount_writes += 1;
+        true
+    }
+
+    /// A general row's own record. Passengers are written by the shared tree walker.
+    fn general_row_record(&self, id: u32, transferring: bool) -> Option<GeneralEntityRecord> {
+        let row = self.general_row(id)?;
+        if !transferring
+            && general_type_catalog().save_policy(row.type_slot)
+                == mod_api::GeneralSavePolicy::NoSave
         {
             return None;
         }
-        let mut record = GeneralEntityRecord {
+        Some(GeneralEntityRecord {
             position: [row.position.x, row.position.y, row.position.z],
             velocity: [row.velocity.x, row.velocity.y, row.velocity.z],
             rotation: row.rotation,
@@ -718,40 +817,16 @@ impl Game<'_> {
                 payload_bytes: row.payload_bytes.clone(),
             },
             passengers: Vec::new(),
-        };
-        for rider in rows.iter().filter(|row| row.mount == Some(id)) {
-            if let Some(rider_record) = self.general_row_record(rider.id, visited) {
-                record.passengers.push(rider_record);
-            }
-        }
-        Some(record)
+        })
     }
 
-    /// Write each riding row's attachments into its own record inside the
-    /// saved tree (`save_lists!` writes the root's): a rider's identity
-    /// travels with its record, matched by UUID inside `Passengers`.
-    fn write_general_rider_attachments(&self, tag: &mut Tag, root: u32) {
-        let rows = &self.resident_entities.general.rows;
-        let Some(Tag::List(riders)) = tag.get_mut(format::PASSENGERS) else {
-            return;
-        };
-        for rider in riders.iter_mut() {
-            let Some(Tag::IntArray(words)) = rider.get(format::UUID) else {
-                continue;
-            };
-            if words.len() != 4 {
-                continue;
-            }
-            let uuid = [words[0], words[1], words[2], words[3]];
-            let Some(row) = rows
-                .iter()
-                .find(|row| row.uuid == uuid && row.mount == Some(root))
-            else {
-                continue;
-            };
-            crate::game::persist::write_attachments(rider, row.id, &self.entity_attachments);
-            self.write_general_rider_attachments(rider, row.id);
-        }
+    /// A general row and its passengers. A dimension transfer includes live
+    /// objects even when their `EntityType` does not serialize to disk.
+    pub(super) fn general_tree_nbt(&mut self, id: u32, transferring: bool) -> Option<Tag> {
+        let mut tag = self.general_row_record(id, transferring)?.to_tag();
+        self.put_passengers_for(&mut tag, id, transferring);
+        crate::game::persist::write_attachments(&mut tag, id, &self.entity_attachments);
+        Some(tag)
     }
 
     /// The unknown-kind gate of the load pass (`spawn_loaded_entity`): may
@@ -793,7 +868,8 @@ impl Game<'_> {
                 && record.passengers.iter().all(missing_types_owned)
         }
         let missing_tree = general_type_catalog().slot(kind).is_some()
-            && record_from_compound(tag).is_ok_and(|record| missing_types_owned(&record));
+            && read_general_record(tag, &|rider| self.loads_as_mob_passenger(rider))
+                .is_ok_and(|record| missing_types_owned(&record));
         if mod_namespace_loaded(namespace) && !missing_tree {
             log::warn!(
                 "Sunrise: {kind} names no type of loaded mod {namespace}; skipping its record"
@@ -823,6 +899,23 @@ impl Game<'_> {
             return false;
         }
         true
+    }
+
+    /// A retained object in the destination must not cause mixed transfer to
+    /// drop a general row after the source tree has already been removed.
+    pub(super) fn general_transfer_conflicts(&self, root: u32, destination: super::Dim) -> bool {
+        !self.resident_entities.general.rows.is_empty()
+            && self
+                .vehicle_tree_ids(root)
+                .into_iter()
+                .filter_map(|id| self.general_row(id))
+                .any(|row| {
+                    self.resident_entities
+                        .table
+                        .borrow_mut()
+                        .level_uuid_candidate(destination.key(), row.uuid, None)
+                        .is_some()
+                })
     }
 
     /// Carry a general entity tree into another level
@@ -925,20 +1018,29 @@ impl Game<'_> {
         tag: Tag,
         transferred: Option<TransferredEntityState>,
     ) -> Result<(), Tag> {
-        let record = match record_from_compound(&tag) {
+        match self.load_general_passenger(&tag, None, transferred) {
+            Ok(_) => Ok(()),
+            Err(()) => Err(tag),
+        }
+    }
+
+    pub(super) fn load_general_passenger(
+        &mut self,
+        tag: &Tag,
+        mount: Option<u32>,
+        transferred: Option<TransferredEntityState>,
+    ) -> Result<Option<u32>, ()> {
+        let record = match read_general_record(tag, &|rider| self.loads_as_mob_passenger(rider)) {
             Ok(record) => record,
             Err(error) => {
                 log::warn!(
                     "Sunrise: refusing general entity record: {}",
                     error.message()
                 );
-                return Ok(());
+                return Ok(None);
             }
         };
-        match self.admit_general_record(record, &tag, transferred) {
-            Err(()) => Err(tag),
-            Ok(_) => Ok(()),
-        }
+        self.admit_general_record_with_mount(record, tag, mount, transferred)
     }
 
     /// Admit one general record tree: every check, then its rows inserted
@@ -950,6 +1052,16 @@ impl Game<'_> {
         &mut self,
         record: GeneralEntityRecord,
         tag: &Tag,
+        transferred: Option<TransferredEntityState>,
+    ) -> Result<Option<u32>, ()> {
+        self.admit_general_record_with_mount(record, tag, None, transferred)
+    }
+
+    fn admit_general_record_with_mount(
+        &mut self,
+        record: GeneralEntityRecord,
+        tag: &Tag,
+        mount: Option<u32>,
         transferred: Option<TransferredEntityState>,
     ) -> Result<Option<u32>, ()> {
         let catalog = general_type_catalog();
@@ -977,7 +1089,7 @@ impl Game<'_> {
         Ok(Some(self.insert_general_record(
             record,
             tag,
-            None,
+            mount,
             transferred,
         )))
     }
@@ -1019,19 +1131,23 @@ impl Game<'_> {
             payload_version: record.envelope.payload_version,
             payload_bytes: record.envelope.payload_bytes,
             mount,
+            vehicle_order: i64::from(id),
+            boarding_cooldown: 0,
             attachment_lifetime: Default::default(),
         };
         self.bind_saved_entity_attachments(id, &mut row.attachment_lifetime);
         self.resident_entities.general.rows.push(row);
-        // The riders' tags sit inside `Passengers` in the order the record
-        // tree was built from them, so each rider's own tag (its saved
-        // attachments) is the one at its index.
-        let riders: Vec<(&GeneralEntityRecord, &Tag)> = match tag.get(format::PASSENGERS) {
-            Some(Tag::List(list)) => record.passengers.iter().zip(list.iter()).collect(),
-            _ => Vec::new(),
-        };
-        for (rider, rider_tag) in riders {
-            self.insert_general_record(rider.clone(), rider_tag, Some(id), None);
+        // The decoder parsed the general rows; load vanilla mobs through the
+        // same path that reads them on a vanilla vehicle, in original seat order.
+        if let Some(Tag::List(list)) = tag.get(format::PASSENGERS) {
+            let mut general = record.passengers.into_iter();
+            for rider in list {
+                if self.loads_as_mob_passenger(rider) {
+                    self.load_mob(rider.clone(), Some(id));
+                } else if let Some(record) = general.next() {
+                    self.insert_general_record(record, rider, Some(id), None);
+                }
+            }
         }
         id
     }
@@ -1134,10 +1250,7 @@ impl Entity for GeneralRow {
         if !keys.contains(&key) {
             return None;
         }
-        let record = game.general_row_record(row.id, &mut HashSet::new())?;
-        let mut tag = record.to_tag();
-        game.write_general_rider_attachments(&mut tag, row.id);
-        Some((key, tag))
+        Some((key, game.general_tree_nbt(row.id, false)?))
     }
     fn load_nbt(
         game: &mut Game<'_>,
@@ -1369,6 +1482,7 @@ mod tests {
             category: mod_api::GeneralEntityCategory::Misc,
             width: 0.8,
             height: 1.9,
+            passenger_attachment: None,
             save_policy: mod_api::GeneralSavePolicy::Save,
             summonable: true,
             tracking_chunks: 8,
@@ -1449,6 +1563,8 @@ mod tests {
             payload_version: 1,
             payload_bytes: Vec::new(),
             mount: None,
+            vehicle_order: 0,
+            boarding_cooldown: 0,
             attachment_lifetime: Default::default(),
         });
         let mut table = EntityTable::new(journal);

@@ -131,6 +131,7 @@ impl Hooks for DeclareGeneral {
             mod_api::GeneralEntityCategory::Misc,
             0.8,
             1.9,
+            None,
             mod_api::GeneralSavePolicy::NoSave,
             false,
             8,

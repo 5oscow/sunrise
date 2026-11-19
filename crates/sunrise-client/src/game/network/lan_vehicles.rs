@@ -343,6 +343,11 @@ impl Game<'_> {
             }
             return;
         }
+        let scale = host.hub.guests[gi].motion.as_ref().map_or(1.0, |p| {
+            f64::from(
+                p.dimensions.width / sunrise_client::pose::Pose::Standing.dimensions(1.0).width,
+            )
+        });
         let at = self
             .boats
             .iter()
@@ -360,7 +365,13 @@ impl Game<'_> {
                     .find(|c| c.id == vehicle)
                     .map(|c| (c.position, c.seat()))
             })
-            .or_else(|| self.seat(vehicle).map(|s| (s.position, s.player_seat())));
+            .or_else(|| {
+                if let Some(s) = self.general_seat(vehicle, false) {
+                    Some((s.position, s.player_seat(scale)))
+                } else {
+                    self.seat(vehicle).map(|s| (s.position, s.player_seat(1.0)))
+                }
+            });
         if let Some((p, seat)) = at {
             let Some(host) = self.lan.as_mut() else {
                 return;

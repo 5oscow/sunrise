@@ -6,14 +6,17 @@ Provisional answer to [#792](https://github.com/arismoko/horizon/issues/792): re
 
 `Hooks::register` receives `&mut dyn Registrar`, whose `GeneralTypesRegistrar`
 supertrait provides `declare_general_entity(path, category, width, height,
-save_policy, summonable, tracking_chunks, update_interval, payload_version,
-required_features)`. Use `GeneralEntityCategory::Misc` and
+passenger_attachment, save_policy, summonable, tracking_chunks, update_interval,
+payload_version, required_features)`. Use `GeneralEntityCategory::Misc` and
 `GeneralSavePolicy::{Save, NoSave}`. The path must belong to the declaring
 mod's namespace. Registration is only available during the registration phase,
 requires a both-side package, and refuses duplicates and unavailable required
 mods with `GeneralEntityRegistrationError` while recording a refusal.
 
-Dimensions must be finite. Tracking distance and interval use signed `i32`
+Dimensions and passenger attachment coordinates must be finite. A passenger
+attachment is a vehicle-local point in blocks, rotated with the vehicle's yaw.
+Use `None` for `[0.0, height, 0.0]`, the top center of the box.
+Tracking distance and interval use signed `i32`
 values directly, matching the vanilla builder; `i32::MAX` means no update
 interval. There is no 64-block, 32-chunk or 1200-tick ceiling.
 
