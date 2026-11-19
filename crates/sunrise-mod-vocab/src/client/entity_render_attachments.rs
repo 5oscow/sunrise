@@ -44,7 +44,7 @@ impl PartialEq for Snapshot {
 impl EntityRenderAttachments {
     /// Projects the holder's synced fields into a bounded render input in key order.
     /// A field that doesn't fit doesn't use the budget or affect the synced holder.
-    // Engine-side only; mods consume snapshots handed to their renderer.
+    // hidden: engine-side only; mods consume the snapshots handed to their renderer.
     #[doc(hidden)]
     pub fn from_synced(attachments: &Attachments) -> Self {
         let mut values: Vec<_> = attachments
