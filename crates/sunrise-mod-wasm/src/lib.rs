@@ -36,7 +36,7 @@ pub(crate) mod boundary {
 }
 pub use imports::{Mismatch, Why, set_game_build};
 pub(crate) use runtime::WeakWasmMod;
-pub use runtime::{CallClass, WasmHandler, WasmMod};
+pub use runtime::{CallClass, WasmHandler, WasmMod, guest_engine, install_stack_policy};
 
 #[cfg(any(test, feature = "test-copy-probe"))]
 pub mod test_log;

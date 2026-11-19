@@ -4774,7 +4774,6 @@ dependencies = [
  "sunrise-client",
  "sunrise-client-lib",
  "sunrise-core",
- "sunrise-guest-stack",
  "sunrise-mod-host",
  "sunrise-mod-package",
  "sunrise-protocol",
