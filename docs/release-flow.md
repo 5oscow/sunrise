@@ -28,8 +28,11 @@ combined result even if the run is cancelled. Its public-tree check reads every 
 
 ## Merging
 
-Pull requests go through the merge queue, which squashes each one into a single commit titled with the pull
-request's title and number (`kind(area): what changes (#123)`); never `gh pr merge --auto`. Branch protection on main
+Pull requests merge with a merge commit (`Merge pull request #123 from ...`), most of them through a rollup: a
+`sunrise-review-rollup-<n>` branch that carries reviewed pull requests at their heads, with integration fixes as carry
+commits on top, and is checked by `dyna-checks` like any rollup. A pull request's own commits stay as they are, and it
+shows as merged when its rollup merges. No workflow has a `merge_group` trigger: there is no merge queue. Never
+`gh pr merge --auto`. Branch protection on main
 requires `verify` for everyone, and a council member's review (team `council`) for the files `.github/CODEOWNERS` lists (what builds, signs
 and ships releases). Branches don't have to be up to date with main: main's own `dyna-checks` run catches the rare
 semantic conflict.
@@ -155,7 +158,7 @@ A [snapshot](#snapshot) (`release.yml -f kind=snapshot`) needs only dyna-checks'
 ```mermaid
 flowchart LR
     pr(["pull request"]) --> checks{"verify"}
-    checks -- green --> merge["merge queue<br/>(squash)"]
+    checks -- green --> merge["merge commit<br/>(most through a rollup)"]
     merge --> main(["main"])
     main --> daily["daily run, including parity on main’s head"]
     daily -- every applicable leg green --> decide{"decide<br/>tools/release_train.py"}
