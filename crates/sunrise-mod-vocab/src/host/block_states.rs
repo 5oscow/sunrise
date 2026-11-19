@@ -210,6 +210,14 @@ pub trait BlockStatesBackend {
     #[access(Metadata)]
     fn block_state_is_redstone_conductor(&self, state: BlockState) -> Option<bool>;
     /// Side: both.
+    /// The read of `BlockStates::block_class`: `Ok(None)` for an unknown state.
+    #[access(Metadata)]
+    fn block_state_class(
+        &self,
+        state: BlockState,
+        class: BlockClass,
+    ) -> Result<Option<bool>, LevelReadError>;
+    /// Side: both.
     /// The states of `block` (`StateDefinition.getPossibleStates`) in immutable local ordinal
     /// order, independent of world numeric IDs. None for unavailable metadata or an unknown block.
     #[access(Metadata)]

@@ -60,6 +60,26 @@ pub enum WeatheringAge {
     Oxidized,
 }
 
+/// A vanilla block class, as Java's `instanceof` asks it of a block, subclasses included. Read it
+/// with [`BlockStates::block_class`]: it is the engine's own classification of the block, not a
+/// tag, so a datapack that edits `minecraft:stairs` does not change it. A mod block declared on
+/// a vanilla behaviour template belongs to that template's classes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+#[derive(sunrise_mod_api_macros::Wire)]
+pub enum BlockClass {
+    /// `StairBlock`.
+    Stair,
+    /// `EntityBlock`: the blocks that own a block entity by class (a chest, a furnace).
+    Entity,
+    /// `IronBarsBlock`, which includes glass panes and stained glass panes.
+    IronBars,
+    /// `StainedGlassPaneBlock`, a subclass of `IronBarsBlock`.
+    StainedGlassPane,
+    /// `TrapDoorBlock`.
+    TrapDoor,
+}
+
 /// An invalid constraint, identifying its index in the supplied list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -258,6 +278,12 @@ impl BlockStates<'_> {
     /// None as for `replaceable`.
     pub fn is_solid_render(&self, state: BlockState) -> Option<bool> {
         self.backend?.block_state_is_solid_render(state)
+    }
+    /// Whether `state`'s block is of vanilla class `class`, subclasses included (Java's
+    /// `instanceof`). It reads the engine's class of the block, never a tag, so it does not move
+    /// when a pack edits a tag. None for an unknown state or no game backend.
+    pub fn block_class(&self, state: BlockState, class: BlockClass) -> Option<bool> {
+        self.backend?.block_state_class(state, class).ok().flatten()
     }
     /// `BlockState.isRedstoneConductor` when vanilla decides from `state` alone. None for an
     /// unknown state, no game backend, or a context-dependent predicate (such as shulker boxes).

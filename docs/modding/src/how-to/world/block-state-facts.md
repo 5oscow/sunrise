@@ -15,6 +15,7 @@ A `BlockState` is an API-owned value pairing a `BlockKey` with a block-local can
 | `is_redstone_conductor(state) -> Option<bool>` | `BlockState.isRedstoneConductor` when it depends only on the block state; `None` when a position is needed |
 | `map_color(state) -> Option<u8>` | `BlockState.getMapColor`: the `MapColor.id` a map item colours a column by, 0 for none |
 | `map_color_rgba(packed) -> Option<[u8; 4]>` | `MapColor.getColorFromPackedId`: decode a map pixel to `[red, green, blue, alpha]`; ID 0 and undefined IDs decode to transparent RGBA; `None` means no game backend |
+| `block_class(state, class: BlockClass) -> Option<bool>` | Java `instanceof` on the block's vanilla class, subclasses included: `Stair`, `Entity` (`EntityBlock`), `IronBars`, `StainedGlassPane`, `TrapDoor`. See below |
 | `states_of(block) -> Option<BlockStateRange>` | `StateDefinition.getPossibleStates`, as owned values in canonical local-ordinal order |
 | `definition(block)` | Property names and legal serialized values |
 | `matches(state, block, constraints)` | Partial property match with typed invalid-property and invalid-value errors |
@@ -30,6 +31,16 @@ placed block, use `LevelRef::is_redstone_conductor(host, pos)` (server side, `No
 position).
 
 Queries return `None` for an unknown state or block, including an invalid local ordinal, and on a host with no game behind it (a mod's test double). The ordinal order is defined by the complete canonical property constraints, not by the engine's numeric enumeration.
+
+## Block classes
+
+`block_class(state, class)` answers what a mod would ask with `instanceof StairBlock`, `EntityBlock`,
+`IronBarsBlock`, `StainedGlassPaneBlock` or `TrapDoorBlock`. It reads the engine's own class of the
+block, so a subclass counts (a waxed copper stair is a `Stair`) and a mod block declared on a vanilla
+behaviour template belongs to that template's classes. It never reads tags: a pack that adds a block
+to `minecraft:stairs` does not make it a `Stair`. Plain glass panes are `IronBars` and not
+`StainedGlassPane`; vanilla 26.3 has no separate glass-pane class, so tell a plain pane from other bars by its
+block key. `BlockClass` is `#[non_exhaustive]`: classes are added when a consumer needs one.
 
 ## Copper weathering and wax
 
