@@ -12,6 +12,7 @@ A `BlockState` is an API-owned value pairing a `BlockKey` with a block-local can
 | `light_emission(state) -> Option<u8>` | `BlockState.getLightEmission()`: 0 to 15; a block with `dynamic_light` answers per cell through its parts, which this does not ask |
 | `friction(state) -> Option<f32>` | `BlockBehaviour.getFriction()` of the block: 0.6 usually, 0.98 ice, 0.8 slime |
 | `is_solid_render(state) -> Option<bool>` | `BlockState.isSolidRender()`: a full, occluding cube (stone yes; glass, leaves, slabs no) |
+| `is_redstone_conductor(state) -> Option<bool>` | `BlockState.isRedstoneConductor` when it depends only on the block state; `None` when a position is needed |
 | `map_color(state) -> Option<u8>` | `BlockState.getMapColor`: the `MapColor.id` a map item colours a column by, 0 for none |
 | `map_color_rgba(packed) -> Option<[u8; 4]>` | `MapColor.getColorFromPackedId`: decode a map pixel to `[red, green, blue, alpha]`; ID 0 and undefined IDs decode to transparent RGBA; `None` means no game backend |
 | `states_of(block) -> Option<BlockStateRange>` | `StateDefinition.getPossibleStates`, as owned values in canonical local-ordinal order |
@@ -23,7 +24,10 @@ A `BlockState` is an API-owned value pairing a `BlockKey` with a block-local can
 
 Use `StateConstraint` for each partial constraint; `StateMatchError` identifies an invalid property or value by index. `StateProperty` describes a property's legal values. These types are shared by state-definition services.
 
-Whether a block conducts redstone depends on where it stands in vanilla's signature (`BlockState.isRedstoneConductor(level, pos)`), so it is read on the level: `LevelRef::is_redstone_conductor(host, pos)` (server side, `None` for an unloaded position).
+The conductor query uses the same exported predicate as redstone, not render solidity. It returns
+`None` for shulker boxes because their collision bounds depend on the live block entity. To query a
+placed block, use `LevelRef::is_redstone_conductor(host, pos)` (server side, `None` for an unloaded
+position).
 
 Queries return `None` for an unknown state or block, including an invalid local ordinal, and on a host with no game behind it (a mod's test double). The ordinal order is defined by the complete canonical property constraints, not by the engine's numeric enumeration.
 

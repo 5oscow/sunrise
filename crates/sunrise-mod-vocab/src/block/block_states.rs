@@ -236,11 +236,16 @@ impl BlockStates<'_> {
         self.backend?.block_state_friction(state)
     }
     /// `BlockState.isSolidRender()`: whether the state is a full, occluding cube for rendering
-    /// and light (stone yes; glass, leaves and slabs no). Whether a block conducts redstone at a
-    /// position is [`LevelRef::is_redstone_conductor`](crate::LevelRef::is_redstone_conductor).
+    /// and light (stone yes; glass, leaves and slabs no). This is not redstone conduction.
     /// None as for `replaceable`.
     pub fn is_solid_render(&self, state: BlockState) -> Option<bool> {
         self.backend?.block_state_is_solid_render(state)
+    }
+    /// `BlockState.isRedstoneConductor` when vanilla decides from `state` alone. None for an
+    /// unknown state, no game backend, or a context-dependent predicate (such as shulker boxes).
+    /// For a placed block see [`LevelRef::is_redstone_conductor`](crate::LevelRef::is_redstone_conductor).
+    pub fn is_redstone_conductor(&self, state: BlockState) -> Option<bool> {
+        self.backend?.block_state_is_redstone_conductor(state)
     }
     /// The block's property names and legal serialized values. None without resolved tables.
     pub fn definition(&self, block: crate::BlockKey) -> Option<Vec<StateProperty>> {

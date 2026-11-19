@@ -1585,6 +1585,16 @@ impl Behaviours {
     pub fn is_redstone_conductor(&self, state: BlockStateId) -> bool {
         self.has_flag(state, data::state_flags::CONDUCTOR)
     }
+    /// The vanilla conductor predicate for a state alone. Shulker boxes use the live
+    /// block entity's bounds; the empty-level export only sees their closed shape.
+    pub fn state_redstone_conductor(&self, state: BlockStateId) -> Option<bool> {
+        if self.data(state).is(classes::Class::ShulkerBox)
+            || self.has_flag(state, data::state_flags::CONDUCTOR_ERROR)
+        {
+            return None;
+        }
+        Some(self.is_redstone_conductor(state))
+    }
     pub fn is_replaceable(&self, state: BlockStateId) -> bool {
         self.has_flag(state, data::state_flags::REPLACEABLE)
     }

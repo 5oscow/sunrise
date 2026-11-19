@@ -204,6 +204,11 @@ pub trait BlockStatesBackend {
     #[access(Metadata)]
     fn block_state_is_solid_render(&self, state: BlockState) -> Option<bool>;
     /// Side: both.
+    /// `BlockState.isRedstoneConductor` for a state alone. None if the state is unknown
+    /// or the predicate needs a level and position.
+    #[access(Metadata)]
+    fn block_state_is_redstone_conductor(&self, state: BlockState) -> Option<bool>;
+    /// Side: both.
     /// The states of `block` (`StateDefinition.getPossibleStates`) in immutable local ordinal
     /// order, independent of world numeric IDs. None for unavailable metadata or an unknown block.
     #[access(Metadata)]
