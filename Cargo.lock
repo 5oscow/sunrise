@@ -4438,16 +4438,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sunrise-chat-filter"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "sunrise-server-files",
- "toml",
-]
-
-[[package]]
 name = "sunrise-client"
 version = "0.1.0"
 dependencies = [
@@ -4479,7 +4469,6 @@ dependencies = [
  "socket2 0.6.5",
  "sunrise-assets",
  "sunrise-bench",
- "sunrise-chat-filter",
  "sunrise-client-core",
  "sunrise-client-gameplay",
  "sunrise-client-input",
@@ -5394,7 +5383,6 @@ dependencies = [
  "serde_json",
  "sha1",
  "sha2",
- "sunrise-chat-filter",
  "sunrise-mcp",
  "sunrise-platform",
  "sunrise-release-sign",
@@ -5427,7 +5415,6 @@ version = "0.1.0"
 dependencies = [
  "dunce",
  "serde",
- "sunrise-chat-filter",
  "sunrise-core",
  "sunrise-platform",
  "sunrise-server-files",

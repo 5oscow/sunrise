@@ -43,7 +43,6 @@ pub mod advancements;
 mod block_changes;
 mod carried_check;
 pub mod chat;
-pub mod chat_filter;
 mod fake_kicks;
 mod item_particles;
 mod joined;
@@ -232,7 +231,7 @@ pub enum HostEvent {
         sender: u128,
         text: String,
     },
-    /// A chat message the sender's chain and the chat filter let through,
+    /// A chat message the sender's chain let through,
     /// not yet broadcast: with server mods loaded, the game tells them
     /// (`native_server_chat`, NeoForge's `ServerChatEvent`) and then
     /// broadcasts it with `Hub::broadcast_chat`.
@@ -245,17 +244,6 @@ pub enum HostEvent {
     /// INITIALIZE_CHAT) held behind a `ChatSubmitted` of the same tick: the
     /// game broadcasts it once it has relayed that message.
     ChatSessionStarted(Box<play::PlayerInfoUpdate>),
-    /// A player's text the chat filter refused (docs/chat-filter.md): relayed to nobody, for the
-    /// game to log and to carry out `action`.
-    ChatFiltered {
-        sender: u128,
-        name: String,
-        place: chat_filter::Place,
-        text: String,
-        /// The hit's number in the filter's window.
-        count: u32,
-        action: sunrise_server_files::chat_guard::Action,
-    },
     /// A server log warning (ServerGamePacketListenerImpl's LOGGER.warn).
     Warn(String),
     /// A server log error (LOGGER.error).
@@ -400,8 +388,6 @@ pub struct Hub {
     /// The `player_movement_check` and `elytra_movement_check` game rules,
     /// set by the game before each tick.
     pub movement_checks: (bool, bool),
-    /// The chat filter, when `server.toml` turns it on (dedicated servers).
-    pub chat_filter: Option<Box<dyn sunrise_server_files::chat_guard::ChatGuard>>,
     /// The far ring, when `server.toml`'s `max_view_distance` turns it on (dedicated servers).
     pub far: Option<super::far::Far>,
     /// The `immediate_respawn` game rule, as the players were last told.
@@ -818,7 +804,6 @@ impl Hub {
             reduced_debug_info: false,
             limited_crafting: false,
             movement_checks: (true, true),
-            chat_filter: None,
             far: None,
             singleplayer_owner: None,
             flat_world: false,

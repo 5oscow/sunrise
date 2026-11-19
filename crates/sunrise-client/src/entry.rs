@@ -106,7 +106,6 @@ pub fn start<G>(
     } = startup;
     runtime_environment::capture(&launch);
     sunrise_threads::configure_allocator();
-    sunrise_chat_filter::install();
     sunrise_look::give();
     // OptiFine's and Polytone's pack formats (platform, docs/layers.md), before any pack loads.
     sunrise_client::pack_formats::install();

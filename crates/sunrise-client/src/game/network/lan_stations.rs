@@ -693,13 +693,7 @@ impl Game<'_> {
             .and_then(|host| host.menus.get(&conn))
             .and_then(|p| p.station.as_ref())
             .is_some_and(|s| s.kind == StationKind::Anvil);
-        if anvil
-            && self.chat_filter_text(
-                conn,
-                &[name],
-                sunrise_client::lan::hub::chat_filter::Place::Anvil,
-            )
-        {
+        if anvil {
             self.lan_station_op(conn, None, |menu, env| {
                 menu.rename(env, name);
             });

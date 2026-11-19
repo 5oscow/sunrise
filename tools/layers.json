@@ -44,7 +44,6 @@
     "sunrise-deflate": "engine",
     "sunrise-world": "engine",
     "cargo-sunrise-mod": "tool",
-    "sunrise-chat-filter": "platform",
     "sunrise-dualsense": "platform",
     "sunrise-hdr": "platform",
     "sunrise-mcp": "platform",
@@ -145,7 +144,6 @@
     }
   ],
   "allowed": [
-    "sunrise-client -> sunrise-chat-filter",
     "sunrise-client -> sunrise-dualsense",
     "sunrise-client -> sunrise-friends",
     "sunrise-client -> sunrise-hdr",

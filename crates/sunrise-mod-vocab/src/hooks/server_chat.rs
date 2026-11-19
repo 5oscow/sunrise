@@ -2,7 +2,7 @@
 
 pub trait Hooks {
     /// NeoForge's `ServerChatEvent`: a player's chat message, through their
-    /// chain and the chat filter, is about to be broadcast.
+    /// chain, is about to be broadcast.
     /// `player_id` is the server's entity id for the player, `player` their
     /// UUID, `username` their name and `raw_text` what they typed. `message`
     /// starts as that text; replace it and players see the new message

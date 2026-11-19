@@ -92,14 +92,6 @@ webhook = ""                 # the channel's webhook URL (a secret: anyone with 
 events = ["chat", "join", "leave", "death"]   # what is posted; "kick" too if you like
 enabled = true               # false pauses it and keeps the webhook
 
-# The chat filter (docs/chat-filter.md) is on: a message, sign, anvil name or book title with a hate slur reaches
-# nobody, the sender is told, and logs/chat-filter.log keeps it for operators. To change it:
-# [chat_filter]
-# enabled = true             # false: players' text goes out as they wrote it
-# mute_after = 2             # the hit (within window_minutes) that mutes for mute_minutes; 0: never
-# tempban_after = 3          # the hit that bans for tempban_hours; 0: never
-# words_file = ""            # your own list, in the format of the built-in one; "": the built-in list
-
 # A world's biome regions from mods are fixed when it is made (docs/design/mod-api/mod-biome-regions.md).
 # When a mod with one is gone, the server refuses to start until you choose. To change it:
 # [biome_regions]
@@ -189,9 +181,6 @@ pub struct Config {
     /// Chat and players posted to a Discord channel (discord.rs).
     #[serde(default)]
     pub discord: Discord,
-    /// The game reads this section itself (docs/chat-filter.md); written only when it isn't the default.
-    #[serde(default, skip_serializing_if = "chat_filter_default")]
-    pub chat_filter: sunrise_chat_filter::Config,
     /// A one-time prune of barely visited chunks before a start (prune.rs); written only when set.
     #[serde(default, skip_serializing_if = "crate::prune::Settings::is_default")]
     pub prune_chunks: crate::prune::Settings,
@@ -250,11 +239,6 @@ impl Entities {
         }
         Ok(())
     }
-}
-
-/// The game reads this section itself too (docs/chat-filter.md).
-fn chat_filter_default(c: &sunrise_chat_filter::Config) -> bool {
-    *c == sunrise_chat_filter::Config::default()
 }
 
 const EVENTS: [&str; 6] = ["chat", "join", "leave", "death", "kick", "announce"];
@@ -645,18 +629,28 @@ fn text_or_number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::E
     })
 }
 
-/// What `parse` answers for a `server.toml` that still has an `[anticheat]` section.
-const ANTICHEAT_REMOVED: &str =
-    "anticheat was removed from Sunrise; delete the [anticheat] section from server.toml";
+/// Sections an older `server.toml` may still have, for features Sunrise no longer has: `parse` says
+/// which to delete instead of serde's "unknown field".
+const REMOVED_SECTIONS: [(&str, &str); 2] = [
+    ("anticheat", "anticheat"),
+    ("chat_filter", "the chat filter"),
+];
+
+fn removed(section: &str, feature: &str) -> String {
+    format!("{feature} was removed from Sunrise; delete the [{section}] section from server.toml")
+}
 
 impl Config {
     pub fn parse(text: &str) -> Result<Self, String> {
         let config: Self = toml::from_str(text).map_err(|e| {
-            // The anticheat is gone: an old file's section gets what to do, not "unknown field".
-            match toml::from_str::<toml::Table>(text) {
-                Ok(table) if table.contains_key("anticheat") => ANTICHEAT_REMOVED.to_owned(),
-                _ => e.to_string(),
-            }
+            let table = toml::from_str::<toml::Table>(text).unwrap_or_default();
+            REMOVED_SECTIONS
+                .iter()
+                .find(|(section, _)| table.contains_key(*section))
+                .map_or_else(
+                    || e.to_string(),
+                    |(section, feature)| removed(section, feature),
+                )
         })?;
         config.check()?;
         Ok(config)
@@ -706,7 +700,6 @@ impl Config {
             return Err("entities.villager_lobotomize_check_interval must be above zero".into());
         }
         self.discord.check()?;
-        self.chat_filter.check()?;
         self.prune_chunks.check()?;
         self.entities.check()?;
         if self.server.port == 0 {
@@ -889,7 +882,7 @@ pub fn render(config: &Config) -> String {
         set(&mut doc, section, field, &table[section][field]);
     }
     let mut text = doc.to_string();
-    for section in ["chat_filter", "prune_chunks", "biome_regions", "entities"] {
+    for section in ["prune_chunks", "biome_regions", "entities"] {
         if let Some(settings) = table.get(section) {
             let mut only = toml::Table::new();
             only.insert(section.into(), settings.clone());
@@ -1139,32 +1132,26 @@ mod tests {
     }
 
     #[test]
-    fn the_chat_filter_is_on_unless_its_section_turns_it_off() {
-        assert!(Config::default().chat_filter.enabled);
-        assert!(!TEMPLATE.lines().any(|l| l.trim() == "[chat_filter]"));
-        let text =
-            format!("{TEMPLATE}\n[chat_filter]\nmute_after = 3\nwords_file = \"slurs.txt\"\n");
-        let c = Config::parse(&text).unwrap();
-        assert_eq!(c.chat_filter.mute_after, 3);
-        assert_eq!(Config::parse(&render(&c)).unwrap(), c);
-        // The game reads the same section from the same file.
-        assert_eq!(
-            sunrise_chat_filter::Config::from_server_toml(&text).unwrap(),
-            c.chat_filter
-        );
-        let off = Config::parse(&format!("{TEMPLATE}\n[chat_filter]\nenabled = false\n")).unwrap();
-        assert!(!off.chat_filter.enabled);
-        assert_eq!(Config::parse(&render(&off)).unwrap(), off);
-        assert!(Config::parse("[chat_filter]\nmute = 2\n").is_err());
-    }
-
-    #[test]
-    fn a_leftover_anticheat_section_says_what_to_do() {
+    fn a_leftover_section_of_a_removed_feature_says_what_to_do() {
         let old = format!("{TEMPLATE}\n[anticheat]\nenabled = true\n");
-        assert_eq!(Config::parse(&old), Err(ANTICHEAT_REMOVED.to_owned()));
+        assert_eq!(
+            Config::parse(&old),
+            Err(
+                "anticheat was removed from Sunrise; delete the [anticheat] section from server.toml"
+                    .to_owned()
+            )
+        );
+        let old = format!("{TEMPLATE}\n[chat_filter]\nenabled = false\n");
+        assert_eq!(
+            Config::parse(&old),
+            Err(
+                "the chat filter was removed from Sunrise; delete the [chat_filter] section from server.toml"
+                    .to_owned()
+            )
+        );
         // Other unknown keys keep serde's own message.
         let other = Config::parse("[nonsense]\nenabled = true\n").unwrap_err();
-        assert_ne!(other, ANTICHEAT_REMOVED);
+        assert!(!other.contains("was removed from Sunrise"), "{other}");
     }
 
     #[test]

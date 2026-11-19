@@ -2081,14 +2081,6 @@ impl Game<'_> {
                 event @ (HostEvent::Chat { .. } | HostEvent::Warn(_) | HostEvent::Error(_)) => {
                     self.lan_log_event(event);
                 }
-                HostEvent::ChatFiltered {
-                    sender,
-                    name,
-                    place,
-                    text,
-                    count,
-                    action,
-                } => self.chat_filtered(sender, &name, place, &text, count, action),
                 HostEvent::PlayerChat { sender, text } => {
                     self.lan_player_chatted(sender, &text);
                 }

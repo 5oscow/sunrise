@@ -1638,8 +1638,7 @@ impl Game<'_> {
     /// again. Hovering the shown name gives the real one, which stays in the
     /// log, commands, selectors and the server's events. Kept until a mod
     /// sets it again or the server stops (also if they leave and come back).
-    /// Plain text: the mod checks it (`Messages::text_allowed`, its length,
-    /// other players' names). False when the server list is unavailable,
+    /// Plain text: the mod checks it (its length, other players' names). False when the server list is unavailable,
     /// the handle is stale or the player isn't online.
     pub(super) fn player_set_nickname(
         &mut self,
@@ -1657,18 +1656,6 @@ impl Game<'_> {
         }
         host.hub.set_nickname(uuid, nickname.map(str::to_owned));
         true
-    }
-    /// Whether the server's chat filter (`server.toml` `[chat_filter]`)
-    /// lets `text` through: true without a filter, None inside a player's
-    /// hook (where the server is out of reach).
-    pub(super) fn native_text_allowed(&self, text: &str) -> Option<bool> {
-        let host = self.lan.as_ref()?;
-        Some(
-            host.hub
-                .chat_filter
-                .as_ref()
-                .is_none_or(|g| !g.matches(text)),
-        )
     }
     /// A system line in every player's chat and the server's log.
     pub(super) fn native_broadcast(&self, mut line: Text) {
