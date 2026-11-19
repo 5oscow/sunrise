@@ -927,6 +927,10 @@ pub struct Graphics {
     /// not `shaderPack`, which versions before the clean-room rewrite saved and which stays
     /// ignored.
     pub shader_pack: String,
+    /// The last non-empty shader pack pick, for the toggle key to resume. It follows every
+    /// non-empty pick, whether by menu or by key; turning shaders off keeps it. Persisted with
+    /// `pickedShaderPack` so the toggle survives a restart.
+    pub last_shader_pack: String,
 }
 impl Default for Graphics {
     fn default() -> Self {
@@ -985,6 +989,7 @@ impl Default for Graphics {
             translucent_batching: true,
             hdr_smooth_gradients: true,
             shader_pack: String::new(),
+            last_shader_pack: String::new(),
         }
     }
 }
@@ -1050,6 +1055,20 @@ impl Graphics {
                 .clone()
                 .filter(|_| self.hdr == before.hdr),
             ..before.clone()
+        }
+    }
+    /// Sets the picked pack, for the pack list and the toggle key alike: an empty pick turns
+    /// shaders off and keeps the last non-empty pick, a non-empty pick (or a switch to another
+    /// pack) becomes the last one too. The toggle key resumes exactly this last pick.
+    pub fn set_shader_pick(&mut self, new_key: &str) {
+        if new_key.is_empty() {
+            if !self.shader_pack.is_empty() {
+                self.last_shader_pack = self.shader_pack.clone();
+            }
+            self.shader_pack.clear();
+        } else {
+            self.shader_pack = new_key.to_owned();
+            self.last_shader_pack = new_key.to_owned();
         }
     }
     pub fn parse(text: &str) -> Self {
@@ -1165,6 +1184,7 @@ impl Graphics {
                 "hdrSmoothGradients" => g.hdr_smooth_gradients = flag(g.hdr_smooth_gradients),
                 "graphicsApi" => g.api = GraphicsApi::from_name(value).unwrap_or_default(),
                 "pickedShaderPack" => g.shader_pack = value.to_owned(),
+                "lastShaderPack" => g.last_shader_pack = value.to_owned(),
                 // Keys older versions saved that no setting or store reads: dropped on the next save.
                 "level" | "shaderPack" | "hdrKey" | "cullLeaves" | "translucentBatching" => {}
                 key => g.unclaimed.push((key.to_owned(), value.to_owned())),
@@ -1183,7 +1203,7 @@ impl Graphics {
     }
     pub fn serialize(&self) -> String {
         let mut text = format!(
-            "preset:{}\nlodDistance:{}\nfarDetail:{}\ncaveCulling:{}\nentityCulling:{}\nentityCullingPrecheck:{}\nparticleCulling:{}\nleafCulling:{}\nopaqueIce:{}\nblockEntityCacheShulkerBoxes:{}\nblockEntityCacheSigns:{}\nblockEntityCacheDecoratedPots:{}\nblockEntityCacheBells:{}\nblockEntityCacheChests:{}\nblockEntityCacheBanners:{}\nblockEntityCacheCopperGolemStatues:{}\nchunkUpdates:{}\nuploadBudgetKiB:{}\ntextureBudgetMiB:{}\nsky:{}\nfog:{}\nweather:{}\nanimatedTextures:{}\nditherCutoutMips:{}\npresentMode:{}\nframePacing:{}\nworkers:{}\nresolutionScale:{}\ndynamicResolution:{}\ntargetFps:{}\nfxaa:{}\ntaa:{}\nupscaling:{}\nupscalingSharpness:{}\nscreenshotQuality:{}\nframeGeneration:{}\nhdr:{}\nhdrPaperWhite:{}\nhdrPeak:{}\nhdrBlackLevel:{}\nhdrUiNits:{}\nhdrLighting:{}\nbatteryMode:{}\nshadowCache:{}\ngraphicsApi:{}\npickedShaderPack:{}\nbatchTranslucent:{}\nhdrSmoothGradients:{}\ngpuCulling:{}\nparallelTick:{}\n",
+            "preset:{}\nlodDistance:{}\nfarDetail:{}\ncaveCulling:{}\nentityCulling:{}\nentityCullingPrecheck:{}\nparticleCulling:{}\nleafCulling:{}\nopaqueIce:{}\nblockEntityCacheShulkerBoxes:{}\nblockEntityCacheSigns:{}\nblockEntityCacheDecoratedPots:{}\nblockEntityCacheBells:{}\nblockEntityCacheChests:{}\nblockEntityCacheBanners:{}\nblockEntityCacheCopperGolemStatues:{}\nchunkUpdates:{}\nuploadBudgetKiB:{}\ntextureBudgetMiB:{}\nsky:{}\nfog:{}\nweather:{}\nanimatedTextures:{}\nditherCutoutMips:{}\npresentMode:{}\nframePacing:{}\nworkers:{}\nresolutionScale:{}\ndynamicResolution:{}\ntargetFps:{}\nfxaa:{}\ntaa:{}\nupscaling:{}\nupscalingSharpness:{}\nscreenshotQuality:{}\nframeGeneration:{}\nhdr:{}\nhdrPaperWhite:{}\nhdrPeak:{}\nhdrBlackLevel:{}\nhdrUiNits:{}\nhdrLighting:{}\nbatteryMode:{}\nshadowCache:{}\ngraphicsApi:{}\npickedShaderPack:{}\nlastShaderPack:{}\nbatchTranslucent:{}\nhdrSmoothGradients:{}\ngpuCulling:{}\nparallelTick:{}\n",
             self.preset.name(),
             self.lod_distance,
             self.far_detail.name(),
@@ -1233,6 +1253,7 @@ impl Graphics {
             bool_text(self.shadow_cache),
             self.api.name(),
             self.shader_pack,
+            self.last_shader_pack,
             bool_text(self.translucent_batching),
             bool_text(self.hdr_smooth_gradients),
             self.gpu_culling.key(),
@@ -1613,6 +1634,7 @@ mod tests {
             translucent_batching: false,
             hdr_smooth_gradients: false,
             shader_pack: "Golden Hour".into(),
+            last_shader_pack: "Warm-1".into(),
         };
         assert_eq!(Graphics::parse(&g.serialize()), g);
         // A legacy marker's hold, which names no driver, round-trips too; none writes no line.
@@ -1973,5 +1995,61 @@ mod tests {
         assert_eq!(g.battery_limit(260, false, true), 30);
         assert_eq!(g.battery_limit(260, true, false), 30);
         assert_eq!(g.battery_limit(10, true, false), 10);
+    }
+
+    /// The toggle key's memory: the last non-empty pick, persisted beside it. Empty by
+    /// default, round-tripped with the pick, and read back from a file that has both.
+    #[test]
+    fn the_last_shader_pack_round_trips_with_the_pick() {
+        let g = Graphics::default();
+        assert_eq!(
+            (g.shader_pack.as_str(), g.last_shader_pack.as_str()),
+            ("", "")
+        );
+        for (pick, last) in [
+            ("A.zip", "B.zip"),
+            ("sunrise:warm", "sunrise:warm"),
+            ("", "A.zip"),
+            ("", ""),
+        ] {
+            let g = Graphics {
+                shader_pack: pick.into(),
+                last_shader_pack: last.into(),
+                ..Graphics::default()
+            };
+            let saved = g.serialize();
+            assert!(
+                saved.contains(&format!("\npickedShaderPack:{pick}\n")),
+                "{saved}"
+            );
+            assert!(
+                saved.contains(&format!("\nlastShaderPack:{last}\n")),
+                "{saved}"
+            );
+            assert_eq!(Graphics::parse(&saved), g, "{saved}");
+        }
+        // A file from before the toggle key has no memory: it reads as empty.
+        let old = Graphics::parse("pickedShaderPack:A.zip\n");
+        assert_eq!(old.shader_pack.as_str(), "A.zip");
+        assert_eq!(old.last_shader_pack.as_str(), "");
+    }
+
+    /// One shared pick for the pack list and the toggle key: turning off keeps the last
+    /// non-empty pick (menu and key alike), a non-empty pick becomes the last one, and
+    /// turning off with nothing picked keeps the memory as it was.
+    #[test]
+    fn setting_the_pick_keeps_the_last_non_empty_one() {
+        let mut g = Graphics::default();
+        let pick_of = |g: &Graphics| (g.shader_pack.clone(), g.last_shader_pack.clone());
+        g.set_shader_pick("A.zip");
+        assert_eq!(pick_of(&g), ("A.zip".into(), "A.zip".into()));
+        g.set_shader_pick("B.zip");
+        assert_eq!(pick_of(&g), ("B.zip".into(), "B.zip".into()));
+        g.set_shader_pick("");
+        assert_eq!(pick_of(&g), ("".into(), "B.zip".into()));
+        g.set_shader_pick("");
+        assert_eq!(pick_of(&g), ("".into(), "B.zip".into()));
+        g.set_shader_pick("A.zip");
+        assert_eq!(pick_of(&g), ("A.zip".into(), "A.zip".into()));
     }
 }

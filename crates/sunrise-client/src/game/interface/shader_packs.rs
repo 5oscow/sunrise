@@ -91,6 +91,55 @@ pub(super) fn picked_pack(settings: &sunrise_client::settings::Settings) -> &str
     )
 }
 
+/// Sets the picked pack, for the pack list and the toggle key alike: an empty pick turns
+/// shaders off and keeps the last non-empty pick, a non-empty pick (or a switch to another
+/// pack) becomes the last one too. The toggle key resumes exactly this last pick.
+/// The body lives on the render crate's `Graphics` so the settings screen and the game use
+/// one implementation; this forwards to it.
+pub(super) fn set_shader_pick(settings: &mut sunrise_client::settings::Settings, new_key: &str) {
+    settings.sunrise.set_shader_pick(new_key);
+}
+
+/// What the toggle key decided: the pack it turned off or resumed, a hint when there is
+/// nothing (or nothing left) to resume, or nothing when the developer override wins.
+pub(super) enum TogglePlan {
+    /// Turned `name` off; the chat names it.
+    Off(String),
+    /// Resumed `name`; the chat names it.
+    On(String),
+    /// Nothing to resume: clear `last` (a pack removed after it was turned off) and hint.
+    HintClearLast,
+    /// Nothing to resume; hint.
+    Hint,
+    /// The developer override wins; do nothing.
+    Noop,
+}
+
+/// The toggle key's decision on the pick, without touching the game: `dev_override` is
+/// `dev_pack()` (the `SUNRISE_SHADER_PACK` override wins over the pick), and `present` says
+/// whether the last pick is still installed. Pure so tests cover every branch without a game.
+pub(super) fn plan_shader_toggle(
+    pick: &str,
+    last: &str,
+    dev_override: bool,
+    present: impl FnOnce(&str) -> bool,
+) -> TogglePlan {
+    if dev_override {
+        return TogglePlan::Noop;
+    }
+    if !pick.is_empty() {
+        return TogglePlan::Off(pick.to_owned());
+    }
+    if last.is_empty() || !present(last) {
+        return if last.is_empty() {
+            TogglePlan::Hint
+        } else {
+            TogglePlan::HintClearLast
+        };
+    }
+    TogglePlan::On(last.to_owned())
+}
+
 /// What a renderer readies for the pick, unless it was refused, is missing or its owner is off.
 #[derive(Clone, Copy)]
 pub(crate) struct PickedPack {
@@ -1224,5 +1273,67 @@ mod native_pack_tests {
         assert_eq!(active_pack("golden_hour", &mods), "golden_hour");
         mods.installed[0].native = None;
         assert_eq!(active_pack(owned, &mods), owned);
+    }
+}
+
+#[cfg(test)]
+mod toggle_tests {
+    use super::{TogglePlan, plan_shader_toggle, set_shader_pick};
+    use sunrise_client::settings::Settings;
+
+    fn plan(pick: &str, last: &str, present: bool) -> String {
+        match plan_shader_toggle(pick, last, false, |_| present) {
+            TogglePlan::Off(name) => format!("off {name}"),
+            TogglePlan::On(name) => format!("on {name}"),
+            TogglePlan::HintClearLast => "hint-clear".into(),
+            TogglePlan::Hint => "hint".into(),
+            TogglePlan::Noop => "noop".into(),
+        }
+    }
+
+    /// The key turns the picked pack off and remembers it, resumes it, and hints when there
+    /// is nothing to resume; a removed pack clears the memory instead of failing.
+    #[test]
+    fn the_toggle_turns_off_resumes_and_hints() {
+        assert_eq!(plan("A.zip", "", true), "off A.zip");
+        assert_eq!(plan("", "A.zip", true), "on A.zip");
+        assert_eq!(plan("", "", true), "hint");
+        assert_eq!(plan("", "A.zip", false), "hint-clear");
+    }
+
+    /// The developer override wins over the pick: the key does nothing.
+    #[test]
+    fn the_developer_override_makes_the_toggle_a_noop() {
+        for (pick, last) in [("A.zip", ""), ("", "A.zip"), ("", "")] {
+            assert!(
+                matches!(
+                    plan_shader_toggle(pick, last, true, |_| true),
+                    TogglePlan::Noop
+                ),
+                "pick {pick:?}, last {last:?}"
+            );
+        }
+    }
+
+    /// One shared pick: the menu's choice and the key's write the same fields, so turning
+    /// off by either keeps the last non-empty pick for the key to resume.
+    #[test]
+    fn picking_and_unpicking_share_the_picks_memory() {
+        let mut s = Settings::default();
+        let pick_of = |s: &Settings| {
+            (
+                s.sunrise.shader_pack.clone(),
+                s.sunrise.last_shader_pack.clone(),
+            )
+        };
+        set_shader_pick(&mut s, "A.zip");
+        assert_eq!(pick_of(&s), ("A.zip".into(), "A.zip".into()));
+        // Picking another pack while turned off by the key forgets the older one.
+        set_shader_pick(&mut s, "");
+        set_shader_pick(&mut s, "B.zip");
+        assert_eq!(pick_of(&s), ("B.zip".into(), "B.zip".into()));
+        // Unpicking by hand keeps the memory, as the key's turning off does.
+        set_shader_pick(&mut s, "");
+        assert_eq!(pick_of(&s), ("".into(), "B.zip".into()));
     }
 }

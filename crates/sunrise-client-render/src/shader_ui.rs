@@ -503,10 +503,11 @@ impl shell::Screen for ShaderScreen {
                 let Some(p) = s.shader_packs.get(usize::from(i)) else {
                     return Vec::new();
                 };
-                s.sunrise.shader_pack = if s.sunrise.shader_pack == p.key {
-                    String::new()
+                let key = p.key.clone();
+                if s.sunrise.shader_pack == key {
+                    s.sunrise.set_shader_pick("");
                 } else {
-                    p.key.clone()
+                    s.sunrise.set_shader_pick(&key);
                 };
                 let mut outputs = Vec::new();
                 // The last pack's changed options are kept before the next one's are read.
@@ -884,10 +885,12 @@ mod tests {
             ];
             assert_eq!(press(&mut shell, &mut s, Item::Pack(1)), picks);
             assert_eq!(s.sunrise.shader_pack, key);
+            assert_eq!(s.sunrise.last_shader_pack, key);
             assert_eq!(picked(&s), Some((1, kind)));
             assert_eq!(switch(Item::Pack(1), &s), Some(true));
             press(&mut shell, &mut s, Item::Pack(1));
             assert_eq!(s.sunrise.shader_pack, "");
+            assert_eq!(s.sunrise.last_shader_pack, key);
             assert_eq!(switch(Item::Pack(0), &s), Some(false));
         }
     }

@@ -54,6 +54,7 @@ actions! {
     ToggleSpectatorShaderEffects, "key.toggleSpectatorShaderEffects", Some(KeyCode::F4);
     Screenshot, "key.screenshot", Some(KeyCode::F2);
     TogglePerspective, "key.togglePerspective", Some(KeyCode::F5);
+    ToggleShaderPack, "key.toggleShaderPack", Some(KeyCode::KeyK);
     SmoothCamera, "key.smoothCamera", None;
     Fullscreen, "key.fullscreen", Some(KeyCode::F11);
     SpectatorOutlines, "key.spectatorOutlines", None;
@@ -139,5 +140,20 @@ mod tests {
         for (name, _) in crate::gamepad::ACTIONS {
             assert!(Action::parse(name).is_some(), "{name}");
         }
+    }
+
+    /// The shader pack toggle lives on K by default, and a rebind moves it: K alone then
+    /// drives nothing, as its default moved away with the mapping.
+    #[test]
+    fn toggle_shader_pack_is_on_k_and_follows_its_rebind() {
+        use winit::keyboard::KeyCode;
+        let action = Action::parse("key.toggleShaderPack").expect("the toggle is an action");
+        assert_eq!(action.key(), Some(KeyCode::KeyK));
+        let mut keys = KeyBinds::default();
+        assert_eq!(keys.get("key.toggleShaderPack"), "key.keyboard.k");
+        assert!(keys.conflicts("key.toggleShaderPack").is_empty());
+        keys.set("key.toggleShaderPack", "key.keyboard.j");
+        assert_eq!(keys.translate_all(KeyCode::KeyJ), [Ok(KeyCode::KeyK)]);
+        assert_eq!(keys.translate_all(KeyCode::KeyK), []);
     }
 }
