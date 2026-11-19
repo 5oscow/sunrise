@@ -1019,7 +1019,9 @@ pub(super) fn emit<'a>(
         {
             let index = snaps.len();
             snaps.push(if cloned.contains(field) {
-                format!("(*{event}.{field}).clone()")
+                // `to_owned`, not `clone`: this generator cannot tell a `Copy` field type from an
+                // owned one, and `clippy::clone_on_copy` would flag a `clone` of the first.
+                format!("ToOwned::to_owned(&*{event}.{field})")
             } else if *by_reference {
                 format!("*{event}.{field}")
             } else {
@@ -1038,7 +1040,7 @@ pub(super) fn emit<'a>(
             String::new()
         } else {
             // A snapshot that only copies is no work to defer: `then_some`.
-            let (then, arm) = if cloned.is_empty() {
+            let (then, arm) = if !snaps.iter().any(|snap| snap.starts_with("ToOwned")) {
                 ("then_some", "")
             } else {
                 ("then", "|| ")
