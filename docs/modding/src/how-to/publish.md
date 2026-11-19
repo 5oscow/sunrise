@@ -8,6 +8,9 @@ then upload the package and open the pull request yourself.
 
 ## 1. Build and write the submission
 
+Set `version` in `sunrise-mod.toml` to a SemVer without `+build` metadata, at most 64 characters after
+padding missing parts (for example, `1.2` becomes `1.2.0`). The registry uses that version in the release name.
+
 In your mod's folder (content, native or wasm; add `--wasm` for a wasm mod, as for `build`):
 
 ```sh
