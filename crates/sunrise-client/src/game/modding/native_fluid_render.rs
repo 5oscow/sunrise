@@ -78,7 +78,7 @@ fn fluid_box_look(
                 look.sprite
                     .as_deref()
                     .unwrap_or(sunrise_client::fluid_models::FLAT_SPRITE),
-                look.tint.unwrap_or(0xFFFF_FFFF),
+                super::native_panel_recipes::fluid_tint(id, look.tint),
             )
         }
     };
@@ -342,11 +342,11 @@ mod tests {
                 luminosity: 0
             })
         );
-        // No tint is opaque white.
+        // No tint is the grey `DrawContext::fluid` draws.
         let plain = sunrise_mod_package::content::FluidLook { tint: None, ..flat };
         assert_eq!(
             fluid_box_look("test:honey", Some(&plain), 0, layers).map(|look| look.tint),
-            Ok(0xFFFF_FFFF)
+            Ok(0xFF9A_9A9A)
         );
     }
 }
