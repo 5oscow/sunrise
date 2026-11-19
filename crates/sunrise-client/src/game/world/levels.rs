@@ -204,11 +204,6 @@ pub(super) struct Parked {
 }
 
 impl Parked {
-    /// The parked level's comparator outputs, moving pistons and trapped chest openers.
-    pub(super) fn signal_state(&self) -> (&Ticks, &HashMap<(i32, i32, i32), i32>) {
-        (&self.block_ticks, &self.lid_openers)
-    }
-
     resident_owners!(
         define_resident_access,
         self,

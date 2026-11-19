@@ -54,24 +54,6 @@ pub trait LevelBlocksBackend {
     /// `block_state`. API 381.
     #[access(WorldOnly)]
     fn level_block_property(&self, level: LevelRef, pos: [i32; 3], key: &str) -> Option<String>;
-    /// Side: server.
-    /// Ask `Block.getStateForPlacement(BlockPlaceContext)` without placing the block.
-    /// The placement-state parts see `block`'s default state, as in a real placement.
-    /// A registered answer belonging to another block is returned as given; an unknown
-    /// answer falls back to the block's own rule, as in a real placement.
-    /// The context is taken as written, with no target or click re-resolution. Nothing is
-    /// written, notified or loaded. No additional survival, obstruction or permission check
-    /// from `BlockItem.place` runs.
-    /// `None` on a client or for vanilla's `null`, a part's `Some(None)`, an unknown block,
-    /// a stale or closed level, an unloaded or out-of-bounds destination, or an
-    /// unrepresentable state.
-    #[access(WorldOnly)]
-    fn level_state_for_placement(
-        &self,
-        level: LevelRef,
-        block: BlockKey,
-        context: &PlacementContext,
-    ) -> Option<BlockState>;
 }
 /// The handles' writes of the `level_blocks` area, implemented by the game and reached through [`BackendMut`].
 // hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
@@ -105,6 +87,24 @@ pub trait LevelBlocksBackendMut {
         pos: [i32; 3],
         state: BlockState,
     ) -> Result<BlockState, LevelWriteError>;
+    /// Side: server.
+    /// Ask `Block.getStateForPlacement(BlockPlaceContext)` without placing the block.
+    /// The placement-state parts see `block`'s default state, as in a real placement.
+    /// A registered answer belonging to another block is returned as given; an unknown
+    /// answer falls back to the block's own rule, as in a real placement.
+    /// The context is taken as written, with no target or click re-resolution. Nothing is
+    /// written, notified or loaded. No additional survival, obstruction or permission check
+    /// from `BlockItem.place` runs.
+    /// Only the level in play is queried. `None` for vanilla's `null`, a part's
+    /// `Some(None)`, an unknown block, a stale, closed or parked level, an unloaded
+    /// or out-of-bounds destination, or an unrepresentable state.
+    #[access(WorldOnly)]
+    fn level_state_for_placement(
+        &mut self,
+        level: LevelRef,
+        block: BlockKey,
+        context: &PlacementContext,
+    ) -> Option<BlockState>;
     /// Side: server.
     /// Write `state` at `pos` as a placement does and run `Block.setPlacedBy` for it, with no
     /// player: a bed places its head, a door its upper half, a tall plant its top. The write

@@ -4,9 +4,9 @@ use super::{
     native_entity_refs::tests::{run_fresh_cases, with_game_at},
 };
 use mod_api::{
-    Block, BlockPart, BlockState, BlockStateRecord, BlocksEvent, Hooks, LevelRef, LevelSide,
-    ModEntry, Mods, PlacementContext, Registrar, RegistrationContext, StateForPlacementEvent,
-    WorldEpoch,
+    Block, BlockPart, BlockState, BlockStateRecord, BlocksEvent, FenceGateInWallEvent, Hooks,
+    LevelRef, LevelSide, ModEntry, Mods, PlacementContext, Registrar, RegistrationContext,
+    StateForPlacementEvent, WorldEpoch,
 };
 use std::sync::Arc;
 use sunrise_client::chunk::Chunk;
@@ -54,6 +54,10 @@ impl BlockPart for PlacementPart {
         );
         assert_eq!(level.has_neighbor_signal([POS.x, POS.y, POS.z]), Some(true));
         Some(level.block_state_id("minecraft:oak_log[axis=z]"))
+    }
+
+    fn fence_gate_in_wall(&self, _: LevelSide<'_>, _: &mut FenceGateInWallEvent) -> Option<bool> {
+        Some(true)
     }
 }
 
@@ -139,22 +143,16 @@ fn vanilla_candidates_use_the_resolved_context_without_placing() {
                 // `BlockItem.place` would refuse this unsupported door: this read does not.
                 ("minecraft:oak_door", "half", "lower"),
             ] {
+                let block_key = game.block_key(block).unwrap();
                 let state = level
-                    .state_for_placement(&*game, game.block_key(block).unwrap(), &context)
+                    .state_for_placement(game, block_key, &context)
                     .unwrap();
                 let state = registry.state(state.try_into_engine(&()).unwrap()).unwrap();
                 assert_eq!(state.name, block);
                 assert_eq!(state.properties[key], expected, "{block}");
             }
-            assert!(
-                level
-                    .state_for_placement(
-                        &*game,
-                        game.block_key("minecraft:tube_coral").unwrap(),
-                        &context
-                    )
-                    .is_some()
-            );
+            let coral = game.block_key("minecraft:tube_coral").unwrap();
+            assert!(level.state_for_placement(game, coral, &context).is_some());
             assert_eq!(blocks(game), before);
             assert_eq!(game.world.random.state(), rng);
             assert_eq!(game.block_ticks.blocks.count(), ticks);
@@ -170,14 +168,14 @@ fn refusals_and_unavailable_inputs_return_no_state() {
         let mut context = PlacementContext::new(POS, Direction::Up, None);
         // No surface supports a vine in this empty column.
         let vine = game.block_key("minecraft:vine").unwrap();
-        assert_eq!(level.state_for_placement(&*game, vine, &context), None);
+        assert_eq!(level.state_for_placement(game, vine, &context), None);
         let mod_block = game.block_key(BLOCK).unwrap();
         context.sneaking = true;
-        assert_eq!(level.state_for_placement(&*game, mod_block, &context), None);
+        assert_eq!(level.state_for_placement(game, mod_block, &context), None);
         context.sneaking = false;
         context.inside = true;
         assert_eq!(
-            level.state_for_placement(&*game, mod_block, &context),
+            level.state_for_placement(game, mod_block, &context),
             game.block_state_default(mod_block)
                 .map(|state| super::api_values::TryIntoApi::try_into_api(&state).unwrap())
         );
@@ -194,22 +192,19 @@ fn refusals_and_unavailable_inputs_return_no_state() {
             (level, stone, POS.offset(16, 0, 0)),
         ] {
             context.pos = pos;
-            assert_eq!(level.state_for_placement(&*game, block, &context), None);
+            assert_eq!(level.state_for_placement(game, block, &context), None);
         }
         assert_eq!(game.world.chunks.len(), 1);
         context.pos = POS;
-        assert!(level.state_for_placement(&*game, stone, &context).is_some());
-        game.options.execution_role = super::execution_role::ExecutionRole::Client;
-        let client: &dyn mod_api::ClientHost = game;
-        assert_eq!(level.state_for_placement(client, stone, &context), None);
+        assert!(level.state_for_placement(game, stone, &context).is_some());
     });
 }
 
 #[test]
 #[ignore = "daily"]
-fn another_blocks_state_is_returned_from_the_parked_levels_part() {
+fn another_blocks_state_is_returned_only_from_the_level_in_play() {
     with_game(
-        "another_blocks_state_is_returned_from_the_parked_levels_part",
+        "another_blocks_state_is_returned_only_from_the_level_in_play",
         |game| {
             use super::api_values::TryIntoApi;
             let level = game.level(game.dim.id()).unwrap();
@@ -245,16 +240,30 @@ fn another_blocks_state_is_returned_from_the_parked_levels_part() {
             game.block_ticks
                 .comparator_outputs
                 .insert(POS.offset(-1, 0, 0), 8);
-            assert!(game.enter_command_level(Dim::Nether).is_some());
             assert_eq!(
-                level.state_for_placement(&*game, mod_block, &context),
+                level.state_for_placement(game, mod_block, &context),
                 Some(log)
             );
             let door = game.block_key("minecraft:oak_door").unwrap();
-            let state = level.state_for_placement(&*game, door, &context).unwrap();
+            let state = level.state_for_placement(game, door, &context).unwrap();
             use super::api_values::TryIntoEngine;
             let state = registry.state(state.try_into_engine(&()).unwrap()).unwrap();
             assert_eq!(state.properties["powered"], "true");
+
+            // The vanilla candidate can also depend on a neighbour's Part.
+            let neighbour = game.block_state_default(mod_block).unwrap();
+            game.world.set(8, 70, 9, neighbour).unwrap();
+            let gate = game.block_key("minecraft:oak_fence_gate").unwrap();
+            let state = level.state_for_placement(game, gate, &context).unwrap();
+            let state = registry.state(state.try_into_engine(&()).unwrap()).unwrap();
+            assert_eq!(state.properties["in_wall"], "true");
+
+            assert!(game.enter_command_level(Dim::Nether).is_some());
+            assert_eq!(
+                level.block(game, [10, 70, 8]),
+                game.block_key("minecraft:stone")
+            );
+            assert_eq!(level.state_for_placement(game, mod_block, &context), None);
             assert_eq!(game.dim, Dim::Nether, "the query never swaps the level in");
         },
     );
