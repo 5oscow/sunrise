@@ -336,13 +336,19 @@ def size_label(label, width, height):
 
 def scene_list(args):
     """(name, from, to, pitch) of the scenes asked for: the flights, then the stress scenes ("stress" is all of them)."""
-    picked = args.scenes.split(",") if args.scenes else [s[0] for s in SCENES]
+    picked = args.scenes.split(",") if args.scenes is not None else [s[0] for s in SCENES]
     if "stress" in picked:
         picked += stress_scenes.NAMES
     # --server-bots adds the crowd scene over the bots.
     return ([s for s in SCENES if s[0] in picked] + list(getattr(args, "extra_scenes", None) or [])
             + [stress_scenes.scene(n) for n in stress_scenes.NAMES if n in picked]
             + [MENU_HOLD] * (MENU_HOLD[0] in picked))
+
+
+def unknown_scenes(spec):
+    """The tokens of a --scenes value that name no scene, an empty one included (`village,,forest`, `''`)."""
+    known = {s[0] for s in SCENES} | set(stress_scenes.NAMES) | {"stress", MENU_HOLD[0]}
+    return [t for t in spec.split(",") if t not in known]
 
 
 # Seconds a stress scene settles after its setup: the server spawns, the client receives and draws it.
@@ -639,13 +645,25 @@ def parse_tick_query(lines):
     return None
 
 
+GAME_TIME = re.compile(r"The time is (\d+)")
+
+
+def game_time(control):
+    """The server's game time (`/time query gametime`): one per server tick, so two readings count the ticks between."""
+    try:
+        lines = control("command time query gametime").get("chat") or []
+    except (OSError, ValueError, RuntimeError):
+        return None
+    return next((int(m[1]) for line in lines if (m := GAME_TIME.search(line))), None)
+
+
 def server_ticks(control, ticked):
-    """The server's tick times over the flight, or None unless `/tick query`'s full window lies inside its `ticked` ticks."""
+    """The server's tick times over the flight, or None unless `/tick query`'s window lies inside its `ticked` server ticks."""
     try:
         query = parse_tick_query(control("command tick query").get("chat") or [])
     except (OSError, ValueError, RuntimeError):
         return None
-    return query if query and query["samples"] >= TICK_WINDOW and ticked >= TICK_WINDOW else None
+    return query if query and query["samples"] >= TICK_WINDOW and (ticked or 0) >= TICK_WINDOW else None
 
 
 def menu_hold(control, seconds):
@@ -741,6 +759,9 @@ def run_sunrise(args, distance):
             time.sleep(settle_seconds(args, name))
             before = control("status")
             loaded_meshes = before["meshed_sections"]
+            # The integrated server's ticks while flying; a joined server's aren't ours to read.
+            server_scene = not args.server and name != MENU_HOLD[0]
+            time_before = game_time(control) if server_scene else None
             begin = time.time()
             if name == MENU_HOLD[0]:
                 summary = menu_hold(control, args.seconds)
@@ -756,9 +777,10 @@ def run_sunrise(args, distance):
             if ticks > 0 and tick_phase is not None:
                 scene["client_tick_ms"] = tick_phase * summary.get("frames", 0) / ticks
             scene["entities"] = {"mobs": status.get("mobs"), "block_entities": status.get("block_entities")}
-            # The integrated server's ticks while flying; a joined server's aren't ours to read.
-            if not args.server and name != MENU_HOLD[0]:
-                scene["server_tick"] = server_ticks(control, ticks)
+            if server_scene:
+                time_after = game_time(control)
+                ran = time_after - time_before if None not in (time_before, time_after) else None
+                scene["server_tick"] = server_ticks(control, ran)
             if name in stress_scenes.NAMES:
                 for line in stress_scenes.cleanup(name):
                     control("command " + line)
@@ -1306,6 +1328,11 @@ def print_judgement(rows, budget_pct):
         print(f"| {r['scene']} | {r['figure']} | {r['a']:.3f} | {r['b']:.3f} | {r['diff']:+.3f}{pct} | {ci} | {r['verdict']} | {within} | {gate} |")
 
 
+def ungated_ticks(rows):
+    """`scene figure` of every server tick figure left ungated because the budget is finer than its resolution."""
+    return [f"{r['scene']} {r['figure']}" for r in rows if r["below_resolution"] and r["figure"].startswith("server_tick")]
+
+
 def compare(args):
     """--compare BEFORE AFTER: games of the two builds alternating, judged per render distance and window size."""
     before, after = (str(Path(b).resolve()) for b in args.compare)
@@ -1327,13 +1354,16 @@ def compare(args):
                 played.append({"build": build, "started": started, "ended": time.time(), "scenes": games[-1]})
             rows = judge(games, args.budget, scenes)
             print_judgement(rows, args.budget)
+            if unchecked := ungated_ticks(rows):
+                print(f"Not gated: server tick times under {TICK_STEP_MS / 2 * 100 / args.budget:.2f} ms ({', '.join(unchecked)}): "
+                      f"/tick query reads {TICK_STEP_MS} ms steps, so the tick half of the budget is unchecked there.")
             failed |= any(r["gated"] and not r["passed"] for r in rows)
             out = ROOT / "benchmarks/perf" / f"{args.label}-compare-rd{d}.json"
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_text(json.dumps({"before": before, "after": after, "budget_pct": args.budget,
                                        "render_distance": d, "window": [args.width, args.height],
                                        "workload": workload, "hardware": hardware(), "games": played,
-                                       "results": rows}, indent=1) + "\n")
+                                       "results": rows, "ungated_ticks": unchecked}, indent=1) + "\n")
             print(out)
     return 1 if failed else 0
 
@@ -1454,6 +1484,8 @@ def main():
                    help="--compare: how far, in %% of BEFORE, a gated figure's interval may reach (default 3)")
     args = p.parse_args()
     SEED = args.seed
+    if args.scenes is not None and (unknown := unknown_scenes(args.scenes)):
+        p.error(f"--scenes {args.scenes!r}: no scene named {', '.join(repr(t) for t in unknown)}")
     sunrise_only = [o for o, v in (("--graphics", args.graphics), ("--resource-pack", args.resource_pack),
                                    ("--shader-pack", args.shader_pack), ("--compare", args.compare)) if v]
     if args.game != "sunrise" and (sunrise_only or MENU_HOLD[0] in (args.scenes or "").split(",")):
@@ -1463,8 +1495,6 @@ def main():
             p.error("--compare runs single player: drop --server")
         if args.repeats < 6 or args.repeats % 2:
             p.error("--compare needs an even --repeats of 6 or more: 6 pairs for the interval, whole B A A B blocks")
-        if not scene_list(args):
-            p.error(f"--scenes {args.scenes!r} names no scene")
         args.label = args.label or f"compare-{platform.node().split('.')[0]}"
         WORK.mkdir(parents=True, exist_ok=True)
         sys.exit(compare(args))

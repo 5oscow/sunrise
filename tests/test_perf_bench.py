@@ -489,6 +489,33 @@ class CompareTests(unittest.TestCase):
         self.assertEqual(parse_tick_query(lines), {"p50_ms": 2.9, "p95_ms": 4.2, "p99_ms": 6.0, "samples": 100})
         self.assertIsNone(parse_tick_query(["Unknown command"]))
 
+    def test_a_misspelled_or_empty_scene_is_refused(self):
+        from tools.perf_bench import unknown_scenes
+        self.assertEqual(unknown_scenes("village,forrest"), ["forrest"])
+        self.assertEqual(unknown_scenes(""), [""])
+        self.assertEqual(unknown_scenes("village,,ocean"), [""])
+        self.assertEqual(unknown_scenes("stress,menu_hold,mountain,stress_mobs"), [])
+
+    def test_server_ticks_count_only_the_flights_own_ticks(self):
+        from tools.perf_bench import game_time, server_ticks
+        replies = {"command time query gametime": {"chat": ["The time is 48210"]},
+                   "command tick query": {"chat": ["Percentiles: P50: 2.9ms P95: 4.2ms P99: 6.0ms. Sample: 100"]}}
+
+        def control(verb):
+            return replies[verb]
+
+        self.assertEqual(game_time(control), 48210)
+        self.assertIsNone(server_ticks(control, 99), "a window reaching back before the flight is not the flight's")
+        self.assertIsNone(server_ticks(control, None), "uncounted ticks are not shown to belong to the flight")
+        self.assertEqual(server_ticks(control, 100)["p50_ms"], 2.9)
+
+    def test_ungated_tick_figures_are_listed_for_the_summary(self):
+        from tools.perf_bench import ungated_ticks
+        rows = [{"scene": "village", "figure": "server_tick_p50_ms", "below_resolution": True},
+                {"scene": "village", "figure": "p50_ms", "below_resolution": False},
+                {"scene": "ocean", "figure": "server_tick_p99_ms", "below_resolution": False}]
+        self.assertEqual(ungated_ticks(rows), ["village server_tick_p50_ms"])
+
     def test_game_folder_gets_graphics_and_packs(self):
         import argparse
         import tempfile
