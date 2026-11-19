@@ -116,7 +116,6 @@ fn uses_command(entry: mod_surface::child::ChildEntry, args: &[PathBuf]) {
     // No manifest form names a hook version today (the schema refuses `hook_version`).
     let manifest = ManifestFacts {
         names: input.manifest_names,
-        hook_versions: Default::default(),
     };
     let uses = uses_contained(
         entry,
