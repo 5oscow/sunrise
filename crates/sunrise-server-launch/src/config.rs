@@ -5,7 +5,10 @@
 //! server does; what the game changes there itself (`/whitelist on`) is copied back afterwards.
 
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, path::Path};
+use std::{
+    collections::{BTreeMap, HashSet},
+    path::Path,
+};
 use sunrise_platform::java_properties::{Properties, date_string, now_millis};
 use sunrise_platform::server_files::biome_regions::BiomeRegions;
 #[cfg(test)]
@@ -750,8 +753,8 @@ impl Config {
     }
 
     /// Writes this configuration into `server.properties`, keeping the keys it doesn't set. Returns what it
-    /// wrote, for [`sync_back`].
-    pub fn write_properties(&self, dir: &Path) -> std::io::Result<Vec<(String, String)>> {
+    /// wrote and which keys cannot safely be copied back after the game runs.
+    pub fn write_properties(&self, dir: &Path) -> std::io::Result<WrittenProperties> {
         let path = dir.join(PROPERTIES);
         // Only a missing file starts empty. One that cannot be read is left as it is and the start stops
         // with why, so the owner's other keys (RCON, command blocks...) are not reset to defaults.
@@ -761,10 +764,25 @@ impl Config {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Properties::default(),
             Err(e) => return Err(e),
         };
-        let written = self.vanilla();
-        for (key, value) in &written {
+        let mut syncable = self.vanilla();
+        for (key, value) in &syncable {
             properties.put(key, value.clone());
         }
+        // Remember collisions while the original keys are still available.
+        // A later read cannot tell which of the Writer's identical rows won.
+        let aliases: HashSet<_> = properties
+            .iter()
+            .filter_map(|(key, _)| key.utf8_writer_alias())
+            .collect();
+        let mut writer_collisions = Vec::new();
+        syncable.retain(|(key, _)| {
+            if aliases.contains(key) {
+                writer_collisions.push(key.clone());
+                false
+            } else {
+                true
+            }
+        });
         // Use the Java OutputStream form: escapes preserve every unit in
         // keys we didn't set. The game, not the overlay, does the Writer pass.
         let text = properties.store(
@@ -773,7 +791,10 @@ impl Config {
             true,
         );
         replace(&path, &text)?;
-        Ok(written)
+        Ok(WrittenProperties {
+            syncable,
+            writer_collisions,
+        })
     }
 
     /// The level `op` gives a new operator: `op-permission-level` as the game reads it at its next start,
@@ -791,12 +812,26 @@ impl Config {
     /// A configuration from a vanilla `server.properties`: typed settings from their keys, and every other
     /// key the file sets to something other than vanilla's default under `[properties]`.
     pub fn import(source: &Properties) -> Result<Self, String> {
+        // Normalization can replace an invalid typed value with a valid default.
+        // Refuse unrepresentable source entries before that can hide them.
+        let mut entries: Vec<_> = source.iter().collect();
+        entries.sort_unstable_by_key(|(key, _)| *key);
+        let mut keys = Vec::with_capacity(entries.len());
+        for (key, value) in entries {
+            let key = key.to_utf8().map_err(|_| {
+                format!("Cannot import server.properties key {:04X?}: TOML cannot represent an unpaired UTF-16 surrogate", key.as_units())
+            })?;
+            if value.has_unpaired_surrogate() {
+                return Err(toml_value_refusal(&key));
+            }
+            keys.push(key);
+        }
         let parsed = ServerProperties::new(source.clone(), &mut SystemEntropy::default())?;
         let defaults = ServerProperties::new(Properties::default(), &mut SystemEntropy::default())?;
         let mut table = toml::Table::try_from(Self::default()).map_err(|e| e.to_string())?;
         for (section, field, key) in TYPED {
             let (Some(text), Some(slot)) = (
-                parsed.raw.get_java(key),
+                parsed.raw.get(key),
                 table
                     .get_mut(section)
                     .and_then(|s| s.as_table_mut())
@@ -804,30 +839,20 @@ impl Config {
             ) else {
                 continue;
             };
-            let text = text.to_utf8().map_err(|_| toml_value_refusal(key))?;
             if let Some(value) = typed_value(&text, slot) {
                 *slot = value;
             }
         }
         let mut extra = toml::Table::new();
-        let mut keys: Vec<_> = source.iter().map(|(key, _)| key).collect();
-        keys.sort_unstable();
         for key in keys {
-            let key = key.to_utf8().map_err(|_| {
-                format!("Cannot import server.properties key {:04X?}: TOML cannot represent an unpaired UTF-16 surrogate", key.as_units())
-            })?;
             if TYPED.iter().any(|t| t.2 == key) {
                 continue;
             }
-            let value = parsed.raw.get_java(&key);
-            if value.is_some() && defaults.raw.get_java(&key) == value {
+            let value = parsed.raw.get(&key);
+            if value.is_some() && defaults.raw.get(&key) == value {
                 continue;
             }
-            let text = value
-                .map(|value| value.to_utf8().map_err(|_| toml_value_refusal(&key)))
-                .transpose()?
-                .unwrap_or_default();
-            extra.insert(key, loose_value(&text));
+            extra.insert(key, loose_value(&value.unwrap_or_default()));
         }
         table.insert("properties".into(), toml::Value::Table(extra));
         let config: Self = table.try_into().map_err(|e| e.to_string())?;
@@ -894,15 +919,29 @@ pub fn render(config: &Config) -> String {
     text
 }
 
-/// After the game stopped: copies into `server.toml` the keys it wrote that the game changed in
+/// A supervisor overlay's baseline for shutdown sync-back.
+#[derive(Debug)]
+pub struct WrittenProperties {
+    syncable: Vec<(String, String)>,
+    writer_collisions: Vec<String>,
+}
+
+impl WrittenProperties {
+    /// Managed keys that the game's Writer cannot distinguish from another key.
+    pub fn writer_collisions(&self) -> &[String] {
+        &self.writer_collisions
+    }
+}
+
+/// After the game stopped: copies into `server.toml` the unambiguous keys the game changed in
 /// `server.properties` (`/whitelist on` stores `white-list`), keeping the owner's comments. Returns the keys
 /// copied.
-pub fn sync_back(dir: &Path, written: &[(String, String)]) -> Result<Vec<String>, String> {
+pub fn sync_back(dir: &Path, written: &WrittenProperties) -> Result<Vec<String>, String> {
     let Ok(now) = read_properties(&dir.join(PROPERTIES)) else {
         return Ok(Vec::new());
     };
     let mut changed = Vec::new();
-    for (key, previous) in written {
+    for (key, previous) in &written.syncable {
         if let Some(value) = now.get_java(key) {
             let value = value.to_utf8().map_err(|_| toml_value_refusal(key))?;
             if &value != previous {
@@ -1262,18 +1301,14 @@ mod tests {
 
     #[test]
     fn import_refuses_properties_toml_cannot_represent() {
-        let keys = Properties::load_str("?=literal\n\\uD800=surrogate\n").unwrap();
-        let error = Config::import(&keys).unwrap_err();
-        assert!(
-            error.contains("key [D800]: TOML cannot represent"),
-            "{error}"
-        );
-        let value = Properties::load_str("level-seed=\\uD800\n").unwrap();
-        let error = Config::import(&value).unwrap_err();
-        assert!(
-            error.contains("value for \"level-seed\": TOML cannot represent"),
-            "{error}"
-        );
+        for input in [
+            "?=literal\n\\uD800=surrogate\n",
+            "level-seed=\\uD800\n",
+            "server-port=\\uD800\n",
+        ] {
+            let source = Properties::load_str(input).unwrap();
+            assert!(Config::import(&source).is_err(), "accepted {input:?}");
+        }
     }
 
     #[test]
@@ -1421,6 +1456,8 @@ mod tests {
         let mut c = Config::default();
         c.properties
             .insert("spawn-protection".into(), toml::Value::Integer(0));
+        c.properties
+            .insert("?".into(), toml::Value::String("managed".into()));
         std::fs::write(dir.join(FILE), render(&c)).unwrap();
         std::fs::write(
             dir.join(PROPERTIES),
@@ -1436,17 +1473,25 @@ mod tests {
             "other keys are kept"
         );
         assert_eq!(p.get("spawn-protection").as_deref(), Some("0"));
-        assert_eq!(p.get("?").as_deref(), Some("literal"));
+        assert_eq!(p.get("?").as_deref(), Some("managed"));
         assert!(
             p.iter().any(|(key, value)| key.as_units() == [0xd800]
                 && value.to_utf8().unwrap() == "surrogate")
         );
         assert_eq!(p.get_java("custom").unwrap().as_units(), [0xdc00]);
-        // The game turns the whitelist off and changes spawn protection.
-        let mut p = p;
-        p.put("white-list", "false".into());
-        p.put("spawn-protection", "4".into());
-        std::fs::write(dir.join(PROPERTIES), p.store(None, "date", false)).unwrap();
+        // The dedicated server rewrites its settings using the Writer path.
+        let path = dir.join(PROPERTIES);
+        ServerProperties::from_file(&path, &mut SystemEntropy::default())
+            .unwrap()
+            .update("white-list", "false".into())
+            .unwrap()
+            .update("spawn-protection", "4".into())
+            .unwrap()
+            .store(&path)
+            .unwrap();
+        let after_writer = read_properties(&path).unwrap();
+        assert_eq!(after_writer.get("?").as_deref(), Some("surrogate"));
+        assert_eq!(written.writer_collisions(), ["?"]);
         let mut changed = sync_back(&dir, &written).unwrap();
         changed.sort();
         assert_eq!(changed, ["spawn-protection", "white-list"]);
@@ -1458,6 +1503,7 @@ mod tests {
         let back = Config::parse(&text).unwrap();
         assert!(!back.server.whitelist);
         assert_eq!(back.properties["spawn-protection"], toml::Value::Integer(4));
+        assert_eq!(back.properties["?"].as_str(), Some("managed"));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

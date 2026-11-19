@@ -28,7 +28,22 @@ impl JavaString {
     pub fn to_utf8(&self) -> Result<String, std::string::FromUtf16Error> {
         String::from_utf16(&self.0)
     }
+
+    pub fn has_unpaired_surrogate(&self) -> bool {
+        char::decode_utf16(self.0.iter().copied()).any(|unit| unit.is_err())
+    }
+
+    /// The distinct key that reloading the UTF-8 Writer form would yield, if encoding changes it.
+    pub fn utf8_writer_alias(&self) -> Option<String> {
+        self.has_unpaired_surrogate().then(|| {
+            char::decode_utf16(self.0.iter().copied())
+                .map(|unit| unit.unwrap_or(UTF8_WRITER_REPLACEMENT))
+                .collect()
+        })
+    }
 }
+
+const UTF8_WRITER_REPLACEMENT: char = '?';
 
 impl From<&str> for JavaString {
     fn from(text: &str) -> Self {
@@ -284,7 +299,7 @@ fn save_convert(out: &mut String, text: &JavaString, escape_space: bool, esc_uni
                 write!(out, "\\u{:04X}", e.unpaired_surrogate()).unwrap();
                 continue;
             }
-            Err(_) => '?',
+            Err(_) => UTF8_WRITER_REPLACEMENT,
         };
         match c {
             ' ' => {
