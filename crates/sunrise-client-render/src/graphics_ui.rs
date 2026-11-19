@@ -2158,9 +2158,9 @@ mod tests {
         assert_eq!(s.sunrise.lod_distance, 24);
         // A distance between stops (from the file) sits on the next one.
         s.sunrise.lod_distance = 3000;
-        assert_eq!(item.slider(&s), Some(13.0 / 23.0));
+        assert_eq!(item.slider(&s), Some(f64::from(13.0_f32 / 23.0)));
         s.sunrise.lod_distance = 12;
-        assert_eq!(item.slider(&s), Some(1.0 / 23.0));
+        assert_eq!(item.slider(&s), Some(f64::from(1.0_f32 / 23.0)));
     }
 
     /// With far terrain on, Render Distance reads "Full Detail Distance" but keeps vanilla's
