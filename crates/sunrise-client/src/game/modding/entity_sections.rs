@@ -20,8 +20,15 @@
 //! deferred by the surrounding entity write and is never re-entered from its own call; listeners
 //! should queue such work themselves until the write completes.
 //!
-//! With no listener each boundary is one subscription check and nothing is filed. With one, a
-//! boundary is a hash lookup and the reusable crossing record is told without a per-frame scan.
+//! Section entry order (`EntitySection` keeps its entities in the order they entered it, which
+//! a chunk's save follows) does not depend on a listener: a server boundary that knows both
+//! ends of the write compares their section coordinates (integers) and, only on a crossing,
+//! tells the residency table (`EntityTable::entered_section`, one hash lookup per crossing).
+//! A write inside one section costs the compare alone.
+//!
+//! With no listener a boundary is that compare and one subscription check, and nothing is
+//! filed. With one, a boundary is a hash lookup and the reusable crossing record is told
+//! without a per-frame scan.
 
 #[path = "entity_sections/observer_cache.rs"]
 pub(super) mod observer_cache;
@@ -51,6 +58,12 @@ fn section_coord(v: f64) -> i32 {
 
 fn section_of([x, y, z]: [f64; 3]) -> [i32; 3] {
     [section_coord(x), section_coord(y), section_coord(z)]
+}
+
+/// Whether a write from `from` to `to` leaves the section it was in: six integer shifts and a
+/// compare, no allocation and no lookup.
+pub(super) fn crossed(from: [f64; 3], to: [f64; 3]) -> bool {
+    section_of(from) != section_of(to)
 }
 
 /// A section change a boundary found: the entity, its old and its new section.
@@ -84,6 +97,9 @@ pub(super) struct EntitySections {
     busy: bool,
     /// The mobs' position updates during their family's tick; kept for its capacity.
     pub(super) ticked: Vec<PositionWrite>,
+    /// Mobs that crossed into another section during their family's tick, in the order of the
+    /// writes; told to the residency table once the pass has its rows back. Kept for its capacity.
+    pub(super) entered: Vec<u32>,
     /// A projectile row is lent during its individual tick. Position reads during its write
     /// boundary use this value until the row is restored.
     pub(super) write_position: Option<(u32, [f64; 3])>,
@@ -279,8 +295,21 @@ impl Game<'_> {
         })
     }
 
+    /// `Callback.onMove` for the residency table: a server entity's write from `from` to `to`
+    /// that leaves its section puts it at the end of the section it enters, whether or not a
+    /// hook listens. Cost: the integer compare of [`crossed`]; the table is touched only on a
+    /// crossing.
+    pub(super) fn entity_section_entered(&mut self, id: u32, from: [f64; 3], to: [f64; 3]) {
+        if crossed(from, to) && self.is_logical_server() {
+            self.resident_entities.table.get_mut().entered_section(id);
+        }
+    }
+
     /// Entity `id` was put from `from` (when known) at `to`; tell it immediately after filing.
     pub(super) fn entity_section_moved(&mut self, id: u32, from: Option<[f64; 3]>, to: [f64; 3]) {
+        if let Some(from) = from {
+            self.entity_section_entered(id, from, to);
+        }
         if let Some(scope) = self.entity_section_scope() {
             self.native_lifecycle
                 .entity_sections
@@ -297,18 +326,19 @@ impl Game<'_> {
         end: [f64; 3],
         moves: impl Iterator<Item = [f64; 3]> + Clone,
     ) {
-        let Some(scope) = self.entity_section_scope() else {
-            return;
-        };
+        let scope = self.entity_section_scope();
         let mut from = moves
             .clone()
             .fold(end, |p, d| [p[0] - d[0], p[1] - d[1], p[2] - d[2]]);
         for d in moves {
             let to = [from[0] + d[0], from[1] + d[1], from[2] + d[2]];
-            self.native_lifecycle
-                .entity_sections
-                .moved(scope, id, Some(from), to);
-            self.tell_entity_sections();
+            self.entity_section_entered(id, from, to);
+            if let Some(scope) = scope {
+                self.native_lifecycle
+                    .entity_sections
+                    .moved(scope, id, Some(from), to);
+                self.tell_entity_sections();
+            }
             from = to;
         }
     }
@@ -395,6 +425,7 @@ impl Game<'_> {
     /// Entity `id`'s position was written from `from` to `to` (`setPosRaw`) inside a family tick
     /// or while a rider is carried by a vehicle teleport. File and tell it at this write.
     pub(super) fn entity_section_step(&mut self, id: u32, from: [f64; 3], to: [f64; 3]) {
+        self.entity_section_entered(id, from, to);
         if id != 0
             && let Some(scope) = self.entity_section_scope()
         {

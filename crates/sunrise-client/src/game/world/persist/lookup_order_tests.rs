@@ -190,3 +190,38 @@ fn chunk_loaded_families_keep_vanilla_lookup_and_save_order() {
         );
     });
 }
+
+#[test]
+#[ignore = "daily"]
+fn a_crossing_without_a_listener_saves_after_the_entity_already_in_the_section() {
+    with_game(|game| {
+        assert!(!mod_api::__private::listened(
+            mod_api::HookId::EntityEnteringSection
+        ));
+        let key = (0, 0);
+        game.world
+            .chunks
+            .insert(key, Arc::new(Chunk::empty(key.0, key.1)));
+        // The pig joins first, in section 0; the zombie after it, in section 4.
+        game.world.queue_entity_nbt(
+            key,
+            vec![
+                saved("minecraft:pig", 1, [3.5, 10.0, 3.5], vec![]),
+                saved("minecraft:zombie", 2, [2.5, 70.0, 2.5], vec![]),
+            ],
+        );
+        game.spawn_loaded_entities();
+        let save =
+            |game: &mut Game<'_>| saved_order(&game.entity_chunks(&HashSet::from([key]), false));
+        assert_eq!(save(game), vec![vec![0, 0, 1, 2]]);
+        // The pig walks up into section 4, which already holds the zombie.
+        let id = game.mob_by_uuid([2703, 0, 0, 1]).unwrap();
+        let pig = game.mobs.iter().position(|m| m.id == id).unwrap();
+        let from = game.mobs[pig].position;
+        let to = Vec3::new(from.x, 70.0, from.z);
+        game.mobs.update(pig, |m| m.position = to);
+        game.entity_section_step(id, [from.x, from.y, from.z], [to.x, to.y, to.z]);
+        // Vanilla's onMove puts it at the end of that section, after the zombie.
+        assert_eq!(save(game), vec![vec![0, 0, 2, 1]]);
+    });
+}
