@@ -127,8 +127,10 @@ review and history; it is not a candidate for installation.
 4. Try the entire batch against the final versions. A replacement can come from a request or from another mod's
    required dependencies. If the whole batch cannot install, group requests whose selections share a mod or activate
    a dependency constraint across requests, and check each group together. An installed version can block a request
-   on its own but not as part of a group that replaces that version. A request that still can't be resolved with such
-   a group does not block a group that can install without it. A plan gives each request's outcome and version or
+   on its own but not as part of a group that replaces that version; a different candidate version may need a
+   different replacement. If a group still fails, retry by omitting requests blocked by installed versions, trying
+   larger subgroups first. If the retry search hits its limit, the unresolved requests report that limit and the
+   previously validated groups can still be planned separately. A plan gives each request's outcome and version or
    refusal reason, lists what to install, keep or update, and identifies which requests need each dependency. Lists
    are ordered by id.
    An update with `downgrade: true` moves to a lower SemVer; the installer names that downgrade in its status line

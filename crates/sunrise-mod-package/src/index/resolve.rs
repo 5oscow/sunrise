@@ -106,6 +106,10 @@ pub fn install(
     if roots.is_empty() {
         return plan;
     }
+    for pins in roots.values_mut() {
+        pins.sort_unstable();
+        pins.dedup();
+    }
     let mut present = BTreeMap::new();
     for m in installed {
         if let Some(previous) = present.insert(m.id.as_str(), m)
@@ -284,11 +288,17 @@ struct Catalog<'a> {
 type Roots<'a> = BTreeMap<&'a str, Vec<&'a str>>;
 type Selected<'a> = BTreeMap<&'a str, &'a Candidate<'a>>;
 
+struct SolveFailure<'a> {
+    reason: String,
+    // Installed artifacts whose replacement may make an explored assignment viable.
+    replacements: BTreeSet<&'a str>,
+}
+
 struct Group<'a> {
     roots: Roots<'a>,
     selected: Selected<'a>,
     // A selection ignoring fixed installed ranges is only a hint for grouping, never a plan.
-    blocked: Option<String>,
+    blocked: Option<SolveFailure<'a>>,
 }
 
 impl<'a> Group<'a> {
@@ -329,10 +339,10 @@ fn interacting_groups<'a>(groups: Vec<Group<'a>>, installed: &Selected<'a>) -> V
         .collect();
     let mut parents: Vec<_> = (0..groups.len()).collect();
     for (i, group) in groups.iter().enumerate() {
-        for (&id, candidate) in &group.selected {
-            // Another selection can share a mod, activate an optional range, or replace
-            // an installed owner whose old ranges constrain some other selection.
-            for target in std::iter::once(id)
+        // Another selection can share a mod, activate an optional range, replace an installed
+        // owner, or satisfy a guard that blocked an alternative version of this request.
+        let targets = group.selected.iter().flat_map(|(&id, candidate)| {
+            std::iter::once(id)
                 .chain(candidate.optional.iter().map(|r| r.row.id.as_str()))
                 .chain(
                     installed
@@ -341,14 +351,18 @@ fn interacting_groups<'a>(groups: Vec<Group<'a>>, installed: &Selected<'a>) -> V
                         .flat_map(|old| old.required.iter().chain(&old.optional))
                         .map(|r| r.row.id.as_str()),
                 )
+        });
+        let replacements = group
+            .blocked
+            .iter()
+            .flat_map(|f| f.replacements.iter().copied());
+        for target in targets.chain(replacements) {
+            if let Some(&j) = owners.get(target)
+                && i != j
             {
-                if let Some(&j) = owners.get(target)
-                    && i != j
-                {
-                    let left = representative(&mut parents, i);
-                    let right = representative(&mut parents, j);
-                    parents[left.max(right)] = left.min(right);
-                }
+                let left = representative(&mut parents, i);
+                let right = representative(&mut parents, j);
+                parents[left.max(right)] = left.min(right);
             }
         }
     }
@@ -550,24 +564,27 @@ impl<'a> Catalog<'a> {
         installed: &Selected<'s>,
         plan: &mut InstallPlan,
     ) -> Selected<'s> {
+        // Group guarded singleton selections by their interactions. For a blocked request,
+        // a guard-free selection and blockers seen during guarded backtracking only establish
+        // links to peers. If a mixed group fails, retry without some of its blocked requests,
+        // keeping validated ones. Only a guarded success becomes part of the plan.
         let mut groups = Vec::new();
         for (&id, pins) in roots {
             let roots = Roots::from([(id, pins.clone())]);
-            match self.solve(&roots, installed) {
+            let mut budget = MAX_STATES;
+            match self.solve_with_budget(&roots, installed, &mut budget) {
                 Ok(selected) => groups.push(Group::validated(roots, selected)),
-                // A peer's required closure may replace a fixed installed version. Discover
-                // this request's selection with fixed guards omitted, for grouping only.
-                Err(reason) => {
+                Err(failure) => {
                     if !installed.is_empty()
                         && let Ok(selected) = self.solve(&roots, &Selected::new())
                     {
                         groups.push(Group {
                             roots,
                             selected,
-                            blocked: Some(reason),
+                            blocked: Some(failure),
                         });
                     } else {
-                        refuse(plan, &roots, &reason);
+                        refuse(plan, &roots, &failure.reason);
                     }
                 }
             }
@@ -576,29 +593,40 @@ impl<'a> Catalog<'a> {
             let count = groups.len();
             let components = interacting_groups(std::mem::take(&mut groups), installed);
             for component in components {
+                let mut limit = None;
                 if component.len() > 1 {
                     let roots = component.iter().flat_map(|g| g.roots.clone()).collect();
-                    match self.solve(&roots, installed) {
+                    let mut budget = MAX_STATES;
+                    match self.solve_with_budget(&roots, installed, &mut budget) {
                         Ok(selected) => {
                             groups.push(Group::validated(roots, selected));
                             continue;
                         }
-                        Err(reason) if component.iter().all(|g| g.blocked.is_none()) => {
+                        Err(failure) if component.iter().all(|g| g.blocked.is_none()) => {
                             let ids = roots.keys().copied().collect::<Vec<_>>().join(", ");
                             refuse(
                                 plan,
                                 &roots,
-                                &format!("{ids} cannot be installed together: {reason}"),
+                                &format!("{ids} cannot be installed together: {}", failure.reason),
                             );
                             continue;
                         }
-                        Err(_) => {}
+                        Err(_) => {
+                            match self.recover_component(&component, installed, &mut budget, plan) {
+                                Ok(Some(group)) => {
+                                    groups.push(group);
+                                    continue;
+                                }
+                                Ok(None) => {}
+                                Err(reason) => limit = Some(reason),
+                            }
+                        }
                     }
                 }
                 // A speculative selection must not cause a viable request to be refused.
                 for group in component {
-                    if let Some(reason) = group.blocked {
-                        refuse(plan, &group.roots, &reason);
+                    if let Some(failure) = group.blocked {
+                        refuse(plan, &group.roots, limit.unwrap_or(&failure.reason));
                     } else {
                         groups.push(group);
                     }
@@ -615,20 +643,82 @@ impl<'a> Catalog<'a> {
         }
     }
 
-    /// Depth-first search over version choices, not over mods on the call stack. New requirements
-    /// can narrow an earlier choice; undo it and retry instead of keeping stale outgoing edges.
+    fn recover_component<'s>(
+        &'s self,
+        component: &[Group<'s>],
+        installed: &Selected<'s>,
+        budget: &mut usize,
+        plan: &mut InstallPlan,
+    ) -> Result<Option<Group<'s>>, &'static str> {
+        let blocked: Vec<_> = component
+            .iter()
+            .enumerate()
+            .filter_map(|(i, g)| g.blocked.as_ref().map(|failure| (i, failure)))
+            .collect();
+        // Try the largest subsets first. Enumerate only omissions of blocked requests; if
+        // none can join the group, the caller regroups the validated survivors on their own.
+        'subsets: for count in 1..blocked.len() {
+            let mut omitted: Vec<_> = (0..count).collect();
+            loop {
+                if *budget == 0 {
+                    break 'subsets;
+                }
+                let mut skip = omitted.iter().map(|&i| blocked[i].0).peekable();
+                let roots = component
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| skip.next_if_eq(i).is_none())
+                    .flat_map(|(_, g)| g.roots.clone())
+                    .collect();
+                if let Ok(selected) = self.solve_with_budget(&roots, installed, budget) {
+                    for &i in &omitted {
+                        let (at, failure) = blocked[i];
+                        refuse(plan, &component[at].roots, &failure.reason);
+                    }
+                    return Ok(Some(Group::validated(roots, selected)));
+                }
+                // Advance to the next sorted combination of omitted indices.
+                let Some(i) = (0..count).rfind(|&i| omitted[i] < blocked.len() - count + i) else {
+                    break;
+                };
+                let next = omitted[i] + 1;
+                for (at, index) in omitted[i..].iter_mut().zip(next..) {
+                    *at = index;
+                }
+            }
+        }
+        if *budget == 0 {
+            return Err(
+                "dependency subgroup resolution limit reached; try fewer requests or pin a version",
+            );
+        }
+        Ok(None)
+    }
+
     fn solve<'s>(
         &'s self,
         roots: &Roots<'s>,
         installed: &Selected<'s>,
-    ) -> Result<Selected<'s>, String>
-    where
-        'a: 's,
-    {
+    ) -> Result<Selected<'s>, String> {
+        let mut budget = MAX_STATES;
+        self.solve_with_budget(roots, installed, &mut budget)
+            .map_err(|failure| failure.reason)
+    }
+
+    /// Depth-first search over version choices, not over mods on the call stack. New requirements
+    /// can narrow an earlier choice; undo it and retry instead of keeping stale outgoing edges.
+    fn solve_with_budget<'s>(
+        &'s self,
+        roots: &Roots<'s>,
+        installed: &Selected<'s>,
+        budget: &mut usize,
+    ) -> Result<Selected<'s>, SolveFailure<'s>> {
         let mut selected = Selected::new();
         let mut stack = Vec::<(&str, std::vec::IntoIter<&Candidate<'_>>)>::new();
         let mut failure = None;
-        for _ in 0..MAX_STATES {
+        let mut replacements = BTreeSet::new();
+        while *budget > 0 {
+            *budget -= 1;
             let step = (|| {
                 let mut needs: BTreeMap<_, _> = roots
                     .iter()
@@ -668,6 +758,7 @@ impl<'a> Catalog<'a> {
                             } else if let Some(row) = installed.get(target) {
                                 let req = range.parsed.as_ref().map_err(Clone::clone)?;
                                 if !row.number.as_ref().is_some_and(|n| req.matches(n)) {
+                                    replacements.insert(target);
                                     return Err(format!(
                                         "{target} {} is installed, but {owner} needs {}",
                                         row.version, range.row.version
@@ -681,7 +772,14 @@ impl<'a> Catalog<'a> {
                             for range in c.required.iter().chain(&c.optional) {
                                 let target = range.row.id.as_str();
                                 if let Some(need) = needs.get_mut(target) {
-                                    range.parsed.as_ref().map_err(Clone::clone)?;
+                                    let req = range.parsed.as_ref().map_err(Clone::clone)?;
+                                    if !selected[target]
+                                        .number
+                                        .as_ref()
+                                        .is_some_and(|n| req.matches(n))
+                                    {
+                                        replacements.insert(owner);
+                                    }
                                     need.ranges.push((owner, range));
                                 }
                             }
@@ -747,14 +845,20 @@ impl<'a> Catalog<'a> {
                 stack.pop();
             }
             if stack.is_empty() {
-                return Err(failure
-                    .unwrap_or_else(|| "no consistent versions for the requested mods".into()));
+                return Err(SolveFailure {
+                    reason: failure
+                        .unwrap_or_else(|| "no consistent versions for the requested mods".into()),
+                    replacements,
+                });
             }
         }
-        Err(format!(
-            "{}: dependency resolution limit reached; try fewer requests or pin a version",
-            roots.keys().copied().collect::<Vec<_>>().join(", ")
-        ))
+        Err(SolveFailure {
+            reason: format!(
+                "{}: dependency resolution limit reached; try fewer requests or pin a version",
+                roots.keys().copied().collect::<Vec<_>>().join(", ")
+            ),
+            replacements,
+        })
     }
 }
 
