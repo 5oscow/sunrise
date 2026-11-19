@@ -3,7 +3,7 @@
 mod admin;
 mod clone_payload;
 pub(super) mod compute;
-mod data;
+pub(in crate::game) mod data;
 mod difficulty;
 mod display_names;
 pub(super) use data::{place_summoned, strip_finalize_tree};
@@ -24,7 +24,7 @@ mod raid;
 mod selector_bounds;
 mod selectors;
 mod targets;
-mod terrain_cmds;
+pub(in crate::game) mod terrain_cmds;
 mod test_locate;
 mod test_runs;
 mod text_commands;
