@@ -3289,7 +3289,8 @@ pub fn world_gen_settings(world: &Path) -> Option<Tag> {
     })
 }
 include!("save/preset_saved.rs");
-pub use sunrise_client_core::uuid::{uuid_from_text, uuid_text};
+pub use sunrise_client_core::uuid::uuid_from_text;
+pub use sunrise_core::uuid::uuid_text;
 /// A random (version 4) UUID as vanilla's four-int form.
 ///
 /// Every call gets its own: the generator is seeded once from the clock and

@@ -4685,6 +4685,7 @@ dependencies = [
  "sunrise-hdr",
  "sunrise-hooks",
  "sunrise-items",
+ "sunrise-java-properties",
  "sunrise-mod-api",
  "sunrise-mod-api-macros",
  "sunrise-mod-package",
