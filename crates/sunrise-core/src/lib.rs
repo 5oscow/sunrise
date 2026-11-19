@@ -27,6 +27,7 @@ pub mod jmath;
 pub mod json_nbt;
 pub mod level_id;
 pub mod level_key;
+pub mod md5;
 pub mod nbt;
 pub mod neighbour_update;
 pub mod no_ai;
