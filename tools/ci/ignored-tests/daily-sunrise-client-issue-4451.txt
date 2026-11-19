@@ -128,7 +128,8 @@ sunrise-client game::boats::below_world::tests::a_tick_discards_the_vehicles_und
 sunrise-client game::boats::below_world::tests::saved_deep_end_boat_loads_then_is_discarded_and_extreme_scans_terminate lib daily resources
 sunrise-client game::boats::cobweb_tests::a_boat_leaving_a_cobweb_for_powder_snow_takes_the_powder_snow lib daily resources
 sunrise-client game::boats::cobweb_tests::a_cobweb_slows_a_boat_and_resets_its_fall lib daily resources
-sunrise-client game::boats::friction_tests::ground_friction_averages_intersecting_blocks_and_only_builds_a_kind_for_listeners lib daily resources
+sunrise-client game::boats::friction_tests::a_status_refresh_asks_friction_as_the_chest_boat_it_is lib daily resources
+sunrise-client game::boats::friction_tests::ground_friction_averages_the_blocks_under_the_hull_and_asks_subscribed_parts lib daily resources
 sunrise-client game::boats::lifetime_tests::a_bound_boat_commits_the_driven_client_tick lib daily resources
 sunrise-client game::boats::lifetime_tests::a_bound_boat_keeps_its_registration_through_ticks_until_discard lib daily resources
 sunrise-client game::boats::lifetime_tests::a_bound_ridden_boat_commits_the_server_leash_tick lib daily resources
@@ -1982,6 +1983,8 @@ sunrise-client game::native_spectator_shader_tests::a_mods_entity_type_puts_its_
 sunrise-client game::native_state_shapes::tests::supplied_shape_state_does_not_replace_world_state lib daily resources
 sunrise-client game::native_surface::tests::a_block_part_answers_the_friction_an_entity_reads lib daily resources
 sunrise-client game::native_surface::tests::mob_travel_and_both_leash_sites_use_the_parts_answer_once lib daily resources
+sunrise-client game::native_surface::tests::nested_friction_queries_stop_at_the_depth_bound_and_unknown_states_are_refused lib daily resources
+sunrise-client game::native_surface::tests::the_friction_view_reads_tags_and_resident_block_entities_of_its_side lib daily resources
 sunrise-client game::native_tick_time::tests::a_client_level_always_has_time lib daily resources
 sunrise-client game::native_tick_time::tests::a_server_has_time_until_its_tick_deadline_passes lib daily resources
 sunrise-client game::native_tick_time::tests::the_tick_listeners_see_the_deadline_through_the_host lib daily resources
