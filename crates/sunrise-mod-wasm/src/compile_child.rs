@@ -88,6 +88,7 @@ static SERVES_COMPILER: std::sync::atomic::AtomicBool = std::sync::atomic::Atomi
 /// between a bounded child process and compiling in-process. Android has none (the game is a
 /// library inside the system's `app_process`), and neither has a host program whose entry never
 /// installed [`compile_child`] (a tool, a test harness).
+#[cfg(any(unix, test))]
 pub(crate) fn compiler_executable() -> bool {
     runs_compiler(
         cfg!(target_os = "android"),
@@ -95,6 +96,7 @@ pub(crate) fn compiler_executable() -> bool {
     )
 }
 
+#[cfg(any(unix, test))]
 pub(crate) fn runs_compiler(android: bool, entry_installed: bool) -> bool {
     !android && entry_installed
 }
