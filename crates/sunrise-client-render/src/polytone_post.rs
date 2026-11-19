@@ -243,7 +243,13 @@ impl ShaderModifiers {
                     .and_then(|bytes| {
                         serde_json::from_slice::<Json>(&bytes).map_err(|e| e.to_string())
                     })
-                    .and_then(|json| ShaderModifier::parse(&json).map_err(|e| e.to_string()));
+                    .and_then(|json| {
+                        // A pack's expressions are untrusted, as its GLSL is (`hud::pack_text`):
+                        // a fault compiling one refuses the file, and the game goes on.
+                        crate::crash::contain(|| ShaderModifier::parse(&json))
+                            .map_err(|panic| format!("the expression compiler failed: {panic}"))?
+                            .map_err(|e| e.to_string())
+                    });
                 match read {
                     Ok(modifier) => shaders.push((id, modifier)),
                     Err(e) => refused(&path, e),
