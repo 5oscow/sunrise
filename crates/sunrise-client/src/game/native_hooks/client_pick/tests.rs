@@ -872,7 +872,7 @@ fn rider_pick_rejects_shared_passengers_unless_their_part_allows_them() {
                     data: 0,
                 }))
                 .unwrap();
-                game.remote_set_passengers(32, &[7, 31]);
+                game.remote_set_passengers(32, vec![7, 31]);
                 game.refresh_client_pick(1.0);
                 assert_eq!(
                     matches!(game.crosshair_target(),
@@ -892,12 +892,12 @@ fn rider_pick_rejects_shared_passengers_unless_their_part_allows_them() {
                 game.refresh_client_pick(1.0);
                 assert_eq!(game.client_pick.rider_candidates.capacity(), capacity);
 
-                game.remote_set_passengers(32, &[]);
+                game.remote_set_passengers(32, vec![]);
                 game.refresh_client_pick(1.0);
                 assert!(matches!(game.crosshair_target(),
                     Some(CrosshairTarget::Entity { entity, .. }) if entity.id() == 31));
                 assert_eq!(*calls.lock().unwrap(), 2 * usize::from(subscribed));
-                game.remote_set_passengers(32, &[7, 31]);
+                game.remote_set_passengers(32, vec![7, 31]);
 
                 // AttackRange uses its own geometry, with no root-vehicle filter.
                 game.inventory[game.selected] = Some(ranged_stack());
@@ -954,7 +954,7 @@ fn rider_pick_refuses_a_camera_changed_by_its_listener() {
                 data: 0,
             }))
             .unwrap();
-            game.remote_set_passengers(32, &[7, 31]);
+            game.remote_set_passengers(32, vec![7, 31]);
             assert_eq!(game.pick_camera_id(), Some(7));
             let stone = game
                 .pack

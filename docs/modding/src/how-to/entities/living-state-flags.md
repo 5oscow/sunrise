@@ -180,10 +180,10 @@ object into the level or exposes a handle for it.
 On a client, `vehicle`, `is_passenger`, `passengers`, `root_vehicle` and
 `is_vehicle` read the riding relationships sent in the server's passenger
 packets. They work for every tracked entity and the local player. A stale or
-untracked input returns `None`. `passengers` keeps the packet order, omitting
-IDs with no client handle; the relationship flags can still report a link to
-such an ID. `vehicle` and `root_vehicle` return `None` when the vehicle or root
-has no client handle. The other riding reads and all riding writes are server-only.
+untracked input returns `None`. Passenger lists for unknown vehicles are
+ignored; unknown passengers and links that would form a cycle do not board.
+`passengers` returns client handles in the order they boarded from the list.
+The other riding reads and all riding writes are server-only.
 
 During boat or cart destruction, mob dismount notifications run, but remaining
 riding relationships are unlinked even when a listener cancels. Each mob keeps its

@@ -58,7 +58,7 @@ impl Game<'_> {
             // SetPassengers packet preceded the vehicle's removal. Otherwise
             // mobs and other players keep their passenger pose after it is gone.
             if vehicles.contains(&(id as u32)) {
-                self.remote_set_passengers(id, &[]);
+                self.remote_clear_passengers(id);
             }
             // Before the crystals go: the dragon's beam index follows them.
             self.remove_remote_dragon(id);
@@ -177,8 +177,8 @@ mod tests {
             }))
             .unwrap();
         }
-        game.remote_set_passengers(40, &[42]);
-        game.remote_set_passengers(41, &[43]);
+        game.remote_set_passengers(40, vec![42]);
+        game.remote_set_passengers(41, vec![43]);
         assert_eq!(game.armor_stands[0].vehicle, Some(40));
         assert_eq!(game.mobs[0].extra.mount, Some(41));
         game.handle_packet(C::RemoveEntities(play::RemoveEntities {

@@ -82,23 +82,15 @@ impl Game<'_> {
         }
     }
     /// The side's own copy of the entity for a read. On a client only tracked
-    /// entities and the local player have handles, but its packet graph can
-    /// include links to IDs without a handle.
+    /// entities and the local player have handles.
     fn riding_read(&self, entity: EntityRef) -> Option<RidingRead<'_>> {
         if self.is_logical_server() {
             return self.native_entity_target(entity).map(RidingRead::Server);
         }
         let (remote, id) = self.native_client_entity_context(entity)?;
-        self.client_riding_tracks(remote, id)
+        remote
+            .riding_entity_exists(id, self.player.is_some())
             .then_some(RidingRead::Client(remote))
-    }
-
-    fn client_riding_tracks(&self, remote: &Remote, id: i32) -> bool {
-        if id == remote.entity_id {
-            self.player.is_some()
-        } else {
-            remote.entities.contains_key(&id)
-        }
     }
 
     fn client_riding_handle(
@@ -107,7 +99,8 @@ impl Game<'_> {
         epoch: WorldEpoch,
         id: u32,
     ) -> Option<EntityRef> {
-        self.client_riding_tracks(remote, i32::try_from(id).ok()?)
+        remote
+            .riding_entity_exists(i32::try_from(id).ok()?, self.player.is_some())
             .then(|| EntityRef::new(epoch, id))
     }
 

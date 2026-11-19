@@ -28,22 +28,42 @@ pub(super) struct PassengerSeat {
     pub index: usize,
 }
 
+fn passenger_chain(
+    vehicles: &HashMap<u32, PassengerSeat>,
+    id: u32,
+) -> impl Iterator<Item = u32> + '_ {
+    std::iter::successors(Some(id), |id| vehicles.get(id).map(|seat| seat.vehicle))
+        .take(vehicles.len() + 2)
+}
+
 /// Walks to the root without allocating. In a cycle, returns the last reached
 /// ID for the collision code's bounded stack walk; there is no actual root.
 pub(super) fn passenger_root(
     vehicles: &HashMap<u32, PassengerSeat>,
-    mut id: u32,
+    id: u32,
 ) -> std::result::Result<u32, u32> {
-    for _ in 0..=vehicles.len() {
-        let Some(seat) = vehicles.get(&id) else {
-            return Ok(id);
-        };
-        id = seat.vehicle;
+    let root = passenger_chain(vehicles, id).last().unwrap_or(id);
+    if vehicles.contains_key(&root) {
+        Err(root)
+    } else {
+        Ok(root)
     }
-    Err(id)
 }
 
 impl Remote {
+    pub(super) fn riding_entity_exists(&self, id: i32, local_exists: bool) -> bool {
+        if id == self.entity_id {
+            local_exists
+        } else {
+            self.entities.contains_key(&id)
+        }
+    }
+
+    fn forget_passengers(&mut self, vehicle: u32) {
+        self.passenger_vehicles
+            .retain(|_, seat| seat.vehicle != vehicle);
+    }
+
     pub(super) fn passenger_vehicle(&self, passenger: u32) -> Option<u32> {
         self.passenger_vehicles
             .get(&passenger)
@@ -260,24 +280,91 @@ impl Game<'_> {
     /// `ClientPacketListener.handleSetEntityPassengersPacket`: who rides
     /// `vehicle` now. The local player gets in or out; mobs and other
     /// players sit where the server keeps them.
-    pub(super) fn remote_set_passengers(&mut self, vehicle: i32, passengers: &[i32]) {
+    pub(super) fn remote_set_passengers(&mut self, vehicle: i32, mut passengers: Vec<i32>) {
+        let Some(remote) = self.remote.as_mut() else {
+            return;
+        };
+        // The local entity is known from Login, even before its motion body
+        // arrives on PlayerPosition. Other entities must already be tracked.
+        let local_exists = remote.logged_in || self.player.is_some();
+        if !remote.riding_entity_exists(vehicle, local_exists) {
+            log::warn!("Sunrise: ignoring passenger list for unknown vehicle {vehicle}");
+            return;
+        }
+        let vehicle_id = vehicle as u32;
+        remote.forget_passengers(vehicle_id);
+        let mut index = 0;
+        passengers.retain(|&passenger| {
+            if !remote.riding_entity_exists(passenger, local_exists) {
+                return false;
+            }
+            let rider = passenger as u32;
+            if remote.passenger_vehicle(rider) == Some(vehicle_id)
+                || passenger_chain(&remote.passenger_vehicles, vehicle_id)
+                    .any(|ancestor| ancestor == rider)
+            {
+                return false;
+            }
+            remote.passenger_vehicles.insert(
+                rider,
+                PassengerSeat {
+                    vehicle: vehicle_id,
+                    index,
+                },
+            );
+            index += 1;
+            true
+        });
+        self.apply_remote_passengers(vehicle, &passengers);
+    }
+
+    /// Removing a vehicle ejects its passengers even without a final packet.
+    pub(super) fn remote_clear_passengers(&mut self, vehicle: i32) {
+        if let Some(remote) = self.remote.as_mut() {
+            remote.forget_passengers(vehicle as u32);
+            self.apply_remote_passengers(vehicle, &[]);
+        }
+    }
+
+    /// A death respawn replaces the local entity even if its level and ID stay.
+    pub(super) fn reset_remote_player_riding(&mut self) {
+        if let Some(remote) = self.remote.as_mut() {
+            let player = remote.entity_id;
+            remote.first_passenger = false;
+            remote.passenger_index = 0;
+            let parent = remote.passenger_vehicles.remove(&(player as u32));
+            self.remote_clear_passengers(player);
+            if let Some(parent) = parent
+                && let Some(remote) = self.remote.as_mut()
+            {
+                let mut siblings: Vec<_> = remote.passenger_seats(parent.vehicle).collect();
+                siblings.sort_unstable_by_key(|&(_, index)| index);
+                let ids: Vec<_> = siblings
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, (id, _))| {
+                        remote.passenger_vehicles.insert(
+                            id,
+                            PassengerSeat {
+                                vehicle: parent.vehicle,
+                                index,
+                            },
+                        );
+                        id as i32
+                    })
+                    .collect();
+                self.apply_remote_passengers(parent.vehicle as i32, &ids);
+            }
+        }
+        self.riding = None;
+    }
+
+    /// Apply the admitted list to the presentation and simulation copies too.
+    fn apply_remote_passengers(&mut self, vehicle: i32, passengers: &[i32]) {
         let Some(me) = self.remote.as_ref().map(|r| r.entity_id) else {
             return;
         };
         let vehicle_id = vehicle as u32;
-        if let Some(r) = self.remote.as_mut() {
-            r.passenger_vehicles
-                .retain(|_, seat| seat.vehicle != vehicle_id);
-            for (index, &passenger) in passengers.iter().enumerate() {
-                r.passenger_vehicles.insert(
-                    passenger as u32,
-                    PassengerSeat {
-                        vehicle: vehicle_id,
-                        index,
-                    },
-                );
-            }
-        }
         self.remote_seat_passengers(vehicle_id, passengers);
         let player_controls = passengers.first().is_some_and(|&id| {
             self.remote

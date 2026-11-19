@@ -10,13 +10,14 @@ pub trait EntityRidingBackend {
     /// What the entity rides (`Entity.getVehicle`): `None` when it rides
     /// nothing, its actual vehicle is retained off-level and has no resident handle,
     /// or the supplied handle is stale. `is_passenger` still reports the relationship.
-    /// On a client, the vehicle from the server's passenger list, if this window tracks it.
+    /// On a client, the vehicle the passenger has boarded from the server's list, if
+    /// this window has a handle for it. A list for an unknown vehicle has no effect.
     #[access(WorldOnly)]
     fn entity_vehicle(&self, entity: EntityRef) -> Option<EntityRef>;
     /// Side: both.
     /// Whether the entity rides another (`Entity.isPassenger`), including a retained
     /// off-level vehicle that cannot be returned by `vehicle`. On a client, whether the
-    /// server listed this entity as a passenger. Stale or untracked handles return `None`.
+    /// entity boarded from the server's passenger list. Stale or untracked handles return `None`.
     #[access(WorldOnly)]
     fn entity_is_passenger(&self, entity: EntityRef) -> Option<bool>;
     /// Side: both.
@@ -25,15 +26,15 @@ pub trait EntityRidingBackend {
     /// but returns `None` if the actual root has no resident handle, the supplied handle
     /// is stale, or the relationship contains a cycle. Never substitutes a descendant.
     /// On a client, follows the server's passenger lists and returns the root only if
-    /// this window tracks it.
+    /// this window has a handle for it.
     #[access(WorldOnly)]
     fn entity_root_vehicle(&self, entity: EntityRef) -> Option<EntityRef>;
     /// Side: both.
     /// The entities riding this one (`Entity.getPassengers`), in `addPassenger`'s order: each
     /// behind those aboard, except that a player goes first when the first is no player.
     /// Only resident handles are returned; retained off-level passengers are omitted.
-    /// Dying passengers stay aboard until removed. On a client, only tracked passengers
-    /// (including the local player) are returned, in the server's packet order.
+    /// Dying passengers stay aboard until removed. On a client, unknown passengers and
+    /// links that would form a cycle do not board. Returns their handles in packet order.
     /// Returns `None` for a stale or untracked vehicle, an empty list for one with no
     /// passengers whose handles can be returned.
     #[access(WorldOnly)]
@@ -41,7 +42,7 @@ pub trait EntityRidingBackend {
     /// Side: both.
     /// Whether anything rides the entity (`Entity.isVehicle`), including retained
     /// off-level passengers omitted from `passengers`. Dying is not removal.
-    /// On a client, whether the server listed any passenger for this entity.
+    /// On a client, whether any passenger boarded from the server's list.
     /// Stale or untracked handles return `None`.
     #[access(WorldOnly)]
     fn entity_is_vehicle(&self, entity: EntityRef) -> Option<bool>;

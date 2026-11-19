@@ -3480,7 +3480,7 @@ impl Game<'_> {
                     r.respawn_velocity = kept_velocity;
                 }
                 if p.keep & 2 == 0 {
-                    self.riding = None;
+                    self.reset_remote_player_riding();
                     // KEEP_ENTITY_DATA copies the old player's synched data
                     // (its shared flags) to the new one; without it they reset.
                     if let Some(r) = self.remote.as_mut() {
@@ -3855,7 +3855,7 @@ impl Game<'_> {
                 );
                 self.entity_section_moved_id(p.id as u32);
             }
-            C::SetPassengers(p) => self.remote_set_passengers(p.vehicle, &p.passengers),
+            C::SetPassengers(p) => self.remote_set_passengers(p.vehicle, p.passengers),
             // ClientPacketListener.handleEntityLinkPacket: who holds a mob's
             // lead (this player, another player, a mob or a fence knot), for
             // the rope.
