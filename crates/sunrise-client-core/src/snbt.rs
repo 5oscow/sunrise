@@ -215,7 +215,7 @@ mod tests {
         let tag = parse_snbt(
             r#"{id:"minecraft:piston",blockState:{id:"minecraft:piston_head",properties:{facing:"east",short:"false",type:"normal"}},components:{},x:1,y:100,z:0,facing:5b,progress:0.0f,source:1b,extending:1b}"#,
         ).unwrap().0;
-        let ordinary = r#"{blockState: {id: "minecraft:piston_head", properties: {facing: "east", short: "false", type: "normal"}}, components: {}, x: 1, facing: 5b, progress: 0.0f, y: 100, z: 0, id: "minecraft:piston", source: 1b, extending: 1b}"#;
+        let ordinary = r#"{blockState: {id: "minecraft:piston_head", properties: {facing: "east", short: "false", type: "normal"}}, components: {}, x: 1, y: 100, facing: 5b, progress: 0.0f, z: 0, id: "minecraft:piston", source: 1b, extending: 1b}"#;
         assert_eq!(pretty(&tag).plain(), ordinary);
         // A separate save writer inserts fields, components, then metadata.
         // Nested StateDefinition/DFU property writes are in reverse name order.
@@ -268,7 +268,7 @@ mod tests {
         .0;
         assert_eq!(
             pretty(&tag).plain(),
-            "{Motion: [0.0d, 0.0d, 0.0d], Invulnerable: 0b, fall_distance: 0.0d, Air: 300s, OnGround: 0b, PortalCooldown: 0, Rotation: [0.0f, 0.0f], Pos: [4.5d, 100.0d, 4.5d], response: 0b, Fire: 0s, width: 1.0f, interaction: {player: [I; 1, 2, 3, 4], timestamp: 9L}, UUID: [I; 66, 0, 0, 1], height: 1.25f}",
+            "{Motion: [0.0d, 0.0d, 0.0d], Invulnerable: 0b, Air: 300s, OnGround: 0b, fall_distance: 0.0d, PortalCooldown: 0, Rotation: [0.0f, 0.0f], Pos: [4.5d, 100.0d, 4.5d], response: 0b, Fire: 0s, width: 1.0f, interaction: {player: [I; 1, 2, 3, 4], timestamp: 9L}, UUID: [I; 66, 0, 0, 1], height: 1.25f}",
         );
     }
     #[test]
