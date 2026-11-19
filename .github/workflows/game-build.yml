@@ -148,6 +148,7 @@ jobs:
         include:
           - name: linux
             os: ubuntu-22.04
+            blacksmith: blacksmith-16vcpu-ubuntu-2204
             dir: sunrise-linux-x86_64
             asset: sunrise-linux-x86_64.tar.gz
             # The server build too: packaging/server/install.sh installs it on Linux.
@@ -155,11 +156,13 @@ jobs:
             server_asset: sunrise-server-linux-x86_64.tar.gz
           - name: linux-musl
             os: ubuntu-22.04
+            blacksmith: blacksmith-16vcpu-ubuntu-2204
             musl: true
             dir: sunrise-linux-musl-x86_64
             asset: sunrise-linux-musl-x86_64.tar.gz
           - name: windows
             os: windows-latest
+            blacksmith: blacksmith-16vcpu-windows-2025
             dir: sunrise-windows-x64
             asset: sunrise-windows-x64.zip
             exe: .exe
@@ -189,7 +192,10 @@ jobs:
             dir: sunrise-macos-x64
             asset: sunrise-macos-x64.zip
             started_on_intel: true
-    runs-on: ${{ matrix.mac && fromJSON(inputs.trusted && toJSON(vars.MAC_RUNNER) || (vars.DYNA_CI_SELF_HOSTED == 'true' && vars.NIGHTLY_MAC_RUNNER) || (vars.SELF_HOSTED_CI != 'off' && '["self-hosted", "macOS", "sunrise-nightly"]') || '"macos-15"') || matrix.os }}
+    # Linux and Windows x64 build on Blacksmith's 16-vCPU machines (owner, 2026-11-18), the same images as GitHub's with
+    # the Rust cache beside them; the repository variable BLACKSMITH=off puts them back on GitHub's runners. Windows
+    # ARM64 has no Blacksmith machine, and the Macs sign with the Mac mini's keychain: both stay where they were.
+    runs-on: ${{ matrix.mac && fromJSON(inputs.trusted && toJSON(vars.MAC_RUNNER) || (vars.DYNA_CI_SELF_HOSTED == 'true' && vars.NIGHTLY_MAC_RUNNER) || (vars.SELF_HOSTED_CI != 'off' && '["self-hosted", "macOS", "sunrise-nightly"]') || '"macos-15"') || (vars.BLACKSMITH != 'off' && matrix.blacksmith) || matrix.os }}
     # The fork's cold client + headless builds need both feature variants; keep upstream's limits unchanged.
     # GitHub's macOS runner builds Sunrise's game cold: 60 minutes ran out mid-build (nightly dry run
     # 43813225420), and a timed-out job counts as cancelled, which continue-on-error does not cover, so the
@@ -197,6 +203,9 @@ jobs:
     # nightly dry run 43838074073 and ran out at 60 in nightly 43869408636, cancelling it the same way.
     timeout-minutes: ${{ github.repository == 'sunrise-org/sunrise' && ((matrix.mac || matrix.musl) && 100 || 60) || (matrix.mac && 60 || 40) }}
     env:
+      # A Blacksmith machine is a fresh VM set up as GitHub's, though Actions reports it as self-hosted: it takes the
+      # hosted steps (Python, the Rust cache, the ALSA headers) and none of the Dyna or Mac mini runners' own.
+      ON_BLACKSMITH: ${{ vars.BLACKSMITH != 'off' && matrix.blacksmith && 'true' || 'false' }}
       RUSTFLAGS: ${{ matrix.rustflags }}
       # The release's version, built in (sunrise_core::release): --version, user agents and crash reports
       # say it. No version-bump commits.
@@ -241,20 +250,20 @@ jobs:
           targets: ${{ matrix.target }}
           components: rustfmt
       - uses: actions/setup-python@v6
-        if: runner.environment == 'github-hosted'
+        if: (runner.environment == 'github-hosted' || env.ON_BLACKSMITH == 'true')
         with:
           python-version: '3.13'
       - uses: Swatinem/rust-cache@v2
-        if: runner.environment == 'github-hosted' && !matrix.musl
+        if: (runner.environment == 'github-hosted' || env.ON_BLACKSMITH == 'true') && !matrix.musl
         with:
           # A release restores only what a release saved: an untrusted build has its own key and saves nothing.
           shared-key: ${{ inputs.trusted && 'release' || 'nightly' }}-${{ matrix.name }}
           save-if: ${{ inputs.trusted }}
       - name: ALSA and udev headers
-        if: runner.os == 'Linux' && runner.environment == 'github-hosted' && !matrix.musl
+        if: runner.os == 'Linux' && (runner.environment == 'github-hosted' || env.ON_BLACKSMITH == 'true') && !matrix.musl
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
       - uses: actions/setup-java@v4
-        if: runner.os == 'Linux' && runner.environment == 'self-hosted'
+        if: runner.os == 'Linux' && (runner.environment == 'self-hosted' && env.ON_BLACKSMITH != 'true')
         with:
           distribution: temurin
           java-version: '25'
@@ -372,13 +381,13 @@ jobs:
             [[ "$out" == "$binary $SUNRISE_VERSION" ]] || { echo "::error::expected $binary $SUNRISE_VERSION"; exit 1; }
           done
       - name: Tools from the runner
-        if: runner.environment == 'self-hosted'
+        if: (runner.environment == 'self-hosted' && env.ON_BLACKSMITH != 'true')
         env:
           SUNRISE_NO_SCCACHE: ${{ inputs.trusted && '1' || '' }}
         run: |
           if [[ -z "${DYNA_CI_BUILD:-}" ]]; then bash tools/ci/runner-env.sh; fi
       - name: Resources prepared from the runner's own Minecraft
-        if: runner.environment == 'self-hosted'
+        if: (runner.environment == 'self-hosted' && env.ON_BLACKSMITH != 'true')
         run: |
           if [[ -n "${DYNA_CI_BUILD:-}" ]]; then
             SUNRISE_DYNA_CACHE=true SUNRISE_PREPARED_CACHE="$DYNA_CI_BUILD/vanilla" SUNRISE_SHARED_SOURCE=/cache/sunrise-local bash tools/ci/vanilla-data.sh
@@ -386,12 +395,12 @@ jobs:
             bash tools/ci/vanilla-data.sh
           fi
       - name: The game runs (offscreen, a new world, 1500 frames)
-        if: runner.environment == 'self-hosted' && !matrix.started_on_intel
+        if: (runner.environment == 'self-hosted' && env.ON_BLACKSMITH != 'true') && !matrix.started_on_intel
         run: bash .workflow-tools/tools/ci/game_smoke.sh
       # The separate Linux artifact smoke supplies the report when Dyna is enabled;
       # otherwise Apple Silicon supplies it. Intel has startup checks only, in macos-x64-intel.
       - uses: actions/upload-artifact@v7
-        if: runner.environment == 'self-hosted' && matrix.name == 'macos' && (inputs.trusted || vars.DYNA_CI_SELF_HOSTED != 'true' || vars.NIGHTLY_LINUX_RUNNER == '')
+        if: (runner.environment == 'self-hosted' && env.ON_BLACKSMITH != 'true') && matrix.name == 'macos' && (inputs.trusted || vars.DYNA_CI_SELF_HOSTED != 'true' || vars.NIGHTLY_LINUX_RUNNER == '')
         with:
           name: smoke-test.json
           path: ${{ runner.temp }}/smoke-test.json
