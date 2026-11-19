@@ -530,7 +530,7 @@ fn short_enchantment_item_holders_bind_for_both_selectors() {
         game.world_tables = game
             .stage_world_tables(&packs, false, &resources)
             .unwrap()
-            .0;
+            .tables;
         game.load_server_loot();
         let roll = |game: &Game<'_>| {
             let loot = game.server_loot.get().unwrap();
