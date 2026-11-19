@@ -66,7 +66,7 @@ pub fn run(folders: &[&Path]) {
     assert!(
         mod_api::content::crash::details()
             .iter()
-            .any(|(key, value)| *key == "phase probe" && value == "first true latched true")
+            .any(|(key, value)| *key == "phase probe" && value == "allowed true first true latched true")
     );
     let lines = LOG.0.lock().unwrap();
     let named: Vec<_> = lines
