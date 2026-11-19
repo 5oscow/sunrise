@@ -228,7 +228,6 @@ impl Game<'_> {
             let BlockEntity::Shelf(shelf) = entity else {
                 continue;
             };
-            let at = glam::DVec3::new(f64::from(key.0), f64::from(key.1), f64::from(key.2));
             if !Reach::Default.should_render([key.0, key.1, key.2], camera, 0) {
                 continue;
             }
