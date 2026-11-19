@@ -305,10 +305,9 @@ impl Game<'_> {
         let latching = self.settings.controller.toggle_sneak || self.settings.toggle_crouch;
         let main_hand_item = self.stack_in(self.selected).is_some();
         let off_hand_item = self.offhand.is_some();
-        let skip_block_use = self.remote_secondary_use_skips_block();
-        let (target, block, can_pick) = self.pad_guide_target(spectator, skip_block_use);
+        let (target, block, can_pick) = self.pad_guide_target(spectator);
         let held = self.held().cloned();
-        let swallowed = !skip_block_use
+        let swallowed = !self.remote_secondary_use_skips_block()
             && block
                 .as_ref()
                 .is_some_and(|hit| self.pad_guide_click_swallowed(hit, held.as_ref()));
@@ -369,11 +368,7 @@ impl Game<'_> {
 
     /// `Minecraft.hitResult` with what the buttons do to it, the block hit the held items may act
     /// on, and whether Pick Block would do anything.
-    fn pad_guide_target(
-        &mut self,
-        spectator: bool,
-        skip_block_use: bool,
-    ) -> (Target, Option<super::super::Hit>, bool) {
+    fn pad_guide_target(&mut self, spectator: bool) -> (Target, Option<super::super::Hit>, bool) {
         let attack = self.pick_entity_hit();
         let object = self
             .remote_object_hit(false)
@@ -406,7 +401,7 @@ impl Game<'_> {
         let opens = self.block_opens_menu(&hit);
         let takes = if spectator {
             opens.then_some(Verb::Open)
-        } else if skip_block_use {
+        } else if self.remote_secondary_use_skips_block() {
             None
         } else {
             let held = self.held().cloned();
