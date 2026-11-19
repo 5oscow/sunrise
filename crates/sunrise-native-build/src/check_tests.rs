@@ -63,7 +63,7 @@ fn judged_with(
         &mut || Ok::<_, String>(target.clone()),
         &mut || Err("no [[inject]] rows: never read".to_owned()),
         &mut || match data {
-            Some(data) => game_uses::entries(&bundle.manifest, data),
+            Some(data) => game_uses::entries(&bundle.manifest, data, build),
             None => Err("no game code declared: never read".to_owned()),
         },
     )
@@ -335,6 +335,181 @@ fn a_mod_with_a_mixin_fits_while_its_target_is_what_its_list_records() {
     );
     std::fs::remove_dir_all(dir).unwrap();
     std::fs::remove_dir_all(data).unwrap();
+}
+
+/// Build data for `build` in a fresh folder: the function index and the internals given.
+fn build_data(
+    name: &str,
+    build: &str,
+    functions: serde_json::Value,
+    internals: serde_json::Value,
+) -> PathBuf {
+    let data = crate::tests::dir(name);
+    std::fs::create_dir_all(&data).unwrap();
+    let header = serde_json::json!({"schema": 1, "build": {"commit": build}});
+    let write = |file: &str, body: serde_json::Value| {
+        let mut document = header.clone();
+        document
+            .as_object_mut()
+            .unwrap()
+            .extend(body.as_object().unwrap().clone());
+        std::fs::write(data.join(file), document.to_string()).unwrap();
+    };
+    write(
+        "functions.json",
+        serde_json::json!({"crates": {}, "functions": functions, "refused": {}}),
+    );
+    write(
+        "internals.json",
+        serde_json::json!({"internals": internals}),
+    );
+    data
+}
+
+fn function(body: &str) -> serde_json::Value {
+    serde_json::json!({
+        "module": "sunrise_client::game", "file": "crates/sunrise-client/src/game.rs",
+        "span": [0, 1], "signature_hash": "sig", "sha256": body,
+    })
+}
+
+#[test]
+fn a_target_that_is_also_a_declared_internal_is_two_entries_of_one_readable_list() {
+    const PATH: &str = "sunrise_client::game::f";
+    let dir = project_dir("fit-both", None, None);
+    let manifest = dir.join(crate::NATIVE_MANIFEST);
+    let text = std::fs::read_to_string(&manifest)
+        .unwrap()
+        .replace(crate::tests::B, crate::MIXINS_REV)
+        + &format!(
+            "[[native.mixin]]\nid = \"m\"\ntarget = \"{PATH}\"\nkind = \"HEAD\"\nhelper = \"src/m.rs\"\n[[internals]]\npath = \"{PATH}\"\nkind = \"fn\"\n"
+        );
+    std::fs::write(&manifest, text).unwrap();
+    std::fs::write(dir.join("src/m.rs"), "{}").unwrap();
+    let internal = |path: &str| serde_json::json!({"path": path, "kind": "fn", "signature": "fn f()", "hash": "isig"});
+    let data = build_data(
+        "fit-both-data",
+        OTHER_BUILD,
+        serde_json::json!({PATH: function("body")}),
+        serde_json::json!([internal(PATH)]),
+    );
+    let bundle = crate::bundle_in(&dir).unwrap().unwrap();
+    let now = game_uses::entries(&bundle.manifest, &data, OTHER_BUILD).unwrap();
+    assert_eq!(
+        now,
+        [
+            (
+                format!("game:fn:{PATH}"),
+                game_uses::Now::Is("sig:body".into())
+            ),
+            (
+                format!("game:internal:fn:{PATH}"),
+                game_uses::Now::Is("isig:sig:body".into())
+            ),
+        ]
+    );
+    // As the packer writes them, the list reads back.
+    let table = UsesTable {
+        schema: uses::USES_SCHEMA,
+        made_for: pin(&dir),
+        entries: now
+            .into_iter()
+            .map(|(id, now)| match now {
+                game_uses::Now::Is(hash) => uses::Entry::plain(id, hash),
+                other => panic!("{id}: {other:?}"),
+            })
+            .collect(),
+    };
+    std::fs::write(dir.join(uses::USES_FILE), table.to_json()).unwrap();
+    assert_eq!(UsesTable::read(table.to_json().as_bytes()), Ok(table));
+    let judged = |data: &Path| judged_with(&dir, OTHER_BUILD, &surface(&[]), Some(data));
+    assert_eq!(
+        judged(&data),
+        Verdict::Fits {
+            made_for: pin(&dir)
+        }
+    );
+    // A function the mod calls whose body the build data does not hold is never shown unchanged.
+    let unindexed = build_data(
+        "fit-both-unindexed",
+        OTHER_BUILD,
+        serde_json::json!({PATH: function("body")}),
+        serde_json::json!([internal(PATH), internal("sunrise_client::entry::g")]),
+    );
+    let more = std::fs::read_to_string(&manifest).unwrap()
+        + "[[internals]]\npath = \"sunrise_client::entry::g\"\nkind = \"fn\"\n";
+    std::fs::write(&manifest, more).unwrap();
+    assert_eq!(
+        judged(&unindexed),
+        Verdict::Exact {
+            made_for: pin(&dir),
+            why: "internals"
+        }
+    );
+    for folder in [dir, data, unindexed] {
+        std::fs::remove_dir_all(folder).unwrap();
+    }
+}
+
+#[test]
+fn build_data_of_another_build_is_refused_by_the_check() {
+    const PATH: &str = "sunrise_client::game::f";
+    let dir = project_dir("fit-other-data", None, None);
+    let manifest = dir.join(crate::NATIVE_MANIFEST);
+    let text = std::fs::read_to_string(&manifest)
+        .unwrap()
+        .replace(crate::tests::B, crate::MIXINS_REV)
+        + &format!(
+            "[[native.mixin]]\nid = \"m\"\ntarget = \"{PATH}\"\nkind = \"HEAD\"\nhelper = \"src/m.rs\"\n"
+        );
+    std::fs::write(&manifest, text).unwrap();
+    std::fs::write(dir.join("src/m.rs"), "{}").unwrap();
+    let table = serde_json::json!({
+        "schema": uses::USES_SCHEMA, "made_for": pin(&dir),
+        "entries": [{"id": format!("game:fn:{PATH}"), "hash": "sig:body"}],
+    });
+    std::fs::write(dir.join(uses::USES_FILE), table.to_string()).unwrap();
+    let surface_file = dir.join("target-surface.json");
+    std::fs::write(
+        &surface_file,
+        serde_json::json!({"schema": mod_surface::SCHEMA, "hash": "s"}).to_string(),
+    )
+    .unwrap();
+    let functions = serde_json::json!({PATH: function("body")});
+    let plan = |data: &Path| Plan {
+        contract: crate::contract::CONTRACT,
+        mods: dir.clone(),
+        build: OTHER_BUILD.into(),
+        surface: Some(surface_file.clone()),
+        build_data: Some(data.to_owned()),
+    };
+    // The pinned build's own data would compare that build with itself.
+    let stale = build_data(
+        "fit-other-data-stale",
+        &pin(&dir),
+        functions.clone(),
+        serde_json::json!([]),
+    );
+    let error = check(&plan(&stale)).unwrap_err();
+    assert!(
+        error.contains("functions.json") && error.contains(OTHER_BUILD),
+        "{error}"
+    );
+    let right = build_data(
+        "fit-other-data-right",
+        OTHER_BUILD,
+        functions,
+        serde_json::json!([]),
+    );
+    assert_eq!(
+        check(&plan(&right)).unwrap().mods[0].verdict,
+        Some(Verdict::Fits {
+            made_for: pin(&dir)
+        })
+    );
+    for folder in [dir, stale, right] {
+        std::fs::remove_dir_all(folder).unwrap();
+    }
 }
 
 #[test]

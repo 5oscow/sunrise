@@ -48,25 +48,22 @@ fn read(root: &Path) -> Result<Result<ModInput, Scanned>, String> {
     if let Some(table) = game_uses::unjudged(&manifest) {
         return Ok(Err(Scanned::Exact(format!("it has a {table} table"))));
     }
-    let mut input = match mod_uses::read(root) {
-        Ok(input) => input,
-        Err(e @ (ReadError::Io { .. } | ReadError::Manifest(_))) => return Err(e.to_string()),
-        Err(e) => return Ok(Err(Scanned::Unread(e.to_string()))),
-    };
     // A helper is compiled inside the game's code, where a name is the game's own, never the
-    // mod API's: what it uses is declared by its row.
-    if let Some(native) = &manifest.native {
-        let helpers: Vec<&str> = native
+    // mod API's: it is not read, and what it uses is declared by its row. A helper the mod's own
+    // source also brings in cannot be judged either way, and the read says so.
+    let helpers: Vec<&str> = manifest.native.as_ref().map_or_else(Vec::new, |native| {
+        native
             .mixin
             .iter()
             .map(|row| row.helper.as_str())
             .chain(native.r#loop.iter().map(|row| row.helper.as_str()))
-            .collect();
-        input
-            .sources
-            .retain(|(path, _)| !helpers.contains(&path.as_str()));
+            .collect()
+    });
+    match mod_uses::read(root, &helpers) {
+        Ok(input) => Ok(Ok(input)),
+        Err(e @ (ReadError::Io { .. } | ReadError::Manifest(_))) => Err(e.to_string()),
+        Err(e) => Ok(Err(Scanned::Unread(e.to_string()))),
     }
-    Ok(Ok(input))
 }
 
 /// What the mod at `root` uses of `surface`.
@@ -99,12 +96,15 @@ pub(crate) fn table(uses: &Uses, root: &Path, sdk: &PinnedSdk) -> Result<UsesTab
     let manifest = manifest(root)?;
     if game_uses::declared(&manifest) {
         let data = crate::sdk_fetch::build_data(root, &sdk.build)?;
-        // An item the pinned build lacks is refused by the build, by name; the list records
-        // only what is there.
+        // An item the pinned build lacks is refused by the build, by name, and one its build data
+        // cannot fingerprint is never shown unchanged; the list records the rest.
         table.entries.extend(
-            game_uses::entries(&manifest, &data)?
+            game_uses::entries(&manifest, &data, &sdk.build)?
                 .into_iter()
-                .filter_map(|(id, hash)| Some(Entry::plain(id, hash?))),
+                .filter_map(|(id, now)| match now {
+                    game_uses::Now::Is(hash) => Some(Entry::plain(id, hash)),
+                    game_uses::Now::Gone | game_uses::Now::Unjudged => None,
+                }),
         );
     }
     Ok(table)
@@ -236,9 +236,22 @@ mod tests {
             .map(|(path, _)| path.as_str())
             .collect();
         assert_eq!(files, ["src/lib.rs"]);
+        // A helper's own includes are the game's to resolve, and never fail the mod's scan.
+        std::fs::write(
+            dir.path().join("src/mixins/m.rs"),
+            "include!(concat!(env!(\"OUT_DIR\"), \"/g.rs\"));",
+        )
+        .unwrap();
+        assert!(read(dir.path()).unwrap().is_ok());
+        // A helper the mod's own source also brings in is both: the scan says it cannot judge.
+        std::fs::write(dir.path().join("src/lib.rs"), "include!(\"mixins/m.rs\");").unwrap();
+        assert!(matches!(
+            read(dir.path()),
+            Ok(Err(Scanned::Unread(why))) if why.contains("src/mixins/m.rs")
+        ));
         std::fs::write(
             dir.path().join("sunrise-mod.toml"),
-            manifest
+            manifest.clone()
                 + "[[native.module]]\nid = \"x\"\nfile = \"game.rs\"\nname = \"x\"\nsource = \"src/x.rs\"\n",
         )
         .unwrap();

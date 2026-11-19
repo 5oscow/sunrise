@@ -7,8 +7,7 @@ In a mod folder, `cargo sunrise-mod` does this for you from the SDK it fetched i
   nightly-2026-11-13 (afe471c).` With `--uses` it lists each item with the line that brought it in.
 - `cargo sunrise-mod build` packs the list into the package as `uses.json`, with each item's fingerprint at the
   pinned build, and each mixin target, loop and internal the manifest declares with its fingerprint there. A mod
-  with a `[[native.module]]`, `[[native.bridge]]` or `[[native.state]]` row is made for exactly one build and gets
-  no list.
+  with a `[[native.module]]` or `[[native.bridge]]` row is made for exactly one build and gets no list.
 - `cargo sunrise-mod fits` says, one line per build, whether the mod fits the current Nightly, or each build
   `--build` names. `cargo sunrise-mod fits greeter.smod --build nightly-2026-11-20` asks the same of a package.
   It exits 0 when every build fits, 1 when one does not, and 2 when it cannot tell or the question does not
@@ -90,5 +89,6 @@ source cannot be judged, and the program that asked carries on. On Linux the pro
 15 seconds bound it.
 
 This by-hand check covers the mod API's items. The game code a mod declares is compared by
-`cargo sunrise-mod fits`, from the target build's build data. A mod with a `[[native.module]]`, `[[native.bridge]]`
-or `[[native.state]]` row is made for exactly one build, and no check applies to it. A mod that fits is still compiled against the target build, and the binary built is exact to that build.
+`cargo sunrise-mod fits`, from the target build's build data; `sunrise-stage` refuses such a mod and such a list
+by name. A mod with a `[[native.module]]` or `[[native.bridge]]` row is made for exactly one build, and no check
+applies to it. A mod that fits is still compiled against the target build, and the binary built is exact to that build.

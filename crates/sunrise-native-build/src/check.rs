@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use sunrise_mod_package::mod_surface::{
     self,
-    uses::{self, Change, Fit, Misfit, UsesError, UsesTable},
+    uses::{self, Fit, Misfit, UsesError, UsesTable},
 };
 
 /// How a mod stands against the build an instance plays.
@@ -17,7 +17,7 @@ pub enum Verdict {
     MadeFor,
     /// Made for another build (`made_for`), and every item it uses is unchanged in this one.
     Fits { made_for: String },
-    /// It has rows of a `[native]` table no build data describes (`why`: the table): it works on the build it was made for only.
+    /// It names game code no list can show unchanged (`why`: the `[native]` table whose rows no build data describes, or `internals` for a function whose body this build's data does not hold): it works on the build it was made for only.
     Exact { made_for: String, why: &'static str },
     /// Its package doesn't say enough about what it uses (`why`): it works on the build it was made for only.
     NoList {
@@ -86,7 +86,7 @@ pub fn judge<E>(
     build: &str,
     surface: &mut dyn FnMut() -> Result<Rc<mod_surface::Surface>, E>,
     catalog: &mut dyn FnMut() -> Result<Rc<internals::Catalog>, E>,
-    game: &mut dyn FnMut() -> Result<Vec<(String, Option<String>)>, E>,
+    game: &mut dyn FnMut() -> Result<Vec<(String, game_uses::Now)>, E>,
 ) -> Result<Verdict, E> {
     let made_for = project.bundle.native().sunrise.clone();
     if made_for == build {
@@ -117,30 +117,31 @@ pub fn judge<E>(
         Fit::Unversioned(hooks) => (Vec::new(), hooks),
     };
     // A build with this tool refuses a mod that pins another horizon-mixins revision than the tool's.
-    if project.bundle.needs_mixins()
-        && project
-            .bundle
-            .native()
-            .mixins
-            .as_deref()
-            .is_some_and(|pin| pin != crate::MIXINS_REV)
-    {
-        misfits.push(Misfit {
-            id: format!("{}tool:horizon-mixins", game_uses::PREFIX),
-            change: Change::Changed,
-        });
-    }
-    let mut unrecorded = false;
+    misfits.extend(game_uses::tool(&project.bundle.manifest, crate::MIXINS_REV));
+    let mut compared = game_uses::Compared::default();
     if game_uses::declared(&project.bundle.manifest) {
-        let (changed, lacks) = game_uses::compare(&declared, game()?);
-        misfits.extend(changed);
-        unrecorded = lacks;
+        match game() {
+            Ok(now) => compared = game_uses::compare(&declared, now),
+            // What is already known to have changed is said, whatever the build data would add.
+            Err(_) if !misfits.is_empty() => {}
+            Err(lack) => return Err(lack),
+        }
     }
+    misfits.append(&mut compared.misfits);
     if !misfits.is_empty() {
         misfits.sort();
         return Ok(Verdict::DoesNotFit { made_for, misfits });
     }
-    if unrecorded {
+    // Code the build data cannot fingerprint is never shown unchanged.
+    if let Some(id) = compared.unjudged.first() {
+        let why = if id.starts_with("game:loop:") {
+            "[[native.loop]]"
+        } else {
+            "internals"
+        };
+        return Ok(Verdict::Exact { made_for, why });
+    }
+    if compared.unrecorded {
         return Ok(unlisted(Unlisted::GameCode, Vec::new()));
     }
     if !unversioned.is_empty() {
@@ -262,7 +263,7 @@ pub fn check(plan: &Plan) -> Result<Reply, String> {
             },
             &mut || {
                 let dir = plan.build_data.as_ref().ok_or(Lack::Needs("build-data"))?;
-                game_uses::entries(&bundle.manifest, dir).map_err(Lack::Unread)
+                game_uses::entries(&bundle.manifest, dir, &plan.build).map_err(Lack::Unread)
             },
         );
         match judged {

@@ -403,17 +403,7 @@ fn fits_lines(entry: ChildEntry, args: &[String]) -> Result<Answer, String> {
                 &target_surface,
             )
         };
-        let (changed, unrecorded) = if game_uses::declared(&manifest) {
-            let recorded: Vec<_> = table
-                .entries
-                .iter()
-                .filter(|entry| entry.id.starts_with(game_uses::PREFIX))
-                .collect();
-            let data = crate::sdk_fetch::build_data(project, &target.build)?;
-            game_uses::compare(&recorded, game_uses::entries(&manifest, &data)?)
-        } else {
-            (Vec::new(), false)
-        };
+        let game = game_fit(project, &manifest, &table, &target);
         let mut answer = api(&table);
         let mut unfetched = None;
         if matches!(answer, Fit::Unversioned(_)) && table.schema != USES_SCHEMA {
@@ -427,17 +417,38 @@ fn fits_lines(entry: ChildEntry, args: &[String]) -> Result<Answer, String> {
                 Err(why) => unfetched = Some(why.clone()),
             }
         }
-        if !changed.is_empty() {
+        // What is already known to have changed is said, whatever the build data would add.
+        let (mut compared, uncompared) = match game {
+            Ok(compared) => (compared, None),
+            Err(why) if matches!(answer, Fit::DoesNotFit(_)) => {
+                (game_uses::Compared::default(), Some(why))
+            }
+            Err(why) => return Err(why),
+        };
+        if !compared.misfits.is_empty() {
             let mut misfits = match answer {
                 Fit::DoesNotFit(misfits) => misfits,
                 Fit::Fits | Fit::Unversioned(_) => Vec::new(),
             };
-            misfits.extend(changed);
+            misfits.append(&mut compared.misfits);
             misfits.sort();
             answer = Fit::DoesNotFit(misfits);
         }
         match answer {
-            Fit::Fits if unrecorded => {
+            Fit::Fits if !compared.unjudged.is_empty() => {
+                known = false;
+                println!(
+                    "{}  not known: nothing the list can judge changed, but the build's data cannot show {} unchanged (it holds no body for a function the mod calls, or not every part of a loop).",
+                    target.name,
+                    compared
+                        .unjudged
+                        .iter()
+                        .map(|id| format!("`{}`", id.rsplit(':').next().unwrap_or(id)))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
+            Fit::Fits if compared.unrecorded => {
                 known = false;
                 println!(
                     "{}  not known: nothing the list can judge changed, but it holds no record of game code the mod declares. Pack the mod again with `cargo sunrise-mod build`, which records it.",
@@ -472,6 +483,9 @@ fn fits_lines(entry: ChildEntry, args: &[String]) -> Result<Answer, String> {
                 for misfit in misfits {
                     println!("    {misfit}");
                 }
+                if let Some(why) = uncompared {
+                    println!("    the game code it declares could not be compared: {why}");
+                }
             }
         }
     }
@@ -480,6 +494,37 @@ fn fits_lines(entry: ChildEntry, args: &[String]) -> Result<Answer, String> {
         (true, false) => Answer::Unknown,
         (true, true) => Answer::Fits,
     })
+}
+
+/// The game code `manifest` declares, as `target` has it, against `table`'s record of it; the
+/// horizon-mixins revision the mod pins against the one `target`'s tool builds with.
+fn game_fit(
+    project: &Path,
+    manifest: &Manifest,
+    table: &UsesTable,
+    target: &PinnedSdk,
+) -> Result<game_uses::Compared, String> {
+    let path = target.dir.join(sdk::INDEX);
+    let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let index =
+        Index::read(&bytes, &target.build).map_err(|e| format!("{}: {e}", path.display()))?;
+    let mut compared = game_uses::Compared::default();
+    if game_uses::declared(manifest) {
+        let recorded: Vec<_> = table
+            .entries
+            .iter()
+            .filter(|entry| entry.id.starts_with(game_uses::PREFIX))
+            .collect();
+        let data = crate::sdk_fetch::build_data(project, &target.build)?;
+        compared = game_uses::compare(
+            &recorded,
+            game_uses::entries(manifest, &data, &target.build)?,
+        );
+    }
+    compared
+        .misfits
+        .extend(game_uses::tool(manifest, &index.mixins.rev));
+    Ok(compared)
 }
 
 /// What the mod nearest to a removed item may use now, in `new`: the hook with one of the same
@@ -551,22 +596,18 @@ pub(crate) fn update_report(
         "{}",
         report(&name, &old, &new, &uses, &old_surface, &new_surface, &notes)
     );
-    // The game code the mod declares, by the two builds' build data.
-    if game_uses::declared(&parsed) {
-        let made = uses_table::table(&uses, root, &old)?;
-        let recorded: Vec<_> = made
-            .entries
-            .iter()
-            .filter(|entry| entry.id.starts_with(game_uses::PREFIX))
-            .collect();
-        let data = crate::sdk_fetch::build_data(root, &new.build)?;
-        let (changed, _) = game_uses::compare(&recorded, game_uses::entries(&parsed, &data)?);
-        if changed.is_empty() {
-            println!("None of the game code it declares changed.");
-        }
-        for misfit in changed {
-            println!("{misfit}");
-        }
+    // The game code the mod declares, by the new build's build data.
+    let made = uses_table::table(&uses, root, &old)?;
+    let compared = game_fit(root, &parsed, &made, &new)?;
+    for misfit in &compared.misfits {
+        println!("{misfit}");
+    }
+    if !compared.unjudged.is_empty() || compared.unrecorded {
+        println!(
+            "Some game code it declares could not be compared: the build data holds no fingerprint for it."
+        );
+    } else if compared.misfits.is_empty() && game_uses::declared(&parsed) {
+        println!("None of the game code it declares changed.");
     }
     Ok(())
 }
@@ -892,7 +933,7 @@ mod tests {
         ] {
             let subject = packed_subject(&kind, pin, Some(&wasm), made_for);
             match (subject, refusal) {
-                (Subject::Table { name, table }, None) => {
+                (Subject::Table { name, table, .. }, None) => {
                     assert_eq!(name, "Greeter");
                     assert_eq!(table.made_for, made_for);
                 }

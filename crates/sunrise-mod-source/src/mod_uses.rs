@@ -18,6 +18,9 @@ pub struct ModInput {
     pub sources: Vec<(String, String)>,
     /// The capability keys `sunrise-mod.toml` lists.
     pub manifest_names: Vec<String>,
+    /// Whether `sunrise-mod.toml` declares game code (a row of a `[native]` table, or an
+    /// `internals` entry): the surface alone cannot judge such a mod.
+    pub game_code: bool,
 }
 
 /// Why a mod folder cannot be judged.
@@ -252,9 +255,10 @@ fn read_bounded(path: &Path, shown: &str, most: u64) -> Result<String, ReadError
 }
 
 /// Reads `dir`: every `.rs` file outside the mod's `target/` and hidden folders, and
-/// `sunrise-mod.toml` when there is one. A `#[path]` or `include!` of a file the scan does not
-/// read is refused.
-pub fn read(dir: &Path) -> Result<ModInput, ReadError> {
+/// `sunrise-mod.toml` when there is one, but not the files `skip` names (relative and
+/// `/`-separated), which are not the mod's own source. A `#[path]` or `include!` of a file the
+/// scan does not read, a skipped one included, is refused.
+pub fn read(dir: &Path, skip: &[&str]) -> Result<ModInput, ReadError> {
     let mut input = ModInput::default();
     let mut total = 0u64;
     let mut brought: Vec<(String, String)> = Vec::new();
@@ -282,6 +286,9 @@ pub fn read(dir: &Path) -> Result<ModInput, ReadError> {
                     .map(|c| c.as_os_str().to_string_lossy().into_owned())
                     .collect();
                 let shown = relative.join("/");
+                if skip.contains(&shown.as_str()) {
+                    continue;
+                }
                 let text = read_bounded(&path, &shown, MAX_SOURCE_BYTES)?;
                 total += text.len() as u64;
                 if total > MAX_TOTAL_BYTES || input.sources.len() >= MAX_FILES {
@@ -326,6 +333,16 @@ pub fn read(dir: &Path) -> Result<ModInput, ReadError> {
                 .map(str::to_owned)
                 .collect();
         }
+        let rows = |value: Option<&toml::Value>| {
+            value
+                .and_then(toml::Value::as_array)
+                .is_some_and(|rows| !rows.is_empty())
+        };
+        input.game_code = rows(value.get("internals"))
+            || value
+                .get("native")
+                .and_then(toml::Value::as_table)
+                .is_some_and(|native| native.values().any(|rows_of| rows(Some(rows_of))));
     }
     Ok(input)
 }
@@ -356,7 +373,7 @@ mod tests {
             "sunrise-mod.toml",
             "id = \"m\"\ncapabilities = [\"registries\"]\n[native]\ngame = \"26.3\"\n",
         );
-        let input = read(root).unwrap();
+        let input = read(root, &[]).unwrap();
         let sources: Vec<(&str, &str)> = input
             .sources
             .iter()
@@ -384,7 +401,7 @@ mod tests {
         );
         write(root, "sunrise-mod.toml", &big);
         assert!(matches!(
-            read(root).unwrap_err(),
+            read(root, &[]).unwrap_err(),
             ReadError::TooLarge { what, most: MAX_MANIFEST_BYTES, .. } if what == "sunrise-mod.toml"
         ));
         write(root, "sunrise-mod.toml", "capabilities = []\n");
@@ -394,7 +411,7 @@ mod tests {
             &"/".repeat(MAX_SOURCE_BYTES as usize + 1),
         );
         assert!(matches!(
-            read(root).unwrap_err(),
+            read(root, &[]).unwrap_err(),
             ReadError::TooLarge { what, most: MAX_SOURCE_BYTES, .. } if what == "src/lib.rs"
         ));
     }
@@ -404,7 +421,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         write(dir.path(), "sunrise-mod.toml", "capabilities = [");
         assert!(matches!(
-            read(dir.path()).unwrap_err(),
+            read(dir.path(), &[]).unwrap_err(),
             ReadError::Manifest(_)
         ));
     }
@@ -421,10 +438,10 @@ mod tests {
             "src/lib.rs",
             "#[path = \"gen/x.rs\"] mod x;\ninclude!(\"../src/y.rs\");\ninclude! { r#\"y.rs\"# }\ninclude![\"\\x79.rs\"];\ninclude!(\"\\u{79}.rs\");\n// #[path = \"/etc\"]",
         );
-        assert!(read(root).is_ok());
+        assert!(read(root, &[]).is_ok());
         let escapes = |text: &str| {
             write(root, "src/lib.rs", text);
-            read(root).unwrap_err()
+            read(root, &[]).unwrap_err()
         };
         // Escapes decoded before the check, with every delimiter.
         for text in [
@@ -470,7 +487,7 @@ mod tests {
         let many = format!("fn f() {{ {} }}", "path = x; ".repeat(400_000));
         let started = std::time::Instant::now();
         write(root, "src/lib.rs", &many);
-        assert!(read(root).is_ok());
+        assert!(read(root, &[]).is_ok());
         assert!(started.elapsed() < std::time::Duration::from_millis(1500));
         // A `#[path]` inside an inline module nests by its name: not judged.
         assert!(matches!(
@@ -513,7 +530,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let deep = "m/".repeat(200);
         write(dir.path(), &format!("src/{deep}x.rs"), "x");
-        let input = read(dir.path()).unwrap();
+        let input = read(dir.path(), &[]).unwrap();
         assert_eq!(input.sources, [(format!("src/{deep}x.rs"), "x".to_owned())]);
     }
 
@@ -525,7 +542,7 @@ mod tests {
         write(root, "src/lib.rs", "a");
         std::os::unix::fs::symlink(root.join("src"), root.join("linked")).unwrap();
         assert_eq!(
-            read(root).unwrap_err(),
+            read(root, &[]).unwrap_err(),
             ReadError::Symlink(root.join("linked"))
         );
     }
