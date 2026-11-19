@@ -783,19 +783,15 @@ fn upgrade_regions_with_threads(
     fs::create_dir_all(&staging)?;
     // A staged `.mcc` with no live copy may be the chunk's only one (an older
     // upgrader replaced the region first): put it in place. One with a live
-    // regular file is dropped only when its region was never put in place (the
-    // live region is the old one) or the live bytes are the same. Otherwise
-    // (a folder, or a stale or later payload) which one the live region needs
-    // cannot be told: both stay and the region is not rewritten.
+    // regular file of the same bytes is a leftover copy and is dropped. Otherwise
+    // (a folder, or a different file) which one the live region needs cannot be
+    // told, even with a staged region: both stay and the region is not rewritten.
     for staged in files_with_suffix(&staging, ".mcc") {
         let name = staged.file_name().unwrap_or_default();
         let live = folder.join(name);
         if !live.try_exists()? {
             fs::rename(staged, live)?;
-        } else if live.is_file()
-            && (staged_region_of(&staging, &name.to_string_lossy()).is_some_and(|r| r.is_file())
-                || fs::read(&live)? == fs::read(&staged)?)
-        {
+        } else if live.is_file() && fs::read(&live)? == fs::read(&staged)? {
             fs::remove_file(staged)?;
         } else {
             return Err(io::Error::other(format!(
@@ -844,16 +840,6 @@ fn upgrade_regions_with_threads(
         return Err(e);
     }
     fs::remove_dir(&staging)
-}
-
-/// The staged region `r.X.Z.mca` in `staging` that a `c.X.Z.mcc` belongs to.
-fn staged_region_of(staging: &Path, mcc: &str) -> Option<PathBuf> {
-    let (x, z) = mcc
-        .strip_prefix("c.")?
-        .strip_suffix(".mcc")?
-        .split_once('.')?;
-    let (x, z) = (x.parse::<i32>().ok()?, z.parse::<i32>().ok()?);
-    Some(staging.join(format!("r.{}.{}.mca", x >> 5, z >> 5)))
 }
 
 /// One file of [`upgrade_regions`]: every chunk fixed, then the file written
@@ -1427,11 +1413,12 @@ mod upgrade_tests {
         region.write(pos, &record).unwrap();
         drop(region);
         assert!(dir.join("c.0.0.mcc").exists());
-        // What an earlier try that stopped before moving it leaves behind:
-        // the region it never put in place, and its `.mcc`.
+        // What an earlier try that stopped before putting its region in place
+        // leaves behind: the staged region (its `.mcc` already moved or
+        // identical to the live one, so nothing is left to compare).
         fs::create_dir_all(dir.join(".datafix")).unwrap();
         fs::write(dir.join(".datafix/r.0.0.mca"), b"stale").unwrap();
-        fs::write(dir.join(".datafix/c.0.0.mcc"), b"stale").unwrap();
+        fs::copy(dir.join("c.0.0.mcc"), dir.join(".datafix/c.0.0.mcc")).unwrap();
 
         upgrade(&dir, fix_overworld_chunk).unwrap();
         assert!(!dir.join(".datafix").exists());
@@ -1579,6 +1566,38 @@ mod upgrade_tests {
         assert_eq!(fs::read(dir.join(".datafix/c.0.0.mcc")).unwrap(), staged);
         assert_eq!(fs::read(dir.join("r.0.0.mca")).unwrap(), region);
         assert!(dir.join("c.0.0.mcc").is_dir());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A retry that decoded a stale live `.mcc` left a second staged index with
+    /// the chunk inline, while the correct payload is still staged: a staged
+    /// region does not show which payload is current, so both files and the
+    /// live region stay and nothing is rewritten from the stale data.
+    #[test]
+    fn region_upgrade_keeps_both_payloads_when_a_staged_region_meets_a_differing_live_mcc() {
+        let dir = std::env::temp_dir().join(format!("sunrise-mcc-stale-{}", std::process::id()));
+        published_stub_with_staged_mcc(&dir);
+        fs::write(dir.join("c.0.0.mcc"), b"stale").unwrap();
+        let stale = NamedTag {
+            name: "".into(),
+            tag: old_chunk(0, 0),
+        };
+        let record =
+            ChunkRecord::from_nbt(&stale, Compression::None, 7, Limits::default()).unwrap();
+        let mut writer = RegionWriter::create(dir.join(".datafix/r.0.0.mca")).unwrap();
+        writer
+            .write(sunrise_core::position::ChunkPos::new(0, 0), &record)
+            .unwrap();
+        writer.finish().unwrap();
+        let staged = fs::read(dir.join(".datafix/c.0.0.mcc")).unwrap();
+        let region = fs::read(dir.join("r.0.0.mca")).unwrap();
+        let index = fs::read(dir.join(".datafix/r.0.0.mca")).unwrap();
+
+        upgrade(&dir, fix_overworld_chunk).unwrap_err();
+        assert_eq!(fs::read(dir.join(".datafix/c.0.0.mcc")).unwrap(), staged);
+        assert_eq!(fs::read(dir.join("c.0.0.mcc")).unwrap(), b"stale");
+        assert_eq!(fs::read(dir.join("r.0.0.mca")).unwrap(), region);
+        assert_eq!(fs::read(dir.join(".datafix/r.0.0.mca")).unwrap(), index);
         let _ = fs::remove_dir_all(&dir);
     }
 
