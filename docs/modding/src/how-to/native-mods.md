@@ -157,8 +157,8 @@ window around the expected age.
 
 ## Host calls a load phase refuses
 
-Each Host method says in which load phases it may be called (`#[access(...)]`). A world read or write is open
-only once the world runs. Before it, each phase opens a few classes:
+Each Host method says in which load phases it may be called (`#[access(...)]`).
+World reads and writes require the World phase. The other Host phases admit only the following classes:
 
 | Phase | Open |
 |---|---|
