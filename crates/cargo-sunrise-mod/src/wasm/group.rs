@@ -319,8 +319,7 @@ pub(super) fn build(
         member.points = points;
     }
     let mut configs = serde_json::Map::new();
-    let mut features = Vec::new();
-    let mut point_names = std::collections::BTreeSet::<String>::new();
+    let mut features: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for member in &members {
         copy(&member.root, &member.stage)?;
         let path = member.stage.join("Cargo.toml");
@@ -420,7 +419,6 @@ pub(super) fn build(
             toml_edit::value(["rlib", "cdylib"].into_iter().collect::<toml_edit::Array>());
         std::fs::write(path, cargo.to_string()).map_err(|e| e.to_string())?;
         let (registrations, points) = (&member.registrations, &member.points);
-        point_names.extend(serde_json::from_str::<Vec<String>>(points).map_err(|e| e.to_string())?);
         configs.insert(member.package.clone(), serde_json::json!({"id":member.manifest["id"].as_str(), "version":member.manifest["version"].as_str(), "stage":member.stage, "registrations":registrations,"points":points,"provided":crates.iter().filter(|c| **c != member.krate).map(String::as_str).collect::<Vec<_>>().join(",")}));
         if let Some(deps) = member
             .manifest
@@ -434,7 +432,10 @@ pub(super) fn build(
                     .and_then(|v| v.as_bool())
                     == Some(true)
                 {
-                    features.push(format!("{}/{id}", member.package));
+                    features
+                        .entry(member.package.clone())
+                        .or_default()
+                        .push(format!("{}/{id}", member.package));
                 }
             }
         }
@@ -486,20 +487,25 @@ pub(super) fn build(
     );
     workspace["workspace"]["resolver"] = toml_edit::value("3");
     std::fs::write(stage.join("Cargo.toml"), workspace.to_string()).map_err(|e| e.to_string())?;
-    let mut command = cargo_command("build", "member", &stage, target, &toolchain)?;
-    command.env(
-        "SUNRISE_POINT_NAMES",
-        serde_json::to_string(&point_names).map_err(|e| e.to_string())?,
-    );
-    command.arg("--workspace").env(
-        "SUNRISE_GROUP_WRAPPER",
-        serde_json::to_string(&configs).map_err(|e| e.to_string())?,
-    );
-    if !features.is_empty() {
-        command.args(["--features", &features.join(",")]);
-    }
-    if !command.status().map_err(|e| e.to_string())?.success() {
-        return Err("Cargo group build failed".into());
+    // One cargo invocation per member: feature resolution has to reach exactly the member's own
+    // dependency closure. A shared `--workspace` build would unify sibling members' features into
+    // this member's dependency rlibs, and the module hash a dependent records would then differ
+    // from the module the member produces when built on its own. The member's own point names
+    // reach its build scripts for the same reason.
+    let wrapper = serde_json::to_string(&configs).map_err(|e| e.to_string())?;
+    for member in &members {
+        let mut command = cargo_command("build", "member", &stage, target, &toolchain)?;
+        command
+            .env("SUNRISE_POINT_NAMES", &member.points)
+            .arg("-p")
+            .arg(&member.package)
+            .env("SUNRISE_GROUP_WRAPPER", &wrapper);
+        if let Some(features) = features.get(&member.package) {
+            command.args(["--features", &features.join(",")]);
+        }
+        if !command.status().map_err(|e| e.to_string())?.success() {
+            return Err(format!("Cargo group build of {} failed", member.package));
+        }
     }
     let artifacts = target.join(TARGET).join(PROFILE);
     let rlibs: BTreeMap<_, _> = members
