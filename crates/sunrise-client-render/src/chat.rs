@@ -1384,9 +1384,6 @@ pub struct ChatScreen {
     /// `CommandSuggestions.setRestrictions`: what the Chat option allows.
     pub abilities: ChatAbilities,
     pub layout: SuggestLayout,
-    /// `MouseHandler.lastClick`: a click within 250 ms of the last one on
-    /// this screen is a double click.
-    last_click: Option<std::time::Instant>,
 }
 /// Local completions waiting for the server's reply to request `id`.
 struct Awaiting {
@@ -1509,7 +1506,6 @@ impl ChatScreen {
             auto_suggestions: true,
             abilities,
             layout: SuggestLayout::CHAT,
-            last_click: None,
         };
         s.update_command_info(m, c);
         s
@@ -1548,7 +1544,6 @@ impl ChatScreen {
             auto_suggestions: true,
             abilities: ChatAbilities::new(ChatVisibility::Full),
             layout: SuggestLayout::COMMAND_BLOCK,
-            last_click: None,
         };
         s.update_command_info(m, c);
         s
@@ -2050,7 +2045,9 @@ impl ChatScreen {
         }
     }
     /// A left click (`ChatScreen.mouseClicked`): a suggestion, else the input.
-    pub fn click(&mut self, m: &Measure, c: &Commands, x: f64, y: f64) -> bool {
+    /// `double` is the flag MouseHandler computes from its 250 ms window; a
+    /// double click on the input selects the word under the pointer.
+    pub fn click(&mut self, m: &Measure, c: &Commands, x: f64, y: f64, double: bool) -> bool {
         if let Some(mut l) = self.suggestions.take() {
             let (xi, yi) = (x as i32, y as i32);
             if l.contains(xi, yi) {
@@ -2064,13 +2061,6 @@ impl ChatScreen {
             }
             self.suggestions = Some(l);
         }
-        // MouseHandler: the same screen's click within 250 ms is a double
-        // click, which selects the word under the pointer.
-        let now = std::time::Instant::now();
-        let double = self
-            .last_click
-            .is_some_and(|at| now.duration_since(at).as_millis() < 250);
-        self.last_click = Some(now);
         if self.input.contains(x, y) {
             self.input.click(m, x, false, double);
             return true;
